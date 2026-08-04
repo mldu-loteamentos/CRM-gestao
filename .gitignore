@@ -1,0 +1,8 @@
+node_modules/
+uploads/
+sienge-browser-data/
+scratch/
+antigravity.db
+.env
+*.log
+scripts-antigos/

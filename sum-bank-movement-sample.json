@@ -1,0 +1,78 @@
+{
+  "data": [
+    {
+      "bankMovementId": 0,
+      "billId": 0,
+      "installmentId": 0,
+      "bankMovementAmount": 100.5,
+      "documentIdentificationId": "string",
+      "documentIdentificationName": "string",
+      "documentIdentificationNumber": "string",
+      "bankMovementOriginId": "string",
+      "bankMovementHistoricId": "string",
+      "bankMovementHistoricName": "string",
+      "bankMovementOperationId": 0,
+      "bankMovementOperationName": "string",
+      "bankMovementOperationType": "string",
+      "bankMovementReconcile": "string",
+      "bankMovementDate": "string",
+      "billDate": "string",
+      "accountNumber": "string",
+      "companyId": 0,
+      "companyName": "string",
+      "groupCompanyId": 0,
+      "groupCompanyName": "string",
+      "holdingId": 0,
+      "holdingName": "string",
+      "subsidiaryId": 0,
+      "subsidiaryName": "string",
+      "creditorId": 0,
+      "creditorName": "string",
+      "clientId": 0,
+      "clientName": "string",
+      "financialCategories": [
+        {
+          "companyId": 0,
+          "companyName": "string",
+          "costCenterId": 0,
+          "costCenterName": "string",
+          "financialCategoryId": "PLANO-1",
+          "financialCategoryName": "Receita de Venda de Lotes",
+          "financialCategoryReducer": "string",
+          "financialCategoryType": "string",
+          "financialCategoryRate": 0,
+          "businessAreaId": 0,
+          "businessAreaName": "string",
+          "projectId": 0,
+          "projectName": "string",
+          "businessTypeId": 0,
+          "businessTypeName": "string",
+          "groupCompanyId": 0,
+          "groupCompanyName": "string",
+          "holdingId": 0,
+          "holdingName": "string",
+          "subsidiaryId": 0,
+          "subsidiaryName": "string"
+        }
+      ],
+      "departamentCosts": [
+        {
+          "id": 0,
+          "name": "string",
+          "rate": 0
+        }
+      ],
+      "buldingCosts": [
+        {
+          "buildingId": 0,
+          "name": "string",
+          "buildingUnitId": 0,
+          "buildingUnitName": "string",
+          "costEstimationSheetId": "string",
+          "costEstimationSheetName": "string",
+          "rate": 0
+        }
+      ]
+    }
+  ]
+}
