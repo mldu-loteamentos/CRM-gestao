@@ -1,6 +1,14 @@
 module.exports = async function handler(req, res) {
   const SIENGE_HOST = 'api.sienge.com.br';
   
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
+
   try {
     const targetPath = '/mouraleite/builder/api/v1' + req.url.replace('/api/sienge-builder-proxy', '');
     
@@ -36,6 +44,9 @@ module.exports = async function handler(req, res) {
     responseHeaders.delete('access-control-allow-origin');
     responseHeaders.delete('access-control-allow-methods');
     responseHeaders.delete('access-control-allow-headers');
+    responseHeaders.delete('content-encoding');
+    responseHeaders.delete('content-length');
+    responseHeaders.delete('transfer-encoding');
 
     res.status(response.status);
     responseHeaders.forEach((value, key) => res.setHeader(key, value));

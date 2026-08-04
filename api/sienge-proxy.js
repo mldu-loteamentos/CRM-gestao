@@ -48,6 +48,9 @@ module.exports = async function handler(req, res) {
       
       const responseHeaders = new Headers(s3Response.headers);
       responseHeaders.set('Access-Control-Allow-Origin', '*');
+      responseHeaders.delete('content-encoding');
+      responseHeaders.delete('content-length');
+      responseHeaders.delete('transfer-encoding');
       
       res.status(s3Response.status);
       responseHeaders.forEach((value, key) => res.setHeader(key, value));
@@ -68,6 +71,9 @@ module.exports = async function handler(req, res) {
     responseHeaders.delete('access-control-allow-methods');
     responseHeaders.delete('access-control-allow-headers');
     responseHeaders.delete('access-control-expose-headers');
+    responseHeaders.delete('content-encoding');
+    responseHeaders.delete('content-length');
+    responseHeaders.delete('transfer-encoding');
 
     res.status(response.status);
     responseHeaders.forEach((value, key) => res.setHeader(key, value));
