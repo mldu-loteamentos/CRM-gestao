@@ -3,8 +3,12 @@
 const ConfigUsersApp = {
   
   users: [
-    { id: 1, name: "Israel Moura", email: "israel@mouraleite.com.br", sienge_user: "israel.moura", phone: "(11) 99999-9999", profile_name: "ADMINISTRADOR", status: "ATIVO", manager_name: "Gestor Principal", manager_email: "gestor@mouraleite.com.br" },
-    { id: 2, name: "Operador Teste", email: "operador@mouraleite.com.br", sienge_user: "operador.teste", phone: "(11) 98888-8888", profile_name: "OPERADOR", status: "PENDENTE", manager_name: "Israel Moura", manager_email: "israel@mouraleite.com.br" }
+    { id: 1, name: "ISRAEL DE OLIVEIRA MENDES", email: "israel@mouraleite.com.br", sienge_user: "ISRAEL", phone: "(15) 99811-8246", profile_name: "ADMINISTRADOR", status: "ATIVO", manager_name: "", manager_email: "" },
+    { id: 2, name: "LETICIA PEREIRA DE OLIVEIRA", email: "leticia.oliveira@mouraleite.com.br", sienge_user: "LETICIA.OLIVEIRA", phone: "(14) 98822-5570", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
+    { id: 3, name: "MICHELLE FRANCINE VIEIRA", email: "michelle.vieira@mouraleite.com.br", sienge_user: "MICHELLE.VIEIRA", phone: "(14) 99655-7212", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
+    { id: 4, name: "MICHELLE PEREIRA YAMASHIRO", email: "michelle.pereira@mouraleite.com.br", sienge_user: "MICHELLE.PEREIRA", phone: "(14) 99144-8775", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
+    { id: 5, name: "THAIANE CRISTINA", email: "thaiane.oliveira@mouraleite.com.br", sienge_user: "THAIANE.CORDEIRO", phone: "(19) 99453-6608", profile_name: "OPERADOR COBRANÇA", operator_type: "externo", status: "PENDENTE", manager_name: "", manager_email: "" },
+    { id: 6, name: "CARLOS EDUARDO COLENCI", email: "caco@colenci.com.br", sienge_user: "CACO", phone: "(14) 99671-2870", profile_name: "OPERADOR COBRANÇA", operator_type: "advogado", status: "PENDENTE", manager_name: "", manager_email: "", adv_companies: [], adv_cities: [], adv_cost_centers: [] }
   ],
 
   profiles: [], // Será carregado dinamicamente
@@ -110,7 +114,7 @@ const ConfigUsersApp = {
     } else {
       this.profiles = [
         { id: "admin", name: "ADMINISTRADOR" },
-        { id: "operador", name: "OPERADOR" }
+        { id: "operador_cobranca", name: "OPERADOR COBRANÇA" }
       ];
       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
     }
@@ -230,7 +234,7 @@ const ConfigUsersApp = {
       }
       
       const userProfileOptions = this.profiles.map(p => 
-          `<option value="${p.name}" ${user && p.name === user.profile_name ? 'selected' : (!user && p.name === 'OPERADOR' ? 'selected' : '')}>${p.name}</option>`
+          `<option value="${p.name}" ${user && p.name === user.profile_name ? 'selected' : (!user && p.name === 'OPERADOR COBRANÇA' ? 'selected' : '')}>${p.name}</option>`
       ).join('');
 
       let companies = [];

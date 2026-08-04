@@ -1581,10 +1581,10 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
   `;
 }
 
-async function loadDashboardData() {
+async function loadDashboardData(forceRefresh = false) {
     if (window._isDefaultersLoading) return;
     window._isDefaultersLoading = true;
-    try { await _loadDashboardData_Impl(); }
+    try { await _loadDashboardData_Impl(forceRefresh); }
     finally { window._isDefaultersLoading = false; }
 }
 window.applyAdvFiltersTo = (sourceList) => {
@@ -1771,7 +1771,7 @@ window.applyAdvFiltersTo = (sourceList) => {
     return filteredList;
 };
 
-async function _loadDashboardData_Impl() {
+async function _loadDashboardData_Impl(forceRefresh = false) {
   const searchInput = document.getElementById("dashboard-search-input");
   const searchValue = searchInput ? searchInput.value.trim().toLowerCase() : "";
 
@@ -2018,7 +2018,7 @@ document.addEventListener("click", function(e) {
                  pctAfter: wData.pctAfter
              };
           }
-        });
+        }, forceRefresh);
 
         const b1 = document.querySelector("#defaulters-table-body .loading-progress-bar");
         const b2 = document.querySelector("#subjudice-table-body .loading-progress-bar");
@@ -2039,6 +2039,19 @@ document.addEventListener("click", function(e) {
         if (getSiengeApiMode() === "real") {
           AppState.defaultersBills = bills;
           AppState.defaultersLoaded = true;
+          
+          const cacheInd = document.getElementById("cache-status-indicator");
+          if (cacheInd && window._siengeLastFetchTime) {
+              cacheInd.style.display = 'block';
+              if (window._siengeLastFetchTime.cached) {
+                 cacheInd.textContent = `Base histórica carregada (Atualizada hoje às ${window._siengeLastFetchTime.at})`;
+                 cacheInd.style.color = '#10b981';
+              } else {
+                 cacheInd.textContent = `Nova atualização salva hoje às ${window._siengeLastFetchTime.at}`;
+                 cacheInd.style.color = '#f59e0b';
+              }
+          }
+
           if (typeof renderRulesSettingsTable === 'function') {
             renderRulesSettingsTable();
           }
@@ -3525,7 +3538,7 @@ document.addEventListener("DOMContentLoaded", () => {
       AppState.dashboardRendered = false;
       AppState.customers = {};
       AppState.sales = [];
-      await loadDashboardData();
+      await loadDashboardData(true); // Pass true to force refresh from Sienge
     };
   }
 

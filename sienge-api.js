@@ -364,7 +364,7 @@ const SiengeApiService = {
   _lastProgressState: null,
   // 2. FILA DE COBRANÇA — Retorna apenas bills brutos inadimplentes
   //    SEM buscar installments, SEM buscar clientes
-  async getDefaulters(companyId = null, onProgress = null) {
+  async getDefaulters(companyId = null, onProgress = null, forceRefresh = false) {
     if (s_apiMode === "simulado") {
       let bills = window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS;
       if (companyId) bills = bills.filter(b => b.companyId === Number(companyId));
@@ -386,13 +386,38 @@ const SiengeApiService = {
           onProgress(...this._lastProgressState);
         }
       }
-      if (this._defaultersPromise) {
+      if (this._defaultersPromise && !forceRefresh) {
         return this._defaultersPromise;
       }
       this._lastProgressState = null;
       this._defaultersPromise = (async () => {
         const t0 = performance.now();
-        console.log('%c[Sienge] ⏱ Iniciando busca completa de inadimplentes...', 'color:#f59e0b;font-weight:bold;');
+
+        // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIREBASE STORAGE)
+        if (!forceRefresh && window.firebaseStorage && window.firebaseCollections) {
+           try {
+             const todayStr = new Date().toISOString().split('T')[0];
+             const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
+             console.log(`%c[Sienge] ⏱ Verificando cache diário: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
+             const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
+             
+             // Se o arquivo não existir, getDownloadURL vai disparar um erro e cair no catch
+             const url = await window.firebaseCollections.getDownloadURL(fileRef);
+             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base do dia...`, 'color:#10b981;font-weight:bold;');
+             
+             const res = await fetch(url);
+             const result = await res.json();
+             
+             const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+             console.log(`%c[Sienge] ✅ Base carregada do cache em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
+             window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: true };
+             return result;
+           } catch (e) {
+             console.log('%c[Sienge] ℹ️ Nenhum cache válido para hoje. Iniciando busca na API Sienge...', 'color:#f59e0b;');
+           }
+        }
+
+        console.log('%c[Sienge] ⏱ Iniciando busca completa de inadimplentes na API...', 'color:#f59e0b;font-weight:bold;');
         try {
           const broadcastProgress = (cId, cc, idx, total, cName, wData) => {
              this._lastProgressState = [cId, cc, idx, total, cName, wData];
@@ -407,10 +432,25 @@ const SiengeApiService = {
             'color:#10b981;font-size:13px;font-weight:bold;'
           );
           // Expõe o tempo no window para outros módulos consultarem
-          window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR') };
+          window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: false };
           
           // Dispara o salvamento do snapshot diário em background
-          this.saveDefaultersSnapshot(result).catch(console.error);
+          if (window.firebaseStorage && window.firebaseCollections) {
+              const todayStr = new Date().toISOString().split('T')[0];
+              const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
+              const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
+              const blob = new Blob([JSON.stringify(result)], { type: 'application/json' });
+              
+              window.firebaseCollections.uploadBytes(fileRef, blob).then(() => {
+                 console.log(`%c[Firebase] Snapshot diário bruto (${todayStr}) salvo com sucesso!`, 'color:#3b82f6;');
+                 this.saveDefaultersSnapshot(result).catch(console.error);
+              }).catch(e => {
+                 console.error("[Firebase] Erro ao salvar snapshot bruto:", e);
+                 this.saveDefaultersSnapshot(result).catch(console.error);
+              });
+          } else {
+             this.saveDefaultersSnapshot(result).catch(console.error);
+          }
 
           return result;
         } finally {

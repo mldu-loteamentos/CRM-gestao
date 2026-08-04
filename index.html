@@ -1584,10 +1584,13 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-refresh-dashboard" class="btn btn-primary"
-                style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; white-space: nowrap;">
-                <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar Fila
-              </button>
+              <div style="display: flex; flex-direction: column; align-items: flex-end; justify-content: center;">
+                <button id="btn-refresh-dashboard" class="btn btn-primary"
+                  style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; white-space: nowrap;">
+                  <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar Fila
+                </button>
+                <span id="cache-status-indicator" style="font-size: 0.75rem; color: #64748b; margin-top: 4px; display: none;"></span>
+              </div>
             </div>
 
             <div class="filters-row">
