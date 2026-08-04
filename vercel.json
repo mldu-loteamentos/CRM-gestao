@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/sienge-proxy/:path*", "destination": "/api/sienge-proxy" },
+    { "source": "/api/sienge-builder-proxy/:path*", "destination": "/api/sienge-builder-proxy" }
+  ]
+}

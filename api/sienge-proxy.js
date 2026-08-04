@@ -1,6 +1,14 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const SIENGE_HOST = 'api.sienge.com.br';
   const SIENGE_PATH_PREFIX = '/mouraleite/public/api/v1';
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
 
   try {
     let targetPath = req.url.replace('/api/sienge-proxy', '');
