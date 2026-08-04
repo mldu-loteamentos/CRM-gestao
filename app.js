@@ -2,17 +2,19 @@
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
-const originalFetch = window.fetch;
-window.fetch = async function() {
-  let args = Array.prototype.slice.call(arguments);
-  if (typeof args[0] === 'string') {
-    if (args[0].includes('/sienge-proxy')) {
-      args[0] = args[0].replace(/http:\/\/[^:\/]+(:\d+)?\/sienge-proxy/g, '/api/sienge-proxy');
-      args[0] = args[0].replace(window.location.origin + '/sienge-proxy', '/api/sienge-proxy');
+(function() {
+  const _origFetch = window.fetch;
+  window.fetch = async function() {
+    var args = Array.prototype.slice.call(arguments);
+    if (typeof args[0] === 'string') {
+      if (args[0].includes('/sienge-proxy')) {
+        args[0] = args[0].replace(/http:\/\/[^:\/]+(:\d+)?\/sienge-proxy/g, '/api/sienge-proxy');
+        args[0] = args[0].replace(window.location.origin + '/sienge-proxy', '/api/sienge-proxy');
+      }
     }
-  }
-  return originalFetch.apply(this, args);
-};
+    return _origFetch.apply(this, args);
+  };
+})();
 // Override lucide.createIcons para evitar que ícones inválidos travem o app
 if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
   const originalCreateIcons = lucide.createIcons;
