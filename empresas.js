@@ -16,29 +16,32 @@ const EmpresasApp = {
       const port = 3000;
       
       let localCustom = localStorage.getItem('crm_empresas_custom');
-      if (!localCustom || localCustom === '{}') {
-          const defaultCustom = {
-              "1": { company_id: 1, nome_usual: "MLDU", percentual_mldu: 100, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
-              "2": { company_id: 2, nome_usual: "EMPREENDIMENTOS", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
-              "3": { company_id: 3, nome_usual: "TERRA DO ARAÇARI", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
-              "4": { company_id: 4, nome_usual: "TERRAS DE ITU", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 0 },
-              "5": { company_id: 5, nome_usual: "MLES", percentual_mldu: 55, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
-              "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 }
-          };
-          localStorage.setItem('crm_empresas_custom', JSON.stringify(defaultCustom));
-          localCustom = JSON.stringify(defaultCustom);
+      
+      const defaultCustom = {
+          "1": { company_id: 1, nome_usual: "MLDU", percentual_mldu: 100, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+          "2": { company_id: 2, nome_usual: "EMPREENDIMENTOS", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+          "3": { company_id: 3, nome_usual: "TERRA DO ARAÇARI", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+          "4": { company_id: 4, nome_usual: "TERRAS DE ITU", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+          "5": { company_id: 5, nome_usual: "MLES", percentual_mldu: 55, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+          "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 }
+      };
+
+      let customData = {};
+      try {
+        if (localCustom) customData = JSON.parse(localCustom);
+      } catch(e) {}
+
+      // Força a mesclagem se a empresa 1 não estiver configurada corretamente
+      if (!customData["1"] || !customData["1"].nome_usual || customData["1"].nome_usual !== "MLDU") {
+          customData = { ...customData, ...defaultCustom };
+          localStorage.setItem('crm_empresas_custom', JSON.stringify(customData));
       }
 
-      if (localCustom) {
-        try {
-          const customData = JSON.parse(localCustom);
-          const map = {};
-          Object.values(customData).forEach(item => {
-            map[item.company_id] = item;
-          });
-          EmpresasState.customFields = map;
-        } catch(e) { console.error("Erro ao ler customFields", e); }
-      }
+      const map = {};
+      Object.values(customData).forEach(item => {
+        map[item.company_id] = item;
+      });
+      EmpresasState.customFields = map;
 
       const url = `http://${host}:${port}/sienge-proxy/companies?limit=200&offset=0`;
       let comps = [];
