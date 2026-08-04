@@ -15,7 +15,20 @@ const EmpresasApp = {
       const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
       const port = 3000;
       
-      const localCustom = localStorage.getItem('crm_empresas_custom');
+      let localCustom = localStorage.getItem('crm_empresas_custom');
+      if (!localCustom || localCustom === '{}') {
+          const defaultCustom = {
+              "1": { company_id: 1, nome_usual: "MLDU", percentual_mldu: 100, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+              "2": { company_id: 2, nome_usual: "EMPREENDIMENTOS", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+              "3": { company_id: 3, nome_usual: "TERRA DO ARAÇARI", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+              "4": { company_id: 4, nome_usual: "TERRAS DE ITU", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+              "5": { company_id: 5, nome_usual: "MLES", percentual_mldu: 55, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+              "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 }
+          };
+          localStorage.setItem('crm_empresas_custom', JSON.stringify(defaultCustom));
+          localCustom = JSON.stringify(defaultCustom);
+      }
+
       if (localCustom) {
         try {
           const customData = JSON.parse(localCustom);
