@@ -538,38 +538,64 @@ const SiengeApiService = {
 
       console.log(`[Sienge] Empresa ${cId} — ${companyCcs.length} centros de custo (1/2/3): ${companyCcs.join(', ')}`);
 
-      // 1 única chamada com todos os CCs separados por vírgula (mais eficiente)
-      const extraParams = companyCcs.length > 0 ? `&enterpriseId=${companyCcs.join(',')}` : '';
+      // Divisão em lotes de 5 CCs para evitar requests muito longos
+      const BATCH_SIZE = 5;
+      const ccBatches = [];
+      if (companyCcs.length === 0) {
+        ccBatches.push([]); // Lote vazio caso não haja CCs filtrados
+      } else {
+        for (let i = 0; i < companyCcs.length; i += BATCH_SIZE) {
+          ccBatches.push(companyCcs.slice(i, i + BATCH_SIZE));
+        }
+      }
 
-      const buildQuery = (billTypeParams) =>
-        `?companyId=${cId}` +
-        `&dueDateLimit=${today}` +
-        `&documentsId=CT` +
-        `&correctionDate=${today}` +
-        billTypeParams +
-        `&normalActivities=false` +
-        `&inBillingActivities=false` +
-        `&defaultersActivities=true` +
-        `&underJudgmentActivities=true` +
-        `&includeResidueInstallment=true` +
-        `&includePartiallyPaidInstallments=true` +
-        `&showOnlyDefaulters=false` +
-        `&includeUnderJudgment=true` +
-        `&showSentToSPCSerasa=true` +
-        `&positionDate=${today}` +
-        extraParams;
+      console.log(`[Sienge] Buscando títulos inadimplentes via Bulk Data da empresa ${cId} em ${ccBatches.length} lote(s)...`);
+      
+      let rawArray = [];
+      let rawUnderJudgment = [];
 
-      const qAll   = buildQuery(`&normalReceivableBills=true&inBillingReceivableBills=true&defaultersReceivableBills=true&underJudgmentReceivableBills=true`);
-      const qJudge = buildQuery(`&normalReceivableBills=false&inBillingReceivableBills=false&defaultersReceivableBills=false&underJudgmentReceivableBills=true`);
+      for (let i = 0; i < ccBatches.length; i++) {
+        const batch = ccBatches[i];
+        const extraParams = batch.length > 0 ? `&enterpriseId=${batch.join(',')}` : '';
 
-      console.log(`[Sienge] Buscando títulos inadimplentes via Bulk Data da empresa ${cId}...`);
+        const buildQuery = (billTypeParams) =>
+          `?companyId=${cId}` +
+          `&dueDateLimit=${today}` +
+          `&documentsId=CT` +
+          `&correctionDate=${today}` +
+          billTypeParams +
+          `&normalActivities=false` +
+          `&inBillingActivities=false` +
+          `&defaultersActivities=true` +
+          `&underJudgmentActivities=true` +
+          `&includeResidueInstallment=true` +
+          `&includePartiallyPaidInstallments=true` +
+          `&showOnlyDefaulters=false` +
+          `&includeUnderJudgment=true` +
+          `&showSentToSPCSerasa=true` +
+          `&positionDate=${today}` +
+          extraParams;
+
+        const qAll   = buildQuery(`&normalReceivableBills=true&inBillingReceivableBills=true&defaultersReceivableBills=true&underJudgmentReceivableBills=true`);
+        const qJudge = buildQuery(`&normalReceivableBills=false&inBillingReceivableBills=false&defaultersReceivableBills=false&underJudgmentReceivableBills=true`);
+
+        if (ccBatches.length > 1) {
+          console.log(`[Sienge] Empresa ${cId} — Processando lote ${i + 1}/${ccBatches.length} (CCs: ${batch.join(', ')})`);
+        }
+
+        try {
+          const resAll   = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qAll}`);
+          await new Promise(r => setTimeout(r, 1000));
+          const resJudge = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qJudge}`);
+
+          rawArray.push(...(resAll.data || []));
+          rawUnderJudgment.push(...(resJudge.data || []));
+        } catch (err) {
+          console.error(`[Sienge] Erro na API Bulk Data da empresa ${cId} (Lote ${i + 1}):`, err);
+        }
+      }
+
       try {
-        const resAll   = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qAll}`);
-        await new Promise(r => setTimeout(r, 1000));
-        const resJudge = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qJudge}`);
-
-        const rawArray         = resAll.data   || [];
-        const rawUnderJudgment = resJudge.data  || [];
         const underJudgmentIds = new Set(rawUnderJudgment.map(b => String(b.receivableBillId || b.id)));
 
         const normalizedArray = rawArray.map(bill => {
