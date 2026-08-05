@@ -1287,10 +1287,36 @@ function validateAndLoadCrmUser(user) {
     crmUsers = JSON.parse(localStorage.getItem('crm_users')) || [];
   } catch(e) {}
   
-  const matchedUser = crmUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+  let matchedUser = crmUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
   
+  // Se o usuário não existir na base, vamos auto-registrar
   if (!matchedUser) {
-    throw new Error("Seu e-mail não está cadastrado na base de usuários do CRM. Solicite o acesso ao Administrador.");
+    // israel@mouraleite.com.br é o super-admin padrão
+    if (user.email.toLowerCase() === "israel@mouraleite.com.br") {
+      matchedUser = {
+        id: "usr_" + Date.now(),
+        name: user.name,
+        email: user.email.toLowerCase(),
+        role: "ADMIN",
+        status: "ATIVO",
+        createdAt: new Date().toISOString()
+      };
+      crmUsers.push(matchedUser);
+      localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+    } else {
+      // Outros usuários entram como PENDENTE
+      matchedUser = {
+        id: "usr_" + Date.now(),
+        name: user.name,
+        email: user.email.toLowerCase(),
+        role: "OPERADOR",
+        status: "PENDENTE",
+        createdAt: new Date().toISOString()
+      };
+      crmUsers.push(matchedUser);
+      localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+      throw new Error("Seu acesso foi registrado e está PENDENTE de aprovação pelo Administrador.");
+    }
   }
   
   if (matchedUser.status === "INATIVO") {
@@ -1298,8 +1324,7 @@ function validateAndLoadCrmUser(user) {
   }
   
   if (matchedUser.status === "PENDENTE") {
-    matchedUser.status = "ATIVO";
-    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+    throw new Error("Seu acesso ainda está PENDENTE de aprovação pelo Administrador.");
   }
   
   // Mescla o perfil do CRM com o usuário logado
