@@ -405,7 +405,9 @@ const SiengeApiService = {
              const url = await window.firebaseCollections.getDownloadURL(fileRef);
              console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base do dia...`, 'color:#10b981;font-weight:bold;');
              
-             const res = await fetch(url);
+             // Usa o proxy para evitar bloqueio de CORS na Vercel
+             const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(url)}&filename=cache.json`;
+             const res = await fetch(proxyUrl);
              const result = await res.json();
              
              const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
