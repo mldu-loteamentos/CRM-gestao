@@ -1326,6 +1326,11 @@ function renderUserSession() {
 // 4. INICIALIZAÇÃO DA APLICAÇÃO E DADOS
 // ----------------------------------------------------
 async function initializeApplication() {
+  // Sincronizar configurações globais do Firebase para a memória local (Recarrega se precisar)
+  if (window.syncGlobalConfigFromFirebase) {
+      await window.syncGlobalConfigFromFirebase();
+  }
+
   // --- Limpeza automática final de dados de teste (Github deploy) ---
   if (!localStorage.getItem("crm_cleared_tests_github_final")) {
       localStorage.removeItem("crm_moura_notes");
@@ -21081,19 +21086,123 @@ window.getDynamicOperators = function(type = 'all') {
     return ops.map(u => String(u.sienge_user).replace('.', ' ').toUpperCase());
 };
 
+window.SYNC_KEYS = [
+    "crm_users",
+    "crm_moura_profiles",
+    "crm_moura_rules",
+    "crm_moura_rules_params",
+    "crm_empresas_custom",
+    "crm_plano_impostos",
+    "crm_impostos_custom",
+    "crm_indexadores_ativos"
+];
+
+// Função que baixa configurações na inicialização
+window.syncGlobalConfigFromFirebase = async function() {
+    if (sessionStorage.getItem('crm_synced_global')) return; // já sincronizou nesta sessão
+    
+    try {
+        if (!window.firebaseDb || !window.firebaseCollections) return;
+        const snap = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, "config"));
+        let globalData = null;
+        snap.forEach(d => { if (d.id === "global") globalData = d.data(); });
+        
+        if (globalData) {
+            let changed = false;
+            // Sincroniza chaves fixas
+            window.SYNC_KEYS.forEach(k => {
+                if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
+                    _originalSetItem.call(localStorage, k, globalData[k]);
+                    changed = true;
+                }
+            });
+            // Sincroniza permissões dinâmicas
+            Object.keys(globalData).forEach(k => {
+                if (k.startsWith("crm_perms_") && globalData[k] !== localStorage.getItem(k)) {
+                    _originalSetItem.call(localStorage, k, globalData[k]);
+                    changed = true;
+                }
+            });
+            
+            sessionStorage.setItem('crm_synced_global', 'true');
+            if (changed) {
+                console.log("[Firebase] Configurações alteradas recebidas da nuvem. Recarregando a página para aplicar...");
+                location.reload();
+            } else {
+                console.log("[Firebase] Configurações globais já estão atualizadas com a nuvem.");
+            }
+        }
+    } catch(e) {
+        console.error("Erro na sincronização:", e);
+    }
+};
+
+// Função para forçar o primeiro envio da máquina base (Israel)
+window.forceUploadLocalConfig = async function() {
+    try {
+        let payload = {};
+        window.SYNC_KEYS.forEach(key => {
+            const val = localStorage.getItem(key);
+            if (val) payload[key] = val;
+        });
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k.startsWith("crm_perms_")) {
+                payload[k] = localStorage.getItem(k);
+            }
+        }
+        
+        if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase não inicializado.");
+        const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+        await window.firebaseCollections.setDoc(docRef, payload);
+        alert("✔️ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
+    } catch(e) {
+        alert("Erro ao enviar: " + e.message);
+    }
+};
+
 // --- INTERCEPTADOR PARA FIREBASE ---
-// Captura as chamadas de localStorage.setItem(crm_moura_notes) e envia pro Firebase
+// Captura as chamadas de localStorage.setItem e envia pro Firebase
 const _originalSetItem = localStorage.setItem;
 localStorage.setItem = function(key, value) {
     _originalSetItem.call(this, key, value);
+    
+    // Tratamento exclusivo de anotações (mantém a lógica anterior)
     if (key === "crm_moura_notes" && window.saveNotesToFirebase) {
         if (window._fbSyncTimeout) clearTimeout(window._fbSyncTimeout);
         window._fbSyncTimeout = setTimeout(() => {
             if (window.AppState && window.AppState.selectedCustomerId) {
                 window.saveNotesToFirebase(window.AppState.selectedCustomerId);
             } else {
-                window.saveNotesToFirebase(null); // salvar tudo se não souber quem
+                window.saveNotesToFirebase(null); // salvar tudo
             }
         }, 300);
+    }
+    
+    // Tratamento de Configurações Globais
+    if ((window.SYNC_KEYS && window.SYNC_KEYS.includes(key)) || key.startsWith("crm_perms_")) {
+        if (window._fbConfigTimeout) clearTimeout(window._fbConfigTimeout);
+        window._fbConfigTimeout = setTimeout(async () => {
+            if (window.firebaseDb && window.firebaseCollections) {
+                try {
+                    let payload = {};
+                    window.SYNC_KEYS.forEach(k => {
+                        const v = localStorage.getItem(k);
+                        if (v) payload[k] = v;
+                    });
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (k.startsWith("crm_perms_")) {
+                            payload[k] = localStorage.getItem(k);
+                        }
+                    }
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+                    await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
+                    console.log("[Firebase] Upload automático: Configurações globais atualizadas na nuvem.");
+                } catch(e) {
+                    console.error("Erro ao salvar configs na nuvem:", e);
+                }
+            }
+        }, 1500); // 1.5s debounce para não sobrecarregar em edições em lote
     }
 };
