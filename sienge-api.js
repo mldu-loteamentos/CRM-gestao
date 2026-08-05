@@ -399,15 +399,16 @@ const SiengeApiService = {
              const todayStr = new Date().toISOString().split('T')[0];
              const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
              console.log(`%c[Sienge] ⏱ Verificando cache diário: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
-             const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
              
-             // Se o arquivo não existir, getDownloadURL vai disparar um erro e cair no catch
-             const url = await window.firebaseCollections.getDownloadURL(fileRef);
-             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base do dia...`, 'color:#10b981;font-weight:bold;');
+             // Evita CORS na Vercel não usando a SDK do Firebase para o download
+             const bucket = "crm-gestao-mldu.firebasestorage.app";
+             const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(snapshotPath)}?alt=media`;
              
-             // Usa o proxy para evitar bloqueio de CORS na Vercel
-             const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(url)}&filename=cache.json`;
+             // Passa pelo nosso proxy da API Vercel
+             const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(firebaseUrl)}&filename=cache.json`;
              const res = await fetch(proxyUrl);
+             
+             if (!res.ok) throw new Error("Cache não encontrado");
              const result = await res.json();
              
              const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
