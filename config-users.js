@@ -417,6 +417,7 @@ const ConfigUsersApp = {
                   <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      <option value="interno" ${user && user.operator_type === 'interno' ? 'selected' : ''}>Interno</option>
                      <option value="externo" ${user && user.operator_type === 'externo' ? 'selected' : ''}>Externo (Terceirizada)</option>
+                     <option value="apoio_juridico" ${user && user.operator_type === 'apoio_juridico' ? 'selected' : ''}>Apoio Jurídico (Interno)</option>
                      <option value="advogado" ${user && user.operator_type === 'advogado' ? 'selected' : ''}>Advogado (Jurídico)</option>
                   </select>
                </div>

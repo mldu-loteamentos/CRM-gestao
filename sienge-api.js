@@ -464,22 +464,25 @@ const SiengeApiService = {
           // Dispara o salvamento do snapshot diário em background
           if (window.firebaseDb && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
-              const CHUNK_SIZE = 500;
+              const CHUNK_SIZE = 100; // Reduzido para evitar limite de 1MB do Firestore
               const numChunks = Math.ceil(result.length / CHUNK_SIZE);
               
               (async () => {
                 try {
                   console.log(`%c[Firebase] Salvando cache no Firestore em ${numChunks} blocos...`, 'color:#3b82f6;');
+                  const promises = [];
                   for (let i = 0; i < numChunks; i++) {
                     const chunkData = result.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
                     const docRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_chunk_${i}`);
-                    await window.firebaseCollections.setDoc(docRef, { data: JSON.stringify(chunkData) });
+                    promises.push(window.firebaseCollections.setDoc(docRef, { data: JSON.stringify(chunkData) }));
                   }
+                  await Promise.all(promises);
+                  
                   const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_meta`);
                   await window.firebaseCollections.setDoc(metaRef, { date: todayStr, chunks: numChunks });
                   console.log(`%c[Firebase] Cache diário salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
                 } catch (e) {
-                  console.error("[Firebase] Erro ao salvar cache no Firestore:", e);
+                  console.error("[Firebase] Erro ao salvar cache no Firestore (tamanho ou permissão):", e);
                 }
               })();
               

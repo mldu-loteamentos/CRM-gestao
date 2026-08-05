@@ -912,18 +912,55 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     const op = AppState.rules[ruleId].operator;
     let cityOps = Array.isArray(op) ? op : [op];
     
-    const usersStr = localStorage.getItem('crm_users');
-    const users = usersStr ? JSON.parse(usersStr) : [];
-
     let candidateOps = cityOps.filter(o => {
        if (o === "NÃO ATRIBUÍDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃO COBRAR" || o === "OUTROS") return false;
-       const u = users.find(user => (user.sienge_user && user.sienge_user.toUpperCase().replace(/\\./g, ' ').trim() === o.toUpperCase()) || user.name.toUpperCase() === o.toUpperCase());
+       const normalizedO = o.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+       const u = users.find(user => {
+           const sName = user.sienge_user ? user.sienge_user.toUpperCase().replace(/\./g, ' ').trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+           const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+           return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
+       });
        const opType = u ? u.operator_type : 'interno';
+       
+       if (requiredType === 'interno_absoluto') return opType === 'interno';
        return opType === requiredType;
     });
 
     if (candidateOps.length === 0) {
+        if (requiredType === 'interno_absoluto') {
+            return defaultOp; // Para 0% pago, DEVE ser interno, não faz fallback pra terceirizada
+        }
+        
+        if (requiredType === 'apoio_juridico') {
+            // Se não encontrou Apoio Jurídico na regra da cidade, pega o primeiro global como fallback
+            const apoioGlobal = users.find(u => u.operator_type === 'apoio_juridico' && u.status !== 'INATIVO');
+            if (apoioGlobal) {
+                return apoioGlobal.sienge_user ? apoioGlobal.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : apoioGlobal.name.toUpperCase();
+            }
+            return defaultOp; // Se não tem Apoio Jurídico no sistema, fica não atribuído
+        }
+        
         candidateOps = cityOps.filter(o => o !== "NÃO ATRIBUÍDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃO COBRAR" && o !== "OUTROS");
+        
+        // Se estamos buscando um interno (<30 dias) e não achou na primeira passada, 
+        // filtramos para NÃO retornar a terceirizada de forma alguma
+        if (requiredType === 'interno') {
+            const onlyInternals = candidateOps.filter(o => {
+               const normalizedO = o.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+               const u = users.find(user => {
+                   const sName = user.sienge_user ? user.sienge_user.toUpperCase().replace(/\./g, ' ').trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+                   const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+                   return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
+               });
+               const opType = u ? u.operator_type : 'interno';
+               return opType !== 'externo' && opType !== 'advogado' && opType !== 'apoio_juridico';
+            });
+            if (onlyInternals.length > 0) {
+                candidateOps = onlyInternals;
+            } else {
+                return defaultOp;
+            }
+        }
     }
 
     if (candidateOps.length === 0) return defaultOp;
@@ -2308,11 +2345,13 @@ document.addEventListener("click", function(e) {
          const c = consolidated[key];
          
          let requiredType = 'interno';
-         if (c.subjudice === "S") {
+         if (c.isZeroPaid) {
+             requiredType = 'interno_absoluto'; // 0% Pago tem prioridade máxima, sempre interno
+         } else if (c.subjudice === "S") {
              requiredType = 'advogado';
          } else if (c.maxDaysDelay >= threshJuridico) {
-             requiredType = 'interno';
-         } else if (c.maxDaysDelay >= threshTerceirizada && !c.isZeroPaid) {
+             requiredType = 'apoio_juridico'; // Corrigido para Apoio Jurídico (intermédio para quem tem >151 e não é Sub Judice S)
+         } else if (c.maxDaysDelay >= threshTerceirizada) {
              requiredType = 'externo';
          }
 
