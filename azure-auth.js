@@ -6,14 +6,14 @@ const USER_SESSION_KEY = "crm_moura_user_session";
 
 // Configurações padrão do Azure AD (inicialmente em branco ou placeholder)
 const DEFAULT_AZURE_CONFIG = {
-  clientId: "",
-  tenantId: "",
+  clientId: "SUA_CLIENT_ID_AQUI",
+  tenantId: "SEU_TENANT_ID_AQUI",
   redirectUri: window.location.origin + window.location.pathname,
-  enabled: false // Se falso, usa o simulador interativo de login
+  enabled: true // MUDADO PARA TRUE (Usa o MSAL real do Microsoft Azure)
 };
 
-// Carregar configuração salva ou padrão
-let g_authConfig = JSON.parse(localStorage.getItem(AZURE_CONFIG_KEY)) || DEFAULT_AZURE_CONFIG;
+// Carregar configuração (Forçando a configuração padrão sem cache de localStorage já que não haverá painel de admin)
+let g_authConfig = DEFAULT_AZURE_CONFIG;
 
 // Instância MSAL (inicializada apenas se o login real estiver habilitado)
 let msalInstance = null;
