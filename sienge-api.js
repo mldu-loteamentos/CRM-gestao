@@ -268,9 +268,25 @@ const SiengeApiService = {
     if (s_apiMode === "simulado") {
       return window.MOCK_DATA.COMPANIES;
     }
-    const list = await siengeFetchWithRetry("/companies?limit=100");
-    const array = list && list.results ? list.results : list;
-    return array || [];
+    const cacheKey = 'crm_companies_data';
+    let cachedData = [];
+    try {
+        const cachedRaw = localStorage.getItem(cacheKey);
+        if (cachedRaw) cachedData = JSON.parse(cachedRaw);
+    } catch(e) {}
+
+    try {
+        const list = await siengeFetchWithRetry("/companies?limit=100", 2); // Menos retentativas
+        const array = list && list.results ? list.results : list;
+        if (array && array.length > 0) {
+            try { localStorage.setItem(cacheKey, JSON.stringify(array)); } catch(e){}
+            return array;
+        }
+        return cachedData;
+    } catch (e) {
+        console.warn("[Sienge] Erro ao buscar empresas (provável limite de API), usando cache local:", e);
+        return cachedData;
+    }
   },
 
   // 1.5. Centros de Custo (Paginado)
