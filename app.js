@@ -1336,13 +1336,16 @@ function checkAuthentication() {
     
     if (authConfig.enabled) {
       // Azure AD habilitado: botão aciona MSAL Popup
-      document.getElementById("mock-login-fields").style.display = "none"; // Ocultar campos
+      const emailInput = document.getElementById("login-email");
+      const labelEl = document.querySelector(".login-label");
+      if (emailInput) emailInput.style.display = "none";
+      if (labelEl) labelEl.style.display = "none";
+      
       btn.textContent = "Entrar com Microsoft";
       
       // Mostrar botão de forma isolada
       btn.style.display = "block";
       btn.style.marginTop = "20px";
-      btn.parentElement.insertBefore(btn, btn.parentElement.firstChild);
       
       btn.onclick = () => {
         MouraAuth.login().then(loggedUser => {
