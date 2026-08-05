@@ -43,6 +43,9 @@ function initSchema() {
       email TEXT NOT NULL UNIQUE,
       phone TEXT,
       profile_id INTEGER,
+      check_construction INTEGER DEFAULT 0,
+      construction_cities TEXT,
+      construction_companies TEXT,
       status TEXT DEFAULT 'Pendente ativação', -- 'Pendente ativação', 'Ativo', 'Inativo'
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL
@@ -125,6 +128,20 @@ function initSchema() {
     db.exec(`ALTER TABLE tags ADD COLUMN destino TEXT DEFAULT 'Unidade'`);
   } catch(e) {
     // A coluna provavelmente já existe
+  }
+
+  // Verifica se colunas de construção existem na tabela users (migração)
+  try {
+    const columns = db.prepare("PRAGMA table_info(users)").all();
+    const hasCheckConstruction = columns.some(c => c.name === 'check_construction');
+    if (!hasCheckConstruction) {
+      db.exec("ALTER TABLE users ADD COLUMN check_construction INTEGER DEFAULT 0;");
+      db.exec("ALTER TABLE users ADD COLUMN construction_cities TEXT;");
+      db.exec("ALTER TABLE users ADD COLUMN construction_companies TEXT;");
+      console.log("Colunas de construção adicionadas à tabela users.");
+    }
+  } catch(e) {
+    console.error("Erro ao verificar/adicionar colunas de construção em users:", e.message);
   }
 }
 

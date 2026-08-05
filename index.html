@@ -698,6 +698,11 @@
         <div id="inadimplencia-dashboard-root" style="padding: 15px;"></div>
       </section>
 
+      <!-- TAB: VERIFICAR CONSTRUCAO -->
+      <section id="tab-verificar_construcao" class="tab-pane" style="display: none;">
+        <div id="verificar-construcao-root"></div>
+      </section>
+
       <!-- TAB: CONTAS A PAGAR -->
       <section id="tab-contas-pagar" class="tab-pane" style="display: none;">
         <div id="contas-pagar-root"></div>
@@ -2927,6 +2932,10 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                 onclick="switchCustomerTab('tab-comportamento')">Comportamento de Pgto</button>
               <button class="customer-tab-btn" data-target="tab-repactuacoes"
                 onclick="switchCustomerTab('tab-repactuacoes'); if(typeof loadRepactuacoes === 'function') loadRepactuacoes();">Repactuações</button>
+              <button class="customer-tab-btn" data-target="tab-construcao"
+                onclick="switchCustomerTab('tab-construcao'); if(typeof window.loadConstrucoes === 'function') window.loadConstrucoes();" style="display: flex; align-items: center; gap: 6px;">
+                <i data-lucide="hard-hat" style="width: 16px; height: 16px;"></i> Construção
+              </button>
               <button id="btn-informe-rendimentos" class="customer-tab-btn"
                 onclick="switchCustomerTab('tab-informe-rendimentos')" style="display: flex; align-items: center; gap: 6px;">
                 <span style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;">
@@ -3555,6 +3564,30 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   </div>
                 </div>
               </div> <!-- FIM TAB REPACTUACOES -->
+
+              <!-- TAB CONSTRUCAO -->
+              <div id="tab-construcao" class="customer-tab-pane" style="display: none;">
+                <div class="crm-card" style="padding: 20px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="font-size: 1.1rem; color: var(--color-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+                      <i data-lucide="hard-hat" style="width: 20px;"></i> Histórico de Vistorias / Construção
+                    </h3>
+                    <div style="display: flex; gap: 10px;">
+                      <button class="btn btn-outline btn-sm" onclick="window.openConstrucaoSettingsModal()" title="Configurar Estágios da Construção">
+                        <i data-lucide="settings" style="width: 16px;"></i>
+                      </button>
+                      <button class="btn btn-primary btn-sm" onclick="window.openNewConstrucaoModal()">
+                        <i data-lucide="plus" style="width: 16px;"></i> Nova Vistoria
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div id="construcao-content" style="padding: 10px 0;">
+                    <div style="text-align: center; padding: 30px; color: #666;" id="construcao-loading">Carregando vistorias...</div>
+                    <div id="construcao-results" style="display: none;"></div>
+                  </div>
+                </div>
+              </div> <!-- FIM TAB CONSTRUCAO -->
 
               <!-- TAB 7: INFORME DE RENDIMENTOS -->
               <div id="tab-informe-rendimentos" class="customer-tab-pane" style="display: none;">
@@ -4337,6 +4370,8 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
   <script defer src="contas-pagar.js?v=24"></script>
   <script defer src="config-tags.js?v=6"></script>
   <script defer src="config-users.js?v=5"></script>
+  <script defer src="construcao.js?v=1"></script>
+  <script defer src="verificar-construcao.js?v=1"></script>
   <script defer src="empresas.js?v=2"></script>
   <script defer src="relacionamento.js?v=2"></script>
   <script defer src="compromissario.js"></script>

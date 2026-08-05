@@ -33,6 +33,7 @@ const ConfigUsersApp = {
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
             { id: "notificacoes", label: "Notificações" },
+            { id: "verificar_construcao", label: "Verificar Construção" },
             { id: "regras_negociacao", label: "Regras de Negociação" },
             { id: "regras_cobranca", label: "Regras de Cobrança" }
           ]
@@ -348,6 +349,49 @@ const ConfigUsersApp = {
       const advCompaniesHtml = buildCheckboxList(companyItems, 'companies', user ? user.adv_companies : [], 'onchange="window.updateAdvogadoCities()"');
       const advCitiesHtml = buildCheckboxList(cityItems, 'cities', user ? user.adv_cities : []);
 
+      window.updateConstCities = () => {
+          const selectedCompanyCheckboxes = document.querySelectorAll('input[name="umodal-const-companies"]:checked');
+          const selectedCompanyIds = Array.from(selectedCompanyCheckboxes).map(cb => cb.value);
+          let allowedCities = [];
+          
+          if (selectedCompanyIds.length > 0 && currentAppState && currentAppState.cachedCostCenters) {
+              const ccIdToCity = {};
+              currentAppState.cachedCostCenters.forEach(cc => {
+                  let city = "";
+                  if (String(cc.id) === "14201" || (cc.name && cc.name.toUpperCase().includes("ARAÇARI"))) {
+                      city = "ARAÇARIGUAMA";
+                  } else if (cc.name && cc.name.includes('-')) {
+                      city = cc.name.split('-')[0].trim().toUpperCase();
+                  }
+                  if (city) ccIdToCity[cc.id] = city;
+              });
+
+              const clients = window.rawClientList || currentAppState.sales || [];
+              clients.forEach(c => {
+                  const sComp = String(c.companyId || "");
+                  if (selectedCompanyIds.includes(sComp) && c.costCenterId) {
+                      const city = ccIdToCity[c.costCenterId];
+                      if (city && cities.includes(city) && !allowedCities.includes(city)) {
+                          allowedCities.push(city);
+                      }
+                  }
+              });
+
+              allowedCities.sort();
+          } else {
+              allowedCities = [...cities];
+          }
+          
+          const cityItems = allowedCities.map(c => ({ value: c, label: c }));
+          const currentlyChecked = Array.from(document.querySelectorAll('input[name="umodal-const-cities"]:checked')).map(cb => cb.value);
+          const newHtml = buildCheckboxList(cityItems, 'const-cities', currentlyChecked);
+          const container = document.getElementById('const-cities-container');
+          if (container) container.innerHTML = newHtml;
+      };
+
+      const constCompaniesHtml = buildCheckboxList(companyItems, 'const-companies', user ? user.const_companies : [], 'onchange="window.updateConstCities()"');
+      const constCitiesHtml = buildCheckboxList(cityItems, 'const-cities', user ? user.const_cities : []);
+
       const modalHtml = `
       <div id="user-modal-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
          <div style="background: #fff; border-radius: 12px; width: 700px; max-width: 95%; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
@@ -442,6 +486,33 @@ const ConfigUsersApp = {
                    </div>
                </div>
             </div>
+
+            <div style="margin-bottom: 16px;">
+               <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
+                  <input type="checkbox" id="umodal-check-const" ${user && user.check_construction ? 'checked' : ''} onchange="document.getElementById('umodal-const-config').style.display = this.checked ? 'block' : 'none';" style="margin-right: 8px; width: 16px; height: 16px;">
+                  Responsável por Checar Construção
+               </label>
+            </div>
+
+            <div id="umodal-const-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && user.check_construction ? 'block' : 'none'};">
+               <h4 style="margin: 0 0 8px 0; font-size: 0.95rem; color: #202124;">Configurações de Atuação (Construção)</h4>
+               <p style="font-size: 0.8rem; color: #5f6368; margin-top: 0; margin-bottom: 12px;">Selecione os locais pelos quais este operador será responsável por verificar a construção.</p>
+               
+               <div style="display: flex; gap: 16px;">
+                   <div style="flex: 1;">
+                      <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.8rem;">Empresas</label>
+                      <div style="height: 150px; overflow-y: auto; border: 1px solid #e8eaed; border-radius: 6px; padding: 8px; background: #fff;">
+                         ${constCompaniesHtml}
+                      </div>
+                   </div>
+                   <div style="flex: 1;">
+                      <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.8rem;">Cidades</label>
+                      <div id="const-cities-container" style="height: 150px; overflow-y: auto; border: 1px solid #e8eaed; border-radius: 6px; padding: 8px; background: #fff;">
+                         ${constCitiesHtml}
+                      </div>
+                   </div>
+               </div>
+            </div>
             
             <div style="margin-bottom: 16px; display: flex; gap: 16px;">
                <div style="flex: 1;">
@@ -480,6 +551,10 @@ const ConfigUsersApp = {
       const advCities = Array.from(document.querySelectorAll('input[name="umodal-adv-cities"]:checked')).map(el => el.value);
       const advCostCenters = Array.from(document.querySelectorAll('input[name="umodal-adv-costcenters"]:checked')).map(el => el.value);
 
+      const checkConstruction = document.getElementById('umodal-check-const') ? document.getElementById('umodal-check-const').checked : false;
+      const constCompanies = Array.from(document.querySelectorAll('input[name="umodal-const-companies"]:checked')).map(el => el.value);
+      const constCities = Array.from(document.querySelectorAll('input[name="umodal-const-cities"]:checked')).map(el => el.value);
+
       if (!name || !email) {
           alert("Nome e E-mail são obrigatórios.");
           return;
@@ -497,6 +572,9 @@ const ConfigUsersApp = {
               user.adv_companies = user.operator_type === 'advogado' ? advCompanies : [];
               user.adv_cities = user.operator_type === 'advogado' ? advCities : [];
               user.adv_cost_centers = user.operator_type === 'advogado' ? advCostCenters : [];
+              user.check_construction = checkConstruction;
+              user.const_companies = checkConstruction ? constCompanies : [];
+              user.const_cities = checkConstruction ? constCities : [];
               user.manager_name = managerName;
               user.manager_email = managerEmail;
               user.badge_color = badgeColor;
@@ -514,6 +592,9 @@ const ConfigUsersApp = {
              adv_companies: operatorType === 'advogado' ? advCompanies : [],
              adv_cities: operatorType === 'advogado' ? advCities : [],
              adv_cost_centers: operatorType === 'advogado' ? advCostCenters : [],
+             check_construction: checkConstruction,
+             const_companies: checkConstruction ? constCompanies : [],
+             const_cities: checkConstruction ? constCities : [],
              manager_name: managerName,
              manager_email: managerEmail,
              badge_color: badgeColor,
