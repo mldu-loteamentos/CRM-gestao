@@ -59,6 +59,23 @@ module.exports = async function handler(req, res) {
       } else {
         return res.end();
       }
+    } else {
+      // HANDLE NORMAL 2xx, 4xx, 5xx RESPONSES
+      const responseHeaders = new Headers(response.headers);
+      responseHeaders.set('Access-Control-Allow-Origin', '*');
+      responseHeaders.delete('content-encoding');
+      responseHeaders.delete('content-length');
+      responseHeaders.delete('transfer-encoding');
+      
+      res.status(response.status);
+      responseHeaders.forEach((value, key) => res.setHeader(key, value));
+      
+      if (response.body) {
+        const { Readable } = require('stream');
+        return Readable.fromWeb(response.body).pipe(res);
+      } else {
+        return res.end();
+      }
     }
 
   } catch (error) {
