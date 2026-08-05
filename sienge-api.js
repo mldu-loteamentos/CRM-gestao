@@ -396,16 +396,13 @@ const SiengeApiService = {
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIREBASE STORAGE)
         if (!forceRefresh && window.firebaseStorage && window.firebaseCollections) {
            try {
-             const snapshotPath = `snapshots/defaulters_latest.json`;
-             console.log(`%c[Sienge] ⏱ Verificando cache geral: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
-             const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
-             
-             // getDownloadURL obtém o token correto do Firebase
-             const url = await window.firebaseCollections.getDownloadURL(fileRef);
-             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base mais recente...`, 'color:#10b981;font-weight:bold;');
+             const snapshotPath = encodeURIComponent(`snapshots/defaulters_latest.json`);
+             console.log(`%c[Sienge] ⏱ Verificando cache geral: ${snapshotPath} via Proxy...`, 'color:#f59e0b;font-weight:bold;');
+             const url = `/proxy-storage/${snapshotPath}?alt=media`;
              
              const res = await fetch(url);
-             if (!res.ok) throw new Error("Falha ao baixar cache");
+             if (!res.ok) throw new Error("Falha ao baixar cache via proxy");
+             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base mais recente...`, 'color:#10b981;font-weight:bold;');
              const result = await res.json();
              
              const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
@@ -437,18 +434,24 @@ const SiengeApiService = {
           // Dispara o salvamento do snapshot diário em background
           if (window.firebaseStorage && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
-              const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
-              const latestPath = `snapshots/defaulters_latest.json`;
-              const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
-              const latestRef = window.firebaseCollections.ref(window.firebaseStorage, latestPath);
-              const blob = new Blob([JSON.stringify(result)], { type: 'application/json' });
+              const snapshotPath = encodeURIComponent(`snapshots/defaulters_${todayStr}.json`);
+              const latestPath = encodeURIComponent(`snapshots/defaulters_latest.json`);
+              const bodyStr = JSON.stringify(result);
               
-              window.firebaseCollections.uploadBytes(fileRef, blob).then(() => {
-                 console.log(`%c[Firebase] Snapshot diário bruto (${todayStr}) salvo com sucesso!`, 'color:#3b82f6;');
-                 window.firebaseCollections.uploadBytes(latestRef, blob).then(() => console.log('Latest snapshot updated.'));
+              fetch(`/proxy-storage?name=${snapshotPath}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: bodyStr
+              }).then(() => {
+                 console.log(`%c[Firebase] Snapshot diário bruto (${todayStr}) salvo com sucesso via Proxy!`, 'color:#3b82f6;');
+                 fetch(`/proxy-storage?name=${latestPath}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: bodyStr
+                 }).then(() => console.log('Latest snapshot updated via Proxy.'));
                  this.saveDefaultersSnapshot(result).catch(console.error);
               }).catch(e => {
-                 console.error("[Firebase] Erro ao salvar snapshot bruto:", e);
+                 console.error("[Firebase] Erro ao salvar snapshot bruto via Proxy:", e);
                  this.saveDefaultersSnapshot(result).catch(console.error);
               });
           } else {
