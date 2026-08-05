@@ -574,8 +574,8 @@ const SiengeApiService = {
 
       console.log(`[Sienge] Empresa ${cId} — ${companyCcs.length} centros de custo (1/2/3): ${companyCcs.join(', ')}`);
 
-      // Divisão em lotes de 5 CCs para evitar requests muito longos
-      const BATCH_SIZE = 5;
+      // Divisão em lotes menores (2 CCs) para evitar requests muito longos e timeout na Vercel (60s limit)
+      const BATCH_SIZE = 2;
       const ccBatches = [];
       if (companyCcs.length === 0) {
         ccBatches.push([]); // Lote vazio caso não haja CCs filtrados
