@@ -114,7 +114,9 @@ const ConfigUsersApp = {
     } else {
       this.profiles = [
         { id: "admin", name: "ADMINISTRADOR" },
-        { id: "operador_cobranca", name: "OPERADOR COBRANÇA" }
+        { id: "operador_pagadoria", name: "OPERADOR PAGADORIA" },
+        { id: "operador_cobranca", name: "OPERADOR COBRANÇA" },
+        { id: "engenharia", name: "ENGENHARIA" }
       ];
       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
     }

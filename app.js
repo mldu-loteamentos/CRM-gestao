@@ -889,6 +889,25 @@ function getRuleOperator(ruleId, defaultOp, customerId = null) {
 }
 
 function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
+  const usersStr = localStorage.getItem('crm_users');
+  const users = usersStr ? JSON.parse(usersStr) : [];
+  
+  if (requiredType === 'advogado') {
+      const advOps = users.filter(u => u.operator_type === 'advogado' && u.status !== 'INATIVO');
+      if (advOps.length > 0) {
+          let lawyerNames = advOps.map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : u.name.toUpperCase());
+          if (lawyerNames.length === 1) return lawyerNames[0];
+          if (customerId) {
+              let hash = 0;
+              const strId = String(customerId);
+              for (let i = 0; i < strId.length; i++) hash = Math.imul(31, hash) + strId.charCodeAt(i) | 0;
+              hash = Math.abs(hash);
+              return lawyerNames[hash % lawyerNames.length];
+          }
+          return lawyerNames[0];
+      }
+      return defaultOp;
+  }
   if (AppState.rules && AppState.rules[ruleId]) {
     const op = AppState.rules[ruleId].operator;
     let cityOps = Array.isArray(op) ? op : [op];
@@ -962,6 +981,25 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
     if (city) {
       const ruleId = "CID_" + city.replace(/\s+/g, '_');
       const custId = client ? (client.id || client.customerId) : null;
+      
+      let isSubj = false;
+      if (sale && (sale.subjudice === 'S' || sale.subjudice === true)) {
+          isSubj = true;
+      }
+      if (!isSubj && client && client.maxDaysDelay !== undefined) {
+          const judLimit = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
+          if (client.maxDaysDelay >= judLimit) isSubj = true;
+      } else if (!isSubj && clientBills && clientBills.length > 0) {
+          const judLimit = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
+          const maxDelay = Math.max(...clientBills.map(b => b.daysDelay || 0));
+          if (maxDelay >= judLimit) isSubj = true;
+      }
+      
+      if (isSubj) {
+          const operator = getRuleOperatorByType(ruleId, "OUTROS", custId, "advogado");
+          return { operator: operator, rule: "REGRA CIDADE (SUB JUDICE) - " + city };
+      }
+      
       const operator = getRuleOperator(ruleId, "OUTROS", custId);
       return { operator: operator, rule: "REGRA CIDADE - " + city };
     }
