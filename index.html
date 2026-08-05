@@ -483,6 +483,9 @@
                 <li data-tab="subjudice">
                   <a onclick="switchTab('subjudice', 'Sub Judice')">Sub Judice</a>
                 </li>
+                <li data-tab="verificar_construcao">
+                  <a onclick="switchTab('verificar_construcao', 'Verificar Construção')">Verificar Construção</a>
+                </li>
                 <li data-tab="wesend">
                   <a onclick="switchTab('wesend', 'Notificações')">Notificações</a>
                 </li>
@@ -1173,9 +1176,12 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   <option value="">Selecione o emp...</option>
                 </select>
               </div>
-              <div class="form-group" style="grid-column: 4 / 5; display: flex; align-items: flex-end;">
-                <button class="btn btn-primary" style="height: 38px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.85rem; white-space: nowrap; background-color: var(--color-primary);" onclick="searchRelacionamento()">
-                  <i data-lucide="search" style="width: 14px;"></i> Pesquisar
+              <div class="form-group" style="grid-column: 4 / 5; display: flex; align-items: flex-end; gap: 8px;">
+                <button class="btn btn-outline" style="height: 38px; width: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; padding: 0;" onclick="window.clearRelacionamentoSearch()" title="Nova Busca">
+                  <i data-lucide="eraser" style="width: 14px;"></i> Limpar
+                </button>
+                <button class="btn btn-primary" style="height: 38px; width: 50%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.85rem; white-space: nowrap; background-color: var(--color-primary); padding: 0;" onclick="searchRelacionamento()" title="Buscar">
+                  <i data-lucide="search" style="width: 14px;"></i> Buscar
                 </button>
               </div>
 

@@ -157,7 +157,7 @@ const IdbCustomerCache = {
     }
 };
 
-window.startCustomerBackgroundSync = async function(force = false) {
+window.startCustomerBackgroundSync = async function(force = false, quiet = false) {
     if (window.GlobalCustomerCache.syncStarted && !force) return;
     
     if (force) {
@@ -166,7 +166,7 @@ window.startCustomerBackgroundSync = async function(force = false) {
     }
     
     const container = document.getElementById('customer-sync-container');
-    if (container) container.style.display = 'flex';
+    if (container && !quiet) container.style.display = 'flex';
     const textEl = document.getElementById('customer-sync-text');
     if (textEl) textEl.style.color = '#6b7280';
     
@@ -174,7 +174,7 @@ window.startCustomerBackgroundSync = async function(force = false) {
     let authHeader = window.getBasicAuthHeader ? getBasicAuthHeader() : '';
     
     if (!authHeader) {
-        setTimeout(() => window.startCustomerBackgroundSync(force), 2000);
+        setTimeout(() => window.startCustomerBackgroundSync(force, quiet), 2000);
         return;
     }
 
@@ -267,7 +267,7 @@ window.startCustomerBackgroundSync = async function(force = false) {
     
     const progEl = document.getElementById('customer-sync-progress');
     
-    if (container) container.style.display = 'flex';
+    if (container && !quiet) container.style.display = 'flex';
     
     try {
         let offset = 0;
@@ -358,7 +358,7 @@ window.startCustomerBackgroundSync = async function(force = false) {
         window.GlobalCustomerCache.status = 'done';
         setDynamicFieldsState(false, "Digite para buscar...");
         
-        if (textEl && progEl) {
+        if (!quiet && textEl && progEl) {
             textEl.innerText = `Base atualizada!`;
             textEl.style.color = 'var(--color-primary)';
             progEl.style.width = `100%`;
@@ -368,13 +368,20 @@ window.startCustomerBackgroundSync = async function(force = false) {
         try {
             await IdbCustomerCache.set('crm_customer_cache', {
                 syncTimestamp: new Date().toISOString(),
-                totalCount: window.GlobalCustomerCache.totalCount,
-                data: window.GlobalCustomerCache.data
+                date: new Date().toLocaleDateString(),
+                data: tempData,
+                totalCount: tempLoadedCount
             });
-            // Limpa o localStorage velho para economizar espaço
             localStorage.removeItem('crm_customer_cache');
         } catch(e) {
             console.warn("Não foi possível salvar cache de clientes no IndexedDB.", e);
+        }
+        
+        if (!window._customerSyncInterval) {
+            window._customerSyncInterval = setInterval(() => {
+                console.log("Iniciando sincronização de hora em hora em background (quiet).");
+                window.startCustomerBackgroundSync(true, true);
+            }, 60 * 60 * 1000);
         }
         
     } catch(e) {
@@ -17861,6 +17868,32 @@ window.maskCpfCnpj = function(input) {
         if (v.length > 18) v = v.substring(0, 18);
     }
     input.value = v;
+    toggleRelacionamentoFilters();
+};
+
+window.clearRelacionamentoSearch = function() {
+    window.SelectedDynamicCustomerId = null;
+    
+    ['titulo', 'contrato', 'doc', 'nome', 'telefone', 'email'].forEach(f => {
+        const el = document.getElementById(`relacionamento-filter-${f}`);
+        if (el) el.value = '';
+    });
+    
+    const empEl = document.getElementById('relacionamento-filter-emp');
+    if (empEl) empEl.value = '';
+    
+    const unEl = document.getElementById('relacionamento-filter-unidade');
+    if (unEl) {
+        unEl.innerHTML = '<option value="">Selecione o emp...</option>';
+        unEl.disabled = true;
+    }
+    
+    document.getElementById('relacionamento-customer-card').style.display = 'none';
+    document.getElementById('relacionamento-customer-info-container').innerHTML = '';
+    document.getElementById('relacionamento-results-card').style.display = 'none';
+    const tbody = document.querySelector('#table-relacionamento-results tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--color-text-muted);">Faça uma busca para encontrar clientes.</td></tr>`;
+    
     toggleRelacionamentoFilters();
 };
 
