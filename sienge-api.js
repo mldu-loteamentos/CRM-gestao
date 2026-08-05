@@ -398,16 +398,14 @@ const SiengeApiService = {
            try {
              const snapshotPath = `snapshots/defaulters_latest.json`;
              console.log(`%c[Sienge] ⏱ Verificando cache geral: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
+             const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
              
-             // Evita CORS na Vercel não usando a SDK do Firebase para o download
-             const bucket = "crm-gestao-mldu.firebasestorage.app";
-             const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(snapshotPath)}?alt=media`;
+             // getDownloadURL obtém o token correto do Firebase
+             const url = await window.firebaseCollections.getDownloadURL(fileRef);
+             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base mais recente...`, 'color:#10b981;font-weight:bold;');
              
-             // Passa pelo nosso proxy da API Vercel
-             const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(firebaseUrl)}&filename=cache.json`;
-             const res = await fetch(proxyUrl);
-             
-             if (!res.ok) throw new Error("Cache não encontrado");
+             const res = await fetch(url);
+             if (!res.ok) throw new Error("Falha ao baixar cache");
              const result = await res.json();
              
              const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
