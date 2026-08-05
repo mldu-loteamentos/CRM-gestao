@@ -396,9 +396,8 @@ const SiengeApiService = {
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIREBASE STORAGE)
         if (!forceRefresh && window.firebaseStorage && window.firebaseCollections) {
            try {
-             const todayStr = new Date().toISOString().split('T')[0];
-             const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
-             console.log(`%c[Sienge] ⏱ Verificando cache diário: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
+             const snapshotPath = `snapshots/defaulters_latest.json`;
+             console.log(`%c[Sienge] ⏱ Verificando cache geral: ${snapshotPath}...`, 'color:#f59e0b;font-weight:bold;');
              
              // Evita CORS na Vercel não usando a SDK do Firebase para o download
              const bucket = "crm-gestao-mldu.firebasestorage.app";
@@ -441,11 +440,14 @@ const SiengeApiService = {
           if (window.firebaseStorage && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
               const snapshotPath = `snapshots/defaulters_${todayStr}.json`;
+              const latestPath = `snapshots/defaulters_latest.json`;
               const fileRef = window.firebaseCollections.ref(window.firebaseStorage, snapshotPath);
+              const latestRef = window.firebaseCollections.ref(window.firebaseStorage, latestPath);
               const blob = new Blob([JSON.stringify(result)], { type: 'application/json' });
               
               window.firebaseCollections.uploadBytes(fileRef, blob).then(() => {
                  console.log(`%c[Firebase] Snapshot diário bruto (${todayStr}) salvo com sucesso!`, 'color:#3b82f6;');
+                 window.firebaseCollections.uploadBytes(latestRef, blob).then(() => console.log('Latest snapshot updated.'));
                  this.saveDefaultersSnapshot(result).catch(console.error);
               }).catch(e => {
                  console.error("[Firebase] Erro ao salvar snapshot bruto:", e);

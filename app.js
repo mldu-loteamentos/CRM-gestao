@@ -1386,9 +1386,9 @@ async function loadAndApplyPermissions() {
   // Buscar permissões do usuário se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
-      const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-      const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-      const apiUrl = `http://${host}:${port}/api/permissions/${AppState.currentUser.email}`;
+      const portStr = (window.location.port && window.location.port !== "5500" && window.location.port !== "443" && window.location.port !== "80") ? ":" + window.location.port : (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? ":3000" : "");
+      const host = window.location.hostname || "localhost";
+      const apiUrl = `${window.location.protocol}//${host}${portStr}/api/permissions/${AppState.currentUser.email}`;
       const res = await fetch(apiUrl);
       if (res.ok) {
         const userData = await res.json();
