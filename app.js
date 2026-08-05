@@ -1340,7 +1340,46 @@ async function initializeApplication() {
 
   // Carregar dados armazenados localmente (SharePoint preambles & occurrences)
   AppState.preambles = JSON.parse(localStorage.getItem("crm_moura_preambles")) || window.MOCK_DATA.INITIAL_PREAMBLE_DATA;
-  AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES;
+  
+  // --- INICIO MIGRACAO FIREBASE NOTES ---
+  try {
+     if (window.firebaseDb && window.firebaseCollections) {
+         const notesSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'customer_notes'));
+         AppState.notes = {};
+         notesSnapshot.forEach(doc => {
+             AppState.notes[doc.id] = doc.data().notes || [];
+         });
+         if (Object.keys(AppState.notes).length === 0) {
+             AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
+         }
+         localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+     } else {
+         AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
+     }
+  } catch (e) {
+     console.error("Erro ao buscar notas do Firebase:", e);
+     AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
+  }
+  
+  window.saveNotesToFirebase = async function(customerId) {
+      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+      if (window.firebaseDb && window.firebaseCollections) {
+          try {
+              if (customerId) {
+                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
+                 window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
+              } else {
+                 for (const custId of Object.keys(AppState.notes)) {
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(custId));
+                    window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[custId] || [] }, { merge: true }).catch(e => console.error(e));
+                 }
+              }
+          } catch(e) {
+              console.error('Erro ao salvar notas no Firebase', e);
+          }
+      }
+  };
+  // --- FIM MIGRACAO FIREBASE NOTES ---
   AppState.weSendStatus = JSON.parse(localStorage.getItem("crm_moura_wesend_status")) || {};
   AppState.rules = JSON.parse(localStorage.getItem("crm_moura_rules")) || INITIAL_RULES_CONFIG;
   if (!localStorage.getItem("crm_moura_rules")) {
@@ -7460,7 +7499,7 @@ window.togglePinOccurrence = function(customerId, occDate) {
   if (!occ) return;
   
   occ.pinned = !occ.pinned;
-  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   renderCustomerOccurrences();
 };
 
@@ -7964,7 +8003,7 @@ window.crossContractAction = function(action) {
 window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skipFormClear = false) {
   // Push the occurrence
   AppState.notes[AppState.selectedCustomerId].push(occurrence);
-  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   
   // Limpar contador de dias na fila do contrato ATUAL apenas se tiver promessa pendente
   try {
@@ -8157,7 +8196,7 @@ window.errataOccurrence = function(customerId, occDate) {
   occ.pastTexts.push(occ.text);
   occ.text = newText.trim().toUpperCase();
   occ.lastErrata = { author: currentUser, date: new Date().toISOString() };
-  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   renderCustomerOccurrences();
   if (document.getElementById("tab-agenda").style.display === "block") {
     loadAgendaTab();
@@ -8190,7 +8229,7 @@ window.editOccurrenceReal = function(customerId, occDate) {
   
   occ.text = newText.trim().toUpperCase();
   occ.lastEdit = { author: currentUser, date: new Date().toISOString() };
-  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   renderCustomerOccurrences();
   if (document.getElementById("tab-agenda").style.display === "block") {
     loadAgendaTab();
@@ -8230,7 +8269,7 @@ window.cancelOccurrence = function(customerId, occDate) {
   const currentList = AppState.notes[customerId] || [];
   AppState.notes[customerId] = currentList.filter(x => x.date !== occDate);
   
-  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   renderCustomerOccurrences();
   updateSidebarAgendaBadge();
   if (document.getElementById("tab-agenda").style.display === "block") {
@@ -19310,7 +19349,7 @@ window.checkAndAutomatePromises = function() {
   });
   
   if (hasChanges) {
-    localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    if(window.saveNotesToFirebase) window.saveNotesToFirebase(null); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
     if (typeof updateSidebarAgendaBadge === 'function') updateSidebarAgendaBadge();
     if (typeof renderAgendaAlerts === 'function') renderAgendaAlerts();
   }
@@ -19356,7 +19395,7 @@ window.renderAgendaAlerts = function() {
 window.dismissAgendaAlert = function(custId, occIndex) {
   if (AppState.notes[custId] && AppState.notes[custId][occIndex]) {
     AppState.notes[custId][occIndex].agendaAlert = false;
-    localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    if(window.saveNotesToFirebase) window.saveNotesToFirebase(custId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
     renderAgendaAlerts();
   }
 };
@@ -21040,4 +21079,21 @@ window.getDynamicOperators = function(type = 'all') {
     
     // Retornar os nomes formatados
     return ops.map(u => String(u.sienge_user).replace('.', ' ').toUpperCase());
+};
+
+// --- INTERCEPTADOR PARA FIREBASE ---
+// Captura as chamadas de localStorage.setItem(crm_moura_notes) e envia pro Firebase
+const _originalSetItem = localStorage.setItem;
+localStorage.setItem = function(key, value) {
+    _originalSetItem.call(this, key, value);
+    if (key === "crm_moura_notes" && window.saveNotesToFirebase) {
+        if (window._fbSyncTimeout) clearTimeout(window._fbSyncTimeout);
+        window._fbSyncTimeout = setTimeout(() => {
+            if (window.AppState && window.AppState.selectedCustomerId) {
+                window.saveNotesToFirebase(window.AppState.selectedCustomerId);
+            } else {
+                window.saveNotesToFirebase(null); // salvar tudo se não souber quem
+            }
+        }, 300);
+    }
 };
