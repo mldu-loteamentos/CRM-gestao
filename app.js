@@ -1247,15 +1247,16 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 
 // ----------------------------------------------------
 // 3. FLUXO DE LOGIN E RENDER DO USUÁRIO
-// ----------------------------------------------------
 window.showMockLoginModal = function(resolve, reject) {
-  const overlay = document.getElementById("login-modal-overlay");
-  overlay.classList.add("active");
-  
+  // O modal já está visível por causa do checkAuthentication.
+  // Apenas configuramos o evento do botão para a lógica do simulador.
   const btn = document.getElementById("btn-submit-login");
   const emailInput = document.getElementById("login-email");
   const nameInput = document.getElementById("login-name");
   const errorMsg = document.getElementById("login-error-msg");
+  
+  // Limpar onclick antigo se houver
+  btn.onclick = null;
   
   btn.onclick = () => {
     const email = emailInput.value.trim();
@@ -1268,7 +1269,6 @@ window.showMockLoginModal = function(resolve, reject) {
     }
     
     errorMsg.style.display = "none";
-    overlay.classList.remove("active");
     
     const user = {
       name: name || "OPERADOR",
@@ -1282,21 +1282,98 @@ window.showMockLoginModal = function(resolve, reject) {
   };
 };
 
+function validateAndLoadCrmUser(user) {
+  let crmUsers = [];
+  try {
+    crmUsers = JSON.parse(localStorage.getItem('crm_users')) || [];
+  } catch(e) {}
+  
+  const matchedUser = crmUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+  
+  if (!matchedUser) {
+    throw new Error("Seu e-mail não está cadastrado na base de usuários do CRM. Solicite o acesso ao Administrador.");
+  }
+  
+  if (matchedUser.status === "INATIVO") {
+    throw new Error("Seu acesso foi desativado pelo Administrador.");
+  }
+  
+  if (matchedUser.status === "PENDENTE") {
+    matchedUser.status = "ATIVO";
+    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+  }
+  
+  // Mescla o perfil do CRM com o usuário logado
+  return { ...user, ...matchedUser };
+}
+
+function processSuccessfulLogin(loggedUser) {
+  try {
+    const validatedUser = validateAndLoadCrmUser(loggedUser);
+    AppState.currentUser = validatedUser;
+    document.getElementById("login-modal-overlay").classList.remove("active");
+    renderUserSession();
+    initializeApplication();
+  } catch (err) {
+    const errorMsg = document.getElementById("login-error-msg");
+    if (errorMsg) {
+      errorMsg.textContent = err.message;
+      errorMsg.style.display = "block";
+    } else {
+      alert(err.message);
+    }
+    MouraAuth.logout();
+  }
+}
+
 function checkAuthentication() {
   const user = MouraAuth.getCurrentUser();
   if (!user) {
-    MouraAuth.login().then(loggedUser => {
-      AppState.currentUser = loggedUser;
+    const overlay = document.getElementById("login-modal-overlay");
+    overlay.classList.add("active");
+    
+    const authConfig = MouraAuth.getAuthConfig();
+    const btn = document.getElementById("btn-submit-login");
+    
+    if (authConfig.enabled) {
+      // Azure AD habilitado: botão aciona MSAL Popup
+      document.getElementById("mock-login-fields").style.display = "none"; // Ocultar campos
+      btn.textContent = "Entrar com Microsoft";
+      
+      // Mostrar botão de forma isolada
+      btn.style.display = "block";
+      btn.style.marginTop = "20px";
+      btn.parentElement.insertBefore(btn, btn.parentElement.firstChild);
+      
+      btn.onclick = () => {
+        MouraAuth.login().then(loggedUser => {
+          processSuccessfulLogin(loggedUser);
+        }).catch(err => {
+          const errorMsg = document.getElementById("login-error-msg");
+          if (errorMsg) {
+            errorMsg.textContent = "Falha no login com a Microsoft: " + err.message;
+            errorMsg.style.display = "block";
+          }
+        });
+      };
+    } else {
+      // Simulado: botão aciona a promessa de mock
+      MouraAuth.login().then(loggedUser => {
+        processSuccessfulLogin(loggedUser);
+      }).catch(err => {
+        // Mock falhou
+      });
+    }
+  } else {
+    try {
+      const validatedUser = validateAndLoadCrmUser(user);
+      AppState.currentUser = validatedUser;
       renderUserSession();
       initializeApplication();
-    }).catch(err => {
-      alert("Autenticação necessária: " + err.message);
-      window.location.reload();
-    });
-  } else {
-    AppState.currentUser = user;
-    renderUserSession();
-    initializeApplication();
+    } catch (err) {
+      alert(err.message);
+      MouraAuth.logout();
+    }
   }
 }
 

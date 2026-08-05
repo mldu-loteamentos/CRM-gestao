@@ -362,34 +362,188 @@
       justify-content: center;
       margin: 0 !important;
     }
+
+    /* =========================================================================
+       LOGIN LANDING PAGE (Estilo Jardim Tropical Moura Leite)
+       ========================================================================= */
+    .login-landing-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      font-family: 'Inter', 'Montserrat', sans-serif;
+      /* Background base fallback (será coberto pelo bg-overlay se tiver img) */
+      background: #003623; 
+    }
+    .login-landing-page.active {
+      display: flex;
+    }
+
+    /* Imagem de Fundo em tela cheia com escurecimento elegante */
+    .login-bg-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('https://images.unsplash.com/photo-1600585154340-be6161a56a0c?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=80');
+      background-size: cover;
+      background-position: center;
+      filter: brightness(0.4) saturate(1.2);
+      z-index: 1;
+    }
+
+    /* Cartão central estilo "Glassmorphism" sofisticado */
+    .login-card-glass {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: 440px;
+      padding: 40px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      animation: loginFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes loginFadeIn {
+      0% { opacity: 0; transform: translateY(30px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cabeçalho da Marca */
+    .login-brand-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .login-logo {
+      width: 80px;
+      height: 80px;
+      object-fit: contain;
+      margin-bottom: 15px;
+      border-radius: 50%;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    .login-title {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #004E33; /* Verde Moura Leite */
+      letter-spacing: 2px;
+    }
+    .login-subtitle {
+      font-size: 0.85rem;
+      color: #64748b;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 5px;
+    }
+
+    .login-form-container {
+      width: 100%;
+    }
+
+    .login-label {
+      font-weight: 600;
+      color: #334155;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+      display: block;
+    }
+    .login-input {
+      width: 100%;
+      padding: 12px 14px;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: #1e293b;
+      transition: all 0.2s;
+    }
+    .login-input:focus {
+      outline: none;
+      border-color: #004E33;
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(0, 78, 51, 0.1);
+    }
+
+    /* Botão Principal de Ação */
+    .btn-login-action {
+      width: 100%;
+      padding: 14px;
+      background: #004E33;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 10px;
+      box-shadow: 0 4px 6px -1px rgba(0, 78, 51, 0.2);
+    }
+    .btn-login-action:hover {
+      background: #003623;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 10px -1px rgba(0, 78, 51, 0.3);
+    }
+
+    /* Rodapé do Cartão */
+    .login-footer {
+      margin-top: 30px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
   </style>
 </head>
 
 <body>
 
-  <!-- Overlay para o Modal de Login Simulado -->
-  <div id="login-modal-overlay" class="modal-overlay">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3>Login de Operador - Moura Leite</h3>
+  <!-- Landing Page Login (Moura Leite - Jardim Tropical Style) -->
+  <div id="login-modal-overlay" class="login-landing-page active">
+    <!-- Background overlay para dar o clima do site original -->
+    <div class="login-bg-overlay"></div>
+    
+    <div class="login-card-glass">
+      <div class="login-brand-header">
+        <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Moura Leite Logo" class="login-logo">
+        <h2 class="login-title">MOURA LEITE</h2>
+        <span class="login-subtitle">Gestão de Loteamentos</span>
       </div>
-      <div style="display: flex; flex-direction: column; gap: 15px;">
-        <p style="font-size: 0.9rem; color: var(--color-text-muted);">
-          Acesse utilizando o seu e-mail corporativo da loteadora com o domínio <strong>@mouraleite.com</strong>.
-        </p>
-        <div class="form-group">
-          <label for="login-email">E-mail Corporativo</label>
-          <input type="email" id="login-email" class="form-control" placeholder="usuario@mouraleite.com"
-            value="leticia@mouraleite.com">
-          <div id="login-error-msg"
-            style="color: var(--color-danger); font-size: 0.8rem; font-weight: 600; display: none; margin-top: 5px;">
+
+      <div class="login-form-container">
+        <div id="login-error-msg" style="color: #ef4444; font-size: 0.85rem; font-weight: 600; display: none; margin-bottom: 15px; text-align: center; background: rgba(239, 68, 68, 0.1); padding: 10px; border-radius: 6px;"></div>
+        
+        <!-- O container interativo (Simulador ou Azure) será controlado pelo JS, mas por padrão deixaremos o mock, se o MSAL falhar ou estiver desligado -->
+        <div id="mock-login-fields" style="display: flex; flex-direction: column; gap: 15px;">
+          <div class="form-group">
+            <label for="login-email" class="login-label">E-mail Corporativo</label>
+            <input type="email" id="login-email" class="form-control login-input" placeholder="usuario@mouraleite.com" value="israel@mouraleite.com.br">
           </div>
+          <div class="form-group">
+            <label for="login-name" class="login-label">Nome do Operador</label>
+            <input type="text" id="login-name" class="form-control login-input" placeholder="Ex: Letícia Silva" value="ISRAEL">
+          </div>
+          <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
         </div>
-        <div class="form-group">
-          <label for="login-name">Nome do Operador</label>
-          <input type="text" id="login-name" class="form-control" placeholder="Ex: Letícia Silva" value="LETÍCIA">
-        </div>
-        <button id="btn-submit-login" class="btn btn-primary" style="margin-top: 10px;">Entrar no CRM</button>
+      </div>
+      
+      <div class="login-footer">
+        <p>&copy; Moura Leite Loteamentos. Todos os direitos reservados.</p>
       </div>
     </div>
   </div>
