@@ -3468,7 +3468,7 @@ window.visualizarExtratoDireto = function(btn) {
       if (res && res.results && res.results.length > 0 && res.results[0].urlReport) {
         const originalUrl = res.results[0].urlReport;
         const fileName = `${customerName} - Título ${rawTitleNumber} (${blockLot}).pdf`;
-        const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
+        const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
         window.open(proxyUrl, '_blank');
       } else if (res && res.fileUrl) {
         window.open(res.fileUrl, '_blank');

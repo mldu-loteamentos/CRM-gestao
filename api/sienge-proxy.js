@@ -43,8 +43,6 @@ module.exports = async function handler(req, res) {
     if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
       const redirectUrl = response.headers.get('location');
       const s3Response = await fetch(redirectUrl);
-      const arrayBuffer = await s3Response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
       
       const responseHeaders = new Headers(s3Response.headers);
       responseHeaders.set('Access-Control-Allow-Origin', '*');
@@ -54,31 +52,15 @@ module.exports = async function handler(req, res) {
       
       res.status(s3Response.status);
       responseHeaders.forEach((value, key) => res.setHeader(key, value));
-      res.send(buffer);
-      return;
+      
+      if (s3Response.body) {
+        const { Readable } = require('stream');
+        return Readable.fromWeb(s3Response.body).pipe(res);
+      } else {
+        return res.end();
+      }
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    responseHeaders.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    responseHeaders.set('Access-Control-Expose-Headers', 'Location, location, X-Pagination-Total-Count');
-    
-    responseHeaders.delete('access-control-allow-origin');
-    responseHeaders.delete('access-control-allow-methods');
-    responseHeaders.delete('access-control-allow-headers');
-    responseHeaders.delete('access-control-expose-headers');
-    responseHeaders.delete('content-encoding');
-    responseHeaders.delete('content-length');
-    responseHeaders.delete('transfer-encoding');
-
-    res.status(response.status);
-    responseHeaders.forEach((value, key) => res.setHeader(key, value));
-    res.send(buffer);
-    
   } catch (error) {
     console.error('Erro no proxy de conexão Sienge:', error);
     res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: error.message });

@@ -40,20 +40,18 @@ module.exports = async function handler(req, res) {
       throw new Error(`Erro no servidor de origem: ${response.status} ${response.statusText}`);
     }
 
-    // Lê os bytes do arquivo
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
     // Repassa os headers relevantes
     const responseHeaders = new Headers(response.headers);
     res.setHeader('Access-Control-Allow-Origin', '*');
     
-    // Tenta obter o nome do arquivo se vier no Content-Disposition
+    // Tenta obter o nome do arquivo se vier na URL ou no header
+    const providedFilename = req.query.filename || 'extrato.pdf';
+    
     const contentDisposition = responseHeaders.get('content-disposition');
     if (contentDisposition) {
       res.setHeader('Content-Disposition', contentDisposition);
     } else {
-      res.setHeader('Content-Disposition', 'attachment; filename="extrato.pdf"');
+      res.setHeader('Content-Disposition', `attachment; filename="${providedFilename}"`);
     }
 
     const contentType = responseHeaders.get('content-type');
@@ -63,7 +61,13 @@ module.exports = async function handler(req, res) {
       res.setHeader('Content-Type', 'application/pdf');
     }
 
-    res.status(200).send(buffer);
+    res.status(200);
+    if (response.body) {
+       const { Readable } = require('stream');
+       return Readable.fromWeb(response.body).pipe(res);
+    } else {
+       return res.end();
+    }
 
   } catch (error) {
     console.error('[PROXY DOWNLOAD] Erro:', error);
