@@ -1252,7 +1252,6 @@ window.showMockLoginModal = function(resolve, reject) {
   // Apenas configuramos o evento do botão para a lógica do simulador.
   const btn = document.getElementById("btn-submit-login");
   const emailInput = document.getElementById("login-email");
-  const nameInput = document.getElementById("login-name");
   const errorMsg = document.getElementById("login-error-msg");
   
   // Limpar onclick antigo se houver
@@ -1260,7 +1259,7 @@ window.showMockLoginModal = function(resolve, reject) {
   
   btn.onclick = () => {
     const email = emailInput.value.trim();
-    const name = nameInput.value.trim().toUpperCase();
+    const name = email.split("@")[0].toUpperCase(); // Usa o começo do e-mail como nome fallback
     
     if (!MouraAuth.validateDomain(email)) {
       errorMsg.textContent = "Erro: O e-mail deve pertencer ao domínio @mouraleite.com";
@@ -1271,7 +1270,7 @@ window.showMockLoginModal = function(resolve, reject) {
     errorMsg.style.display = "none";
     
     const user = {
-      name: name || "OPERADOR",
+      name: name,
       email: email,
       isAuthenticated: true,
       method: "Simulado"
