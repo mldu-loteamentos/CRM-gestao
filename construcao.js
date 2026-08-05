@@ -103,12 +103,31 @@ window.loadConstrucoes = async function() {
     container.style.display = 'none';
     loading.style.display = 'block';
 
-    const customerId = window.activeCustomerId || (window.AnexosState && window.AnexosState.idCliente);
-    const contract = window.AnexosState && window.AnexosState.activeContract;
+    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+
+    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+
+    if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
+        saleId = AppState.sales[0].id;
+    }
     
-    if (!customerId || !contract) {
+    if (!customerId || !saleId) {
         loading.innerHTML = 'Selecione um cliente e contrato primeiro.';
         return;
+    }
+    
+    let contractNumber = saleId;
+    let enterpriseId = "N/D";
+    let unitId = "N/D";
+    if (typeof AppState !== 'undefined' && AppState.sales) {
+        const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (saleObj) {
+            contractNumber = saleObj.contractNumber || saleObj.id || saleId;
+            enterpriseId = saleObj.enterpriseId || saleObj.costCenterId || enterpriseId;
+            unitId = saleObj.unitId || unitId;
+        }
     }
 
     try {
@@ -116,7 +135,7 @@ window.loadConstrucoes = async function() {
         const q = query(
             collection(window.firebaseDb, "construction_checks"),
             where("customerId", "==", String(customerId)),
-            where("contractId", "==", String(contract.contractNumber))
+            where("contractId", "==", String(contractNumber))
         );
         
         const snapshot = await getDocs(q);
@@ -191,14 +210,29 @@ function renderConstrucaoHistory(checks) {
 }
 
 window.openNewConstrucaoModal = function() {
-    const contract = window.AnexosState && window.AnexosState.activeContract;
-    if (!contract) {
+    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+
+    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+
+    if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
+        saleId = AppState.sales[0].id;
+    }
+    
+    if (!customerId || !saleId) {
         alert("Por favor, selecione um cliente e um contrato na aba Contrato de Venda primeiro.");
         return;
     }
 
+    let contractObj = { customerName: "Cliente" };
+    if (typeof AppState !== 'undefined' && AppState.sales) {
+        const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (saleObj) contractObj = saleObj;
+    }
+
     const today = new Date().toISOString().split('T')[0];
-    const responsible = window.ConstrucaoApp.getResponsibleOperator(contract);
+    const responsible = window.ConstrucaoApp.getResponsibleOperator(contractObj);
     
     let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}">${s}</option>`).join('');
 
@@ -256,8 +290,18 @@ window.saveNovaVistoria = async function() {
         return;
     }
 
-    const customerId = window.activeCustomerId || (window.AnexosState && window.AnexosState.idCliente);
-    const contract = window.AnexosState && window.AnexosState.activeContract;
+    const customerId = AppState.selectedCustomerId;
+    const saleId = AppState.selectedSaleId;
+    
+    let contractNumber = saleId;
+    let companyId = "N/D";
+    if (AppState.sales) {
+        const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (saleObj) {
+            contractNumber = saleObj.contractNumber || saleObj.id || saleId;
+            companyId = saleObj.companyId || companyId;
+        }
+    }
     
     btn.disabled = true;
     btn.innerHTML = 'Salvando...';
@@ -276,8 +320,8 @@ window.saveNovaVistoria = async function() {
         const { collection, addDoc } = window.firebaseCollections;
         const newCheck = {
             customerId: String(customerId),
-            contractId: String(contract.contractNumber),
-            companyId: String(contract.companyId),
+            contractId: String(contractNumber),
+            companyId: String(companyId),
             date: date,
             responsible: responsible,
             stage: stage,

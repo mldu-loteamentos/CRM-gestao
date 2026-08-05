@@ -278,12 +278,17 @@ const ConfigUsersApp = {
       cities.sort();
       companies.sort((a,b) => Number(a.id) - Number(b.id));
 
-      const buildCheckboxList = (items, typeName, selectedValues, extraAttrs = '') => {
+      const buildCheckboxList = (items, inputName, selectedValues, extraAttrs = '') => {
           if (!items || items.length === 0) return `<div style="padding: 10px; font-size: 0.85rem; color: #80868b;">Nenhum item encontrado</div>`;
           
-          const onSelectAll = typeName === 'companies' 
-              ? `onchange="document.querySelectorAll('input[name=\\'umodal-adv-companies\\']').forEach(cb => cb.checked = this.checked); window.updateAdvogadoCities();"` 
-              : `onchange="document.querySelectorAll('input[name=\\'umodal-adv-cities\\']').forEach(cb => cb.checked = this.checked);"`;
+          let onSelectAll = '';
+          if (inputName === 'umodal-adv-companies') {
+              onSelectAll = `onchange="document.querySelectorAll('input[name=\\'${inputName}\\']').forEach(cb => cb.checked = this.checked); window.updateAdvogadoCities();"`;
+          } else if (inputName === 'umodal-const-companies') {
+              onSelectAll = `onchange="document.querySelectorAll('input[name=\\'${inputName}\\']').forEach(cb => cb.checked = this.checked); window.updateConstCities();"`;
+          } else {
+              onSelectAll = `onchange="document.querySelectorAll('input[name=\\'${inputName}\\']').forEach(cb => cb.checked = this.checked);"`;
+          }
 
           let html = `<label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.85rem; font-weight: 700; cursor: pointer; color: var(--color-primary); border-bottom: 1px solid #eee; padding-bottom: 6px;">
                          <input type="checkbox" ${onSelectAll}>
@@ -295,7 +300,7 @@ const ConfigUsersApp = {
               const label = item.label;
               const isChecked = selectedValues && selectedValues.includes(val) ? 'checked' : '';
               return `<label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.85rem; cursor: pointer; color: #202124;">
-                         <input type="checkbox" name="umodal-adv-${typeName}" value="${val}" ${isChecked} ${extraAttrs}>
+                         <input type="checkbox" name="${inputName}" value="${val}" ${isChecked} ${extraAttrs}>
                          ${label}
                       </label>`;
           }).join('');
@@ -344,10 +349,12 @@ const ConfigUsersApp = {
       };
 
       const companyItems = companies.map(c => ({ value: String(c.id), label: `${c.id} - ${c.nome_usual}` }));
+      const allCompanyItems = (currentAppState.cachedCompanies || currentAppState.companies || []).map(c => ({ value: String(c.id), label: `${c.id} - ${c.name || c.nome}` }));
+      
       const cityItems = cities.map(c => ({ value: c, label: c }));
 
-      const advCompaniesHtml = buildCheckboxList(companyItems, 'companies', user ? user.adv_companies : [], 'onchange="window.updateAdvogadoCities()"');
-      const advCitiesHtml = buildCheckboxList(cityItems, 'cities', user ? user.adv_cities : []);
+      const advCompaniesHtml = buildCheckboxList(companyItems, 'umodal-adv-companies', user ? user.adv_companies : [], 'onchange="window.updateAdvogadoCities()"');
+      const advCitiesHtml = buildCheckboxList(cityItems, 'umodal-adv-cities', user ? user.adv_cities : []);
 
       window.updateConstCities = () => {
           const selectedCompanyCheckboxes = document.querySelectorAll('input[name="umodal-const-companies"]:checked');
@@ -384,13 +391,13 @@ const ConfigUsersApp = {
           
           const cityItems = allowedCities.map(c => ({ value: c, label: c }));
           const currentlyChecked = Array.from(document.querySelectorAll('input[name="umodal-const-cities"]:checked')).map(cb => cb.value);
-          const newHtml = buildCheckboxList(cityItems, 'const-cities', currentlyChecked);
+          const newHtml = buildCheckboxList(cityItems, 'umodal-const-cities', currentlyChecked);
           const container = document.getElementById('const-cities-container');
           if (container) container.innerHTML = newHtml;
       };
 
-      const constCompaniesHtml = buildCheckboxList(companyItems, 'const-companies', user ? user.const_companies : [], 'onchange="window.updateConstCities()"');
-      const constCitiesHtml = buildCheckboxList(cityItems, 'const-cities', user ? user.const_cities : []);
+      const constCompaniesHtml = buildCheckboxList(allCompanyItems, 'umodal-const-companies', user ? user.const_companies : [], 'onchange="window.updateConstCities()"');
+      const constCitiesHtml = buildCheckboxList(cityItems, 'umodal-const-cities', user ? user.const_cities : []);
 
       const modalHtml = `
       <div id="user-modal-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
