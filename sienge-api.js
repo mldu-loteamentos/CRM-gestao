@@ -1495,17 +1495,18 @@ const SiengeApiService = {
         }
       };
 
-      const res = await fetch('/api/inadimplencia-snapshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (res.ok) {
-        console.log("[Sienge] Snapshot salvo/atualizado com sucesso.");
+      if (window.firebaseCollections && window.firebaseDb) {
+        try {
+          const docRef = window.firebaseCollections.doc(window.firebaseDb, 'inadimplencia_snapshots', dateStr);
+          await window.firebaseCollections.setDoc(docRef, payload);
+          console.log(`[Firebase] Snapshot de dashboard (${dateStr}) salvo no Firestore com sucesso.`);
+        } catch (fbErr) {
+          console.error("[Firebase] Erro ao salvar snapshot no Firestore:", fbErr);
+        }
       } else {
-        console.error("[Sienge] Erro ao salvar snapshot:", await res.text());
+          console.error("[Firebase] Firebase não inicializado, impossível salvar snapshot.");
       }
+
     } catch (e) {
       console.error("[Sienge] Exceção ao salvar snapshot:", e);
     }

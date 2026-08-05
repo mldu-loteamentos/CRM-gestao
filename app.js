@@ -14130,7 +14130,7 @@ window.populateFilaOperators = function() {
       select.appendChild(option);
     });
   } else {
-    const operators = window.getDynamicOperators();
+    const operators = window.getDynamicOperators('interno');
     operators.forEach(op => {
       const option = document.createElement("option");
       option.value = op;
@@ -20931,4 +20931,36 @@ window.exportSubjudiceToExcel = function() {
     } finally {
         window.clientList = oldList;
     }
+};
+
+// Função dinâmica para buscar operadores do localStorage "crm_users"
+window.getDynamicOperators = function(type = 'all') {
+    let users = [];
+    try {
+        const saved = localStorage.getItem('crm_users');
+        if (saved) {
+            users = JSON.parse(saved);
+        } else {
+            // Fallback
+            users = [
+                { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno" },
+                { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno" },
+                { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno" },
+                { sienge_user: "THAIANE.CORDEIRO", profile_name: "OPERADOR COBRANÇA", operator_type: "externo" }
+            ];
+        }
+    } catch(e) {
+        console.error("Erro ao buscar operadores", e);
+    }
+    
+    // Filtrar por perfil Operador
+    let ops = users.filter(u => u.profile_name && u.profile_name.toUpperCase().includes("OPERADOR"));
+    
+    // Filtrar tipo se especificado
+    if (type === 'interno') {
+        ops = ops.filter(u => u.operator_type === 'interno');
+    }
+    
+    // Retornar os nomes formatados
+    return ops.map(u => String(u.sienge_user).replace('.', ' ').toUpperCase());
 };
