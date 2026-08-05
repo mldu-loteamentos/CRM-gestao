@@ -52,11 +52,11 @@ function getCurrentUser() {
   return JSON.parse(localStorage.getItem(USER_SESSION_KEY)) || null;
 }
 
-// Validar se o domínio do e-mail é @mouraleite.com
+// Validar se o domínio do e-mail é @mouraleite.com ou @mouraleite.com.br
 function validateDomain(email) {
   if (!email) return false;
   const domain = email.split("@")[1];
-  return domain && domain.toLowerCase() === "mouraleite.com";
+  return domain && (domain.toLowerCase() === "mouraleite.com" || domain.toLowerCase() === "mouraleite.com.br");
 }
 
 // Fluxo de Login
@@ -74,7 +74,7 @@ async function login() {
       // Validação crítica de domínio corporativo
       if (!validateDomain(email)) {
         await msalInstance.logoutPopup();
-        throw new Error("Acesso negado. Apenas e-mails do domínio @mouraleite.com são permitidos.");
+        throw new Error("Acesso negado. Apenas e-mails do domínio @mouraleite.com.br são permitidos.");
       }
 
       const user = {

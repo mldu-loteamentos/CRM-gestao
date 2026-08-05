@@ -1262,7 +1262,7 @@ window.showMockLoginModal = function(resolve, reject) {
     const name = email.split("@")[0].toUpperCase(); // Usa o começo do e-mail como nome fallback
     
     if (!MouraAuth.validateDomain(email)) {
-      errorMsg.textContent = "Erro: O e-mail deve pertencer ao domínio @mouraleite.com";
+      errorMsg.textContent = "Erro: O e-mail deve pertencer ao domínio @mouraleite.com.br";
       errorMsg.style.display = "block";
       return;
     }
