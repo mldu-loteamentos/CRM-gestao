@@ -409,24 +409,38 @@ const SiengeApiService = {
       this._defaultersPromise = (async () => {
         const t0 = performance.now();
 
-        // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIREBASE STORAGE)
-        if (!forceRefresh && window.firebaseStorage && window.firebaseCollections) {
+        // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIRESTORE)
+        if (!forceRefresh && window.firebaseDb && window.firebaseCollections) {
            try {
-             const snapshotPath = encodeURIComponent(`snapshots/defaulters_latest.json`);
-             console.log(`%c[Sienge] ⏱ Verificando cache geral: ${snapshotPath} via Proxy...`, 'color:#f59e0b;font-weight:bold;');
-             const url = `/proxy-storage/${snapshotPath}?alt=media`;
+             console.log(`%c[Sienge] ⏱ Verificando cache geral no Firestore...`, 'color:#f59e0b;font-weight:bold;');
+             const cacheRef = window.firebaseCollections.collection(window.firebaseDb, "sienge_cache");
+             const snapshot = await window.firebaseCollections.getDocs(cacheRef);
              
-             const res = await fetch(url);
-             if (!res.ok) throw new Error("Falha ao baixar cache via proxy");
-             console.log(`%c[Sienge] ✅ Cache encontrado! Baixando base mais recente...`, 'color:#10b981;font-weight:bold;');
-             const result = await res.json();
-             
-             const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-             console.log(`%c[Sienge] ✅ Base carregada do cache em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
-             window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: true };
-             return result;
+             let meta = null;
+             let chunksMap = {};
+             snapshot.forEach(doc => {
+               if (doc.id === 'defaulters_meta') meta = doc.data();
+               else if (doc.id.startsWith('defaulters_chunk_')) chunksMap[doc.id] = JSON.parse(doc.data().data);
+             });
+
+             const todayStr = new Date().toISOString().split('T')[0];
+             if (meta && meta.date === todayStr) {
+               console.log(`%c[Sienge] ✅ Cache de hoje encontrado! Montando base...`, 'color:#10b981;font-weight:bold;');
+               let result = [];
+               for (let i = 0; i < meta.chunks; i++) {
+                 if (chunksMap[`defaulters_chunk_${i}`]) {
+                   result.push(...chunksMap[`defaulters_chunk_${i}`]);
+                 }
+               }
+               const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+               console.log(`%c[Sienge] ✅ Base carregada do Firestore em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
+               window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: true };
+               return result;
+             } else {
+               console.log('%c[Sienge] ℹ️ Cache do Firestore desatualizado ou inexistente. Iniciando busca na API Sienge...', 'color:#f59e0b;');
+             }
            } catch (e) {
-             console.log('%c[Sienge] ℹ️ Nenhum cache válido para hoje. Iniciando busca na API Sienge...', 'color:#f59e0b;');
+             console.log('%c[Sienge] ℹ️ Erro ao ler cache do Firestore:', e);
            }
         }
 
@@ -448,28 +462,28 @@ const SiengeApiService = {
           window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: false };
           
           // Dispara o salvamento do snapshot diário em background
-          if (window.firebaseStorage && window.firebaseCollections) {
+          if (window.firebaseDb && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
-              const snapshotPath = encodeURIComponent(`snapshots/defaulters_${todayStr}.json`);
-              const latestPath = encodeURIComponent(`snapshots/defaulters_latest.json`);
-              const bodyStr = JSON.stringify(result);
+              const CHUNK_SIZE = 500;
+              const numChunks = Math.ceil(result.length / CHUNK_SIZE);
               
-              fetch(`/proxy-storage?name=${snapshotPath}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: bodyStr
-              }).then(() => {
-                 console.log(`%c[Firebase] Snapshot diário bruto (${todayStr}) salvo com sucesso via Proxy!`, 'color:#3b82f6;');
-                 fetch(`/proxy-storage?name=${latestPath}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: bodyStr
-                 }).then(() => console.log('Latest snapshot updated via Proxy.'));
-                 this.saveDefaultersSnapshot(result).catch(console.error);
-              }).catch(e => {
-                 console.error("[Firebase] Erro ao salvar snapshot bruto via Proxy:", e);
-                 this.saveDefaultersSnapshot(result).catch(console.error);
-              });
+              (async () => {
+                try {
+                  console.log(`%c[Firebase] Salvando cache no Firestore em ${numChunks} blocos...`, 'color:#3b82f6;');
+                  for (let i = 0; i < numChunks; i++) {
+                    const chunkData = result.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_chunk_${i}`);
+                    await window.firebaseCollections.setDoc(docRef, { data: JSON.stringify(chunkData) });
+                  }
+                  const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_meta`);
+                  await window.firebaseCollections.setDoc(metaRef, { date: todayStr, chunks: numChunks });
+                  console.log(`%c[Firebase] Cache diário salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
+                } catch (e) {
+                  console.error("[Firebase] Erro ao salvar cache no Firestore:", e);
+                }
+              })();
+              
+              this.saveDefaultersSnapshot(result).catch(console.error);
           } else {
              this.saveDefaultersSnapshot(result).catch(console.error);
           }
