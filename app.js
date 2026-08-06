@@ -49,29 +49,7 @@ if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
   };
 }
 
-window.getDynamicOperators = function() {
-    let operators = [];
-    try {
-        const savedUsers = localStorage.getItem('crm_users');
-        if (savedUsers) {
-            const users = JSON.parse(savedUsers);
-            operators = users
-                .filter(u => u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÇA" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA") && u.status !== "INATIVO")
-                .map(u => {
-                    if (u.sienge_user) return u.sienge_user.toUpperCase().replace(/\./g, ' ').trim();
-                    return u.name.toUpperCase();
-                });
-        }
-    } catch(e) {
-        console.error("Erro ao carregar usuários", e);
-    }
-    
-    if (operators.length === 0) {
-        operators = ["LETÍCIA", "R CORDEIRO", "MICHELLE"];
-    }
-    
-    return operators;
-};
+// getDynamicOperators was removed from here because it is defined at the end of the file.
 
 window.updateOperatorTabsUI = function() {
   const dynOps = window.getDynamicOperators();
@@ -21288,8 +21266,22 @@ window.getDynamicOperators = function(type = 'all') {
         console.error("Erro ao buscar operadores", e);
     }
     
-    // Filtrar por perfil Operador
-    let ops = users.filter(u => u.profile_name && u.profile_name.toUpperCase().includes("OPERADOR"));
+    // Filtrar por perfil Operador, excluindo Pagadoria e inativos
+    let ops = users.filter(u => {
+        if (!u.profile_name) return false;
+        const prof = u.profile_name.toUpperCase();
+        const nome = (u.name || "").toUpperCase();
+        // É operador
+        if (!prof.includes("OPERADOR")) return false;
+        // Não é inativo
+        if (u.status === "INATIVO") return false;
+        // Não é pagadoria
+        if (prof.includes("PAGADORIA")) return false;
+        // Fallback: se o nome for Danielle, bloquear também, conforme solicitado
+        if (nome.includes("DANIELLE MARTINS") || nome === "DANIELLE") return false;
+        
+        return true;
+    });
     
     // Filtrar tipo se especificado
     if (type === 'interno') {
@@ -21297,7 +21289,10 @@ window.getDynamicOperators = function(type = 'all') {
     }
     
     // Retornar os nomes formatados
-    return ops.map(u => String(u.sienge_user).replace('.', ' ').toUpperCase());
+    return ops.map(u => {
+        if (u.sienge_user) return String(u.sienge_user).replace(/\./g, ' ').toUpperCase();
+        return String(u.name).toUpperCase();
+    });
 };
 
 window.SYNC_KEYS = [
