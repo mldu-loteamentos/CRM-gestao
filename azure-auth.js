@@ -6,7 +6,7 @@ const USER_SESSION_KEY = "crm_moura_user_session";
 
 // Configurações padrão do Azure AD (inicialmente em branco ou placeholder)
 const DEFAULT_AZURE_CONFIG = {
-  clientId: "de1d516c-3755-40eb-98a5-cf0932398418",
+  clientId: "643259b4-6f72-4f25-8a2d-ac131a34f169",
   tenantId: "34bf99e3-12de-4814-ab19-0d0f90fab15b",
   redirectUri: window.location.origin + window.location.pathname,
   enabled: true // MUDADO PARA TRUE (Usa o MSAL real do Microsoft Azure)

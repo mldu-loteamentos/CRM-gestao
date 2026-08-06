@@ -1395,6 +1395,7 @@ function checkAuthentication() {
     try {
       const validatedUser = validateAndLoadCrmUser(user);
       AppState.currentUser = validatedUser;
+      document.getElementById("login-modal-overlay").classList.remove("active");
       renderUserSession();
       initializeApplication();
     } catch (err) {
