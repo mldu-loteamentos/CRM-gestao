@@ -3,6 +3,28 @@
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
 (function() {
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function(key, value) {
+      if (key === "crm_moura_notes") {
+          window.agendaItemsCache = null;
+      }
+      originalSetItem.apply(this, arguments);
+  };
+
+  let originalSaveNotesToFirebase = null;
+  Object.defineProperty(window, 'saveNotesToFirebase', {
+      set: function(val) { originalSaveNotesToFirebase = val; },
+      get: function() {
+          if (!originalSaveNotesToFirebase) return undefined;
+          return function() {
+              window.agendaItemsCache = null;
+              return originalSaveNotesToFirebase.apply(this, arguments);
+          };
+      },
+      configurable: true
+  });
+})();
+(function() {
   const _origFetch = window.fetch;
   window.fetch = async function() {
     var args = Array.prototype.slice.call(arguments);
@@ -1585,24 +1607,18 @@ async function loadAndApplyPermissions() {
   // Buscar permissões do usuário se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
-      const portStr = (window.location.port && window.location.port !== "5500" && window.location.port !== "443" && window.location.port !== "80") ? ":" + window.location.port : (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? ":3000" : "");
-      const host = window.location.hostname || "localhost";
-      const apiUrl = `${window.location.protocol}//${host}${portStr}/api/permissions/${AppState.currentUser.email}`;
-      const res = await fetch(apiUrl);
-      if (res.ok) {
-        const userData = await res.json();
-        AppState.currentUser.permissions = userData.permissions || [];
-        // Para testes, vamos garantir acesso local a tudo
-        const defaultPerms = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
-        defaultPerms.forEach(p => {
-          if(!AppState.currentUser.permissions.includes(p)) AppState.currentUser.permissions.push(p);
-        });
+      let profileId = AppState.currentUser.profile_name ? AppState.currentUser.profile_name.trim().toLowerCase().replace(/\s+/g, '_') : 'admin';
+      let permsStr = localStorage.getItem('crm_perms_' + profileId);
+      
+      if (permsStr) {
+         let permsObj = JSON.parse(permsStr);
+         AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
       } else {
-        console.warn("Usuário não encontrado no DB. Concedendo permissões locais para teste.");
-        AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
+         console.warn("Permissões não encontradas no localStorage para o perfil:", profileId, "Aplicando padrão.");
+         AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
       }
     } catch (e) {
-      console.error("Erro na API de permissões:", e);
+      console.error("Erro ao carregar permissões:", e);
       AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
     }
   } else {
@@ -3707,7 +3723,7 @@ window.visualizarExtratoDireto = function(btn) {
       if (res && res.results && res.results.length > 0 && res.results[0].urlReport) {
         const originalUrl = res.results[0].urlReport;
         const fileName = `${customerName} - Título ${rawTitleNumber} (${blockLot}).pdf`;
-        const proxyUrl = `/api/proxy_download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
+        const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
         window.open(proxyUrl, '_blank');
       } else if (res && res.fileUrl) {
         window.open(res.fileUrl, '_blank');
@@ -11118,7 +11134,7 @@ async function loadAgendaDayTasks(dateStr) {
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
   const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales || []);
   
-  const dayItems = [];
+  let dayItems = [];
   
   const selectedOperator = document.getElementById("agenda-operator-select")?.value || "Todos";
   const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
@@ -11126,108 +11142,129 @@ async function loadAgendaDayTasks(dateStr) {
   const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
   const typeFilter = window.agendaFilterType || "todas";
 
-  Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
-    const custId = Number(custIdStr);
-    const customer = customers[custId];
-    if (!customer) return;
-    
-    const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) ? window.MOCK_DATA.SALES : [];
-    let sale = salesList.find(s => String(s.customerId) === String(custId));
-    if (!sale) {
-      sale = mockSales.find(s => String(s.customerId) === String(custId)) || { id: null, unitId: "" };
-    }
-    const unit = AppState.units[sale.unitId] || { block: "N/D", lot: "N/D" };
-    
-    occList.forEach((occ, index) => {
-      if (occ.promiseDate === dateStr && occ.status !== "Cancelada") {
+  window.agendaItemsCache = window.agendaItemsCache || {};
+  const cacheKey = dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
+
+  if (window.agendaItemsCache.key === cacheKey && window.agendaItemsCache.items) {
+      dayItems = [...window.agendaItemsCache.items];
+  } else {
+      Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
+        const custId = Number(custIdStr);
+        const customer = customers[custId];
+        if (!customer) return;
         
-        // Aplicação dos Filtros
-        const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-        const occAuthor = normalizeStr(occ.author);
-        const selOp = normalizeStr(selectedOperator);
-        if (selectedOperator !== "Todos" && occAuthor !== selOp) return;
-        if (typeFilter !== "todas") {
-           if (typeFilter === "promessa" && (!occ.promiseDate)) return;
-           if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
+        const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) ? window.MOCK_DATA.SALES : [];
+        let sale = salesList.find(s => String(s.customerId) === String(custId));
+        if (!sale) {
+          sale = mockSales.find(s => String(s.customerId) === String(custId)) || { id: null, unitId: "" };
         }
-        let occSaleId = occ.saleId || occ.contractId || sale.id;
-        if (!occSaleId) occSaleId = 'N/D';
-        let finalSale = salesList.find(s => String(s.id) === String(occSaleId));
-        if (!finalSale) finalSale = mockSales.find(s => String(s.id) === String(occSaleId)) || sale;
-        let rawUnitId = occ.unitId || finalSale.unitId || 'N/D';
-        let cleanUnit = rawUnitId;
+        const unit = AppState.units[sale.unitId] || { block: "N/D", lot: "N/D" };
         
-        let displayUnit = cleanUnit;
-        if (rawUnitId && AppState.units && AppState.units[rawUnitId]) {
-            const uObj = AppState.units[rawUnitId];
-            if (uObj.costCenterId) {
-                let uName = "";
-                if (cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
-                    const parts = cleanUnit.substring(2).split('-');
-                    if (parts.length >= 2) {
-                        uName = parts.slice(1).join('-'); 
-                    } else {
-                        uName = parts[0];
-                    }
-                } else {
-                    uName = cleanUnit;
-                }
-                displayUnit = uObj.costCenterId + " - " + uName;
+        occList.forEach((occ, index) => {
+          if (occ.promiseDate === dateStr && occ.status !== "Cancelada") {
+            
+            // Aplicação dos Filtros
+            const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+            const occAuthor = normalizeStr(occ.author);
+            const selOp = normalizeStr(selectedOperator);
+            if (selectedOperator !== "Todos" && occAuthor !== selOp) return;
+            if (typeFilter !== "todas") {
+               if (typeFilter === "promessa" && (!occ.promiseDate)) return;
+               if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
             }
-        }
-        
-        if (displayUnit === cleanUnit && cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
-          cleanUnit = cleanUnit.substring(2);
-          const parts = cleanUnit.split('-');
-          if (parts.length >= 2) displayUnit = parts.slice(1).join('-');
-          else displayUnit = cleanUnit;
-        }
-        
-        if (searchFilter) {
-           const custName = customer.name.toLowerCase();
-           const titleInfo = occSaleId.toString().toLowerCase();
-           const recBillInfo = (finalSale.receivableBillId || "").toString().toLowerCase();
-           const unitInfo = cleanUnit.toString().toLowerCase();
-           
-           if (!custName.includes(searchFilter) && 
-               !titleInfo.includes(searchFilter) && 
-               !recBillInfo.includes(searchFilter) && 
-               !unitInfo.includes(searchFilter)) {
-             return;
-           }
-        }
+            let occSaleId = occ.saleId || occ.contractId || sale.id;
+            if (!occSaleId) occSaleId = 'N/D';
+            let finalSale = salesList.find(s => String(s.id) === String(occSaleId));
+            if (!finalSale) finalSale = mockSales.find(s => String(s.id) === String(occSaleId)) || sale;
+            let rawUnitId = occ.unitId || finalSale.unitId || 'N/D';
+            let cleanUnit = rawUnitId;
+            
+            let displayUnit = cleanUnit;
+            if (rawUnitId && AppState.units && AppState.units[rawUnitId]) {
+                const uObj = AppState.units[rawUnitId];
+                if (uObj.costCenterId) {
+                    let uName = "";
+                    if (cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
+                        const parts = cleanUnit.substring(2).split('-');
+                        if (parts.length >= 2) {
+                            uName = parts.slice(1).join('-'); 
+                        } else {
+                            uName = parts[0];
+                        }
+                    } else {
+                        uName = cleanUnit;
+                    }
+                    displayUnit = uObj.costCenterId + " - " + uName;
+                }
+            }
+            
+            if (displayUnit === cleanUnit && cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
+              cleanUnit = cleanUnit.substring(2);
+              const parts = cleanUnit.split('-');
+              if (parts.length >= 2) displayUnit = parts.slice(1).join('-');
+              else displayUnit = cleanUnit;
+            }
+            
+            if (searchFilter) {
+               const custName = customer.name.toLowerCase();
+               const titleInfo = occSaleId.toString().toLowerCase();
+               const recBillInfo = (finalSale.receivableBillId || "").toString().toLowerCase();
+               const unitInfo = cleanUnit.toString().toLowerCase();
+               
+               if (!custName.includes(searchFilter) && 
+                   !titleInfo.includes(searchFilter) && 
+                   !recBillInfo.includes(searchFilter) && 
+                   !unitInfo.includes(searchFilter)) {
+                 return;
+               }
+            }
 
-        const occDate = new Date(occ.date);
-        const diffTime = Math.abs(new Date() - occDate);
-        const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            const occDate = new Date(occ.date);
+            const diffTime = Math.abs(new Date() - occDate);
+            const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-        const cpfRaw = customer.cpf || customer.cnpj || '';
-        const cpfMasked = cpfRaw ? cpfRaw.replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
+            const cpfRaw = customer.cpf || customer.cnpj || '';
+            const cpfMasked = cpfRaw ? cpfRaw.replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
 
-        dayItems.push({
-          customerId: custId,
-          customerName: customer.name,
-          cpf: cpfMasked,
-          saleId: (finalSale && finalSale.receivableBillId) ? finalSale.receivableBillId : occSaleId,
-          unitId: displayUnit,
-          promiseDate: occ.promiseDate,
-          promiseStatus: occ.promiseStatus,
-          reminder: occ.reminder || "Retorno de Cobrança",
-          text: occ.text,
-          date: occ.date,
-          daysAgo: daysAgo,
-          occIndex: index,
-          agendaAlert: occ.agendaAlert
+            dayItems.push({
+              customerId: custId,
+              customerName: customer.name,
+              cpf: cpfMasked,
+              saleId: (finalSale && finalSale.receivableBillId) ? finalSale.receivableBillId : occSaleId,
+              unitId: displayUnit,
+              promiseDate: occ.promiseDate,
+              promiseStatus: occ.promiseStatus,
+              reminder: occ.reminder || "Retorno de Cobrança",
+              text: occ.text,
+              date: occ.date,
+              daysAgo: daysAgo,
+              occIndex: index,
+              agendaAlert: occ.agendaAlert
+            });
+          }
         });
+      });
+      
+      if (window.generateDailyQueue) {
+        if (dateStr === window.getActiveQueueDate()) {
+            const queueItems = await window.generateDailyQueue(selectedOperator, dateStr);
+            dayItems.push(...queueItems);
+        }
       }
-    });
-  });
-  
-  if (window.generateDailyQueue) {
-    if (dateStr === window.getActiveQueueDate()) {
-        const queueItems = await window.generateDailyQueue(selectedOperator, dateStr);
-        dayItems.push(...queueItems);
-    }
+      
+      window.agendaItemsCache = {
+          key: cacheKey,
+          items: [...dayItems]
+      };
+  }
+
+  const hideResolvedEl = document.getElementById("agenda-hide-resolved");
+  if (hideResolvedEl && hideResolvedEl.checked) {
+      dayItems = dayItems.filter(item => {
+          if (item.isFila) return true;
+          if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
+          return true;
+      });
   }
   
   const filaCount = dayItems.filter(i => i.isFila).length;
@@ -14777,6 +14814,16 @@ window.renderTimeline = function() {
   const container = document.getElementById('interactive-timeline-container');
   if (!container) return;
 
+  // Autocorreção: remover nós órfãos ou corrompidos
+  if (window.TimelineState && window.TimelineAcoesList) {
+    const initialLen = window.TimelineState.length;
+    window.TimelineState = window.TimelineState.filter(n => n.acao === 'custom' || window.TimelineAcoesList.find(a => a.id === n.acao));
+    if (window.TimelineState.length !== initialLen) {
+        localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+        console.warn('Nós corrompidos (sem ação definida) removidos via autocorreção no renderTimeline.');
+    }
+  }
+
   container.style.minHeight = '100px';
   container.style.marginTop = '60px'; 
   container.style.marginLeft = '60px';
@@ -15009,7 +15056,7 @@ window.timelineModalAcaoChanged = function() {
   }
 };
 
-window.TimelineAcoesList = [
+window.TimelineAcoesList = JSON.parse(localStorage.getItem('crm_moura_timeline_acoes')) || [
   { id: 'cob_interna', label: 'Início Cobrança Interna', color: '#3b82f6' },
   { id: 'cob_terceirizada', label: 'Início Terceirizada', color: '#eab308' },
   { id: 'juridico', label: 'Envio Jurídico', color: '#ef4444' }
@@ -15064,6 +15111,7 @@ window.addTimelineAcao = function() {
   
   const id = 'acao_' + new Date().getTime();
   window.TimelineAcoesList.push({ id, label: val, color });
+  localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
   
   input.value = '';
   window.renderTimelineAcoesListModal();
@@ -15072,6 +15120,19 @@ window.addTimelineAcao = function() {
 window.removeTimelineAcao = function(id) {
   if (!confirm('Deseja realmente remover esta ação? Os pontos que usam ela ficarão sem ação definida.')) return;
   window.TimelineAcoesList = window.TimelineAcoesList.filter(a => a.id !== id);
+  localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
+  
+  // Rotina de autocorreção: Remover os nós que dependiam dessa ação que foi excluída (ou estavam corrompidos)
+  if (window.TimelineState) {
+    const initialLen = window.TimelineState.length;
+    window.TimelineState = window.TimelineState.filter(n => n.acao === 'custom' || window.TimelineAcoesList.find(a => a.id === n.acao));
+    if (window.TimelineState.length !== initialLen) {
+        localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+        if (window.renderTimeline) window.renderTimeline();
+        alert('Alguns nós corrompidos ou sem ação definida foram removidos automaticamente da régua de cobrança.');
+    }
+  }
+  
   window.renderTimelineAcoesListModal();
 };
 
