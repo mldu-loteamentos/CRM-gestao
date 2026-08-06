@@ -526,8 +526,8 @@
         top: 0; left: 0; right: 0; bottom: 0;
         z-index: 99999;
         display: none;
-        /* Using a premium architectural rendering as background */
-        background: url('https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?q=80&w=2075&auto=format&fit=crop') center/cover no-repeat;
+        /* Using a premium architectural rendering as background (Night time aesthetic) */
+        background: url('https://images.unsplash.com/photo-1613490908573-047bd92751fc?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat;
         overflow: hidden;
       }
       .login-landing-page.active {
@@ -650,12 +650,15 @@
         box-shadow: 0 10px 25px rgba(0,0,0,0.25);
       }
       
-      /* Top right logo for the background image */
-      .top-right-logo {
+      /* Bottom right logo for the background image */
+      .bottom-right-logo {
         position: absolute;
-        top: 40px;
-        right: 50px;
+        bottom: 50px;
+        right: 60px;
         z-index: 3;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
       }
       
       #login-error-msg {
@@ -695,12 +698,12 @@
           padding-left: 10%;
           padding-top: 5%;
         }
-        .top-right-logo {
-          top: auto;
+        .bottom-right-logo {
           bottom: 40px;
           right: auto;
           left: 50%;
           transform: translateX(-50%);
+          align-items: center;
         }
       }
     </style>
@@ -731,13 +734,16 @@
       </div>
     </div>
     
-    <!-- Top Right White Logo on the background image -->
-    <div class="top-right-logo">
-      <div class="ml-logo-container" style="opacity: 0.9;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
-        <div class="ml-logo-text">
-          <h2 style="font-size: 1.5rem;">MOURA LEITE</h2>
-          <span style="font-size: 0.65rem;">LOTEAMENTOS</span>
+    <!-- Bottom Right White Logo on the background image -->
+    <div class="bottom-right-logo">
+      <div class="ml-logo-text" style="color: white; text-align: left; border-bottom: 2px solid rgba(255,255,255,0.8); padding-bottom: 6px; margin-bottom: 8px;">
+        <h2 style="font-size: 1.4rem; font-weight: 800; margin: 0; letter-spacing: 1.5px; line-height: 1;">MOURA LEITE</h2>
+        <span style="font-size: 0.65rem; letter-spacing: 4px; font-weight: 600;">LOTEAMENTOS</span>
+      </div>
+      <div style="color: white; display: flex; align-items: flex-end; justify-content: flex-end; width: 100%;">
+        <span style="font-size: 4rem; font-weight: 800; line-height: 0.8; letter-spacing: -2px;">30</span>
+        <div style="display: flex; flex-direction: column; margin-left: 8px; padding-bottom: 6px;">
+           <span style="font-size: 1.1rem; font-weight: 800; letter-spacing: 1px; line-height: 1;">ANOS</span>
         </div>
       </div>
     </div>
