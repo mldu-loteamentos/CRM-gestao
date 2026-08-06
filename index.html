@@ -525,132 +525,102 @@
         position: fixed;
         top: 0; left: 0; right: 0; bottom: 0;
         z-index: 99999;
-        display: none;
-        /* Using a premium architectural rendering as background (Night time aesthetic) */
-        background: url('https://images.unsplash.com/photo-1613490908573-047bd92751fc?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat;
-        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: url('https://scontent.faqa2-1.fna.fbcdn.net/v/t39.30808-6/729867728_1593441256119475_5625932030370843141_n.jpg?stp=dst-jpg_tt6&cstp=mx1080x1350&ctp=s1080x1350&_nc_cat=100&ccb=1-7&_nc_sid=127cfc&_nc_ohc=NYGs_chl4ukQ7kNvwFXmiC9&_nc_oc=AdrIUd8bl9Gj-GF2gq8MFJTZCLAHZzC229WK61JuaN3Ng2ygYNx55EO6m3FhCXNOqTI&_nc_zt=23&_nc_ht=scontent.faqa2-1.fna&_nc_gid=48Jx5752S0n_0Hp1T4Qkew&_nc_ss=7b289&oh=00_AQHUnhfXTOEOtiwUjArLtXSbmiL_1nb0M56DL2PYlHGp_Q&oe=6A7A571F') center/cover no-repeat;
       }
-      .login-landing-page.active {
-        display: block;
-      }
-      
-      /* Dark overlay for the background image to make the right side look premium */
+
       .login-landing-page::before {
         content: '';
         position: absolute;
         top: 0; left: 0; right: 0; bottom: 0;
-        background: linear-gradient(to right, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%);
+        background: rgba(0, 0, 0, 0.4);
         z-index: 1;
       }
 
-      .login-curve-panel {
-        position: absolute;
-        top: -10%;
-        left: -15%;
-        width: 55%;
-        height: 120%;
-        background: #2cb17a; /* Moura Leite Green */
-        border-right: 15px solid #c9df37; /* Yellowish accent */
-        border-radius: 0 50% 50% 0;
+      .login-center-card {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 20px;
+        padding: 40px;
+        width: 100%;
+        max-width: 400px;
         z-index: 2;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
         display: flex;
         flex-direction: column;
-        justify-content: center;
         align-items: center;
-        padding-left: 15%; /* offset the -15% left */
-        box-shadow: 15px 0 40px rgba(0,0,0,0.4);
-        overflow: hidden;
+        backdrop-filter: blur(10px);
       }
 
-      /* Watermark tree inside the green panel */
-      .watermark-tree {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 500px;
-        height: 500px;
-        opacity: 0.05;
-        pointer-events: none;
+      .login-center-card .ml-logo-container svg {
+        stroke: #105436; /* Dark green for light background */
       }
-
-      .login-form-wrapper {
-        width: 80%;
-        max-width: 380px;
-        margin: auto;
-        color: white;
+      
+      .login-center-card .ml-logo-text {
+        color: #105436;
         text-align: center;
-        z-index: 3;
       }
 
-      .ml-logo-container {
+      .login-center-card .ml-logo-container {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 12px;
-        margin-bottom: 40px;
-      }
-
-      .ml-logo-text {
-        text-align: left;
-      }
-
-      .ml-logo-text h2 {
-        font-size: 2rem;
-        font-weight: 800;
-        margin: 0;
-        letter-spacing: 1px;
-        line-height: 1;
-      }
-      .ml-logo-text span {
-        font-size: 0.8rem;
-        letter-spacing: 3px;
-        font-weight: 600;
-        opacity: 0.9;
+        margin-bottom: 30px;
+        gap: 15px;
       }
 
       .login-input {
         width: 100%;
-        padding: 16px 24px;
-        border-radius: 30px;
-        border: none;
+        padding: 16px 20px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
         font-size: 1.05rem;
         outline: none;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-        text-align: center;
+        background: #f8fafc;
         margin-bottom: 20px;
-        font-weight: 600;
+        font-weight: 500;
         color: #1e293b;
-        background: #ffffff;
-        transition: box-shadow 0.3s;
+        transition: border-color 0.3s, box-shadow 0.3s;
+        text-align: center;
       }
       
       .login-input:focus {
-        box-shadow: 0 8px 25px rgba(0,0,0,0.2), 0 0 0 3px rgba(201, 223, 55, 0.5);
+        border-color: #2cb17a;
+        box-shadow: 0 0 0 3px rgba(44, 177, 122, 0.2);
+        background: #ffffff;
       }
 
       .btn-login-action {
         width: 100%;
-        padding: 16px 24px;
-        border-radius: 30px;
+        padding: 16px 20px;
+        border-radius: 12px;
         border: none;
-        background: #c9df37;
-        color: #105436;
-        font-weight: 800;
-        font-size: 1.15rem;
+        background: #2cb17a;
+        color: white;
+        font-weight: 700;
+        font-size: 1.1rem;
         cursor: pointer;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        transition: all 0.3s ease;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+        transition: background 0.3s, transform 0.2s;
       }
       .btn-login-action:hover {
-        background: #dff54a;
+        background: #249968;
         transform: translateY(-2px);
-        box-shadow: 0 10px 25px rgba(0,0,0,0.25);
       }
-      
-      /* Bottom right logo for the background image */
+
+      #login-error-msg {
+        color: #ef4444;
+        font-size: 0.95rem;
+        font-weight: 700;
+        display: none;
+        margin-bottom: 20px;
+        text-align: center;
+        background: #fee2e2;
+        padding: 12px;
+        border-radius: 8px;
+        width: 100%;
+      }
+
       .bottom-right-logo {
         position: absolute;
         bottom: 50px;
@@ -660,46 +630,14 @@
         flex-direction: column;
         align-items: flex-end;
       }
-      
-      #login-error-msg {
-        color: #fff;
-        font-size: 0.95rem;
-        font-weight: 700;
-        display: none;
-        margin-bottom: 24px;
-        text-align: center;
-        background: rgba(239, 68, 68, 0.9);
-        padding: 14px;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
-      }
-      
-      .login-footer {
-        position: absolute;
-        bottom: 30px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 0.8rem;
-        color: rgba(255,255,255,0.7);
-        z-index: 3;
-        width: 100%;
-        text-align: center;
-      }
 
-      @media (max-width: 900px) {
-        .login-curve-panel {
-          width: 120%;
-          height: 65%;
-          top: -5%;
-          left: -10%;
-          border-radius: 0 0 50% 50%;
-          border-right: none;
-          border-bottom: 12px solid #c9df37;
-          padding-left: 10%;
-          padding-top: 5%;
+      @media (max-width: 768px) {
+        .login-center-card {
+          margin: 20px;
+          padding: 30px 20px;
         }
         .bottom-right-logo {
-          bottom: 40px;
+          bottom: 30px;
           right: auto;
           left: 50%;
           transform: translateX(-50%);
@@ -708,35 +646,26 @@
       }
     </style>
 
-    <div class="login-curve-panel">
-      <!-- Watermark Tree Icon -->
-      <svg class="watermark-tree" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
+    <div class="login-center-card">
+      <div class="ml-logo-container">
+        <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#105436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
+        <div class="ml-logo-text">
+          <h2 style="font-size: 1.8rem; font-weight: 800; margin: 0; letter-spacing: 1px;">MOURA LEITE</h2>
+          <span style="font-size: 0.75rem; letter-spacing: 2px; font-weight: 600;">GESTÃO DE LOTEAMENTOS</span>
+        </div>
+      </div>
 
-      <div class="login-form-wrapper">
-        <div class="ml-logo-container">
-          <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
-          <div class="ml-logo-text">
-            <h2>MOURA LEITE</h2>
-            <span>GESTÃO DE LOTEAMENTOS</span>
-          </div>
-        </div>
-
-        <div id="login-error-msg"></div>
-        
-        <div id="mock-login-fields" style="display: flex; flex-direction: column;">
-          <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
-          <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
-        </div>
-        
-        <div class="login-footer">
-          &copy; Moura Leite Loteamentos
-        </div>
+      <div id="login-error-msg"></div>
+      
+      <div id="mock-login-fields" style="width: 100%; display: flex; flex-direction: column;">
+        <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
+        <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
       </div>
     </div>
     
     <!-- Bottom Right White Logo on the background image -->
     <div class="bottom-right-logo">
-      <div class="ml-logo-text" style="color: white; text-align: left; border-bottom: 2px solid rgba(255,255,255,0.8); padding-bottom: 6px; margin-bottom: 8px;">
+      <div class="ml-logo-text" style="color: white; text-align: right; border-bottom: 2px solid rgba(255,255,255,0.8); padding-bottom: 6px; margin-bottom: 8px; width: 100%;">
         <h2 style="font-size: 1.4rem; font-weight: 800; margin: 0; letter-spacing: 1.5px; line-height: 1;">MOURA LEITE</h2>
         <span style="font-size: 0.65rem; letter-spacing: 4px; font-weight: 600;">LOTEAMENTOS</span>
       </div>
