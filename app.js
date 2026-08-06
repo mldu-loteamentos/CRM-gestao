@@ -816,19 +816,20 @@ window.applyDynamicCityRules = function() {
   const cities = new Set();
   AppState.cachedCostCenters.forEach(cc => {
     // Apenas centros de custo que começam com "1" (Empreendimentos)
-    if (cc && cc.name && String(cc.id).startsWith("1")) {
+    if (cc && cc.name) {
+      let city = "";
       if (cc.name.includes('-')) {
-        let city = cc.name.split('-')[0].trim().toUpperCase();
-        
-        // Tratamento especial para Empreendimento 14201 (Terra do Araçari / Araçariguama)
-        if (String(cc.id) === "14201" || cc.name.toUpperCase().includes("ARAÇARI")) {
-           city = "ARAÇARIGUAMA";
-        }
-        
-        if (city) cities.add(city);
-      } else if (String(cc.id) === "14201" || cc.name.toUpperCase().includes("ARAÇARI")) {
-        cities.add("ARAÇARIGUAMA");
+        city = cc.name.split('-')[0].trim().toUpperCase();
+      } else {
+        city = cc.name.trim().toUpperCase();
       }
+      
+      // Tratamento especial para Empreendimento 14201 (Terra do Araçari / Araçariguama)
+      if (String(cc.id) === "14201" || cc.name.toUpperCase().includes("ARAÇARI")) {
+         city = "ARAÇARIGUAMA";
+      }
+      
+      if (city) cities.add(city);
     }
   });
 
@@ -1006,7 +1007,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
   }
   
   // Regra Dinâmica por Cidade do Empreendimento (prioridade única agora)
-  if (idCCusto && String(idCCusto).startsWith("1")) {
+  if (idCCusto) {
     let ccName = "";
     if (AppState.cachedCostCenters) {
       const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
@@ -2395,7 +2396,7 @@ document.addEventListener("click", function(e) {
         customerCpf: "N/D",
         saleId: saleId,
         companyId: bill.companyId || 2,
-        costCenterId: (bill.costCentersId && bill.costCentersId.length > 0) ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId) : (bill.costCenterId || (bill.unitId ? bill.unitId.split('-')[1] : '20100')),
+        costCenterId: (bill.costCentersId && bill.costCentersId.length > 0) ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId) : (bill.costCenterId || (bill.unitId ? bill.unitId.split('-')[1] : null)),
         unitName: bill.units || billUnity,
         unitId: `U-${bill.companyId || 2}-${billUnity.replace(/\s+/g, '')}`,
         subjudice: isSubjudiceStr,
@@ -2438,7 +2439,7 @@ document.addEventListener("click", function(e) {
           const idCCusto = consolidated[key].costCenterId;
           let op = "NÃO ATRIBUÍDO";
           let rule = "REGRA PADRÃO";
-          if (idCCusto && String(idCCusto).startsWith("1")) {
+          if (idCCusto) {
             let ccName = "";
             if (AppState.cachedCostCenters) {
               const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
@@ -2522,7 +2523,7 @@ document.addEventListener("click", function(e) {
 
          let idCCusto = c.costCenterId;
          let city = "";
-         if (idCCusto && String(idCCusto).startsWith("1")) {
+         if (idCCusto) {
             let ccName = "";
             if (AppState.cachedCostCenters) {
                const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
@@ -12456,7 +12457,7 @@ async function _loadZeroPaidTab_Impl() {
       
       let assignedOp = "NÃO ATRIBUÍDO";
       const idCCusto = (bill.costCentersId && bill.costCentersId.length > 0) ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId) : (bill.costCenterId || (bill.unitId ? bill.unitId.split('-')[1] : '20100'));
-      if (idCCusto && String(idCCusto).startsWith("1")) {
+      if (idCCusto) {
           let ccName = "";
           if (AppState.cachedCostCenters) {
               const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
