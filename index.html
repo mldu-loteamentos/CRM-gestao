@@ -526,9 +526,10 @@
         top: 0; left: 0; right: 0; bottom: 0;
         z-index: 99999;
         display: flex;
-        justify-content: center;
+        justify-content: flex-start; /* Aligned to left */
         align-items: center;
-        background: url('https://scontent.faqa2-1.fna.fbcdn.net/v/t39.30808-6/729867728_1593441256119475_5625932030370843141_n.jpg?stp=dst-jpg_tt6&cstp=mx1080x1350&ctp=s1080x1350&_nc_cat=100&ccb=1-7&_nc_sid=127cfc&_nc_ohc=NYGs_chl4ukQ7kNvwFXmiC9&_nc_oc=AdrIUd8bl9Gj-GF2gq8MFJTZCLAHZzC229WK61JuaN3Ng2ygYNx55EO6m3FhCXNOqTI&_nc_zt=23&_nc_ht=scontent.faqa2-1.fna&_nc_gid=48Jx5752S0n_0Hp1T4Qkew&_nc_ss=7b289&oh=00_AQHUnhfXTOEOtiwUjArLtXSbmiL_1nb0M56DL2PYlHGp_Q&oe=6A7A571F') center/cover no-repeat;
+        padding-left: 8%; /* Placed on the left side */
+        background: url('https://scontent.faqa2-1.fna.fbcdn.net/v/t39.30808-6/729867728_1593441256119475_5625932030370843141_n.jpg?stp=dst-jpg_tt6&cstp=mx1080x1350&ctp=s1080x1350&_nc_cat=100&ccb=1-7&_nc_sid=127cfc&_nc_ohc=NYGs_chl4ukQ7kNvwFXmiC9&_nc_oc=AdrIUd8bl9Gj-GF2gq8MFJTZCLAHZzC229WK61JuaN3Ng2ygYNx55EO6m3FhCXNOqTI&_nc_zt=23&_nc_ht=scontent.faqa2-1.fna&_nc_gid=48Jx5752S0n_0Hp1T4Qkew&_nc_ss=7b289&oh=00_AQHUnhfXTOEOtiwUjArLtXSbmiL_1nb0M56DL2PYlHGp_Q&oe=6A7A571F') center 70%/cover no-repeat;
       }
 
       .login-landing-page::before {
@@ -540,7 +541,8 @@
       }
 
       .login-center-card {
-        background: rgba(255, 255, 255, 0.95);
+        position: relative; /* REQUIRED for z-index to work */
+        background: rgba(255, 255, 255, 0.97);
         border-radius: 20px;
         padding: 40px;
         width: 100%;
@@ -651,7 +653,7 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#105436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
         <div class="ml-logo-text">
           <h2 style="font-size: 1.8rem; font-weight: 800; margin: 0; letter-spacing: 1px;">MOURA LEITE</h2>
-          <span style="font-size: 0.75rem; letter-spacing: 2px; font-weight: 600;">GESTÃO DE LOTEAMENTOS</span>
+          <span style="font-size: 0.9rem; letter-spacing: 3px; font-weight: 600;">LOTEAMENTOS</span>
         </div>
       </div>
 
