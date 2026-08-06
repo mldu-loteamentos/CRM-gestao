@@ -520,30 +520,228 @@
   <!-- Landing Page Login (Minimalist Moura Leite Style) -->
   <div id="login-modal-overlay" class="login-landing-page active">
     
-    <div class="login-card-glass">
-      <div class="login-brand-header">
-        <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Moura Leite Logo" class="login-logo">
-        <h2 class="login-title">MOURA LEITE</h2>
-        <span class="login-subtitle">Gestão de Loteamentos</span>
-      </div>
+    <style>
+      .login-landing-page {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: 99999;
+        display: none;
+        /* Using a premium architectural rendering as background */
+        background: url('https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?q=80&w=2075&auto=format&fit=crop') center/cover no-repeat;
+        overflow: hidden;
+      }
+      .login-landing-page.active {
+        display: block;
+      }
+      
+      /* Dark overlay for the background image to make the right side look premium */
+      .login-landing-page::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: linear-gradient(to right, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%);
+        z-index: 1;
+      }
 
-      <div class="login-form-container">
-        <div id="login-error-msg" style="color: #ef4444; font-size: 0.9rem; font-weight: 700; display: none; margin-bottom: 20px; text-align: center; background: #fee2e2; padding: 12px; border-radius: 8px; border: 1px solid #fca5a5;"></div>
-        
-        <div id="mock-login-fields" style="display: flex; flex-direction: column; gap: 20px;">
-          <div class="form-group">
-            <label for="login-email" class="login-label">E-mail Corporativo</label>
-            <input type="email" id="login-email" class="form-control login-input" placeholder="usuario@mouraleite.com" value="israel@mouraleite.com.br">
+      .login-curve-panel {
+        position: absolute;
+        top: -10%;
+        left: -15%;
+        width: 55%;
+        height: 120%;
+        background: #2cb17a; /* Moura Leite Green */
+        border-right: 15px solid #c9df37; /* Yellowish accent */
+        border-radius: 0 50% 50% 0;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding-left: 15%; /* offset the -15% left */
+        box-shadow: 15px 0 40px rgba(0,0,0,0.4);
+        overflow: hidden;
+      }
+
+      /* Watermark tree inside the green panel */
+      .watermark-tree {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 500px;
+        height: 500px;
+        opacity: 0.05;
+        pointer-events: none;
+      }
+
+      .login-form-wrapper {
+        width: 80%;
+        max-width: 380px;
+        margin: auto;
+        color: white;
+        text-align: center;
+        z-index: 3;
+      }
+
+      .ml-logo-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-bottom: 40px;
+      }
+
+      .ml-logo-text {
+        text-align: left;
+      }
+
+      .ml-logo-text h2 {
+        font-size: 2rem;
+        font-weight: 800;
+        margin: 0;
+        letter-spacing: 1px;
+        line-height: 1;
+      }
+      .ml-logo-text span {
+        font-size: 0.8rem;
+        letter-spacing: 3px;
+        font-weight: 600;
+        opacity: 0.9;
+      }
+
+      .login-input {
+        width: 100%;
+        padding: 16px 24px;
+        border-radius: 30px;
+        border: none;
+        font-size: 1.05rem;
+        outline: none;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        text-align: center;
+        margin-bottom: 20px;
+        font-weight: 600;
+        color: #1e293b;
+        background: #ffffff;
+        transition: box-shadow 0.3s;
+      }
+      
+      .login-input:focus {
+        box-shadow: 0 8px 25px rgba(0,0,0,0.2), 0 0 0 3px rgba(201, 223, 55, 0.5);
+      }
+
+      .btn-login-action {
+        width: 100%;
+        padding: 16px 24px;
+        border-radius: 30px;
+        border: none;
+        background: #c9df37;
+        color: #105436;
+        font-weight: 800;
+        font-size: 1.15rem;
+        cursor: pointer;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .btn-login-action:hover {
+        background: #dff54a;
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+      }
+      
+      /* Top right logo for the background image */
+      .top-right-logo {
+        position: absolute;
+        top: 40px;
+        right: 50px;
+        z-index: 3;
+      }
+      
+      #login-error-msg {
+        color: #fff;
+        font-size: 0.95rem;
+        font-weight: 700;
+        display: none;
+        margin-bottom: 24px;
+        text-align: center;
+        background: rgba(239, 68, 68, 0.9);
+        padding: 14px;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+      }
+      
+      .login-footer {
+        position: absolute;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.8rem;
+        color: rgba(255,255,255,0.7);
+        z-index: 3;
+        width: 100%;
+        text-align: center;
+      }
+
+      @media (max-width: 900px) {
+        .login-curve-panel {
+          width: 120%;
+          height: 65%;
+          top: -5%;
+          left: -10%;
+          border-radius: 0 0 50% 50%;
+          border-right: none;
+          border-bottom: 12px solid #c9df37;
+          padding-left: 10%;
+          padding-top: 5%;
+        }
+        .top-right-logo {
+          top: auto;
+          bottom: 40px;
+          right: auto;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+      }
+    </style>
+
+    <div class="login-curve-panel">
+      <!-- Watermark Tree Icon -->
+      <svg class="watermark-tree" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
+
+      <div class="login-form-wrapper">
+        <div class="ml-logo-container">
+          <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
+          <div class="ml-logo-text">
+            <h2>MOURA LEITE</h2>
+            <span>GESTÃO DE LOTEAMENTOS</span>
           </div>
-          <!-- O Campo NOME DO OPERADOR foi removido a pedido -->
+        </div>
+
+        <div id="login-error-msg"></div>
+        
+        <div id="mock-login-fields" style="display: flex; flex-direction: column;">
+          <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
           <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
         </div>
-      </div>
-      
-      <div class="login-footer">
-        <p>&copy; Moura Leite Loteamentos - 30 Anos. Todos os direitos reservados.</p>
+        
+        <div class="login-footer">
+          &copy; Moura Leite Loteamentos
+        </div>
       </div>
     </div>
+    
+    <!-- Top Right White Logo on the background image -->
+    <div class="top-right-logo">
+      <div class="ml-logo-container" style="opacity: 0.9;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="m5 14 7-6 7 6"/><path d="m7 10 5-6 5 6"/><path d="M12 14v4"/><path d="m8 18 4-4 4 4"/></svg>
+        <div class="ml-logo-text">
+          <h2 style="font-size: 1.5rem;">MOURA LEITE</h2>
+          <span style="font-size: 0.65rem;">LOTEAMENTOS</span>
+        </div>
+      </div>
+    </div>
+    
   </div>
 
   <!-- Modal Visualizador de Projeto Urbanistico -->

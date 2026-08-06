@@ -498,6 +498,23 @@ const ConfigUsersApp = {
       document.body.insertAdjacentHTML('beforeend', modalHtml);
   },
 
+  toggleUserStatus(userId) {
+      const user = this.users.find(u => u.id === userId);
+      if (user) {
+          if (user.status === 'ATIVO') {
+              user.status = 'INATIVO';
+          } else {
+              user.status = 'ATIVO';
+          }
+          localStorage.setItem('crm_users', JSON.stringify(this.users));
+          if (typeof window !== 'undefined') {
+              window._cachedCrmUsersBadge = null;
+              if (typeof window.updateOperatorTabsUI === 'function') window.updateOperatorTabsUI();
+          }
+          this.render();
+      }
+  },
+
   saveUserModal(userId) {
       const name = document.getElementById('umodal-name').value.trim();
       const email = document.getElementById('umodal-email').value.trim();
