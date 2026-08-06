@@ -1595,6 +1595,15 @@ async function initializeApplication() {
       AppState.remadeInstallments = window.MOCK_DATA.REMADE_INSTALLMENTS;
     }
     
+    // Auto-filtrar a Agenda se for Operador
+    const u = AppState.currentUser;
+    if (u && ((u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÇA" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA")) || u.role === "OPERADOR")) {
+      const opName = u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : u.name.toUpperCase();
+      if (typeof window.setAgendaOperator === 'function') {
+        window.setAgendaOperator(opName);
+      }
+    }
+    
     // Iniciar na aba padrão
     switchTab("dashboard");
   } catch (err) {
