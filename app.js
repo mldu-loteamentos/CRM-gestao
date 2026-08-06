@@ -1331,13 +1331,16 @@ function validateAndLoadCrmUser(user) {
   return { ...user, ...matchedUser };
 }
 
-function processSuccessfulLogin(loggedUser) {
+async function processSuccessfulLogin(loggedUser) {
   try {
+    if (window.syncGlobalConfigFromFirebase) {
+       await window.syncGlobalConfigFromFirebase();
+    }
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
     document.getElementById("login-modal-overlay").classList.remove("active");
     renderUserSession();
-    initializeApplication();
+    await initializeApplication();
   } catch (err) {
     const errorMsg = document.getElementById("login-error-msg");
     if (errorMsg) {
@@ -1350,7 +1353,7 @@ function processSuccessfulLogin(loggedUser) {
   }
 }
 
-function checkAuthentication() {
+async function checkAuthentication() {
   const user = MouraAuth.getCurrentUser();
   if (!user) {
     const overlay = document.getElementById("login-modal-overlay");
@@ -1373,8 +1376,8 @@ function checkAuthentication() {
       btn.style.marginTop = "20px";
       
       btn.onclick = () => {
-        MouraAuth.login().then(loggedUser => {
-          processSuccessfulLogin(loggedUser);
+        MouraAuth.login().then(async loggedUser => {
+          await processSuccessfulLogin(loggedUser);
         }).catch(err => {
           const errorMsg = document.getElementById("login-error-msg");
           if (errorMsg) {
@@ -1385,19 +1388,22 @@ function checkAuthentication() {
       };
     } else {
       // Simulado: botão aciona a promessa de mock
-      MouraAuth.login().then(loggedUser => {
-        processSuccessfulLogin(loggedUser);
+      MouraAuth.login().then(async loggedUser => {
+        await processSuccessfulLogin(loggedUser);
       }).catch(err => {
         // Mock falhou
       });
     }
   } else {
     try {
+      if (window.syncGlobalConfigFromFirebase) {
+         await window.syncGlobalConfigFromFirebase();
+      }
       const validatedUser = validateAndLoadCrmUser(user);
       AppState.currentUser = validatedUser;
       document.getElementById("login-modal-overlay").classList.remove("active");
       renderUserSession();
-      initializeApplication();
+      await initializeApplication();
     } catch (err) {
       alert(err.message);
       MouraAuth.logout();

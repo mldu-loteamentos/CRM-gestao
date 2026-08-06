@@ -106,13 +106,15 @@ async function logout() {
   const user = getCurrentUser();
   localStorage.removeItem(USER_SESSION_KEY);
   
-  if (g_authConfig.enabled && msalInstance && user && user.method === "Azure AD") {
-    try {
-      await msalInstance.logoutPopup();
-    } catch (e) {
-      console.error("Erro no logout do Azure AD:", e);
-    }
-  }
+  // A pedido do usuário, não vamos deslogar globalmente a conta Microsoft
+  // para evitar que o usuário perca o acesso a outras ferramentas do trabalho.
+  // if (g_authConfig.enabled && msalInstance && user && user.method === "Azure AD") {
+  //   try {
+  //     await msalInstance.logoutPopup();
+  //   } catch (e) {
+  //     console.error("Erro no logout do Azure AD:", e);
+  //   }
+  // }
   
   window.location.reload();
 }
