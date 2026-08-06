@@ -525,11 +525,13 @@
         position: fixed;
         top: 0; left: 0; right: 0; bottom: 0;
         z-index: 99999;
+        display: none;
+        background: url('https://images.unsplash.com/photo-1512917774080-9991f1c4c750?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat;
+      }
+      .login-landing-page.active {
         display: flex;
-        justify-content: flex-start; /* Aligned to left */
+        justify-content: center; /* Centered */
         align-items: center;
-        padding-left: 8%; /* Placed on the left side */
-        background: url('https://scontent.faqa2-1.fna.fbcdn.net/v/t39.30808-6/729867728_1593441256119475_5625932030370843141_n.jpg?stp=dst-jpg_tt6&cstp=mx1080x1350&ctp=s1080x1350&_nc_cat=100&ccb=1-7&_nc_sid=127cfc&_nc_ohc=NYGs_chl4ukQ7kNvwFXmiC9&_nc_oc=AdrIUd8bl9Gj-GF2gq8MFJTZCLAHZzC229WK61JuaN3Ng2ygYNx55EO6m3FhCXNOqTI&_nc_zt=23&_nc_ht=scontent.faqa2-1.fna&_nc_gid=48Jx5752S0n_0Hp1T4Qkew&_nc_ss=7b289&oh=00_AQHUnhfXTOEOtiwUjArLtXSbmiL_1nb0M56DL2PYlHGp_Q&oe=6A7A571F') center 70%/cover no-repeat;
       }
 
       .login-landing-page::before {
@@ -542,7 +544,8 @@
 
       .login-center-card {
         position: relative; /* REQUIRED for z-index to work */
-        background: rgba(255, 255, 255, 0.97);
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 20px;
         padding: 40px;
         width: 100%;
@@ -552,15 +555,16 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
       }
 
       .login-center-card .ml-logo-container svg {
-        stroke: #105436; /* Dark green for light background */
+        stroke: #ffffff; /* White for glass background */
       }
       
       .login-center-card .ml-logo-text {
-        color: #105436;
+        color: #ffffff;
         text-align: center;
       }
 
