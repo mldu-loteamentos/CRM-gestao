@@ -87,9 +87,12 @@ window.updateOperatorTabsUI = function() {
          if (!window.AgendaSelectedOperator) window.AgendaSelectedOperator = "Todos";
      } else {
          agendaTabs.style.display = "none";
-         const opName = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name : "";
-         if (opName) {
-             window.AgendaSelectedOperator = opName;
+         const _cu = window.AppState && window.AppState.currentUser;
+         if (_cu) {
+             const opName = _cu.sienge_user
+                 ? _cu.sienge_user.toUpperCase().replace(/\./g, ' ').trim()
+                 : (_cu.name ? _cu.name.toUpperCase() : '');
+             if (opName) window.AgendaSelectedOperator = opName;
          }
      }
   }
@@ -1367,10 +1370,22 @@ async function processSuccessfulLogin(loggedUser) {
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
     
-    if (validatedUser.role === 'ADMIN') {
+    // Determine admin/gestor status based on role OR profile_name
+    const _profileNameUp = (validatedUser.profile_name || '').toUpperCase();
+    const _isAdminOrGestor = validatedUser.role === 'ADMIN' ||
+        _profileNameUp.includes('ADMIN') ||
+        _profileNameUp.includes('GESTOR') ||
+        _profileNameUp.includes('GERENTE') ||
+        (validatedUser.email && validatedUser.email === 'admin@mouraleite.com.br');
+
+    if (_isAdminOrGestor) {
         window.AgendaSelectedOperator = "Todos";
     } else {
-        window.AgendaSelectedOperator = validatedUser.name ? validatedUser.name.toUpperCase() : "TODOS";
+        // Use sienge_user name if available (matches how occ.author is stored)
+        const opName = validatedUser.sienge_user
+            ? validatedUser.sienge_user.toUpperCase().replace(/\./g, ' ').trim()
+            : (validatedUser.name ? validatedUser.name.toUpperCase() : "TODOS");
+        window.AgendaSelectedOperator = opName;
     }
     if (typeof window.updateOperatorTabsUI === 'function') {
         window.updateOperatorTabsUI();
@@ -10459,9 +10474,30 @@ async function loadAgendaTab(showLoader = false) {
   
   const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
   
+  // Compute isAdmin locally so we don't reference undefined outer scope
+  const _currentUser = window.AppState && window.AppState.currentUser;
+  const _isAdminInAgenda = _currentUser && (
+      _currentUser.role === 'ADMIN' ||
+      (_currentUser.profile_name && (
+          _currentUser.profile_name.toUpperCase().includes('ADMIN') ||
+          _currentUser.profile_name.toUpperCase().includes('GESTOR') ||
+          _currentUser.profile_name.toUpperCase().includes('GERENTE')
+      )) ||
+      (_currentUser.email && _currentUser.email === 'admin@mouraleite.com.br')
+  );
+  
+  // Determine which operator's agenda to show.
+  // Priority: window.AgendaSelectedOperator (set at login or by tab click).
+  // If not set and user is not admin, default to logged-in user's own name.
   let initialOp = window.AgendaSelectedOperator;
-  if (!initialOp && !isAdmin) {
-     initialOp = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name : "Todos";
+  if (!initialOp) {
+     if (!_isAdminInAgenda && _currentUser && _currentUser.name) {
+         initialOp = _currentUser.name;
+         window.AgendaSelectedOperator = initialOp; // persist for other uses
+     } else if (_isAdminInAgenda) {
+         initialOp = "Todos";
+         window.AgendaSelectedOperator = "Todos";
+     }
   }
   const selectedOperator = initialOp || document.getElementById("agenda-operator-select")?.value || "Todos";
   const selOp = normalizeStr(selectedOperator);
@@ -11318,7 +11354,9 @@ async function loadAgendaDayTasks(dateStr) {
   
   let dayItems = [];
   
-  const selectedOperator = document.getElementById("agenda-operator-select")?.value || "Todos";
+  // Use window.AgendaSelectedOperator as source of truth (DOM select may be hidden for operators)
+  const _domSelectVal = document.getElementById("agenda-operator-select")?.value || "";
+  const selectedOperator = window.AgendaSelectedOperator || _domSelectVal || "Todos";
   const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
   const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
   const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
