@@ -70,7 +70,11 @@ window.updateOperatorTabsUI = function() {
      filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
 
-  const isAdmin = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.role === 'ADMIN');
+  const isAdmin = (window.AppState && window.AppState.currentUser && (
+      window.AppState.currentUser.role === 'ADMIN' || 
+      (window.AppState.currentUser.profile_name && window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN')) ||
+      (window.AppState.currentUser.email && window.AppState.currentUser.email === 'admin@mouraleite.com.br')
+  ));
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
   if (agendaTabs) {
      if (isAdmin) {
@@ -11883,7 +11887,7 @@ window.renderAgendaPersonalNotes = function() {
     listDiv.appendChild(inputItem);
     
     // Fill the rest with some empty lines just for visual
-    for(let i=0; i<Math.max(0, 8 - dayNotes.length); i++) {
+    for(let i=0; i<Math.max(0, 8 - combinedNotes.length); i++) {
         const emptyLine = document.createElement("div");
         emptyLine.style.cssText = "border-bottom: 1px solid #cbd5e1; min-height: 36px; position: relative; z-index: 2;";
         listDiv.appendChild(emptyLine);
@@ -12647,15 +12651,7 @@ async function _loadZeroPaidTab_Impl() {
               const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
               if (ccObj) ccName = ccObj.name || "";
           }
-          let city = "";
-          if (ccName.includes('-')) {
-              city = ccName.split('-')[0].trim().toUpperCase();
-          } else {
-              city = ccName.trim().toUpperCase();
-          }
-          if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-              city = "ARAÇARIGUAMA";
-          }
+          const city = window.extractCityFromCostCenter(idCCusto, ccName);
           if (city) {
               const ruleId = "CID_" + city.replace(/\s+/g, '_');
               let requiredType = "interno";
@@ -13851,7 +13847,8 @@ function renderRulesSettingsTable() {
   const opSummary = {};
 
   sortedRules.forEach((rule, index) => {
-    const stats = cityStats[rule.desc] || { totalOverdue: 0, billCount: 0, enterprises: {}, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
+    const normalizedDesc = rule.desc ? rule.desc.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : '';
+    const stats = cityStats[normalizedDesc] || cityStats[rule.desc] || { totalOverdue: 0, billCount: 0, enterprises: {}, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
     
     const isZero = stats.totalOverdue === 0;
     const formattedOverdue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalOverdue);
