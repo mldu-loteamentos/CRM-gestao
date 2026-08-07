@@ -1828,6 +1828,12 @@ async function loadDashboardData(forceRefresh = false) {
     try { await _loadDashboardData_Impl(forceRefresh); }
     finally { window._isDefaultersLoading = false; }
 }
+window.advFiltersFila = {};
+window.advFiltersSubjudice = {};
+window.advFiltersZeroPaid = {};
+window.currentAdvFilterContext = 'fila';
+window.advFilters = window.advFiltersFila;
+
 window.applyAdvFiltersTo = (sourceList) => {
     let filteredList = sourceList;
     if (window.advFilters) {
@@ -2778,6 +2784,8 @@ document.addEventListener("click", function(e) {
     clientList = clientList.filter(c => c.assignedOperator === activeOperatorFilter);
   }
 
+  const originalAdvFilters = window.advFilters;
+  window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
 
   const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
@@ -2822,7 +2830,9 @@ document.addEventListener("click", function(e) {
   }
   
   // Aplica os filtros avançados também na lista de Sub Judice!
+  window.advFilters = window.advFiltersSubjudice || {};
   filteredSubjudice = window.applyAdvFiltersTo(filteredSubjudice);
+  window.advFilters = originalAdvFilters; // Restore
 
   // 2. Ordenação da Lista principal
   const sortCol = AppState.currentSortCol;
@@ -12544,7 +12554,10 @@ async function _loadZeroPaidTab_Impl() {
   
   // Aplica os filtros avançados também na lista de 0% Pago!
   if (typeof window.applyAdvFiltersTo === 'function') {
+      const originalAdvFilters = window.advFilters;
+      window.advFilters = window.advFiltersZeroPaid || {};
       zeroPaidList = window.applyAdvFiltersTo(zeroPaidList);
+      window.advFilters = originalAdvFilters;
   }
   
   // ========================================================
@@ -20642,7 +20655,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal();
+                    window.openAdvFiltersModal('fila');
                 }
             });
         }
@@ -20652,7 +20665,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal();
+                    window.openAdvFiltersModal('zeropaid');
                 }
             });
         }
@@ -20662,14 +20675,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal();
+                    window.openAdvFiltersModal('subjudice');
                 }
             });
         }
     }, 500);
 });
 
-window.openAdvFiltersModal = function() {
+window.openAdvFiltersModal = function(context = 'fila') {
+    window.currentAdvFilterContext = context;
+    if (context === 'fila') window.advFilters = window.advFiltersFila;
+    else if (context === 'subjudice') window.advFilters = window.advFiltersSubjudice;
+    else if (context === 'zeropaid') window.advFilters = window.advFiltersZeroPaid;
+
     const modal = document.getElementById('adv-filters-modal');
     if(!modal) return;
     
@@ -20889,7 +20907,11 @@ window.applyAdvFilters = async function(keepOpen = false) {
     if (window.advFilters.subjudice && window.advFilters.subjudice !== 'TODOS') count++;
     if (window.advFilters.pagamentoRecente && window.advFilters.pagamentoRecente.length > 0) count++;
 
-    const badge = document.getElementById('adv-filters-badge');
+    let badgeId = 'adv-filters-badge';
+    if (window.currentAdvFilterContext === 'subjudice') badgeId = 'subjudice-adv-filters-badge';
+    else if (window.currentAdvFilterContext === 'zeropaid') badgeId = 'zeropaid-adv-filters-badge';
+    
+    const badge = document.getElementById(badgeId);
     if (badge) {
         if (count > 0) {
             badge.style.display = 'inline-flex';
@@ -21024,11 +21046,15 @@ window.prefetchRecentPayments = async function() {
 };
 
 window.clearAdvFilters = function() {
-    window.advFilters = {
+    const defaultState = {
         lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
         cidade: [], empresa: [], ccusto: [], operador: [],
-        contato: '', statusJuridico: 'TODOS', retroMeses: '3', zeropaid: 'TODOS'
+        contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: []
     };
+    if (window.currentAdvFilterContext === 'fila') window.advFiltersFila = defaultState;
+    else if (window.currentAdvFilterContext === 'subjudice') window.advFiltersSubjudice = defaultState;
+    else if (window.currentAdvFilterContext === 'zeropaid') window.advFiltersZeroPaid = defaultState;
+    window.advFilters = defaultState;
     
     document.querySelectorAll('.adv-pills-group').forEach(group => {
         group.querySelectorAll('.adv-pill').forEach(p => p.classList.remove('active'));

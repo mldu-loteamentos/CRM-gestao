@@ -972,11 +972,6 @@
           <span id="ctx-subjudice-alert" style="display: flex; align-items: center; margin-left: 4px;"></span>
         </div>
         <div class="topbar-actions" style="display: none;">
-          <div class="api-mode-selector">
-            <button id="btn-mode-simulado" class="api-mode-btn active"
-              onclick="changeApiMode('simulado')">Simulação</button>
-            <button id="btn-mode-real" class="api-mode-btn" onclick="changeApiMode('real')">Sienge Real</button>
-          </div>
           <div id="azure-status" class="auth-status-badge">
             <i data-lucide="shield-check" style="width: 16px;"></i> Azure Ativo
           </div>
@@ -2001,6 +1996,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
               </div>
               <button id="btn-subjudice-adv-filters" class="btn btn-secondary" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
+                <span id="subjudice-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
               </button>
               <button class="btn btn-secondary" onclick="exportSubjudiceToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
                 <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
@@ -2249,6 +2245,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
               </div>
               <button id="btn-zeropaid-adv-filters" class="btn btn-secondary" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
+                <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
               </button>
               <button class="btn btn-secondary" onclick="exportZeropaidToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
                 <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel

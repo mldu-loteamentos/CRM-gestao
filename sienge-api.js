@@ -31,13 +31,12 @@ function getBasicAuthHeader() {
   return "Basic " + btoa(credentials);
 }
 
-let s_apiMode = localStorage.getItem("crm_sienge_api_mode") || "simulado";
+let s_apiMode = "real";
 
 function setApiMode(mode) {
-  if (mode === "real" || mode === "simulado") {
-    s_apiMode = mode;
-    localStorage.setItem("crm_sienge_api_mode", mode);
-  }
+  // Always use "real" mode
+  s_apiMode = "real";
+  localStorage.setItem("crm_sienge_api_mode", "real");
 }
 
 function getApiMode() {
