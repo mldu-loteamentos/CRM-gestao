@@ -4258,16 +4258,21 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
 
   // FETCH CUSTOMER NOTES FROM FIREBASE IN REAL-TIME
   if (window.firebaseDb && window.firebaseCollections) {
+      if (window.currentCustomerNotesUnsubscribe) {
+          window.currentCustomerNotesUnsubscribe();
+      }
       try {
           const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
-          const docSnap = await window.firebaseCollections.getDoc(docRef);
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data && data.notes) {
-                  AppState.notes[customerId] = data.notes;
-                  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+          window.currentCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(docRef, (docSnap) => {
+              if (docSnap.exists()) {
+                  const data = docSnap.data();
+                  if (data && data.notes) {
+                      AppState.notes[customerId] = data.notes;
+                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+                      if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
+                  }
               }
-          }
+          });
       } catch (e) {
           console.error("Erro ao sincronizar ocorrencias do cliente em tempo real:", e);
       }
