@@ -1359,7 +1359,7 @@ async function processSuccessfulLogin(loggedUser) {
     if (validatedUser.role === 'ADMIN') {
         window.AgendaSelectedOperator = "Todos";
     } else {
-        window.AgendaSelectedOperator = validatedUser.name.toUpperCase();
+        window.AgendaSelectedOperator = validatedUser.name ? validatedUser.name.toUpperCase() : "TODOS";
     }
     if (typeof window.updateOperatorTabsUI === 'function') {
         window.updateOperatorTabsUI();
@@ -1445,9 +1445,10 @@ function renderUserSession() {
   const appContainer = document.getElementById("app-container");
   
   if (AppState.currentUser) {
-    nameEl.textContent = AppState.currentUser.name;
+    const safeName = AppState.currentUser.name || "Usuario";
+    nameEl.textContent = safeName;
     emailEl.textContent = AppState.currentUser.email;
-    avatarEl.textContent = AppState.currentUser.name.substring(0, 2);
+    avatarEl.textContent = safeName.substring(0, 2).toUpperCase();
     appContainer.style.display = "flex";
     
     // Atualizar badge do Azure
@@ -1720,7 +1721,8 @@ async function initializeApplication() {
     // Auto-filtrar a Agenda se for Operador
     const u = AppState.currentUser;
     if (u && ((u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÇA" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA")) || u.role === "OPERADOR")) {
-      const opName = u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : u.name.toUpperCase();
+      const safeNameForOp = u.name || "";
+      const opName = u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : safeNameForOp.toUpperCase();
       if (typeof window.setAgendaOperator === 'function') {
         window.setAgendaOperator(opName);
       }
@@ -20760,38 +20762,6 @@ window.initAdvFiltersUI = function() {
 
 document.addEventListener('DOMContentLoaded', () => {
     window.initAdvFiltersUI();
-    setTimeout(() => {
-        const btnAdv = document.getElementById('btn-adv-filters');
-        if (btnAdv) {
-            btnAdv.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal('fila');
-                }
-            });
-        }
-        const btnZeroAdv = document.getElementById('btn-zeropaid-adv-filters');
-        if (btnZeroAdv) {
-            btnZeroAdv.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal('zeropaid');
-                }
-            });
-        }
-        const btnSubAdv = document.getElementById('btn-subjudice-adv-filters');
-        if (btnSubAdv) {
-            btnSubAdv.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof window.openAdvFiltersModal === 'function') {
-                    window.openAdvFiltersModal('subjudice');
-                }
-            });
-        }
-    }, 500);
 });
 
 window.openAdvFiltersModal = function(context = 'fila') {
@@ -21633,9 +21603,7 @@ localStorage.setItem = function(key, value) {
             }
         }, 1500); // 1.5s debounce para não sobrecarregar em edições em lote
     }
-    }
 };
-
 // ---------------- SHARE AGENDA MODAL ----------------
 window.openShareAgendaNoteModal = function(srcKey, originalIndex) {
     window._currentShareNoteKey = srcKey;

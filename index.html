@@ -1894,7 +1894,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   <button class="operator-tab-btn" data-operator="MICHELLE">MICHELLE</button>
                   <button class="operator-tab-btn" data-operator="NÃO COBRAR">NÃO COBRAR</button>
                   <button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>
-                  <button id="btn-adv-filters" class="adv-filter-trigger" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; margin-left: 8px; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600;">
+                  <button id="btn-adv-filters" class="adv-filter-trigger" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; margin-left: 8px; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600;">
                     <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados 
                     <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
                   </button>
@@ -1994,7 +1994,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                 placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" oninput="handleSubjudiceAutocomplete(this.value)" autocomplete="off">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-subjudice-adv-filters" class="btn btn-secondary" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
+              <button id="btn-subjudice-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('subjudice')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
                 <span id="subjudice-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
               </button>
@@ -2243,7 +2243,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" oninput="handleZeropaidAutocomplete(this.value)" autocomplete="off">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-zeropaid-adv-filters" class="btn btn-secondary" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
+              <button id="btn-zeropaid-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('zeropaid')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
                 <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
               </button>
