@@ -4256,6 +4256,23 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   sessionStorage.setItem('currentCustomerId', customerId);
   sessionStorage.setItem('currentSaleId', saleId);
 
+  // FETCH CUSTOMER NOTES FROM FIREBASE IN REAL-TIME
+  if (window.firebaseDb && window.firebaseCollections) {
+      try {
+          const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
+          const docSnap = await window.firebaseCollections.getDoc(docRef);
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data && data.notes) {
+                  AppState.notes[customerId] = data.notes;
+                  localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+              }
+          }
+      } catch (e) {
+          console.error("Erro ao sincronizar ocorrencias do cliente em tempo real:", e);
+      }
+  }
+
   // Limpar Score
   const pointsEl = document.getElementById("score-points");
   const labelEl = document.getElementById("score-label");
@@ -12041,7 +12058,13 @@ window.deleteAgendaPersonalNote = function(index, sourceKey) {
 
     if (allNotes[sourceKey]) {
         allNotes[sourceKey].splice(index, 1);
-        if (allNotes[sourceKey].length === 0) delete allNotes[sourceKey];
+        if (allNotes[sourceKey].length === 0) {
+            delete allNotes[sourceKey];
+            if (window.firebaseDb && window.firebaseCollections) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_personal_notes', sourceKey);
+                window.firebaseCollections.setDoc(docRef, { notes: [] }, { merge: true }).catch(e => {});
+            }
+        }
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         window.renderAgendaPersonalNotes();
     }
@@ -12331,7 +12354,13 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
         if (alarmStorageKey !== currentStorageKey) {
             // Remove da chave atual
             notesList.splice(index, 1);
-            if (notesList.length === 0) delete allNotes[currentStorageKey];
+            if (notesList.length === 0) {
+                delete allNotes[currentStorageKey];
+                if (window.firebaseDb && window.firebaseCollections) {
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_personal_notes', currentStorageKey);
+                    window.firebaseCollections.setDoc(docRef, { notes: [] }, { merge: true }).catch(e => {});
+                }
+            }
             // Insere na chave do dia do alarme
             if (!allNotes[alarmStorageKey]) allNotes[alarmStorageKey] = [];
             allNotes[alarmStorageKey].push({...targetNote});
@@ -21798,21 +21827,19 @@ window.openShareAgendaNoteModal = function(srcKey, originalIndex) {
     if(!note) return;
     
     const sharedWith = note.sharedWith || [];
-    const dynOps = window.getDynamicOperators();
     const modalBody = document.getElementById("share-agenda-users-list");
     
     if(modalBody) {
         let html = '';
         const crmUsers = JSON.parse(localStorage.getItem('crm_users') || '[]');
         
-        dynOps.forEach(op => {
-            const u = crmUsers.find(x => x.name.toUpperCase() === op.toUpperCase());
-            if(u && u.email && window.AppState && window.AppState.currentUser && u.email.toLowerCase() !== window.AppState.currentUser.email.toLowerCase()) {
+        crmUsers.forEach(u => {
+            if(u.status === 'ATIVO' && u.email && window.AppState && window.AppState.currentUser && u.email.toLowerCase() !== window.AppState.currentUser.email.toLowerCase()) {
                 const checked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
                 html += `
                   <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;">
                      <input type="checkbox" class="share-user-chk" value="${u.email.toLowerCase()}" ${checked} style="width:16px;height:16px;accent-color:var(--color-primary);">
-                     <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${op}</span>
+                     <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${u.name} (${u.email})</span>
                   </label>
                 `;
             }
