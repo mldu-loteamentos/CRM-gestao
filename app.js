@@ -71,9 +71,9 @@ window.updateOperatorTabsUI = function() {
   }
 
   const isAdmin = (window.AppState && window.AppState.currentUser && (
-      window.AppState.currentUser.role === 'ADMIN' || 
+      (window.AppState.currentUser.role && window.AppState.currentUser.role.toUpperCase().includes('ADMIN')) || 
       (window.AppState.currentUser.profile_name && (window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN') || window.AppState.currentUser.profile_name.toUpperCase().includes('GESTOR') || window.AppState.currentUser.profile_name.toUpperCase().includes('GERENTE'))) ||
-      (window.AppState.currentUser.email && window.AppState.currentUser.email === 'admin@mouraleite.com.br')
+      (window.AppState.currentUser.email && (window.AppState.currentUser.email === 'admin@mouraleite.com.br' || window.AppState.currentUser.email === 'israel@mouraleite.com.br'))
   ));
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
   if (agendaTabs) {
@@ -1372,11 +1372,12 @@ async function processSuccessfulLogin(loggedUser) {
     
     // Determine admin/gestor status based on role OR profile_name
     const _profileNameUp = (validatedUser.profile_name || '').toUpperCase();
-    const _isAdminOrGestor = validatedUser.role === 'ADMIN' ||
+    const _roleUp = (validatedUser.role || '').toUpperCase();
+    const _isAdminOrGestor = _roleUp.includes('ADMIN') ||
         _profileNameUp.includes('ADMIN') ||
         _profileNameUp.includes('GESTOR') ||
         _profileNameUp.includes('GERENTE') ||
-        (validatedUser.email && validatedUser.email === 'admin@mouraleite.com.br');
+        (validatedUser.email && (validatedUser.email === 'admin@mouraleite.com.br' || validatedUser.email === 'israel@mouraleite.com.br'));
 
     if (_isAdminOrGestor) {
         window.AgendaSelectedOperator = "Todos";
@@ -10462,13 +10463,13 @@ async function loadAgendaTab(showLoader = false) {
   // Compute isAdmin locally so we don't reference undefined outer scope
   const _currentUser = window.AppState && window.AppState.currentUser;
   const _isAdminInAgenda = _currentUser && (
-      _currentUser.role === 'ADMIN' ||
+      (_currentUser.role && _currentUser.role.toUpperCase().includes('ADMIN')) ||
       (_currentUser.profile_name && (
           _currentUser.profile_name.toUpperCase().includes('ADMIN') ||
           _currentUser.profile_name.toUpperCase().includes('GESTOR') ||
           _currentUser.profile_name.toUpperCase().includes('GERENTE')
       )) ||
-      (_currentUser.email && _currentUser.email === 'admin@mouraleite.com.br')
+      (_currentUser.email && (_currentUser.email === 'admin@mouraleite.com.br' || _currentUser.email === 'israel@mouraleite.com.br'))
   );
   
   // Determine which operator's agenda to show.
