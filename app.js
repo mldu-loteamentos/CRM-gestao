@@ -1621,8 +1621,10 @@ async function initializeApplication() {
   
   // Inicializar o seletor de API do Sienge
   const mode = getSiengeApiMode();
-  document.getElementById("btn-mode-simulado").classList.toggle("active", mode === "simulado");
-  document.getElementById("btn-mode-real").classList.toggle("active", mode === "real");
+  const btnSimulado = document.getElementById("btn-mode-simulado");
+  const btnReal = document.getElementById("btn-mode-real");
+  if (btnSimulado) btnSimulado.classList.toggle("active", mode === "simulado");
+  if (btnReal) btnReal.classList.toggle("active", mode === "real");
   try {
     await loadAndApplyPermissions();
     
