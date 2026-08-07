@@ -56,16 +56,18 @@ window.updateOperatorTabsUI = function() {
   
   const filaTabs = document.getElementById("operator-tabs-container");
   if (filaTabs) {
-     const filterBtn = document.getElementById("btn-adv-filters");
-     const exportBtn = document.getElementById("btn-export-excel");
+     // Remover botões de operador existentes
+     const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
+     existingOpBtns.forEach(btn => btn.remove());
      
-     filaTabs.innerHTML = `<button class="operator-tab-btn active" data-operator="TODOS">TODOS</button>`;
+     // Criar e inserir novos botões no início
+     let opBtnsHtml = `<button class="operator-tab-btn active" data-operator="TODOS">TODOS</button>`;
      dynOps.forEach(op => {
-         filaTabs.innerHTML += `<button class="operator-tab-btn" data-operator="${op}">${op}</button>`;
+         opBtnsHtml += `<button class="operator-tab-btn" data-operator="${op}">${op}</button>`;
      });
-     filaTabs.innerHTML += `<button class="operator-tab-btn" data-operator="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</button>`;
-     if (filterBtn) filaTabs.appendChild(filterBtn);
-     if (exportBtn) filaTabs.appendChild(exportBtn);
+     opBtnsHtml += `<button class="operator-tab-btn" data-operator="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</button>`;
+     
+     filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
 
   const isAdmin = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.role === 'ADMIN');
@@ -1913,6 +1915,27 @@ function getCostCenterName(id) {
     return "C.C. " + rawId;
 }
 
+window.extractCityFromCostCenter = function(ccId, ccName) {
+    if (!ccId) return null;
+    const ccIdStr = String(ccId);
+    if (!ccIdStr.startsWith("1") && !ccIdStr.startsWith("2") && !ccIdStr.startsWith("3")) {
+        return null;
+    }
+    let cleanName = (ccName || "").replace(new RegExp(`^${ccIdStr}\\s*-\\s*`), '');
+    if (cleanName.toUpperCase().startsWith("C.C. ")) {
+        cleanName = cleanName.substring(5);
+    }
+    const cityMatch = cleanName.split('-')[0].trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    
+    if (ccIdStr === "14201" || cleanName.toUpperCase().includes("ARAÇARI") || cleanName.toUpperCase().includes("ARACARI")) {
+        return "ARACARIGUAMA";
+    }
+    if (cityMatch && cityMatch.length > 2 && isNaN(cityMatch)) {
+        return cityMatch;
+    }
+    return null;
+};
+
 function parseSafeDate(dStr) {
     if (!dStr) return new Date(0);
     let str = String(dStr).trim();
@@ -2061,14 +2084,8 @@ window.applyAdvFiltersTo = (sourceList) => {
                     const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === primaryId);
                     if (ccObj) ccName = ccObj.name || "";
                 }
-                let city = "";
-                const cityMatch = ccName.split('-')[0].trim().toUpperCase();
-                if (String(primaryId) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-                    city = "ARAÇARIGUAMA";
-                } else if (cityMatch) {
-                    city = cityMatch;
-                }
-                return window.advFilters.cidade.includes(city);
+                const city = window.extractCityFromCostCenter(primaryId, ccName);
+                return city ? window.advFilters.cidade.includes(city) : false;
             });
         }
         
@@ -13738,14 +13755,16 @@ function renderRulesSettingsTable() {
       }
       if (!ccId && bill.unitId) ccId = bill.unitId.split('-')[1];
 
-      if (ccId && String(ccId).startsWith("1")) {
+      if (ccId) {
+        const ccIdStr = String(ccId);
         let city = null;
         let ccObj = null;
         if (AppState.cachedCostCenters) {
-          ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(ccId));
-          if (ccObj && ccObj.name) {
-             city = ccObj.name.split('-')[0].trim().toUpperCase();
-          }
+          ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === ccIdStr);
+        }
+        
+        if (ccObj) {
+           city = window.extractCityFromCostCenter(ccIdStr, ccObj.name);
         }
         
         if (city) {
@@ -20798,14 +20817,8 @@ window.openAdvFiltersModal = function(context = 'fila') {
                 ccustos.set(c.costCenterId, { label: `${c.costCenterId} - ${cleanName}`, companyId: c.companyId });
                 
                 // Extrai a cidade para popular os filtros (mesma lógica da Atribuição)
-                let city = "";
-                const cityMatch = ccName.split('-')[0].trim().toUpperCase();
-                if (String(c.costCenterId) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-                    city = "ARAÇARIGUAMA";
-                } else if (cityMatch) {
-                    city = cityMatch;
-                }
-                if (city && city.length > 2 && isNaN(city)) {
+                const city = window.extractCityFromCostCenter(c.costCenterId, ccName);
+                if (city) {
                     cities.add(city);
                     
                     const linkKey = `${c.companyId}|${c.costCenterId}|${city}`;
