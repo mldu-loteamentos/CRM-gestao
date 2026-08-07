@@ -65,7 +65,8 @@ async function login() {
     // Login Real via Microsoft Azure AD
     try {
       const loginRequest = {
-        scopes: ["user.read"]
+        scopes: ["user.read"],
+        prompt: "select_account"
       };
       const loginResponse = await msalInstance.loginPopup(loginRequest);
       

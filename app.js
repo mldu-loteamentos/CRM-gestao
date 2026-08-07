@@ -78,7 +78,8 @@ window.updateOperatorTabsUI = function() {
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
   if (agendaTabs) {
      if (isAdmin) {
-         agendaTabs.style.display = "flex";
+         console.log("updateOperatorTabsUI - isAdmin is TRUE. Showing agenda tabs.");
+         agendaTabs.style.cssText = "display: flex !important;";
          agendaTabs.innerHTML = `<button class="operator-tab-btn active" onclick="setAgendaOperator('Todos')">TODOS</button>`;
          dynOps.forEach(op => {
              agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('${op}')">${op}</button>`;
@@ -86,7 +87,8 @@ window.updateOperatorTabsUI = function() {
          agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
          if (!window.AgendaSelectedOperator) window.AgendaSelectedOperator = "Todos";
      } else {
-         agendaTabs.style.display = "none";
+         console.log("updateOperatorTabsUI - isAdmin is FALSE. Hiding agenda tabs. User:", window.AppState.currentUser);
+         agendaTabs.style.cssText = "display: none !important;";
          const _cu = window.AppState && window.AppState.currentUser;
          if (_cu) {
              const opName = _cu.sienge_user
@@ -2012,8 +2014,11 @@ const defaultAdvFilterState = {
     contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: []
 };
 window.advFiltersFila = JSON.parse(JSON.stringify(defaultAdvFilterState));
+window.advFiltersFila.paidMap = new Map();
 window.advFiltersSubjudice = JSON.parse(JSON.stringify(defaultAdvFilterState));
+window.advFiltersSubjudice.paidMap = new Map();
 window.advFiltersZeroPaid = JSON.parse(JSON.stringify(defaultAdvFilterState));
+window.advFiltersZeroPaid.paidMap = new Map();
 window.currentAdvFilterContext = 'fila';
 window.advFilters = window.advFiltersFila;
 
@@ -10948,7 +10953,14 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
          let exclude = false;
          const notes = AppState.notes[item.customerId] || [];
          notes.forEach(n => {
+           // Excluir se houver uma promessa pendente para hoje ou futuro
            if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
+              if (!n.saleId || String(n.saleId) === String(item.saleId)) {
+                  exclude = true;
+              }
+           }
+           // Excluir se o operador tiver feito qualquer anotação HOJE (significa que já tratou o cliente)
+           if (n.date && n.date.startsWith(todayStr) && n.author && n.author.toLowerCase().includes(selectedOperator.toLowerCase())) {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) {
                   exclude = true;
               }
@@ -13167,7 +13179,7 @@ async function _loadZeroPaidTab_Impl() {
 
 window.fetchMissingZeroPaidSales = async function(zeroList) {
     if (!zeroList || zeroList.length === 0) return;
-    const missing = zeroList.filter(c => !c.saleDate && c.customerId);
+    const missing = zeroList.filter(c => c && !c.saleDate && c.customerId);
     if (missing.length === 0) return;
     
     const customerIds = [...new Set(missing.map(c => c.customerId))];
