@@ -21871,26 +21871,26 @@ window.exportAgendaToExcel = function() {
         else if (cols[0].querySelector('.lucide-check-circle')) status = 'Resolvido';
         else if (cols[0].querySelector('.lucide-x-circle')) status = 'Cancelado';
 
-        const clienteUnidade = cols[1].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
-        const lembreteResumo = cols[2].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
-        const valorRaw = cols[3].textContent.replace(/\\s+/g, ' ').trim();
+        const clienteUnidade = cols[1].textContent.replace(/\s+/g, ' ').trim().replace(/;/g, ',');
+        const lembreteResumo = cols[2].textContent.replace(/\s+/g, ' ').trim().replace(/;/g, ',');
+        const valorRaw = cols[3].textContent.replace(/\s+/g, ' ').trim();
         const valor = valorRaw.replace('R$', '').trim().replace(/;/g, '');
-        const ultimoContato = cols[4].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
-        const registro = cols[5].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
+        const ultimoContato = cols[4].textContent.replace(/\s+/g, ' ').trim().replace(/;/g, ',');
+        const registro = cols[5].textContent.replace(/\s+/g, ' ').trim().replace(/;/g, ',');
 
-        csvContent += \`"\${status}";"\${clienteUnidade}";"\${lembreteResumo}";"\${valor}";"\${ultimoContato}";"\${registro}"\\n\`;
+        csvContent += `"${status}";"${clienteUnidade}";"${lembreteResumo}";"${valor}";"${ultimoContato}";"${registro}"\n`;
     });
 
     const dateStr = document.getElementById("selected-agenda-date-str")?.textContent || "agenda";
     const opSelect = document.getElementById("agenda-operator-select");
     let opStr = opSelect ? opSelect.value : "Todos";
-    opStr = opStr === "Todos" ? "Todos_Operadores" : opStr.replace(/\\s+/g, '_');
+    opStr = opStr === "Todos" ? "Todos_Operadores" : opStr.replace(/\s+/g, '_');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", \`Agenda_\${opStr}_\${dateStr.replace(/\\//g, '-')}.csv\`);
+    link.setAttribute("download", `Agenda_${opStr}_${dateStr.replace(/\//g, '-')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
