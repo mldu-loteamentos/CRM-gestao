@@ -815,18 +815,29 @@ window.applyDynamicCityRules = function() {
 
   const cities = new Set();
   AppState.cachedCostCenters.forEach(cc => {
-    // Apenas centros de custo que começam com "1" (Empreendimentos)
+    // Apenas centros de custo que começam com "1", "2" ou "3" (Empreendimentos)
     if (cc && cc.name) {
-      let city = "";
-      if (cc.name.includes('-')) {
-        city = cc.name.split('-')[0].trim().toUpperCase();
-      } else {
-        city = cc.name.trim().toUpperCase();
+      const codeStr = cc.code ? String(cc.code) : "";
+      const nameStr = cc.name ? String(cc.name) : "";
+      
+      if (!/^[123]/.test(codeStr) && !/^[123]/.test(nameStr)) {
+          return;
       }
       
+      let cleanName = nameStr.replace(/^[0-9.]+\s+/, '').trim();
+      let city = "";
+      if (cleanName.includes('-')) {
+        city = cleanName.split('-')[0].trim().toUpperCase();
+      } else {
+        city = cleanName.trim().toUpperCase();
+      }
+      
+      // Remover acentos para padronizar (ex: CERQUEIRA CÉSAR -> CERQUEIRA CESAR)
+      city = city.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+      
       // Tratamento especial para Empreendimento 14201 (Terra do Araçari / Araçariguama)
-      if (String(cc.id) === "14201" || cc.name.toUpperCase().includes("ARAÇARI")) {
-         city = "ARAÇARIGUAMA";
+      if (String(cc.id) === "14201" || cleanName.toUpperCase().includes("ARAÇARI")) {
+         city = "ARACARIGUAMA";
       }
       
       if (city) cities.add(city);
