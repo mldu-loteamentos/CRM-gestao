@@ -66,6 +66,7 @@ module.exports = async function handler(req, res) {
       responseHeaders.delete('content-encoding');
       responseHeaders.delete('content-length');
       responseHeaders.delete('transfer-encoding');
+      responseHeaders.delete('www-authenticate'); // Previne popup de senha no navegador
       
       res.status(response.status);
       responseHeaders.forEach((value, key) => res.setHeader(key, value));

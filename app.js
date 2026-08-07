@@ -10546,21 +10546,28 @@ async function loadAgendaTab(showLoader = false) {
     
     if (idsToFetch.length > 0) {
       const batchSize = 2;
-      for (let i = 0; i < idsToFetch.length; i += batchSize) {
-        const batch = idsToFetch.slice(i, i + batchSize);
-        await Promise.all(batch.map(async (id) => {
-          try {
-            const bills = await SiengeApiService.getPaidBills(null, id);
-            paidBillsCache.map[id] = bills;
-          } catch (e) {
-            paidBillsCache.map[id] = [];
+      // Start background fetch without blocking UI
+      (async () => {
+          for (let i = 0; i < idsToFetch.length; i += batchSize) {
+            const batch = idsToFetch.slice(i, i + batchSize);
+            await Promise.all(batch.map(async (id) => {
+              try {
+                const bills = await SiengeApiService.getPaidBills(null, id);
+                paidBillsCache.map[id] = bills;
+              } catch (e) {
+                paidBillsCache.map[id] = [];
+              }
+            }));
+            if (i + batchSize < idsToFetch.length) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
           }
-        }));
-        if (i + batchSize < idsToFetch.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-      localStorage.setItem(cacheKey, JSON.stringify(paidBillsCache));
+          localStorage.setItem(cacheKey, JSON.stringify(paidBillsCache));
+          // Re-render just the KPIs once done (if still on agenda tab)
+          if (document.getElementById("tab-agenda").style.display !== "none") {
+              if (typeof window.renderConversionKPIs === 'function') window.renderConversionKPIs(paidBillsCache.map, agendaCustomerIds);
+          }
+      })();
     }
     
     agendaCustomerIds.forEach(id => {
@@ -10920,7 +10927,13 @@ window.getActiveQueueDate = function() {
 window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const todayStr = new Date().toISOString().split("T")[0];
   
-  if (!window._dailyQueueCache) window._dailyQueueCache = {};
+  if (!window._dailyQueueCache) {
+      try {
+          window._dailyQueueCache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v2') || '{}');
+      } catch(e) {
+          window._dailyQueueCache = {};
+      }
+  }
   const cacheKey = `${selectedOperator}_${dateStr}`;
   if (window._dailyQueueCache[cacheKey]) {
       let cachedQueue = window._dailyQueueCache[cacheKey];
@@ -11244,6 +11257,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   
   window._dailyQueueCache[cacheKey] = resultQueue;
+  localStorage.setItem('crm_daily_queue_cache_v2', JSON.stringify(window._dailyQueueCache));
   return resultQueue;
 };
 
