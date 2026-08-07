@@ -1448,19 +1448,7 @@ async function checkAuthentication() {
       });
     }
   } else {
-    try {
-      if (window.syncGlobalConfigFromFirebase) {
-         await window.syncGlobalConfigFromFirebase();
-      }
-      const validatedUser = validateAndLoadCrmUser(user);
-      AppState.currentUser = validatedUser;
-      document.getElementById("login-modal-overlay").classList.remove("active");
-      renderUserSession();
-      await initializeApplication();
-    } catch (err) {
-      alert(err.message);
-      MouraAuth.logout();
-    }
+    await processSuccessfulLogin(user);
   }
 }
 
