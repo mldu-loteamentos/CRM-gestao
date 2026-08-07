@@ -87,7 +87,7 @@ window.updateOperatorTabsUI = function() {
          agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
          if (!window.AgendaSelectedOperator) window.AgendaSelectedOperator = "Todos";
      } else {
-         console.log("updateOperatorTabsUI - isAdmin is FALSE. Hiding agenda tabs. User:", window.AppState.currentUser);
+         console.log("updateOperatorTabsUI - isAdmin is FALSE. Hiding agenda tabs. User:", window.AppState ? window.AppState.currentUser : null);
          agendaTabs.style.cssText = "display: none !important;";
          const _cu = window.AppState && window.AppState.currentUser;
          if (_cu) {
