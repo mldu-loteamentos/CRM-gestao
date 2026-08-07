@@ -72,7 +72,7 @@ window.updateOperatorTabsUI = function() {
 
   const isAdmin = (window.AppState && window.AppState.currentUser && (
       window.AppState.currentUser.role === 'ADMIN' || 
-      (window.AppState.currentUser.profile_name && window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN')) ||
+      (window.AppState.currentUser.profile_name && (window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN') || window.AppState.currentUser.profile_name.toUpperCase().includes('GESTOR') || window.AppState.currentUser.profile_name.toUpperCase().includes('GERENTE'))) ||
       (window.AppState.currentUser.email && window.AppState.currentUser.email === 'admin@mouraleite.com.br')
   ));
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
@@ -84,8 +84,13 @@ window.updateOperatorTabsUI = function() {
              agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('${op}')">${op}</button>`;
          });
          agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
+         if (!window.AgendaSelectedOperator) window.AgendaSelectedOperator = "Todos";
      } else {
          agendaTabs.style.display = "none";
+         const opName = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name : "";
+         if (opName) {
+             window.AgendaSelectedOperator = opName;
+         }
      }
   }
 
@@ -10450,12 +10455,25 @@ async function loadAgendaTab(showLoader = false) {
     selectedAgendaDate = new Date();
   
   // Pre-load all customers that have notes/occurrences
-  const agendaCustomerIds = Object.keys(AppState.notes).map(Number);
-  await preloadCustomers(agendaCustomerIds);
+  let agendaCustomerIds = Object.keys(AppState.notes).map(Number);
   
   const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-  const selectedOperator = window.AgendaSelectedOperator || document.getElementById("agenda-operator-select")?.value || "Todos";
+  
+  let initialOp = window.AgendaSelectedOperator;
+  if (!initialOp && !isAdmin) {
+     initialOp = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name : "Todos";
+  }
+  const selectedOperator = initialOp || document.getElementById("agenda-operator-select")?.value || "Todos";
   const selOp = normalizeStr(selectedOperator);
+
+  if (selectedOperator !== "Todos") {
+      agendaCustomerIds = agendaCustomerIds.filter(id => {
+          const occList = AppState.notes[id] || [];
+          return occList.some(occ => normalizeStr(occ.author || "OUTROS") === selOp);
+      });
+  }
+
+  await preloadCustomers(agendaCustomerIds);
 
   // Calculate Agenda KPIs
   const today = new Date();
