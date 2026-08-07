@@ -1302,22 +1302,19 @@ function validateAndLoadCrmUser(user) {
         status: "ATIVO",
         createdAt: new Date().toISOString()
       };
-      crmUsers.push(matchedUser);
-      localStorage.setItem('crm_users', JSON.stringify(crmUsers));
     } else {
-      // Outros usuários entram como PENDENTE
+      // Outros usuários entram como ATIVO automaticamente (OPERADOR)
       matchedUser = {
         id: "usr_" + Date.now(),
         name: user.name,
         email: user.email.toLowerCase(),
         role: "OPERADOR",
-        status: "PENDENTE",
+        status: "ATIVO",
         createdAt: new Date().toISOString()
       };
-      crmUsers.push(matchedUser);
-      localStorage.setItem('crm_users', JSON.stringify(crmUsers));
-      throw new Error("Seu acesso foi registrado e está PENDENTE de aprovação pelo Administrador.");
     }
+    crmUsers.push(matchedUser);
+    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
   }
   
   if (matchedUser.status === "INATIVO") {
@@ -1325,7 +1322,9 @@ function validateAndLoadCrmUser(user) {
   }
   
   if (matchedUser.status === "PENDENTE") {
-    throw new Error("Seu acesso ainda está PENDENTE de aprovação pelo Administrador.");
+    // Se eles ficaram pendentes no passado, nós vamos auto-aprovar agora!
+    matchedUser.status = "ATIVO";
+    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
   }
   
   // Mescla o perfil do CRM com o usuário logado
@@ -1504,6 +1503,83 @@ async function initializeApplication() {
       }
   };
   // --- FIM MIGRACAO FIREBASE NOTES ---
+  
+  // --- INICIO MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
+  try {
+     if (window.firebaseDb && window.firebaseCollections) {
+         // Jud Notes
+         const judSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'jud_notes'));
+         AppState.judNotes = {};
+         judSnapshot.forEach(doc => { AppState.judNotes[doc.id] = doc.data().notes || []; });
+         if (Object.keys(AppState.judNotes).length === 0) {
+             AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
+         }
+         localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+         
+         // Agenda Personal Notes
+         const agendaSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'agenda_personal_notes'));
+         let personalNotes = {};
+         agendaSnapshot.forEach(doc => { personalNotes[doc.id] = doc.data().notes || []; });
+         if (Object.keys(personalNotes).length === 0) {
+             personalNotes = JSON.parse(localStorage.getItem("crm_agenda_personal_notes")) || {};
+         }
+         localStorage.setItem("crm_agenda_personal_notes", JSON.stringify(personalNotes));
+
+         // Agenda Recurring Notes
+         const recurringSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'agenda_recurring_notes'));
+         let recurringNotes = {};
+         recurringSnapshot.forEach(doc => { recurringNotes[doc.id] = doc.data().notes || []; });
+         if (Object.keys(recurringNotes).length === 0) {
+             recurringNotes = JSON.parse(localStorage.getItem("crm_agenda_recurring_notes")) || {};
+         }
+         localStorage.setItem("crm_agenda_recurring_notes", JSON.stringify(recurringNotes));
+     } else {
+         AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
+     }
+  } catch (e) {
+     console.error("Erro ao buscar jud_notes/agenda do Firebase:", e);
+     AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
+  }
+  
+  window.saveJudNotesToFirebase = async function(customerId) {
+      localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+      if (window.firebaseDb && window.firebaseCollections) {
+          try {
+              if (customerId) {
+                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes', String(customerId));
+                 window.firebaseCollections.setDoc(docRef, { notes: AppState.judNotes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
+              } else {
+                 for (const custId of Object.keys(AppState.judNotes)) {
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes', String(custId));
+                    window.firebaseCollections.setDoc(docRef, { notes: AppState.judNotes[custId] || [] }, { merge: true }).catch(e => console.error(e));
+                 }
+              }
+          } catch(e) {
+              console.error('Erro ao salvar jud_notes no Firebase', e);
+          }
+      }
+  };
+
+  window.saveAgendaNotesToFirebase = async function() {
+      const personalNotes = JSON.parse(localStorage.getItem("crm_agenda_personal_notes")) || {};
+      const recurringNotes = JSON.parse(localStorage.getItem("crm_agenda_recurring_notes")) || {};
+      if (window.firebaseDb && window.firebaseCollections) {
+          try {
+             for (const key of Object.keys(personalNotes)) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_personal_notes', key);
+                window.firebaseCollections.setDoc(docRef, { notes: personalNotes[key] || [] }, { merge: true }).catch(e => console.error(e));
+             }
+             for (const key of Object.keys(recurringNotes)) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_recurring_notes', key);
+                window.firebaseCollections.setDoc(docRef, { notes: recurringNotes[key] || [] }, { merge: true }).catch(e => console.error(e));
+             }
+          } catch(e) {
+              console.error('Erro ao salvar agenda notes no Firebase', e);
+          }
+      }
+  };
+  // --- FIM MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
+
   AppState.weSendStatus = JSON.parse(localStorage.getItem("crm_moura_wesend_status")) || {};
   AppState.rules = JSON.parse(localStorage.getItem("crm_moura_rules")) || INITIAL_RULES_CONFIG;
   if (!localStorage.getItem("crm_moura_rules")) {
@@ -11522,69 +11598,58 @@ window.renderAgendaPersonalNotes = function() {
     if (!listDiv) return;
     
     let allNotes = {};
-    let recurringNotes = {};
     try {
         allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
-        recurringNotes = JSON.parse(localStorage.getItem('crm_agenda_recurring_notes') || '{}');
     } catch(e) {}
     
     const dateStr = window.currentSelectedAgendaDate; 
     if (!dateStr) return;
     
-    let op = document.getElementById("agenda-operator-select")?.value || "Todos";
-    op = op.trim();
-    const storageKey = op + "_" + dateStr;
+    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
+    const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
     
-    let dayNotes = allNotes[storageKey];
+    let combinedNotes = [];
     
-    if (!dayNotes && allNotes[dateStr] && Array.isArray(allNotes[dateStr])) {
-        dayNotes = allNotes[dateStr];
-        allNotes[storageKey] = dayNotes;
-        delete allNotes[dateStr];
-        localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
-    }
-    if (!dayNotes) dayNotes = [];
-    
-    let needsSave = false;
-    dayNotes = dayNotes.map(n => {
-        if (typeof n === 'string') {
-            needsSave = true;
-            return { text: n, alarm: null, triggered: false };
-        }
-        return n;
-    });
-    if (needsSave) {
-        allNotes[storageKey] = dayNotes;
-        localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
-    }
-
-    let combinedNotes = dayNotes.map((n, i) => ({ ...n, isRecurringInstance: false, originalIndex: i, _sourceKey: null }));
-
-    const opPrefix = op + "_";
     Object.entries(allNotes).forEach(([key, notes]) => {
-        if (!key.startsWith(opPrefix)) return;
-        const sourceDate = key.slice(opPrefix.length);
-        if (sourceDate === dateStr) return;
         if (!Array.isArray(notes)) return;
+        const parts = key.split("_");
+        const owner = parts[0];
+        const noteDateStr = parts.slice(1).join("_");
+        
+        let needsSave = false;
         notes.forEach((note, ni) => {
-            if (!note.recorrencia || note.recorrencia.tipo === 'nenhuma') return;
-            const checkNote = { ...note, originalDateStr: note.originalDateStr || sourceDate };
-            if (isRecurringNoteActiveOnDate(checkNote, dateStr)) {
-                const dup = combinedNotes.some(cn => cn._sourceKey === key && cn.originalIndex === ni);
-                if (!dup) {
-                    combinedNotes.push({ ...checkNote, isRecurringInstance: true, originalIndex: ni, _sourceKey: key });
+            if (typeof note === 'string') {
+                notes[ni] = { text: note, alarm: null, triggered: false, sharedWith: [] };
+                note = notes[ni];
+                needsSave = true;
+            }
+            const isOwner = (owner === currentUser || owner === "TODOS" || owner === "Todos");
+            const isShared = (note.sharedWith && note.sharedWith.includes(currentUserEmail));
+            
+            if (isOwner || isShared) {
+                const checkNote = { ...note, originalDateStr: note.originalDateStr || noteDateStr };
+                if (noteDateStr === dateStr) {
+                    combinedNotes.push({ ...note, isRecurringInstance: false, originalIndex: ni, _sourceKey: key, _isOwner: isOwner });
+                } else if (note.recorrencia && note.recorrencia.tipo !== 'nenhuma') {
+                    if (isRecurringNoteActiveOnDate(checkNote, dateStr)) {
+                        combinedNotes.push({ ...checkNote, isRecurringInstance: true, originalIndex: ni, _sourceKey: key, _isOwner: isOwner });
+                    }
                 }
             }
         });
+        if (needsSave) {
+            allNotes[key] = notes;
+            localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
+        }
     });
     
-    const orderKey = `crm_agenda_order_${op}_${dateStr}`;
+    const orderKey = `crm_agenda_order_${currentUser}_${dateStr}`;
     let savedOrder = [];
     try { savedOrder = JSON.parse(localStorage.getItem(orderKey) || '[]'); } catch(e){}
 
     combinedNotes.sort((a, b) => {
-        const idA = (a._sourceKey || "current") + "_" + a.originalIndex;
-        const idB = (b._sourceKey || "current") + "_" + b.originalIndex;
+        const idA = a._sourceKey + "_" + a.originalIndex;
+        const idB = b._sourceKey + "_" + b.originalIndex;
         const indexA = savedOrder.indexOf(idA);
         const indexB = savedOrder.indexOf(idB);
         if (indexA !== -1 && indexB !== -1) return indexA - indexB;
@@ -11626,15 +11691,15 @@ window.renderAgendaPersonalNotes = function() {
             e.preventDefault();
             const items = [...listDiv.querySelectorAll('div[data-item-id]')];
             const newOrder = items.map(el => el.dataset.itemId);
-            const opStr = (document.getElementById("agenda-operator-select")?.value || "Todos").trim();
+            const userStr = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
             const dStr = window.currentSelectedAgendaDate;
-            localStorage.setItem(`crm_agenda_order_${opStr}_${dStr}`, JSON.stringify(newOrder));
+            localStorage.setItem(`crm_agenda_order_${userStr}_${dStr}`, JSON.stringify(newOrder));
         });
     }
     
     combinedNotes.forEach((noteObj) => {
         const item = document.createElement("div");
-        const itemId = (noteObj._sourceKey || "current") + "_" + noteObj.originalIndex;
+        const itemId = noteObj._sourceKey + "_" + noteObj.originalIndex;
         item.dataset.itemId = itemId;
         item.setAttribute("draggable", "true");
         item.style.cssText = "display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1; position: relative; z-index: 2; min-height: 36px; cursor: grab;";
@@ -11654,18 +11719,27 @@ window.renderAgendaPersonalNotes = function() {
         const hasRec = noteObj.recorrencia && noteObj.recorrencia.tipo !== 'nenhuma';
         const hasNote = !!noteObj.notaExplicativa;
 
-        // Cor da engrenagem muda conforme estado
         const gearColor = (hasAlarm || hasRec || hasNote) ? 'var(--color-primary)' : '#94a3b8';
         const gearOpacity = (hasAlarm || hasRec || hasNote) ? '0.85' : '0.55';
 
         const menuId = `note-gear-menu-${noteObj.originalIndex}-${noteObj.isRecurringInstance}`;
         const alarmLabel = hasAlarm ? `Alarme: ${new Date(noteObj.alarm).toLocaleString('pt-BR')}` : 'Alarme';
-        // _sourceKey encoded for onclick (empty string = note da data atual)
-        const srcKey = noteObj._sourceKey || '';
+        const srcKey = noteObj._sourceKey;
 
         const isChecked = noteObj.checkedDates && noteObj.checkedDates.includes(dateStr);
         const textDecoration = isChecked ? 'line-through' : 'none';
         const textColor = isChecked ? '#94a3b8' : '#1e293b';
+        
+        let shareBtnHTML = '';
+        if (noteObj._isOwner) {
+            const hasShares = noteObj.sharedWith && noteObj.sharedWith.length > 0;
+            const shareColor = hasShares ? '#10b981' : '#3b82f6';
+            shareBtnHTML = `
+                <button class="btn btn-sm" style="padding: 0; background: none; color: ${shareColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.2s; border-radius:4px;" onclick="openShareAgendaNoteModal('${srcKey}', ${noteObj.originalIndex})" onmouseenter="this.style.opacity='1'; this.style.background='#eff6ff'" onmouseleave="this.style.opacity='0.7'; this.style.background='none'" title="Compartilhar">
+                    <i data-lucide="share-2" style="width: 13px; margin: 0;"></i>
+                </button>
+            `;
+        }
 
         item.innerHTML = `
             <div style="position: absolute; left: 6px; top: 50%; transform: translateY(-50%); z-index: 10;">
@@ -11677,6 +11751,7 @@ window.renderAgendaPersonalNotes = function() {
                 ${noteObj.text}
             </div>
             <div style="display: flex; gap: 2px; align-items: center; padding-right: 8px; flex-shrink:0; position:relative;">
+                ${shareBtnHTML}
                 <button class="btn btn-sm" style="padding: 0; background: none; color: ${gearColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: ${gearOpacity}; transition: opacity 0.2s; border-radius:4px;" onclick="toggleNoteGearMenu(this, '${menuId}', '${dateStr}', ${noteObj.originalIndex}, '${srcKey}')" onmouseenter="this.style.opacity='1'; this.style.background='#f1f5f9'" onmouseleave="this.style.opacity='${gearOpacity}'; this.style.background='none'" title="Opções">
                     <i data-lucide="settings" style="width: 13px; margin: 0;"></i>
                 </button>
@@ -11730,9 +11805,8 @@ window.addAgendaPersonalNote = function() {
     const dateStr = window.currentSelectedAgendaDate;
     if (!dateStr) return;
     
-    let op = document.getElementById("agenda-operator-select")?.value || "Todos";
-    op = op.trim();
-    const storageKey = op + "_" + dateStr;
+    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
+    const storageKey = currentUser + "_" + dateStr;
     
     let allNotes = {};
     try {
@@ -11740,7 +11814,7 @@ window.addAgendaPersonalNote = function() {
     } catch(e) {}
     
     if (!allNotes[storageKey]) allNotes[storageKey] = [];
-    allNotes[storageKey].push({ text: text, alarm: null, triggered: false });
+    allNotes[storageKey].push({ text: text, alarm: null, triggered: false, sharedWith: [] });
     
     localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
     input.value = '';
@@ -11748,17 +11822,25 @@ window.addAgendaPersonalNote = function() {
     window.renderAgendaPersonalNotes();
 };
 
-window.deleteAgendaPersonalNote = function(index, sourceKey = '') {
+window.deleteAgendaPersonalNote = function(index, sourceKey) {
     const dateStr = window.currentSelectedAgendaDate;
     if (!dateStr) return;
 
-    let op = document.getElementById("agenda-operator-select")?.value || "Todos";
-    op = op.trim();
+    let allNotes = {};
+    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
 
-    if (sourceKey) {
+    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
+    const owner = sourceKey.split("_")[0];
+    
+    if (owner !== currentUser && owner !== "TODOS" && owner !== "Todos") {
+        alert("Você não pode excluir um lembrete compartilhado por outra pessoa.");
+        return;
+    }
+
+    const noteDateStr = sourceKey.split("_").slice(1).join("_");
+
+    if (noteDateStr !== dateStr) {
         // É uma instância recorrente vinda de outra data: mostrar opções
-        let allNotes = {};
-        try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
         const notes = allNotes[sourceKey];
         const noteText = (notes && notes[index]) ? notes[index].text : '?';
         showDeleteRecurrenceChoice(index, sourceKey, noteText, dateStr);
@@ -11767,13 +11849,10 @@ window.deleteAgendaPersonalNote = function(index, sourceKey = '') {
 
     // Nota normal da data atual
     if (!confirm('Excluir esta anotação?')) return;
-    const storageKey = op + "_" + dateStr;
-    let allNotes = {};
-    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
 
-    if (allNotes[storageKey]) {
-        allNotes[storageKey].splice(index, 1);
-        if (allNotes[storageKey].length === 0) delete allNotes[storageKey];
+    if (allNotes[sourceKey]) {
+        allNotes[sourceKey].splice(index, 1);
+        if (allNotes[sourceKey].length === 0) delete allNotes[sourceKey];
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         window.renderAgendaPersonalNotes();
     }
@@ -21322,6 +21401,68 @@ window.getDynamicOperators = function(type = 'all') {
     });
 };
 
+window._currentShareNoteParams = null;
+
+window.openShareAgendaNoteModal = function(sourceKey, index) {
+    window._currentShareNoteParams = { sourceKey, index };
+    const modal = document.getElementById('share-agenda-modal');
+    const listDiv = document.getElementById('share-agenda-users-list');
+    
+    // Load current note to see who it's shared with
+    let allNotes = {};
+    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
+    const note = allNotes[sourceKey] ? allNotes[sourceKey][index] : null;
+    const sharedWith = note && note.sharedWith ? note.sharedWith : [];
+    
+    // Populate list of active operators (excluding self)
+    let users = [];
+    try { users = JSON.parse(localStorage.getItem('crm_users') || '[]'); } catch(e) {}
+    const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
+    
+    let html = '';
+    users.forEach(u => {
+        if (u.status !== 'ATIVO' || u.email.toLowerCase() === currentUserEmail) return;
+        const isChecked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; border-radius: 4px;" onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='none'">
+                <input type="checkbox" value="${u.email.toLowerCase()}" class="share-user-checkbox" ${isChecked} style="width: 16px; height: 16px;">
+                <span style="font-size: 0.9rem; color: #334155;">${u.name} (${u.email})</span>
+            </label>
+        `;
+    });
+    
+    if (!html) {
+        html = '<p style="font-size: 0.85rem; color: #64748b;">Nenhum outro operador ativo encontrado.</p>';
+    }
+    
+    listDiv.innerHTML = html;
+    modal.style.display = 'flex';
+};
+
+window.closeShareAgendaModal = function() {
+    document.getElementById('share-agenda-modal').style.display = 'none';
+    window._currentShareNoteParams = null;
+};
+
+window.saveShareAgendaNote = function() {
+    if (!window._currentShareNoteParams) return;
+    const { sourceKey, index } = window._currentShareNoteParams;
+    
+    const checkboxes = document.querySelectorAll('.share-user-checkbox:checked');
+    const selectedEmails = Array.from(checkboxes).map(cb => cb.value);
+    
+    let allNotes = {};
+    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
+    
+    if (allNotes[sourceKey] && allNotes[sourceKey][index]) {
+        allNotes[sourceKey][index].sharedWith = selectedEmails;
+        localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
+        window.renderAgendaPersonalNotes();
+    }
+    
+    window.closeShareAgendaModal();
+};
+
 window.SYNC_KEYS = [
     "crm_users",
     "crm_moura_profiles",
@@ -21412,6 +21553,24 @@ localStorage.setItem = function(key, value) {
             } else {
                 window.saveNotesToFirebase(null); // salvar tudo
             }
+        }, 300);
+    }
+
+    if (key === "crm_moura_jud_notes" && window.saveJudNotesToFirebase) {
+        if (window._fbJudSyncTimeout) clearTimeout(window._fbJudSyncTimeout);
+        window._fbJudSyncTimeout = setTimeout(() => {
+            if (window.AppState && window.AppState.selectedCustomerId) {
+                window.saveJudNotesToFirebase(window.AppState.selectedCustomerId);
+            } else {
+                window.saveJudNotesToFirebase(null);
+            }
+        }, 300);
+    }
+
+    if ((key === "crm_agenda_personal_notes" || key === "crm_agenda_recurring_notes") && window.saveAgendaNotesToFirebase) {
+        if (window._fbAgendaSyncTimeout) clearTimeout(window._fbAgendaSyncTimeout);
+        window._fbAgendaSyncTimeout = setTimeout(() => {
+            window.saveAgendaNotesToFirebase();
         }, 300);
     }
     
