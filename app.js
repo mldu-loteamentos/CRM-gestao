@@ -68,13 +68,19 @@ window.updateOperatorTabsUI = function() {
      if (exportBtn) filaTabs.appendChild(exportBtn);
   }
 
+  const isAdmin = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.role === 'ADMIN');
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
   if (agendaTabs) {
-     agendaTabs.innerHTML = `<button class="operator-tab-btn active" onclick="setAgendaOperator('Todos')">TODOS</button>`;
-     dynOps.forEach(op => {
-         agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('${op}')">${op}</button>`;
-     });
-     agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
+     if (isAdmin) {
+         agendaTabs.style.display = "flex";
+         agendaTabs.innerHTML = `<button class="operator-tab-btn active" onclick="setAgendaOperator('Todos')">TODOS</button>`;
+         dynOps.forEach(op => {
+             agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('${op}')">${op}</button>`;
+         });
+         agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
+     } else {
+         agendaTabs.style.display = "none";
+     }
   }
 
   const agendaSelect = document.getElementById("agenda-operator-select");
@@ -1349,6 +1355,16 @@ async function processSuccessfulLogin(loggedUser) {
     }
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
+    
+    if (validatedUser.role === 'ADMIN') {
+        window.AgendaSelectedOperator = "Todos";
+    } else {
+        window.AgendaSelectedOperator = validatedUser.name.toUpperCase();
+    }
+    if (typeof window.updateOperatorTabsUI === 'function') {
+        window.updateOperatorTabsUI();
+    }
+
     document.getElementById("login-modal-overlay").classList.remove("active");
     renderUserSession();
     await initializeApplication();
@@ -11711,7 +11727,7 @@ window.renderAgendaPersonalNotes = function() {
     
     listDiv.innerHTML = '';
     
-    listDiv.style.cssText = "display: flex; flex-direction: column; background: #fffcf2 linear-gradient(to right, transparent 30px, rgba(239, 68, 68, 0.4) 30px, rgba(239, 68, 68, 0.4) 32px, transparent 32px); border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); overflow-y: auto; overflow-x: hidden; position: relative; height: 333px;";
+    listDiv.style.cssText = "display: flex; flex-direction: column; background-color: #fffcf2; background-image: linear-gradient(to right, transparent 30px, rgba(239, 68, 68, 0.4) 30px, rgba(239, 68, 68, 0.4) 32px, transparent 32px), repeating-linear-gradient(transparent, transparent 35px, #cbd5e1 35px, #cbd5e1 36px); background-attachment: local; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: inset 0 0 10px rgba(0,0,0,0.02); overflow-y: auto; overflow-x: hidden; position: relative; height: 333px;";
     
     if (!listDiv.dataset.dragEnabled) {
         listDiv.dataset.dragEnabled = "true";
@@ -11753,7 +11769,16 @@ window.renderAgendaPersonalNotes = function() {
         const itemId = noteObj._sourceKey + "_" + noteObj.originalIndex;
         item.dataset.itemId = itemId;
         item.setAttribute("draggable", "true");
-        item.style.cssText = "display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1; position: relative; z-index: 2; min-height: 36px; cursor: grab;";
+        item.style.cssText = "display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid transparent; position: relative; z-index: 2; min-height: 36px; cursor: grab;";
+        
+        item.onmouseenter = () => {
+            const actions = item.querySelector('.note-actions');
+            if (actions) actions.style.opacity = '1';
+        };
+        item.onmouseleave = () => {
+            const actions = item.querySelector('.note-actions');
+            if (actions) actions.style.opacity = '0';
+        };
         
         item.addEventListener("dragstart", (e) => {
             item.classList.add("dragging");
@@ -12400,7 +12425,7 @@ window.toggleAgendaNoteCheck = function(srcKey, originalIndex) {
     }
 };
 
-window.AgendaSelectedOperator = "Todos";
+window.AgendaSelectedOperator = "";
 window.setAgendaOperator = function(op) {
   window.AgendaSelectedOperator = op;
   const selectEl = document.getElementById("agenda-operator-select");
@@ -21608,4 +21633,70 @@ localStorage.setItem = function(key, value) {
             }
         }, 1500); // 1.5s debounce para não sobrecarregar em edições em lote
     }
+    }
+};
+
+// ---------------- SHARE AGENDA MODAL ----------------
+window.openShareAgendaNoteModal = function(srcKey, originalIndex) {
+    window._currentShareNoteKey = srcKey;
+    window._currentShareNoteIdx = originalIndex;
+    
+    let allNotes = {};
+    try {
+        allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
+    } catch(e) {}
+    
+    const note = allNotes[srcKey] ? allNotes[srcKey][originalIndex] : null;
+    if(!note) return;
+    
+    const sharedWith = note.sharedWith || [];
+    const dynOps = window.getDynamicOperators();
+    const modalBody = document.getElementById("share-agenda-users-list");
+    
+    if(modalBody) {
+        let html = '';
+        const crmUsers = JSON.parse(localStorage.getItem('crm_users') || '[]');
+        
+        dynOps.forEach(op => {
+            const u = crmUsers.find(x => x.name.toUpperCase() === op.toUpperCase());
+            if(u && u.email && window.AppState && window.AppState.currentUser && u.email.toLowerCase() !== window.AppState.currentUser.email.toLowerCase()) {
+                const checked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
+                html += `
+                  <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;">
+                     <input type="checkbox" class="share-user-chk" value="${u.email.toLowerCase()}" ${checked} style="width:16px;height:16px;accent-color:var(--color-primary);">
+                     <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${op}</span>
+                  </label>
+                `;
+            }
+        });
+        
+        if(html === '') html = '<p style="font-size:0.85rem; color:#64748b; text-align:center;">Não há outros operadores para compartilhar.</p>';
+        modalBody.innerHTML = html;
+    }
+    document.getElementById("share-agenda-modal").style.display = "flex";
+};
+
+window.closeShareAgendaModal = function() {
+    document.getElementById("share-agenda-modal").style.display = "none";
+};
+
+window.saveShareAgendaNote = function() {
+    const allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
+    if(!window._currentShareNoteKey || window._currentShareNoteIdx === undefined) return;
+    if(!allNotes[window._currentShareNoteKey]) return;
+    const note = allNotes[window._currentShareNoteKey][window._currentShareNoteIdx];
+    if(!note) return;
+    
+    const chks = document.querySelectorAll(".share-user-chk:checked");
+    const sharedWith = Array.from(chks).map(c => c.value);
+    
+    note.sharedWith = sharedWith;
+    localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
+    
+    if (typeof window.saveAgendaNotesToFirebase === 'function') {
+        window.saveAgendaNotesToFirebase();
+    }
+    
+    window.closeShareAgendaModal();
+    if(window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
 };
