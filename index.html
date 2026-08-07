@@ -2161,12 +2161,15 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
             <!-- Compromissos do Dia Selecionado -->
             <div style="position: relative;">
               <div class="crm-card" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 1.5rem; display: flex; flex-direction: column;">
-                <div class="crm-header" style="border: none; padding: 0; margin-bottom: 1.2rem; flex-shrink: 0;">
+                <div class="crm-header" style="border: none; padding: 0; margin-bottom: 1.2rem; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;">
                   <h3
                     style="font-size: 1.1rem; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 8px; margin: 0;">
                     <i data-lucide="list-todo" style="width: 20px;"></i> Compromissos de: <span
                       id="selected-agenda-date-str" style="color: var(--color-secondary);">23/05/2026</span>
                   </h3>
+                  <button class="btn btn-secondary" onclick="exportAgendaToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar Agenda do Dia para Excel">
+                    <i data-lucide="download" style="width: 14px;"></i> Exportar Agenda
+                  </button>
                 </div>
 
                 <div class="table-container"

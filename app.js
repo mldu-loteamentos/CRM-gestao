@@ -73,7 +73,7 @@ window.updateOperatorTabsUI = function() {
   const isAdmin = (window.AppState && window.AppState.currentUser && (
       (window.AppState.currentUser.role && window.AppState.currentUser.role.toUpperCase().includes('ADMIN')) || 
       (window.AppState.currentUser.profile_name && (window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN') || window.AppState.currentUser.profile_name.toUpperCase().includes('GESTOR') || window.AppState.currentUser.profile_name.toUpperCase().includes('GERENTE'))) ||
-      (window.AppState.currentUser.email && (window.AppState.currentUser.email === 'admin@mouraleite.com.br' || window.AppState.currentUser.email === 'israel@mouraleite.com.br'))
+      (window.AppState.currentUser.email && (window.AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br' || window.AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || window.AppState.currentUser.email.toLowerCase() === 'atendimento@mouraleite.com.br'))
   ));
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
   if (agendaTabs) {
@@ -904,6 +904,21 @@ window.applyDynamicCityRules = function() {
   window.checkUnassignedCities();
 };
 
+window.extractCityFromCostCenter = function(idCCusto, ccName) {
+    if (!idCCusto && !ccName) return "NÃO INFORMADA";
+    
+    let city = "";
+    if (ccName && ccName.includes('-')) {
+        city = ccName.split('-')[0].trim().toUpperCase();
+    }
+    
+    if (String(idCCusto) === "14201" || (ccName && ccName.toUpperCase().includes("ARAÇARI"))) {
+       city = "ARAÇARIGUAMA";
+    }
+    
+    return city || "NÃO INFORMADA";
+};
+
 function getRuleOperator(ruleId, defaultOp, customerId = null) {
   if (AppState.rules && AppState.rules[ruleId]) {
     const op = AppState.rules[ruleId].operator;
@@ -1371,6 +1386,7 @@ async function processSuccessfulLogin(loggedUser) {
     }
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
+    window.updateOperatorTabsUI();
     
     // Determine admin/gestor status based on role OR profile_name
     const _profileNameUp = (validatedUser.profile_name || '').toUpperCase();
@@ -21831,4 +21847,51 @@ window.saveShareAgendaNote = function() {
     
     window.closeShareAgendaModal();
     if(window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+};
+
+window.exportAgendaToExcel = function() {
+    const tableBody = document.getElementById("agenda-selected-day-body");
+    if (!tableBody || tableBody.querySelectorAll('tr').length === 0 || tableBody.innerHTML.includes('Nenhum compromisso')) {
+        alert("Não há dados na agenda para exportar.");
+        return;
+    }
+
+    const rows = Array.from(tableBody.querySelectorAll("tr"));
+    
+    // Header
+    let csvContent = "\\uFEFF"; // BOM para acentuação no Excel
+    csvContent += "Status;Cliente/Unidade;Lembrete/Resumo;R$ Atualizado;Ultimo Contato;Registro\\n";
+
+    rows.forEach(row => {
+        const cols = Array.from(row.querySelectorAll("td"));
+        if (cols.length < 6) return;
+        
+        let status = cols[0].textContent.trim();
+        if (cols[0].querySelector('.lucide-clock')) status = 'Pendente';
+        else if (cols[0].querySelector('.lucide-check-circle')) status = 'Resolvido';
+        else if (cols[0].querySelector('.lucide-x-circle')) status = 'Cancelado';
+
+        const clienteUnidade = cols[1].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
+        const lembreteResumo = cols[2].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
+        const valorRaw = cols[3].textContent.replace(/\\s+/g, ' ').trim();
+        const valor = valorRaw.replace('R$', '').trim().replace(/;/g, '');
+        const ultimoContato = cols[4].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
+        const registro = cols[5].textContent.replace(/\\s+/g, ' ').trim().replace(/;/g, ',');
+
+        csvContent += \`"\${status}";"\${clienteUnidade}";"\${lembreteResumo}";"\${valor}";"\${ultimoContato}";"\${registro}"\\n\`;
+    });
+
+    const dateStr = document.getElementById("selected-agenda-date-str")?.textContent || "agenda";
+    const opSelect = document.getElementById("agenda-operator-select");
+    let opStr = opSelect ? opSelect.value : "Todos";
+    opStr = opStr === "Todos" ? "Todos_Operadores" : opStr.replace(/\\s+/g, '_');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", \`Agenda_\${opStr}_\${dateStr.replace(/\\//g, '-')}.csv\`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 };

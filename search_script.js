@@ -1,9 +1,10 @@
 const fs = require('fs');
-const lines = fs.readFileSync('index.html', 'utf8').split('\n');
+const content = fs.readFileSync('app.js', 'utf8');
+const lines = content.split('\n');
 const results = [];
-lines.forEach((l, i) => {
-  if (l.toLowerCase().includes('contas a receber')) {
-    results.push((i + 1) + ': ' + l.trim());
-  }
+lines.forEach((line, i) => {
+    if (line.includes('updateOperatorTabsUI')) {
+        results.push((i + 1) + ': ' + line.trim());
+    }
 });
-fs.writeFileSync('search_result.txt', results.join('\n'));
+fs.writeFileSync('search_results.txt', results.join('\n'));
