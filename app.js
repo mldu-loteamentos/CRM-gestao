@@ -2006,11 +2006,17 @@ async function loadDashboardData(forceRefresh = false) {
     try { await _loadDashboardData_Impl(forceRefresh); }
     finally { window._isDefaultersLoading = false; }
 }
-window.advFiltersFila = {};
-window.advFiltersSubjudice = {};
-window.advFiltersZeroPaid = {};
+const defaultAdvFilterState = {
+    lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
+    cidade: [], empresa: [], ccusto: [], operador: [],
+    contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: []
+};
+window.advFiltersFila = JSON.parse(JSON.stringify(defaultAdvFilterState));
+window.advFiltersSubjudice = JSON.parse(JSON.stringify(defaultAdvFilterState));
+window.advFiltersZeroPaid = JSON.parse(JSON.stringify(defaultAdvFilterState));
 window.currentAdvFilterContext = 'fila';
 window.advFilters = window.advFiltersFila;
+
 
 window.applyAdvFiltersTo = (sourceList) => {
     let filteredList = sourceList;
