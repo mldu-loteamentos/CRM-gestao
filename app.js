@@ -1591,6 +1591,44 @@ async function initializeApplication() {
   };
   // --- FIM MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
 
+  // --- INICIALIZAÇÃO DE ESTADOS GLOBAIS (Timeline e Judiciais) ---
+  const timelineStr = localStorage.getItem("crm_moura_timeline_nodes");
+  window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [
+    { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
+    { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
+    { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
+  ];
+  if (!localStorage.getItem("crm_moura_timeline_v2")) {
+      window.TimelineState = [
+        { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
+        { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
+        { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
+      ];
+      localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+      localStorage.setItem("crm_moura_timeline_v2", "true");
+  }
+
+  const judStr = localStorage.getItem("crm_moura_judiciais");
+  window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [
+    { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
+    { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
+    { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
+    { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
+    { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
+  ];
+  if (!localStorage.getItem("crm_moura_judiciais_v2")) {
+      window.EtapasJudiciaisState = [
+        { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
+        { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
+        { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
+        { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
+        { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
+      ];
+      localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+      localStorage.setItem("crm_moura_judiciais_v2", "true");
+  }
+  // --- FIM ESTADOS GLOBAIS ---
+
   AppState.weSendStatus = JSON.parse(localStorage.getItem("crm_moura_wesend_status")) || {};
   AppState.rules = JSON.parse(localStorage.getItem("crm_moura_rules")) || INITIAL_RULES_CONFIG;
   if (!localStorage.getItem("crm_moura_rules")) {
@@ -13659,50 +13697,7 @@ function renderRulesSettingsTable() {
   if (document.getElementById("rule-param-parcelas")) document.getElementById("rule-param-parcelas").value = params.renegParcelas || 12;
   if (document.getElementById("rule-param-taxa")) document.getElementById("rule-param-taxa").value = params.renegTaxa || 3.0;
   
-  // Carregar/Criar Estado da Timeline
-  const timelineStr = localStorage.getItem("crm_moura_timeline_nodes");
-  window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [
-    { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
-    { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
-    { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
-  ];
-  
-  // Força atualização v2 da Timeline (hardcode solicitado)
-  if (!localStorage.getItem("crm_moura_timeline_v2")) {
-      window.TimelineState = [
-        { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
-        { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
-        { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
-      ];
-      localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
-      localStorage.setItem("crm_moura_timeline_v2", "true");
-  }
-  
   window.renderTimeline();
-
-  // Carregar/Criar Estado das Etapas Judiciais
-  const judStr = localStorage.getItem("crm_moura_judiciais");
-  window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [
-    { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-    { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
-    { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
-    { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-    { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
-  ];
-  
-  // Força atualização v2 das Etapas Judiciais
-  if (!localStorage.getItem("crm_moura_judiciais_v2")) {
-      window.EtapasJudiciaisState = [
-        { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-        { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
-        { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
-        { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-        { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
-      ];
-      localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-      localStorage.setItem("crm_moura_judiciais_v2", "true");
-  }
-  
   window.renderEtapasJudiciais();
   if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
   
