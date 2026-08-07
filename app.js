@@ -1503,35 +1503,32 @@ async function initializeApplication() {
       await window.syncGlobalConfigFromFirebase();
   }
 
-  // --- Limpeza automática final de dados de teste (Github deploy) ---
-  if (!localStorage.getItem("crm_cleared_tests_github_final")) {
-      localStorage.removeItem("crm_moura_notes");
-      localStorage.removeItem("crm_moura_jud_notes");
-      localStorage.removeItem("crm_queue_entry_dates");
-      localStorage.removeItem("crm_moura_occurrences");
-      localStorage.removeItem("crm_moura_timeline_nodes");
-      localStorage.removeItem("subjudiceHistory");
-      localStorage.setItem("crm_cleared_tests_github_final", "true");
-      console.log("Bases de testes (Ocorrências, Promessas, Jurídico) apagadas com sucesso.");
-  }
 
   // Carregar dados armazenados localmente (SharePoint preambles & occurrences)
   AppState.preambles = JSON.parse(localStorage.getItem("crm_moura_preambles")) || window.MOCK_DATA.INITIAL_PREAMBLE_DATA;
   
   // --- INICIO MIGRACAO FIREBASE NOTES ---
+  // Strategy: merge Firebase (source of truth for cloud) with localStorage (local fallback)
+  // Firebase wins on a per-customer basis if the customer exists in Firebase.
   try {
+     const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
      if (window.firebaseDb && window.firebaseCollections) {
          const notesSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'customer_notes'));
-         AppState.notes = {};
+         const firebaseNotes = {};
          notesSnapshot.forEach(doc => {
-             AppState.notes[doc.id] = doc.data().notes || [];
+             if (doc.data().notes && doc.data().notes.length > 0) {
+                 firebaseNotes[doc.id] = doc.data().notes;
+             }
          });
+         // Merge: start with local notes, then override with Firebase notes (Firebase is authoritative)
+         AppState.notes = { ...localNotes, ...firebaseNotes };
          if (Object.keys(AppState.notes).length === 0) {
-             AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
+             AppState.notes = window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
          }
+         console.log(`[Firebase] Notas carregadas: ${Object.keys(firebaseNotes).length} do Firebase, ${Object.keys(localNotes).length} locais. Total: ${Object.keys(AppState.notes).length} clientes.`);
          localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
      } else {
-         AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
+         AppState.notes = localNotes.length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
      }
   } catch (e) {
      console.error("Erro ao buscar notas do Firebase:", e);
@@ -21583,7 +21580,6 @@ window.syncGlobalConfigFromFirebase = async function() {
     }
 };
 
-// Função para forçar o primeiro envio da máquina base (Israel)
 window.forceUploadLocalConfig = async function() {
     try {
         let payload = {};
@@ -21604,6 +21600,87 @@ window.forceUploadLocalConfig = async function() {
         alert("✔️ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
     } catch(e) {
         alert("Erro ao enviar: " + e.message);
+    }
+};
+
+// Sincronização em lote de todas as notas (ocorrências, agenda, jud) para o Firebase
+window.syncAllNotesToFirebase = async function() {
+    const statusEl = document.getElementById('firebase-sync-status');
+    const setStatus = (msg, color) => {
+        if (statusEl) { statusEl.textContent = msg; statusEl.style.color = color || '#64748b'; }
+        console.log('[SyncNotes]', msg);
+    };
+    
+    if (!window.firebaseDb || !window.firebaseCollections) {
+        setStatus('❌ Firebase não está inicializado. Tente novamente em alguns instantes.', '#ef4444');
+        return;
+    }
+    
+    try {
+        setStatus('🔄 Sincronizando notas de clientes...', '#1d4ed8');
+        
+        // 1. customer_notes (ocorrências e promessas)
+        const notes = window.AppState && window.AppState.notes ? window.AppState.notes : 
+                      (JSON.parse(localStorage.getItem('crm_moura_notes') || '{}'));
+        const noteKeys = Object.keys(notes);
+        let uploadedNotes = 0;
+        
+        for (const custId of noteKeys) {
+            if (notes[custId] && notes[custId].length > 0) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(custId));
+                await window.firebaseCollections.setDoc(docRef, { notes: notes[custId] }, { merge: false });
+                uploadedNotes++;
+                if (uploadedNotes % 10 === 0) {
+                    setStatus(`🔄 Sincronizando notas... ${uploadedNotes}/${noteKeys.length} clientes`, '#1d4ed8');
+                }
+                // Small delay to avoid rate limiting
+                if (uploadedNotes % 5 === 0) await new Promise(r => setTimeout(r, 200));
+            }
+        }
+        
+        // 2. jud_notes
+        setStatus('🔄 Sincronizando notas judiciais...', '#1d4ed8');
+        const judNotes = window.AppState && window.AppState.judNotes ? window.AppState.judNotes :
+                         (JSON.parse(localStorage.getItem('crm_moura_jud_notes') || '{}'));
+        let uploadedJud = 0;
+        for (const custId of Object.keys(judNotes)) {
+            if (judNotes[custId] && judNotes[custId].length > 0) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes', String(custId));
+                await window.firebaseCollections.setDoc(docRef, { notes: judNotes[custId] }, { merge: false });
+                uploadedJud++;
+                if (uploadedJud % 5 === 0) await new Promise(r => setTimeout(r, 200));
+            }
+        }
+        
+        // 3. agenda_personal_notes
+        setStatus('🔄 Sincronizando notas pessoais de agenda...', '#1d4ed8');
+        const personalNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
+        for (const key of Object.keys(personalNotes)) {
+            if (personalNotes[key] && personalNotes[key].length > 0) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_personal_notes', key);
+                await window.firebaseCollections.setDoc(docRef, { notes: personalNotes[key] }, { merge: false });
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+        
+        // 4. agenda_recurring_notes
+        const recurringNotes = JSON.parse(localStorage.getItem('crm_agenda_recurring_notes') || '{}');
+        for (const key of Object.keys(recurringNotes)) {
+            if (recurringNotes[key] && recurringNotes[key].length > 0) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'agenda_recurring_notes', key);
+                await window.firebaseCollections.setDoc(docRef, { notes: recurringNotes[key] }, { merge: false });
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+        
+        const msg = `✅ Sincronização concluída! ${uploadedNotes} clientes com ocorrências, ${uploadedJud} com notas judiciais enviados para o Firebase.`;
+        setStatus(msg, '#16a34a');
+        setTimeout(() => alert(msg + '\n\nAtualize a página na Vercel para ver os dados.'), 100);
+        
+    } catch(e) {
+        const errMsg = '❌ Erro na sincronização: ' + e.message;
+        setStatus(errMsg, '#ef4444');
+        console.error('[SyncNotes] Erro:', e);
     }
 };
 

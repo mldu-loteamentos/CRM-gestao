@@ -2457,8 +2457,33 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
               <i data-lucide="shield-check" style="width: 16px;"></i> Gravar E-mail Admin
             </button>
           </div>
+          <!-- Sincronização Firebase -->
+          <div class="crm-card" id="firebase-sync-card">
+            <div class="crm-header" style="background: #1a365d;">
+              <h2 style="display:flex; align-items:center; gap:8px;">
+                <i data-lucide="cloud-upload" style="width:18px;"></i>
+                Sincronização de Dados com a Nuvem
+              </h2>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+              Use estes botões para sincronizar dados entre esta máquina e o Firebase (nuvem). 
+              <strong>Faça isto sempre que criar dados localmente que precisam aparecer para outros usuários na Vercel.</strong>
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+              <button class="btn btn-primary" onclick="window.syncAllNotesToFirebase()" style="flex:1; min-width:220px;">
+                <i data-lucide="calendar-clock" style="width: 16px;"></i>
+                Subir Todas as Ocorrências/Agenda
+              </button>
+              <button class="btn btn-secondary" onclick="window.forceUploadLocalConfig()" style="flex:1; min-width:220px;">
+                <i data-lucide="settings-2" style="width: 16px;"></i>
+                Subir Configurações (Regras, Usuários)
+              </button>
+            </div>
+            <div id="firebase-sync-status" style="margin-top:12px; font-size:0.85rem; color:#64748b;"></div>
+          </div>
 
           <!-- Configuração Azure Active Directory -->
+
           <div class="crm-card">
             <div class="crm-header">
               <h2>Configuração Microsoft Azure AD</h2>
