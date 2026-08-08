@@ -103,7 +103,7 @@ window.VerificarConstrucaoApp = {
             // 1. Filtrar clientes
             const clients = window.rawClientList || (window.currentAppState && window.currentAppState.sales) || [];
             const elegiveis = clients.filter(c => {
-                const maxDelay = parseInt(c.maxDelayDays) || 0;
+                const maxDelay = parseInt(c.maxDaysDelay) || 0;
                 return maxDelay >= thresholdDays;
             });
             

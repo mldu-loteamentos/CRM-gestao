@@ -2040,19 +2040,17 @@ window.applyAdvFiltersTo = (sourceList) => {
                     const city = window.extractCityFromCostCenter(comp.id, comp.name);
                     if (city && window.advFilters.cidade.includes(city)) {
                         validCompanies.add(String(comp.id));
-                        let prefix = String(comp.id).replace(/00$/, '');
-                        if (prefix) validPrefixes.add(prefix);
                     }
                 });
             }
 
-            // 2. Extrair cidades a partir dos Centros de Custo
+            // 2. Extrair cidades a partir dos Centros de Custo (correspondência exata de CC ou prefixo fixo)
+            const validCostCenters = new Set();
             if (window.AppState && window.AppState.cachedCostCenters) {
                 window.AppState.cachedCostCenters.forEach(cc => {
                     const city = window.extractCityFromCostCenter(cc.id, cc.name);
                     if (city && window.advFilters.cidade.includes(city)) {
-                        let prefix = String(cc.id).replace(/00$/, '');
-                        if (prefix) validPrefixes.add(prefix);
+                        validCostCenters.add(String(cc.id));
                     }
                 });
             }
@@ -2071,10 +2069,18 @@ window.applyAdvFiltersTo = (sourceList) => {
                 const city = window.extractCityFromCostCenter(primaryId, ccName);
                 if (city && window.advFilters.cidade.includes(city)) return true;
                 
-                // Checar pelo prefixo numérico do Centro de Custo
-                for (let prefix of validPrefixes) {
-                    if (primaryId.startsWith(prefix)) return true;
+                // Checar se o primaryId bate com a lista de CCs válidos extraída
+                if (validCostCenters.has(primaryId)) return true;
+
+                // Casos especiais Sienge: prefixo conhecido (137 a 140 para Avaré)
+                if (window.advFilters.cidade.includes("AVARE") && ["137", "138", "139", "140"].some(p => primaryId.startsWith(p))) {
+                    return true;
                 }
+                // Reserva do Araçari (142) e Jd São Paulo (149)
+                if (window.advFilters.cidade.includes("ARACARIGUAMA") && (primaryId.startsWith("142") || primaryId.startsWith("149"))) {
+                    return true;
+                }
+                
                 return false;
             });
         }
@@ -11908,7 +11914,7 @@ window.renderAgendaPersonalNotes = function() {
             const hasShares = noteObj.sharedWith && noteObj.sharedWith.length > 0;
             const shareColor = hasShares ? '#10b981' : '#3b82f6';
             shareBtnHTML = `
-                <button class="btn btn-sm" style="padding: 0; background: none; color: ${shareColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.2s; border-radius:4px;" onclick="openShareAgendaNoteModal('${srcKey}', ${noteObj.originalIndex}, ${noteObj.isRecurringInstance})" onmouseenter="this.style.opacity='1'; this.style.background='#eff6ff'" onmouseleave="this.style.opacity='0.7'; this.style.background='none'" title="Compartilhar">
+                <button class="btn btn-sm" style="padding: 0; background: none; color: ${shareColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.2s; border-radius:4px;" onclick="openShareAgendaNoteModal('${srcKey}', ${noteObj.originalIndex}, ${noteObj.isRecurringInstance === true})" onmouseenter="this.style.opacity='1'; this.style.background='#eff6ff'" onmouseleave="this.style.opacity='0.7'; this.style.background='none'" title="Compartilhar">
                     <i data-lucide="share-2" style="width: 13px; margin: 0;"></i>
                 </button>
             `;
