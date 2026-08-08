@@ -2024,17 +2024,36 @@ window.applyAdvFiltersTo = (sourceList) => {
         
         if (window.advFilters.cidade && window.advFilters.cidade.length > 0) {
             const validPrefixes = new Set();
+            const validCompanies = new Set();
+            
+            // 1. Extrair cidades a partir das Empresas (Empreendimentos)
+            if (window.AppState && window.AppState.companies) {
+                window.AppState.companies.forEach(comp => {
+                    const city = window.extractCityFromCostCenter(comp.id, comp.name);
+                    if (city && window.advFilters.cidade.includes(city)) {
+                        validCompanies.add(String(comp.id));
+                        let prefix = String(comp.id).replace(/00$/, '');
+                        if (prefix) validPrefixes.add(prefix);
+                    }
+                });
+            }
+
+            // 2. Extrair cidades a partir dos Centros de Custo
             if (window.AppState && window.AppState.cachedCostCenters) {
                 window.AppState.cachedCostCenters.forEach(cc => {
                     const city = window.extractCityFromCostCenter(cc.id, cc.name);
                     if (city && window.advFilters.cidade.includes(city)) {
-                        let prefix = String(cc.id).replace(/0+$/, '');
+                        let prefix = String(cc.id).replace(/00$/, '');
                         if (prefix) validPrefixes.add(prefix);
                     }
                 });
             }
 
             filteredList = filteredList.filter(c => {
+                // Checar pela Empresa
+                if (c.companyId && validCompanies.has(String(c.companyId))) return true;
+
+                // Checar pelo Centro de Custo
                 let ccName = "";
                 const primaryId = getPrimaryCostCenter(c.costCenterId);
                 if (window.AppState && window.AppState.cachedCostCenters) {
@@ -2044,6 +2063,7 @@ window.applyAdvFiltersTo = (sourceList) => {
                 const city = window.extractCityFromCostCenter(primaryId, ccName);
                 if (city && window.advFilters.cidade.includes(city)) return true;
                 
+                // Checar pelo prefixo numérico do Centro de Custo
                 for (let prefix of validPrefixes) {
                     if (primaryId.startsWith(prefix)) return true;
                 }
