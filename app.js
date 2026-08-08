@@ -1858,7 +1858,7 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
     if (!ccIdStr.startsWith("1") && !ccIdStr.startsWith("2") && !ccIdStr.startsWith("3")) {
         return null;
     }
-    let cleanName = (ccName || "").replace(new RegExp(`^${ccIdStr}\\s*-\\s*`), '');
+    let cleanName = (ccName || "").replace(/^(?:\d+\s*-\s*)+/, '');
     if (cleanName.toUpperCase().startsWith("C.C. ")) {
         cleanName = cleanName.substring(5);
     }
@@ -2023,6 +2023,17 @@ window.applyAdvFiltersTo = (sourceList) => {
         }
         
         if (window.advFilters.cidade && window.advFilters.cidade.length > 0) {
+            const validPrefixes = new Set();
+            if (window.AppState && window.AppState.cachedCostCenters) {
+                window.AppState.cachedCostCenters.forEach(cc => {
+                    const city = window.extractCityFromCostCenter(cc.id, cc.name);
+                    if (city && window.advFilters.cidade.includes(city)) {
+                        let prefix = String(cc.id).replace(/0+$/, '');
+                        if (prefix) validPrefixes.add(prefix);
+                    }
+                });
+            }
+
             filteredList = filteredList.filter(c => {
                 let ccName = "";
                 const primaryId = getPrimaryCostCenter(c.costCenterId);
@@ -2031,7 +2042,12 @@ window.applyAdvFiltersTo = (sourceList) => {
                     if (ccObj) ccName = ccObj.name || "";
                 }
                 const city = window.extractCityFromCostCenter(primaryId, ccName);
-                return city ? window.advFilters.cidade.includes(city) : false;
+                if (city && window.advFilters.cidade.includes(city)) return true;
+                
+                for (let prefix of validPrefixes) {
+                    if (primaryId.startsWith(prefix)) return true;
+                }
+                return false;
             });
         }
         
