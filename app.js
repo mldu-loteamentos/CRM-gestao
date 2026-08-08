@@ -1685,6 +1685,11 @@ async function loadAndApplyPermissions() {
       if (permsStr) {
          let permsObj = JSON.parse(permsStr);
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
+         
+         // Forçar permissões de ADMIN para o Israel e Admin (fallback de segurança)
+         if (AppState.currentUser.email && (AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br')) {
+             AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
+         }
       } else {
          console.warn("Permissões não encontradas no localStorage para o perfil:", profileId, "Aplicando padrão.");
          AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
