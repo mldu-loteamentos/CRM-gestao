@@ -1867,6 +1867,9 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
     if (ccIdStr === "14201" || cleanName.toUpperCase().includes("ARAÇARI") || cleanName.toUpperCase().includes("ARACARI")) {
         return "ARACARIGUAMA";
     }
+    if (["137", "138", "139", "140"].some(p => ccIdStr.startsWith(p)) || cleanName.toUpperCase().includes("AVARE")) {
+        return "AVARE";
+    }
     if (cityMatch && cityMatch.length > 2 && isNaN(cityMatch)) {
         return cityMatch;
     }
@@ -11900,7 +11903,7 @@ window.renderAgendaPersonalNotes = function() {
             const hasShares = noteObj.sharedWith && noteObj.sharedWith.length > 0;
             const shareColor = hasShares ? '#10b981' : '#3b82f6';
             shareBtnHTML = `
-                <button class="btn btn-sm" style="padding: 0; background: none; color: ${shareColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.2s; border-radius:4px;" onclick="openShareAgendaNoteModal('${srcKey}', ${noteObj.originalIndex})" onmouseenter="this.style.opacity='1'; this.style.background='#eff6ff'" onmouseleave="this.style.opacity='0.7'; this.style.background='none'" title="Compartilhar">
+                <button class="btn btn-sm" style="padding: 0; background: none; color: ${shareColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.2s; border-radius:4px;" onclick="openShareAgendaNoteModal('${srcKey}', ${noteObj.originalIndex}, ${noteObj.isRecurringInstance})" onmouseenter="this.style.opacity='1'; this.style.background='#eff6ff'" onmouseleave="this.style.opacity='0.7'; this.style.background='none'" title="Compartilhar">
                     <i data-lucide="share-2" style="width: 13px; margin: 0;"></i>
                 </button>
             `;
@@ -21717,13 +21720,15 @@ localStorage.setItem = function(key, value) {
     }
 };
 // ---------------- SHARE AGENDA MODAL ----------------
-window.openShareAgendaNoteModal = function(srcKey, originalIndex) {
+window.openShareAgendaNoteModal = function(srcKey, originalIndex, isRecurring) {
     window._currentShareNoteKey = srcKey;
     window._currentShareNoteIdx = originalIndex;
+    window._currentShareNoteRecurring = isRecurring;
     
     let allNotes = {};
     try {
-        allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
+        const storeKey = isRecurring ? 'crm_agenda_recurring_notes' : 'crm_agenda_personal_notes';
+        allNotes = JSON.parse(localStorage.getItem(storeKey) || '{}');
     } catch(e) {}
     
     const note = allNotes[srcKey] ? allNotes[srcKey][originalIndex] : null;
@@ -21760,7 +21765,9 @@ window.closeShareAgendaModal = function() {
 };
 
 window.saveShareAgendaNote = function() {
-    const allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
+    const isRecurring = window._currentShareNoteRecurring;
+    const storeKey = isRecurring ? 'crm_agenda_recurring_notes' : 'crm_agenda_personal_notes';
+    const allNotes = JSON.parse(localStorage.getItem(storeKey) || '{}');
     if(!window._currentShareNoteKey || window._currentShareNoteIdx === undefined) return;
     if(!allNotes[window._currentShareNoteKey]) return;
     const note = allNotes[window._currentShareNoteKey][window._currentShareNoteIdx];
@@ -21770,7 +21777,7 @@ window.saveShareAgendaNote = function() {
     const sharedWith = Array.from(chks).map(c => c.value);
     
     note.sharedWith = sharedWith;
-    localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
+    localStorage.setItem(storeKey, JSON.stringify(allNotes));
     
     if (typeof window.saveAgendaNotesToFirebase === 'function') {
         window.saveAgendaNotesToFirebase();
