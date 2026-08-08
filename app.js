@@ -101,13 +101,14 @@ window.updateOperatorTabsUI = function() {
      }
   }
 
-  const agendaSelect = document.getElementById("agenda-operator-select");
+
   if (agendaSelect) {
      agendaSelect.innerHTML = `<option value="Todos">Todos os Operadores</option>`;
      dynOps.forEach(op => {
          agendaSelect.innerHTML += `<option value="${op}">${op}</option>`;
      });
      agendaSelect.innerHTML += `<option value="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</option>`;
+  }
   }
 };
 
@@ -21522,7 +21523,8 @@ window.SYNC_KEYS = [
     "crm_empresas_custom",
     "crm_plano_impostos",
     "crm_impostos_custom",
-    "crm_indexadores_ativos"
+    "crm_indexadores_ativos",
+    "crm_moura_timeline_nodes"
 ];
 
 // Função que baixa configurações na inicialização
