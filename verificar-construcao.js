@@ -101,7 +101,7 @@ window.VerificarConstrucaoApp = {
         
         try {
             // 1. Filtrar clientes
-            const clients = window.rawClientList || (window.currentAppState && window.currentAppState.sales) || [];
+            const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
             const elegiveis = clients.filter(c => {
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
                 return maxDelay >= thresholdDays;
@@ -125,8 +125,8 @@ window.VerificarConstrucaoApp = {
 
             // 3. CC to City mapper
             const ccIdToCity = {};
-            if (window.currentAppState && window.currentAppState.cachedCostCenters) {
-                window.currentAppState.cachedCostCenters.forEach(cc => {
+            if (window.AppState && window.AppState.cachedCostCenters) {
+                window.AppState.cachedCostCenters.forEach(cc => {
                     let city = "";
                     if (String(cc.id) === "14201" || (cc.name && cc.name.toUpperCase().includes("ARAÇARI"))) {
                         city = "ARAÇARIGUAMA";
