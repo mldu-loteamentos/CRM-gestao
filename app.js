@@ -70,21 +70,23 @@ window.updateOperatorTabsUI = function() {
      filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
 
-  const isAdmin = (window.AppState && window.AppState.currentUser && (
-      (window.AppState.currentUser.role && window.AppState.currentUser.role.toUpperCase().includes('ADMIN')) || 
-      (window.AppState.currentUser.profile_name && (window.AppState.currentUser.profile_name.toUpperCase().includes('ADMIN') || window.AppState.currentUser.profile_name.toUpperCase().includes('GESTOR') || window.AppState.currentUser.profile_name.toUpperCase().includes('GERENTE'))) ||
-      (window.AppState.currentUser.email && (window.AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br' || window.AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || window.AppState.currentUser.email.toLowerCase() === 'atendimento@mouraleite.com.br'))
+  const _cu = window.AppState ? window.AppState.currentUser : null;
+  const isAdmin = (_cu && (
+      (_cu.role && _cu.role.toUpperCase().includes('ADMIN')) || 
+      (_cu.profile_name && (_cu.profile_name.toUpperCase().includes('ADMIN') || _cu.profile_name.toUpperCase().includes('GESTOR') || _cu.profile_name.toUpperCase().includes('GERENTE'))) ||
+      (_cu.email && (_cu.email.toLowerCase() === 'admin@mouraleite.com.br' || _cu.email.toLowerCase() === 'israel@mouraleite.com.br' || _cu.email.toLowerCase() === 'atendimento@mouraleite.com.br')) ||
+      (_cu.name && _cu.name.toUpperCase().includes('ISRAEL'))
   ));
+
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
+  const agendaSelect = document.getElementById("agenda-operator-select");
+
   if (agendaTabs) {
      if (isAdmin) {
-         console.log("updateOperatorTabsUI - isAdmin is TRUE. Showing agenda tabs.");
-         agendaTabs.style.cssText = "display: flex !important;";
-         agendaTabs.innerHTML = `<button class="operator-tab-btn active" onclick="setAgendaOperator('Todos')">TODOS</button>`;
-         dynOps.forEach(op => {
-             agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('${op}')">${op}</button>`;
-         });
-         agendaTabs.innerHTML += `<button class="operator-tab-btn" onclick="setAgendaOperator('NÃO ATRIBUÍDO')">NÃO ATRIBUÍDO</button>`;
+         console.log("updateOperatorTabsUI - isAdmin is TRUE. Showing agenda dropdown for admin.");
+         agendaTabs.style.cssText = "display: none !important;"; // Hide tabs, prefer select for admin
+         if(agendaSelect) agendaSelect.style.display = "block"; // Show select dropdown
+         
          if (!window.AgendaSelectedOperator) window.AgendaSelectedOperator = "Todos";
      } else {
          console.log("updateOperatorTabsUI - isAdmin is FALSE. Hiding agenda tabs. User:", window.AppState ? window.AppState.currentUser : null);
