@@ -21498,67 +21498,6 @@ window.getDynamicOperators = function(type = 'all') {
     });
 };
 
-window._currentShareNoteParams = null;
-
-window.openShareAgendaNoteModal = function(sourceKey, index) {
-    window._currentShareNoteParams = { sourceKey, index };
-    const modal = document.getElementById('share-agenda-modal');
-    const listDiv = document.getElementById('share-agenda-users-list');
-    
-    // Load current note to see who it's shared with
-    let allNotes = {};
-    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
-    const note = allNotes[sourceKey] ? allNotes[sourceKey][index] : null;
-    const sharedWith = note && note.sharedWith ? note.sharedWith : [];
-    
-    // Populate list of active operators (excluding self)
-    let users = [];
-    try { users = JSON.parse(localStorage.getItem('crm_users') || '[]'); } catch(e) {}
-    const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
-    
-    let html = '';
-    users.forEach(u => {
-        if (u.status !== 'ATIVO' || u.email.toLowerCase() === currentUserEmail) return;
-        const isChecked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
-        html += `
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px; border-radius: 4px;" onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='none'">
-                <input type="checkbox" value="${u.email.toLowerCase()}" class="share-user-checkbox" ${isChecked} style="width: 16px; height: 16px;">
-                <span style="font-size: 0.9rem; color: #334155;">${u.name} (${u.email})</span>
-            </label>
-        `;
-    });
-    
-    if (!html) {
-        html = '<p style="font-size: 0.85rem; color: #64748b;">Nenhum outro operador ativo encontrado.</p>';
-    }
-    
-    listDiv.innerHTML = html;
-    modal.style.display = 'flex';
-};
-
-window.closeShareAgendaModal = function() {
-    document.getElementById('share-agenda-modal').style.display = 'none';
-    window._currentShareNoteParams = null;
-};
-
-window.saveShareAgendaNote = function() {
-    if (!window._currentShareNoteParams) return;
-    const { sourceKey, index } = window._currentShareNoteParams;
-    
-    const checkboxes = document.querySelectorAll('.share-user-checkbox:checked');
-    const selectedEmails = Array.from(checkboxes).map(cb => cb.value);
-    
-    let allNotes = {};
-    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
-    
-    if (allNotes[sourceKey] && allNotes[sourceKey][index]) {
-        allNotes[sourceKey][index].sharedWith = selectedEmails;
-        localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
-        window.renderAgendaPersonalNotes();
-    }
-    
-    window.closeShareAgendaModal();
-};
 
 window.SYNC_KEYS = [
     "crm_users",
@@ -21797,12 +21736,13 @@ window.openShareAgendaNoteModal = function(srcKey, originalIndex) {
     if(modalBody) {
         let html = '';
         const crmUsers = JSON.parse(localStorage.getItem('crm_users') || '[]');
+        const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
         
         crmUsers.forEach(u => {
-            if(u.status === 'ATIVO' && u.email && window.AppState && window.AppState.currentUser && u.email.toLowerCase() !== window.AppState.currentUser.email.toLowerCase()) {
+            if(u.status === 'ATIVO' && u.email && u.email.toLowerCase() !== currentUserEmail) {
                 const checked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
                 html += `
-                  <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;">
+                  <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;" onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='none'">
                      <input type="checkbox" class="share-user-chk" value="${u.email.toLowerCase()}" ${checked} style="width:16px;height:16px;accent-color:var(--color-primary);">
                      <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${u.name} (${u.email})</span>
                   </label>

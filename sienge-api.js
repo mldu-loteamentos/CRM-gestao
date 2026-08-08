@@ -93,6 +93,43 @@ const AuditService = {
   }
 };
 
+// Cache Local via IndexedDB para evitar dependência total do Firebase e limites de Quota
+const IdbDefaultersCache = {
+    dbName: 'CrmDefaultersDB',
+    storeName: 'DefaultersCache',
+    openDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 1);
+            request.onupgradeneeded = e => e.target.result.createObjectStore(this.storeName);
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e.target.error);
+        });
+    },
+    async get(key) {
+        try {
+            const db = await this.openDB();
+            if (!db.objectStoreNames.contains(this.storeName)) return null;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readonly');
+                const req = tx.objectStore(this.storeName).get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        } catch(e) { return null; }
+    },
+    async set(key, val) {
+        try {
+            const db = await this.openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(this.storeName, 'readwrite');
+                const req = tx.objectStore(this.storeName).put(val, key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        } catch(e) {}
+    }
+};
+
 // Monkey Patch global fetch to intercept mutating requests
 const originalFetch = window.fetch;
 window.fetch = async function(...args) {
@@ -408,48 +445,79 @@ const SiengeApiService = {
       this._defaultersPromise = (async () => {
         const t0 = performance.now();
 
-        // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIRESTORE)
-        if (!forceRefresh && window.firebaseDb && window.firebaseCollections) {
+        // 1) VERIFICAÇÃO DO CACHE DIÁRIO (INDEXEDDB E FIRESTORE)
+        if (!forceRefresh) {
+           const todayStr = new Date().toISOString().split('T')[0];
+           
+           // A) Tentar ler do IndexedDB (Cache Local, rápido e sem limite de quota)
            try {
-             console.log(`%c[Sienge] ⏱ Verificando cache diário no Firestore...`, 'color:#f59e0b;font-weight:bold;');
-             const todayStr = new Date().toISOString().split('T')[0];
-             const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
-             const metaSnap = await window.firebaseCollections.getDoc(metaRef);
-             
-             if (metaSnap.exists()) {
-               const meta = metaSnap.data();
-               console.log(`%c[Sienge] ✅ Cache de hoje encontrado! Montando base...`, 'color:#10b981;font-weight:bold;');
-               let result = [];
-               const chunkPromises = [];
-               for (let i = 0; i < meta.chunks; i++) {
-                 const chunkRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", `${todayStr}_chunk_${i}`);
-                 chunkPromises.push(window.firebaseCollections.getDoc(chunkRef));
+               const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
+               if (localCache && localCache.data) {
+                   console.log(`%c[Sienge] ✅ Base carregada do IndexedDB local — ${localCache.data.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
+                   if (localCache.paidMap) {
+                       window.advFilters = window.advFilters || {};
+                       try {
+                           window.advFilters.paidMap = new Map(JSON.parse(localCache.paidMap));
+                           console.log(`%c[Sienge] ✅ Último Pagamento restaurado do IndexedDB.`, 'color:#10b981;font-weight:bold;');
+                       } catch(e) {}
+                   }
+                   window._siengeLastFetchTime = { elapsed: "0.1", count: localCache.data.length, at: localCache.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
+                   return localCache.data;
                }
-               
-               const chunkSnaps = await Promise.all(chunkPromises);
-               chunkSnaps.forEach(snap => {
-                 if (snap.exists()) {
-                   result.push(...JSON.parse(snap.data().data));
-                 }
-               });
-               
-               if (meta.paidMap) {
-                 window.advFilters = window.advFilters || {};
-                 try {
-                     window.advFilters.paidMap = new Map(JSON.parse(meta.paidMap));
-                     console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
-                 } catch(e) {}
-               }
-
-               const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-               console.log(`%c[Sienge] ✅ Base carregada do Firestore em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
-               window._siengeLastFetchTime = { elapsed, count: result.length, at: meta.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
-               return result;
-             } else {
-               console.log('%c[Sienge] ℹ️ Cache do Firestore desatualizado ou inexistente. Iniciando busca na API Sienge...', 'color:#f59e0b;');
-             }
            } catch (e) {
-             console.log('%c[Sienge] ℹ️ Erro ao ler cache do Firestore:', e);
+               console.log('%c[Sienge] ℹ️ Erro ao ler cache do IndexedDB:', e);
+           }
+
+           // B) Se não tem no IndexedDB, tenta o Firebase (útil para o primeiro acesso do dia no PC)
+           if (window.firebaseDb && window.firebaseCollections) {
+               try {
+                 console.log(`%c[Sienge] ⏱ Verificando cache diário no Firestore...`, 'color:#f59e0b;font-weight:bold;');
+                 const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
+                 const metaSnap = await window.firebaseCollections.getDoc(metaRef);
+                 
+                 if (metaSnap.exists()) {
+                   const meta = metaSnap.data();
+                   console.log(`%c[Sienge] ✅ Cache de hoje encontrado! Montando base...`, 'color:#10b981;font-weight:bold;');
+                   let result = [];
+                   const chunkPromises = [];
+                   for (let i = 0; i < meta.chunks; i++) {
+                     const chunkRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", `${todayStr}_chunk_${i}`);
+                     chunkPromises.push(window.firebaseCollections.getDoc(chunkRef));
+                   }
+                   
+                   const chunkSnaps = await Promise.all(chunkPromises);
+                   chunkSnaps.forEach(snap => {
+                     if (snap.exists()) {
+                       result.push(...JSON.parse(snap.data().data));
+                     }
+                   });
+                   
+                   if (meta.paidMap) {
+                     window.advFilters = window.advFilters || {};
+                     try {
+                         window.advFilters.paidMap = new Map(JSON.parse(meta.paidMap));
+                         console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
+                     } catch(e) {}
+                   }
+
+                   const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+                   console.log(`%c[Sienge] ✅ Base carregada do Firestore em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
+                   window._siengeLastFetchTime = { elapsed, count: result.length, at: meta.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
+                   
+                   // Salva no IndexedDB para as próximas vezes serem instantâneas!
+                   IdbDefaultersCache.set(`defaulters_${todayStr}`, {
+                       data: result,
+                       paidMap: meta.paidMap,
+                       timestampStr: meta.timestampStr
+                   }).catch(() => {});
+
+                   return result;
+                 } else {
+                   console.log('%c[Sienge] ℹ️ Cache do Firestore desatualizado ou inexistente.', 'color:#f59e0b;');
+                 }
+               } catch (e) {
+                 console.log('%c[Sienge] ℹ️ Erro ao ler cache do Firestore (Possível limite de cota atingido):', e);
+               }
            }
         }
 
@@ -502,9 +570,28 @@ const SiengeApiService = {
                   });
                   console.log(`%c[Firebase] Cache diário (${todayStr}) salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
                 } catch (e) {
-                  console.error("[Firebase] Erro ao salvar cache no Firestore (tamanho ou permissão):", e);
+                  console.error("[Firebase] Erro ao salvar cache no Firestore (limite de cota atingido):", e);
                 }
               })();
+              
+              // SALVA NO INDEXEDDB LOCALMENTE TAMBÉM
+              (async () => {
+                try {
+                   let paidMapStr = null;
+                   if (window.advFilters && window.advFilters.paidMap) {
+                       try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
+                   }
+                   await IdbDefaultersCache.set(`defaulters_${todayStr}`, {
+                       data: result,
+                       paidMap: paidMapStr,
+                       timestampStr: timestampStr
+                   });
+                   console.log(`%c[IndexedDB] Cache diário salvo localmente com sucesso!`, 'color:#3b82f6;font-weight:bold;');
+                } catch(e) {
+                   console.error("[IndexedDB] Erro ao salvar cache local:", e);
+                }
+              })();
+
               
               this.saveDefaultersSnapshot(result).catch(console.error);
           } else {
