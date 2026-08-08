@@ -8,5 +8,11 @@
     { "source": "/api/sienge-proxy/:path*", "destination": "/api/sienge-proxy" },
     { "source": "/api/sienge-builder-proxy/:path*", "destination": "/api/sienge-builder-proxy" },
     { "source": "/proxy-storage/:path*", "destination": "https://firebasestorage.googleapis.com/v0/b/crm-gestao-mldu.firebasestorage.app/o/:path*" }
+  ],
+  "crons": [
+    {
+      "path": "/api/sync-customers",
+      "schedule": "0 8-18 * * 1-5"
+    }
   ]
 }

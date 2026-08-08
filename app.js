@@ -191,80 +191,36 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
     if (container && !quiet) container.style.display = 'flex';
     const textEl = document.getElementById('customer-sync-text');
     if (textEl) textEl.style.color = '#6b7280';
+    const progEl = document.getElementById('customer-sync-progress');
     
-    let baseUrl = window.SIENGE_CONFIG ? window.SIENGE_CONFIG.baseUrl : `http://${window.location.hostname || 'localhost'}:3000/sienge-proxy`;
-    let authHeader = window.getBasicAuthHeader ? getBasicAuthHeader() : '';
-    
-    if (!authHeader) {
-        setTimeout(() => window.startCustomerBackgroundSync(force, quiet), 2000);
-        return;
-    }
-
     if (!force) {
         try {
             const cachedData = await IdbCustomerCache.get('crm_customer_cache');
-            const oldCacheStr = localStorage.getItem('crm_customer_cache');
-            
-            let parsed = null;
-            if (cachedData) {
-                parsed = cachedData;
-            } else if (oldCacheStr) {
-                parsed = JSON.parse(oldCacheStr);
-            }
-            
-            if (parsed) {
-                if ((parsed.syncTimestamp || parsed.date) && parsed.data && parsed.data.length > 0) {
-                    // Verificar versão do cache: se não tem birthDate, precisa re-baixar
-                    if (!parsed.data[0] || (!parsed.data[0].name && !parsed.data[0].customerName)) {
-                        console.warn("Cache de clientes inválido (sem nome). Forçando atualização.");
-                    } else if (!('birthDate' in parsed.data[0])) {
-                        console.warn("Cache de clientes desatualizado (sem birthDate). Forçando atualização.");
-                    } else {
-                        let lastSync;
-                        if (parsed.syncTimestamp) {
-                            lastSync = new Date(parsed.syncTimestamp);
-                        } else {
-                            lastSync = new Date();
-                            if (parsed.date !== new Date().toLocaleDateString()) {
-                                lastSync.setDate(lastSync.getDate() - 1);
-                            }
-                        }
-                        
-                        const now = new Date();
-                        let targetSyncTime = new Date();
-                        targetSyncTime.setHours(8, 0, 0, 0);
-                        
-                        if (now < targetSyncTime) {
-                            targetSyncTime.setDate(targetSyncTime.getDate() - 1);
-                        }
-                        
-                        window.GlobalCustomerCache.data = parsed.data;
-                        window.GlobalCustomerCache.totalCount = parsed.totalCount || parsed.data.length;
-                        window.GlobalCustomerCache.loadedCount = parsed.data.length;
-                        
-                        ['nome', 'telefone', 'email'].forEach(type => {
-                            const el = document.getElementById(`relacionamento-filter-${type}`);
-                            if (el) {
-                                el.disabled = false;
-                                el.placeholder = "Digite para buscar...";
-                            }
-                        });
-                        
-                        if (lastSync >= targetSyncTime) {
-                            window.GlobalCustomerCache.status = 'done';
-                            window.GlobalCustomerCache.syncStarted = true;
-                            console.log(`Loaded ${parsed.data.length} customers from local cache. Next sync at 08:00 AM.`);
-                            if (container) container.style.display = 'none';
-                            return;
-                        } else {
-                            console.log(`Cache expirado. Dados antigos provisórios carregados na memória. Iniciando sync em background...`);
-                        }
-                    }
+            if (cachedData && cachedData.data && cachedData.data.length > 0) {
+                let lastSync = cachedData.syncTimestamp ? new Date(cachedData.syncTimestamp) : new Date(0);
+                const now = new Date();
+                let targetSyncTime = new Date();
+                targetSyncTime.setHours(8, 0, 0, 0);
+                if (now < targetSyncTime) targetSyncTime.setDate(targetSyncTime.getDate() - 1);
+                
+                window.GlobalCustomerCache.data = cachedData.data;
+                window.GlobalCustomerCache.totalCount = cachedData.totalCount || cachedData.data.length;
+                window.GlobalCustomerCache.loadedCount = cachedData.data.length;
+                
+                ['nome', 'telefone', 'email'].forEach(type => {
+                    const el = document.getElementById(`relacionamento-filter-${type}`);
+                    if (el) { el.disabled = false; el.placeholder = "Digite para buscar..."; }
+                });
+                
+                if (lastSync >= targetSyncTime) {
+                    window.GlobalCustomerCache.status = 'done';
+                    window.GlobalCustomerCache.syncStarted = true;
+                    console.log(`Loaded ${cachedData.data.length} customers from local cache. Next sync at 08:00 AM.`);
+                    if (container) container.style.display = 'none';
+                    return;
                 }
             }
-        } catch(e) {
-            console.error("Erro ao ler cache do IndexedDB:", e);
-        }
+        } catch(e) { console.error("Erro ao ler cache do IndexedDB:", e); }
     }
 
     window.GlobalCustomerCache.syncStarted = true;
@@ -273,53 +229,50 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
     const setDynamicFieldsState = (disabled, placeholder) => {
         ['nome', 'telefone', 'email'].forEach(type => {
             const el = document.getElementById(`relacionamento-filter-${type}`);
-            if (el) {
-                el.disabled = disabled;
-                el.placeholder = placeholder;
-            }
+            if (el) { el.disabled = disabled; el.placeholder = placeholder; }
         });
     };
     
-    // Se não há dados antigos na memória, bloqueia a busca até terminar. Caso contrário, permite busca simultânea.
     if (!window.GlobalCustomerCache.data || window.GlobalCustomerCache.data.length === 0) {
-        setDynamicFieldsState(true, "Carregando base (aguarde)...");
-    } else {
-        setDynamicFieldsState(false, "Digite para buscar...");
+        setDynamicFieldsState(true, "Carregando base do Firebase...");
     }
     
-    const progEl = document.getElementById('customer-sync-progress');
-    
-    if (container && !quiet) container.style.display = 'flex';
-    
     try {
-        let offset = 0;
-        const limit = 200;
+        if (textEl && progEl) {
+            textEl.innerText = `Buscando no Firebase...`;
+            progEl.style.width = `10%`;
+        }
+
+        // Se for force manual (clicou no botão), primeiro chama o worker para buscar Sienge -> Firebase
+        if (force && !quiet) {
+            if (textEl && progEl) {
+                textEl.innerText = `Sincronizando Sienge -> Firebase...`;
+                progEl.style.width = `30%`;
+            }
+            try {
+                await fetch('/api/sync-customers');
+            } catch(e) {
+                console.warn('Erro ao acionar cron de sync-customers manualmente:', e);
+            }
+        }
+        
+        if (!window.firebaseDb || !window.firebaseCollections) {
+            throw new Error("Firebase SDK não inicializado.");
+        }
+
+        if (textEl && progEl) {
+            textEl.innerText = `Baixando base atualizada...`;
+            progEl.style.width = `60%`;
+        }
+
+        // Baixa a base completa do Firebase (rápido e não depende da lentidão do Sienge)
+        const colRef = window.firebaseCollections.collection(window.firebaseDb, 'sienge_customers');
+        const snapshot = await window.firebaseCollections.getDocs(colRef);
+        
         let tempData = [];
-        let tempLoadedCount = 0;
-        
-        // Verifica se já existia uma base antiga na memória para não apagá-la durante o download
-        const hadPreviousData = window.GlobalCustomerCache.data && window.GlobalCustomerCache.data.length > 0;
-        
-        while(true) {
-            const url = `${baseUrl}/customers?limit=${limit}&offset=${offset}`;
-            const res = await fetch(url, { headers: { 'Authorization': authHeader } });
-            if (!res.ok) {
-                console.error("Falha ao buscar base de clientes em background");
-                break;
-            }
-            
-            const data = await res.json();
-            const results = data.results || [];
-            
-            if (offset === 0 && results.length > 0) {
-                window.GlobalCustomerCache.totalCount = data.resultSetMetadata?.count || 5000;
-            }
-            
-            if (results.length === 0) break;
-            
-            // Otimização crítica: Salvar apenas os campos estritamente necessários para a busca,
-            // evitando o limite de 5MB (QuotaExceeded) do localStorage
-            const minifiedResults = results.map(c => ({
+        snapshot.forEach(doc => {
+            const c = doc.data();
+            tempData.push({
                 id: c.id || c.customerId,
                 name: c.name || c.customerName || c.clientName || 'Sem Nome',
                 cpfCnpj: c.cpfCnpj || c.document || '',
@@ -332,49 +285,13 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
                     areaCode: p.areaCode,
                     number: p.number || p.phoneNumber
                 })) : undefined
-            }));
-            
-            tempData.push(...minifiedResults);
-            tempLoadedCount += results.length;
-            
-            // Se a memória estava VAZIA (primeiro acesso real), injetamos os dados ao vivo 
-            // para liberar a busca rapidamente. Se já tinha dados velhos, não tocamos na memória
-            // para que o usuário continue pesquisando na base inteira velha enquanto a nova baixa!
-            if (!hadPreviousData) {
-                window.GlobalCustomerCache.data = tempData;
-                window.GlobalCustomerCache.loadedCount = tempLoadedCount;
-                
-                // Se foi o primeiro lote, já libera os campos para o usuário não ficar travado
-                if (offset === 0) {
-                    setDynamicFieldsState(false, "Digite para buscar...");
-                }
-            }
-            
-            if (textEl && progEl) {
-                let perc = Math.min(100, Math.round((tempLoadedCount / window.GlobalCustomerCache.totalCount) * 100));
-                textEl.innerText = `Atualizando base... ${perc}%`;
-                progEl.style.width = `${perc}%`;
-            }
-            
-            // Re-dispara busca se o usuário estiver com o campo focado
-            if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('relacionamento-filter-')) {
-                const type = document.activeElement.id.split('-').pop();
-                const val = document.activeElement.value;
-                if (val && val.length > 2 && typeof handleDynamicCustomerSearch === 'function') {
-                    handleDynamicCustomerSearch(val, type);
-                }
-            }
-            
-            offset += limit;
-            
-            // Pausa curta para não sobrecarregar
-            await new Promise(r => setTimeout(r, 200));
-        }
-        
-        // No final do download, substituímos a base velha pela nova de forma transparente!
+            });
+        });
+
         if (tempData.length > 0) {
             window.GlobalCustomerCache.data = tempData;
-            window.GlobalCustomerCache.loadedCount = tempLoadedCount;
+            window.GlobalCustomerCache.loadedCount = tempData.length;
+            window.GlobalCustomerCache.totalCount = tempData.length;
         }
         
         window.GlobalCustomerCache.status = 'done';
@@ -392,24 +309,16 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
                 syncTimestamp: new Date().toISOString(),
                 date: new Date().toLocaleDateString(),
                 data: tempData,
-                totalCount: tempLoadedCount
+                totalCount: tempData.length
             });
-            localStorage.removeItem('crm_customer_cache');
         } catch(e) {
-            console.warn("Não foi possível salvar cache de clientes no IndexedDB.", e);
-        }
-        
-        if (!window._customerSyncInterval) {
-            window._customerSyncInterval = setInterval(() => {
-                console.log("Iniciando sincronização de hora em hora em background (quiet).");
-                window.startCustomerBackgroundSync(true, true);
-            }, 60 * 60 * 1000);
+            console.warn("Não foi possível salvar cache no IndexedDB.", e);
         }
         
     } catch(e) {
-        console.error("Erro no background sync de clientes:", e);
+        console.error("Erro no sync de clientes do Firebase:", e);
         window.GlobalCustomerCache.status = 'error';
-        setDynamicFieldsState(false, "Falha na busca dinâmica");
+        setDynamicFieldsState(false, "Falha na busca");
         if (textEl) textEl.innerText = `Erro ao sincronizar base.`;
     }
 };
