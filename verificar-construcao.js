@@ -388,8 +388,8 @@ window.VerificarConstrucaoApp = {
     }
 };
 
-window.addEventListener('menuChange', (e) => {
-    if (e.detail && e.detail.id === 'verificar_construcao') {
+document.addEventListener('tabChanged', (e) => {
+    if (e.detail === 'verificar_construcao') {
         window.VerificarConstrucaoApp.init();
     }
 });
