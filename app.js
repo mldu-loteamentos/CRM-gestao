@@ -6585,7 +6585,15 @@ function formatCpfCnpj(val) {
       if (isSubjudice) {
         btnJur.style.display = "none";
       } else {
-        if (maxDelayDays >= 151) {
+        let juridicoDays = 151;
+        if (window.TimelineState) {
+          const juridicoNode = window.TimelineState.find(n => n.acao === 'juridico');
+          if (juridicoNode && juridicoNode.dias !== undefined) {
+            juridicoDays = parseInt(juridicoNode.dias);
+          }
+        }
+        
+        if (maxDelayDays >= juridicoDays) {
           btnJur.style.display = "flex";
           btnJur.disabled = false;
           btnJur.title = "";
@@ -6593,7 +6601,7 @@ function formatCpfCnpj(val) {
           btnJur.style.cursor = "pointer";
         } else {
           btnJur.disabled = true;
-          btnJur.title = "Atraso menor que 151 dias. O envio será habilitado caso haja um acordo quebrado.";
+          btnJur.title = `Atraso menor que ${juridicoDays} dias.`;
           btnJur.style.opacity = "0.5";
           btnJur.style.cursor = "not-allowed";
         }
@@ -17343,16 +17351,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                 const lastDateObj = new Date(parts[2], parts[1]-1, parts[0]);
                 const monthsAgo = Math.floor((new Date() - lastDateObj) / (1000 * 60 * 60 * 24 * 30));
                 
-                // Exceção Jurídica: Habilitar o botão de Enviar para Jurídico
-                const btnJur = document.getElementById("btn-enviar-juridico-top");
-                if (btnJur) {
-                    // Nota: Se houver necessidade de ocultar em subjudice, a lógica do banner já roda e pode ser sobrescrita aqui, mas tudo bem.
-                    btnJur.style.display = 'flex';
-                    btnJur.disabled = false;
-                    btnJur.style.opacity = '1';
-                    btnJur.style.cursor = 'pointer';
-                    btnJur.title = "Botão habilitado (exceção): Há um acordo quebrado no histórico.";
-                }
+
                 
                 // Lógica de Bloqueio
                 let regrasStr = localStorage.getItem('crm_moura_regras_negociacao');

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Vistoria de Lote</title>
+    
+    <!-- CSS Básico -->
+    <style>
+        :root {
+            --primary: #10b981;
+            --primary-dark: #059669;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); margin-bottom: 20px; }
+        h1 { font-size: 1.5rem; margin-top: 0; color: var(--primary-dark); }
+        .info-row { margin-bottom: 10px; font-size: 0.95rem; }
+        .info-label { font-weight: 600; color: #64748b; }
+        .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; text-align: center; margin-bottom: 15px; text-decoration: none; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:active { background: var(--primary-dark); }
+        .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+        .btn-outline { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+        .status-box { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 0.95rem; text-align: center; }
+        .status-error { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+        .status-success { background: #dcfce7; color: #166534; border: 1px solid #4ade80; }
+        .photo-area { margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+        .photo-btn-wrapper { position: relative; margin-bottom: 15px; }
+        .photo-btn-wrapper input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .photo-preview { display: none; width: 100%; height: 150px; object-fit: cover; border-radius: 8px; margin-top: 8px; border: 2px solid #e2e8f0; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+    
+    <!-- Configuração e Lógica -->
+    <script src="firebase-config.js"></script>
+    <script src="vistoria.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <div class="card" id="card-loading">
+            <h1 style="text-align: center;">Carregando Vistoria...</h1>
+            <div class="loader"></div>
+        </div>
+        
+        <div class="card" id="card-content" style="display: none;">
+            <h1>Detalhes do Lote</h1>
+            <div class="info-row"><span class="info-label">Cidade:</span> <span id="lbl-cidade"></span></div>
+            <div class="info-row"><span class="info-label">Empreendimento:</span> <span id="lbl-empreendimento"></span></div>
+            <div class="info-row"><span class="info-label">Unidade:</span> <span id="lbl-unidade"></span></div>
+            
+            <div id="status-container" class="status-box" style="display: none;"></div>
+            
+            <button class="btn btn-outline" id="btn-maps" style="display: none;" onclick="abrirMaps()">
+                📍 Abrir no Google Maps
+            </button>
+            
+            <div class="photo-area" id="photo-area" style="display: none;">
+                <h3 style="margin-top:0; color:var(--text);">Captura de Imagens</h3>
+                <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 20px;">
+                    Tire as 3 fotos obrigatórias para liberar o envio.
+                </p>
+                
+                <div class="photo-btn-wrapper">
+                    <button class="btn btn-outline" id="btn-foto1">📷 1. Fachada/Frente do Lote</button>
+                    <input type="file" accept="image/*" capture="environment" id="input-foto1" onchange="previewImage(this, 'preview1')">
+                    <img id="preview1" class="photo-preview">
+                </div>
+                
+                <div class="photo-btn-wrapper">
+                    <button class="btn btn-outline" id="btn-foto2">📷 2. Do Meio para o Fundo</button>
+                    <input type="file" accept="image/*" capture="environment" id="input-foto2" onchange="previewImage(this, 'preview2')">
+                    <img id="preview2" class="photo-preview">
+                </div>
+                
+                <div class="photo-btn-wrapper">
+                    <button class="btn btn-outline" id="btn-foto3">📷 3. Do Fundo para a Frente</button>
+                    <input type="file" accept="image/*" capture="environment" id="input-foto3" onchange="previewImage(this, 'preview3')">
+                    <img id="preview3" class="photo-preview">
+                </div>
+                
+                <button class="btn btn-primary" id="btn-enviar" onclick="enviarVistoria()" disabled style="margin-top: 30px;">
+                    Enviar Fotos
+                </button>
+            </div>
+        </div>
+        
+        <div class="card" id="card-sucesso" style="display: none; text-align: center;">
+            <h1>✅ Vistoria Enviada!</h1>
+            <p>As fotos foram recebidas com sucesso. O responsável irá validar e anexar ao sistema.</p>
+            <p style="color: #64748b; font-size: 0.9rem;">Você já pode fechar esta página.</p>
+        </div>
+    </div>
+</body>
+</html>
