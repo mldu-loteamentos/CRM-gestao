@@ -11,7 +11,7 @@ window.VerificarConstrucaoApp = {
         
         let thresholdDays = 91;
         if (window.TimelineState) {
-            const node = window.TimelineState.find(n => n.label && n.label.toLowerCase().includes('verificar constru'));
+            const node = window.TimelineState.find(n => (n.label || n.nome || '').toLowerCase().includes('verificar constru'));
             if (node && node.dias !== undefined) {
                 thresholdDays = parseInt(node.dias);
             }
@@ -93,7 +93,7 @@ window.VerificarConstrucaoApp = {
         
         let thresholdDays = 91;
         if (window.TimelineState) {
-            const node = window.TimelineState.find(n => n.label && n.label.toLowerCase().includes('verificar constru'));
+            const node = window.TimelineState.find(n => (n.label || n.nome || '').toLowerCase().includes('verificar constru'));
             if (node && node.dias !== undefined) {
                 thresholdDays = parseInt(node.dias);
             }
