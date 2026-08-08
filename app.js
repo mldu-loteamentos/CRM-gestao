@@ -2127,6 +2127,7 @@ window.applyAdvFiltersTo = (sourceList) => {
 };
 
 async function _loadDashboardData_Impl(forceRefresh = false) {
+  window._dashboardForceRefresh = forceRefresh;
   const searchInput = document.getElementById("dashboard-search-input");
   const searchValue = searchInput ? searchInput.value.trim().toLowerCase() : "";
 
@@ -3803,7 +3804,7 @@ document.addEventListener("click", function(e) {
   }
   
   if (typeof window.prefetchRecentPayments === 'function') {
-      window.prefetchRecentPayments();
+      window.prefetchRecentPayments(window._dashboardForceRefresh);
   }
   
   if (typeof loadAgendaDayTasks === 'function' && window.lastSelectedAgendaDate) {
@@ -21065,8 +21066,15 @@ window.applyAdvFilters = async function(keepOpen = false) {
 };
 
 window.hasPrefetchedPayments = false;
-window.prefetchRecentPayments = async function() {
-    if (window.hasPrefetchedPayments) return;
+window.prefetchRecentPayments = async function(forceRefresh = false) {
+    if (window.hasPrefetchedPayments && !forceRefresh) return;
+    
+    // Se o paidMap já foi populado pelo Firebase Cache e tem dados, NÃO BUSQUE de novo!
+    if (!forceRefresh && window.advFilters && window.advFilters.paidMap && window.advFilters.paidMap.size > 0) {
+        window.hasPrefetchedPayments = true;
+        return;
+    }
+    
     console.log("Iniciando busca de pagamentos recentes em segundo plano...");
     if (!window.rawClientList) return;
     window.hasPrefetchedPayments = true;
@@ -21162,6 +21170,13 @@ window.prefetchRecentPayments = async function() {
             }
         }
         console.log("Busca de pagamentos recentes em segundo plano finalizada com sucesso!");
+        if (window.SiengeApiService && typeof window.SiengeApiService.updateCachePaidMap === 'function' && window.advFilters && window.advFilters.paidMap) {
+            let paidMapStr = null;
+            try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
+            if (paidMapStr) {
+                window.SiengeApiService.updateCachePaidMap(paidMapStr);
+            }
+        }
     } catch (e) {
         console.error("Erro geral na busca de pagamentos em segundo plano:", e);
     } finally {

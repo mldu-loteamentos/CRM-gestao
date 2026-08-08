@@ -411,29 +411,39 @@ const SiengeApiService = {
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (FIRESTORE)
         if (!forceRefresh && window.firebaseDb && window.firebaseCollections) {
            try {
-             console.log(`%c[Sienge] ⏱ Verificando cache geral no Firestore...`, 'color:#f59e0b;font-weight:bold;');
-             const cacheRef = window.firebaseCollections.collection(window.firebaseDb, "sienge_cache");
-             const snapshot = await window.firebaseCollections.getDocs(cacheRef);
-             
-             let meta = null;
-             let chunksMap = {};
-             snapshot.forEach(doc => {
-               if (doc.id === 'defaulters_meta') meta = doc.data();
-               else if (doc.id.startsWith('defaulters_chunk_')) chunksMap[doc.id] = JSON.parse(doc.data().data);
-             });
-
+             console.log(`%c[Sienge] ⏱ Verificando cache diário no Firestore...`, 'color:#f59e0b;font-weight:bold;');
              const todayStr = new Date().toISOString().split('T')[0];
-             if (meta && meta.date === todayStr) {
+             const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
+             const metaSnap = await window.firebaseCollections.getDoc(metaRef);
+             
+             if (metaSnap.exists()) {
+               const meta = metaSnap.data();
                console.log(`%c[Sienge] ✅ Cache de hoje encontrado! Montando base...`, 'color:#10b981;font-weight:bold;');
                let result = [];
+               const chunkPromises = [];
                for (let i = 0; i < meta.chunks; i++) {
-                 if (chunksMap[`defaulters_chunk_${i}`]) {
-                   result.push(...chunksMap[`defaulters_chunk_${i}`]);
-                 }
+                 const chunkRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", `${todayStr}_chunk_${i}`);
+                 chunkPromises.push(window.firebaseCollections.getDoc(chunkRef));
                }
+               
+               const chunkSnaps = await Promise.all(chunkPromises);
+               chunkSnaps.forEach(snap => {
+                 if (snap.exists()) {
+                   result.push(...JSON.parse(snap.data().data));
+                 }
+               });
+               
+               if (meta.paidMap) {
+                 window.advFilters = window.advFilters || {};
+                 try {
+                     window.advFilters.paidMap = new Map(JSON.parse(meta.paidMap));
+                     console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
+                 } catch(e) {}
+               }
+
                const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
                console.log(`%c[Sienge] ✅ Base carregada do Firestore em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
-               window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: true };
+               window._siengeLastFetchTime = { elapsed, count: result.length, at: meta.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
                return result;
              } else {
                console.log('%c[Sienge] ℹ️ Cache do Firestore desatualizado ou inexistente. Iniciando busca na API Sienge...', 'color:#f59e0b;');
@@ -457,29 +467,40 @@ const SiengeApiService = {
             `%c[Sienge] ✅ Busca concluída em ${elapsed}s — ${result.length} títulos inadimplentes`,
             'color:#10b981;font-size:13px;font-weight:bold;'
           );
-          // Expõe o tempo no window para outros módulos consultarem
-          window._siengeLastFetchTime = { elapsed, count: result.length, at: new Date().toLocaleTimeString('pt-BR'), cached: false };
           
-          // Dispara o salvamento do snapshot diário em background
+          const timestampStr = new Date().toLocaleTimeString('pt-BR');
+          window._siengeLastFetchTime = { elapsed, count: result.length, at: timestampStr, cached: false };
+          
           if (window.firebaseDb && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
-              const CHUNK_SIZE = 100; // Reduzido para evitar limite de 1MB do Firestore
+              const CHUNK_SIZE = 100;
               const numChunks = Math.ceil(result.length / CHUNK_SIZE);
               
               (async () => {
                 try {
-                  console.log(`%c[Firebase] Salvando cache no Firestore em ${numChunks} blocos...`, 'color:#3b82f6;');
+                  console.log(`%c[Firebase] Salvando cache diário no Firestore em ${numChunks} blocos...`, 'color:#3b82f6;');
                   const promises = [];
                   for (let i = 0; i < numChunks; i++) {
                     const chunkData = result.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-                    const docRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_chunk_${i}`);
+                    const docRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", `${todayStr}_chunk_${i}`);
                     promises.push(window.firebaseCollections.setDoc(docRef, { data: JSON.stringify(chunkData) }));
                   }
                   await Promise.all(promises);
                   
-                  const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_cache", `defaulters_meta`);
-                  await window.firebaseCollections.setDoc(metaRef, { date: todayStr, chunks: numChunks });
-                  console.log(`%c[Firebase] Cache diário salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
+                  let paidMapStr = null;
+                  if (window.advFilters && window.advFilters.paidMap) {
+                      try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
+                  }
+                  
+                  const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
+                  await window.firebaseCollections.setDoc(metaRef, { 
+                      date: todayStr, 
+                      chunks: numChunks, 
+                      timestampStr: timestampStr,
+                      paidMap: paidMapStr,
+                      createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
+                  });
+                  console.log(`%c[Firebase] Cache diário (${todayStr}) salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
                 } catch (e) {
                   console.error("[Firebase] Erro ao salvar cache no Firestore (tamanho ou permissão):", e);
                 }
@@ -500,6 +521,22 @@ const SiengeApiService = {
       return this._defaultersPromise;
     }
     return await this._getDefaultersInternal(companyId, onProgress);
+  },
+
+  async updateCachePaidMap(paidMapStr) {
+    if (s_apiMode === "simulado" || !window.firebaseDb || !window.firebaseCollections) return;
+    try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
+        // Only update if it exists
+        const metaSnap = await window.firebaseCollections.getDoc(metaRef);
+        if (metaSnap.exists()) {
+            await window.firebaseCollections.updateDoc(metaRef, { paidMap: paidMapStr });
+            console.log('%c[Firebase] PaidMap atualizado no cache diário.', 'color:#3b82f6;');
+        }
+    } catch(e) {
+        console.error("[Firebase] Erro ao atualizar PaidMap no cache:", e);
+    }
   },
 
 
