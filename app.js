@@ -137,6 +137,7 @@ const AppState = {
   currentSortCol: 'maxDaysDelay', // Coluna de ordenação padrão
   currentSortDir: 'desc' // Direção de ordenação padrão
 };
+window.AppState = AppState;
 
 window.GlobalCustomerCache = {
     data: [],
