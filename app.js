@@ -1711,7 +1711,12 @@ async function loadAndApplyPermissions() {
   // Aplicar permissões no Menu
   document.querySelectorAll('[data-permission]').forEach(el => {
     const reqPerm = el.getAttribute('data-permission');
-    if (AppState.currentUser.permissions && AppState.currentUser.permissions.includes(reqPerm)) {
+    const isSuperAdmin = AppState.currentUser && (
+      (AppState.currentUser.profile_name && AppState.currentUser.profile_name.toUpperCase() === 'ADMINISTRADOR') ||
+      (AppState.currentUser.email && (AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br'))
+    );
+
+    if (isSuperAdmin || (AppState.currentUser.permissions && AppState.currentUser.permissions.includes(reqPerm))) {
       el.style.display = ''; // mostrar
     } else {
       el.style.display = 'none'; // esconder
