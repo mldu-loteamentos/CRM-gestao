@@ -6,3 +6,5 @@ antigravity.db
 .env
 *.log
 scripts-antigos/
+.vercel
+.env*
