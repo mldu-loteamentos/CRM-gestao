@@ -3,7 +3,7 @@ echo ========================================================
 echo ENVIANDO CORRECOES PARA O GITHUB E VERCEL...
 echo ========================================================
 git add .
-git commit -m "Fix: Vercel rewrites and CORS for proxy"
+git commit -m "Fix: Atualiza diretorio na Vercel"
 git push
 echo.
 echo ========================================================
