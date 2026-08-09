@@ -33,7 +33,6 @@ const ConfigUsersApp = {
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
             { id: "notificacoes", label: "Notificações" },
-            { id: "verificar_construcao", label: "Verificar Construção" },
             { id: "regras_negociacao", label: "Regras de Negociação" },
             { id: "regras_cobranca", label: "Regras de Cobrança" }
           ]
