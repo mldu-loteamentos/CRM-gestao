@@ -1433,25 +1433,57 @@ async function initializeApplication() {
   try {
      const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
      if (window.firebaseDb && window.firebaseCollections) {
-         const notesSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'customer_notes'));
-         const firebaseNotes = {};
-         notesSnapshot.forEach(doc => {
-             if (doc.data().notes && doc.data().notes.length > 0) {
-                 firebaseNotes[doc.id] = doc.data().notes;
+         // 1) Carga inicial + listener em tempo real para TODA a coleção customer_notes
+         //    Isso garante que gravações de QUALQUER operadora cheguem para TODAS em tempo real
+         if (window.globalCustomerNotesUnsubscribe) {
+             window.globalCustomerNotesUnsubscribe();
+         }
+         window.globalCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(
+             window.firebaseCollections.collection(window.firebaseDb, 'customer_notes'),
+             (snapshot) => {
+                 let changed = false;
+                 snapshot.docChanges().forEach(change => {
+                     const custId = change.doc.id;
+                     const data = change.doc.data();
+                     if (change.type === 'removed') {
+                         delete AppState.notes[custId];
+                         changed = true;
+                     } else if (data && data.notes) {
+                         // Firebase é autoritativo: sempre sobrescreve o local para este cliente
+                         AppState.notes[custId] = data.notes;
+                         changed = true;
+                     }
+                 });
+                 if (changed) {
+                     localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+                     // Se a ficha do cliente alterado estiver aberta, re-renderiza automaticamente
+                     const openCustomerId = String(AppState.selectedCustomerId || '');
+                     const affectedIds = snapshot.docChanges().map(c => c.doc.id);
+                     if (openCustomerId && affectedIds.includes(openCustomerId)) {
+                         if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
+                         console.log(`[Firebase RT] Ocorrências do cliente ${openCustomerId} atualizadas em tempo real.`);
+                     }
+                     if (!snapshot.metadata.hasPendingWrites) {
+                         console.log(`[Firebase RT] customer_notes sincronizado: ${affectedIds.length} cliente(s) atualizado(s).`);
+                     }
+                 }
+             },
+             (error) => {
+                 console.error("[Firebase RT] Erro no listener global de customer_notes:", error);
              }
-         });
-         // Merge: start with local notes, then override with Firebase notes (Firebase is authoritative)
-         AppState.notes = { ...localNotes, ...firebaseNotes };
+         );
+
+         // Merge inicial: local como base, Firebase sobrescreve (já virá via onSnapshot acima)
+         AppState.notes = { ...localNotes };
          if (Object.keys(AppState.notes).length === 0) {
              AppState.notes = window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
          }
-         console.log(`[Firebase] Notas carregadas: ${Object.keys(firebaseNotes).length} do Firebase, ${Object.keys(localNotes).length} locais. Total: ${Object.keys(AppState.notes).length} clientes.`);
-         localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+         console.log(`[Firebase RT] Listener em tempo real ativado para customer_notes. Base local: ${Object.keys(localNotes).length} clientes.`);
      } else {
-         AppState.notes = localNotes.length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
+         AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
      }
   } catch (e) {
-     console.error("Erro ao buscar notas do Firebase:", e);
+     console.error("Erro ao iniciar listener de notas do Firebase:", e);
      AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
   }
   
@@ -1478,16 +1510,32 @@ async function initializeApplication() {
   // --- INICIO MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
   try {
      if (window.firebaseDb && window.firebaseCollections) {
-         // Jud Notes
-         const judSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'jud_notes'));
-         AppState.judNotes = {};
-         judSnapshot.forEach(doc => { AppState.judNotes[doc.id] = doc.data().notes || []; });
-         if (Object.keys(AppState.judNotes).length === 0) {
-             AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
-         }
-         localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+         // Jud Notes — listener em tempo real (ocorrências judiciais)
+         if (window.globalJudNotesUnsubscribe) window.globalJudNotesUnsubscribe();
+         AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
+         window.globalJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(
+             window.firebaseCollections.collection(window.firebaseDb, 'jud_notes'),
+             (snapshot) => {
+                 let changed = false;
+                 snapshot.docChanges().forEach(change => {
+                     const custId = change.doc.id;
+                     if (change.type === 'removed') {
+                         delete AppState.judNotes[custId];
+                         changed = true;
+                     } else {
+                         AppState.judNotes[custId] = change.doc.data().notes || [];
+                         changed = true;
+                     }
+                 });
+                 if (changed) {
+                     localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                     console.log(`[Firebase RT] jud_notes atualizado em tempo real.`);
+                 }
+             },
+             (error) => { console.error("[Firebase RT] Erro no listener de jud_notes:", error); }
+         );
          
-         // Agenda Personal Notes
+         // Agenda Personal Notes (getDocs — agenda é por usuário, sem conflito entre operadoras)
          const agendaSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'agenda_personal_notes'));
          let personalNotes = {};
          agendaSnapshot.forEach(doc => { personalNotes[doc.id] = doc.data().notes || []; });
