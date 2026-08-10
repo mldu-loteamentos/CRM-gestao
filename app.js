@@ -1454,7 +1454,9 @@ async function initializeApplication() {
                      }
                  });
                  if (changed) {
+                     window._isFirebaseSyncing = true;
                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+                     window._isFirebaseSyncing = false;
                      // Se a ficha do cliente alterado estiver aberta, re-renderiza automaticamente
                      const openCustomerId = String(AppState.selectedCustomerId || '');
                      const affectedIds = snapshot.docChanges().map(c => c.doc.id);
@@ -1487,7 +1489,9 @@ async function initializeApplication() {
   }
   
   window.saveNotesToFirebase = async function(customerId) {
+      window._isFirebaseSyncing = true;
       localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+      window._isFirebaseSyncing = false;
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
@@ -1530,7 +1534,9 @@ async function initializeApplication() {
                      }
                  });
                  if (changed) {
+                     window._isFirebaseSyncing = true;
                      localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                     window._isFirebaseSyncing = false;
                      console.log(`[Firebase RT] jud_notes atualizado em tempo real.`);
                  }
              },
@@ -1563,7 +1569,9 @@ async function initializeApplication() {
   }
   
   window.saveJudNotesToFirebase = async function(customerId) {
+      window._isFirebaseSyncing = true;
       localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+      window._isFirebaseSyncing = false;
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
@@ -21734,7 +21742,7 @@ localStorage.setItem = function(key, value) {
     _originalSetItem.call(this, key, value);
     
     // Tratamento exclusivo de anotações (mantém a lógica anterior)
-    if (key === "crm_moura_notes" && window.saveNotesToFirebase) {
+    if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing) {
         if (window._fbSyncTimeout) clearTimeout(window._fbSyncTimeout);
         window._fbSyncTimeout = setTimeout(() => {
             if (window.AppState && window.AppState.selectedCustomerId) {
@@ -21745,7 +21753,7 @@ localStorage.setItem = function(key, value) {
         }, 300);
     }
 
-    if (key === "crm_moura_jud_notes" && window.saveJudNotesToFirebase) {
+    if (key === "crm_moura_jud_notes" && window.saveJudNotesToFirebase && !window._isFirebaseSyncing) {
         if (window._fbJudSyncTimeout) clearTimeout(window._fbJudSyncTimeout);
         window._fbJudSyncTimeout = setTimeout(() => {
             if (window.AppState && window.AppState.selectedCustomerId) {
