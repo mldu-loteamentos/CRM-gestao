@@ -1543,23 +1543,57 @@ async function initializeApplication() {
              (error) => { console.error("[Firebase RT] Erro no listener de jud_notes:", error); }
          );
          
-         // Agenda Personal Notes (getDocs — agenda é por usuário, sem conflito entre operadoras)
-         const agendaSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'agenda_personal_notes'));
-         let personalNotes = {};
-         agendaSnapshot.forEach(doc => { personalNotes[doc.id] = doc.data().notes || []; });
-         if (Object.keys(personalNotes).length === 0) {
-             personalNotes = JSON.parse(localStorage.getItem("crm_agenda_personal_notes")) || {};
-         }
-         localStorage.setItem("crm_agenda_personal_notes", JSON.stringify(personalNotes));
+         // Agenda Personal Notes RT Listener
+         window.globalAgendaPersonalUnsubscribe = window.firebaseCollections.onSnapshot(
+             window.firebaseCollections.collection(window.firebaseDb, 'agenda_personal_notes'),
+             (snapshot) => {
+                 let changed = false;
+                 let personalNotes = JSON.parse(localStorage.getItem("crm_agenda_personal_notes")) || {};
+                 snapshot.docChanges().forEach(change => {
+                     if (change.type === 'removed') {
+                         delete personalNotes[change.doc.id];
+                         changed = true;
+                     } else {
+                         personalNotes[change.doc.id] = change.doc.data().notes || [];
+                         changed = true;
+                     }
+                 });
+                 if (changed) {
+                     window._isFirebaseSyncing = true;
+                     localStorage.setItem("crm_agenda_personal_notes", JSON.stringify(personalNotes));
+                     window._isFirebaseSyncing = false;
+                     if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+                     console.log(`[Firebase RT] agenda_personal_notes atualizado em tempo real.`);
+                 }
+             },
+             (error) => { console.error("[Firebase RT] Erro no listener de agenda_personal_notes:", error); }
+         );
 
-         // Agenda Recurring Notes
-         const recurringSnapshot = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, 'agenda_recurring_notes'));
-         let recurringNotes = {};
-         recurringSnapshot.forEach(doc => { recurringNotes[doc.id] = doc.data().notes || []; });
-         if (Object.keys(recurringNotes).length === 0) {
-             recurringNotes = JSON.parse(localStorage.getItem("crm_agenda_recurring_notes")) || {};
-         }
-         localStorage.setItem("crm_agenda_recurring_notes", JSON.stringify(recurringNotes));
+         // Agenda Recurring Notes RT Listener
+         window.globalAgendaRecurringUnsubscribe = window.firebaseCollections.onSnapshot(
+             window.firebaseCollections.collection(window.firebaseDb, 'agenda_recurring_notes'),
+             (snapshot) => {
+                 let changed = false;
+                 let recurringNotes = JSON.parse(localStorage.getItem("crm_agenda_recurring_notes")) || {};
+                 snapshot.docChanges().forEach(change => {
+                     if (change.type === 'removed') {
+                         delete recurringNotes[change.doc.id];
+                         changed = true;
+                     } else {
+                         recurringNotes[change.doc.id] = change.doc.data().notes || [];
+                         changed = true;
+                     }
+                 });
+                 if (changed) {
+                     window._isFirebaseSyncing = true;
+                     localStorage.setItem("crm_agenda_recurring_notes", JSON.stringify(recurringNotes));
+                     window._isFirebaseSyncing = false;
+                     if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+                     console.log(`[Firebase RT] agenda_recurring_notes atualizado em tempo real.`);
+                 }
+             },
+             (error) => { console.error("[Firebase RT] Erro no listener de agenda_recurring_notes:", error); }
+         );
      } else {
          AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
      }
@@ -1590,8 +1624,10 @@ async function initializeApplication() {
   };
 
   window.saveAgendaNotesToFirebase = async function() {
+      window._isFirebaseSyncing = true;
       const personalNotes = JSON.parse(localStorage.getItem("crm_agenda_personal_notes")) || {};
       const recurringNotes = JSON.parse(localStorage.getItem("crm_agenda_recurring_notes")) || {};
+      window._isFirebaseSyncing = false;
       if (window.firebaseDb && window.firebaseCollections) {
           try {
              for (const key of Object.keys(personalNotes)) {
@@ -11842,8 +11878,20 @@ window.renderAgendaPersonalNotes = function() {
     const dateStr = window.currentSelectedAgendaDate; 
     if (!dateStr) return;
     
-    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
-    const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
+    let currentUser = "TODOS";
+    let currentUserEmail = "";
+    if (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) {
+        currentUser = window.AppState.currentUser.name.toUpperCase();
+        currentUserEmail = window.AppState.currentUser.email ? window.AppState.currentUser.email.toLowerCase() : "";
+    } else {
+        try {
+            const stored = JSON.parse(localStorage.getItem('currentUser'));
+            if (stored && stored.name) {
+                currentUser = stored.name.toUpperCase();
+                currentUserEmail = stored.email ? stored.email.toLowerCase() : "";
+            }
+        } catch(e) {}
+    }
     
     let combinedNotes = [];
     
@@ -11860,10 +11908,12 @@ window.renderAgendaPersonalNotes = function() {
                 note = notes[ni];
                 needsSave = true;
             }
-            const isOwner = (owner === currentUser || owner === "TODOS" || owner === "Todos");
+            const isOwner = (owner === currentUser);
+            // Mostrar notas 'TODOS' apenas se o dono real foi apagado ou em caso de migração
+            const isLegacyTodos = (owner === "TODOS" || owner === "Todos");
             const isShared = (note.sharedWith && note.sharedWith.includes(currentUserEmail));
             
-            if (isOwner || isShared) {
+            if (isOwner || isShared || isLegacyTodos) {
                 const checkNote = { ...note, originalDateStr: note.originalDateStr || noteDateStr };
                 if (noteDateStr === dateStr) {
                     combinedNotes.push({ ...note, isRecurringInstance: false, originalIndex: ni, _sourceKey: key, _isOwner: isOwner });
@@ -12051,7 +12101,21 @@ window.addAgendaPersonalNote = function() {
     const dateStr = window.currentSelectedAgendaDate;
     if (!dateStr) return;
     
-    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
+    let currentUser = "TODOS";
+    if (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) {
+        currentUser = window.AppState.currentUser.name.toUpperCase();
+    } else {
+        try {
+            const stored = JSON.parse(localStorage.getItem('currentUser'));
+            if (stored && stored.name) currentUser = stored.name.toUpperCase();
+        } catch(e) {}
+    }
+    
+    if (currentUser === "TODOS") {
+        alert("Usuário não identificado. Por favor, atualize a página antes de salvar notas.");
+        return;
+    }
+    
     const storageKey = currentUser + "_" + dateStr;
     
     let allNotes = {};
@@ -12075,7 +12139,15 @@ window.deleteAgendaPersonalNote = function(index, sourceKey) {
     let allNotes = {};
     try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e) {}
 
-    const currentUser = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) ? window.AppState.currentUser.name.toUpperCase() : "TODOS";
+    let currentUser = "TODOS";
+    if (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) {
+        currentUser = window.AppState.currentUser.name.toUpperCase();
+    } else {
+        try {
+            const stored = JSON.parse(localStorage.getItem('currentUser'));
+            if (stored && stored.name) currentUser = stored.name.toUpperCase();
+        } catch(e) {}
+    }
     const owner = sourceKey.split("_")[0];
     
     if (owner !== currentUser && owner !== "TODOS" && owner !== "Todos") {
@@ -21764,7 +21836,7 @@ localStorage.setItem = function(key, value) {
         }, 300);
     }
 
-    if ((key === "crm_agenda_personal_notes" || key === "crm_agenda_recurring_notes") && window.saveAgendaNotesToFirebase) {
+    if ((key === "crm_agenda_personal_notes" || key === "crm_agenda_recurring_notes") && window.saveAgendaNotesToFirebase && !window._isFirebaseSyncing) {
         if (window._fbAgendaSyncTimeout) clearTimeout(window._fbAgendaSyncTimeout);
         window._fbAgendaSyncTimeout = setTimeout(() => {
             window.saveAgendaNotesToFirebase();
