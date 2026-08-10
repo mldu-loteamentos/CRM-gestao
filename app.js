@@ -109,7 +109,6 @@ window.updateOperatorTabsUI = function() {
      });
      agendaSelect.innerHTML += `<option value="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</option>`;
   }
-  }
 };
 
 document.addEventListener("DOMContentLoaded", () => {
