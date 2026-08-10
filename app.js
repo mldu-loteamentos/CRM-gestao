@@ -21872,43 +21872,66 @@ localStorage.setItem = function(key, value) {
 };
 // ---------------- SHARE AGENDA MODAL ----------------
 window.openShareAgendaNoteModal = function(srcKey, originalIndex, isRecurring) {
-    window._currentShareNoteKey = srcKey;
-    window._currentShareNoteIdx = originalIndex;
-    window._currentShareNoteRecurring = isRecurring;
-    
-    let allNotes = {};
     try {
+        window._currentShareNoteKey = srcKey;
+        window._currentShareNoteIdx = originalIndex;
+        window._currentShareNoteRecurring = isRecurring;
+        
+        let allNotes = {};
         const storeKey = isRecurring ? 'crm_agenda_recurring_notes' : 'crm_agenda_personal_notes';
         allNotes = JSON.parse(localStorage.getItem(storeKey) || '{}');
-    } catch(e) {}
-    
-    const note = allNotes[srcKey] ? allNotes[srcKey][originalIndex] : null;
-    if(!note) return;
-    
-    const sharedWith = note.sharedWith || [];
-    const modalBody = document.getElementById("share-agenda-users-list");
-    
-    if(modalBody) {
-        let html = '';
-        const crmUsers = JSON.parse(localStorage.getItem('crm_users') || '[]');
-        const currentUserEmail = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) ? window.AppState.currentUser.email.toLowerCase() : "";
         
-        crmUsers.forEach(u => {
-            if(u.status === 'ATIVO' && u.email && u.email.toLowerCase() !== currentUserEmail) {
-                const checked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
-                html += `
-                  <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;" onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='none'">
-                     <input type="checkbox" class="share-user-chk" value="${u.email.toLowerCase()}" ${checked} style="width:16px;height:16px;accent-color:var(--color-primary);">
-                     <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${u.name} (${u.email})</span>
-                  </label>
-                `;
+        const note = allNotes[srcKey] ? allNotes[srcKey][originalIndex] : null;
+        if(!note) {
+            alert("Erro: Lembrete não encontrado na base local. Atualize a página e tente novamente.");
+            return;
+        }
+        
+        const sharedWith = note.sharedWith || [];
+        const modalBody = document.getElementById("share-agenda-users-list");
+        
+        if(modalBody) {
+            let html = '';
+            let crmUsers = [];
+            try {
+                const usersStr = localStorage.getItem('crm_users');
+                if (usersStr && usersStr !== "null" && usersStr !== "undefined") {
+                    crmUsers = JSON.parse(usersStr);
+                    if (!Array.isArray(crmUsers)) crmUsers = [];
+                }
+            } catch(e) { console.error(e); }
+            
+            let currentUserEmail = "";
+            if (window.AppState && window.AppState.currentUser && window.AppState.currentUser.email) {
+                currentUserEmail = window.AppState.currentUser.email.toLowerCase();
             }
-        });
+            
+            crmUsers.forEach(u => {
+                if(u && u.status === 'ATIVO' && u.email && u.email.toLowerCase() !== currentUserEmail) {
+                    const checked = sharedWith.includes(u.email.toLowerCase()) ? 'checked' : '';
+                    html += `
+                      <label style="display:flex; align-items:center; gap:10px; padding:8px; border:1px solid #e2e8f0; border-radius:4px; margin-bottom:5px; cursor:pointer;" onmouseenter="this.style.background='#f1f5f9'" onmouseleave="this.style.background='none'">
+                         <input type="checkbox" class="share-user-chk" value="${u.email.toLowerCase()}" ${checked} style="width:16px;height:16px;accent-color:var(--color-primary);">
+                         <span style="font-size:0.9rem; color:#1e293b; font-weight:500;">${u.name} (${u.email})</span>
+                      </label>
+                    `;
+                }
+            });
+            
+            if(html === '') html = '<p style="font-size:0.85rem; color:#64748b; text-align:center;">Não há outros operadores para compartilhar.</p>';
+            modalBody.innerHTML = html;
+        }
         
-        if(html === '') html = '<p style="font-size:0.85rem; color:#64748b; text-align:center;">Não há outros operadores para compartilhar.</p>';
-        modalBody.innerHTML = html;
+        const modal = document.getElementById("share-agenda-modal");
+        if (modal) {
+            modal.style.display = "flex";
+        } else {
+            alert("Erro estrutural: Modal de compartilhamento não encontrado no HTML.");
+        }
+    } catch(err) {
+        console.error("Erro ao abrir modal de compartilhar:", err);
+        alert("Ocorreu um erro ao abrir a tela de compartilhamento: " + err.message);
     }
-    document.getElementById("share-agenda-modal").style.display = "flex";
 };
 
 window.closeShareAgendaModal = function() {

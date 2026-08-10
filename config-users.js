@@ -420,11 +420,11 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="document.getElementById('umodal-operator-type-container').style.display = this.value.toUpperCase().includes('OPERADOR') ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="document.getElementById('umodal-operator-type-container').style.display = this.value.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
-               <div id="umodal-operator-type-container" style="flex: 1; display: ${user && user.profile_name && user.profile_name.toUpperCase().includes('OPERADOR') ? 'block' : (!user ? 'block' : 'none')};">
+               <div id="umodal-operator-type-container" style="flex: 1; display: ${user && user.profile_name && user.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : (!user ? 'block' : 'none')};">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Tipo de Operador</label>
                   <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      <option value="interno" ${user && user.operator_type === 'interno' ? 'selected' : ''}>Interno</option>
@@ -613,7 +613,7 @@ const ConfigUsersApp = {
           <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.phone || '-'}</td>
           <td style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.85rem;">
              ${u.profile_name}
-             ${u.operator_type ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : 'Advogado (Jurídico)')}</div>` : ''}
+             ${(u.operator_type && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÇA') ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : (u.operator_type === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
           </td>
           <td style="padding: 16px 15px;">${statusBadge}</td>
           <td style="padding: 16px 15px;">
