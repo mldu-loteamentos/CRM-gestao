@@ -1491,16 +1491,19 @@ async function initializeApplication() {
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
+                 console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
-                 window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
+                 await window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[customerId] || [] }, { merge: true });
+                 console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
               } else {
                  for (const custId of Object.keys(AppState.notes)) {
                     const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(custId));
-                    window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[custId] || [] }, { merge: true }).catch(e => console.error(e));
+                    await window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[custId] || [] }, { merge: true });
                  }
               }
           } catch(e) {
-              console.error('Erro ao salvar notas no Firebase', e);
+              console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
+              alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
           }
       }
   };
