@@ -1410,6 +1410,43 @@ function renderUserSession() {
       azureStatus.style.backgroundColor = "var(--color-warning-glow)";
     }
     lucide.createIcons();
+    applyMenuPermissions();
+  }
+}
+
+function applyMenuPermissions() {
+  if (!AppState.currentUser) return;
+  const profileName = AppState.currentUser.profile_name || "";
+  
+  // Administrador tem acesso a tudo
+  if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
+  
+  const profileId = profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  const permsStr = localStorage.getItem(`crm_perms_${profileId}`);
+  
+  if (permsStr) {
+    try {
+      const perms = JSON.parse(permsStr);
+      const moduleItems = document.querySelectorAll('.nav-item[data-module]');
+      
+      moduleItems.forEach(item => {
+        const modKey = item.getAttribute('data-module');
+        // Se o módulo não estiver marcado (true) nas permissões, ocultamos
+        if (perms[modKey] === true) {
+          item.style.display = '';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    } catch (e) {
+      console.error("Erro ao aplicar permissões do menu", e);
+    }
+  } else {
+    // Se não tiver permissões salvas para o perfil (novo perfil sem salvar), oculta os restritos
+    const moduleItems = document.querySelectorAll('.nav-item[data-module]');
+    moduleItems.forEach(item => {
+      item.style.display = 'none';
+    });
   }
 }
 

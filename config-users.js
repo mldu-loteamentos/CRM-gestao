@@ -67,6 +67,10 @@ const ConfigUsersApp = {
       submodules: [{ name: "Geral", key: "sub_rel_geral", actions: [{ id: "relacionamento", label: "Relacionamento" }] }]
     },
     {
+      name: "Compromissário", icon: "building", key: "mod_compromissario",
+      submodules: [{ name: "Geral", key: "sub_compromissario_geral", actions: [{ id: "prefeitura", label: "Prefeitura" }, { id: "associacoes", label: "Associações" }] }]
+    },
+    {
       name: "Segurança", icon: "shield", key: "mod_seg",
       submodules: [
         {
