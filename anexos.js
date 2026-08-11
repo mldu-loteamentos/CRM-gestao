@@ -710,36 +710,24 @@ const AnexosApp = {
 
   async loadTagsAtivas() {
     try {
-      const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-      const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-      const res = await fetch(`http://${host}:${port}/api/tags`);
-      
-      if (res.ok) {
-        const tags = await res.json();
-        AnexosState.tagsAtivas = tags.filter(t => t.status === 'Ativa');
-        // Re-render file list after tags are loaded
-        this.renderFilesList();
-      } else if (res.status === 503) {
-        // Banco de dados indisponível
-        const error = await res.json();
-        console.error("Banco de dados indisponível:", error.error);
-        // Mostrar aviso visual ao usuário
-        const filesList = document.getElementById('anexos-files-list');
-        if (filesList) {
-          filesList.innerHTML = `
-            <div style="padding: 20px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; color: #856404; margin-bottom: 20px;">
-              <strong>⚠️ Problema de Permissões</strong><br/>
-              Não foi possível carregar as TAGs. ${error.error}
-            </div>
-          `;
-        }
-        AnexosState.tagsAtivas = [];
-      } else {
-        console.error("Erro na API de tags:", res.status, res.statusText);
-        AnexosState.tagsAtivas = [];
+      if (!window.firebaseCollections || !window.firebaseDb) {
+        throw new Error("Firebase não está inicializado.");
       }
+      const q = window.firebaseCollections.query(
+        window.firebaseCollections.collection(window.firebaseDb, 'tags')
+      );
+      const querySnapshot = await window.firebaseCollections.getDocs(q);
+      const tags = [];
+      querySnapshot.forEach(doc => {
+        tags.push({ id: doc.id, ...doc.data() });
+      });
+      // Filter active tags only
+      AnexosState.tagsAtivas = tags.filter(t => t.status === 'Ativa');
+      AnexosState.tagsAtivas.sort((a, b) => a.name.localeCompare(b.name));
+      
+      this.renderFilesList();
     } catch (e) {
-      console.error("Erro ao buscar tags:", e);
+      console.error("Erro ao buscar tags do Firebase:", e);
       AnexosState.tagsAtivas = [
         { name: "RG", destino: "Unidade", status: "Ativa" },
         { name: "CPF", destino: "Unidade", status: "Ativa" },
