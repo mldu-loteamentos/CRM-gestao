@@ -56,7 +56,10 @@ const ConfigUsersApp = {
     },
     {
       name: "Comercial", icon: "store", key: "mod_comercial",
-      submodules: [{ name: "Geral", key: "sub_com_geral", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos" }] }]
+      submodules: [{ name: "Geral", key: "sub_com_geral", actions: [
+        { id: "dashboard", label: "Dashboard" },
+        { id: "assistente_anexos", label: "Assistente de Anexos" }
+      ]}]
     },
     {
       name: "Marketing", icon: "megaphone", key: "mod_mkt",
@@ -96,7 +99,8 @@ const ConfigUsersApp = {
             { id: "plano_financeiro", label: "Plano Financeiro" },
             { id: "doc_padrao", label: "Documentos Padrões" },
             { id: "upload_kmz", label: "Upload de KMZ" },
-            { id: "upload_mapa", label: "Projeto Urbanístico" }
+            { id: "upload_mapa", label: "Projeto Urbanístico" },
+            { id: "indexadores", label: "Indexadores" }
           ]
         }
       ]

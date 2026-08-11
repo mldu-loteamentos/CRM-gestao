@@ -745,58 +745,58 @@
           </a>
           <ul class="nav-submenu" id="submenu-financeiro" style="display: none;">
             <!-- 4.1 Contas a Receber -->
-            <li class="nav-item nav-group">
+            <li class="nav-item nav-group" data-module="sub_fin_cr">
               <a onclick="toggleNavMenu(event, 'submenu-contas-receber')" title="Contas a Receber">
                 <span>Contas a Receber</span>
                 <i data-lucide="chevron-down" class="nav-chevron"></i>
               </a>
               <ul class="nav-submenu" id="submenu-contas-receber" style="display: none;">
-                <li data-tab="inadimplencia_dashboard">
+                <li data-tab="inadimplencia_dashboard" data-module="sub_fin_cr_fila_cobranca_acessar">
                   <a onclick="switchTab('inadimplencia_dashboard', 'Dashboard (Histórico)')">Dashboard</a>
                 </li>
-                <li data-tab="dashboard">
+                <li data-tab="dashboard" data-module="sub_fin_cr_fila_cobranca_acessar">
                   <a onclick="switchTab('dashboard', 'Fila de Cobrança')">Fila de Cobrança</a>
                 </li>
-                <li data-tab="agenda">
+                <li data-tab="agenda" data-module="sub_fin_cr_agenda_acessar">
                   <a onclick="switchTab('agenda', 'Agenda do Operador', true)" style="display: flex; align-items: center;">
                     Agenda do Operador
                     <span id="agenda-badge" class="badge badge-danger"
                       style="margin-left: auto; font-size: 0.75rem; padding: 2px 6px; border-radius: 10px; display: none;">0</span>
                   </a>
                 </li>
-                <li data-tab="zeropaid">
+                <li data-tab="zeropaid" data-module="sub_fin_cr_zero_paid_acessar">
                   <a onclick="switchTab('zeropaid', 'Clientes 0% Pago')">Clientes 0% Pago</a>
                 </li>
-                <li data-tab="subjudice">
+                <li data-tab="subjudice" data-module="sub_fin_cr_sub_judice_acessar">
                   <a onclick="switchTab('subjudice', 'Sub Judice')">Sub Judice</a>
                 </li>
 
-                <li data-tab="wesend">
+                <li data-tab="wesend" data-module="sub_fin_cr_notificacoes_acessar">
                   <a onclick="switchTab('wesend', 'Notificações')">Notificações</a>
                 </li>
 
-                <li data-tab="regras-cobranca">
+                <li data-tab="regras-cobranca" data-module="sub_fin_cr_regras_cobranca_acessar">
                   <a onclick="switchTab('regras-cobranca', 'Regras de Cobrança')">Regras de Cobrança</a>
                 </li>
               </ul>
             </li>
             <!-- 4.2 Contas a Pagar -->
-            <li class="nav-item nav-group">
+            <li class="nav-item nav-group" data-module="sub_fin_cp">
               <a onclick="toggleNavMenu(event, 'submenu-contas-pagar')" title="Contas a Pagar">
                 <span>Contas a Pagar</span>
                 <i data-lucide="chevron-down" class="nav-chevron"></i>
               </a>
               <ul class="nav-submenu" id="submenu-contas-pagar" style="display: none;">
-                <li data-tab="contas-pagar">
+                <li data-tab="contas-pagar" data-module="sub_fin_cp_assistente_cp_acessar">
                   <a onclick="switchTab('contas-pagar', 'Contas a Pagar')">Assistente de Contas a Pagar</a>
                 </li>
-                <li data-tab="prestacao-contas">
+                <li data-tab="prestacao-contas" data-module="sub_fin_cp_prestacao_contas_acessar">
                   <a onclick="switchTab('prestacao-contas', 'Prestação de Contas')">Prestação de Contas</a>
                 </li>
               </ul>
             </li>
             <!-- 4.3 Caixa e Banco -->
-            <li data-tab="construcao-caixa">
+            <li data-tab="construcao-caixa" data-module="sub_fin_cb">
               <a onclick="switchTab('construcao-caixa', 'Caixa e Banco')">Caixa e Banco</a>
             </li>
           </ul>
@@ -809,10 +809,10 @@
             <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
           <ul class="nav-submenu" id="submenu-fiscal" style="display: none;">
-            <li data-tab="construcao-fiscal">
+            <li data-tab="construcao-fiscal" data-module="sub_fiscal_geral_fiscal_acessar">
               <a onclick="switchTab('construcao-fiscal', 'PIS/COFINS')">PIS/COFINS</a>
             </li>
-            <li data-tab="construcao-fiscal-csll">
+            <li data-tab="construcao-fiscal-csll" data-module="sub_fiscal_geral_fiscal_acessar">
               <a onclick="switchTab('construcao-fiscal-csll', 'CSLL/IRPJ')">CSLL/IRPJ</a>
             </li>
           </ul>
@@ -825,10 +825,10 @@
             <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
           <ul class="nav-submenu" id="submenu-comercial" style="display: none;">
-            <li data-tab="dashboard-comercial">
+            <li data-tab="dashboard-comercial" data-module="sub_com_geral_dashboard_acessar">
               <a onclick="switchTab('dashboard-comercial', 'Dashboard')">Dashboard</a>
             </li>
-            <li data-tab="anexos" data-permission="anexos" style="display: none;">
+            <li data-tab="anexos" data-module="sub_com_geral_assistente_anexos_acessar">
               <a onclick="switchTab('anexos', 'Assistente de Anexos')">Assistente de Anexos</a>
             </li>
           </ul>
@@ -855,10 +855,10 @@
             <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
           <ul class="nav-submenu" id="submenu-compromissario" style="display: none;">
-            <li data-tab="compromissario_prefeitura">
+            <li data-tab="compromissario_prefeitura" data-module="sub_compromissario_geral_prefeitura_acessar">
               <a onclick="switchTab('compromissario_prefeitura', 'Prefeitura')">Prefeitura</a>
             </li>
-            <li data-tab="compromissario_associacoes">
+            <li data-tab="compromissario_associacoes" data-module="sub_compromissario_geral_associacoes_acessar">
               <a onclick="switchTab('compromissario_associacoes', 'Associações')">Associações</a>
             </li>
           </ul>
@@ -871,10 +871,10 @@
             <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
           <ul class="nav-submenu" id="submenu-seguranca" style="display: none;">
-            <li data-tab="auditoria">
+            <li data-tab="auditoria" data-module="sub_seg_geral_auditoria_acessar">
               <a onclick="switchTab('auditoria', 'Auditoria do Sistema')">Auditoria do Sistema</a>
             </li>
-            <li data-tab="acessos">
+            <li data-tab="acessos" data-module="sub_seg_geral_acessos_acessar">
               <a onclick="switchTab('acessos', 'Acessos e Segurança')">Acessos</a>
             </li>
           </ul>
@@ -893,34 +893,34 @@
                 <i data-lucide="chevron-down" class="nav-chevron"></i>
               </a>
               <ul class="nav-submenu" id="submenu-apoio" style="display: none;">
-                <li data-tab="preambles">
+                <li data-tab="preambles" data-module="sub_cfg_apoio_preambulos_acessar">
                   <a onclick="switchTab('preambles', 'Apoio - Preâmbulos')">Preâmbulos</a>
                 </li>
-                <li data-tab="config-tags" data-permission="config.tags">
+                <li data-tab="config-tags" data-module="sub_cfg_apoio_tags_acessar">
                   <a onclick="switchTab('config-tags', 'Tags de Anexos')">Tags de Anexos</a>
                 </li>
-                <li data-tab="config-users" data-permission="config.usuarios">
+                <li data-tab="config-users" data-module="sub_cfg_apoio_usuarios_acessar">
                   <a onclick="switchTab('config-users', 'Usuários e Perfis')">Usuários e Perfis</a>
                 </li>
-                <li data-tab="parametrizacoes">
+                <li data-tab="parametrizacoes" data-module="sub_cfg_apoio_empresas_acessar">
                   <a onclick="switchTab('parametrizacoes', 'Empresas')">Empresas</a>
                 </li>
-                <li data-tab="centros-custo">
+                <li data-tab="centros-custo" data-module="sub_cfg_apoio_centro_custo_acessar">
                   <a onclick="switchTab('centros-custo', 'Centros de Custo')">Centro de Custo</a>
                 </li>
-                <li data-tab="plano-financeiro">
+                <li data-tab="plano-financeiro" data-module="sub_cfg_apoio_plano_financeiro_acessar">
                   <a onclick="switchTab('plano-financeiro', 'Plano Financeiro e Visões')">Plano Financeiro e Visões</a>
                 </li>
-                <li data-tab="doc-padrao">
+                <li data-tab="doc-padrao" data-module="sub_cfg_apoio_doc_padrao_acessar">
                   <a onclick="switchTab('doc-padrao', 'Documentos Padrões')">Documentos Padrões</a>
                 </li>
-                <li data-tab="upload-kmz">
+                <li data-tab="upload-kmz" data-module="sub_cfg_apoio_upload_kmz_acessar">
                   <a onclick="switchTab('upload-kmz', 'Upload de KMZ')">Upload de KMZ</a>
                 </li>
-                <li data-tab="upload-mapa">
+                <li data-tab="upload-mapa" data-module="sub_cfg_apoio_upload_mapa_acessar">
                   <a onclick="switchTab('upload-mapa', 'Projeto Urbanístico')">Projeto Urbanístico</a>
                 </li>
-                <li data-tab="indexadores">
+                <li data-tab="indexadores" data-module="sub_cfg_apoio_indexadores_acessar">
                   <a onclick="switchTab('indexadores', 'Indexadores')">Indexadores</a>
                 </li>
               </ul>

@@ -1427,7 +1427,7 @@ function applyMenuPermissions() {
   if (permsStr) {
     try {
       const perms = JSON.parse(permsStr);
-      const moduleItems = document.querySelectorAll('.nav-item[data-module]');
+      const moduleItems = document.querySelectorAll('li[data-module]');
       
       moduleItems.forEach(item => {
         const modKey = item.getAttribute('data-module');
@@ -1443,7 +1443,7 @@ function applyMenuPermissions() {
     }
   } else {
     // Se não tiver permissões salvas para o perfil (novo perfil sem salvar), oculta os restritos
-    const moduleItems = document.querySelectorAll('.nav-item[data-module]');
+    const moduleItems = document.querySelectorAll('li[data-module]');
     moduleItems.forEach(item => {
       item.style.display = 'none';
     });
