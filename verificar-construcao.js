@@ -389,7 +389,7 @@ window.VerificarConstrucaoApp = {
 };
 
 document.addEventListener('tabChanged', (e) => {
-    if (e.detail === 'verificar_construcao') {
+    if (e.detail === 'construcao-engenharia') {
         window.VerificarConstrucaoApp.init();
     }
 });

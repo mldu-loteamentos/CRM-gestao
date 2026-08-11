@@ -21712,20 +21712,14 @@ window.getDynamicOperators = function(type = 'all') {
         console.error("Erro ao buscar operadores", e);
     }
     
-    // Filtrar por perfil Operador, excluindo Pagadoria e inativos
+    // Filtrar APENAS usuários com perfil exato "OPERADOR COBRANÇA" e que estejam ativos
     let ops = users.filter(u => {
         if (!u.profile_name) return false;
-        const prof = u.profile_name.toUpperCase();
-        const nome = (u.name || "").toUpperCase();
-        // É operador
-        if (!prof.includes("OPERADOR")) return false;
+        const prof = u.profile_name.trim().toUpperCase();
+        // Somente perfil exato de cobrança
+        if (prof !== "OPERADOR COBRANÇA") return false;
         // Não é inativo
         if (u.status === "INATIVO") return false;
-        // Não é pagadoria
-        if (prof.includes("PAGADORIA")) return false;
-        // Fallback: se o nome for Danielle, bloquear também, conforme solicitado
-        if (nome.includes("DANIELLE MARTINS") || nome === "DANIELLE") return false;
-        
         return true;
     });
     
