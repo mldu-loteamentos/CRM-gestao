@@ -23,7 +23,7 @@ $newBadge  = "v$newVer &nbsp;·&nbsp; $today"
 
 # Substitui o badge antigo pelo novo
 $content = $content -replace `
-    'v\d+\.\d+\.\d+\s*&nbsp;·&nbsp;\s*\d{2}/\d{2}/\d{4}', `
+    'v\d+\.\d+\.\d+\s*&nbsp;.+?\d{2}/\d{2}/\d{4}', `
     $newBadge
 
 [System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)

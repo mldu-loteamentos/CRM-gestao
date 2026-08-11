@@ -11093,9 +11093,8 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       }
   }
   const cacheKey = `${selectedOperator}_${dateStr}`;
-  if (window._dailyQueueCache[cacheKey]) {
-      let cachedQueue = window._dailyQueueCache[cacheKey];
-      return cachedQueue.filter(item => {
+  const applyTouchedFilter = (queue) => {
+      return queue.filter(item => {
          let exclude = false;
          const notes = AppState.notes[item.customerId] || [];
          notes.forEach(n => {
@@ -11114,6 +11113,10 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
          });
          return !exclude;
       });
+  };
+
+  if (window._dailyQueueCache[cacheKey]) {
+      return applyTouchedFilter(window._dailyQueueCache[cacheKey]);
   }
 
   // Permitir visualização da fila para hoje e dias futuros
@@ -11155,6 +11158,39 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
 
   let remainingSlots = capacity - scheduledCount;
   if (remainingSlots <= 0) return [];
+
+  let leftoverSaleIds = new Set();
+  let latestPrevDate = null;
+  Object.keys(window._dailyQueueCache).forEach(k => {
+     if (k.startsWith(selectedOperator + "_")) {
+         const kDate = k.substring(selectedOperator.length + 1);
+         if (kDate < dateStr) {
+             if (!latestPrevDate || kDate > latestPrevDate) {
+                 latestPrevDate = kDate;
+             }
+         }
+     }
+  });
+
+  if (latestPrevDate) {
+      const prevKey = `${selectedOperator}_${latestPrevDate}`;
+      const prevQueue = window._dailyQueueCache[prevKey] || [];
+      prevQueue.forEach(item => {
+         let exclude = false;
+         const notes = AppState.notes[item.customerId] || [];
+         notes.forEach(n => {
+           if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
+              if (!n.saleId || String(n.saleId) === String(item.saleId)) exclude = true;
+           }
+           if (n.date && n.date >= latestPrevDate && n.author && n.author.toLowerCase().includes(selectedOperator.toLowerCase())) {
+              if (!n.saleId || String(n.saleId) === String(item.saleId)) exclude = true;
+           }
+         });
+         if (!exclude) {
+             leftoverSaleIds.add(String(item.saleId));
+         }
+      });
+  }
 
   let pool = (window.clientList || []).filter(item => item.assignedOperator === selectedOperator);
 
@@ -11227,6 +11263,15 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
 
   // Calculate score for each client
   const scoredPool = pool.map(item => {
+    let isLeftover = leftoverSaleIds.has(String(item.saleId));
+    if (isLeftover) {
+        return {
+          ...item,
+          filaScore: 999999,
+          filaReason: "Fila Anterior"
+        };
+    }
+    
     let totalDebt = item.overdueValue + item.overdueCharges;
     
     let scoreValor = maxOverdue > 0 ? (totalDebt / maxOverdue) * 100 : 0;
@@ -11423,7 +11468,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   
   window._dailyQueueCache[cacheKey] = resultQueue;
   localStorage.setItem('crm_daily_queue_cache_v2', JSON.stringify(window._dailyQueueCache));
-  return resultQueue;
+  return applyTouchedFilter(resultQueue);
 };
 
 async function loadAgendaDayTasks(dateStr) {
