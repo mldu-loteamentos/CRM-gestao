@@ -11088,6 +11088,15 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   if (!window._dailyQueueCache) {
       try {
           window._dailyQueueCache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v2') || '{}');
+          if (!localStorage.getItem('crm_queue_v3_migrated_final')) {
+              Object.keys(window._dailyQueueCache).forEach(k => {
+                  if (k.endsWith(`_${todayStr}`)) {
+                      delete window._dailyQueueCache[k];
+                  }
+              });
+              localStorage.setItem('crm_queue_v3_migrated_final', 'true');
+              localStorage.setItem('crm_daily_queue_cache_v2', JSON.stringify(window._dailyQueueCache));
+          }
       } catch(e) {
           window._dailyQueueCache = {};
       }
