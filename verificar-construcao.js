@@ -429,20 +429,7 @@ document.addEventListener('tabChanged', (e) => {
     }
 });
 
-                    <div>
-                        <button class="btn btn-primary" onclick="window.VerificarConstrucaoApp.loadData()">
-                            <i data-lucide="refresh-cw" style="width: 16px;"></i> Carregar Pendentes
-                        </button>
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
-                            <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
-                        </button>
-                        <button class="btn btn-outline" onclick="window.VerificarConstrucaoApp.abrirVistoriasRecebidas()">
-                            <i data-lucide="inbox" style="width: 16px;"></i> Vistorias Recebidas
-                        </button>
-                    </div>
-                </div>
+
 
                 <div id="vc-loading" style="display: none; text-align: center; padding: 20px; color: #666;">
                     Analisando fila de clientes e cruzando com KMZs...

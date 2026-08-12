@@ -1417,11 +1417,23 @@ function renderUserSession() {
 function applyMenuPermissions() {
   if (!AppState.currentUser) return;
   const profileName = AppState.currentUser.profile_name || "";
+  window.applyPermissions(profileName);
+}
+
+window.applyPermissions = function(profileName) {
+  if (!profileName) return;
   
   // Administrador tem acesso a tudo
   if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
   
-  const profileId = profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  let crmProfiles = [];
+  try {
+    crmProfiles = JSON.parse(localStorage.getItem('crm_moura_profiles')) || [];
+  } catch(e) {}
+  
+  const matchedProfile = crmProfiles.find(p => p.name === profileName.trim().toUpperCase());
+  const profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  
   const permsStr = localStorage.getItem(`crm_perms_${profileId}`);
   
   if (permsStr) {
@@ -1814,7 +1826,16 @@ async function loadAndApplyPermissions() {
   // Buscar permissões do usuário se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
-      let profileId = AppState.currentUser.profile_name ? AppState.currentUser.profile_name.trim().toLowerCase().replace(/\s+/g, '_') : 'admin';
+      let profileName = AppState.currentUser.profile_name || '';
+      let profileId = 'admin';
+      if (profileName) {
+          let crmProfiles = [];
+          try {
+             crmProfiles = JSON.parse(localStorage.getItem('crm_moura_profiles')) || [];
+          } catch(e) {}
+          const matchedProfile = crmProfiles.find(p => p.name === profileName.trim().toUpperCase());
+          profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
+      }
       let permsStr = localStorage.getItem('crm_perms_' + profileId);
       
       if (permsStr) {
@@ -21753,8 +21774,6 @@ window.SYNC_KEYS = [
 
 // Função que baixa configurações na inicialização
 window.syncGlobalConfigFromFirebase = async function() {
-    if (sessionStorage.getItem('crm_synced_global')) return; // já sincronizou nesta sessão
-    
     try {
         if (!window.firebaseDb || !window.firebaseCollections) return;
         const snap = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, "config"));
@@ -21778,7 +21797,6 @@ window.syncGlobalConfigFromFirebase = async function() {
                 }
             });
             
-            sessionStorage.setItem('crm_synced_global', 'true');
             if (changed) {
                 console.log("[Firebase] Configurações alteradas recebidas da nuvem. Recarregando a página para aplicar...");
                 location.reload();
