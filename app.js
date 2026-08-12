@@ -1421,7 +1421,7 @@ function applyMenuPermissions() {
   // Administrador tem acesso a tudo
   if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
   
-  const profileId = profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  const profileId = profileName.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_');
   const permsStr = localStorage.getItem(`crm_perms_${profileId}`);
   
   if (permsStr) {
@@ -1814,7 +1814,7 @@ async function loadAndApplyPermissions() {
   // Buscar permissões do usuário se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
-      let profileId = AppState.currentUser.profile_name ? AppState.currentUser.profile_name.trim().toLowerCase().replace(/\s+/g, '_') : 'admin';
+      let profileId = AppState.currentUser.profile_name ? AppState.currentUser.profile_name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_') : 'admin';
       let permsStr = localStorage.getItem('crm_perms_' + profileId);
       
       if (permsStr) {

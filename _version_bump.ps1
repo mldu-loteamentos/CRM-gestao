@@ -28,5 +28,10 @@ $content = $content -replace `
 
 [System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
 
+# Substitui também as strings de cache dos scripts (ex: app.js?v=114 -> app.js?v=121)
+$content = $content -replace '\?v=\d+', "?v=$patch"
+
+[System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
+
 # Retorna a versão nova para o deploy.bat capturar
 Write-Output $newVer

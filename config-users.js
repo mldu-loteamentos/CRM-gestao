@@ -136,7 +136,7 @@ const ConfigUsersApp = {
   addProfile() {
     const profileName = prompt("Digite o nome do novo perfil (ex: Operador Financeiro):");
     if (profileName && profileName.trim() !== "") {
-       const id = profileName.trim().toLowerCase().replace(/\s+/g, '_');
+       const id = profileName.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_');
        
        if (this.profiles.find(p => p.id === id)) {
           alert("Este perfil já existe.");
