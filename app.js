@@ -11103,7 +11103,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   const cacheKey = `${selectedOperator}_${dateStr}`;
   const applyTouchedFilter = (queue) => {
-      return queue.filter(item => {
+      queue.forEach(item => {
          let exclude = false;
          const notes = AppState.notes[item.customerId] || [];
          notes.forEach(n => {
@@ -11120,8 +11120,9 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
               }
            }
          });
-         return !exclude;
+         item.isResolved = exclude;
       });
+      return queue;
   };
 
   if (window._dailyQueueCache[cacheKey]) {
@@ -11699,6 +11700,7 @@ async function loadAgendaDayTasks(dateStr) {
   const hideResolvedEl = document.getElementById("agenda-hide-resolved");
   if (hideResolvedEl && hideResolvedEl.checked) {
       dayItems = dayItems.filter(item => {
+          if (item.isResolved) return false;
           if (item.isFila) return true;
           if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
           return true;
@@ -11750,7 +11752,10 @@ async function loadAgendaDayTasks(dateStr) {
     let actionHtml = '';
     let filaBadge = '';
     
-    if (item.isFila) {
+    if (item.isResolved) {
+      statusColor = "#22c55e"; // Verde para resolvido
+      filaBadge = `<span style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #86efac; margin-bottom: 4px;"><i data-lucide="check" style="width: 10px; height: 10px;"></i> RESOLVIDO</span><br>`;
+    } else if (item.isFila) {
       statusColor = "#f97316"; // Laranja para a fila
       filaBadge = `<span style="background: #ffedd5; color: #ea580c; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fdba74; margin-bottom: 4px; cursor: help;" title="${(item.scoreDetails || 'Fila de Hoje').replace(/\n/g, '&#10;')}"><i data-lucide="zap" style="width: 10px; height: 10px;"></i> FILA DE HOJE</span><br>`;
     } else if (item.promiseStatus === "Cumprido") {

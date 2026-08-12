@@ -729,7 +729,14 @@
             <span>Engenharia</span>
           </a>
         </li>
-        <!-- 3 - COMPRAS -->
+        <!-- 3 - VISTORIA -->
+        <li class="nav-item" data-tab="tab-vistoria" data-module="mod_vistoria">
+          <a onclick="switchTab('tab-vistoria', 'Vistoria')" title="Vistoria">
+            <i data-lucide="camera"></i>
+            <span>Vistoria</span>
+          </a>
+        </li>
+        <!-- 4 - COMPRAS -->
         <li class="nav-item" data-tab="construcao-compras" data-module="mod_compras">
           <a onclick="switchTab('construcao-compras', 'Compras')" title="Compras">
             <i data-lucide="shopping-cart"></i>
@@ -959,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.119 &nbsp;Â·&nbsp; 11/08/2026
+            v1.0.120 &nbsp;Â·&nbsp; 12/08/2026
           </span>
         </div>
       </div>
@@ -1650,7 +1657,18 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
         </div>
       </section>
 
-      <section id="tab-construcao-engenharia" class="tab-pane" style="display: none; background: var(--bg);">
+      <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
+          <img src="em_construcao.png" alt="Em Construção" style="max-width: 400px; margin-bottom: 2rem;">
+          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
+          <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
+            Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
+          </p>
+        </div>
+      </section>
+
+      <!-- TAB: VISTORIA -->
+      <section id="tab-vistoria" class="tab-pane" style="display: none; background: var(--bg);">
         <div id="verificar-construcao-root" style="height: 100%; padding: 20px;"></div>
       </section>
 
