@@ -1476,6 +1476,15 @@ async function initializeApplication() {
   AppState.preambles = JSON.parse(localStorage.getItem("crm_moura_preambles")) || window.MOCK_DATA.INITIAL_PREAMBLE_DATA;
   
   // --- INICIO MIGRACAO FIREBASE NOTES ---
+  window.getCustomerNoteChunkId = function(customerId) {
+      let sum = 0;
+      const str = String(customerId);
+      for (let i = 0; i < str.length; i++) {
+          sum += str.charCodeAt(i);
+      }
+      return 'chunk_' + (sum % 20); // 20 shards
+  };
+  
   // Strategy: merge Firebase (source of truth for cloud) with localStorage (local fallback)
   // Firebase wins on a per-customer basis if the customer exists in Firebase.
   try {
@@ -1487,19 +1496,20 @@ async function initializeApplication() {
              window.globalCustomerNotesUnsubscribe();
          }
          window.globalCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(
-             window.firebaseCollections.collection(window.firebaseDb, 'customer_notes'),
+             window.firebaseCollections.collection(window.firebaseDb, 'customer_notes_shards'),
              (snapshot) => {
                  let changed = false;
                  snapshot.docChanges().forEach(change => {
-                     const custId = change.doc.id;
                      const data = change.doc.data();
-                     if (change.type === 'removed') {
-                         delete AppState.notes[custId];
-                         changed = true;
-                     } else if (data && data.notes) {
-                         // Firebase é autoritativo: sempre sobrescreve o local para este cliente
-                         AppState.notes[custId] = data.notes;
-                         changed = true;
+                     if (change.type !== 'removed' && data) {
+                         // data is a chunk containing multiple customers: { "123": [...], "456": [...] }
+                         Object.entries(data).forEach(([custId, notesList]) => {
+                             // Compare to avoid unnecessary re-renders
+                             if (JSON.stringify(AppState.notes[custId]) !== JSON.stringify(notesList)) {
+                                 AppState.notes[custId] = notesList;
+                                 changed = true;
+                             }
+                         });
                      }
                  });
                  if (changed) {
@@ -1545,14 +1555,23 @@ async function initializeApplication() {
           try {
               if (customerId) {
                  console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
-                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
-                 await window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[customerId] || [] }, { merge: true });
+                 const chunkId = window.getCustomerNoteChunkId(customerId);
+                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
+                 await window.firebaseCollections.setDoc(docRef, { [String(customerId)]: AppState.notes[customerId] || [] }, { merge: true });
                  console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
               } else {
+                 console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
+                 const chunks = {};
                  for (const custId of Object.keys(AppState.notes)) {
-                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(custId));
-                    await window.firebaseCollections.setDoc(docRef, { notes: AppState.notes[custId] || [] }, { merge: true });
+                     const chunkId = window.getCustomerNoteChunkId(custId);
+                     if (!chunks[chunkId]) chunks[chunkId] = {};
+                     chunks[chunkId][String(custId)] = AppState.notes[custId] || [];
                  }
+                 for (const [chunkId, data] of Object.entries(chunks)) {
+                     const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
+                     await window.firebaseCollections.setDoc(docRef, data, { merge: true });
+                 }
+                 console.log("[Firebase RT] Salvamento em massa (sharded) concluído!");
               }
           } catch(e) {
               console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
@@ -1569,17 +1588,18 @@ async function initializeApplication() {
          if (window.globalJudNotesUnsubscribe) window.globalJudNotesUnsubscribe();
          AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
          window.globalJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(
-             window.firebaseCollections.collection(window.firebaseDb, 'jud_notes'),
+             window.firebaseCollections.collection(window.firebaseDb, 'jud_notes_shards'),
              (snapshot) => {
                  let changed = false;
                  snapshot.docChanges().forEach(change => {
-                     const custId = change.doc.id;
-                     if (change.type === 'removed') {
-                         delete AppState.judNotes[custId];
-                         changed = true;
-                     } else {
-                         AppState.judNotes[custId] = change.doc.data().notes || [];
-                         changed = true;
+                     const data = change.doc.data();
+                     if (change.type !== 'removed' && data) {
+                         Object.entries(data).forEach(([custId, notesList]) => {
+                             if (JSON.stringify(AppState.judNotes[custId]) !== JSON.stringify(notesList)) {
+                                 AppState.judNotes[custId] = notesList;
+                                 changed = true;
+                             }
+                         });
                      }
                  });
                  if (changed) {
@@ -1658,12 +1678,19 @@ async function initializeApplication() {
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
-                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes', String(customerId));
-                 window.firebaseCollections.setDoc(docRef, { notes: AppState.judNotes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
+                 const chunkId = window.getCustomerNoteChunkId(customerId);
+                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
+                 window.firebaseCollections.setDoc(docRef, { [String(customerId)]: AppState.judNotes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
               } else {
+                 const chunks = {};
                  for (const custId of Object.keys(AppState.judNotes)) {
-                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes', String(custId));
-                    window.firebaseCollections.setDoc(docRef, { notes: AppState.judNotes[custId] || [] }, { merge: true }).catch(e => console.error(e));
+                     const chunkId = window.getCustomerNoteChunkId(custId);
+                     if (!chunks[chunkId]) chunks[chunkId] = {};
+                     chunks[chunkId][String(custId)] = AppState.judNotes[custId] || [];
+                 }
+                 for (const [chunkId, data] of Object.entries(chunks)) {
+                     const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
+                     window.firebaseCollections.setDoc(docRef, data, { merge: true }).catch(e => console.error(e));
                  }
               }
           } catch(e) {
