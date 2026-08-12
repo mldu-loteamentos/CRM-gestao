@@ -956,16 +956,39 @@ const ConfigUsersApp = {
 
     localStorage.setItem(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms));
     
-    // Animação de sucesso no botão
+    // Animação de sucesso no botão e sincronização com o Firebase
     const btn = document.querySelector('button[onclick="ConfigUsersApp.savePermissions()"]');
     if (btn) {
        const originalText = btn.innerHTML;
-       btn.innerHTML = '<i data-lucide="check" style="width: 18px; margin-right: 6px;"></i> Salvo com Sucesso';
+       btn.innerHTML = '<i data-lucide="upload-cloud" style="width: 18px; margin-right: 6px;"></i> Sincronizando...';
        if (window.lucide) lucide.createIcons();
-       setTimeout(() => {
-          btn.innerHTML = originalText;
-          if (window.lucide) lucide.createIcons();
-       }, 2000);
+       
+       // Faz o upload de todas as permissões locais para o Firebase
+       if (window.forceUploadLocalConfig) {
+          window.forceUploadLocalConfig().then(() => {
+             btn.innerHTML = '<i data-lucide="check" style="width: 18px; margin-right: 6px;"></i> Salvo e Sincronizado';
+             if (window.lucide) lucide.createIcons();
+             setTimeout(() => {
+                btn.innerHTML = originalText;
+                if (window.lucide) lucide.createIcons();
+             }, 3000);
+          }).catch(e => {
+             btn.innerHTML = '<i data-lucide="alert-circle" style="width: 18px; margin-right: 6px;"></i> Erro na Nuvem';
+             console.error(e);
+             if (window.lucide) lucide.createIcons();
+             setTimeout(() => {
+                btn.innerHTML = originalText;
+                if (window.lucide) lucide.createIcons();
+             }, 3000);
+          });
+       } else {
+           btn.innerHTML = '<i data-lucide="check" style="width: 18px; margin-right: 6px;"></i> Salvo com Sucesso';
+           if (window.lucide) lucide.createIcons();
+           setTimeout(() => {
+              btn.innerHTML = originalText;
+              if (window.lucide) lucide.createIcons();
+           }, 2000);
+       }
     }
   }
 };
