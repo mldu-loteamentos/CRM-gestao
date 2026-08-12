@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.123 &nbsp;Â·&nbsp; 12/08/2026
+            v1.0.124 &nbsp;Â·&nbsp; 12/08/2026
           </span>
         </div>
       </div>
@@ -2136,7 +2136,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--color-text-dark);">
-                  <input type="checkbox" id="agenda-hide-resolved" style="width: 16px; height: 16px; accent-color: var(--color-primary);" checked onchange="renderAgendaAlerts()">
+                  <input type="checkbox" id="agenda-hide-resolved" style="width: 16px; height: 16px; accent-color: var(--color-primary);" checked onchange="if(window.loadAgendaDayTasks && window.lastSelectedAgendaDate) loadAgendaDayTasks(window.lastSelectedAgendaDate); renderAgendaAlerts()">
                   Ocultar Resolvidos
                 </label>
               </div>
@@ -4713,25 +4713,25 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     }
   </script>
 
-  <script defer src="data.js?v=123"></script>
-  <script defer src="sienge-api.js?v=123"></script>
-  <script defer src="azure-auth.js?v=123"></script>
-  <script defer src="app.js?v=123"></script>
-  <script defer src="anexos.js?v=123"></script>
-  <script defer src="contas-pagar.js?v=123"></script>
-  <script defer src="config-tags.js?v=123"></script>
-  <script defer src="config-users.js?v=123"></script>
-  <script defer src="construcao.js?v=123"></script>
+  <script defer src="data.js?v=124"></script>
+  <script defer src="sienge-api.js?v=124"></script>
+  <script defer src="azure-auth.js?v=124"></script>
+  <script defer src="app.js?v=124"></script>
+  <script defer src="anexos.js?v=124"></script>
+  <script defer src="contas-pagar.js?v=124"></script>
+  <script defer src="config-tags.js?v=124"></script>
+  <script defer src="config-users.js?v=124"></script>
+  <script defer src="construcao.js?v=124"></script>
 
-  <script defer src="empresas.js?v=123"></script>
-  <script defer src="relacionamento.js?v=123"></script>
+  <script defer src="empresas.js?v=124"></script>
+  <script defer src="relacionamento.js?v=124"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=123"></script>
-  <script defer src="plano-financeiro.js?v=123"></script>
-  <script defer src="fiscal.js?v=123"></script>
-  <script defer src="indexadores.js?v=123"></script>
-  <script defer src="verificar-construcao.js?v=123"></script>
+  <script defer src="centros-custo.js?v=124"></script>
+  <script defer src="plano-financeiro.js?v=124"></script>
+  <script defer src="fiscal.js?v=124"></script>
+  <script defer src="indexadores.js?v=124"></script>
+  <script defer src="verificar-construcao.js?v=124"></script>
   
   <!-- Modal Compartilhar Anotação -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; pointer-events: auto !important; z-index: 999999 !important; visibility: visible !important; opacity: 1 !important; width: 100vw !important; height: 100vh !important; top: 0 !important; left: 0 !important;">
@@ -5080,7 +5080,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     </div>
   </div>
 
-  <script src="repactuacoes.js?v=123"></script>
+  <script src="repactuacoes.js?v=124"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

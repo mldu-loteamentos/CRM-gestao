@@ -11512,7 +11512,34 @@ async function loadAgendaDayTasks(dateStr) {
       return;
   }
   
-  body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px; color:var(--color-text-muted);">
+  const typeFilter = window.agendaFilterType || "todas";
+
+  const dateParts = dateStr.split("-");
+  if (dateHeader) {
+    dateHeader.textContent = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+  }
+  
+  window.lastSelectedAgendaDate = dateStr;
+  
+  const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
+  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales || []);
+  
+  let dayItems = [];
+  
+  // Use window.AgendaSelectedOperator as source of truth (DOM select may be hidden for operators)
+  const _domSelectVal = document.getElementById("agenda-operator-select")?.value || "";
+  const selectedOperator = window.AgendaSelectedOperator || _domSelectVal || "Todos";
+  const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
+  const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
+  const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
+
+  window.agendaItemsCache = window.agendaItemsCache || {};
+  const cacheKey = dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
+
+  if (window.agendaItemsCache[cacheKey]) {
+      dayItems = [...window.agendaItemsCache[cacheKey]];
+  } else {
+      body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px; color:var(--color-text-muted);">
     <style>
       @keyframes sortBar1 {
         0%, 15% { top: 0px; background-color: #cbd5e1; }
@@ -11560,33 +11587,7 @@ async function loadAgendaDayTasks(dateStr) {
       <span style="font-weight: 600; font-size: 1.05rem; color: var(--color-primary);">Priorizando clientes para montar a fila...</span>
     </div>
   </td></tr>`;
-  
-  const dateParts = dateStr.split("-");
-  if (dateHeader) {
-    dateHeader.textContent = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
-  }
-  
-  window.lastSelectedAgendaDate = dateStr;
-  
-  const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
-  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales || []);
-  
-  let dayItems = [];
-  
-  // Use window.AgendaSelectedOperator as source of truth (DOM select may be hidden for operators)
-  const _domSelectVal = document.getElementById("agenda-operator-select")?.value || "";
-  const selectedOperator = window.AgendaSelectedOperator || _domSelectVal || "Todos";
-  const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
-  const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
-  const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
-  const typeFilter = window.agendaFilterType || "todas";
 
-  window.agendaItemsCache = window.agendaItemsCache || {};
-  const cacheKey = dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
-
-  if (window.agendaItemsCache.key === cacheKey && window.agendaItemsCache.items) {
-      dayItems = [...window.agendaItemsCache.items];
-  } else {
       Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
         const custId = Number(custIdStr);
         const customer = customers[custId];
@@ -11691,10 +11692,7 @@ async function loadAgendaDayTasks(dateStr) {
         }
       }
       
-      window.agendaItemsCache = {
-          key: cacheKey,
-          items: [...dayItems]
-      };
+      window.agendaItemsCache[cacheKey] = [...dayItems];
   }
 
   const hideResolvedEl = document.getElementById("agenda-hide-resolved");
