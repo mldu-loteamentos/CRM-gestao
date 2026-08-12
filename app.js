@@ -21796,7 +21796,8 @@ window.SYNC_KEYS = [
     "crm_plano_impostos",
     "crm_impostos_custom",
     "crm_indexadores_ativos",
-    "crm_moura_timeline_nodes"
+    "crm_moura_timeline_nodes",
+    "crm_moura_timeline_acoes"
 ];
 
 // Função que baixa configurações na inicialização

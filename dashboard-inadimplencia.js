@@ -3,14 +3,19 @@ const DashboardInadimplencia = (function() {
   
   async function carregarDados() {
     try {
-      const res = await fetch('/api/inadimplencia-snapshots');
-      if (res.ok) {
-        snapshots = await res.json();
+      if (window.firebaseCollections && window.firebaseDb) {
+        const snapRef = window.firebaseCollections.collection(window.firebaseDb, 'inadimplencia_snapshots');
+        const q = window.firebaseCollections.query(snapRef, window.firebaseCollections.orderBy("date", "asc"));
+        const fbDocs = await window.firebaseCollections.getDocs(q);
+        snapshots = [];
+        fbDocs.forEach(d => {
+          snapshots.push(d.data());
+        });
       } else {
-        console.warn('Erro ao carregar snapshots de inadimplência');
+        console.warn('Firebase não inicializado para carregar snapshots');
       }
     } catch (e) {
-      console.error('Falha na requisição dos snapshots', e);
+      console.error('Falha na requisição dos snapshots do Firebase', e);
     }
   }
   
@@ -348,6 +353,16 @@ const DashboardInadimplencia = (function() {
     
     let html = `
       <div style="max-width: 1200px; margin: 0 auto;">
+        
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
+          <button class="btn btn-outline" style="border-color: #3b82f6; color: #3b82f6;" onclick="window.DashboardInadimplencia.salvarPosicaoHoje()">
+            <i data-lucide="save" style="width: 16px;"></i> Salvar Posição Hoje
+          </button>
+          <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
+            <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
+          </button>
+        </div>
+
         ${renderCards()}
         
         <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
@@ -410,7 +425,147 @@ const DashboardInadimplencia = (function() {
     }, 1000);
   }
 
+  async function salvarPosicaoHoje() {
+    if (!window.AppState || !window.AppState.inadimplentes || window.AppState.inadimplentes.length === 0) {
+      alert("Nenhum dado na fila de cobrança para salvar. Carregue os dados primeiro.");
+      return;
+    }
+    if (confirm("Deseja salvar a posição atual da Fila de Cobrança como o snapshot de hoje?")) {
+      try {
+        await window.SiengeAPI.saveDefaultersSnapshot(window.AppState.inadimplentes);
+        alert("Posição salva com sucesso!");
+        await carregarDados(); // Recarrega para exibir no gráfico
+        render();
+      } catch (e) {
+        alert("Erro ao salvar posição: " + e.message);
+      }
+    }
+  }
+
+  function gerarRelatorioDiarioPdf() {
+    if (!window.AppState || !window.AppState.inadimplentes || window.AppState.inadimplentes.length === 0) {
+      alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
+      return;
+    }
+
+    const bills = window.AppState.inadimplentes;
+    
+    // 1. Por Cidade/Empreendimento
+    const cities = {};
+    // 2. Por Operador
+    const ops = {};
+    // 3. Contratos 0% Pago
+    let zeroPaidCount = 0;
+
+    bills.forEach(b => {
+      // 0% pago
+      if (b.porcentagem_paga === 0 || b.porcentagem_paga === "0%" || b.porcentagem_paga === "0.00%") {
+        zeroPaidCount++;
+      }
+
+      // Por Cidade
+      let city = 'N/D';
+      if (b.customer && b.customer.address && b.customer.address.city) {
+         city = b.customer.address.city.toUpperCase();
+      }
+      if (!cities[city]) cities[city] = 0;
+      cities[city] += b.value;
+
+      // Por Operador
+      let op = b.operator || 'SEM OPERADOR';
+      if (!ops[op]) ops[op] = { total: 0, customers: {} };
+      ops[op].total += b.value;
+      
+      const custName = b.customerName || 'N/D';
+      if (!ops[op].customers[custName]) ops[op].customers[custName] = 0;
+      ops[op].customers[custName] += b.value;
+    });
+
+    const dateStr = new Date().toLocaleDateString('pt-BR');
+    let html = `
+      <html>
+        <head>
+          <title>Sprint Diário - ${dateStr}</title>
+          <style>
+            body { font-family: 'Inter', sans-serif; padding: 20px; color: #1e293b; }
+            h1 { text-align: center; color: #0f172a; margin-bottom: 5px; }
+            h2 { font-size: 1.2rem; margin-top: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; color: #334155; }
+            h3 { font-size: 1rem; margin-top: 15px; color: #475569; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; }
+            th { background-color: #f8fafc; font-weight: 600; color: #475569; }
+            .val { text-align: right; }
+            .kpi-container { display: flex; gap: 20px; justify-content: center; margin-top: 20px; margin-bottom: 30px; }
+            .kpi { padding: 15px 25px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; text-align: center; }
+            .kpi-title { font-size: 0.85rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
+            .kpi-value { font-size: 1.5rem; font-weight: 700; color: #1e293b; margin-top: 5px; }
+            @media print {
+              body { padding: 0; }
+              button { display: none !important; }
+            }
+          </style>
+        </head>
+        <body>
+          <div style="text-align: center; margin-bottom: 20px;">
+             <button onclick="window.print()" style="padding: 10px 20px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimir PDF</button>
+          </div>
+          <h1>Relatório de Sprint Diário</h1>
+          <div style="text-align: center; color: #64748b;">Posição: ${dateStr}</div>
+
+          <div class="kpi-container">
+            <div class="kpi">
+              <div class="kpi-title">Valor Total em Atraso</div>
+              <div class="kpi-value">${formatMoney(Object.values(cities).reduce((a,b)=>a+b, 0))}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-title">Contratos 0% Pagos Abertos</div>
+              <div class="kpi-value" style="color: #ef4444;">${zeroPaidCount}</div>
+            </div>
+          </div>
+
+          <h2>1. Valor em Atraso por Cidade (Empreendimento)</h2>
+          <table>
+            <thead><tr><th>Cidade</th><th class="val">Valor Total (R$)</th></tr></thead>
+            <tbody>
+              ${Object.entries(cities).sort((a,b)=>b[1]-a[1]).map(([city, val]) => `
+                <tr><td>${city}</td><td class="val">${formatMoney(val)}</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>2. Valor em Atraso por Operador (Top 5 Clientes)</h2>
+    `;
+
+    // Operadores sorted by total descending
+    const opsSorted = Object.entries(ops).sort((a,b) => b[1].total - a[1].total);
+    opsSorted.forEach(([opName, opData]) => {
+      html += `
+        <h3>Operador: ${opName} <span style="float: right; color: #0f172a;">Total: ${formatMoney(opData.total)}</span></h3>
+        <table>
+          <thead><tr><th>Top 5 Clientes Inadimplentes</th><th class="val" style="width: 150px;">Valor (R$)</th></tr></thead>
+          <tbody>
+      `;
+      // Sort customers by value descending, take top 5
+      const custSorted = Object.entries(opData.customers).sort((a,b) => b[1] - a[1]).slice(0, 5);
+      custSorted.forEach(([custName, val]) => {
+        html += `<tr><td>${custName}</td><td class="val">${formatMoney(val)}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+    });
+
+    html += `
+        </body>
+      </html>
+    `;
+
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+  }
+
   return {
-    render
+    render,
+    salvarPosicaoHoje,
+    gerarRelatorioDiarioPdf
   };
 })();

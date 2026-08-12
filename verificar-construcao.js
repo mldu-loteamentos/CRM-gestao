@@ -6,7 +6,7 @@ function _vcGetThreshold() {
     let thresholdDays = 91; // padrão caso o ponto não exista na régua
     if (window.TimelineState && Array.isArray(window.TimelineState)) {
         const node = window.TimelineState.find(n =>
-            (n.label || n.nome || '').toLowerCase().includes('verificar constru')
+            n.acao === 'verificar_construcao' || n.acao === 'vistoria' || (n.label || n.nome || '').toLowerCase().includes('verificar constru')
         );
         if (node && node.dias !== undefined) {
             const parsed = parseInt(node.dias);
@@ -485,7 +485,7 @@ document.addEventListener('tabChanged', (e) => {
         
         let thresholdDays = 91;
         if (window.TimelineState) {
-            const node = window.TimelineState.find(n => (n.label || n.nome || '').toLowerCase().includes('verificar constru'));
+            const node = window.TimelineState.find(n => n.acao === 'verificar_construcao' || n.acao === 'vistoria' || (n.label || n.nome || '').toLowerCase().includes('verificar constru'));
             if (node && node.dias !== undefined) {
                 thresholdDays = parseInt(node.dias);
             }
