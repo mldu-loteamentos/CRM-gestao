@@ -11781,7 +11781,8 @@ window.fireConfetti = function() {
       });
   }
   
-  const unresolvedItems = dayItems.filter(item => {
+  const originalItems = window.agendaItemsCache[cacheKey] || [];
+  const unresolvedItems = originalItems.filter(item => {
       if (item.isResolved) return false;
       if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
       return true;
@@ -11801,7 +11802,7 @@ window.fireConfetti = function() {
           summaryDiv.className = 'agenda-queue-summary';
           table.parentNode.insertBefore(summaryDiv, table);
       }
-  } else if (dayItems.length > 0 && unresolvedCount === 0) {
+  } else if (originalItems.length > 0 && unresolvedCount === 0) {
       const table = body.closest('table');
       if (table && table.parentNode) {
           const oldSummary = table.parentNode.querySelector('.agenda-queue-summary');
