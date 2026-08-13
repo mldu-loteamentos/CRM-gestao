@@ -447,114 +447,345 @@ const DashboardInadimplencia = (function() {
 
     const bills = window.rawClientList;
     
-    // 1. Por Cidade/Empreendimento (usaremos Centro de Custo no lugar da cidade caso não tenha)
-    const cities = {};
-    // 2. Por Operador
-    const ops = {};
-    // 3. Contratos 0% Pago
-    let zeroPaidCount = 0;
-
+    // 1. KPI Totals
+    let totalOverdue = 0;
+    let totalBills = 0;
+    const uniqueClients = new Set();
+    let sumMaxDaysDelay = 0;
+    
+    // 2. Por Empresa/Empreendimento (costCenterId)
+    const companyData = {};
+    
+    // 3. Por Operador
+    const operatorData = {};
+    
+    // 4. Zero Paid
+    const zeroPaidClients = [];
+    
     bills.forEach(b => {
-      // 0% pago
-      if (b.isZeroPaid) {
-        zeroPaidCount++;
-      }
+      // Basic KPIs
+      totalOverdue += b.overdueValue || 0;
+      uniqueClients.add(b.customerId);
+      totalBills += (b.billCount || 1);
+      sumMaxDaysDelay += (b.maxDaysDelay || 0);
 
-      // Por Cidade / Empreendimento
-      let city = 'N/D';
-      if (window.AppState && window.AppState.cachedCostCenters) {
-         const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === String(b.costCenterId));
-         if (ccObj && ccObj.name) city = ccObj.name.toUpperCase();
-      }
-      if (!cities[city]) cities[city] = 0;
-      cities[city] += b.overdueValue;
+      const delay = b.maxDaysDelay || 0;
+      let delayBucketCompany = '';
+      if (delay <= 30) delayBucketCompany = 'd30';
+      else if (delay <= 60) delayBucketCompany = 'd60';
+      else if (delay <= 90) delayBucketCompany = 'd90';
+      else if (delay <= 120) delayBucketCompany = 'd120';
+      else delayBucketCompany = 'd120p';
 
-      // Por Operador
-      let op = b.assignedOperator || 'SEM OPERADOR';
-      if (!ops[op]) ops[op] = { total: 0, customers: {} };
-      ops[op].total += b.overdueValue;
+      // 1. Empresa / Empreendimento
+      const ccId = String(b.costCenterId || 'N/D');
+      if (!companyData[ccId]) {
+         let ccName = 'N/D';
+         if (window.AppState && window.AppState.cachedCostCenters) {
+             const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === ccId);
+             if (ccObj && ccObj.name) ccName = ccObj.name.toUpperCase();
+         }
+         companyData[ccId] = {
+            id: ccId,
+            name: ccName,
+            totalBills: 0,
+            totalValue: 0,
+            d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0,
+            subjudice_v: 0
+         };
+      }
       
-      const custName = b.customerName || 'N/D';
-      if (!ops[op].customers[custName]) ops[op].customers[custName] = 0;
-      ops[op].customers[custName] += b.overdueValue;
+      const comp = companyData[ccId];
+      comp.totalBills += (b.billCount || 1);
+      comp.totalValue += (b.overdueValue || 0);
+      
+      if (b.subjudice === 'S') {
+         comp.subjudice_v += (b.overdueValue || 0);
+      } else {
+         if (delayBucketCompany === 'd30') comp.d30_v += (b.overdueValue || 0);
+         else if (delayBucketCompany === 'd60') comp.d60_v += (b.overdueValue || 0);
+         else if (delayBucketCompany === 'd90') comp.d90_v += (b.overdueValue || 0);
+         else if (delayBucketCompany === 'd120') comp.d120_v += (b.overdueValue || 0);
+         else comp.d120p_v += (b.overdueValue || 0);
+      }
+
+      // 2. Operador Aging (Títulos > 31 dias)
+      let opName = b.subjudice === 'S' ? 'APOIO JURÍDICO INTERNO' : (b.assignedOperator || 'NÃO ATRIBUÍDO');
+      opName = opName.toUpperCase();
+      
+      if (!operatorData[opName]) {
+          operatorData[opName] = {
+              name: opName,
+              d31_90_c: 0, d31_90_v: 0,
+              d91_120_c: 0, d91_120_v: 0,
+              d120p_c: 0, d120p_v: 0,
+              customers: []
+          };
+      }
+      
+      const op = operatorData[opName];
+      op.customers.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
+      
+      // Bucket operator (> 31)
+      if (delay >= 31 && delay <= 90) {
+          op.d31_90_c += (b.billCount || 1);
+          op.d31_90_v += (b.overdueValue || 0);
+      } else if (delay >= 91 && delay <= 120) {
+          op.d91_120_c += (b.billCount || 1);
+          op.d91_120_v += (b.overdueValue || 0);
+      } else if (delay > 120) {
+          op.d120p_c += (b.billCount || 1);
+          op.d120p_v += (b.overdueValue || 0);
+      }
+
+      // 3. 0% Pago
+      if (b.isZeroPaid || b.percPaid === 0) {
+          zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
+      }
     });
 
+    const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
     const dateStr = new Date().toLocaleDateString('pt-BR');
-    let html = `
+    
+    // Sort company data by totalValue DESC
+    const compSorted = Object.values(companyData).sort((a,b) => b.totalValue - a.totalValue);
+    
+    // Total row for company data
+    const compTotals = {
+        totalBills: 0, totalValue: 0,
+        d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0
+    };
+    compSorted.forEach(c => {
+        compTotals.totalBills += c.totalBills;
+        compTotals.totalValue += c.totalValue;
+        compTotals.d30_v += c.d30_v;
+        compTotals.d60_v += c.d60_v;
+        compTotals.d90_v += c.d90_v;
+        compTotals.d120_v += c.d120_v;
+        compTotals.d120p_v += c.d120p_v;
+        compTotals.subjudice_v += c.subjudice_v;
+    });
+
+    const getPct = (val, total) => total > 0 ? ((val/total)*100).toFixed(1) + '%' : '0.0%';
+
+    let html = \`
       <html>
         <head>
-          <title>Sprint Diário - ${dateStr}</title>
+          <title>Sprint Diário - \${dateStr}</title>
           <style>
-            body { font-family: 'Inter', sans-serif; padding: 20px; color: #1e293b; }
-            h1 { text-align: center; color: #0f172a; margin-bottom: 5px; }
-            h2 { font-size: 1.2rem; margin-top: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; color: #334155; }
-            h3 { font-size: 1rem; margin-top: 15px; color: #475569; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
-            th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; }
-            th { background-color: #f8fafc; font-weight: 600; color: #475569; }
+            @page { size: A4 landscape; margin: 8mm; }
+            body { font-family: 'Inter', 'Segoe UI', sans-serif; padding: 0; color: #1e293b; font-size: 10px; background: #f8fafc; -webkit-print-color-adjust: exact; }
+            .print-btn { text-align: center; margin-bottom: 10px; }
+            .print-btn button { padding: 8px 16px; background: #0f172a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+            @media print { .print-btn { display: none !important; } body { background: white; } }
+            h1 { text-align: center; color: #0f172a; margin: 0 0 5px 0; font-size: 14px; text-transform: uppercase; }
+            h2 { font-size: 11px; margin: 10px 0 5px 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 3px; display: flex; align-items: center; gap: 4px; }
+            
+            .kpi-container { display: flex; gap: 10px; justify-content: space-between; margin-bottom: 15px; }
+            .kpi { flex: 1; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+            .kpi-title { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+            .kpi-value { font-size: 16px; font-weight: 800; color: #0f172a; }
+
+            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+            th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; font-size: 9px; }
+            th { background-color: #f1f5f9; font-weight: 700; color: #334155; text-transform: uppercase; text-align: center; }
             .val { text-align: right; }
-            .kpi-container { display: flex; gap: 20px; justify-content: center; margin-top: 20px; margin-bottom: 30px; }
-            .kpi { padding: 15px 25px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; text-align: center; }
-            .kpi-title { font-size: 0.85rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
-            .kpi-value { font-size: 1.5rem; font-weight: 700; color: #1e293b; margin-top: 5px; }
-            @media print {
-              body { padding: 0; }
-              button { display: none !important; }
-            }
+            .center { text-align: center; }
+            .row-total { background-color: #fff7ed; font-weight: 800; }
+            .row-total td { color: #c2410c; }
+            
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+            .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+            
+            .pct-badge { display: block; font-size: 7.5px; color: #64748b; margin-top: 2px; }
+            .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 3px; }
+            .dot-green { background: #22c55e; }
+            .dot-yellow { background: #eab308; }
+            .dot-orange { background: #f97316; }
+            .dot-red { background: #ef4444; }
+            .dot-darkred { background: #991b1b; }
+            .dot-gray { background: #64748b; }
           </style>
         </head>
         <body>
-          <div style="text-align: center; margin-bottom: 20px;">
-             <button onclick="window.print()" style="padding: 10px 20px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimir PDF</button>
-          </div>
-          <h1>Relatório de Sprint Diário</h1>
-          <div style="text-align: center; color: #64748b;">Posição: ${dateStr}</div>
+          <div class="print-btn"><button onclick="window.print()">🖨️ Imprimir Relatório</button></div>
+          <h1>Posição de Inadimplência Geral (\${dateStr})</h1>
 
           <div class="kpi-container">
-            <div class="kpi">
-              <div class="kpi-title">Valor Total em Atraso</div>
-              <div class="kpi-value">${formatMoney(Object.values(cities).reduce((a,b)=>a+b, 0))}</div>
+            <div class="kpi" style="border-left: 4px solid #ef4444;">
+              <div class="kpi-title">Valor em Atraso</div>
+              <div class="kpi-value" style="color: #0f172a;">\${formatMoney(totalOverdue)}</div>
             </div>
-            <div class="kpi">
-              <div class="kpi-title">Contratos 0% Pagos Abertos</div>
-              <div class="kpi-value" style="color: #ef4444;">${zeroPaidCount}</div>
+            <div class="kpi" style="border-left: 4px solid #f59e0b;">
+              <div class="kpi-title">Clientes em Atraso</div>
+              <div class="kpi-value">\${uniqueClients.size}</div>
+            </div>
+            <div class="kpi" style="border-left: 4px solid #22c55e;">
+              <div class="kpi-title">Títulos Vencidos</div>
+              <div class="kpi-value">\${totalBills}</div>
+            </div>
+            <div class="kpi" style="border-left: 4px solid #3b82f6;">
+              <div class="kpi-title">Atraso Médio</div>
+              <div class="kpi-value">\${avgDelay} dias</div>
             </div>
           </div>
 
-          <h2>1. Valor em Atraso por Cidade (Empreendimento)</h2>
+          <h2>Inadimplência por Empresa | Empreendimento</h2>
           <table>
-            <thead><tr><th>Cidade</th><th class="val">Valor Total (R$)</th></tr></thead>
+            <thead>
+              <tr>
+                <th style="width: 30px;">ID</th>
+                <th style="text-align: left;">EMPRESA | EMPREENDIMENTO</th>
+                <th>TÍTULOS</th>
+                <th class="val">R$ ATUALIZADO</th>
+                <th class="val">ATÉ 30 DIAS</th>
+                <th class="val">ATÉ 60 DIAS</th>
+                <th class="val">ATÉ 90 DIAS</th>
+                <th class="val">ATÉ 120 DIAS</th>
+                <th class="val">ACIMA 120 DIAS</th>
+                <th class="val">SUB JUDICE</th>
+              </tr>
+            </thead>
             <tbody>
-              ${Object.entries(cities).sort((a,b)=>b[1]-a[1]).map(([city, val]) => `
-                <tr><td>${city}</td><td class="val">${formatMoney(val)}</td></tr>
-              `).join('')}
-            </tbody>
-          </table>
+    \`;
 
-          <h2>2. Valor em Atraso por Operador (Top 5 Clientes)</h2>
-    `;
-
-    // Operadores sorted by total descending
-    const opsSorted = Object.entries(ops).sort((a,b) => b[1].total - a[1].total);
-    opsSorted.forEach(([opName, opData]) => {
-      html += `
-        <h3>Operador: ${opName} <span style="float: right; color: #0f172a;">Total: ${formatMoney(opData.total)}</span></h3>
-        <table>
-          <thead><tr><th>Top 5 Clientes Inadimplentes</th><th class="val" style="width: 150px;">Valor (R$)</th></tr></thead>
-          <tbody>
-      `;
-      // Sort customers by value descending, take top 5
-      const custSorted = Object.entries(opData.customers).sort((a,b) => b[1] - a[1]).slice(0, 5);
-      custSorted.forEach(([custName, val]) => {
-        html += `<tr><td>${custName}</td><td class="val">${formatMoney(val)}</td></tr>`;
-      });
-      html += `</tbody></table>`;
+    compSorted.forEach(c => {
+        html += \`
+              <tr>
+                <td class="center">\${c.id}</td>
+                <td><strong>\${c.name}</strong></td>
+                <td class="center">\${c.totalBills}</td>
+                <td class="val"><strong>\${formatMoney(c.totalValue)}</strong></td>
+                <td class="val">\${c.d30_v > 0 ? formatMoney(c.d30_v) + '<span class="pct-badge"><span class="dot dot-green"></span>'+getPct(c.d30_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">\${c.d60_v > 0 ? formatMoney(c.d60_v) + '<span class="pct-badge"><span class="dot dot-yellow"></span>'+getPct(c.d60_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">\${c.d90_v > 0 ? formatMoney(c.d90_v) + '<span class="pct-badge"><span class="dot dot-orange"></span>'+getPct(c.d90_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">\${c.d120_v > 0 ? formatMoney(c.d120_v) + '<span class="pct-badge"><span class="dot dot-red"></span>'+getPct(c.d120_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">\${c.d120p_v > 0 ? formatMoney(c.d120p_v) + '<span class="pct-badge"><span class="dot dot-darkred"></span>'+getPct(c.d120p_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">\${c.subjudice_v > 0 ? formatMoney(c.subjudice_v) + '<span class="pct-badge"><span class="dot dot-gray"></span>'+getPct(c.subjudice_v, c.totalValue)+'</span>' : '-'}</td>
+              </tr>
+        \`;
     });
 
-    html += `
+    html += \`
+              <tr class="row-total">
+                <td colspan="2" class="val">TOTAL GERAL</td>
+                <td class="center">\${compTotals.totalBills}</td>
+                <td class="val">\${formatMoney(compTotals.totalValue)}</td>
+                <td class="val">\${formatMoney(compTotals.d30_v)}<span class="pct-badge">\${getPct(compTotals.d30_v, compTotals.totalValue)}</span></td>
+                <td class="val">\${formatMoney(compTotals.d60_v)}<span class="pct-badge">\${getPct(compTotals.d60_v, compTotals.totalValue)}</span></td>
+                <td class="val">\${formatMoney(compTotals.d90_v)}<span class="pct-badge">\${getPct(compTotals.d90_v, compTotals.totalValue)}</span></td>
+                <td class="val">\${formatMoney(compTotals.d120_v)}<span class="pct-badge">\${getPct(compTotals.d120_v, compTotals.totalValue)}</span></td>
+                <td class="val">\${formatMoney(compTotals.d120p_v)}<span class="pct-badge">\${getPct(compTotals.d120p_v, compTotals.totalValue)}</span></td>
+                <td class="val">\${formatMoney(compTotals.subjudice_v)}<span class="pct-badge">\${getPct(compTotals.subjudice_v, compTotals.totalValue)}</span></td>
+              </tr>
+            </tbody>
+          </table>
+    \`;
+
+    // Operator Aging
+    html += \`
+          <div class="grid-2">
+            <div>
+              <h2>Aging por Operador (Títulos Vencidos)</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">OPERADOR</th>
+                    <th class="val">31 a 90 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
+                    <th class="val">91 a 120 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
+                    <th class="val">Acima 120 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+    \`;
+
+    const opSorted = Object.values(operatorData).sort((a,b) => (b.d31_90_v+b.d91_120_v+b.d120p_v) - (a.d31_90_v+a.d91_120_v+a.d120p_v));
+    opSorted.forEach(op => {
+       const hasData = op.d31_90_c > 0 || op.d91_120_c > 0 || op.d120p_c > 0;
+       if (!hasData) return;
+       html += \`
+          <tr>
+            <td><strong>\${op.name}</strong></td>
+            <td class="val">\${op.d31_90_c > 0 ? op.d31_90_c + ' | ' + formatMoney(op.d31_90_v) : '-'}</td>
+            <td class="val">\${op.d91_120_c > 0 ? op.d91_120_c + ' | ' + formatMoney(op.d91_120_v) : '-'}</td>
+            <td class="val">\${op.d120p_c > 0 ? op.d120p_c + ' | ' + formatMoney(op.d120p_v) : '-'}</td>
+          </tr>
+       \`;
+    });
+    
+    html += \`
+                </tbody>
+              </table>
+            </div>
+            
+            <div>
+              <h2>Clientes 0% Pago</h2>
+    \`;
+    
+    // Top 5 0% Pago
+    zeroPaidClients.sort((a,b) => b.delay - a.delay);
+    const zeroPaidTotalValue = zeroPaidClients.reduce((acc, c) => acc + c.value, 0);
+    const zeroPaidTop5 = zeroPaidClients.slice(0, 5);
+
+    html += \`
+              <div style="display:flex; justify-content:space-between; margin-bottom: 5px; background: #fff; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                <span style="font-weight:bold; color: #ef4444; font-size: 10px;">Total Contratos: \${zeroPaidClients.length}</span>
+                <span style="font-weight:bold; font-size: 10px;">Valor Total: \${formatMoney(zeroPaidTotalValue)}</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">TOP 5 - CLIENTE (MAIOR ATRASO)</th>
+                    <th class="center">DIAS</th>
+                    <th class="val">VALOR (R$)</th>
+                  </tr>
+                </thead>
+                <tbody>
+    \`;
+    zeroPaidTop5.forEach(c => {
+       html += \`<tr><td>\${c.name}</td><td class="center" style="color:#ef4444;font-weight:bold;">\${c.delay}</td><td class="val">\${formatMoney(c.value)}</td></tr>\`;
+    });
+    if (zeroPaidTop5.length === 0) html += \`<tr><td colspan="3" class="center">Nenhum cliente 0% pago</td></tr>\`;
+    
+    html += \`
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <h2>Top Maiores Valores por Operador</h2>
+          <div class="grid-3" style="align-items: start; display: flex; flex-wrap: wrap; gap: 10px;">
+    \`;
+    
+    // Top 5 operators (only those with customers)
+    opSorted.forEach(op => {
+       if (op.customers.length === 0) return;
+       // Sort customers by value desc
+       op.customers.sort((a,b) => b.value - a.value);
+       const top5 = op.customers.slice(0, 5);
+       
+       html += \`
+            <table style="margin-bottom:0; flex: 1 1 30%; min-width: 250px;">
+              <thead>
+                <tr><th colspan="2" style="background:#0f172a; color:white; text-align:left;">\${op.name}</th></tr>
+                <tr><th style="text-align:left;">CLIENTE</th><th class="val">VALOR (R$)</th></tr>
+              </thead>
+              <tbody>
+       \`;
+       top5.forEach(c => {
+          html += \`<tr><td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 140px;" title="\${c.name}">\${c.name}</td><td class="val"><strong>\${formatMoney(c.value)}</strong></td></tr>\`;
+       });
+       html += \`
+              </tbody>
+            </table>
+       \`;
+    });
+
+    html += \`
+          </div>
         </body>
       </html>
-    `;
+    \`;
 
     const win = window.open('', '_blank');
     win.document.write(html);

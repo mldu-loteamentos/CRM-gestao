@@ -15311,7 +15311,7 @@ window.saveRulesConfig = function() {
   }
   
   if (window.forceUploadLocalConfig) {
-      window.forceUploadLocalConfig().then(() => {
+      window.forceUploadLocalConfig(true).then(() => {
           alert("Configurações do Motor de Regras salvas com sucesso na Nuvem!");
           loadPreamblesConfigTab();
       }).catch(err => {
@@ -15628,7 +15628,7 @@ window.addTimelineAcao = function() {
   localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
   
   if (window.forceUploadLocalConfig) {
-      window.forceUploadLocalConfig().catch(console.error);
+      window.forceUploadLocalConfig(true).catch(console.error);
   }
   
   input.value = '';
@@ -15652,13 +15652,13 @@ window.removeTimelineAcao = function(id) {
   }
   
   if (window.forceUploadLocalConfig) {
-      window.forceUploadLocalConfig().catch(console.error);
+      window.forceUploadLocalConfig(true).catch(console.error);
   }
   
   window.renderTimelineAcoesListModal();
 };
 
-window.TimelineGatilhosGlobais = [
+window.TimelineGatilhosGlobais = JSON.parse(localStorage.getItem('crm_moura_timeline_gatilhos')) || [
   'Alterar Status para Terceirizada',
   'Transferir para Jurídico',
   'Enviar Notificação WhatsApp',
@@ -15709,6 +15709,10 @@ window.addTimelineGatilhoGlobal = function() {
   
   if (!window.TimelineGatilhosGlobais.includes(val)) {
     window.TimelineGatilhosGlobais.push(val);
+    localStorage.setItem('crm_moura_timeline_gatilhos', JSON.stringify(window.TimelineGatilhosGlobais));
+    if (window.forceUploadLocalConfig) {
+        window.forceUploadLocalConfig(true).catch(console.error);
+    }
   }
   
   input.value = '';
@@ -15718,6 +15722,10 @@ window.addTimelineGatilhoGlobal = function() {
 window.removeTimelineGatilhoGlobal = function(val) {
   if (!confirm('Deseja realmente remover este gatilho da lista global?')) return;
   window.TimelineGatilhosGlobais = window.TimelineGatilhosGlobais.filter(g => g !== val);
+  localStorage.setItem('crm_moura_timeline_gatilhos', JSON.stringify(window.TimelineGatilhosGlobais));
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig(true).catch(console.error);
+  }
   window.renderTimelineGatilhosListModal();
 };
 
@@ -15859,7 +15867,7 @@ window.excluirTimelineNode = function() {
   window.TimelineState = window.TimelineState.filter(n => n.id !== id);
   localStorage.setItem('crm_moura_timeline_nodes', JSON.stringify(window.TimelineState));
   if (window.forceUploadLocalConfig) {
-      window.forceUploadLocalConfig().catch(console.error);
+      window.forceUploadLocalConfig(true).catch(console.error);
   }
   
   document.getElementById('timeline-node-modal').style.display = 'none';
@@ -15903,7 +15911,7 @@ window.saveTimelineNode = function() {
   document.getElementById('timeline-node-modal').style.display = 'none';
   localStorage.setItem('crm_moura_timeline_nodes', JSON.stringify(window.TimelineState));
   if (window.forceUploadLocalConfig) {
-      window.forceUploadLocalConfig().catch(console.error);
+      window.forceUploadLocalConfig(true).catch(console.error);
   }
   window.renderTimeline();
   const listModal = document.getElementById('timeline-list-modal');
@@ -21824,7 +21832,8 @@ window.SYNC_KEYS = [
     "crm_impostos_custom",
     "crm_indexadores_ativos",
     "crm_moura_timeline_nodes",
-    "crm_moura_timeline_acoes"
+    "crm_moura_timeline_acoes",
+    "crm_moura_timeline_gatilhos"
 ];
 
 // Função que baixa configurações na inicialização
@@ -21864,7 +21873,7 @@ window.syncGlobalConfigFromFirebase = async function() {
     }
 };
 
-window.forceUploadLocalConfig = async function() {
+window.forceUploadLocalConfig = async function(silent = true) {
     try {
         let payload = {};
         window.SYNC_KEYS.forEach(key => {
@@ -21881,9 +21890,14 @@ window.forceUploadLocalConfig = async function() {
         if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase não inicializado.");
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
         await window.firebaseCollections.setDoc(docRef, payload);
-        alert("✔️ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
+        if (!silent) {
+            alert("✔️ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
+        } else {
+            console.log("Configurações locais enviadas para nuvem com sucesso.");
+        }
     } catch(e) {
-        alert("Erro ao enviar: " + e.message);
+        if (!silent) alert("Erro ao enviar: " + e.message);
+        else console.error("Erro ao enviar (forceUploadLocalConfig):", e);
     }
 };
 
