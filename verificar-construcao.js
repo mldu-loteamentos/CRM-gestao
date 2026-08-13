@@ -182,7 +182,7 @@ window.VerificarConstrucaoApp = {
                         statusLabel = 'Link Enviado – Aguardando Fotos';
                         statusColor = 'color: #eab308;';
                     } else if (vistoriaAtiva.status === 'aguardando_validacao') {
-                        statusLabel = `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${idx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>`;
+                        statusLabel = 'Aguardando Validação';
                         statusColor = '';
                     }
                 }
@@ -212,7 +212,9 @@ window.VerificarConstrucaoApp = {
                             <td style="padding: 12px;">${r.cidade}</td>
                             <td style="padding: 12px;">${r.empreendimento}</td>
                             <td style="padding: 12px; font-weight: 600;">${r.unidade}</td>
-                            <td style="padding: 12px; ${r.statusColor}">${r.statusLabel}</td>
+                            <td style="padding: 12px; ${r.statusColor}">
+                                ${r.statusLabel === 'Aguardando Validação' ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${idx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` : r.statusLabel}
+                            </td>
                         </tr>
                     `;
                 });
@@ -383,7 +385,7 @@ window.VerificarConstrucaoApp = {
         try {
             const v = row.vistoriaAtiva;
             const { getStorage, ref, listAll, getDownloadURL } = window.firebaseCollections;
-            const storageRef = ref(window.firebaseStorage, \`vistorias/\${v.id}\`);
+            const storageRef = ref(window.firebaseStorage, `vistorias/${v.id}`);
             
             document.getElementById('vc-validar-status').textContent = 'Buscando fotos no Firebase...';
             const listRes = await listAll(storageRef);
@@ -398,7 +400,7 @@ window.VerificarConstrucaoApp = {
             if (host.includes('vercel.app')) port = '';
             
             const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
-            const cRes = await fetch(\`http://\${host}\${port}/sienge-proxy/sales-contracts/\${row.contractId}\`, {
+            const cRes = await fetch(`http://${host}${port}/sienge-proxy/sales-contracts/${row.contractId}`, {
                 headers: { 'Authorization': authHeader }
             });
             if (!cRes.ok) throw new Error("Falha ao consultar contrato no Sienge.");
@@ -408,7 +410,7 @@ window.VerificarConstrucaoApp = {
 
             document.getElementById('vc-validar-status').textContent = 'Enviando fotos para o Sienge...';
             
-            const padraoData = new Date().toLocaleDateString('pt-BR').replace(/\\//g, '.');
+            const padraoData = new Date().toLocaleDateString('pt-BR').replace(/\//g, '.');
 
             for (let i = 0; i < listRes.items.length; i++) {
                 const itemRef = listRes.items[i];
@@ -419,10 +421,10 @@ window.VerificarConstrucaoApp = {
                 const blob = await imgRes.blob();
                 
                 // Montar FormData e POST para Sienge
-                const nomeFinal = \`\${row.empreendimento} - \${row.unidade} - Foto de Vistoria \${i+1} - \${padraoData}.jpg\`;
-                const descricaoSienge = \`\${padraoData} - Foto de Vistoria \${i+1}\`;
+                const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i+1} - ${padraoData}.jpg`;
+                const descricaoSienge = `${padraoData} - Foto de Vistoria ${i+1}`;
                 
-                const apiUrl = \`http://\${host}\${port}/sienge-proxy/units/\${siengeUnitId}/attachments?description=\${encodeURIComponent(descricaoSienge)}\`;
+                const apiUrl = `http://${host}${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
                 
                 const formData = new FormData();
                 formData.append('file', blob, nomeFinal);
@@ -434,7 +436,7 @@ window.VerificarConstrucaoApp = {
                 });
                 
                 if (!uploadRes.ok) {
-                    throw new Error(\`Falha ao enviar foto \${i+1}: HTTP \${uploadRes.status}\`);
+                    throw new Error(`Falha ao enviar foto ${i+1}: HTTP ${uploadRes.status}`);
                 }
             }
 
