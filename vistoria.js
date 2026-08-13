@@ -218,6 +218,7 @@ async function buscarCoordenadasLote() {
                 
                 if (!found && list.length > 0) {
                     found = list[0];
+                    alert(`Atenção: O lote "${currentVistoriaDoc.unidade}" não foi encontrado dentro do arquivo KMZ! O sistema vai usar a coordenada do primeiro item que achou no arquivo: "${found.name}".`);
                 }
                 
                 if (found) {
@@ -412,24 +413,31 @@ window.enviarVistoria = async function() {
         
         let url1 = null, url2 = null, url3 = null;
 
+        const uploadWithTimeout = (ref, file, timeoutMs = 15000) => {
+            return Promise.race([
+                uploadBytes(ref, file),
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Tempo limite de upload excedido (CORS ou Falha de Rede).")), timeoutMs))
+            ]);
+        };
+
         // Upload 1
         if (files.file1) {
             const ref1 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/frente_${Date.now()}.jpeg`);
-            await uploadBytes(ref1, files.file1);
+            await uploadWithTimeout(ref1, files.file1);
             url1 = await getDownloadURL(ref1);
         }
         
         // Upload 2
         if (files.file2) {
             const ref2 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/meio_fundo_${Date.now()}.jpeg`);
-            await uploadBytes(ref2, files.file2);
+            await uploadWithTimeout(ref2, files.file2);
             url2 = await getDownloadURL(ref2);
         }
         
         // Upload 3
         if (files.file3) {
             const ref3 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/fundo_frente_${Date.now()}.jpeg`);
-            await uploadBytes(ref3, files.file3);
+            await uploadWithTimeout(ref3, files.file3);
             url3 = await getDownloadURL(ref3);
         }
         
