@@ -1,45 +1,86 @@
-let vistoriaDoc = null;
-let vistoriaId = null;
+let currentVistoriaId = null;
+let currentVistoriaDoc = null;
 let loteCoords = null; // {lat, lng}
 let currentDistance = Infinity;
 const MAX_DISTANCE = 40; // meters
 const files = { file1: null, file2: null, file3: null };
 
-document.addEventListener("DOMContentLoaded", async () => {
-    const urlParams = new URLSearchParams(window.location.search);
-    vistoriaId = urlParams.get('id');
-    
-    if (!vistoriaId) {
-        showError("ID da vistoria não fornecido na URL.");
-        return;
+// Lista de lotes carregados
+let loadedVistorias = [];
+let watchId = null;
+
+// Aguardar o firebaseDb estar disponível
+async function waitForFirebase() {
+    let retries = 20;
+    while (!window.firebaseDb && retries > 0) {
+        await new Promise(r => setTimeout(r, 100));
+        retries--;
     }
-    
+    if (!window.firebaseDb) throw new Error("Falha ao inicializar o Firebase. Verifique sua conexão.");
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
     try {
-        const db = firebase.firestore();
-        const docRef = await db.collection('vistorias').doc(vistoriaId).get();
+        await waitForFirebase();
         
-        if (!docRef.exists) {
-            showError("Solicitação de vistoria não encontrada.");
+        const urlParams = new URLSearchParams(window.location.search);
+        const idParam = urlParams.get('id');
+        const idsParam = urlParams.get('ids');
+        
+        let idsToLoad = [];
+        if (idsParam) {
+            idsToLoad = idsParam.split(',').map(id => id.trim()).filter(id => id);
+        } else if (idParam) {
+            idsToLoad = [idParam];
+        }
+        
+        if (idsToLoad.length === 0) {
+            showError("ID(s) da vistoria não fornecido(s) na URL.");
             return;
         }
         
-        vistoriaDoc = docRef.data();
+        const { getDoc, doc } = window.firebaseCollections;
         
-        if (vistoriaDoc.status === 'concluida' || vistoriaDoc.status === 'aguardando_validacao') {
-            document.getElementById('card-loading').style.display = 'none';
-            document.getElementById('card-sucesso').style.display = 'block';
-            return;
+        // Carregar todas as vistorias
+        loadedVistorias = [];
+        for (const vId of idsToLoad) {
+            const docRef = doc(window.firebaseDb, 'vistorias', vId);
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                loadedVistorias.push({ id: vId, ...snap.data() });
+            }
         }
         
-        // Populate info
-        document.getElementById('lbl-cidade').textContent = vistoriaDoc.cidade;
-        document.getElementById('lbl-empreendimento').textContent = vistoriaDoc.empreendimento;
-        document.getElementById('lbl-unidade').textContent = vistoriaDoc.unidade;
+        if (loadedVistorias.length === 0) {
+            showError("Nenhuma vistoria encontrada.");
+            return;
+        }
         
         document.getElementById('card-loading').style.display = 'none';
-        document.getElementById('card-content').style.display = 'block';
         
-        await buscarCoordenadasLote();
+        // Se houver mais de um, mostrar a lista
+        if (loadedVistorias.length > 1) {
+            renderizarLista();
+        } else {
+            // Se houver apenas 1, abrir direto
+            abrirVistoria(loadedVistorias[0].id);
+        }
+        
+        // Botão voltar
+        document.getElementById('btn-voltar').addEventListener('click', () => {
+            if (watchId) navigator.geolocation.clearWatch(watchId);
+            document.getElementById('card-content').style.display = 'none';
+            document.getElementById('card-list').style.display = 'block';
+        });
+        
+        document.getElementById('btn-voltar-sucesso').addEventListener('click', () => {
+            document.getElementById('card-sucesso').style.display = 'none';
+            // Atualizar status localmente e voltar para a lista
+            if (currentVistoriaDoc) {
+                currentVistoriaDoc.status = 'aguardando_validacao';
+            }
+            renderizarLista();
+        });
         
     } catch (e) {
         console.error(e);
@@ -47,24 +88,121 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
+function renderizarLista() {
+    const container = document.getElementById('lots-list-container');
+    container.innerHTML = '';
+    
+    // Ordenar para agrupar visualmente
+    loadedVistorias.sort((a, b) => (a.cidade || "").localeCompare(b.cidade || "") || (a.empreendimento || "").localeCompare(b.empreendimento || ""));
+    
+    loadedVistorias.forEach(v => {
+        const item = document.createElement('div');
+        item.style.padding = "15px";
+        item.style.marginBottom = "10px";
+        item.style.borderRadius = "8px";
+        item.style.border = "1px solid #e2e8f0";
+        item.style.cursor = "pointer";
+        item.style.display = "flex";
+        item.style.justifyContent = "space-between";
+        item.style.alignItems = "center";
+        
+        let statusBadge = '';
+        if (v.status === 'concluida' || v.status === 'aguardando_validacao') {
+            item.style.background = "#f1f5f9";
+            item.style.opacity = "0.7";
+            statusBadge = `<span style="background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">Enviado</span>`;
+        } else {
+            item.style.background = "#ffffff";
+            statusBadge = `<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">Pendente</span>`;
+        }
+        
+        item.innerHTML = `
+            <div>
+                <div style="font-weight: bold; margin-bottom: 4px;">${v.cidade || '-'} - ${v.empreendimento || '-'}</div>
+                <div style="color: #64748b; font-size: 0.9rem;">Unidade: ${v.unidade || '-'}</div>
+            </div>
+            <div>${statusBadge}</div>
+        `;
+        
+        item.addEventListener('click', () => {
+            if (v.status === 'concluida' || v.status === 'aguardando_validacao') {
+                alert("Esta vistoria já foi enviada!");
+                return;
+            }
+            abrirVistoria(v.id);
+        });
+        
+        container.appendChild(item);
+    });
+    
+    document.getElementById('card-list').style.display = 'block';
+}
+
+async function abrirVistoria(id) {
+    currentVistoriaId = id;
+    currentVistoriaDoc = loadedVistorias.find(v => v.id === id);
+    
+    if (!currentVistoriaDoc) return;
+    
+    document.getElementById('card-list').style.display = 'none';
+    document.getElementById('card-content').style.display = 'block';
+    
+    // Configura botões de voltar
+    if (loadedVistorias.length > 1) {
+        document.getElementById('btn-voltar').style.display = 'block';
+        document.getElementById('btn-voltar-sucesso').style.display = 'inline-block';
+        document.getElementById('msg-fechar').style.display = 'none';
+    } else {
+        document.getElementById('btn-voltar').style.display = 'none';
+        document.getElementById('btn-voltar-sucesso').style.display = 'none';
+        document.getElementById('msg-fechar').style.display = 'block';
+    }
+    
+    if (currentVistoriaDoc.status === 'concluida' || currentVistoriaDoc.status === 'aguardando_validacao') {
+        document.getElementById('card-content').style.display = 'none';
+        document.getElementById('card-sucesso').style.display = 'block';
+        return;
+    }
+    
+    document.getElementById('lbl-cidade').textContent = currentVistoriaDoc.cidade || '-';
+    document.getElementById('lbl-empreendimento').textContent = currentVistoriaDoc.empreendimento || '-';
+    document.getElementById('lbl-unidade').textContent = currentVistoriaDoc.unidade || '-';
+    
+    // Resetar fotos
+    files.file1 = null; files.file2 = null; files.file3 = null;
+    document.getElementById('input-foto1').value = ""; document.getElementById('preview1').style.display = 'none';
+    document.getElementById('input-foto2').value = ""; document.getElementById('preview2').style.display = 'none';
+    document.getElementById('input-foto3').value = ""; document.getElementById('preview3').style.display = 'none';
+    document.getElementById('btn-enviar').disabled = true;
+    
+    await buscarCoordenadasLote();
+}
+
 async function buscarCoordenadasLote() {
     try {
-        setStatus("Buscando coordenadas no servidor...", "wait");
+        setStatus("Buscando coordenadas...", "wait");
         
-        // Empreendimento ID (CostCenter)
-        const empId = vistoriaDoc.costCenterId;
+        // Se as coords já estiverem no documento do Firebase (adicionado na última atualização), usa elas
+        if (currentVistoriaDoc.loteCoords && currentVistoriaDoc.loteCoords.lat && currentVistoriaDoc.loteCoords.lng) {
+            loteCoords = currentVistoriaDoc.loteCoords;
+            iniciarGPS();
+            return;
+        }
+
+        // Tentar buscar na API caso contrário
+        const empId = currentVistoriaDoc.costCenterId;
+        if (!empId) throw new Error("Sem Centro de Custo vinculado");
+
         const host = window.location.hostname;
         const port = window.location.port || '80';
         
         const res = await fetch(`http://${host}:${port}/api/kmz-coords/${empId}`);
-        if (!res.ok) throw new Error("Falha ao buscar mapa do empreendimento");
+        if (!res.ok) {
+            throw new Error("Falha ao buscar mapa do empreendimento");
+        }
         
         const list = await res.json();
-        
-        // Match unit (lote)
-        // Usually unit is like "Q 01 L 02" or similar. KMZ usually has "Quadra 01 - Lote 02" or exact matches.
-        // For robustness, we will try to find a partial match. 
-        const unitNameRaw = vistoriaDoc.unidade.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const unitNameRaw = String(currentVistoriaDoc.unidade).toLowerCase().replace(/[^a-z0-9]/g, '');
         
         let found = null;
         for (let item of list) {
@@ -76,8 +214,7 @@ async function buscarCoordenadasLote() {
         }
         
         if (!found && list.length > 0) {
-            // fallback se não achar exato, pega o primeiro só pra nao quebrar (ideal é melhorar match depois)
-            console.warn("Match exato de lote não encontrado. Usando o primeiro do KMZ como referência central.");
+            console.warn("Match exato de lote não encontrado.");
             found = list[0];
         }
         
@@ -85,33 +222,23 @@ async function buscarCoordenadasLote() {
             throw new Error("Nenhum mapa (KMZ) cadastrado para este empreendimento.");
         }
         
-        // Parse coordinates. Depending on KMZ parser, it might be a JSON array of [lng, lat]
-        // or a string.
         let coordsArr = typeof found.coordinates === 'string' ? JSON.parse(found.coordinates) : found.coordinates;
         
-        // If it's a polygon (array of arrays), we take the first point or calculate centroid
         if (Array.isArray(coordsArr) && coordsArr.length > 0) {
             if (Array.isArray(coordsArr[0])) {
-                // Polygon -> pick first point
                 loteCoords = { lng: coordsArr[0][0], lat: coordsArr[0][1] };
             } else {
-                // Point -> [lng, lat]
                 loteCoords = { lng: coordsArr[0], lat: coordsArr[1] };
             }
         }
         
-        if (!loteCoords) {
-            throw new Error("Coordenadas inválidas no banco de dados.");
-        }
+        if (!loteCoords) throw new Error("Coordenadas inválidas no sistema.");
         
-        // Ativar GPS
         iniciarGPS();
         
     } catch(e) {
         console.error(e);
         showError("Erro de Mapa: " + e.message + " (Não será possível validar a distância).");
-        // Se der erro no mapa, liberamos as fotos de qualquer forma para não travar o processo, 
-        // mas marcamos uma flag.
         document.getElementById('photo-area').style.display = 'block';
     }
 }
@@ -119,19 +246,21 @@ async function buscarCoordenadasLote() {
 function iniciarGPS() {
     if (!navigator.geolocation) {
         showError("Seu navegador não suporta GPS.");
-        document.getElementById('photo-area').style.display = 'block'; // fallback
+        document.getElementById('photo-area').style.display = 'block';
         return;
     }
     
     setStatus("Aguardando sinal de GPS...", "wait");
     
-    navigator.geolocation.watchPosition(
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    
+    watchId = navigator.geolocation.watchPosition(
         (pos) => {
             const userLat = pos.coords.latitude;
             const userLng = pos.coords.longitude;
             
             const dist = calcCrow(userLat, userLng, loteCoords.lat, loteCoords.lng);
-            currentDistance = dist * 1000; // convert to meters
+            currentDistance = dist * 1000; // metros
             
             if (currentDistance <= MAX_DISTANCE) {
                 setStatus(`📍 Você está no local (${Math.round(currentDistance)}m do lote). Fotos liberadas!`, "success");
@@ -146,7 +275,7 @@ function iniciarGPS() {
         (err) => {
             console.error(err);
             if (err.code === 1) {
-                showError("Por favor, permita o acesso à Localização (GPS) no seu navegador para liberar as fotos.");
+                showError("Por favor, permita o acesso à Localização (GPS) no seu navegador.");
             } else {
                 showError("Erro ao obter GPS. Sinal fraco?");
             }
@@ -155,17 +284,17 @@ function iniciarGPS() {
     );
 }
 
-function abrirMaps() {
+// Escopo global para HTML attributes (onclick/onchange)
+window.abrirMaps = function() {
     if (loteCoords) {
         window.open(`https://www.google.com/maps/dir/?api=1&destination=${loteCoords.lat},${loteCoords.lng}`, '_blank');
     }
-}
+};
 
-function previewImage(input, previewId) {
+window.previewImage = function(input, previewId) {
     if (input.files && input.files[0]) {
         const file = input.files[0];
         
-        // Basic check
         if (file.size > 15 * 1024 * 1024) {
             alert("A imagem é muito grande (máx 15MB).");
             input.value = "";
@@ -184,52 +313,49 @@ function previewImage(input, previewId) {
         }
         reader.readAsDataURL(file);
         
-        checkAllPhotos();
+        if (files.file1 && files.file2 && files.file3) {
+            document.getElementById('btn-enviar').disabled = false;
+        } else {
+            document.getElementById('btn-enviar').disabled = true;
+        }
     }
-}
+};
 
-function checkAllPhotos() {
-    if (files.file1 && files.file2 && files.file3) {
-        document.getElementById('btn-enviar').disabled = false;
-    } else {
-        document.getElementById('btn-enviar').disabled = true;
-    }
-}
-
-async function enviarVistoria() {
+window.enviarVistoria = async function() {
     const btn = document.getElementById('btn-enviar');
     btn.disabled = true;
     btn.textContent = 'Enviando... (Aguarde)';
     
     try {
-        const storage = firebase.storage();
+        const { ref, uploadBytes, getDownloadURL, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
         
         // Upload 1
-        const ref1 = storage.ref(`vistorias/${vistoriaId}/frente_${Date.now()}.jpeg`);
-        await ref1.put(files.file1);
-        const url1 = await ref1.getDownloadURL();
+        const ref1 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/frente_${Date.now()}.jpeg`);
+        await uploadBytes(ref1, files.file1);
+        const url1 = await getDownloadURL(ref1);
         
         // Upload 2
-        const ref2 = storage.ref(`vistorias/${vistoriaId}/meio_fundo_${Date.now()}.jpeg`);
-        await ref2.put(files.file2);
-        const url2 = await ref2.getDownloadURL();
+        const ref2 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/meio_fundo_${Date.now()}.jpeg`);
+        await uploadBytes(ref2, files.file2);
+        const url2 = await getDownloadURL(ref2);
         
         // Upload 3
-        const ref3 = storage.ref(`vistorias/${vistoriaId}/fundo_frente_${Date.now()}.jpeg`);
-        await ref3.put(files.file3);
-        const url3 = await ref3.getDownloadURL();
+        const ref3 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/fundo_frente_${Date.now()}.jpeg`);
+        await uploadBytes(ref3, files.file3);
+        const url3 = await getDownloadURL(ref3);
         
         // Update Firestore
-        const db = firebase.firestore();
-        await db.collection('vistorias').doc(vistoriaId).update({
+        const docRef = doc(window.firebaseDb, 'vistorias', currentVistoriaId);
+        await updateDoc(docRef, {
             status: 'aguardando_validacao',
             fotoFrente: url1,
             fotoMeioFundo: url2,
             fotoFundoFrente: url3,
-            enviadoEm: firebase.firestore.FieldValue.serverTimestamp()
+            enviadoEm: serverTimestamp()
         });
         
-        // Show success
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+        
         document.getElementById('card-content').style.display = 'none';
         document.getElementById('card-sucesso').style.display = 'block';
         
@@ -239,7 +365,7 @@ async function enviarVistoria() {
         btn.disabled = false;
         btn.textContent = 'Tentar Novamente';
     }
-}
+};
 
 function setStatus(msg, type) {
     const el = document.getElementById('status-container');
@@ -257,7 +383,6 @@ function showError(msg) {
     setStatus(msg, "error");
 }
 
-// Haversine formula
 function calcCrow(lat1, lon1, lat2, lon2) {
     var R = 6371; // km
     var dLat = toRad(lat2-lat1);

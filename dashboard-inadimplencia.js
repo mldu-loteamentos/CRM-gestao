@@ -477,17 +477,22 @@ const DashboardInadimplencia = (function() {
       else if (delay <= 120) delayBucketCompany = 'd120';
       else delayBucketCompany = 'd120p';
 
-      // 1. Empresa / Empreendimento
-      const ccId = String(b.costCenterId || 'N/D');
-      if (!companyData[ccId]) {
-         let ccName = 'N/D';
-         if (window.AppState && window.AppState.cachedCostCenters) {
-             const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === ccId);
-             if (ccObj && ccObj.name) ccName = ccObj.name.toUpperCase();
+      // 1. Empresa
+      const compId = String(b.companyId || 'N/D');
+      if (!companyData[compId]) {
+         let compName = 'N/D';
+         if (window.AppState && window.AppState.companies) {
+             const cObj = window.AppState.companies.find(c => String(c.id) === compId);
+             if (cObj) compName = cObj.tradeName || cObj.name || `EMPRESA ${compId}`;
          }
-         companyData[ccId] = {
-            id: ccId,
-            name: ccName,
+         if (compName === 'N/D' && typeof window.getCompanyName === 'function') {
+             compName = window.getCompanyName(compId);
+         }
+         compName = compName.toUpperCase();
+         
+         companyData[compId] = {
+            id: compId,
+            name: compName,
             totalBills: 0,
             totalValue: 0,
             d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0,
@@ -495,7 +500,7 @@ const DashboardInadimplencia = (function() {
          };
       }
       
-      const comp = companyData[ccId];
+      const comp = companyData[compId];
       comp.totalBills += (b.billCount || 1);
       comp.totalValue += (b.overdueValue || 0);
       
@@ -630,12 +635,12 @@ const DashboardInadimplencia = (function() {
             </div>
           </div>
 
-          <h2>Inadimplência por Empresa | Empreendimento</h2>
+          <h3>Inadimplência por Empresa</h3>
           <table>
             <thead>
               <tr>
                 <th style="width: 30px;">ID</th>
-                <th style="text-align: left;">EMPRESA | EMPREENDIMENTO</th>
+                 <th style="text-align: left; width: 30%;">EMPRESA</th>
                 <th>TÍTULOS</th>
                 <th class="val">R$ ATUALIZADO</th>
                 <th class="val">ATÉ 30 DIAS</th>

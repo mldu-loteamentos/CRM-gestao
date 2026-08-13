@@ -273,7 +273,10 @@ window.VerificarConstrucaoApp = {
             const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
             const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
 
-            let message = 'Olá! Os seguintes lotes precisam ser vistoriados:\n\n';
+            let message = 'Vistorias a serem realizadas na(s) cidade(s):\n\n';
+            
+            const cityGroups = {};
+            const generatedIds = [];
 
             for (const r of selected) {
                 let vId = r.vistoriaAtiva ? r.vistoriaAtiva.id : null;
@@ -297,10 +300,26 @@ window.VerificarConstrucaoApp = {
                 } else if (loteCoords && !r.vistoriaAtiva.loteCoords) {
                     await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { loteCoords });
                 }
+                
+                generatedIds.push(vId);
 
-                const link = `${baseUrl}vistoria.html?id=${vId}`;
-                message += `*${r.cidade} - ${r.empreendimento} - Unid: ${r.unidade}*\nLink: ${link}\n\n`;
+                if (!cityGroups[r.cidade]) cityGroups[r.cidade] = {};
+                if (!cityGroups[r.cidade][r.empreendimento]) cityGroups[r.cidade][r.empreendimento] = 0;
+                cityGroups[r.cidade][r.empreendimento]++;
             }
+
+            for (const city in cityGroups) {
+                message += `*${city.toUpperCase()}*\n`;
+                for (const emp in cityGroups[city]) {
+                    const count = cityGroups[city][emp];
+                    message += `- ${emp.toUpperCase()} (${count} lote${count > 1 ? 's' : ''})\n`;
+                }
+                message += '\n';
+            }
+
+            const idsParam = generatedIds.join(',');
+            const link = `${baseUrl}vistoria.html?ids=${idsParam}`;
+            message += `Acesse o link abaixo para realizar as vistorias:\n${link}`;
 
             const phone = '5515998118246';
             window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
