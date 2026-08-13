@@ -194,55 +194,52 @@ async function buscarCoordenadasLote() {
     try {
         setStatus("Buscando coordenadas...", "wait");
         
-        // Se as coords já estiverem no documento do Firebase (adicionado na última atualização), usa elas
-        if (currentVistoriaDoc.loteCoords && currentVistoriaDoc.loteCoords.lat && currentVistoriaDoc.loteCoords.lng) {
-            loteCoords = currentVistoriaDoc.loteCoords;
-            iniciarGPS();
-            return;
-        }
-
-        // Tentar buscar na API caso contrário
         const empId = currentVistoriaDoc.costCenterId;
         if (!empId) throw new Error("Sem Centro de Custo vinculado");
 
         const { doc, getDoc } = window.firebaseCollections;
         const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', String(empId));
-        const docSnap = await getDoc(kmzRef);
         
-        if (!docSnap.exists()) {
-            throw new Error("Nenhum mapa (KMZ) cadastrado para este empreendimento.");
-        }
-        
-        const list = docSnap.data().placemarks || [];
-        const unitNameRaw = String(currentVistoriaDoc.unidade).toLowerCase().replace(/[^a-z0-9]/g, '');
-        
-        let found = null;
-        for (let item of list) {
-            let itemNameRaw = item.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (itemNameRaw === unitNameRaw || itemNameRaw.includes(unitNameRaw) || unitNameRaw.includes(itemNameRaw)) {
-                found = item;
-                break;
+        let foundLiveCoords = null;
+        try {
+            const docSnap = await getDoc(kmzRef);
+            if (docSnap.exists()) {
+                const list = docSnap.data().placemarks || [];
+                const unitNameRaw = String(currentVistoriaDoc.unidade).toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                let found = null;
+                for (let item of list) {
+                    let itemNameRaw = item.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (itemNameRaw === unitNameRaw || itemNameRaw.includes(unitNameRaw) || unitNameRaw.includes(itemNameRaw)) {
+                        found = item;
+                        break;
+                    }
+                }
+                
+                if (!found && list.length > 0) {
+                    found = list[0];
+                }
+                
+                if (found) {
+                    const coordsStr = found.coords.trim().split(' ')[0];
+                    const coordsArr = coordsStr.split(',');
+                    if (coordsArr && coordsArr.length >= 2) {
+                        foundLiveCoords = { lng: parseFloat(coordsArr[0]), lat: parseFloat(coordsArr[1]) };
+                    }
+                }
             }
+        } catch(e) {
+            console.warn("Falha ao buscar KMZ em tempo real. Tentando cache local.", e);
         }
-        
-        if (!found && list.length > 0) {
-            console.warn("Match exato de lote não encontrado.");
-            found = list[0];
+
+        if (foundLiveCoords) {
+            loteCoords = foundLiveCoords;
+        } else if (currentVistoriaDoc.loteCoords && currentVistoriaDoc.loteCoords.lat && currentVistoriaDoc.loteCoords.lng) {
+            loteCoords = currentVistoriaDoc.loteCoords;
+            console.log("Usando coordenadas salvas em cache no documento da vistoria.");
+        } else {
+            throw new Error("Lote não encontrado no arquivo KMZ nem no cache da vistoria.");
         }
-        
-        if (!found) {
-            throw new Error("Lote não encontrado no arquivo KMZ.");
-        }
-        
-        // Coordenadas são strings no formato "lng,lat,alt" (Ex: "-48.123,-22.123,0")
-        const coordsStr = found.coords.trim().split(' ')[0]; // Pega o primeiro conjunto caso tenha muitos
-        const coordsArr = coordsStr.split(',');
-        
-        if (coordsArr && coordsArr.length >= 2) {
-            loteCoords = { lng: parseFloat(coordsArr[0]), lat: parseFloat(coordsArr[1]) };
-        }
-        
-        if (!loteCoords) throw new Error("Coordenadas inválidas no sistema.");
         
         iniciarGPS();
         
