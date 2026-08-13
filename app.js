@@ -16003,9 +16003,9 @@ window.onDragOverJud = function(e) {
     if (target && target.dataset.id !== window.draggedJudId) {
         const rect = target.getBoundingClientRect();
         const y = e.clientY - rect.top;
-        if (y < rect.height * 0.25) {
+        if (y < rect.height * 0.15) {
             target.style.borderTop = '2px solid var(--color-primary)';
-        } else if (y > rect.height * 0.75) {
+        } else if (y > rect.height * 0.85) {
             target.style.borderBottom = '2px solid var(--color-primary)';
         } else {
             target.style.background = '#e0f2fe';
@@ -16034,6 +16034,7 @@ window.onDropJudRoot = function(e) {
             dragged.order = maxOrder + 1;
             
             localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+            if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
             window.renderEtapasJudiciais();
             if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
         }
@@ -16081,11 +16082,11 @@ window.onDropJudNode = function(e, targetId) {
         siblings.sort((a, b) => (a.order || 0) - (b.order || 0));
         siblings.forEach((s, i) => s.order = i * 10); // Espaçamento de 10
         
-        if (y < rect.height * 0.25) {
+        if (y < rect.height * 0.15) {
             // Inserir ANTES
             dragged.parentId = targetNode.parentId;
             dragged.order = targetNode.order - 5;
-        } else if (y > rect.height * 0.75) {
+        } else if (y > rect.height * 0.85) {
             // Inserir DEPOIS
             dragged.parentId = targetNode.parentId;
             dragged.order = targetNode.order + 5;
@@ -16097,6 +16098,7 @@ window.onDropJudNode = function(e, targetId) {
         }
         
         localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+        if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
         window.renderEtapasJudiciais();
         if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
     }
@@ -16258,6 +16260,7 @@ window.salvarEtapaModal = function() {
 
     document.getElementById('etapa-judicial-modal').style.display = 'none';
     localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
     window.renderEtapasJudiciais();
     if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
 };
@@ -16484,6 +16487,7 @@ window.removerEtapaJudicial = function(id) {
       if (confirm(`Deseja realmente excluir a etapa "${etapa.nome}"?`)) {
           window.EtapasJudiciaisState = window.EtapasJudiciaisState.filter(e => e.id !== id);
           localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+          if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
           window.renderEtapasJudiciais();
       }
   }
@@ -22071,6 +22075,7 @@ window.getDynamicOperators = function(type = 'all') {
 
 window.SYNC_KEYS = [
     "crm_users",
+    "crm_moura_judiciais",
     "crm_moura_profiles",
     "crm_moura_rules",
     "crm_moura_rules_params",

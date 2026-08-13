@@ -166,6 +166,9 @@ async function abrirVistoria(id) {
     
     document.getElementById('lbl-cidade').textContent = currentVistoriaDoc.cidade || '-';
     document.getElementById('lbl-empreendimento').textContent = currentVistoriaDoc.empreendimento || '-';
+    if (document.getElementById('lbl-unidade')) {
+        document.getElementById('lbl-unidade').textContent = currentVistoriaDoc.unidade || '-';
+    }
     document.getElementById('form-area').style.display = 'block';
     
     // Resetar formulário
@@ -203,7 +206,7 @@ async function buscarCoordenadasLote() {
         if (!empId) throw new Error("Sem Centro de Custo vinculado");
 
         const { doc, getDoc } = window.firebaseCollections;
-        const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
+        const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', String(empId));
         const docSnap = await getDoc(kmzRef);
         
         if (!docSnap.exists()) {
