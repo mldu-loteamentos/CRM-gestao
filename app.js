@@ -11326,13 +11326,6 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   // Calculate score for each client
   const scoredPool = pool.map(item => {
     let isLeftover = leftoverSaleIds.has(String(item.saleId));
-    if (isLeftover) {
-        return {
-          ...item,
-          filaScore: 999999,
-          filaReason: "Fila Anterior"
-        };
-    }
     
     let totalDebt = item.overdueValue + item.overdueCharges;
     
@@ -11370,24 +11363,29 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
                      
     // Generate a summary reason
     let reasons = [];
-    if (scoreValor * r1_pct > 15) reasons.push("Valor Alto");
-    if (scoreDias * r2_pct > 15) reasons.push("Atraso Antigo");
-    if (isMulti && r3_pct > 0) reasons.push("Multi-contrato");
-    if (scoreNovo * r4_pct > 10) reasons.push("Contrato Novo");
-    if (scoreParcelas * r5_pct > 10) reasons.push("Muitas Parcelas");
-    if (isSkipped && r6_pct > 0) reasons.push("Parcela Pulada");
-    if (isJuridicoRecente && r7_pct > 0) reasons.push("Retorno do Jurídico");
-    if (reasons.length === 0) reasons.push("Mix Geral");
+    if (isLeftover) {
+        reasons.push("Fila Anterior");
+    } else {
+        if (scoreValor * r1_pct > 15) reasons.push("Valor Alto");
+        if (scoreDias * r2_pct > 15) reasons.push("Atraso Antigo");
+        if (isMulti && r3_pct > 0) reasons.push("Multi-contrato");
+        if (scoreNovo * r4_pct > 10) reasons.push("Contrato Novo");
+        if (scoreParcelas * r5_pct > 10) reasons.push("Muitas Parcelas");
+        if (isSkipped && r6_pct > 0) reasons.push("Parcela Pulada");
+        if (isJuridicoRecente && r7_pct > 0) reasons.push("Retorno do Jurídico");
+        if (reasons.length === 0) reasons.push("Mix Geral");
+    }
 
     return {
       ...item,
       filaScore: Math.round(finalScore),
+      sortScore: isLeftover ? 999999 : Math.round(finalScore),
       filaReason: reasons.slice(0, 2).join(" + ")
     };
   });
   
   // Sort descending by score
-  scoredPool.sort((a, b) => b.filaScore - a.filaScore);
+  scoredPool.sort((a, b) => b.sortScore - a.sortScore);
   
   // Pick unique clients up to remainingSlots, filtering out those with active valid boletos
   const selectedQueue = [];
