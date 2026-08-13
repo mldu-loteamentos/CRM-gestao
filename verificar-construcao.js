@@ -424,7 +424,7 @@ window.VerificarConstrucaoApp = {
 
 // Ativa o módulo quando a aba "Vistoria" é aberta
 document.addEventListener('tabChanged', (e) => {
-    if (e.detail === 'tab-vistoria') {
+    if (e.detail === 'vistoria') {
         window.VerificarConstrucaoApp.init();
     }
 });
