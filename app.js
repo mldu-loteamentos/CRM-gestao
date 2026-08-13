@@ -15310,8 +15310,18 @@ window.saveRulesConfig = function() {
       window.saveNegotiationRules();
   }
   
-  alert("Configurações do Motor de Regras salvas com sucesso!");
-  loadPreamblesConfigTab();
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig().then(() => {
+          alert("Configurações do Motor de Regras salvas com sucesso na Nuvem!");
+          loadPreamblesConfigTab();
+      }).catch(err => {
+          alert("Erro ao salvar na nuvem: " + err.message);
+          loadPreamblesConfigTab();
+      });
+  } else {
+      alert("Configurações do Motor de Regras salvas apenas localmente!");
+      loadPreamblesConfigTab();
+  }
 };
 
 window.renderTimeline = function() {
@@ -15617,6 +15627,10 @@ window.addTimelineAcao = function() {
   window.TimelineAcoesList.push({ id, label: val, color });
   localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
   
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig().catch(console.error);
+  }
+  
   input.value = '';
   window.renderTimelineAcoesListModal();
 };
@@ -15635,6 +15649,10 @@ window.removeTimelineAcao = function(id) {
         if (window.renderTimeline) window.renderTimeline();
         alert('Alguns nós corrompidos ou sem ação definida foram removidos automaticamente da régua de cobrança.');
     }
+  }
+  
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig().catch(console.error);
   }
   
   window.renderTimelineAcoesListModal();
@@ -15839,6 +15857,11 @@ window.excluirTimelineNode = function() {
   if (!confirm("Tem certeza que deseja excluir este ponto?")) return;
   
   window.TimelineState = window.TimelineState.filter(n => n.id !== id);
+  localStorage.setItem('crm_moura_timeline_nodes', JSON.stringify(window.TimelineState));
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig().catch(console.error);
+  }
+  
   document.getElementById('timeline-node-modal').style.display = 'none';
   window.renderTimeline();
   const listModal = document.getElementById('timeline-list-modal');
@@ -15878,6 +15901,10 @@ window.saveTimelineNode = function() {
   }
   
   document.getElementById('timeline-node-modal').style.display = 'none';
+  localStorage.setItem('crm_moura_timeline_nodes', JSON.stringify(window.TimelineState));
+  if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig().catch(console.error);
+  }
   window.renderTimeline();
   const listModal = document.getElementById('timeline-list-modal');
   if (listModal && listModal.style.display === 'flex') {

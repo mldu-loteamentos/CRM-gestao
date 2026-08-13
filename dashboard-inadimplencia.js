@@ -569,3 +569,4 @@ const DashboardInadimplencia = (function() {
     gerarRelatorioDiarioPdf
   };
 })();
+window.DashboardInadimplencia = DashboardInadimplencia;
