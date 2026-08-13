@@ -17214,15 +17214,7 @@ async function uploadKMZ() {
 
     const { doc, setDoc, ref, uploadBytes, collection, getDocs, deleteDoc } = window.firebaseCollections;
     
-    // 1. Upload do KMZ para o Storage (com try-catch por causa do CORS do Firebase Storage)
-    try {
-      const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
-      await uploadBytes(storageRef, file);
-    } catch (e) {
-      console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");
-    }
-
-    // 2. Salvar coordenadas no Firestore
+    // 1. Salvar coordenadas no Firestore PRIMEIRO para evitar travamento por CORS no Storage
     const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
     await setDoc(docRef, {
       empreendimento_id: empId,
@@ -17231,10 +17223,21 @@ async function uploadKMZ() {
       updatedAt: new Date().toISOString()
     });
 
+    // Atualiza a UI imediatamente!
     statusDiv.textContent = `Sucesso! ${placemarks.length} lotes mapeados e salvos para o Empreendimento ${empId}.`;
     statusDiv.style.color = "var(--color-success)";
     fileInput.value = "";
     loadKMZList();
+
+    // 2. Upload do KMZ para o Storage em background (sem await)
+    try {
+      const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
+      uploadBytes(storageRef, file).catch(e => {
+          console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas já foram salvas.");
+      });
+    } catch (e) {
+      console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");
+    }
 
   } catch (err) {
     console.error(err);
@@ -17266,7 +17269,7 @@ async function loadKMZList() {
       const row = document.createElement('tr');
       row.innerHTML = `
         <td><strong>${item.empreendimento_id}</strong></td>
-        <td><span class="badge badge-info">${item.count} Lotes Sincronizados</span></td>
+        <td><span class="badge badge-info">${item.count !== undefined ? item.count : (item.placemarks ? item.placemarks.length : 0)} Lotes Sincronizados</span></td>
         <td>
           <button class="btn btn-danger btn-sm" onclick="deleteKMZ('${item.empreendimento_id}')">
             <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
