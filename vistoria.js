@@ -169,6 +169,17 @@ async function abrirVistoria(id) {
     if (document.getElementById('lbl-unidade')) {
         document.getElementById('lbl-unidade').textContent = currentVistoriaDoc.unidade || '-';
     }
+    
+    if (currentVistoriaDoc.createdAt) {
+        let createdAtDate = currentVistoriaDoc.createdAt;
+        if (createdAtDate.toDate) createdAtDate = createdAtDate.toDate();
+        else if (typeof createdAtDate === 'string') createdAtDate = new Date(createdAtDate);
+        
+        const diffTime = Math.abs(new Date() - createdAtDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        document.getElementById('lbl-dias-solicitado').textContent = `Vistoria solicitada há ${diffDays} dia(s)`;
+    }
+    
     document.getElementById('form-area').style.display = 'block';
     
     // Resetar formulário
@@ -177,8 +188,7 @@ async function abrirVistoria(id) {
     document.getElementById('q-entulho').value = '';
     document.getElementById('q-acesso').value = '';
     document.getElementById('q-estagio').value = '';
-    document.getElementById('opt2').textContent = '';
-    document.getElementById('opt3').textContent = '';
+    if(document.getElementById('q-obs')) document.getElementById('q-obs').value = '';
     
     // Resetar fotos
     files.file1 = null; files.file2 = null; files.file3 = null;
@@ -274,13 +284,25 @@ function iniciarGPS() {
             window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             
             if (currentDistance <= 20) {
-                setStatus(`📍 Você está no local (${Math.round(currentDistance)}m do lote). Fotos liberadas!`, "success");
+                setStatus(`📍 Você está no local (${Math.round(currentDistance)}m do lote). Perguntas e Fotos liberadas!`, "success");
                 document.getElementById('btn-maps').style.display = 'none';
                 document.getElementById('photo-area').style.display = 'block';
+                document.getElementById('q-agua').disabled = false;
+                document.getElementById('q-energia').disabled = false;
+                document.getElementById('q-entulho').disabled = false;
+                document.getElementById('q-acesso').disabled = false;
+                document.getElementById('q-estagio').disabled = false;
+                if(document.getElementById('q-obs')) document.getElementById('q-obs').disabled = false;
             } else {
-                setStatus(`⚠️ Você está a ${Math.round(currentDistance)}m do lote. Aproxime-se para menos de ${MAX_DISTANCE}m.`, "error");
+                setStatus(`⚠️ Você está a ${Math.round(currentDistance)}m do lote. Aproxime-se para menos de 20m para liberar as respostas.`, "error");
                 document.getElementById('btn-maps').style.display = 'block';
                 document.getElementById('photo-area').style.display = 'none';
+                document.getElementById('q-agua').disabled = true;
+                document.getElementById('q-energia').disabled = true;
+                document.getElementById('q-entulho').disabled = true;
+                document.getElementById('q-acesso').disabled = true;
+                document.getElementById('q-estagio').disabled = true;
+                if(document.getElementById('q-obs')) document.getElementById('q-obs').disabled = true;
             }
         },
         (err) => {
@@ -378,11 +400,30 @@ window.verificarFormulario = function() {
     let fotosOpcionais = false;
     if (qAcesso === 'nao' || qEstagio === 'casa_pronta_sem_acabamento' || qEstagio === 'casa_pronta_com_morador' || qEstagio === 'apenas_muro') {
         fotosOpcionais = true;
-        document.getElementById('opt2').textContent = '(Opcional)';
-        document.getElementById('opt3').textContent = '(Opcional)';
+    }
+    
+    // Atualizar UI das fotos
+    const block2 = document.getElementById('block-foto2');
+    const block3 = document.getElementById('block-foto3');
+    const btnMais = document.getElementById('btn-mais-fotos');
+    
+    if (fotosOpcionais) {
+        if (!window.fotosReveladas) {
+            block2.style.display = 'none';
+            block3.style.display = 'none';
+            btnMais.style.display = 'inline-block';
+            // Se as escondeu, pode limpar as fotos se o usuario tinha selecionado
+            // Mas não vamos limpar para não perder se ele só mudou o select sem querer
+        } else {
+            block2.style.display = 'block';
+            block3.style.display = 'block';
+            btnMais.style.display = 'none';
+        }
     } else {
-        document.getElementById('opt2').textContent = '';
-        document.getElementById('opt3').textContent = '';
+        block2.style.display = 'block';
+        block3.style.display = 'block';
+        btnMais.style.display = 'none';
+        window.fotosReveladas = false;
     }
     
     // Validação de preenchimento
@@ -401,6 +442,14 @@ window.verificarFormulario = function() {
     } else {
         document.getElementById('btn-enviar').disabled = true;
     }
+};
+
+window.revelarMaisFotos = function() {
+    window.fotosReveladas = true;
+    document.getElementById('block-foto2').style.display = 'block';
+    document.getElementById('block-foto3').style.display = 'block';
+    document.getElementById('btn-mais-fotos').style.display = 'none';
+    window.verificarFormulario();
 };
 
 window.enviarVistoria = async function() {
@@ -447,6 +496,7 @@ window.enviarVistoria = async function() {
             possuiEntulho: document.getElementById('q-entulho').value,
             permiteAcesso: document.getElementById('q-acesso').value,
             estagioObra: document.getElementById('q-estagio').value,
+            observacoes: document.getElementById('q-obs') ? document.getElementById('q-obs').value : ""
         };
         
         // Update Firestore

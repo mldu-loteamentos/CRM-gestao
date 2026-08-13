@@ -60,6 +60,9 @@ window.VerificarConstrucaoApp = {
                         </button>
                     </div>
                     <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.editarRegua()">
+                            <i data-lucide="settings" style="width: 16px;"></i> Editar Régua
+                        </button>
                         <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
                             <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
                         </button>
@@ -179,19 +182,19 @@ window.VerificarConstrucaoApp = {
                         statusLabel = 'Link Enviado – Aguardando Fotos';
                         statusColor = 'color: #eab308;';
                     } else if (vistoriaAtiva.status === 'aguardando_validacao') {
-                        statusLabel = 'Fotos Recebidas – Validar!';
-                        statusColor = 'color: #22c55e; font-weight: bold;';
+                        statusLabel = `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${idx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>`;
+                        statusColor = '';
                     }
                 }
 
                 rows.push({ customerId: c.customerId, contractId, cidade: city, costCenterId, empreendimento, unidade, statusLabel, statusColor, vistoriaAtiva });
             });
 
-            // Ordenar: validação primeiro, depois aguardando, depois pendente, por cidade
+            // Ordenar: validação primeiro, depois aguardando, depois pendente, por cidade, empreendimento, unidade
             rows.sort((a, b) => {
                 const rank = s => s.includes('Validar') ? 0 : (s.includes('Aguardando') ? 1 : 2);
                 if (rank(a.statusLabel) !== rank(b.statusLabel)) return rank(a.statusLabel) - rank(b.statusLabel);
-                return a.cidade.localeCompare(b.cidade);
+                return a.cidade.localeCompare(b.cidade) || a.empreendimento.localeCompare(b.empreendimento) || a.unidade.localeCompare(b.unidade);
             });
 
             this.renderedRows = rows;
@@ -236,6 +239,16 @@ window.VerificarConstrucaoApp = {
         if (btn) btn.disabled = cbs.length === 0;
     },
 
+    editarRegua() {
+        if (typeof window.switchTab === 'function') {
+            window.switchTab('config');
+            setTimeout(() => {
+                const regrasTab = document.querySelector('.config-tab-btn[data-tab="regras"]');
+                if (regrasTab) regrasTab.click();
+            }, 100);
+        }
+    },
+
     // Busca coords do KMZ via servidor local para salvar no Firebase
     async _fetchLoteCoords(costCenterId) {
         try {
@@ -272,8 +285,6 @@ window.VerificarConstrucaoApp = {
         try {
             const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
             const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
-
-            let message = 'Vistorias a serem realizadas na(s) cidade(s):\n\n';
             
             const cityGroups = {};
             const generatedIds = [];
@@ -297,7 +308,7 @@ window.VerificarConstrucaoApp = {
                         createdAt: serverTimestamp()
                     });
                     vId = docRef.id;
-                } else if (loteCoords && !r.vistoriaAtiva.loteCoords) {
+                } else if (loteCoords) {
                     await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { loteCoords });
                 }
                 
@@ -307,6 +318,16 @@ window.VerificarConstrucaoApp = {
                 if (!cityGroups[r.cidade][r.empreendimento]) cityGroups[r.cidade][r.empreendimento] = 0;
                 cityGroups[r.cidade][r.empreendimento]++;
             }
+
+            const hour = new Date().getHours();
+            let greeting = 'Bom dia';
+            if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
+            else if (hour >= 18) greeting = 'Boa noite';
+            
+            let numCidades = Object.keys(cityGroups).length;
+            let cidadeStr = numCidades > 1 ? 'cidades' : 'cidade';
+            
+            let message = `${greeting}! Segue a lista de vistorias a serem realizadas na(s) ${cidadeStr}:\n\n`;
 
             for (const city in cityGroups) {
                 message += `*${city.toUpperCase()}*\n`;
@@ -319,7 +340,7 @@ window.VerificarConstrucaoApp = {
 
             const idsParam = generatedIds.join(',');
             const link = `${baseUrl}vistoria.html?ids=${idsParam}`;
-            message += `Acesse o link abaixo para realizar as vistorias:\n${link}`;
+            message += `Acesse o link abaixo para realizar a(s) vistoria(s):\n${link}`;
 
             const phone = '5515998118246';
             window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
@@ -340,103 +361,96 @@ window.VerificarConstrucaoApp = {
     },
 
     async abrirVistoriasRecebidas() {
-        const modal = document.getElementById('modal-vistorias-recebidas');
-        const body = document.getElementById('vistorias-recebidas-body');
-        modal.style.display = 'flex';
-        body.innerHTML = '<div style="text-align:center; padding:30px;">Carregando...</div>';
+        alert("As vistorias prontas para validação agora possuem um botão 'Validar Vistoria' diretamente na coluna STATUS da tabela principal.");
+    },
+
+    async validarVistoria(idx) {
+        const row = this.renderedRows[idx];
+        if (!row || !row.vistoriaAtiva) return;
+
+        const confirmacao = confirm(`Deseja validar e enviar as fotos da vistoria da unidade ${row.unidade} para o Sienge?`);
+        if (!confirmacao) return;
+
+        const loadingDiv = document.createElement('div');
+        loadingDiv.innerHTML = `
+            <div style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.8); z-index:99999; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                <div class="loader" style="border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
+                <h3 style="margin-top:20px; color:var(--color-primary);" id="vc-validar-status">Preparando validação...</h3>
+            </div>
+        `;
+        document.body.appendChild(loadingDiv);
 
         try {
-            const { collection, getDocs, query, where } = window.firebaseCollections;
-            const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '==', 'aguardando_validacao'));
-            const snap = await getDocs(q);
-
-            let html = '';
-            if (snap.empty) {
-                html = '<div style="padding:20px; text-align:center; color:#666;">Nenhuma vistoria pendente de validação.</div>';
-            } else {
-                html = '<div style="display:flex; flex-direction:column; gap:15px;">';
-                snap.forEach(docSnap => {
-                    const d = docSnap.data();
-                    const vId = docSnap.id;
-                    const f1 = (d.fotoFrente || '').replace(/'/g, "\\'");
-                    const f2 = (d.fotoMeioFundo || '').replace(/'/g, "\\'");
-                    const f3 = (d.fotoFundoFrente || '').replace(/'/g, "\\'");
-                    html += `
-                        <div class="crm-card" style="padding:15px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;" id="vistoria-card-${vId}">
-                            <div>
-                                <h4 style="margin:0 0 5px 0;">${d.cidade || '-'} – ${d.empreendimento || '-'}</h4>
-                                <div style="font-size:0.9rem; color:#555;">Unidade: <b>${d.unidade || '-'}</b></div>
-                            </div>
-                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                                <button class="btn btn-outline" onclick="window.VerificarConstrucaoApp.verFotos('${vId}', '${f1}', '${f2}', '${f3}')">
-                                    <i data-lucide="image"></i> Ver Fotos
-                                </button>
-                                <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.aprovarVistoria('${vId}', '${d.customerId}', '${d.contractId}', '${f1}', '${f2}', '${f3}')">
-                                    <i data-lucide="check"></i> Aprovar e Sienge
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                });
-                html += '</div>';
+            const v = row.vistoriaAtiva;
+            const { getStorage, ref, listAll, getDownloadURL } = window.firebaseCollections;
+            const storageRef = ref(window.firebaseStorage, \`vistorias/\${v.id}\`);
+            
+            document.getElementById('vc-validar-status').textContent = 'Buscando fotos no Firebase...';
+            const listRes = await listAll(storageRef);
+            if (listRes.items.length === 0) {
+                throw new Error("Nenhuma foto encontrada para esta vistoria.");
             }
-            body.innerHTML = html;
-            if (window.lucide) lucide.createIcons();
 
-        } catch (e) {
-            console.error(e);
-            body.innerHTML = '<div style="color:red; padding:20px;">Erro ao carregar vistorias recebidas.</div>';
-        }
-    },
+            // Descobrir o unitId do contrato
+            document.getElementById('vc-validar-status').textContent = 'Consultando contrato no Sienge...';
+            let host = window.location.hostname;
+            let port = window.location.port ? ':' + window.location.port : '';
+            if (host.includes('vercel.app')) port = '';
+            
+            const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
+            const cRes = await fetch(\`http://\${host}\${port}/sienge-proxy/sales-contracts/\${row.contractId}\`, {
+                headers: { 'Authorization': authHeader }
+            });
+            if (!cRes.ok) throw new Error("Falha ao consultar contrato no Sienge.");
+            const contractData = await cRes.json();
+            const siengeUnitId = contractData.unitId;
+            if (!siengeUnitId) throw new Error("ID da unidade não encontrado no contrato Sienge.");
 
-    verFotos(id, f1, f2, f3) {
-        const win = window.open('', '_blank');
-        win.document.write(`
-            <html><head><title>Fotos da Vistoria</title></head>
-            <body style="font-family:sans-serif; text-align:center; background:#eee; padding:20px;">
-                <h2>Frente do Lote</h2><img src="${f1}" style="max-width:90%; border:2px solid #ccc; margin-bottom:20px;"/><br>
-                <h2>Meio para o Fundo</h2><img src="${f2}" style="max-width:90%; border:2px solid #ccc; margin-bottom:20px;"/><br>
-                <h2>Fundo para a Frente</h2><img src="${f3}" style="max-width:90%; border:2px solid #ccc;"/><br>
-            </body></html>
-        `);
-    },
+            document.getElementById('vc-validar-status').textContent = 'Enviando fotos para o Sienge...';
+            
+            const padraoData = new Date().toLocaleDateString('pt-BR').replace(/\\//g, '.');
 
-    async aprovarVistoria(vId, customerId, contractId, f1, f2, f3) {
-        if (!confirm('Tem certeza que deseja aprovar as fotos e anexar no Sienge?')) return;
-
-        const card = document.getElementById(`vistoria-card-${vId}`);
-        const originalHtml = card.innerHTML;
-        card.innerHTML = '<div style="width:100%; text-align:center; padding:20px;">Aprovando e enviando para Sienge...</div>';
-
-        try {
-            const uploadToSienge = async (imgUrl, filename) => {
-                const res = await fetch(imgUrl);
-                const blob = await res.blob();
-                const file = new File([blob], filename, { type: blob.type });
+            for (let i = 0; i < listRes.items.length; i++) {
+                const itemRef = listRes.items[i];
+                const url = await getDownloadURL(itemRef);
+                
+                // Baixar como Blob
+                const imgRes = await fetch(url);
+                const blob = await imgRes.blob();
+                
+                // Montar FormData e POST para Sienge
+                const nomeFinal = \`\${row.empreendimento} - \${row.unidade} - Foto de Vistoria \${i+1} - \${padraoData}.jpg\`;
+                const descricaoSienge = \`\${padraoData} - Foto de Vistoria \${i+1}\`;
+                
+                const apiUrl = \`http://\${host}\${port}/sienge-proxy/units/\${siengeUnitId}/attachments?description=\${encodeURIComponent(descricaoSienge)}\`;
+                
                 const formData = new FormData();
-                formData.append('file', file);
-                const dataFormatada = new Date().toLocaleDateString('pt-BR');
-                const desc = `${dataFormatada} - Vistoria - ${filename}`;
-                const apiUrl = `/api/sienge-proxy/customers/${customerId}/attachments?description=${encodeURIComponent(desc)}`;
-                const uploadRes = await fetch(apiUrl, { method: 'POST', body: formData });
-                if (!uploadRes.ok) throw new Error('Erro no upload Sienge: ' + uploadRes.statusText);
-            };
+                formData.append('file', blob, nomeFinal);
+                
+                const uploadRes = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Authorization': authHeader, 'Accept': 'application/json' },
+                    body: formData
+                });
+                
+                if (!uploadRes.ok) {
+                    throw new Error(\`Falha ao enviar foto \${i+1}: HTTP \${uploadRes.status}\`);
+                }
+            }
 
-            await uploadToSienge(f1, 'vistoria_frente.jpeg');
-            await uploadToSienge(f2, 'vistoria_meio_fundo.jpeg');
-            await uploadToSienge(f3, 'vistoria_fundo_frente.jpeg');
-
+            // Atualizar status no Firebase para concluida
+            document.getElementById('vc-validar-status').textContent = 'Finalizando Vistoria...';
             const { doc, updateDoc } = window.firebaseCollections;
-            await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { status: 'concluida' });
+            await updateDoc(doc(window.firebaseDb, 'vistorias', v.id), { status: 'concluida' });
 
-            card.innerHTML = '<div style="width:100%; text-align:center; padding:20px; color:green; font-weight:bold;">Enviado com sucesso!</div>';
-            setTimeout(() => { card.style.display = 'none'; }, 2000);
+            alert("Vistoria validada e fotos anexadas com sucesso!");
+            await this.loadData();
 
         } catch (e) {
-            console.error(e);
-            alert('Erro ao aprovar vistoria: ' + e.message);
-            card.innerHTML = originalHtml;
-            if (window.lucide) lucide.createIcons();
+            console.error("Erro na validação:", e);
+            alert("Erro ao validar vistoria: " + e.message);
+        } finally {
+            document.body.removeChild(loadingDiv);
         }
     }
 };

@@ -11813,8 +11813,11 @@ window.fireConfetti = function() {
           table.parentNode.insertBefore(successDiv, table);
           
           // Show confetti!
-          if (!window.confettiFiredToday) {
-              window.confettiFiredToday = true;
+          const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : new Date().toISOString().split('T')[0];
+          const firedDate = localStorage.getItem('confettiFiredDate');
+          
+          if (firedDate !== todayStr) {
+              localStorage.setItem('confettiFiredDate', todayStr);
               if (typeof window.confetti !== 'function') {
                   const script = document.createElement('script');
                   script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';

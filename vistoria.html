@@ -46,8 +46,8 @@
         <!-- Logo -->
         <div style="text-align: center; margin-bottom: 20px;">
             <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Moura Leite Logo" style="width: 80px; height: 80px; border-radius: 50%; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-            <h2 style="margin: 10px 0 0 0; color: #1e293b; font-size: 1.2rem;">MOURA LEITE</h2>
-            <p style="margin: 0; color: #64748b; font-size: 0.9rem;">Vistoria de Lotes</p>
+            <h2 style="margin: 10px 0 0 0; color: #1e293b; font-size: 1.2rem;">Verificação Construção</h2>
+            <p style="margin: 0; color: #64748b; font-size: 0.9rem;">(gatilho atual: 91 dias de atraso)</p>
         </div>
 
         <div class="card" id="card-loading">
@@ -71,6 +71,7 @@
                 ⬅ Voltar para a lista
             </button>
             <h1>Detalhes do Lote</h1>
+            <p id="lbl-dias-solicitado" style="font-size: 0.9rem; color: #10b981; font-weight: bold; margin-top: -10px; margin-bottom: 15px;"></p>
             <div class="info-row"><span class="info-label">Cidade:</span> <span id="lbl-cidade"></span></div>
             <div class="info-row"><span class="info-label">Empreendimento:</span> <span id="lbl-empreendimento"></span></div>
             <div class="info-row"><span class="info-label">Unidade:</span> <span id="lbl-unidade"></span></div>
@@ -127,13 +128,17 @@
                 </div>
 
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Lote permite acesso?</label>
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">É possível acessar o lote?</label>
                     <select id="q-acesso" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
                         <option value="">Selecione...</option>
                         <option value="sim">Sim</option>
                         <option value="nao">Não</option>
                     </select>
-                    <p style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Se não permitir acesso ou for casa pronta, as fotos 2 e 3 tornam-se opcionais.</p>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Observações Adicionais (Opcional)</label>
+                    <textarea id="q-obs" class="form-select" style="width: 100%; height: 80px; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1; resize: vertical;" placeholder="Alguma informação importante..."></textarea>
                 </div>
             </div>
 
@@ -150,21 +155,26 @@
                     <img id="preview1" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
                 
-                <div class="photo-btn-wrapper">
+                <div class="photo-btn-wrapper" id="block-foto2" style="display: none;">
                     <label class="btn btn-outline" style="margin-bottom: 15px; display: block; cursor: pointer;">
-                        📷 2. Do Meio para o Fundo <span id="opt2" style="font-size: 0.8rem; font-weight: normal; color: #64748b;"></span>
+                        📷 2. Do Meio para o Fundo
                         <input type="file" id="input-foto2" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(this, 'preview2')">
                     </label>
                     <img id="preview2" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
                 
-                <div class="photo-btn-wrapper">
+                <div class="photo-btn-wrapper" id="block-foto3" style="display: none;">
                     <label class="btn btn-outline" style="margin-bottom: 15px; display: block; cursor: pointer;">
-                        📷 3. Do Fundo para a Frente <span id="opt3" style="font-size: 0.8rem; font-weight: normal; color: #64748b;"></span>
+                        📷 3. Do Fundo para a Frente
                         <input type="file" id="input-foto3" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(this, 'preview3')">
                     </label>
                     <img id="preview3" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
+
+                <button class="btn btn-outline" id="btn-mais-fotos" onclick="revelarMaisFotos()" style="margin-bottom: 15px; border-style: dashed;">
+                    ➕ Tirar mais fotos
+                </button>
+
                 
                 <button class="btn btn-primary" id="btn-enviar" onclick="enviarVistoria()" disabled style="margin-top: 30px;">
                     Enviar Fotos
@@ -175,6 +185,7 @@
         <div class="card" id="card-sucesso" style="display: none; text-align: center;">
             <h1>✅ Vistoria Enviada!</h1>
             <p>As fotos foram recebidas com sucesso. O responsável irá validar e anexar ao sistema.</p>
+            <p style="font-weight: bold; color: var(--primary-dark); margin-top: 15px;">Obrigado pela sua colaboração!</p>
             <button class="btn btn-primary" id="btn-voltar-sucesso" style="margin-top: 20px; display: none;">
                 Voltar para a lista
             </button>
