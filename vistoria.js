@@ -166,7 +166,16 @@ async function abrirVistoria(id) {
     
     document.getElementById('lbl-cidade').textContent = currentVistoriaDoc.cidade || '-';
     document.getElementById('lbl-empreendimento').textContent = currentVistoriaDoc.empreendimento || '-';
-    document.getElementById('lbl-unidade').textContent = currentVistoriaDoc.unidade || '-';
+    document.getElementById('form-area').style.display = 'block';
+    
+    // Resetar formulário
+    document.getElementById('q-agua').value = '';
+    document.getElementById('q-energia').value = '';
+    document.getElementById('q-entulho').value = '';
+    document.getElementById('q-acesso').value = '';
+    document.getElementById('q-estagio').value = '';
+    document.getElementById('opt2').textContent = '';
+    document.getElementById('opt3').textContent = '';
     
     // Resetar fotos
     files.file1 = null; files.file2 = null; files.file3 = null;
@@ -313,11 +322,43 @@ window.previewImage = function(input, previewId) {
         }
         reader.readAsDataURL(file);
         
-        if (files.file1 && files.file2 && files.file3) {
-            document.getElementById('btn-enviar').disabled = false;
-        } else {
-            document.getElementById('btn-enviar').disabled = true;
-        }
+        window.verificarFormulario();
+    }
+};
+
+window.verificarFormulario = function() {
+    const qAgua = document.getElementById('q-agua').value;
+    const qEnergia = document.getElementById('q-energia').value;
+    const qEntulho = document.getElementById('q-entulho').value;
+    const qAcesso = document.getElementById('q-acesso').value;
+    const qEstagio = document.getElementById('q-estagio').value;
+    
+    // Verifica obrigatoriedade de fotos 2 e 3
+    let fotosOpcionais = false;
+    if (qAcesso === 'nao' || qEstagio === 'casa_pronta_sem_acabamento' || qEstagio === 'casa_pronta_com_morador' || qEstagio === 'apenas_muro') {
+        fotosOpcionais = true;
+        document.getElementById('opt2').textContent = '(Opcional)';
+        document.getElementById('opt3').textContent = '(Opcional)';
+    } else {
+        document.getElementById('opt2').textContent = '';
+        document.getElementById('opt3').textContent = '';
+    }
+    
+    // Validação de preenchimento
+    const formCompleto = (qAgua && qEnergia && qEntulho && qAcesso && qEstagio);
+    
+    // Validação de fotos
+    let fotosCompletas = false;
+    if (fotosOpcionais) {
+        fotosCompletas = !!files.file1; // Apenas a 1 é obrigatória
+    } else {
+        fotosCompletas = (files.file1 && files.file2 && files.file3);
+    }
+    
+    if (formCompleto && fotosCompletas) {
+        document.getElementById('btn-enviar').disabled = false;
+    } else {
+        document.getElementById('btn-enviar').disabled = true;
     }
 };
 
@@ -329,25 +370,42 @@ window.enviarVistoria = async function() {
     try {
         const { ref, uploadBytes, getDownloadURL, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
         
+        let url1 = null, url2 = null, url3 = null;
+
         // Upload 1
-        const ref1 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/frente_${Date.now()}.jpeg`);
-        await uploadBytes(ref1, files.file1);
-        const url1 = await getDownloadURL(ref1);
+        if (files.file1) {
+            const ref1 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/frente_${Date.now()}.jpeg`);
+            await uploadBytes(ref1, files.file1);
+            url1 = await getDownloadURL(ref1);
+        }
         
         // Upload 2
-        const ref2 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/meio_fundo_${Date.now()}.jpeg`);
-        await uploadBytes(ref2, files.file2);
-        const url2 = await getDownloadURL(ref2);
+        if (files.file2) {
+            const ref2 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/meio_fundo_${Date.now()}.jpeg`);
+            await uploadBytes(ref2, files.file2);
+            url2 = await getDownloadURL(ref2);
+        }
         
         // Upload 3
-        const ref3 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/fundo_frente_${Date.now()}.jpeg`);
-        await uploadBytes(ref3, files.file3);
-        const url3 = await getDownloadURL(ref3);
+        if (files.file3) {
+            const ref3 = ref(window.firebaseStorage, `vistorias/${currentVistoriaId}/fundo_frente_${Date.now()}.jpeg`);
+            await uploadBytes(ref3, files.file3);
+            url3 = await getDownloadURL(ref3);
+        }
+        
+        const respostas = {
+            possuiAgua: document.getElementById('q-agua').value,
+            possuiEnergia: document.getElementById('q-energia').value,
+            possuiEntulho: document.getElementById('q-entulho').value,
+            permiteAcesso: document.getElementById('q-acesso').value,
+            estagioObra: document.getElementById('q-estagio').value,
+        };
         
         // Update Firestore
         const docRef = doc(window.firebaseDb, 'vistorias', currentVistoriaId);
         await updateDoc(docRef, {
             status: 'aguardando_validacao',
+            respostasFormulario: respostas,
             fotoFrente: url1,
             fotoMeioFundo: url2,
             fotoFundoFrente: url3,

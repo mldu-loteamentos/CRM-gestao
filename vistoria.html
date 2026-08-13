@@ -43,6 +43,13 @@
 </head>
 <body>
     <div class="container">
+        <!-- Logo -->
+        <div style="text-align: center; margin-bottom: 20px;">
+            <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Moura Leite Logo" style="width: 80px; height: 80px; border-radius: 50%; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+            <h2 style="margin: 10px 0 0 0; color: #1e293b; font-size: 1.2rem;">MOURA LEITE</h2>
+            <p style="margin: 0; color: #64748b; font-size: 0.9rem;">Vistoria de Lotes</p>
+        </div>
+
         <div class="card" id="card-loading">
             <h1 style="text-align: center;">Carregando...</h1>
             <div class="loader"></div>
@@ -68,34 +75,95 @@
             <div class="info-row"><span class="info-label">Empreendimento:</span> <span id="lbl-empreendimento"></span></div>
             <div class="info-row"><span class="info-label">Unidade:</span> <span id="lbl-unidade"></span></div>
             
-            <div id="status-container" class="status-box" style="display: none;"></div>
-            
             <button class="btn btn-outline" id="btn-maps" style="display: none;" onclick="abrirMaps()">
                 📍 Abrir no Google Maps
             </button>
             
-            <div class="photo-area" id="photo-area" style="display: none;">
-                <h3 style="margin-top:0; color:var(--text);">Captura de Imagens</h3>
-                <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 20px;">
-                    Tire as 3 fotos obrigatórias para liberar o envio.
-                </p>
+            <div id="status-container" style="display: none;"></div>
+            
+            <div id="form-area" style="display: none; margin-top: 20px;">
+                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+                <h3>Questionário Obrigatório</h3>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Possui cavalete de água?</label>
+                    <select id="q-agua" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
+                        <option value="">Selecione...</option>
+                        <option value="sim">Sim</option>
+                        <option value="nao">Não</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Possui poste de energia?</label>
+                    <select id="q-energia" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
+                        <option value="">Selecione...</option>
+                        <option value="sim">Sim</option>
+                        <option value="nao">Não</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Possui entulho?</label>
+                    <select id="q-entulho" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
+                        <option value="">Selecione...</option>
+                        <option value="sim">Sim</option>
+                        <option value="nao">Não</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Estágio da obra:</label>
+                    <select id="q-estagio" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
+                        <option value="">Selecione...</option>
+                        <option value="terraplanagem">Terraplanagem</option>
+                        <option value="alicerce">Alicerce</option>
+                        <option value="apenas_muro">Apenas muro</option>
+                        <option value="altura_laje">Altura de laje</option>
+                        <option value="telhado">Telhado</option>
+                        <option value="casa_pronta_sem_acabamento">Casa pronta sem acabamento</option>
+                        <option value="casa_pronta_com_morador">Casa pronta com morador</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;">Lote permite acesso?</label>
+                    <select id="q-acesso" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;" onchange="verificarFormulario()">
+                        <option value="">Selecione...</option>
+                        <option value="sim">Sim</option>
+                        <option value="nao">Não</option>
+                    </select>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Se não permitir acesso ou for casa pronta, as fotos 2 e 3 tornam-se opcionais.</p>
+                </div>
+            </div>
+
+            <div id="photo-area" style="display: none; margin-top: 30px;">
+                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-bottom: 20px;">
+                <h3>Captura de Imagens</h3>
+                <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 15px;" id="photo-instruction">Tire as fotos obrigatórias para liberar o envio.</p>
                 
                 <div class="photo-btn-wrapper">
-                    <button class="btn btn-outline" id="btn-foto1">📷 1. Fachada/Frente do Lote</button>
-                    <input type="file" accept="image/*" capture="environment" id="input-foto1" onchange="previewImage(this, 'preview1')">
-                    <img id="preview1" class="photo-preview">
+                    <label class="btn btn-outline" style="margin-bottom: 15px; display: block; cursor: pointer;">
+                        📷 1. Fachada/Frente do Lote
+                        <input type="file" id="input-foto1" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(this, 'preview1')">
+                    </label>
+                    <img id="preview1" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
                 
                 <div class="photo-btn-wrapper">
-                    <button class="btn btn-outline" id="btn-foto2">📷 2. Do Meio para o Fundo</button>
-                    <input type="file" accept="image/*" capture="environment" id="input-foto2" onchange="previewImage(this, 'preview2')">
-                    <img id="preview2" class="photo-preview">
+                    <label class="btn btn-outline" style="margin-bottom: 15px; display: block; cursor: pointer;">
+                        📷 2. Do Meio para o Fundo <span id="opt2" style="font-size: 0.8rem; font-weight: normal; color: #64748b;"></span>
+                        <input type="file" id="input-foto2" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(this, 'preview2')">
+                    </label>
+                    <img id="preview2" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
                 
                 <div class="photo-btn-wrapper">
-                    <button class="btn btn-outline" id="btn-foto3">📷 3. Do Fundo para a Frente</button>
-                    <input type="file" accept="image/*" capture="environment" id="input-foto3" onchange="previewImage(this, 'preview3')">
-                    <img id="preview3" class="photo-preview">
+                    <label class="btn btn-outline" style="margin-bottom: 15px; display: block; cursor: pointer;">
+                        📷 3. Do Fundo para a Frente <span id="opt3" style="font-size: 0.8rem; font-weight: normal; color: #64748b;"></span>
+                        <input type="file" id="input-foto3" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(this, 'preview3')">
+                    </label>
+                    <img id="preview3" class="preview-img" style="display: none; max-width: 100%; border-radius: 8px; margin-bottom: 15px;">
                 </div>
                 
                 <button class="btn btn-primary" id="btn-enviar" onclick="enviarVistoria()" disabled style="margin-top: 30px;">
