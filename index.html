@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.139 &nbsp;Â·&nbsp; 13/08/2026
+            v1.0.140 &nbsp;Â·&nbsp; 13/08/2026
           </span>
         </div>
       </div>
@@ -2606,20 +2606,8 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                   <i data-lucide="scale" style="color: var(--color-primary);"></i> Prazos das Etapas Judiciais
                 </h3>
               <p style="font-size: 0.85rem; color: #64748b; margin-top: 0; margin-bottom: 15px;">Defina os prazos médios esperados (em dias) para cada etapa quando o processo entra na fase judicial.</p>
-              <div class="table-container" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <table class="custom-table" style="width: 100%; border-collapse: collapse;">
-                  <thead>
-                    <tr>
-                      <th style="width: 30%; text-align: left; padding: 12px 16px; background: #004E33; color: #fff; font-weight: 600;">Nome da Etapa</th>
-                      <th style="width: 40%; text-align: left; padding: 12px 16px; background: #004E33; color: #fff; font-weight: 600;">Explicação</th>
-                      <th style="width: 15%; text-align: center; padding: 12px 16px; background: #004E33; color: #fff; font-weight: 600;">Prazo</th>
-                      <th style="width: 15%; text-align: right; padding: 12px 20px; background: #004E33; color: #fff; font-weight: 600;">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody id="judiciais-container">
-                    <!-- Dinâmico -->
-                  </tbody>
-                </table>
+              <div id="judiciais-tree-container" style="border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); min-height: 200px;" ondragover="window.onDragOverJud(event)" ondrop="window.onDropJudRoot(event)">
+                <!-- Árvore arrastável -->
               </div>
               <button onclick="adicionarEtapaJudicial()" style="margin-top: 15px; background: #004E33; color: white; border: none; border-radius: 8px; padding: 10px 20px; cursor: pointer; font-size: 0.875rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(0,78,51,0.35); transition: background 0.2s;" onmouseover="this.style.background='#006644'" onmouseout="this.style.background='#004E33'">
                 <i data-lucide="save" style="width: 16px; height: 16px;"></i> Adicionar Etapa
@@ -3831,7 +3819,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                         <div style="margin-bottom: 5px;">
                           <label for="jud-fase" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin: 0; display: flex; align-items: center; gap: 8px;">
                             Andamento / Fase Processual <span style="color: var(--color-danger);">*</span>
-                            <i data-lucide="settings" id="btn-config-jud-fase" style="width: 14px; height: 14px; cursor: pointer; color: var(--color-primary);" onclick="console.log('Inline Click!'); try { window.openJudicialOptionsEditor(); } catch(e) { alert(e.message); }" title="Configurar Etapas"></i>
+                            <i data-lucide="settings" id="btn-config-jud-fase" style="width: 14px; height: 14px; cursor: pointer; color: var(--color-primary);" onclick="console.log('Inline Click!'); try { window.openEtapaModal('new'); } catch(e) { alert(e.message); }" title="Configurar Etapas"></i>
                           </label>
                         </div>
                         <select id="jud-fase" class="form-control" style="font-size: 0.85rem; padding: 8px 10px; border-radius: 4px; border: 1px solid #ccc; width: 100%;" onchange="handleJudFaseChange(this)">
@@ -4713,25 +4701,25 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     }
   </script>
 
-  <script defer src="data.js?v=139"></script>
-  <script defer src="sienge-api.js?v=139"></script>
-  <script defer src="azure-auth.js?v=139"></script>
-  <script defer src="app.js?v=139"></script>
-  <script defer src="anexos.js?v=139"></script>
-  <script defer src="contas-pagar.js?v=139"></script>
-  <script defer src="config-tags.js?v=139"></script>
-  <script defer src="config-users.js?v=139"></script>
-  <script defer src="construcao.js?v=139"></script>
+  <script defer src="data.js?v=140"></script>
+  <script defer src="sienge-api.js?v=140"></script>
+  <script defer src="azure-auth.js?v=140"></script>
+  <script defer src="app.js?v=140"></script>
+  <script defer src="anexos.js?v=140"></script>
+  <script defer src="contas-pagar.js?v=140"></script>
+  <script defer src="config-tags.js?v=140"></script>
+  <script defer src="config-users.js?v=140"></script>
+  <script defer src="construcao.js?v=140"></script>
 
-  <script defer src="empresas.js?v=139"></script>
-  <script defer src="relacionamento.js?v=139"></script>
+  <script defer src="empresas.js?v=140"></script>
+  <script defer src="relacionamento.js?v=140"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=139"></script>
-  <script defer src="plano-financeiro.js?v=139"></script>
-  <script defer src="fiscal.js?v=139"></script>
-  <script defer src="indexadores.js?v=139"></script>
-  <script defer src="verificar-construcao.js?v=139"></script>
+  <script defer src="centros-custo.js?v=140"></script>
+  <script defer src="plano-financeiro.js?v=140"></script>
+  <script defer src="fiscal.js?v=140"></script>
+  <script defer src="indexadores.js?v=140"></script>
+  <script defer src="verificar-construcao.js?v=140"></script>
   
   <!-- Modal Compartilhar Anotação -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; pointer-events: auto !important; z-index: 999999 !important; visibility: visible !important; opacity: 1 !important; width: 100vw !important; height: 100vh !important; top: 0 !important; left: 0 !important;">
@@ -5080,7 +5068,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     </div>
   </div>
 
-  <script src="repactuacoes.js?v=139"></script>
+  <script src="repactuacoes.js?v=140"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

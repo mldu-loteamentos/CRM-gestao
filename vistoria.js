@@ -2,7 +2,7 @@ let currentVistoriaId = null;
 let currentVistoriaDoc = null;
 let loteCoords = null; // {lat, lng}
 let currentDistance = Infinity;
-const MAX_DISTANCE = 40; // meters
+const MAX_DISTANCE = 20; // meters
 const files = { file1: null, file2: null, file3: null };
 
 // Lista de lotes carregados
@@ -267,9 +267,12 @@ function iniciarGPS() {
             const userLng = pos.coords.longitude;
             
             const dist = calcCrow(userLat, userLng, loteCoords.lat, loteCoords.lng);
-            currentDistance = dist * 1000; // metros
+            currentDistance = Math.round(dist * 1000);
             
-            if (currentDistance <= MAX_DISTANCE) {
+            // Salvar GPS atual globalmente para a marca d'água
+            window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            
+            if (currentDistance <= 20) {
                 setStatus(`📍 Você está no local (${Math.round(currentDistance)}m do lote). Fotos liberadas!`, "success");
                 document.getElementById('btn-maps').style.display = 'none';
                 document.getElementById('photo-area').style.display = 'block';
@@ -308,19 +311,58 @@ window.previewImage = function(input, previewId) {
             return;
         }
         
-        if (previewId === 'preview1') files.file1 = file;
-        if (previewId === 'preview2') files.file2 = file;
-        if (previewId === 'preview3') files.file3 = file;
-        
         const reader = new FileReader();
         reader.onload = function(e) {
-            const img = document.getElementById(previewId);
-            img.src = e.target.result;
-            img.style.display = 'block';
+            const imgObj = new Image();
+            imgObj.onload = function() {
+                const canvas = document.createElement("canvas");
+                const ctx = canvas.getContext("2d");
+                
+                // Manter resolução original
+                canvas.width = imgObj.width;
+                canvas.height = imgObj.height;
+                ctx.drawImage(imgObj, 0, 0);
+                
+                // Configurar texto de marca d'água
+                const dateStr = new Date().toLocaleString("pt-BR");
+                const locationStr = window.currentVistoriaGps ? 
+                    `Lat: ${window.currentVistoriaGps.lat.toFixed(6)}, Lng: ${window.currentVistoriaGps.lng.toFixed(6)}` : 
+                    "Localização Indisponível";
+                
+                const watermarkText = `${dateStr} | ${locationStr}`;
+                
+                const fontSize = Math.max(14, Math.floor(canvas.width / 40));
+                ctx.font = `${fontSize}px Arial`;
+                ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+                
+                const textWidth = ctx.measureText(watermarkText).width;
+                const padding = fontSize * 0.5;
+                const x = canvas.width - textWidth - (padding * 2) - 10;
+                const y = canvas.height - fontSize - (padding * 2) - 10;
+                
+                // Fundo semi-transparente
+                ctx.fillRect(x, y, textWidth + (padding * 2), fontSize + (padding * 2));
+                
+                // Texto branco
+                ctx.fillStyle = "white";
+                ctx.textBaseline = "top";
+                ctx.fillText(watermarkText, x + padding, y + padding);
+                
+                canvas.toBlob((blob) => {
+                    const newFile = new File([blob], file.name, { type: 'image/jpeg' });
+                    if (previewId === 'preview1') files.file1 = newFile;
+                    if (previewId === 'preview2') files.file2 = newFile;
+                    if (previewId === 'preview3') files.file3 = newFile;
+                    
+                    const imgPreview = document.getElementById(previewId);
+                    imgPreview.src = URL.createObjectURL(newFile);
+                    imgPreview.style.display = 'block';
+                    window.verificarFormulario();
+                }, 'image/jpeg', 0.85);
+            };
+            imgObj.src = e.target.result;
         }
         reader.readAsDataURL(file);
-        
-        window.verificarFormulario();
     }
 };
 

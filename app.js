@@ -11585,6 +11585,30 @@ async function loadAgendaDayTasks(dateStr) {
   const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
   const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
 
+window.fireConfetti = function() {
+    if (typeof window.confetti === 'function') {
+        const duration = 3 * 1000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 999999 };
+
+        function randomInRange(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        const interval = setInterval(function() {
+            const timeLeft = animationEnd - Date.now();
+
+            if (timeLeft <= 0) {
+                return clearInterval(interval);
+            }
+
+            const particleCount = 50 * (timeLeft / duration);
+            window.confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } }));
+            window.confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } }));
+        }, 250);
+    }
+};
+
   window.agendaItemsCache = window.agendaItemsCache || {};
   const cacheKey = dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
 
@@ -11757,11 +11781,17 @@ async function loadAgendaDayTasks(dateStr) {
       });
   }
   
-  const filaCount = dayItems.filter(i => i.isFila).length;
-  if (filaCount > 0) {
+  const unresolvedItems = dayItems.filter(item => {
+      if (item.isResolved) return false;
+      if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
+      return true;
+  });
+  const unresolvedCount = unresolvedItems.length;
+
+  if (unresolvedCount > 0) {
       const summaryDiv = document.createElement("div");
       summaryDiv.style.cssText = "background: #fff7ed; color: #c2410c; padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; border: 1px solid #ffedd5; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;";
-      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${filaCount} atendimentos para finalizar a sua fila hoje.`;
+      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${unresolvedCount} atendimentos para finalizar a sua fila hoje.`;
       // We can insert this before the table. The `body` is the tbody. We need to find its parent.
       const table = body.closest('table');
       if (table && table.parentNode) {
@@ -11770,6 +11800,33 @@ async function loadAgendaDayTasks(dateStr) {
           if (oldSummary) oldSummary.remove();
           summaryDiv.className = 'agenda-queue-summary';
           table.parentNode.insertBefore(summaryDiv, table);
+      }
+  } else if (dayItems.length > 0 && unresolvedCount === 0) {
+      const table = body.closest('table');
+      if (table && table.parentNode) {
+          const oldSummary = table.parentNode.querySelector('.agenda-queue-summary');
+          if (oldSummary) oldSummary.remove();
+          
+          const successDiv = document.createElement("div");
+          successDiv.className = 'agenda-queue-summary';
+          successDiv.style.cssText = "background: #f0fdf4; color: #166534; padding: 12px 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 700; border: 1px solid #bbf7d0; margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);";
+          successDiv.innerHTML = `<i data-lucide="party-popper" style="width: 20px; height: 20px;"></i> Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉`;
+          table.parentNode.insertBefore(successDiv, table);
+          
+          // Show confetti!
+          if (!window.confettiFiredToday) {
+              window.confettiFiredToday = true;
+              if (typeof window.confetti !== 'function') {
+                  const script = document.createElement('script');
+                  script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+                  script.onload = () => {
+                      fireConfetti();
+                  };
+                  document.head.appendChild(script);
+              } else {
+                  fireConfetti();
+              }
+          }
       }
   } else {
       const table = body.closest('table');
@@ -15924,39 +15981,191 @@ window.saveTimelineNode = function() {
   }
 };
 
+window.draggedJudId = null;
+
+window.onDragStartJud = function(e, id) {
+    window.draggedJudId = id;
+    e.dataTransfer.effectAllowed = "move";
+};
+
+window.onDragOverJud = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    
+    // UI feedback
+    document.querySelectorAll('.jud-node-target').forEach(el => {
+        el.style.borderTop = '';
+        el.style.borderBottom = '';
+        el.style.background = '';
+    });
+    
+    const target = e.target.closest('.jud-node-target');
+    if (target && target.dataset.id !== window.draggedJudId) {
+        const rect = target.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        if (y < rect.height * 0.25) {
+            target.style.borderTop = '2px solid var(--color-primary)';
+        } else if (y > rect.height * 0.75) {
+            target.style.borderBottom = '2px solid var(--color-primary)';
+        } else {
+            target.style.background = '#e0f2fe';
+        }
+    }
+};
+
+window.onDropJudRoot = function(e) {
+    e.preventDefault();
+    document.querySelectorAll('.jud-node-target').forEach(el => {
+        el.style.borderTop = '';
+        el.style.borderBottom = '';
+        el.style.background = '';
+    });
+    
+    if (!window.draggedJudId) return;
+    
+    // Se soltou na raiz (fora de qualquer target)
+    const target = e.target.closest('.jud-node-target');
+    if (!target) {
+        const dragged = window.EtapasJudiciaisState.find(x => x.id === window.draggedJudId);
+        if (dragged) {
+            dragged.parentId = null;
+            // Move para o final da raiz
+            const maxOrder = Math.max(...window.EtapasJudiciaisState.filter(x => !x.parentId).map(x => x.order || 0), 0);
+            dragged.order = maxOrder + 1;
+            
+            localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+            window.renderEtapasJudiciais();
+            if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
+        }
+    }
+};
+
+window.onDropJudNode = function(e, targetId) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    document.querySelectorAll('.jud-node-target').forEach(el => {
+        el.style.borderTop = '';
+        el.style.borderBottom = '';
+        el.style.background = '';
+    });
+    
+    if (!window.draggedJudId || window.draggedJudId === targetId) return;
+    
+    // Validar hierarquia circular
+    let isChild = false;
+    let curr = window.EtapasJudiciaisState.find(x => x.id === targetId);
+    while (curr && curr.parentId) {
+        if (curr.parentId === window.draggedJudId) {
+            isChild = true;
+            break;
+        }
+        curr = window.EtapasJudiciaisState.find(x => x.id === curr.parentId);
+    }
+    
+    if (isChild) {
+        alert("Ação inválida. Você não pode mover uma etapa para dentro de uma de suas próprias subetapas.");
+        return;
+    }
+    
+    const dragged = window.EtapasJudiciaisState.find(x => x.id === window.draggedJudId);
+    const targetNode = window.EtapasJudiciaisState.find(x => x.id === targetId);
+    
+    if (dragged && targetNode) {
+        const targetEl = e.target.closest('.jud-node-target');
+        const rect = targetEl.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        
+        // Reordenar todos os nós irmãos para evitar gaps
+        let siblings = window.EtapasJudiciaisState.filter(x => x.parentId === targetNode.parentId);
+        siblings.sort((a, b) => (a.order || 0) - (b.order || 0));
+        siblings.forEach((s, i) => s.order = i * 10); // Espaçamento de 10
+        
+        if (y < rect.height * 0.25) {
+            // Inserir ANTES
+            dragged.parentId = targetNode.parentId;
+            dragged.order = targetNode.order - 5;
+        } else if (y > rect.height * 0.75) {
+            // Inserir DEPOIS
+            dragged.parentId = targetNode.parentId;
+            dragged.order = targetNode.order + 5;
+        } else {
+            // Inserir como FILHO
+            dragged.parentId = targetNode.id;
+            const childMaxOrder = Math.max(...window.EtapasJudiciaisState.filter(x => x.parentId === targetNode.id).map(x => x.order || 0), 0);
+            dragged.order = childMaxOrder + 10;
+        }
+        
+        localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+        window.renderEtapasJudiciais();
+        if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
+    }
+};
+
 window.renderEtapasJudiciais = function() {
-  const container = document.getElementById('judiciais-container');
+  const container = document.getElementById('judiciais-tree-container');
   if (!container) return;
   
   container.innerHTML = '';
   
-  window.EtapasJudiciaisState.forEach((etapa) => {
-    container.innerHTML += `
-      <tr style="border-bottom: 1px solid #f1f5f9; transition: background 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-        <td style="text-align: left; padding: 12px 16px; font-size: 0.9rem; font-weight: 600; color: #334155;">
-          ${etapa.nome}
-        </td>
-        <td style="text-align: left; padding: 12px 16px; font-size: 0.85rem; color: #64748b;">
-          ${etapa.descricao || '<span style="color: #cbd5e1; font-style: italic;">Sem descrição</span>'}
-        </td>
-        <td style="text-align: center; padding: 12px 16px; font-size: 0.85rem; color: #64748b; font-weight: 500;">
-          <span style="background: #f1f5f9; padding: 3px 8px; border-radius: 10px; border: 1px solid #e2e8f0;">${etapa.dias} dias</span>
-        </td>
-        <td style="text-align: right; padding: 12px 16px; white-space: nowrap;">
-          <button style="background: transparent; color: #128143; border: 1px solid #128143; border-radius: 6px; padding: 5px 7px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-right: 4px;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='transparent'" onclick="editarEtapaJudicial('${etapa.id}')" title="Editar">
-            <i data-lucide="edit" style="width: 15px; height: 15px;"></i>
-          </button>
-          <button style="background: transparent; border: 2px solid #ef4444; color: #ef4444; border-radius: 6px; padding: 5px 7px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='transparent'" onclick="removerEtapaJudicial('${etapa.id}')" title="Excluir">
-            <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-          </button>
-        </td>
-      </tr>
-    `;
+  if (!window.EtapasJudiciaisState || window.EtapasJudiciaisState.length === 0) {
+      container.innerHTML = `<div style="text-align: center; color: #94a3b8; font-size: 0.9rem; padding: 20px;">Nenhuma etapa configurada.</div>`;
+      return;
+  }
+
+  // Garantir que todos tenham order se não tiver
+  window.EtapasJudiciaisState.forEach((e, i) => {
+      if (typeof e.order === 'undefined') e.order = i * 10;
   });
+  
+  const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const rootItems = sorted.filter(e => !e.parentId);
+  
+  const renderNode = (node, level, prefix) => {
+      const children = sorted.filter(e => e.parentId === node.id);
+      
+      let html = `
+      <div class="jud-node" style="margin-left: ${level > 0 ? 25 : 0}px; position: relative;">
+        ${level > 0 ? '<div style="position: absolute; left: -15px; top: 18px; width: 12px; height: 1px; background: #cbd5e1;"></div>' : ''}
+        ${level > 0 ? '<div style="position: absolute; left: -15px; top: 0; width: 1px; height: 100%; background: #cbd5e1;"></div>' : ''}
+        
+        <div class="jud-node-target" data-id="${node.id}" draggable="true" ondragstart="window.onDragStartJud(event, '${node.id}')" ondrop="window.onDropJudNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${level === 0 ? '#f8fafc' : '#ffffff'}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: grab; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i data-lucide="grip-vertical" style="width: 16px; height: 16px; color: #94a3b8; cursor: grab;"></i>
+            <div>
+              <div style="font-size: 0.9rem; font-weight: 600; color: #334155;">
+                <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${prefix}</span>
+                ${node.nome}
+              </div>
+              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} • <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
+            <button onclick="window.openEtapaModal('new', '${node.id}')" style="background: transparent; color: #128143; border: 1px solid transparent; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='transparent'" title="Adicionar Subetapa">
+              <i data-lucide="plus-circle" style="width: 15px; height: 15px;"></i>
+            </button>
+            <button onclick="editarEtapaJudicial('${node.id}')" style="background: transparent; color: #64748b; border: 1px solid transparent; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" title="Editar">
+              <i data-lucide="edit" style="width: 15px; height: 15px;"></i>
+            </button>
+            <button onclick="removerEtapaJudicial('${node.id}')" style="background: transparent; border: 1px solid transparent; color: #ef4444; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='transparent'" title="Excluir">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+            </button>
+          </div>
+        </div>
+        <div class="jud-children">
+          ${children.map((c, i) => renderNode(c, level + 1, `${prefix}${i + 1}.`)).join('')}
+        </div>
+      </div>
+      `;
+      return html;
+  };
+  
+  container.innerHTML = rootItems.map((n, i) => renderNode(n, 0, `${i + 1}. `)).join('');
+  
   if (typeof lucide !== 'undefined') lucide.createIcons();
 };
 
-window.openEtapaModal = function(id = 'new') {
+window.openEtapaModal = function(id = 'new', parentId = null) {
     let modal = document.getElementById('etapa-judicial-modal');
     if (!modal) {
         modal = document.createElement('div');
@@ -15972,6 +16181,7 @@ window.openEtapaModal = function(id = 'new') {
                 </div>
                 <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
                     <input type="hidden" id="etapa-modal-id">
+                    <input type="hidden" id="etapa-modal-parent-id">
                     <div>
                         <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Nome da Etapa</label>
                         <input type="text" id="etapa-modal-nome" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: Notificação Extrajudicial">
@@ -15997,16 +16207,18 @@ window.openEtapaModal = function(id = 'new') {
 
     let e = window.EtapasJudiciaisState.find(x => x.id === id);
     if (id === 'new') {
-        document.getElementById('etapa-modal-title').innerText = 'Nova Etapa';
+        document.getElementById('etapa-modal-title').innerText = parentId ? 'Nova Subetapa' : 'Nova Etapa';
         document.getElementById('etapa-modal-id').value = 'new';
+        document.getElementById('etapa-modal-parent-id').value = parentId || '';
         document.getElementById('etapa-modal-nome').value = '';
         document.getElementById('etapa-modal-dias').value = '';
         document.getElementById('etapa-modal-descricao').value = '';
     } else if (e) {
         document.getElementById('etapa-modal-title').innerText = 'Editar Etapa';
         document.getElementById('etapa-modal-id').value = id;
+        document.getElementById('etapa-modal-parent-id').value = e.parentId || '';
         document.getElementById('etapa-modal-nome').value = e.nome;
-        document.getElementById('etapa-modal-dias').value = e.dias;
+        document.getElementById('etapa-modal-dias').value = e.dias || 0;
         document.getElementById('etapa-modal-descricao').value = e.descricao || '';
     }
 
@@ -16015,6 +16227,7 @@ window.openEtapaModal = function(id = 'new') {
 
 window.salvarEtapaModal = function() {
     const id = document.getElementById('etapa-modal-id').value;
+    const parentId = document.getElementById('etapa-modal-parent-id').value || null;
     const nome = document.getElementById('etapa-modal-nome').value;
     const dias = parseInt(document.getElementById('etapa-modal-dias').value) || 0;
     const desc = document.getElementById('etapa-modal-descricao').value;
@@ -16025,11 +16238,14 @@ window.salvarEtapaModal = function() {
     }
 
     if (id === 'new') {
+        const maxOrder = Math.max(...window.EtapasJudiciaisState.filter(x => x.parentId === parentId).map(x => x.order || 0), 0);
         window.EtapasJudiciaisState.push({
             id: 'j' + Date.now(),
             nome: nome.trim(),
             dias: dias,
-            descricao: desc
+            descricao: desc,
+            parentId: parentId,
+            order: maxOrder + 10
         });
     } else {
         const e = window.EtapasJudiciaisState.find(x => x.id === id);
@@ -16198,8 +16414,20 @@ window.updateJudFaseDropdown = function() {
   if(!sel) return;
   let html = `<option value="">Selecione...</option>`;
   if(window.EtapasJudiciaisState) {
-    window.EtapasJudiciaisState.forEach(e => {
-       html += `<option value="${e.nome}" data-dias="${e.dias}">${e.nome}</option>`;
+    const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));
+    const rootItems = sorted.filter(e => !e.parentId);
+    
+    const buildOptions = (node, prefix) => {
+        let optHtml = `<option value="${node.nome}" data-dias="${node.dias}">${prefix}${node.nome}</option>`;
+        const children = sorted.filter(e => e.parentId === node.id);
+        children.forEach(c => {
+            optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;↳ ");
+        });
+        return optHtml;
+    };
+    
+    rootItems.forEach(e => {
+        html += buildOptions(e, "");
     });
   }
   html += `<option value="Nota Interna">Nota Interna</option>`;
@@ -16986,9 +17214,13 @@ async function uploadKMZ() {
 
     const { doc, setDoc, ref, uploadBytes, collection, getDocs, deleteDoc } = window.firebaseCollections;
     
-    // 1. Upload do KMZ para o Storage
-    const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
-    await uploadBytes(storageRef, file);
+    // 1. Upload do KMZ para o Storage (com try-catch por causa do CORS do Firebase Storage)
+    try {
+      const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
+      await uploadBytes(storageRef, file);
+    } catch (e) {
+      console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");
+    }
 
     // 2. Salvar coordenadas no Firestore
     const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
@@ -20170,8 +20402,8 @@ document.addEventListener('click', (e) => {
   if (icon) {
     e.preventDefault();
     e.stopPropagation();
-    if (typeof window.openJudicialOptionsEditor === 'function') {
-      window.openJudicialOptionsEditor();
+    if (typeof window.openEtapaModal === 'function') {
+      window.openEtapaModal('new');
     }
   }
 });
