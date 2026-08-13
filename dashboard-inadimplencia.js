@@ -355,9 +355,6 @@ const DashboardInadimplencia = (function() {
       <div style="max-width: 1200px; margin: 0 auto;">
         
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
-          <button class="btn btn-outline" style="border-color: #3b82f6; color: #3b82f6;" onclick="window.DashboardInadimplencia.salvarPosicaoHoje()">
-            <i data-lucide="save" style="width: 16px;"></i> Salvar Posição Hoje
-          </button>
           <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
             <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
           </button>
@@ -443,14 +440,14 @@ const DashboardInadimplencia = (function() {
   }
 
   function gerarRelatorioDiarioPdf() {
-    if (!window.AppState || !window.AppState.inadimplentes || window.AppState.inadimplentes.length === 0) {
+    if (!window.rawClientList || window.rawClientList.length === 0) {
       alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
       return;
     }
 
-    const bills = window.AppState.inadimplentes;
+    const bills = window.rawClientList;
     
-    // 1. Por Cidade/Empreendimento
+    // 1. Por Cidade/Empreendimento (usaremos Centro de Custo no lugar da cidade caso não tenha)
     const cities = {};
     // 2. Por Operador
     const ops = {};
@@ -459,26 +456,27 @@ const DashboardInadimplencia = (function() {
 
     bills.forEach(b => {
       // 0% pago
-      if (b.porcentagem_paga === 0 || b.porcentagem_paga === "0%" || b.porcentagem_paga === "0.00%") {
+      if (b.isZeroPaid) {
         zeroPaidCount++;
       }
 
-      // Por Cidade
+      // Por Cidade / Empreendimento
       let city = 'N/D';
-      if (b.customer && b.customer.address && b.customer.address.city) {
-         city = b.customer.address.city.toUpperCase();
+      if (window.AppState && window.AppState.cachedCostCenters) {
+         const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === String(b.costCenterId));
+         if (ccObj && ccObj.name) city = ccObj.name.toUpperCase();
       }
       if (!cities[city]) cities[city] = 0;
-      cities[city] += b.value;
+      cities[city] += b.overdueValue;
 
       // Por Operador
-      let op = b.operator || 'SEM OPERADOR';
+      let op = b.assignedOperator || 'SEM OPERADOR';
       if (!ops[op]) ops[op] = { total: 0, customers: {} };
-      ops[op].total += b.value;
+      ops[op].total += b.overdueValue;
       
       const custName = b.customerName || 'N/D';
       if (!ops[op].customers[custName]) ops[op].customers[custName] = 0;
-      ops[op].customers[custName] += b.value;
+      ops[op].customers[custName] += b.overdueValue;
     });
 
     const dateStr = new Date().toLocaleDateString('pt-BR');
