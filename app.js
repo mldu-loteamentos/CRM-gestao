@@ -22102,6 +22102,19 @@ window.syncGlobalConfigFromFirebase = async function() {
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
+                    if (k === "crm_moura_judiciais") {
+                        try {
+                            const localArr = JSON.parse(localStorage.getItem(k) || "[]");
+                            const cloudArr = JSON.parse(globalData[k] || "[]");
+                            if (localArr.length > cloudArr.length) {
+                                console.log("[Firebase] Local judiciais tem mais itens que a nuvem. Forçando upload da versão local...");
+                                if (window.forceUploadLocalConfig) {
+                                    setTimeout(() => window.forceUploadLocalConfig(true), 2000);
+                                }
+                                return;
+                            }
+                        } catch(e) {}
+                    }
                     _originalSetItem.call(localStorage, k, globalData[k]);
                     changed = true;
                 }
