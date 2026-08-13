@@ -568,10 +568,10 @@ const DashboardInadimplencia = (function() {
 
     const getPct = (val, total) => total > 0 ? ((val/total)*100).toFixed(1) + '%' : '0.0%';
 
-    let html = \`
+    let html = `
       <html>
         <head>
-          <title>Sprint Diário - \${dateStr}</title>
+          <title>Sprint Diário - ${dateStr}</title>
           <style>
             @page { size: A4 landscape; margin: 8mm; }
             body { font-family: 'Inter', 'Segoe UI', sans-serif; padding: 0; color: #1e293b; font-size: 10px; background: #f8fafc; -webkit-print-color-adjust: exact; }
@@ -609,24 +609,24 @@ const DashboardInadimplencia = (function() {
         </head>
         <body>
           <div class="print-btn"><button onclick="window.print()">🖨️ Imprimir Relatório</button></div>
-          <h1>Posição de Inadimplência Geral (\${dateStr})</h1>
+          <h1>Posição de Inadimplência Geral (${dateStr})</h1>
 
           <div class="kpi-container">
             <div class="kpi" style="border-left: 4px solid #ef4444;">
               <div class="kpi-title">Valor em Atraso</div>
-              <div class="kpi-value" style="color: #0f172a;">\${formatMoney(totalOverdue)}</div>
+              <div class="kpi-value" style="color: #0f172a;">${formatMoney(totalOverdue)}</div>
             </div>
             <div class="kpi" style="border-left: 4px solid #f59e0b;">
               <div class="kpi-title">Clientes em Atraso</div>
-              <div class="kpi-value">\${uniqueClients.size}</div>
+              <div class="kpi-value">${uniqueClients.size}</div>
             </div>
             <div class="kpi" style="border-left: 4px solid #22c55e;">
               <div class="kpi-title">Títulos Vencidos</div>
-              <div class="kpi-value">\${totalBills}</div>
+              <div class="kpi-value">${totalBills}</div>
             </div>
             <div class="kpi" style="border-left: 4px solid #3b82f6;">
               <div class="kpi-title">Atraso Médio</div>
-              <div class="kpi-value">\${avgDelay} dias</div>
+              <div class="kpi-value">${avgDelay} dias</div>
             </div>
           </div>
 
@@ -647,43 +647,43 @@ const DashboardInadimplencia = (function() {
               </tr>
             </thead>
             <tbody>
-    \`;
+    `;
 
     compSorted.forEach(c => {
-        html += \`
+        html += `
               <tr>
-                <td class="center">\${c.id}</td>
-                <td><strong>\${c.name}</strong></td>
-                <td class="center">\${c.totalBills}</td>
-                <td class="val"><strong>\${formatMoney(c.totalValue)}</strong></td>
-                <td class="val">\${c.d30_v > 0 ? formatMoney(c.d30_v) + '<span class="pct-badge"><span class="dot dot-green"></span>'+getPct(c.d30_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">\${c.d60_v > 0 ? formatMoney(c.d60_v) + '<span class="pct-badge"><span class="dot dot-yellow"></span>'+getPct(c.d60_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">\${c.d90_v > 0 ? formatMoney(c.d90_v) + '<span class="pct-badge"><span class="dot dot-orange"></span>'+getPct(c.d90_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">\${c.d120_v > 0 ? formatMoney(c.d120_v) + '<span class="pct-badge"><span class="dot dot-red"></span>'+getPct(c.d120_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">\${c.d120p_v > 0 ? formatMoney(c.d120p_v) + '<span class="pct-badge"><span class="dot dot-darkred"></span>'+getPct(c.d120p_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">\${c.subjudice_v > 0 ? formatMoney(c.subjudice_v) + '<span class="pct-badge"><span class="dot dot-gray"></span>'+getPct(c.subjudice_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="center">${c.id}</td>
+                <td><strong>${c.name}</strong></td>
+                <td class="center">${c.totalBills}</td>
+                <td class="val"><strong>${formatMoney(c.totalValue)}</strong></td>
+                <td class="val">${c.d30_v > 0 ? formatMoney(c.d30_v) + '<span class="pct-badge"><span class="dot dot-green"></span>'+getPct(c.d30_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">${c.d60_v > 0 ? formatMoney(c.d60_v) + '<span class="pct-badge"><span class="dot dot-yellow"></span>'+getPct(c.d60_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">${c.d90_v > 0 ? formatMoney(c.d90_v) + '<span class="pct-badge"><span class="dot dot-orange"></span>'+getPct(c.d90_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">${c.d120_v > 0 ? formatMoney(c.d120_v) + '<span class="pct-badge"><span class="dot dot-red"></span>'+getPct(c.d120_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">${c.d120p_v > 0 ? formatMoney(c.d120p_v) + '<span class="pct-badge"><span class="dot dot-darkred"></span>'+getPct(c.d120p_v, c.totalValue)+'</span>' : '-'}</td>
+                <td class="val">${c.subjudice_v > 0 ? formatMoney(c.subjudice_v) + '<span class="pct-badge"><span class="dot dot-gray"></span>'+getPct(c.subjudice_v, c.totalValue)+'</span>' : '-'}</td>
               </tr>
-        \`;
+        `;
     });
 
-    html += \`
+    html += `
               <tr class="row-total">
                 <td colspan="2" class="val">TOTAL GERAL</td>
-                <td class="center">\${compTotals.totalBills}</td>
-                <td class="val">\${formatMoney(compTotals.totalValue)}</td>
-                <td class="val">\${formatMoney(compTotals.d30_v)}<span class="pct-badge">\${getPct(compTotals.d30_v, compTotals.totalValue)}</span></td>
-                <td class="val">\${formatMoney(compTotals.d60_v)}<span class="pct-badge">\${getPct(compTotals.d60_v, compTotals.totalValue)}</span></td>
-                <td class="val">\${formatMoney(compTotals.d90_v)}<span class="pct-badge">\${getPct(compTotals.d90_v, compTotals.totalValue)}</span></td>
-                <td class="val">\${formatMoney(compTotals.d120_v)}<span class="pct-badge">\${getPct(compTotals.d120_v, compTotals.totalValue)}</span></td>
-                <td class="val">\${formatMoney(compTotals.d120p_v)}<span class="pct-badge">\${getPct(compTotals.d120p_v, compTotals.totalValue)}</span></td>
-                <td class="val">\${formatMoney(compTotals.subjudice_v)}<span class="pct-badge">\${getPct(compTotals.subjudice_v, compTotals.totalValue)}</span></td>
+                <td class="center">${compTotals.totalBills}</td>
+                <td class="val">${formatMoney(compTotals.totalValue)}</td>
+                <td class="val">${formatMoney(compTotals.d30_v)}<span class="pct-badge">${getPct(compTotals.d30_v, compTotals.totalValue)}</span></td>
+                <td class="val">${formatMoney(compTotals.d60_v)}<span class="pct-badge">${getPct(compTotals.d60_v, compTotals.totalValue)}</span></td>
+                <td class="val">${formatMoney(compTotals.d90_v)}<span class="pct-badge">${getPct(compTotals.d90_v, compTotals.totalValue)}</span></td>
+                <td class="val">${formatMoney(compTotals.d120_v)}<span class="pct-badge">${getPct(compTotals.d120_v, compTotals.totalValue)}</span></td>
+                <td class="val">${formatMoney(compTotals.d120p_v)}<span class="pct-badge">${getPct(compTotals.d120p_v, compTotals.totalValue)}</span></td>
+                <td class="val">${formatMoney(compTotals.subjudice_v)}<span class="pct-badge">${getPct(compTotals.subjudice_v, compTotals.totalValue)}</span></td>
               </tr>
             </tbody>
           </table>
-    \`;
+    `;
 
     // Operator Aging
-    html += \`
+    html += `
           <div class="grid-2">
             <div>
               <h2>Aging por Operador (Títulos Vencidos)</h2>
@@ -697,40 +697,40 @@ const DashboardInadimplencia = (function() {
                   </tr>
                 </thead>
                 <tbody>
-    \`;
+    `;
 
     const opSorted = Object.values(operatorData).sort((a,b) => (b.d31_90_v+b.d91_120_v+b.d120p_v) - (a.d31_90_v+a.d91_120_v+a.d120p_v));
     opSorted.forEach(op => {
        const hasData = op.d31_90_c > 0 || op.d91_120_c > 0 || op.d120p_c > 0;
        if (!hasData) return;
-       html += \`
+       html += `
           <tr>
-            <td><strong>\${op.name}</strong></td>
-            <td class="val">\${op.d31_90_c > 0 ? op.d31_90_c + ' | ' + formatMoney(op.d31_90_v) : '-'}</td>
-            <td class="val">\${op.d91_120_c > 0 ? op.d91_120_c + ' | ' + formatMoney(op.d91_120_v) : '-'}</td>
-            <td class="val">\${op.d120p_c > 0 ? op.d120p_c + ' | ' + formatMoney(op.d120p_v) : '-'}</td>
+            <td><strong>${op.name}</strong></td>
+            <td class="val">${op.d31_90_c > 0 ? op.d31_90_c + ' | ' + formatMoney(op.d31_90_v) : '-'}</td>
+            <td class="val">${op.d91_120_c > 0 ? op.d91_120_c + ' | ' + formatMoney(op.d91_120_v) : '-'}</td>
+            <td class="val">${op.d120p_c > 0 ? op.d120p_c + ' | ' + formatMoney(op.d120p_v) : '-'}</td>
           </tr>
-       \`;
+       `;
     });
     
-    html += \`
+    html += `
                 </tbody>
               </table>
             </div>
             
             <div>
               <h2>Clientes 0% Pago</h2>
-    \`;
+    `;
     
     // Top 5 0% Pago
     zeroPaidClients.sort((a,b) => b.delay - a.delay);
     const zeroPaidTotalValue = zeroPaidClients.reduce((acc, c) => acc + c.value, 0);
     const zeroPaidTop5 = zeroPaidClients.slice(0, 5);
 
-    html += \`
+    html += `
               <div style="display:flex; justify-content:space-between; margin-bottom: 5px; background: #fff; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px;">
-                <span style="font-weight:bold; color: #ef4444; font-size: 10px;">Total Contratos: \${zeroPaidClients.length}</span>
-                <span style="font-weight:bold; font-size: 10px;">Valor Total: \${formatMoney(zeroPaidTotalValue)}</span>
+                <span style="font-weight:bold; color: #ef4444; font-size: 10px;">Total Contratos: ${zeroPaidClients.length}</span>
+                <span style="font-weight:bold; font-size: 10px;">Valor Total: ${formatMoney(zeroPaidTotalValue)}</span>
               </div>
               <table>
                 <thead>
@@ -741,13 +741,13 @@ const DashboardInadimplencia = (function() {
                   </tr>
                 </thead>
                 <tbody>
-    \`;
+    `;
     zeroPaidTop5.forEach(c => {
-       html += \`<tr><td>\${c.name}</td><td class="center" style="color:#ef4444;font-weight:bold;">\${c.delay}</td><td class="val">\${formatMoney(c.value)}</td></tr>\`;
+       html += `<tr><td>${c.name}</td><td class="center" style="color:#ef4444;font-weight:bold;">${c.delay}</td><td class="val">${formatMoney(c.value)}</td></tr>`;
     });
-    if (zeroPaidTop5.length === 0) html += \`<tr><td colspan="3" class="center">Nenhum cliente 0% pago</td></tr>\`;
+    if (zeroPaidTop5.length === 0) html += `<tr><td colspan="3" class="center">Nenhum cliente 0% pago</td></tr>`;
     
-    html += \`
+    html += `
                 </tbody>
               </table>
             </div>
@@ -755,7 +755,7 @@ const DashboardInadimplencia = (function() {
           
           <h2>Top Maiores Valores por Operador</h2>
           <div class="grid-3" style="align-items: start; display: flex; flex-wrap: wrap; gap: 10px;">
-    \`;
+    `;
     
     // Top 5 operators (only those with customers)
     opSorted.forEach(op => {
@@ -764,28 +764,28 @@ const DashboardInadimplencia = (function() {
        op.customers.sort((a,b) => b.value - a.value);
        const top5 = op.customers.slice(0, 5);
        
-       html += \`
+       html += `
             <table style="margin-bottom:0; flex: 1 1 30%; min-width: 250px;">
               <thead>
-                <tr><th colspan="2" style="background:#0f172a; color:white; text-align:left;">\${op.name}</th></tr>
+                <tr><th colspan="2" style="background:#0f172a; color:white; text-align:left;">${op.name}</th></tr>
                 <tr><th style="text-align:left;">CLIENTE</th><th class="val">VALOR (R$)</th></tr>
               </thead>
               <tbody>
-       \`;
+       `;
        top5.forEach(c => {
-          html += \`<tr><td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 140px;" title="\${c.name}">\${c.name}</td><td class="val"><strong>\${formatMoney(c.value)}</strong></td></tr>\`;
+          html += `<tr><td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 140px;" title="${c.name}">${c.name}</td><td class="val"><strong>${formatMoney(c.value)}</strong></td></tr>`;
        });
-       html += \`
+       html += `
               </tbody>
             </table>
-       \`;
+       `;
     });
 
-    html += \`
+    html += `
           </div>
         </body>
       </html>
-    \`;
+    `;
 
     const win = window.open('', '_blank');
     win.document.write(html);
