@@ -5296,9 +5296,13 @@ function formatCpfCnpj(val) {
     
     // Buscar coordenadas do KMZ para exibir o botão do Google Earth
     if (empIdToUse !== "N/D") {
-      fetch(`/api/kmz-coords/${empIdToUse}`)
-        .then(res => res.json())
-        .then(async data => {
+      const { doc, getDoc } = window.firebaseCollections;
+      const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empIdToUse);
+      getDoc(kmzRef).then(async docSnap => {
+          let data = [];
+          if (docSnap.exists()) {
+             data = docSnap.data().placemarks || [];
+          }
           const span = document.getElementById("det-block-lot-span");
           if (!span) return;
           
@@ -5316,8 +5320,8 @@ function formatCpfCnpj(val) {
           }
 
           const match = kmzMissing ? null : data.find(p => {
-            if (!p.lot_name) return false;
-            const ln = p.lot_name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (!p.name) return false;
+            const ln = p.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
             const bfn = blockLotFromName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
             const un = unitDisplayStr.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
             return ln === bfn || ln === un || ln.endsWith(bfn) || ln.endsWith(un) || ln.includes(bfn) || ln.includes(un) || bfn.includes(ln);
@@ -16980,29 +16984,25 @@ async function uploadKMZ() {
       throw new Error("Nenhuma marcação (Placemark) com coordenada encontrada.");
     }
 
-    // Converter o arquivo KMZ para base64
-    const fileBase64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = error => reject(error);
-      reader.readAsDataURL(file);
+    const { doc, setDoc, ref, uploadBytes, collection, getDocs, deleteDoc } = window.firebaseCollections;
+    
+    // 1. Upload do KMZ para o Storage
+    const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
+    await uploadBytes(storageRef, file);
+
+    // 2. Salvar coordenadas no Firestore
+    const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
+    await setDoc(docRef, {
+      empreendimento_id: empId,
+      placemarks: placemarks,
+      count: placemarks.length,
+      updatedAt: new Date().toISOString()
     });
 
-    const res = await fetch('/api/kmz-coords', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ empreendimento_id: empId, placemarks, kmz_base64: fileBase64 })
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      statusDiv.textContent = `Sucesso! ${placemarks.length} lotes mapeados e salvos para o Empreendimento ${empId}.`;
-      statusDiv.style.color = "var(--color-success)";
-      fileInput.value = "";
-      loadKMZList();
-    } else {
-      throw new Error(data.error || "Erro desconhecido ao salvar no servidor.");
-    }
+    statusDiv.textContent = `Sucesso! ${placemarks.length} lotes mapeados e salvos para o Empreendimento ${empId}.`;
+    statusDiv.style.color = "var(--color-success)";
+    fileInput.value = "";
+    loadKMZList();
 
   } catch (err) {
     console.error(err);
@@ -17017,8 +17017,12 @@ async function loadKMZList() {
   body.innerHTML = '<tr><td colspan="3" style="text-align:center;">Carregando arquivos...</td></tr>';
   
   try {
-    const res = await fetch('/api/kmz-list');
-    const data = await res.json();
+    const { collection, getDocs } = window.firebaseCollections;
+    const querySnapshot = await getDocs(collection(window.firebaseDb, "kmz_coordinates"));
+    const data = [];
+    querySnapshot.forEach((doc) => {
+      data.push(doc.data());
+    });
     
     if (data.length === 0) {
       body.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhum arquivo KMZ cadastrado no banco de dados.</td></tr>';
@@ -17050,14 +17054,22 @@ async function deleteKMZ(empId) {
   if (!confirm(`Tem certeza que deseja excluir o KMZ do empreendimento ${empId}? Isso removerá a visualização 3D do mapa.`)) return;
   
   try {
-    const res = await fetch(`/api/kmz-coords/${empId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      alert(`KMZ do empreendimento ${empId} excluído com sucesso!`);
-      loadKMZList();
-    } else {
-      throw new Error(data.error || 'Erro desconhecido');
+    const { doc, deleteDoc, ref, deleteObject } = window.firebaseCollections;
+    
+    // Excluir do Firestore
+    const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
+    await deleteDoc(docRef);
+
+    // Excluir do Storage
+    const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
+    try {
+      await deleteObject(storageRef);
+    } catch (e) {
+      console.warn("Arquivo KMZ não encontrado no Storage ou erro ao excluir.", e);
     }
+    
+    alert(`KMZ do empreendimento ${empId} excluído com sucesso!`);
+    loadKMZList();
   } catch (error) {
     console.error("Erro ao excluir KMZ:", error);
     alert("Erro ao excluir KMZ: " + error.message);

@@ -202,20 +202,20 @@ async function buscarCoordenadasLote() {
         const empId = currentVistoriaDoc.costCenterId;
         if (!empId) throw new Error("Sem Centro de Custo vinculado");
 
-        const host = window.location.hostname;
-        const port = window.location.port || '80';
+        const { doc, getDoc } = window.firebaseCollections;
+        const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
+        const docSnap = await getDoc(kmzRef);
         
-        const res = await fetch(`http://${host}:${port}/api/kmz-coords/${empId}`);
-        if (!res.ok) {
-            throw new Error("Falha ao buscar mapa do empreendimento");
+        if (!docSnap.exists()) {
+            throw new Error("Nenhum mapa (KMZ) cadastrado para este empreendimento.");
         }
         
-        const list = await res.json();
+        const list = docSnap.data().placemarks || [];
         const unitNameRaw = String(currentVistoriaDoc.unidade).toLowerCase().replace(/[^a-z0-9]/g, '');
         
         let found = null;
         for (let item of list) {
-            let itemNameRaw = item.lot_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            let itemNameRaw = item.name.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (itemNameRaw === unitNameRaw || itemNameRaw.includes(unitNameRaw) || unitNameRaw.includes(itemNameRaw)) {
                 found = item;
                 break;
@@ -228,17 +228,15 @@ async function buscarCoordenadasLote() {
         }
         
         if (!found) {
-            throw new Error("Nenhum mapa (KMZ) cadastrado para este empreendimento.");
+            throw new Error("Lote não encontrado no arquivo KMZ.");
         }
         
-        let coordsArr = typeof found.coordinates === 'string' ? JSON.parse(found.coordinates) : found.coordinates;
+        // Coordenadas são strings no formato "lng,lat,alt" (Ex: "-48.123,-22.123,0")
+        const coordsStr = found.coords.trim().split(' ')[0]; // Pega o primeiro conjunto caso tenha muitos
+        const coordsArr = coordsStr.split(',');
         
-        if (Array.isArray(coordsArr) && coordsArr.length > 0) {
-            if (Array.isArray(coordsArr[0])) {
-                loteCoords = { lng: coordsArr[0][0], lat: coordsArr[0][1] };
-            } else {
-                loteCoords = { lng: coordsArr[0], lat: coordsArr[1] };
-            }
+        if (coordsArr && coordsArr.length >= 2) {
+            loteCoords = { lng: parseFloat(coordsArr[0]), lat: parseFloat(coordsArr[1]) };
         }
         
         if (!loteCoords) throw new Error("Coordenadas inválidas no sistema.");
