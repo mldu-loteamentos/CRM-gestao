@@ -3,7 +3,7 @@
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function _vcGetThreshold() {
-    let thresholdDays = 91; // padrão caso o ponto não exista na régua
+    let thresholdDays = 91;
     if (window.TimelineState && Array.isArray(window.TimelineState)) {
         const node = window.TimelineState.find(n =>
             n.acao === 'verificar_construcao' || n.acao === 'vistoria' || (n.label || n.nome || '').toLowerCase().includes('verificar constru')
@@ -32,6 +32,15 @@ function _vcGetCity(costCenterId) {
     return ccName.trim().toUpperCase();
 }
 
+// Retorna "13900 - AVARÉ - CENTRAL PARQUE II" a partir do costCenterId
+function _vcGetEmpLabel(costCenterId) {
+    if (!costCenterId) return '-';
+    const ccName = _vcGetCostCenterName(costCenterId);
+    if (!ccName || ccName === '-') return '-';
+    // ccName típico: "AVARÉ - CENTRAL PARQUE" ou "ARAÇARIGUAMA - JARDIM SÃO PAULO"
+    return `${costCenterId} - ${ccName.trim().toUpperCase()}`;
+}
+
 // ─── App ────────────────────────────────────────────────────────────────────
 
 window.VerificarConstrucaoApp = {
@@ -55,7 +64,7 @@ window.VerificarConstrucaoApp = {
         const thresholdDays = _vcGetThreshold();
 
         root.innerHTML = `
-            <div class="crm-card" style="padding: 20px;">
+            <div class="crm-card" style="padding: 24px;">
                 <h3 style="font-size: 1.2rem; color: var(--color-primary); margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
                     <i data-lucide="camera" style="width: 24px;"></i> Verificar Construção (Atraso >= ${thresholdDays} dias)
                 </h3>
@@ -66,10 +75,7 @@ window.VerificarConstrucaoApp = {
                             <i data-lucide="building" style="width: 16px;"></i> Obras em andamento
                         </button>
                     </div>
-                    <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.editarRegua()">
-                            <i data-lucide="settings" style="width: 16px;"></i> Editar Régua
-                        </button>
+                    <div>
                         <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
                             <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
                         </button>
@@ -81,17 +87,19 @@ window.VerificarConstrucaoApp = {
                 </div>
 
                 <div id="vc-results" style="display: none;">
-                    <div style="max-height: 500px; overflow-y: auto;">
+                    <div style="max-height: 75vh; overflow-y: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;" id="vc-table">
-                            <thead style="position: sticky; top: 0; background: #f1f5f9; z-index: 10;">
+                            <thead style="position: sticky; top: 0; background: #1e293b; z-index: 10;">
                                 <tr>
-                                    <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; width: 40px; text-align: center;">
+                                    <th style="padding: 12px 10px; width: 40px; text-align: center; color: #94a3b8;">
                                         <input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)">
                                     </th>
-                                    <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">CIDADE</th>
-                                    <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">EMPREENDIMENTO</th>
-                                    <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">TÍTULO / UNIDADE</th>
-                                    <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">STATUS</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">VALOR VENCIDO</th>
+                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
                                 </tr>
                             </thead>
                             <tbody id="vc-tbody"></tbody>
@@ -101,50 +109,69 @@ window.VerificarConstrucaoApp = {
             </div>
         `;
 
-        // Inject modals into body (not inside the tab section) so they work as true overlays
         this._ensureModals();
 
         if (window.lucide) lucide.createIcons();
     },
 
     _ensureModals() {
-        // Avoid duplicating modals if already present in body
         if (document.getElementById('modal-validar-vistoria')) return;
 
         const wrapper = document.createElement('div');
         wrapper.id = 'vc-modals-wrapper';
         wrapper.innerHTML = `
             <!-- Modal Validar Vistoria -->
-            <div id="modal-validar-vistoria" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999; align-items:flex-start; justify-content:center; padding-top:50px; overflow-y:auto;">
-                <div style="background:#fff; border-radius:12px; width:800px; max-width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.3); margin-bottom:40px;">
-                    <div style="padding:20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
-                        <h2 style="margin:0; font-size:1.2rem; color:#1e293b;">Validar Vistoria</h2>
-                        <button onclick="document.getElementById('modal-validar-vistoria').style.display='none'" style="background:none; border:none; cursor:pointer; color:#64748b; font-size:1.2rem;">✕</button>
+            <div id="modal-validar-vistoria" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:99999; align-items:flex-start; justify-content:center; padding-top:40px; overflow-y:auto;">
+                <div style="background:#fff; border-radius:14px; width:900px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
+                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius: 14px 14px 0 0;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                                <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            </div>
+                            <h2 style="margin:0; font-size:1.15rem; color:#fff; font-weight:600;">Validar Vistoria</h2>
+                        </div>
+                        <button onclick="document.getElementById('modal-validar-vistoria').style.display='none'" style="background:rgba(255,255,255,0.15); border:none; cursor:pointer; color:#fff; font-size:1.1rem; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
                     </div>
-                    <div id="validar-vistoria-body" style="padding:20px; min-height:200px;">
+                    <div id="validar-vistoria-body" style="padding:28px; min-height:200px;">
                         Carregando...
                     </div>
-                    <div style="padding:15px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:10px;">
-                        <button class="btn btn-outline" style="border-color:var(--color-danger,#dc2626); color:var(--color-danger,#dc2626);" onclick="window.VerificarConstrucaoApp.rejeitarVistoriaModal()">
+                    <div style="padding:18px 28px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:12px; background:#f8fafc; border-radius: 0 0 14px 14px;">
+                        <button onclick="window.VerificarConstrucaoApp.rejeitarVistoriaModal()" style="padding:10px 22px; border:2px solid #dc2626; color:#dc2626; background:transparent; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:6px; transition: all 0.2s;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='transparent'">
                             ✕ Rejeitar
                         </button>
-                        <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.aprovarVistoriaModal()">
-                            ✓ Aprovar
+                        <button onclick="window.VerificarConstrucaoApp.aprovarVistoriaModal()" style="padding:10px 22px; border:none; color:#fff; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(21,49,35,0.3); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                            ✓ Aprovar Vistoria
                         </button>
                     </div>
                 </div>
             </div>
 
             <!-- Modal Obras em Andamento -->
-            <div id="modal-obras-andamento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999; align-items:flex-start; justify-content:center; padding-top:50px; overflow-y:auto;">
-                <div style="background:#fff; border-radius:12px; width:600px; max-width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.3); margin-bottom:40px;">
-                    <div style="padding:20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
-                        <h2 style="margin:0; font-size:1.2rem; color:#1e293b;">Obras em Andamento</h2>
-                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="background:none; border:none; cursor:pointer; color:#64748b; font-size:1.2rem;">✕</button>
+            <div id="modal-obras-andamento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:99999; align-items:flex-start; justify-content:center; padding-top:40px; overflow-y:auto;">
+                <div style="background:#fff; border-radius:14px; width:660px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
+                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius: 14px 14px 0 0;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                                <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
+                            </div>
+                            <div>
+                                <h2 style="margin:0; font-size:1.1rem; color:#fff; font-weight:600;">Obras em Andamento</h2>
+                                <p style="margin:2px 0 0; font-size:0.78rem; color:rgba(255,255,255,0.7);">Empreendimentos com obra ativa — clientes dispensados de vistoria</p>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="background:rgba(255,255,255,0.15); border:none; cursor:pointer; color:#fff; font-size:1.1rem; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
                     </div>
-                    <div style="padding:20px; min-height:200px; max-height:60vh; overflow-y:auto;">
-                        <p style="font-size:0.9rem; color:#64748b; margin-bottom:15px;">Ligue a chave para os empreendimentos que estão com obras em andamento. Os clientes desses empreendimentos serão dispensados de vistoria.</p>
+                    <div style="padding:20px 28px; max-height:55vh; overflow-y:auto;">
                         <div id="obras-andamento-list">Carregando...</div>
+                    </div>
+                    <div style="padding:18px 28px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:12px; background:#f8fafc; border-radius: 0 0 14px 14px;">
+                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="padding:10px 22px; border:2px solid #94a3b8; color:#64748b; background:transparent; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
+                            Fechar
+                        </button>
+                        <button onclick="window.VerificarConstrucaoApp.salvarObrasAndamento()" style="padding:10px 22px; border:none; color:#fff; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(21,49,35,0.3); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            Salvar
+                        </button>
                     </div>
                 </div>
             </div>
@@ -193,10 +220,18 @@ window.VerificarConstrucaoApp = {
                 if (ccName && ccName !== '-') {
                     empreendimento = ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
                 }
+                // Label completo: "13900 - AVARÉ - CENTRAL PARQUE II"
+                const empLabel = _vcGetEmpLabel(costCenterId);
 
                 const contractId = c.saleId || c.contractId || c.id;
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
                 const vistoriaAtiva = checksByContract[String(contractId)];
+
+                // Dados financeiros do cliente
+                const clienteName = c.customerName || c.name || c.nome || '-';
+                const titulo = c.saleCode || c.contractCode || c.titulo || c.codigo || contractId || '-';
+                const parcelasVencidas = parseInt(c.overdueInstallments || c.parcelasVencidas || c.overdue_count || 0);
+                const valorVencido = parseFloat(c.totalOverdue || c.valorVencido || c.overdue_amount || 0);
 
                 let statusLabel = 'Pendente de Vistoria';
                 let statusColor = 'color: #dc2626; font-weight: bold;';
@@ -204,25 +239,24 @@ window.VerificarConstrucaoApp = {
                 if (vistoriaAtiva) {
                     if (vistoriaAtiva.status === 'aguardando_fotos') {
                         statusLabel = 'Link Enviado – Aguardando Fotos';
-                        statusColor = 'color: #eab308;';
+                        statusColor = 'color: #d97706; font-weight: 600;';
                     } else if (vistoriaAtiva.status === 'aguardando_validacao') {
                         statusLabel = 'Aguardando Validação';
-                        statusColor = '';
+                        statusColor = 'color: #7c3aed; font-weight: 600;';
                     }
                 }
 
-                rows.push({ customerId: c.customerId, contractId, cidade: city, costCenterId, empreendimento, unidade, statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length });
+                rows.push({
+                    customerId: c.customerId, contractId, cidade: city, costCenterId,
+                    empreendimento, empLabel, unidade,
+                    clienteName, titulo, parcelasVencidas, valorVencido,
+                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length
+                });
             });
 
-            // Update originalIdx explicitly
             rows.forEach((r, i) => r.originalIdx = i);
             this.allRows = rows;
-            this.renderedRows = []; // Will be populated by renderTable
-            
-            // Populate Filter Selects
-            this.populateFilterSelects();
-
-            // Removed DEBUG BANNER
+            this.renderedRows = [];
 
             this.renderTable();
 
@@ -233,59 +267,6 @@ window.VerificarConstrucaoApp = {
             console.error('[Vistoria] Erro ao carregar dados:', e);
             loading.innerHTML = '<span style="color:red">Erro ao carregar os dados: ' + e.message + '</span>';
         }
-    },
-
-    populateFilterSelects() {
-        if (!this.allRows) return;
-        const cidades = new Set();
-        const empreendimentos = new Set();
-        this.allRows.forEach(r => {
-            cidades.add(r.cidade);
-            empreendimentos.add(r.empreendimento);
-        });
-
-        const cidSel = document.getElementById('vc-filter-cidade');
-        const empSel = document.getElementById('vc-filter-empreendimento');
-        
-        if(cidSel) {
-            cidSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(cidades).sort().map(c => `<option value="${c}">${c}</option>`).join('');
-            cidSel.value = this.activeFilters.cidade;
-        }
-        if(empSel) {
-            empSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(empreendimentos).sort().map(e => `<option value="${e}">${e}</option>`).join('');
-            empSel.value = this.activeFilters.empreendimento;
-        }
-    },
-
-    updateFilterOptions() {
-        const cid = document.getElementById('vc-filter-cidade').value;
-        const empSel = document.getElementById('vc-filter-empreendimento');
-        if (!this.allRows || !empSel) return;
-        
-        const empreendimentos = new Set();
-        this.allRows.forEach(r => {
-            if (cid === 'Todos' || r.cidade === cid) empreendimentos.add(r.empreendimento);
-        });
-        
-        empSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(empreendimentos).sort().map(e => `<option value="${e}">${e}</option>`).join('');
-        empSel.value = 'Todos';
-    },
-
-    applyFilters() {
-        this.activeFilters.cidade = document.getElementById('vc-filter-cidade').value;
-        this.activeFilters.empreendimento = document.getElementById('vc-filter-empreendimento').value;
-        this.activeFilters.status = document.getElementById('vc-filter-status').value;
-        document.getElementById('modal-filtros-vistoria').style.display = 'none';
-        this.renderTable();
-    },
-
-    clearFilters() {
-        this.activeFilters = { cidade: 'Todos', empreendimento: 'Todos', status: 'Todos' };
-        document.getElementById('vc-filter-cidade').value = 'Todos';
-        this.updateFilterOptions();
-        document.getElementById('vc-filter-empreendimento').value = 'Todos';
-        document.getElementById('vc-filter-status').value = 'Todos';
-        this.applyFilters();
     },
 
     renderTable() {
@@ -299,36 +280,35 @@ window.VerificarConstrucaoApp = {
             return true;
         });
 
-        // Store linearly for idx matching
         this.renderedRows = filtered;
 
         if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="padding: 20px; text-align: center; color: #666;">Nenhum título encontrado com os filtros atuais.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" style="padding: 30px; text-align: center; color: #666;">Nenhum título encontrado com os filtros atuais.</td></tr>`;
             return;
         }
 
-        // Grouping: Cidade -> Empreendimento
+        // Grouping: Cidade -> Empreendimento (by empLabel for display, empreendimento for key)
         const grouped = {};
         filtered.forEach((r, idx) => {
             if (!grouped[r.cidade]) grouped[r.cidade] = {};
-            if (!grouped[r.cidade][r.empreendimento]) grouped[r.cidade][r.empreendimento] = [];
-            grouped[r.cidade][r.empreendimento].push({ ...r, currentIdx: idx });
+            if (!grouped[r.cidade][r.empreendimento]) grouped[r.cidade][r.empreendimento] = { label: r.empLabel, items: [] };
+            grouped[r.cidade][r.empreendimento].items.push({ ...r, currentIdx: idx });
         });
 
         let html = '';
         const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
-        
+
         Object.keys(grouped).sort().forEach(cidade => {
             const safeCidade = cidade.replace(/[^a-zA-Z0-9]/g, '_');
-            
+
             // City Header Row
             html += `
-                <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
-                    <td style="padding: 10px; text-align: center; width: 40px;">
-                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')">
+                <tr style="background: linear-gradient(135deg, #0f1e17 0%, #1a3628 100%);">
+                    <td style="padding: 10px 12px; text-align: center; width: 40px;">
+                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')" style="accent-color: #22c55e;">
                     </td>
-                    <td colspan="4" style="padding: 10px; font-weight: bold; font-size: 0.9rem;">
-                        <i data-lucide="map-pin" style="width: 14px; margin-right: 5px;"></i> ${cidade}
+                    <td colspan="6" style="padding: 10px 12px; font-weight: 700; font-size: 0.85rem; color: #86efac; letter-spacing: 0.08em; text-transform: uppercase;">
+                        📍 ${cidade}
                     </td>
                 </tr>
             `;
@@ -336,16 +316,18 @@ window.VerificarConstrucaoApp = {
             Object.keys(grouped[cidade]).sort().forEach(emp => {
                 const safeEmp = emp.replace(/[^a-zA-Z0-9]/g, '_');
                 const isObraAndamento = savedState[emp] === true;
-                
+                const empData = grouped[cidade][emp];
+                const empLabelDisplay = empData.label || emp;
+
                 // Empreendimento Header Row
                 html += `
-                    <tr style="background: #fdfdfd; border-bottom: 1px solid #e2e8f0;">
-                        <td style="padding: 8px; text-align: center; width: 40px; border-right: 1px solid #e2e8f0;"></td>
-                        <td style="padding: 8px; text-align: center; width: 40px;">
-                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''}>
+                    <tr style="background: #f0fdf4; border-bottom: 1px solid #bbf7d0;">
+                        <td style="padding: 9px 12px; text-align: center; width: 40px;">
+                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''} style="accent-color: #16a34a;">
                         </td>
-                        <td colspan="3" style="padding: 8px; font-weight: 600; color: #475569;">
-                            ${emp} ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:2px 6px; border-radius:4px; font-size:0.75rem; margin-left:10px;">Obra em Andamento</span>' : ''}
+                        <td colspan="6" style="padding: 9px 12px; font-weight: 700; color: #15803d; font-size: 0.83rem;">
+                            🏗️ ${empLabelDisplay}
+                            ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:2px 8px; border-radius:4px; font-size:0.72rem; margin-left:10px; font-weight:600;">⚠ Obra em Andamento</span>' : ''}
                         </td>
                     </tr>
                 `;
@@ -353,28 +335,37 @@ window.VerificarConstrucaoApp = {
                 if (isObraAndamento) {
                     html += `
                         <tr style="border-bottom: 1px solid #f1f5f9; background: #fffbeb;">
-                            <td colspan="2" style="border-right: 1px solid #e2e8f0;"></td>
-                            <td colspan="3" style="padding: 15px; text-align: center; color: #854d0e; font-style: italic; font-size: 0.85rem;">
-                                Vistoria dispensada - cliente não pode construir - obras do empreendimento em andamento.
+                            <td colspan="7" style="padding: 12px 20px; text-align: center; color: #92400e; font-style: italic; font-size: 0.82rem;">
+                                Vistoria dispensada — obras do empreendimento em andamento.
                             </td>
                         </tr>
                     `;
                 } else {
-                    // Unidades Rows
-                    const unidades = grouped[cidade][emp].sort((a, b) => a.unidade.localeCompare(b.unidade));
-                    unidades.forEach(u => {
-                        const validAction = u.statusLabel === 'Aguardando Validação' 
-                            ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` 
-                            : u.statusLabel;
+                    const unidades = empData.items.sort((a, b) => a.unidade.localeCompare(b.unidade));
+                    unidades.forEach((u, uIdx) => {
+                        const rowBg = uIdx % 2 === 0 ? '#fff' : '#f9fafb';
+                        const validAction = u.statusLabel === 'Aguardando Validação'
+                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:5px 12px; font-size:0.78rem; border:none; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(21,49,35,0.3);">Validar Vistoria</button>`
+                            : `<span style="${u.statusColor}">${u.statusLabel}</span>`;
+
+                        const valorFmt = u.valorVencido > 0
+                            ? u.valorVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                            : '-';
+                        const parcelasDisplay = u.parcelasVencidas > 0
+                            ? `<span style="background:#fef2f2; color:#dc2626; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.78rem;">${u.parcelasVencidas}</span>`
+                            : '<span style="color:#94a3b8;">-</span>';
 
                         html += `
-                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                <td colspan="2" style="border-right: 1px solid #e2e8f0;"></td>
-                                <td style="padding: 8px 8px 8px 20px; text-align: center; width: 40px;">
-                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()">
+                            <tr style="border-bottom: 1px solid #f1f5f9; background:${rowBg}; transition: background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${rowBg}'">
+                                <td style="padding: 10px 12px; text-align: center; width: 40px;">
+                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" style="accent-color: #16a34a;">
                                 </td>
-                                <td style="padding: 8px; font-weight: 600;">${u.unidade}</td>
-                                <td style="padding: 8px; ${u.statusColor}">${validAction}</td>
+                                <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
+                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
+                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
+                                <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
+                                <td style="padding: 10px 12px; text-align: right; font-weight: 600; color: ${u.valorVencido > 0 ? '#dc2626' : '#94a3b8'}; font-size: 0.83rem;">${valorFmt}</td>
+                                <td style="padding: 10px 12px;">${validAction}</td>
                             </tr>
                         `;
                     });
@@ -415,66 +406,76 @@ window.VerificarConstrucaoApp = {
         if (!modal || !listDiv) return;
 
         if (!this.allRows) {
-            listDiv.innerHTML = '<p style="color:#64748b;">Aguarde, dados ainda carregando...</p>';
+            listDiv.innerHTML = '<p style="color:#64748b; padding: 10px 0;">Aguarde, dados ainda carregando...</p>';
             modal.style.display = 'flex';
             return;
         }
 
-        const empreendimentos = new Set();
+        // Mapa de empreendimento -> empLabel (nome completo com ID)
+        const empMap = new Map();
         this.allRows.forEach(r => {
             if (r.empreendimento && r.empreendimento !== '-') {
-                empreendimentos.add(r.empreendimento);
+                if (!empMap.has(r.empreendimento)) {
+                    empMap.set(r.empreendimento, r.empLabel || r.empreendimento);
+                }
             }
         });
 
         const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+        // Guardar estado temporário para o botão Salvar
+        this._tempObrasState = { ...savedState };
 
         let html = '';
-        Array.from(empreendimentos).sort().forEach(emp => {
-            const isChecked = savedState[emp] === true ? 'checked' : '';
-            html += `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #e2e8f0;">
-                    <span style="font-weight: 500; color: #1e293b;">${emp}</span>
-                    <label style="position: relative; display: inline-block; width: 40px; height: 20px;">
-                        <input type="checkbox" style="opacity: 0; width: 0; height: 0;" ${isChecked} onchange="window.VerificarConstrucaoApp.toggleObraEmAndamento('${emp.replace(/'/g, "\\'")}', this.checked)">
-                        <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isChecked ? '#10b981' : '#cbd5e1'}; transition: .4s; border-radius: 20px;">
-                            <span style="position: absolute; content: ''; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; transform: ${isChecked ? 'translateX(20px)' : 'none'};"></span>
-                        </span>
-                    </label>
-                </div>
-            `;
-        });
-
-        if (Array.from(empreendimentos).length === 0) {
+        if (empMap.size === 0) {
             html = '<p style="color: #64748b;">Nenhum empreendimento listado no momento.</p>';
+        } else {
+            Array.from(empMap.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([emp, label]) => {
+                const isOn = savedState[emp] === true;
+                const toggleId = `oa-toggle-${emp.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 16px;">
+                        <div>
+                            <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label}</div>
+                        </div>
+                        <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
+                            <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${emp.replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
+                            <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
+                                <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
+                            </span>
+                        </label>
+                    </div>
+                `;
+            });
         }
 
         listDiv.innerHTML = html;
         modal.style.display = 'flex';
     },
 
-    toggleObraEmAndamento(emp, checked) {
-        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
-        savedState[emp] = checked;
-        localStorage.setItem('crm_obras_andamento', JSON.stringify(savedState));
-        
-        // Update visually
-        const evt = window.event;
-        if (evt && evt.target) {
-            const toggleSpan = evt.target.nextElementSibling;
-            if (toggleSpan) {
-                const circleSpan = toggleSpan.querySelector('span');
-                if (checked) {
-                    toggleSpan.style.backgroundColor = '#10b981';
-                    if (circleSpan) circleSpan.style.transform = 'translateX(20px)';
-                } else {
-                    toggleSpan.style.backgroundColor = '#cbd5e1';
-                    if (circleSpan) circleSpan.style.transform = 'none';
-                }
-            }
-        }
+    _onToggleObraChange(input) {
+        const emp = input.dataset.emp;
+        const checked = input.checked;
+        const id = input.id;
+        const track = document.getElementById(id + '-track');
+        const thumb = document.getElementById(id + '-thumb');
+        if (track) track.style.backgroundColor = checked ? '#16a34a' : '#cbd5e1';
+        if (thumb) thumb.style.left = checked ? '24px' : '3px';
+        if (!this._tempObrasState) this._tempObrasState = {};
+        this._tempObrasState[emp] = checked;
+    },
 
+    salvarObrasAndamento() {
+        if (this._tempObrasState) {
+            localStorage.setItem('crm_obras_andamento', JSON.stringify(this._tempObrasState));
+        }
+        document.getElementById('modal-obras-andamento').style.display = 'none';
         this.renderTable();
+    },
+
+    // Mantido para compatibilidade mas não é mais chamado diretamente
+    toggleObraEmAndamento(emp, checked) {
+        if (!this._tempObrasState) this._tempObrasState = {};
+        this._tempObrasState[emp] = checked;
     },
 
     editarRegua() {
@@ -488,7 +489,6 @@ window.VerificarConstrucaoApp = {
         }
     },
 
-    // Busca coords do KMZ via servidor local para salvar no Firebase
     async _fetchLoteCoords(costCenterId) {
         try {
             const res = await fetch(`/api/kmz-coords/${costCenterId}`);
@@ -524,14 +524,12 @@ window.VerificarConstrucaoApp = {
         try {
             const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
             const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
-            
+
             const cityGroups = {};
             const generatedIds = [];
 
             for (const r of selected) {
                 let vId = r.vistoriaAtiva ? r.vistoriaAtiva.id : null;
-
-                // Buscar coords e salvar no Firebase para que vistoria.html use sem servidor local
                 const loteCoords = await this._fetchLoteCoords(r.costCenterId);
 
                 if (!vId) {
@@ -550,7 +548,7 @@ window.VerificarConstrucaoApp = {
                 } else if (loteCoords) {
                     await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { loteCoords });
                 }
-                
+
                 generatedIds.push(vId);
 
                 if (!cityGroups[r.cidade]) cityGroups[r.cidade] = {};
@@ -562,10 +560,10 @@ window.VerificarConstrucaoApp = {
             let greeting = 'Bom dia';
             if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
             else if (hour >= 18) greeting = 'Boa noite';
-            
+
             let numCidades = Object.keys(cityGroups).length;
             let prefixo = numCidades > 1 ? 'nas cidades:' : 'na cidade:';
-            
+
             let message = `${greeting}! Segue a lista de vistorias a serem realizadas ${prefixo}\n\n`;
 
             for (const city in cityGroups) {
@@ -599,10 +597,6 @@ window.VerificarConstrucaoApp = {
         }
     },
 
-    async abrirVistoriasRecebidas() {
-        alert("As vistorias prontas para validação agora possuem um botão 'Validar Vistoria' diretamente na coluna STATUS da tabela principal.");
-    },
-
     async validarVistoria(idx) {
         const row = this.renderedRows[idx];
         if (!row || !row.vistoriaAtiva) return;
@@ -613,37 +607,43 @@ window.VerificarConstrucaoApp = {
         const r = v.respostasFormulario || {};
 
         const formatSimNao = (val) => {
-            if (!val) return '-';
-            return val.toLowerCase() === 'sim' ? 'Sim' : 'Não';
+            if (!val) return '<span style="color:#94a3b8;">-</span>';
+            return val.toLowerCase() === 'sim'
+                ? '<span style="color:#16a34a; font-weight:600;">✓ Sim</span>'
+                : '<span style="color:#dc2626; font-weight:600;">✗ Não</span>';
         };
 
         const formatEstagio = (val) => {
-            if (!val) return '-';
-            return val.replace(/_/g, ' ').toUpperCase();
+            if (!val) return '<span style="color:#94a3b8;">-</span>';
+            return `<span style="background:#f0fdf4; color:#15803d; padding:2px 10px; border-radius:12px; font-weight:600; font-size:0.82rem;">${val.replace(/_/g, ' ').toUpperCase()}</span>`;
         };
 
         let html = `
             <div style="display: flex; flex-direction: column; gap: 20px;">
-                <div style="display: flex; flex-direction: column; gap: 10px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                    <h3 style="margin-top:0; color: #1e293b; font-size: 1rem; margin-bottom: 5px;">Respostas do Questionário</h3>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9rem;">
-                        <div><strong>Água:</strong> ${formatSimNao(r.possuiAgua)}</div>
-                        <div><strong>Energia:</strong> ${formatSimNao(r.possuiEnergia)}</div>
-                        <div><strong>Entulho:</strong> ${formatSimNao(r.possuiEntulho)}</div>
-                        <div><strong>Acesso:</strong> ${formatSimNao(r.permiteAcesso)}</div>
-                        <div style="grid-column: 1 / -1;"><strong>Estágio da Obra:</strong> ${formatEstagio(r.estagioObra)}</div>
-                        <div style="grid-column: 1 / -1;"><strong>Observações:</strong> ${r.observacoes || '-'}</div>
+                <div style="background: #f8fafc; padding: 18px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                    <h3 style="margin:0 0 14px; color:#1e293b; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
+                        📋 Respostas do Questionário
+                    </h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.88rem;">
+                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Água:</strong> ${formatSimNao(r.possuiAgua)}</div>
+                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Energia:</strong> ${formatSimNao(r.possuiEnergia)}</div>
+                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Entulho:</strong> ${formatSimNao(r.possuiEntulho)}</div>
+                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Acesso:</strong> ${formatSimNao(r.permiteAcesso)}</div>
+                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0; grid-column: 1/-1;"><strong style="color:#64748b;">Estágio da Obra:</strong> ${formatEstagio(r.estagioObra)}</div>
+                        ${r.observacoes ? `<div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0; grid-column: 1/-1;"><strong style="color:#64748b;">Observações:</strong> <span style="color:#334155;">${r.observacoes}</span></div>` : ''}
                     </div>
                 </div>
-                
+
                 <div>
-                    <h3 style="margin-top:0; color: #1e293b; font-size: 1rem; margin-bottom: 10px;">Fotos Recebidas</h3>
-                    <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px;">
-                        ${v.fotoFrente ? `<a href="${v.fotoFrente}" target="_blank"><img src="${v.fotoFrente}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Frente)</span>'}
-                        ${v.fotoMeioFundo ? `<a href="${v.fotoMeioFundo}" target="_blank"><img src="${v.fotoMeioFundo}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Meio Fundo)</span>'}
-                        ${v.fotoFundoFrente ? `<a href="${v.fotoFundoFrente}" target="_blank"><img src="${v.fotoFundoFrente}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Fundo Frente)</span>'}
+                    <h3 style="margin:0 0 12px; color:#1e293b; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
+                        📸 Fotos Recebidas
+                    </h3>
+                    <div style="display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px;">
+                        ${v.fotoFrente ? `<div style="flex-shrink:0;"><a href="${v.fotoFrente}" target="_blank"><img src="${v.fotoFrente}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Frente</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Frente)</div>'}
+                        ${v.fotoMeioFundo ? `<div style="flex-shrink:0;"><a href="${v.fotoMeioFundo}" target="_blank"><img src="${v.fotoMeioFundo}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Meio / Fundo</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Meio Fundo)</div>'}
+                        ${v.fotoFundoFrente ? `<div style="flex-shrink:0;"><a href="${v.fotoFundoFrente}" target="_blank"><img src="${v.fotoFundoFrente}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Fundo / Frente</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Fundo Frente)</div>'}
                     </div>
-                    <p style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Clique na foto para ampliar em nova guia.</p>
+                    <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;">Clique na foto para ampliar em nova guia.</p>
                 </div>
             </div>
         `;
@@ -668,77 +668,100 @@ window.VerificarConstrucaoApp = {
 
         const loadingDiv = document.createElement('div');
         loadingDiv.innerHTML = `
-            <div style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.8); z-index:99999; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                <div class="loader" style="border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
-                <h3 style="margin-top:20px; color:var(--color-primary);" id="vc-validar-status">Preparando validação...</h3>
+            <div style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,30,23,0.85); z-index:99999; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                <div style="border: 4px solid rgba(255,255,255,0.2); border-top: 4px solid #22c55e; border-radius: 50%; width: 48px; height: 48px; animation: spin 0.8s linear infinite;"></div>
+                <h3 style="margin-top:20px; color:#fff; font-size:1rem;" id="vc-validar-status">Preparando validação...</h3>
             </div>
         `;
         document.body.appendChild(loadingDiv);
 
         try {
             const v = row.vistoriaAtiva;
-            const { getStorage, ref, listAll, getDownloadURL } = window.firebaseCollections;
+            const { ref, listAll, getDownloadURL } = window.firebaseCollections;
             const storageRef = ref(window.firebaseStorage, `vistorias/${v.id}`);
-            
+
             document.getElementById('vc-validar-status').textContent = 'Buscando fotos no Firebase...';
             const listRes = await listAll(storageRef);
             if (listRes.items.length === 0) {
                 throw new Error("Nenhuma foto encontrada para esta vistoria.");
             }
 
-            // Descobrir o unitId do contrato
-            document.getElementById('vc-validar-status').textContent = 'Consultando contrato no Sienge...';
-            let host = window.location.hostname;
-            let port = window.location.port ? ':' + window.location.port : '';
-            if (host.includes('vercel.app')) port = '';
-            
+            // Buscar o unitId pelo costCenterId + nome da unidade (igual ao fluxo de anexos.js)
+            document.getElementById('vc-validar-status').textContent = 'Localizando unidade no Sienge...';
             const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
-            const cRes = await fetch(`/api/sienge-proxy/sales-contracts/${row.contractId}`, {
-                headers: { 'Authorization': authHeader }
-            });
-            if (!cRes.ok) throw new Error("Falha ao consultar contrato no Sienge.");
-            const contractData = await cRes.json();
-            const siengeUnitId = contractData.unitId;
-            if (!siengeUnitId) throw new Error("ID da unidade não encontrado no contrato Sienge.");
+
+            let siengeUnitId = null;
+            let offset = 0;
+            const limit = 200;
+            let found = false;
+
+            const unitNameNorm = (row.unidade || '').trim().toUpperCase();
+
+            while (!found) {
+                const uRes = await fetch(
+                    `/api/sienge-proxy/units?limit=${limit}&offset=${offset}&enterpriseId=${row.costCenterId}&additionalData=NONE`,
+                    { headers: { 'Authorization': authHeader } }
+                );
+                if (!uRes.ok) throw new Error(`Falha ao buscar unidades no Sienge: HTTP ${uRes.status}`);
+                const uData = await uRes.json();
+                const uResults = uData.results || [];
+
+                const match = uResults.find(u =>
+                    (u.name || '').trim().toUpperCase() === unitNameNorm ||
+                    (u.name || '').trim().replace(/[\s-]+/g, '').toUpperCase() === unitNameNorm.replace(/[\s-]+/g, '')
+                );
+
+                if (match) {
+                    siengeUnitId = match.id;
+                    found = true;
+                } else if (uResults.length < limit) {
+                    break; // Sem mais páginas
+                } else {
+                    offset += limit;
+                }
+            }
+
+            if (!siengeUnitId) {
+                throw new Error(`Unidade "${row.unidade}" não encontrada no empreendimento ${row.costCenterId} no Sienge.`);
+            }
 
             document.getElementById('vc-validar-status').textContent = 'Enviando fotos para o Sienge...';
-            
+
             const padraoData = new Date().toLocaleDateString('pt-BR').replace(/\//g, '.');
 
             for (let i = 0; i < listRes.items.length; i++) {
                 const itemRef = listRes.items[i];
                 const url = await getDownloadURL(itemRef);
-                
-                // Baixar como Blob
+
                 const imgRes = await fetch(url);
                 const blob = await imgRes.blob();
-                
-                // Montar FormData e POST para Sienge
-                const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i+1} - ${padraoData}.jpg`;
-                const descricaoSienge = `${padraoData} - Foto de Vistoria ${i+1}`;
-                
+
+                const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i + 1} - ${padraoData}.jpg`;
+                const descricaoSienge = `${padraoData} - Foto de Vistoria ${i + 1}`;
+
                 const apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
-                
+
                 const formData = new FormData();
                 formData.append('file', blob, nomeFinal);
-                
+
                 const uploadRes = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Authorization': authHeader, 'Accept': 'application/json' },
                     body: formData
                 });
-                
+
                 if (!uploadRes.ok) {
-                    throw new Error(`Falha ao enviar foto ${i+1}: HTTP ${uploadRes.status}`);
+                    throw new Error(`Falha ao enviar foto ${i + 1}: HTTP ${uploadRes.status}`);
                 }
+
+                document.getElementById('vc-validar-status').textContent = `Enviando foto ${i + 1} de ${listRes.items.length}...`;
             }
 
-            // Atualizar status no Firebase para concluida
             document.getElementById('vc-validar-status').textContent = 'Finalizando Vistoria...';
             const { doc, updateDoc } = window.firebaseCollections;
             await updateDoc(doc(window.firebaseDb, 'vistorias', v.id), { status: 'concluida' });
 
-            alert("Vistoria validada e fotos anexadas com sucesso!");
+            alert(`✅ Vistoria validada com sucesso!\n${listRes.items.length} foto(s) anexada(s) na unidade ${row.unidade} (ID Sienge: ${siengeUnitId}).`);
             await this.loadData();
 
         } catch (e) {
