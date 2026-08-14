@@ -227,6 +227,22 @@ window.VerificarConstrucaoApp = {
             // Populate Filter Selects
             this.populateFilterSelects();
 
+            // DEBUG BANNER
+            try {
+                let dbg = document.getElementById('vc-debug-banner');
+                if (!dbg) {
+                    dbg = document.createElement('div');
+                    dbg.id = 'vc-debug-banner';
+                    dbg.style.padding = '10px';
+                    dbg.style.background = '#fee2e2';
+                    dbg.style.color = '#991b1b';
+                    dbg.style.marginBottom = '10px';
+                    dbg.style.fontSize = '12px';
+                    results.insertBefore(dbg, results.firstChild);
+                }
+                dbg.innerHTML = `DEBUG => Total Clientes no rawClientList: ${clients.length} | thresholdDays: ${thresholdDays} | Elegíveis (>= ${thresholdDays}): ${elegiveis.length} | rows: ${rows.length}`;
+            } catch(e) {}
+
             this.renderTable();
 
             loading.style.display = 'none';
