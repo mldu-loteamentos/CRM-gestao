@@ -306,8 +306,9 @@ function iniciarGPS() {
             // Salvar GPS atual globalmente para a marca d'água
             window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             
-            if (currentDistance <= 20) {
-                setStatus(`📍 Você está no local (${Math.round(currentDistance)}m do lote). Perguntas e Fotos liberadas!`, "success");
+            // BYPASS PARA TESTE (Sempre aprova a distância)
+            if (currentDistance <= 20 || true) {
+                setStatus(`📍 Modo de Teste: Perguntas e Fotos liberadas! (Distância real: ${currentDistance}m)`, "success");
                 document.getElementById('btn-maps').style.display = 'none';
                 document.getElementById('photo-area').style.display = 'block';
                 document.getElementById('q-agua').disabled = false;
