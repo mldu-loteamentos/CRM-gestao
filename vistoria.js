@@ -245,13 +245,28 @@ async function buscarCoordenadasLote() {
 
         if (foundLiveCoords) {
             loteCoords = foundLiveCoords;
+            console.log("Usando KMZ ao vivo:", loteCoords);
+            window._debugCoordSource = "KMZ (Live)";
         } else if (currentVistoriaDoc.loteCoords && currentVistoriaDoc.loteCoords.lat && currentVistoriaDoc.loteCoords.lng) {
             loteCoords = currentVistoriaDoc.loteCoords;
             console.log("Usando coordenadas salvas em cache no documento da vistoria.");
+            window._debugCoordSource = "Cache (Antigo)";
         } else {
             throw new Error("Lote não encontrado no arquivo KMZ nem no cache da vistoria.");
         }
         
+        // --- DEBUG INFO ---
+        try {
+            const debugDiv = document.createElement('div');
+            debugDiv.style.fontSize = '10px';
+            debugDiv.style.color = '#888';
+            debugDiv.style.marginTop = '10px';
+            debugDiv.style.textAlign = 'center';
+            debugDiv.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}`;
+            document.getElementById('card-content').appendChild(debugDiv);
+        } catch(e){}
+        // ------------------
+
         iniciarGPS();
         
     } catch(e) {
