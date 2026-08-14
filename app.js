@@ -13105,9 +13105,11 @@ async function _loadZeroPaidTab_Impl() {
           const city = window.extractCityFromCostCenter(idCCusto, ccName);
           if (city) {
               const ruleId = "CID_" + city.replace(/\s+/g, '_');
-              let requiredType = "interno";
+              let requiredType = "interno_absoluto"; // 0% Pago tem prioridade máxima
               const isSubj = sale.subjudice === "S" || sale.subjudice === true;
-              if (isSubj) { requiredType = "advogado"; }
+              if (isSubj) { 
+                  requiredType = "advogado"; 
+              }
               assignedOp = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", bill.customerId, requiredType);
           }
       }
