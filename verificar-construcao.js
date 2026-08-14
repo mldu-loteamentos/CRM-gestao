@@ -411,12 +411,19 @@ window.VerificarConstrucaoApp = {
             return;
         }
 
-        // Mapa de empreendimento -> empLabel (nome completo com ID)
-        const empMap = new Map();
+        // Array de empreendimentos para ordenação por ID
+        const empList = [];
+        const seenEmp = new Set();
+        
         this.allRows.forEach(r => {
             if (r.empreendimento && r.empreendimento !== '-') {
-                if (!empMap.has(r.empreendimento)) {
-                    empMap.set(r.empreendimento, r.empLabel || r.empreendimento);
+                if (!seenEmp.has(r.empreendimento)) {
+                    seenEmp.add(r.empreendimento);
+                    empList.push({
+                        empreendimento: r.empreendimento,
+                        label: r.empLabel || r.empreendimento,
+                        id: parseInt(r.costCenterId) || 0
+                    });
                 }
             }
         });
@@ -426,10 +433,10 @@ window.VerificarConstrucaoApp = {
         this._tempObrasState = { ...savedState };
 
         let html = '';
-        if (empMap.size === 0) {
+        if (empList.length === 0) {
             html = '<p style="color: #64748b;">Nenhum empreendimento listado no momento.</p>';
         } else {
-            Array.from(empMap.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([emp, label]) => {
+            empList.sort((a, b) => a.id - b.id).forEach(({ empreendimento: emp, label }) => {
                 const isOn = savedState[emp] === true;
                 const toggleId = `oa-toggle-${emp.replace(/[^a-zA-Z0-9]/g, '_')}`;
                 html += `
@@ -619,36 +626,94 @@ window.VerificarConstrucaoApp = {
         };
 
         let html = `
-            <div style="display: flex; flex-direction: column; gap: 20px;">
-                <div style="background: #f8fafc; padding: 18px; border-radius: 10px; border: 1px solid #e2e8f0;">
-                    <h3 style="margin:0 0 14px; color:#1e293b; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
+            <div style="display: flex; flex-direction: column; gap: 24px;">
+                <div style="background: #f8fafc; padding: 22px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
+                    <h3 style="margin:0 0 16px; color:#0f172a; font-size:1.05rem; display:flex; align-items:center; gap:8px; font-weight: 600;">
                         📋 Respostas do Questionário
                     </h3>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.88rem;">
-                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Água:</strong> ${formatSimNao(r.possuiAgua)}</div>
-                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Energia:</strong> ${formatSimNao(r.possuiEnergia)}</div>
-                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Entulho:</strong> ${formatSimNao(r.possuiEntulho)}</div>
-                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;"><strong style="color:#64748b;">Acesso:</strong> ${formatSimNao(r.permiteAcesso)}</div>
-                        <div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0; grid-column: 1/-1;"><strong style="color:#64748b;">Estágio da Obra:</strong> ${formatEstagio(r.estagioObra)}</div>
-                        ${r.observacoes ? `<div style="background:#fff; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0; grid-column: 1/-1;"><strong style="color:#64748b;">Observações:</strong> <span style="color:#334155;">${r.observacoes}</span></div>` : ''}
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; font-size: 0.88rem;">
+                        <div style="background:#fff; padding:14px 16px; border-radius:10px; border:1px solid #cbd5e1; display:flex; flex-direction:column; gap:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+                            <strong style="color:#475569; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:6px;"><i data-lucide="droplet" style="width:14px; height:14px; color: #3b82f6;"></i> Água</strong>
+                            <div style="font-size: 1.05rem;">${formatSimNao(r.possuiAgua)}</div>
+                        </div>
+                        <div style="background:#fff; padding:14px 16px; border-radius:10px; border:1px solid #cbd5e1; display:flex; flex-direction:column; gap:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+                            <strong style="color:#475569; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:6px;"><i data-lucide="zap" style="width:14px; height:14px; color: #eab308;"></i> Energia</strong>
+                            <div style="font-size: 1.05rem;">${formatSimNao(r.possuiEnergia)}</div>
+                        </div>
+                        <div style="background:#fff; padding:14px 16px; border-radius:10px; border:1px solid #cbd5e1; display:flex; flex-direction:column; gap:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+                            <strong style="color:#475569; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:6px;"><i data-lucide="trash-2" style="width:14px; height:14px; color: #f97316;"></i> Entulho</strong>
+                            <div style="font-size: 1.05rem;">${formatSimNao(r.possuiEntulho)}</div>
+                        </div>
+                        <div style="background:#fff; padding:14px 16px; border-radius:10px; border:1px solid #cbd5e1; display:flex; flex-direction:column; gap:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.03); transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+                            <strong style="color:#475569; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:6px;"><i data-lucide="door-open" style="width:14px; height:14px; color: #8b5cf6;"></i> Acesso</strong>
+                            <div style="font-size: 1.05rem;">${formatSimNao(r.permiteAcesso)}</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 14px; display: grid; grid-template-columns: 1fr; gap: 14px;">
+                        <div style="background:#fff; padding:16px 20px; border-radius:10px; border:1px solid #cbd5e1; display:flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.03);">
+                            <strong style="color:#475569; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:8px;"><i data-lucide="hammer" style="width:16px; height:16px; color: #10b981;"></i> Estágio da Obra</strong>
+                            <div style="font-size: 1.15rem;">${formatEstagio(r.estagioObra)}</div>
+                        </div>
+                        ${r.observacoes ? `<div style="background:#fff; padding:16px 20px; border-radius:10px; border:1px solid #cbd5e1; display:flex; flex-direction: column; gap: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.03);"><strong style="color:#475569; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display:flex; align-items:center; gap:8px;"><i data-lucide="align-left" style="width:16px; height:16px; color: #64748b;"></i> Observações</strong><span style="color:#334155; line-height: 1.6; font-size: 0.95rem; background: #f8fafc; padding: 12px; border-radius: 8px;">${r.observacoes}</span></div>` : ''}
                     </div>
                 </div>
 
                 <div>
-                    <h3 style="margin:0 0 12px; color:#1e293b; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
+                    <h3 style="margin:0 0 16px; color:#0f172a; font-size:1.05rem; display:flex; align-items:center; gap:8px; font-weight: 600;">
                         📸 Fotos Recebidas
                     </h3>
-                    <div style="display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px;">
-                        ${v.fotoFrente ? `<div style="flex-shrink:0;"><a href="${v.fotoFrente}" target="_blank"><img src="${v.fotoFrente}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Frente</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Frente)</div>'}
-                        ${v.fotoMeioFundo ? `<div style="flex-shrink:0;"><a href="${v.fotoMeioFundo}" target="_blank"><img src="${v.fotoMeioFundo}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Meio / Fundo</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Meio Fundo)</div>'}
-                        ${v.fotoFundoFrente ? `<div style="flex-shrink:0;"><a href="${v.fotoFundoFrente}" target="_blank"><img src="${v.fotoFundoFrente}" style="height: 180px; border-radius: 10px; border: 2px solid #e2e8f0; object-fit: cover; display:block;"></a><div style="text-align:center; font-size:0.72rem; color:#64748b; margin-top:4px;">Fundo / Frente</div></div>` : '<div style="height:180px; width:140px; background:#f1f5f9; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; color:#94a3b8; font-size:0.8rem; flex-shrink:0;"><span style="font-size:2rem;">📷</span>Sem foto (Fundo Frente)</div>'}
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px;">
+                        ${v.fotoFrente ? `
+                            <div style="position:relative; border-radius:12px; overflow:hidden; border:1px solid #cbd5e1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 10px 15px -3px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)'">
+                                <a href="${v.fotoFrente}" target="_blank" style="display:block; height: 240px;">
+                                    <img src="${v.fotoFrente}" style="width: 100%; height: 100%; object-fit: cover; display:block; transition: filter 0.3s;" onmouseover="this.style.filter='brightness(0.85)'" onmouseout="this.style.filter='brightness(1)'">
+                                </a>
+                                <div style="position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent, rgba(0,0,0,0.85)); padding:16px 12px 12px; color:#fff; font-size:0.9rem; font-weight:600; text-align:center; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">Frente</div>
+                            </div>
+                        ` : `
+                            <div style="height:240px; background:#f8fafc; border-radius:12px; border:2px dashed #94a3b8; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#64748b; font-size:0.95rem; font-weight: 500;">
+                                <i data-lucide="image-off" style="width:40px; height:40px; opacity: 0.4;"></i>
+                                Sem foto (Frente)
+                            </div>
+                        `}
+                        ${v.fotoMeioFundo ? `
+                            <div style="position:relative; border-radius:12px; overflow:hidden; border:1px solid #cbd5e1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 10px 15px -3px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)'">
+                                <a href="${v.fotoMeioFundo}" target="_blank" style="display:block; height: 240px;">
+                                    <img src="${v.fotoMeioFundo}" style="width: 100%; height: 100%; object-fit: cover; display:block; transition: filter 0.3s;" onmouseover="this.style.filter='brightness(0.85)'" onmouseout="this.style.filter='brightness(1)'">
+                                </a>
+                                <div style="position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent, rgba(0,0,0,0.85)); padding:16px 12px 12px; color:#fff; font-size:0.9rem; font-weight:600; text-align:center; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">Meio / Fundo</div>
+                            </div>
+                        ` : `
+                            <div style="height:240px; background:#f8fafc; border-radius:12px; border:2px dashed #94a3b8; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#64748b; font-size:0.95rem; font-weight: 500;">
+                                <i data-lucide="image-off" style="width:40px; height:40px; opacity: 0.4;"></i>
+                                Sem foto (Meio Fundo)
+                            </div>
+                        `}
+                        ${v.fotoFundoFrente ? `
+                            <div style="position:relative; border-radius:12px; overflow:hidden; border:1px solid #cbd5e1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 10px 15px -3px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.1)'">
+                                <a href="${v.fotoFundoFrente}" target="_blank" style="display:block; height: 240px;">
+                                    <img src="${v.fotoFundoFrente}" style="width: 100%; height: 100%; object-fit: cover; display:block; transition: filter 0.3s;" onmouseover="this.style.filter='brightness(0.85)'" onmouseout="this.style.filter='brightness(1)'">
+                                </a>
+                                <div style="position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent, rgba(0,0,0,0.85)); padding:16px 12px 12px; color:#fff; font-size:0.9rem; font-weight:600; text-align:center; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">Fundo / Frente</div>
+                            </div>
+                        ` : `
+                            <div style="height:240px; background:#f8fafc; border-radius:12px; border:2px dashed #94a3b8; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#64748b; font-size:0.95rem; font-weight: 500;">
+                                <i data-lucide="image-off" style="width:40px; height:40px; opacity: 0.4;"></i>
+                                Sem foto (Fundo Frente)
+                            </div>
+                        `}
                     </div>
-                    <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;">Clique na foto para ampliar em nova guia.</p>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-top: 12px; display:flex; align-items:center; gap:6px;">
+                        <i data-lucide="external-link" style="width:14px; height:14px;"></i> Clique na foto para ampliar em nova guia.
+                    </p>
                 </div>
             </div>
         `;
 
         document.getElementById('validar-vistoria-body').innerHTML = html;
+        if (window.lucide) lucide.createIcons();
         document.getElementById('modal-validar-vistoria').style.display = 'flex';
     },
 
