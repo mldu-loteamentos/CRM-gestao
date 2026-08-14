@@ -62,8 +62,8 @@ window.VerificarConstrucaoApp = {
 
                 <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <div>
-                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="document.getElementById('modal-filtros-vistoria').style.display='flex'">
-                            <i data-lucide="filter" style="width: 16px;"></i> Filtros Avançados
+                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.abrirModalObrasAndamento()">
+                            <i data-lucide="building" style="width: 16px;"></i> Obras em andamento
                         </button>
                     </div>
                     <div style="display: flex; gap: 10px;">
@@ -121,38 +121,17 @@ window.VerificarConstrucaoApp = {
                 </div>
             </div>
 
-            <!-- Modal Filtros Avançados Vistoria -->
-            <div id="modal-filtros-vistoria" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
-                <div class="modal-content" style="width: 500px; max-width: 95%;">
+            <!-- Modal Obras em Andamento -->
+            <div id="modal-obras-andamento" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
+                <div class="modal-content" style="width: 600px; max-width: 95%;">
                     <div class="modal-header">
-                        <h2>Filtros Avançados (Vistoria)</h2>
-                        <button class="modal-close" onclick="document.getElementById('modal-filtros-vistoria').style.display='none'"><i data-lucide="x"></i></button>
+                        <h2>Obras em Andamento</h2>
+                        <button class="modal-close" onclick="document.getElementById('modal-obras-andamento').style.display='none'"><i data-lucide="x"></i></button>
                     </div>
-                    <div class="modal-body" style="min-height: 200px;">
-                        <div style="margin-bottom: 15px;">
-                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Cidade</label>
-                            <select id="vc-filter-cidade" class="form-input" onchange="window.VerificarConstrucaoApp.updateFilterOptions()" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
-                                <option value="Todos">Todos</option>
-                            </select>
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Empreendimento</label>
-                            <select id="vc-filter-empreendimento" class="form-input" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
-                                <option value="Todos">Todos</option>
-                            </select>
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Status</label>
-                            <select id="vc-filter-status" class="form-input" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
-                                <option value="Todos">Todos</option>
-                                <option value="Pendente de Vistoria">Pendente de Vistoria</option>
-                                <option value="Link Enviado – Aguardando Fotos">Link Enviado – Aguardando Fotos</option>
-                                <option value="Aguardando Validação">Aguardando Validação</option>
-                            </select>
-                        </div>
-                        <div style="display: flex; gap: 10px; margin-top: 25px;">
-                            <button class="btn btn-outline" style="flex:1; border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.clearFilters()">Limpar Filtros</button>
-                            <button class="btn btn-success" style="flex:1;" onclick="window.VerificarConstrucaoApp.applyFilters()">Aplicar Filtros</button>
+                    <div class="modal-body" style="min-height: 200px; max-height: 60vh; overflow-y: auto;">
+                        <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 15px;">Ligue a chave para os empreendimentos que estão com obras em andamento. Os clientes desses empreendimentos serão dispensados de vistoria.</p>
+                        <div id="obras-andamento-list">
+                            Carregando...
                         </div>
                     </div>
                 </div>
@@ -326,6 +305,7 @@ window.VerificarConstrucaoApp = {
         });
 
         let html = '';
+        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
         
         Object.keys(grouped).sort().forEach(cidade => {
             const safeCidade = cidade.replace(/[^a-zA-Z0-9]/g, '_');
@@ -344,38 +324,50 @@ window.VerificarConstrucaoApp = {
 
             Object.keys(grouped[cidade]).sort().forEach(emp => {
                 const safeEmp = emp.replace(/[^a-zA-Z0-9]/g, '_');
+                const isObraAndamento = savedState[emp] === true;
                 
                 // Empreendimento Header Row
                 html += `
                     <tr style="background: #fdfdfd; border-bottom: 1px solid #e2e8f0;">
                         <td style="padding: 8px; text-align: center; width: 40px; border-right: 1px solid #e2e8f0;"></td>
                         <td style="padding: 8px; text-align: center; width: 40px;">
-                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')">
+                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''}>
                         </td>
                         <td colspan="3" style="padding: 8px; font-weight: 600; color: #475569;">
-                            ${emp}
+                            ${emp} ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:2px 6px; border-radius:4px; font-size:0.75rem; margin-left:10px;">Obra em Andamento</span>' : ''}
                         </td>
                     </tr>
                 `;
 
-                // Unidades Rows
-                const unidades = grouped[cidade][emp].sort((a, b) => a.unidade.localeCompare(b.unidade));
-                unidades.forEach(u => {
-                    const validAction = u.statusLabel === 'Aguardando Validação' 
-                        ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` 
-                        : u.statusLabel;
-
+                if (isObraAndamento) {
                     html += `
-                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                        <tr style="border-bottom: 1px solid #f1f5f9; background: #fffbeb;">
                             <td colspan="2" style="border-right: 1px solid #e2e8f0;"></td>
-                            <td style="padding: 8px 8px 8px 20px; text-align: center; width: 40px;">
-                                <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()">
+                            <td colspan="3" style="padding: 15px; text-align: center; color: #854d0e; font-style: italic; font-size: 0.85rem;">
+                                Vistoria dispensada - cliente não pode construir - obras do empreendimento em andamento.
                             </td>
-                            <td style="padding: 8px; font-weight: 600;">${u.unidade}</td>
-                            <td style="padding: 8px; ${u.statusColor}">${validAction}</td>
                         </tr>
                     `;
-                });
+                } else {
+                    // Unidades Rows
+                    const unidades = grouped[cidade][emp].sort((a, b) => a.unidade.localeCompare(b.unidade));
+                    unidades.forEach(u => {
+                        const validAction = u.statusLabel === 'Aguardando Validação' 
+                            ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` 
+                            : u.statusLabel;
+
+                        html += `
+                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                <td colspan="2" style="border-right: 1px solid #e2e8f0;"></td>
+                                <td style="padding: 8px 8px 8px 20px; text-align: center; width: 40px;">
+                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()">
+                                </td>
+                                <td style="padding: 8px; font-weight: 600;">${u.unidade}</td>
+                                <td style="padding: 8px; ${u.statusColor}">${validAction}</td>
+                            </tr>
+                        `;
+                    });
+                }
             });
         });
 
@@ -403,6 +395,68 @@ window.VerificarConstrucaoApp = {
         const cbs = document.querySelectorAll('.vc-row-checkbox:checked');
         const btn = document.getElementById('btn-solicitar-wpp');
         if (btn) btn.disabled = cbs.length === 0;
+    },
+
+    abrirModalObrasAndamento() {
+        const modal = document.getElementById('modal-obras-andamento');
+        const listDiv = document.getElementById('obras-andamento-list');
+        if (!this.allRows || !listDiv) return;
+
+        const empreendimentos = new Set();
+        this.allRows.forEach(r => {
+            if (r.empreendimento && r.empreendimento !== '-') {
+                empreendimentos.add(r.empreendimento);
+            }
+        });
+
+        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+
+        let html = '';
+        Array.from(empreendimentos).sort().forEach(emp => {
+            const isChecked = savedState[emp] === true ? 'checked' : '';
+            html += `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #e2e8f0;">
+                    <span style="font-weight: 500; color: #1e293b;">${emp}</span>
+                    <label style="position: relative; display: inline-block; width: 40px; height: 20px;">
+                        <input type="checkbox" style="opacity: 0; width: 0; height: 0;" ${isChecked} onchange="window.VerificarConstrucaoApp.toggleObraEmAndamento('${emp.replace(/'/g, "\\'")}', this.checked)">
+                        <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isChecked ? '#10b981' : '#cbd5e1'}; transition: .4s; border-radius: 20px;">
+                            <span style="position: absolute; content: ''; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; transform: ${isChecked ? 'translateX(20px)' : 'none'};"></span>
+                        </span>
+                    </label>
+                </div>
+            `;
+        });
+
+        if (Array.from(empreendimentos).length === 0) {
+            html = '<p style="color: #64748b;">Nenhum empreendimento listado no momento.</p>';
+        }
+
+        listDiv.innerHTML = html;
+        modal.style.display = 'flex';
+    },
+
+    toggleObraEmAndamento(emp, checked) {
+        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+        savedState[emp] = checked;
+        localStorage.setItem('crm_obras_andamento', JSON.stringify(savedState));
+        
+        // Update visually
+        const evt = window.event;
+        if (evt && evt.target) {
+            const toggleSpan = evt.target.nextElementSibling;
+            if (toggleSpan) {
+                const circleSpan = toggleSpan.querySelector('span');
+                if (checked) {
+                    toggleSpan.style.backgroundColor = '#10b981';
+                    if (circleSpan) circleSpan.style.transform = 'translateX(20px)';
+                } else {
+                    toggleSpan.style.backgroundColor = '#cbd5e1';
+                    if (circleSpan) circleSpan.style.transform = 'none';
+                }
+            }
+        }
+
+        this.renderTable();
     },
 
     editarRegua() {
@@ -535,8 +589,64 @@ window.VerificarConstrucaoApp = {
         const row = this.renderedRows[idx];
         if (!row || !row.vistoriaAtiva) return;
 
-        const confirmacao = confirm(`Deseja validar e enviar as fotos da vistoria da unidade ${row.unidade} para o Sienge?`);
-        if (!confirmacao) return;
+        this._currentValidatingRowIdx = idx;
+
+        const v = row.vistoriaAtiva;
+        const r = v.respostasFormulario || {};
+
+        const formatSimNao = (val) => {
+            if (!val) return '-';
+            return val.toLowerCase() === 'sim' ? 'Sim' : 'Não';
+        };
+
+        const formatEstagio = (val) => {
+            if (!val) return '-';
+            return val.replace(/_/g, ' ').toUpperCase();
+        };
+
+        let html = `
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <div style="display: flex; flex-direction: column; gap: 10px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <h3 style="margin-top:0; color: #1e293b; font-size: 1rem; margin-bottom: 5px;">Respostas do Questionário</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9rem;">
+                        <div><strong>Água:</strong> ${formatSimNao(r.possuiAgua)}</div>
+                        <div><strong>Energia:</strong> ${formatSimNao(r.possuiEnergia)}</div>
+                        <div><strong>Entulho:</strong> ${formatSimNao(r.possuiEntulho)}</div>
+                        <div><strong>Acesso:</strong> ${formatSimNao(r.permiteAcesso)}</div>
+                        <div style="grid-column: 1 / -1;"><strong>Estágio da Obra:</strong> ${formatEstagio(r.estagioObra)}</div>
+                        <div style="grid-column: 1 / -1;"><strong>Observações:</strong> ${r.observacoes || '-'}</div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 style="margin-top:0; color: #1e293b; font-size: 1rem; margin-bottom: 10px;">Fotos Recebidas</h3>
+                    <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px;">
+                        ${v.fotoFrente ? `<a href="${v.fotoFrente}" target="_blank"><img src="${v.fotoFrente}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Frente)</span>'}
+                        ${v.fotoMeioFundo ? `<a href="${v.fotoMeioFundo}" target="_blank"><img src="${v.fotoMeioFundo}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Meio Fundo)</span>'}
+                        ${v.fotoFundoFrente ? `<a href="${v.fotoFundoFrente}" target="_blank"><img src="${v.fotoFundoFrente}" style="height: 150px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;"></a>` : '<span style="color:#94a3b8; font-size:0.8rem;">Sem foto (Fundo Frente)</span>'}
+                    </div>
+                    <p style="font-size: 0.8rem; color: #64748b; margin-top: 5px;">Clique na foto para ampliar em nova guia.</p>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('validar-vistoria-body').innerHTML = html;
+        document.getElementById('modal-validar-vistoria').style.display = 'flex';
+    },
+
+    rejeitarVistoriaModal() {
+        document.getElementById('modal-validar-vistoria').style.display = 'none';
+        this._currentValidatingRowIdx = null;
+    },
+
+    async aprovarVistoriaModal() {
+        if (this._currentValidatingRowIdx === null || this._currentValidatingRowIdx === undefined) return;
+        const idx = this._currentValidatingRowIdx;
+        const row = this.renderedRows[idx];
+        if (!row || !row.vistoriaAtiva) return;
+
+        document.getElementById('modal-validar-vistoria').style.display = 'none';
+        this._currentValidatingRowIdx = null;
 
         const loadingDiv = document.createElement('div');
         loadingDiv.innerHTML = `
