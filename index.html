@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.154 &nbsp;Â·&nbsp; 13/08/2026
+            v1.0.155 &nbsp;Â·&nbsp; 13/08/2026
           </span>
         </div>
       </div>
@@ -3653,6 +3653,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                               <option value="E-mail">E-mail</option>
                               <option value="Presencial">Presencial</option>
                               <option value="Nota interna">Nota interna</option>
+                              <option value="Proposta de renegociação">Proposta de renegociação</option>
                             </select>
                           </div>
                           <div class="form-group" id="occurrence-iniciativa-group">
@@ -3668,6 +3669,39 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                               </label>
                             </div>
                           </div>
+                          </div>
+                        </div>
+
+                        <div id="reneg-proposal-container" style="display: none; border: 1px solid var(--color-primary); border-radius: 6px; padding: 15px; margin-bottom: 15px; background-color: #f0fdf4;">
+                           <h5 style="margin: 0 0 10px 0; color: var(--color-primary);">Calculadora de Renegociação</h5>
+                           <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                              <div style="flex: 1; min-width: 150px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Sinal (Entrada)</label>
+                                 <div style="display: flex; gap: 5px;">
+                                    <select id="reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                                       <option value="%">%</option>
+                                       <option value="R$">R$</option>
+                                    </select>
+                                    <input type="number" id="reneg-sinal-value" class="form-control" style="flex: 1;" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation()" placeholder="Valor">
+                                 </div>
+                                 <small id="reneg-sinal-feedback" style="font-size: 0.7rem; color: #666;"></small>
+                              </div>
+                              <div style="flex: 1; min-width: 120px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Nº Parcelas</label>
+                                 <input type="number" id="reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                              </div>
+                              <div style="flex: 1; min-width: 120px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Data 1º Vencimento</label>
+                                 <input type="date" id="reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                              </div>
+                           </div>
+                           <div style="font-size: 0.8rem; background: white; padding: 10px; border-radius: 4px; border: 1px dashed #ccc; margin-bottom: 10px;">
+                              <strong>Dívida (Vencido + Juros):</strong> <span id="reneg-total-debt">R$ 0,00</span><br>
+                              <strong>Sinal (Convertido):</strong> <span id="reneg-sinal-converted">R$ 0,00</span><br>
+                              <strong>Saldo a parcelar:</strong> <span id="reneg-saldo">R$ 0,00</span><br>
+                              <strong>Valor da Parcela:</strong> <span id="reneg-installment-value">R$ 0,00</span>
+                           </div>
+                           <button type="button" class="btn btn-outline" style="width: 100%; padding: 8px; font-weight: 600; border-color: var(--color-primary); color: var(--color-primary);" onclick="if(window.applyRenegotiationText) window.applyRenegotiationText()">Gerar Texto da Proposta</button>
                         </div>
 
                         <div class="form-group" style="margin-bottom: 10px;">
@@ -3823,7 +3857,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                         <div style="margin-bottom: 5px;">
                           <label for="jud-fase" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin: 0; display: flex; align-items: center; gap: 8px;">
                             Andamento / Fase Processual <span style="color: var(--color-danger);">*</span>
-                            <i data-lucide="settings" id="btn-config-jud-fase" style="width: 14px; height: 14px; cursor: pointer; color: var(--color-primary);" onclick="console.log('Inline Click!'); try { window.openEtapaModal('new'); } catch(e) { alert(e.message); }" title="Configurar Etapas"></i>
+                            <i data-lucide="settings" id="btn-config-jud-fase" style="width: 14px; height: 14px; cursor: pointer; color: var(--color-primary);" onclick="document.getElementById('modal-ocorrencia-judicial').style.display='none'; window.switchTab('config'); setTimeout(() => { window.switchRegrasTab('regra-judiciais'); }, 150);" title="Configurar Etapas"></i>
                           </label>
                         </div>
                         <select id="jud-fase" class="form-control" style="font-size: 0.85rem; padding: 8px 10px; border-radius: 4px; border: 1px solid #ccc; width: 100%;" onchange="handleJudFaseChange(this)">
@@ -3833,6 +3867,39 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                       
                       <div class="form-group" style="flex: 1; display: flex; flex-direction: column;">
                         <label style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Detalhes da Ocorrência <span style="color: var(--color-danger);">*</span></label>
+                        
+                        <div id="jud-reneg-proposal-container" style="display: none; border: 1px solid var(--color-primary); border-radius: 6px; padding: 15px; margin-bottom: 15px; background-color: #f0fdf4;">
+                           <h5 style="margin: 0 0 10px 0; color: var(--color-primary);">Calculadora de Renegociação</h5>
+                           <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                              <div style="flex: 1; min-width: 150px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Sinal (Entrada)</label>
+                                 <div style="display: flex; gap: 5px;">
+                                    <select id="jud-reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                                       <option value="%">%</option>
+                                       <option value="R$">R$</option>
+                                    </select>
+                                    <input type="number" id="jud-reneg-sinal-value" class="form-control" style="flex: 1;" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')" placeholder="Valor">
+                                 </div>
+                                 <small id="jud-reneg-sinal-feedback" style="font-size: 0.7rem; color: #666;"></small>
+                              </div>
+                              <div style="flex: 1; min-width: 120px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Nº Parcelas</label>
+                                 <input type="number" id="jud-reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                              </div>
+                              <div style="flex: 1; min-width: 120px;">
+                                 <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Data 1º Vencimento</label>
+                                 <input type="date" id="jud-reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                              </div>
+                           </div>
+                           <div style="font-size: 0.8rem; background: white; padding: 10px; border-radius: 4px; border: 1px dashed #ccc; margin-bottom: 10px;">
+                              <strong>Dívida (Vencido + Juros):</strong> <span id="jud-reneg-total-debt">R$ 0,00</span><br>
+                              <strong>Sinal (Convertido):</strong> <span id="jud-reneg-sinal-converted">R$ 0,00</span><br>
+                              <strong>Saldo a parcelar:</strong> <span id="jud-reneg-saldo">R$ 0,00</span><br>
+                              <strong>Valor da Parcela:</strong> <span id="jud-reneg-installment-value">R$ 0,00</span>
+                           </div>
+                           <button type="button" class="btn btn-outline" style="width: 100%; padding: 8px; font-weight: 600; border-color: var(--color-primary); color: var(--color-primary);" onclick="if(window.applyRenegotiationText) window.applyRenegotiationText('jud-')">Gerar Texto da Proposta</button>
+                        </div>
+                        
                         <textarea id="jud-note-text" class="form-control" placeholder="Descreva os detalhes do andamento ou contato com o cliente..." style="font-size: 0.85rem; padding: 10px; border-radius: 4px; border: 1px solid #ccc; width: 100%; flex: 1; resize: none; min-height: 100px;"></textarea>
                       </div>
                       
@@ -4705,25 +4772,25 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     }
   </script>
 
-  <script defer src="data.js?v=154"></script>
-  <script defer src="sienge-api.js?v=154"></script>
-  <script defer src="azure-auth.js?v=154"></script>
-  <script defer src="app.js?v=154"></script>
-  <script defer src="anexos.js?v=154"></script>
-  <script defer src="contas-pagar.js?v=154"></script>
-  <script defer src="config-tags.js?v=154"></script>
-  <script defer src="config-users.js?v=154"></script>
-  <script defer src="construcao.js?v=154"></script>
+  <script defer src="data.js?v=155"></script>
+  <script defer src="sienge-api.js?v=155"></script>
+  <script defer src="azure-auth.js?v=155"></script>
+  <script defer src="app.js?v=155"></script>
+  <script defer src="anexos.js?v=155"></script>
+  <script defer src="contas-pagar.js?v=155"></script>
+  <script defer src="config-tags.js?v=155"></script>
+  <script defer src="config-users.js?v=155"></script>
+  <script defer src="construcao.js?v=155"></script>
 
-  <script defer src="empresas.js?v=154"></script>
-  <script defer src="relacionamento.js?v=154"></script>
+  <script defer src="empresas.js?v=155"></script>
+  <script defer src="relacionamento.js?v=155"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=154"></script>
-  <script defer src="plano-financeiro.js?v=154"></script>
-  <script defer src="fiscal.js?v=154"></script>
-  <script defer src="indexadores.js?v=154"></script>
-  <script defer src="verificar-construcao.js?v=154"></script>
+  <script defer src="centros-custo.js?v=155"></script>
+  <script defer src="plano-financeiro.js?v=155"></script>
+  <script defer src="fiscal.js?v=155"></script>
+  <script defer src="indexadores.js?v=155"></script>
+  <script defer src="verificar-construcao.js?v=155"></script>
   
   <!-- Modal Compartilhar Anotação -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; pointer-events: auto !important; z-index: 999999 !important; visibility: visible !important; opacity: 1 !important; width: 100vw !important; height: 100vh !important; top: 0 !important; left: 0 !important;">
@@ -5072,7 +5139,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     </div>
   </div>
 
-  <script src="repactuacoes.js?v=154"></script>
+  <script src="repactuacoes.js?v=155"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

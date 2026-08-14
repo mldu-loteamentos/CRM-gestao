@@ -8644,14 +8644,20 @@ window.validateOccurrenceForm = function() {
   
   let isValid = false;
   
-  if (canal === "Nota interna") {
+  const renegContainer = document.getElementById("reneg-proposal-container");
+  
+  if (renegContainer) {
+      renegContainer.style.display = (canal === "Proposta de renegociação") ? "block" : "none";
+  }
+
+  if (canal === "Nota interna" || canal === "Proposta de renegociação") {
     if (iniciativaGroup) iniciativaGroup.style.display = "none";
     if (promiseRow) promiseRow.style.display = "none";
     if (installmentsGroup) installmentsGroup.style.display = "none";
     if (pinGroup) pinGroup.style.display = "block";
     
-    if (labelNoteText) labelNoteText.innerHTML = 'Nota interna <span style="color: var(--color-danger);">*</span>';
-    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
+    if (labelNoteText) labelNoteText.innerHTML = (canal === "Proposta de renegociação") ? 'Proposta <span style="color: var(--color-danger);">*</span>' : 'Nota interna <span style="color: var(--color-danger);">*</span>';
+    if (saveBtn) saveBtn.innerHTML = (canal === "Proposta de renegociação") ? '<i data-lucide="save" style="width: 16px;"></i> Gravar Proposta' : '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
     
     isValid = text.length > 0;
   } else {
@@ -16442,6 +16448,7 @@ window.updateJudFaseDropdown = function() {
     });
   }
   html += `<option value="Nota Interna">Nota Interna</option>`;
+  html += `<option value="Proposta de renegociação">Proposta de renegociação</option>`;
   sel.innerHTML = html;
 };
 
@@ -16454,11 +16461,16 @@ window.handleJudFaseChange = function(sel) {
    const prazoLabel = document.getElementById('jud-prazo-label');
    const pinRow = document.getElementById('jud-pin-row');
    const btnSave = document.getElementById('btn-save-jud-occurrence');
+   const judRenegContainer = document.getElementById('jud-reneg-proposal-container');
 
-   if (sel.value === 'Nota Interna') {
+   if (judRenegContainer) {
+       judRenegContainer.style.display = (sel.value === 'Proposta de renegociação') ? 'block' : 'none';
+   }
+
+   if (sel.value === 'Nota Interna' || sel.value === 'Proposta de renegociação') {
        if (prazoRow) prazoRow.style.display = 'none';
        if (pinRow) pinRow.style.display = 'block';
-       if (btnSave) btnSave.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar nota interna';
+       if (btnSave) btnSave.innerHTML = `<i data-lucide="save" style="width: 16px;"></i> Gravar ${sel.value === 'Proposta de renegociação' ? 'proposta' : 'nota interna'}`;
        if (prazoInput) {
            prazoInput.removeAttribute('readonly');
            prazoInput.value = '';
@@ -22454,4 +22466,138 @@ window.exportAgendaToExcel = function() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+};
+
+window.calculateRenegotiation = function(prefix = '') {
+    if (!window.g_renegBills) return;
+
+    const overdueBills = window.g_renegBills.filter(b => b.isOverdue);
+    const totalDebt = overdueBills.reduce((acc, b) => acc + (b.computedCorrected || 0), 0);
+
+    const typeEl = document.getElementById(prefix + 'reneg-sinal-type');
+    const valEl = document.getElementById(prefix + 'reneg-sinal-value');
+    const instEl = document.getElementById(prefix + 'reneg-installments');
+    const fbEl = document.getElementById(prefix + 'reneg-sinal-feedback');
+    const debtEl = document.getElementById(prefix + 'reneg-total-debt');
+    const convertedEl = document.getElementById(prefix + 'reneg-sinal-converted');
+    const saldoEl = document.getElementById(prefix + 'reneg-saldo');
+    const instValEl = document.getElementById(prefix + 'reneg-installment-value');
+
+    let sinalType = typeEl ? typeEl.value : '%';
+    let rawValue = parseFloat(valEl ? valEl.value : 0) || 0;
+    let numInst = parseInt(instEl ? instEl.value : 3) || 3;
+
+    if (numInst > 5) { numInst = 5; if(instEl) instEl.value = 5; }
+    if (numInst < 3) { numInst = 3; if(instEl) instEl.value = 3; }
+
+    let sinalPct = 0;
+    let sinalRs = 0;
+
+    if (sinalType === '%') {
+        sinalPct = rawValue;
+        sinalRs = totalDebt * (sinalPct / 100);
+    } else {
+        sinalRs = rawValue;
+        sinalPct = totalDebt > 0 ? (sinalRs / totalDebt) * 100 : 0;
+    }
+
+    if (fbEl) {
+        if (sinalPct < 30 || sinalPct > 50) {
+            fbEl.innerHTML = `<span style="color: red;">Atenção: A entrada (${sinalPct.toFixed(1)}%) está fora da margem de 30% a 50%.</span>`;
+        } else {
+            fbEl.innerHTML = `<span style="color: green;">Entrada válida (${sinalPct.toFixed(1)}%).</span>`;
+        }
+    }
+
+    const saldo = Math.max(0, totalDebt - sinalRs);
+    const parcelaVal = numInst > 0 ? saldo / numInst : 0;
+
+    if (debtEl) debtEl.textContent = totalDebt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (convertedEl) convertedEl.textContent = sinalRs.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ` (${sinalPct.toFixed(1)}%)`;
+    if (saldoEl) saldoEl.textContent = saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (instValEl) instValEl.textContent = parcelaVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
+
+window.applyRenegotiationText = function(prefix = '') {
+    if (!window.g_renegBills) return;
+
+    const overdueBills = window.g_renegBills.filter(b => b.isOverdue);
+    const totalDebt = overdueBills.reduce((acc, b) => acc + (b.computedCorrected || 0), 0);
+
+    const typeEl = document.getElementById(prefix + 'reneg-sinal-type');
+    const valEl = document.getElementById(prefix + 'reneg-sinal-value');
+    const instEl = document.getElementById(prefix + 'reneg-installments');
+    const dateEl = document.getElementById(prefix + 'reneg-first-date');
+    const textEl = document.getElementById(prefix === 'jud-' ? 'jud-note-text' : 'note-text');
+
+    let sinalType = typeEl ? typeEl.value : '%';
+    let rawValue = parseFloat(valEl ? valEl.value : 0) || 0;
+    let numInst = parseInt(instEl ? instEl.value : 3) || 3;
+    let sinalDateRaw = dateEl ? dateEl.value : '';
+
+    let sinalPct = 0;
+    let sinalRs = 0;
+
+    if (sinalType === '%') {
+        sinalPct = rawValue;
+        sinalRs = totalDebt * (sinalPct / 100);
+    } else {
+        sinalRs = rawValue;
+        sinalPct = totalDebt > 0 ? (sinalRs / totalDebt) * 100 : 0;
+    }
+
+    if (sinalPct < 30 || sinalPct > 50) {
+        alert('O valor da entrada deve ficar entre 30% e 50% do total em atraso para poder gerar a proposta.');
+        return;
+    }
+    
+    if (!sinalDateRaw) {
+        alert('Por favor, informe a Data do 1º Vencimento da entrada.');
+        return;
+    }
+
+    const sinalDateObj = new Date(sinalDateRaw + 'T12:00:00');
+    const sinalDateStr = sinalDateObj.toLocaleDateString('pt-BR');
+
+    const saldo = Math.max(0, totalDebt - sinalRs);
+    const parcelaVal = numInst > 0 ? saldo / numInst : 0;
+
+    // Vincendas
+    const aVencerBills = window.g_renegBills.filter(b => !b.isOverdue);
+    const numVincendas = aVencerBills.length;
+    let valorVincenda = 0;
+    let dataVincendaStr = 'N/A';
+
+    if (numVincendas > 0) {
+        valorVincenda = aVencerBills[0].value || 0;
+        let dt;
+        if (aVencerBills[0].originalDate) dt = new Date(aVencerBills[0].originalDate);
+        else if (aVencerBills[0].dueDate) dt = new Date(aVencerBills[0].dueDate);
+        
+        if (dt) {
+            if (typeof aVencerBills[0].originalDate === 'string' && aVencerBills[0].originalDate.length === 10) {
+                dt = new Date(aVencerBills[0].originalDate + 'T12:00:00');
+            }
+            dataVincendaStr = dt.toLocaleDateString('pt-BR');
+        }
+    }
+
+    const strPct = sinalPct.toFixed(1) + '%';
+    const strRs = sinalRs.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const strParcelaVal = parcelaVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const strVincendaVal = valorVincenda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    let msg = `entrada de ${strPct} no valor de ${strRs} + \n`;
+    msg += `${numInst} parcelas fixas de ${strParcelaVal} com primeiro vencimento para ${sinalDateStr}`;
+    
+    if (numVincendas > 0) {
+        msg += ` + \n${numVincendas} parcelas vincendas de ${strVincendaVal} com primeiro vencimento para ${dataVincendaStr}`;
+    }
+
+    if (textEl) {
+        textEl.value = msg;
+        if (typeof window.validateOccurrenceForm === 'function' && prefix === '') {
+            window.validateOccurrenceForm();
+        }
+    }
 };
