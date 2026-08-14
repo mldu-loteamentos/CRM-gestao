@@ -73,9 +73,6 @@ window.VerificarConstrucaoApp = {
                         <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
                             <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
                         </button>
-                        <button class="btn btn-outline" onclick="window.VerificarConstrucaoApp.abrirVistoriasRecebidas()">
-                            <i data-lucide="inbox" style="width: 16px;"></i> Vistorias Recebidas
-                        </button>
                     </div>
                 </div>
 
@@ -103,15 +100,23 @@ window.VerificarConstrucaoApp = {
                 </div>
             </div>
 
-            <!-- Modal Vistorias Recebidas -->
-            <div id="modal-vistorias-recebidas" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
+            <!-- Modal Validar Vistoria -->
+            <div id="modal-validar-vistoria" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
                 <div class="modal-content" style="width: 800px; max-width: 95%;">
                     <div class="modal-header">
-                        <h2>Vistorias Recebidas (Para Validação)</h2>
-                        <button class="modal-close" onclick="document.getElementById('modal-vistorias-recebidas').style.display='none'"><i data-lucide="x"></i></button>
+                        <h2>Validar Vistoria</h2>
+                        <button class="modal-close" onclick="document.getElementById('modal-validar-vistoria').style.display='none'"><i data-lucide="x"></i></button>
                     </div>
-                    <div class="modal-body" id="vistorias-recebidas-body" style="min-height: 200px;">
+                    <div class="modal-body" id="validar-vistoria-body" style="min-height: 200px;">
                         Carregando...
+                    </div>
+                    <div class="modal-footer" style="padding: 15px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="btn btn-outline" style="border-color: var(--color-danger); color: var(--color-danger);" onclick="window.VerificarConstrucaoApp.rejeitarVistoriaModal()">
+                            <i data-lucide="x-circle" style="width: 16px;"></i> Rejeitar
+                        </button>
+                        <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.aprovarVistoriaModal()">
+                            <i data-lucide="check-circle" style="width: 16px;"></i> Aprovar
+                        </button>
                     </div>
                 </div>
             </div>

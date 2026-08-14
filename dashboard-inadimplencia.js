@@ -544,7 +544,7 @@ const DashboardInadimplencia = (function() {
       }
 
       // 3. 0% Pago
-      if (b.isZeroPaid || b.percPaid === 0) {
+      if (b.isZeroPaid) {
           zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
       }
     });

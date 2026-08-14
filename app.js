@@ -3189,12 +3189,13 @@ document.addEventListener("click", function(e) {
       const notes = AppState.notes[client.customerId] || [];
       return notes.some(n => n.promiseDate && n.status !== "Cancelada");
     };
-
     const getPriority = (client) => {
-        if (hasScheduledOcc(client)) return 1;
+        if (hasScheduledOcc(client)) {
+            if (client.subjudice === "S") return 3;
+            return 1;
+        }
         if (client.isZeroPaid) return 4;
-        if (client.subjudice !== "S" && client.maxDaysDelay >= thresholdJuridico) return 3;
-        if (client.subjudice === "S") return 2;
+        if (client.subjudice === "S" || client.maxDaysDelay >= thresholdJuridico) return 3;
         return 1;
     };
 
@@ -13102,7 +13103,16 @@ async function _loadZeroPaidTab_Impl() {
               const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
               if (ccObj) ccName = ccObj.name || "";
           }
-          const city = window.extractCityFromCostCenter(idCCusto, ccName);
+          let city = "";
+          if (ccName.includes('-')) {
+              city = ccName.split('-')[0].trim().toUpperCase();
+          } else {
+              city = ccName.trim().toUpperCase();
+          }
+          if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
+             city = "ARAÇARIGUAMA";
+          }
+          
           if (city) {
               const ruleId = "CID_" + city.replace(/\s+/g, '_');
               let requiredType = "interno_absoluto"; // 0% Pago tem prioridade máxima
@@ -20649,7 +20659,7 @@ window.renderJudicialTimeline = function() {
     }
 
     let repetirBtnHtml = "";
-    if (occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna') {
+    if (occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociação') {
         repetirBtnHtml = `
             <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc(${index})" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
                <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Repetir
@@ -22618,16 +22628,9 @@ window.applyRenegotiationText = function(prefix = '') {
 
     if (numVincendas > 0) {
         valorVincenda = aVencerBills[0].value || 0;
-        let dt;
-        if (aVencerBills[0].originalDate) dt = new Date(aVencerBills[0].originalDate);
-        else if (aVencerBills[0].dueDate) dt = new Date(aVencerBills[0].dueDate);
-        
-        if (dt) {
-            if (typeof aVencerBills[0].originalDate === 'string' && aVencerBills[0].originalDate.length === 10) {
-                dt = new Date(aVencerBills[0].originalDate + 'T12:00:00');
-            }
-            dataVincendaStr = dt.toLocaleDateString('pt-BR');
-        }
+        let dt = new Date(sinalDateObj.getTime());
+        dt.setMonth(dt.getMonth() + numInst);
+        dataVincendaStr = dt.toLocaleDateString('pt-BR');
     }
 
     const strPct = sinalPct.toFixed(1) + '%';

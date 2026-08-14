@@ -772,9 +772,7 @@ const AnexosApp = {
     try {
       // Loop de paginação
       while (hasMore) {
-        const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-        const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-        const url = `http://${host}:${port}/sienge-proxy/units?limit=${limit}&offset=${offset}&enterpriseId=${cc}&additionalData=NONE`;
+        const url = `/api/sienge-proxy/units?limit=${limit}&offset=${offset}&enterpriseId=${cc}&additionalData=NONE`;
         const res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
         if (!res.ok) throw new Error("Falha Sienge HTTP " + res.status);
         
