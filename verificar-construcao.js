@@ -874,9 +874,15 @@ window.VerificarConstrucaoApp = {
                 const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i + 1} - ${padraoData}.jpg`;
                 const descricaoSienge = `${padraoData} - Foto de Vistoria ${i + 1}`;
 
-                const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-                const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-                const apiUrl = `http://${host}:${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                const isVercel = window.location.hostname.includes('vercel.app');
+                let apiUrl = '';
+                if (isVercel) {
+                    apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                } else {
+                    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+                    const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
+                    apiUrl = `http://${host}:${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                }
 
                 await new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();

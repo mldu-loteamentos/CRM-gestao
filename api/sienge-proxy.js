@@ -33,7 +33,7 @@ module.exports = async function handler(req, res) {
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       options.body = req.body;
-      if (typeof options.body === 'object') {
+      if (typeof options.body === 'object' && !Buffer.isBuffer(options.body)) {
         options.body = JSON.stringify(options.body);
       }
     }

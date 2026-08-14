@@ -5698,7 +5698,7 @@ function formatCpfCnpj(val) {
       otherContractsContainer.innerHTML = "";
       
       const currentBillId = AppState.selectedSaleId ? String(AppState.selectedSaleId) : null;
-      const ctContracts = receivableBills.filter(c => (c.documentId || "").trim() === "CT" && String(c.receivableBillId) !== currentBillId);
+      const ctContracts = receivableBills.filter(c => (c.documentId || "").trim() === "CT");
       
       if (ctContracts.length === 0) {
         otherContractsContainer.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted);">Não há outros contratos vinculados ao cliente.</div>`;
@@ -5920,8 +5920,7 @@ function formatCpfCnpj(val) {
           card.className = "contract-card";
           card.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.01); border: 1.5px solid rgba(16, 84, 54, 0.05); padding: 15px; border-radius: 8px; margin-bottom: 10px;";
           
-          const isCurrent = String(contract.receivableBillId) === String(saleId) || String(contract.receivableBillId) === String(sale.receivableBillId);
-          if (isCurrent) return;
+          const isCurrent = String(contract.receivableBillId) === String(currentBillId);
           
           const currentLabelHtml = isCurrent 
             ? `<span style="font-size:0.75rem; font-weight:700; color:var(--color-primary); background:var(--color-success-glow); padding:2px 6px; border-radius:4px; margin-left: 10px;">Ativo na Ficha</span>`

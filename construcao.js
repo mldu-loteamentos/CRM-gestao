@@ -109,6 +109,9 @@ window.loadConstrucoes = async function() {
     if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
     if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
 
+    if (!saleId && window.AnexosState && window.AnexosState.activeContract) {
+        saleId = window.AnexosState.activeContract.id;
+    }
     if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
         saleId = AppState.sales[0].id;
     }
@@ -121,7 +124,12 @@ window.loadConstrucoes = async function() {
     let contractNumber = saleId;
     let enterpriseId = "N/D";
     let unitId = "N/D";
-    if (typeof AppState !== 'undefined' && AppState.sales) {
+    
+    if (window.AnexosState && window.AnexosState.activeContract && (String(window.AnexosState.activeContract.id) === String(saleId) || String(window.AnexosState.activeContract.receivableBillId) === String(saleId))) {
+        contractNumber = window.AnexosState.activeContract.contractNumber || window.AnexosState.activeContract.id || saleId;
+        enterpriseId = window.AnexosState.activeContract.enterpriseId || window.AnexosState.activeContract.costCenterId || enterpriseId;
+        unitId = window.AnexosState.activeContract.unitId || unitId;
+    } else if (typeof AppState !== 'undefined' && AppState.sales) {
         const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
         if (saleObj) {
             contractNumber = saleObj.contractNumber || saleObj.id || saleId;
@@ -210,72 +218,82 @@ function renderConstrucaoHistory(checks) {
 }
 
 window.openNewConstrucaoModal = function() {
-    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
-    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+    try {
+        let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+        let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
 
-    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
-    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+        if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+        if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
 
-    if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
-        saleId = AppState.sales[0].id;
-    }
-    
-    if (!customerId || !saleId) {
-        alert("Por favor, selecione um cliente e um contrato na aba Contrato de Venda primeiro.");
-        return;
-    }
+        if (!saleId && window.AnexosState && window.AnexosState.activeContract) {
+            saleId = window.AnexosState.activeContract.id;
+        }
+        if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
+            saleId = AppState.sales[0].id;
+        }
+        
+        if (!customerId || !saleId) {
+            alert("Por favor, selecione um cliente e um contrato na aba Contrato de Venda primeiro.");
+            return;
+        }
 
-    let contractObj = { customerName: "Cliente" };
-    if (typeof AppState !== 'undefined' && AppState.sales) {
-        const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
-        if (saleObj) contractObj = saleObj;
-    }
+        let contractObj = { customerName: "Cliente" };
+        if (window.AnexosState && window.AnexosState.activeContract && (String(window.AnexosState.activeContract.id) === String(saleId) || String(window.AnexosState.activeContract.receivableBillId) === String(saleId))) {
+            contractObj = window.AnexosState.activeContract;
+        } else if (typeof AppState !== 'undefined' && AppState.sales) {
+            const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+            if (saleObj) contractObj = saleObj;
+        }
 
-    const today = new Date().toISOString().split('T')[0];
-    const responsible = window.ConstrucaoApp.getResponsibleOperator(contractObj);
-    
-    let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}">${s}</option>`).join('');
+        const today = new Date().toISOString().split('T')[0];
+        const responsible = window.ConstrucaoApp.getResponsibleOperator(contractObj);
+        
+        let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}">${s}</option>`).join('');
 
-    const modalHtml = `
-    <div id="modal-nova-vistoria" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center;">
-        <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-            <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="plus-circle" style="width: 20px;"></i> Inserir Vistoria Manual
-            </h3>
-            
-            <div style="display: flex; gap: 15px; margin-bottom: 15px;">
-                <div style="flex: 1;">
-                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Data da Vistoria</label>
-                    <input type="date" id="vistoria-data" value="${today}" class="form-control" style="width: 100%;">
+        const modalHtml = `
+        <div id="modal-nova-vistoria" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center;">
+            <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="plus-circle" style="width: 20px;"></i> Inserir Vistoria Manual
+                </h3>
+                
+                <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                    <div style="flex: 1;">
+                        <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Data da Vistoria</label>
+                        <input type="date" id="vistoria-data" value="${today}" class="form-control" style="width: 100%;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Responsável</label>
+                        <input type="text" id="vistoria-resp" value="${responsible}" class="form-control" style="width: 100%; background: #f1f5f9;">
+                    </div>
                 </div>
-                <div style="flex: 1;">
-                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Responsável</label>
-                    <input type="text" id="vistoria-resp" value="${responsible}" class="form-control" style="width: 100%; background: #f1f5f9;">
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Estágio da Obra</label>
+                    <select id="vistoria-stage" class="form-control" style="width: 100%;">
+                        ${stageOptions}
+                    </select>
                 </div>
-            </div>
 
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Estágio da Obra</label>
-                <select id="vistoria-stage" class="form-control" style="width: 100%;">
-                    ${stageOptions}
-                </select>
-            </div>
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivo (Foto ou PDF)</label>
+                    <input type="file" id="vistoria-file" accept="image/*,.pdf" class="form-control" style="width: 100%; padding: 8px;">
+                </div>
 
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivo (Foto ou PDF)</label>
-                <input type="file" id="vistoria-file" accept="image/*,.pdf" class="form-control" style="width: 100%; padding: 8px;">
-            </div>
-
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="window.saveNovaVistoria()" id="btn-salvar-vistoria">Salvar Vistoria</button>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
+                    <button type="button" class="btn btn-primary" onclick="window.saveNovaVistoria()" id="btn-salvar-vistoria">Salvar Vistoria</button>
+                </div>
             </div>
         </div>
-    </div>
-    `;
+        `;
 
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    if (window.lucide) lucide.createIcons();
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        if (window.lucide) lucide.createIcons();
+    } catch(err) {
+        console.error("Erro ao abrir modal:", err);
+        alert("Erro ao abrir janela de vistoria. Verifique se há um contrato válido.");
+    }
 };
 
 window.saveNovaVistoria = async function() {
@@ -290,12 +308,31 @@ window.saveNovaVistoria = async function() {
         return;
     }
 
-    const customerId = AppState.selectedCustomerId;
-    const saleId = AppState.selectedSaleId;
-    
+    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+
+    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+
+    if (!saleId && window.AnexosState && window.AnexosState.activeContract) {
+        saleId = window.AnexosState.activeContract.id;
+    }
+    if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) {
+        saleId = AppState.sales[0].id;
+    }
+
+    if (!customerId || !saleId) {
+        alert("Cliente ou Contrato não identificados.");
+        return;
+    }
+
     let contractNumber = saleId;
     let companyId = "N/D";
-    if (AppState.sales) {
+    
+    if (window.AnexosState && window.AnexosState.activeContract && (String(window.AnexosState.activeContract.id) === String(saleId) || String(window.AnexosState.activeContract.receivableBillId) === String(saleId))) {
+        contractNumber = window.AnexosState.activeContract.contractNumber || window.AnexosState.activeContract.id || saleId;
+        companyId = window.AnexosState.activeContract.companyId || companyId;
+    } else if (typeof AppState !== 'undefined' && AppState.sales) {
         const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
         if (saleObj) {
             contractNumber = saleObj.contractNumber || saleObj.id || saleId;

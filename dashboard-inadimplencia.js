@@ -487,10 +487,9 @@ const DashboardInadimplencia = (function() {
       else comp[delayBucket + '_v'] += (b.overdueValue || 0);
 
       // Operador
-      let opName = b.subjudice === 'S' ? 'APOIO JURÍDICO' : (b.assignedOperator || 'NÃO ATRIBUÍDO');
-      opName = opName.toUpperCase().trim();
+      let opName = (b.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
       if (!operatorData[opName]) {
-          operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[], isSubjudice: b.subjudice === 'S' };
+          operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
       const op = operatorData[opName];
       op.customers.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
@@ -498,15 +497,22 @@ const DashboardInadimplencia = (function() {
       op[delayBucket+'_c'] += (b.billCount||1); op[delayBucket+'_v'] += (b.overdueValue||0);
 
       if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
+      if (b.subjudice === 'S') {
+          if (!window._subjudiceClientsList) window._subjudiceClientsList = [];
+          window._subjudiceClientsList.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0, billCount: b.billCount || 1 });
+      }
     });
 
     const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
     const dateStr = new Date().toLocaleDateString('pt-BR');
 
-    const opSorted = Object.values(operatorData).filter(op => !op.isSubjudice).sort((a,b) => b.total_v - a.total_v);
-    const subjudiceOps = Object.values(operatorData).filter(op => op.isSubjudice);
-    const subjudiceTotal = subjudiceOps.reduce((acc, op) => ({ c: acc.c + op.total_c, v: acc.v + op.total_v }), { c:0, v:0 });
-    const subjudiceClients = subjudiceOps.flatMap(op => op.customers).sort((a,b) => b.value - a.value);
+    const opSorted = Object.values(operatorData).sort((a,b) => b.total_v - a.total_v);
+    
+    let subjudiceClientsList = window._subjudiceClientsList || [];
+    window._subjudiceClientsList = []; // clear for next run
+    const subjudiceTotal = subjudiceClientsList.reduce((acc, c) => ({ c: acc.c + c.billCount, v: acc.v + c.value }), { c:0, v:0 });
+    const subjudiceClients = subjudiceClientsList.sort((a,b) => b.value - a.value);
+
     const opTotals = { d30_c:0,d30_v:0,d60_c:0,d60_v:0,d90_c:0,d90_v:0,d120_c:0,d120_v:0,d120p_c:0,d120p_v:0,total_c:0,total_v:0 };
     opSorted.forEach(op => { ['d30','d60','d90','d120','d120p','total'].forEach(k => { opTotals[k+'_c'] += op[k+'_c']; opTotals[k+'_v'] += op[k+'_v']; }); });
 
@@ -547,29 +553,35 @@ const DashboardInadimplencia = (function() {
     const spark31t = snaps.map(s=>s.above31_count||0);
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
-@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}
+@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;padding:0;color:#1e293b;font-size:10px;background:#f1f5f9;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 @media print{.no-print{display:none!important}body{background:white}}
 .no-print{text-align:center;padding:8px;background:#0f172a}
 .no-print button{padding:7px 24px;background:#22c55e;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:700;font-size:11px}
 h1{text-align:center;color:#0f172a;margin:0 0 10px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-.kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
-.kpi{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;text-align:center}
-.kpi-label{font-size:8.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em}
-.kpi-value{font-size:18px;font-weight:800;color:#0f172a;margin-top:3px}
-.row-2{display:grid;grid-template-columns:196px 1fr;gap:10px;margin-bottom:10px;align-items:start}
+.kpi-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin-bottom:15px; }
+.kpi { display:flex; align-items:center; gap:12px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
+.kpi-icon-wrapper { width:40px; height:40px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.kpi.danger .kpi-icon-wrapper { background:#fee2e2; color:#ef4444; }
+.kpi.warning .kpi-icon-wrapper { background:#fef3c7; color:#f59e0b; }
+.kpi.success .kpi-icon-wrapper { background:#dcfce7; color:#10b981; }
+.kpi.info .kpi-icon-wrapper { background:#e0f2fe; color:#3b82f6; }
+.kpi-content { display:flex; flex-direction:column; gap:4px; }
+.kpi-label { font-size:9.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
+.kpi-value { font-size:20px; font-weight:800; color:#0f172a; line-height:1; }
+.row-2{display:grid;grid-template-columns:1fr 2fr;gap:15px;margin-bottom:15px;align-items:start}
 .bar-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px}
-.bar-title{font-size:9px;font-weight:700;color:#334155;margin-bottom:4px}
-.bar-delta{font-size:11px;font-weight:800;color:#16a34a;margin-bottom:8px}
-.bars-row{display:flex;gap:20px;justify-content:center;align-items:flex-end}
-.legend-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;justify-content:center}
-.legend-item{display:flex;align-items:center;gap:3px;font-size:7.5px;color:#64748b}
-.legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.bar-title{font-size:10px;font-weight:700;color:#334155;margin-bottom:4px}
+.bar-delta{font-size:12px;font-weight:800;color:#16a34a;margin-bottom:10px}
+.bars-row{display:flex;gap:30px;justify-content:center;align-items:flex-end}
+.legend-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;justify-content:center}
+.legend-item{display:flex;align-items:center;gap:4px;font-size:8.5px;color:#64748b}
+.legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
 .op-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
 table{width:100%;border-collapse:collapse}
-th{background:#f8fafc;padding:6px 8px;font-size:8px;font-weight:700;color:#475569;text-transform:uppercase;border-bottom:2px solid #e2e8f0;text-align:center}
+th{background:#f8fafc;padding:6px 8px;font-size:8.5px;font-weight:700;color:#475569;text-transform:uppercase;border-bottom:2px solid #e2e8f0;text-align:center}
 th.L{text-align:left}
-td{padding:5px 8px;font-size:8.5px;border-bottom:1px solid #f1f5f9;text-align:center;vertical-align:middle}
+td{padding:6px 8px;font-size:9px;border-bottom:1px solid #f1f5f9;text-align:center;vertical-align:middle}
 td.L{text-align:left;font-weight:700;color:#1e293b}
 tr:nth-child(even) td{background:#fafafa}
 tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:2px solid #fed7aa}
@@ -595,10 +607,10 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 <div class="no-print"><button onclick="window.print()">🖨️ Imprimir Sprint Diário</button></div>
 <h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
 <div class="kpi-strip">
-  <div class="kpi"><div class="kpi-label">Valor em Atraso</div><div class="kpi-value">${fmtK(totalOverdue)}</div></div>
-  <div class="kpi"><div class="kpi-label">Clientes em Atraso</div><div class="kpi-value">${uniqueClients.size}</div></div>
-  <div class="kpi"><div class="kpi-label">Títulos Vencidos</div><div class="kpi-value">${totalBills}</div></div>
-  <div class="kpi"><div class="kpi-label">Atraso Médio · Em dias</div><div class="kpi-value">${avgDelay}</div></div>
+  <div class="kpi danger"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div><div class="kpi-content"><span class="kpi-label">Valor em Atraso</span><span class="kpi-value">${fmtK(totalOverdue)}</span></div></div>
+  <div class="kpi warning"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></div><div class="kpi-content"><span class="kpi-label">Clientes em Atraso</span><span class="kpi-value">${uniqueClients.size}</span></div></div>
+  <div class="kpi success"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg></div><div class="kpi-content"><span class="kpi-label">Títulos Vencidos</span><span class="kpi-value">${totalBills}</span></div></div>
+  <div class="kpi info"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div><div class="kpi-content"><span class="kpi-label">Atraso Médio</span><span class="kpi-value">${avgDelay} dias</span></div></div>
 </div>
 <div class="row-2">
   <div class="bar-panel">

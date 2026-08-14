@@ -594,8 +594,10 @@ const SiengeApiService = {
 
               
               this.saveDefaultersSnapshot(result).catch(console.error);
+              if (this.syncSubjudiceHistory) this.syncSubjudiceHistory(result).catch(console.error);
           } else {
              this.saveDefaultersSnapshot(result).catch(console.error);
+             if (this.syncSubjudiceHistory) this.syncSubjudiceHistory(result).catch(console.error);
           }
 
           return result;
@@ -1697,6 +1699,56 @@ const SiengeApiService = {
 
     } catch (e) {
       console.error("[Sienge] Exceção ao salvar snapshot:", e);
+    }
+  },
+
+  // 29. Sincronizar Histórico de Sub Judice no Firebase
+  async syncSubjudiceHistory(bills) {
+    if (!window.firebaseDb || !window.firebaseCollections) return;
+    try {
+      console.log("[Firebase] Sincronizando histórico Sub Judice...");
+      const { collection, getDocs, doc, setDoc, query, where } = window.firebaseCollections;
+      
+      const q = query(collection(window.firebaseDb, "sienge_customers"), where("is_subjudice", "==", true));
+      const snap = await getDocs(q);
+      const currentFirebaseSubjudice = new Map();
+      snap.forEach(d => currentFirebaseSubjudice.set(d.id, d.data()));
+      
+      const siengeSubjudice = new Set();
+      bills.forEach(b => {
+         if (b.subjudice === 'S') siengeSubjudice.add(String(b.customerId || b.clientId));
+      });
+      
+      const todayStr = new Date().toISOString();
+      const batchPromises = [];
+      
+      for (const cId of siengeSubjudice) {
+         if (!currentFirebaseSubjudice.has(cId)) {
+             const docRef = doc(window.firebaseDb, "sienge_customers", cId);
+             batchPromises.push(setDoc(docRef, {
+                 is_subjudice: true,
+                 subjudice_entry_date: todayStr,
+                 subjudice_exit_date: null
+             }, { merge: true }));
+         }
+      }
+      
+      for (const [cId, data] of currentFirebaseSubjudice.entries()) {
+         if (!siengeSubjudice.has(cId)) {
+             const docRef = doc(window.firebaseDb, "sienge_customers", cId);
+             batchPromises.push(setDoc(docRef, {
+                 is_subjudice: false,
+                 subjudice_exit_date: todayStr
+             }, { merge: true }));
+         }
+      }
+      
+      await Promise.allSettled(batchPromises);
+      if (batchPromises.length > 0) {
+         console.log(`[Firebase] Sincronizado histórico Sub Judice. ${batchPromises.length} alterações.`);
+      }
+    } catch (e) {
+      console.error("[Firebase] Erro no syncSubjudiceHistory:", e);
     }
   }
 };
