@@ -22553,6 +22553,10 @@ window.calculateSimpleRenegotiation = function(prefix = '') {
     const saldo = Math.max(0, totalDebt - sinalRs);
     const parcelaVal = numInst > 0 ? saldo / numInst : 0;
 
+    const vincendasBills = g_renegBills.filter(b => !b.isOverdue);
+    const vincendasEl = document.getElementById(prefix + 'reneg-vincendas');
+    if (vincendasEl) vincendasEl.textContent = vincendasBills.length.toString();
+
     if (debtEl) debtEl.textContent = totalDebt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     if (convertedEl) convertedEl.textContent = sinalRs.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) + ` (${sinalPct.toFixed(1)}%)`;
     if (saldoEl) saldoEl.textContent = saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -22561,7 +22565,7 @@ window.calculateSimpleRenegotiation = function(prefix = '') {
 
 window.applyRenegotiationText = function(prefix = '') {
     if ((!g_renegBills || g_renegBills.length === 0) && AppState.currentContractInstallments) {
-        if (window.calculateRenegotiation) window.calculateRenegotiation(prefix);
+        if (window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation(prefix);
     }
     if (!g_renegBills) return;
 

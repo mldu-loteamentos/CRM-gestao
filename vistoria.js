@@ -255,18 +255,7 @@ async function buscarCoordenadasLote() {
             throw new Error("Lote não encontrado no arquivo KMZ nem no cache da vistoria.");
         }
         
-        // --- DEBUG INFO ---
-    try {
-        const debugDiv = document.createElement('div');
-        debugDiv.id = 'debug-coord-div';
-        debugDiv.style.fontSize = '10px';
-        debugDiv.style.color = '#888';
-        debugDiv.style.marginTop = '10px';
-        debugDiv.style.textAlign = 'center';
-        debugDiv.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}<br>Lote: ${loteCoords.lat.toFixed(5)}, ${loteCoords.lng.toFixed(5)}`;
-        document.getElementById('card-content').appendChild(debugDiv);
-    } catch(e){}
-    // ------------------
+        // Removed DEBUG INFO
 
         iniciarGPS();
         
@@ -296,19 +285,14 @@ function iniciarGPS() {
             const dist = calcCrow(userLat, userLng, loteCoords.lat, loteCoords.lng);
             currentDistance = Math.round(dist * 1000);
             
-            try {
-                const dbg = document.getElementById('debug-coord-div');
-                if(dbg) {
-                    dbg.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}<br>Lote: ${loteCoords.lat.toFixed(5)}, ${loteCoords.lng.toFixed(5)}<br>User: ${userLat.toFixed(5)}, ${userLng.toFixed(5)}<br>Dist: ${currentDistance}m`;
-                }
-            } catch(e){}
+            // Removed update debug
             
             // Salvar GPS atual globalmente para a marca d'água
             window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             
             // BYPASS PARA TESTE (Sempre aprova a distância)
             if (currentDistance <= 20 || true) {
-                setStatus(`📍 Modo de Teste: Perguntas e Fotos liberadas! (Distância real: ${currentDistance}m)`, "success");
+                setStatus(`📍 Você chegou no local! (Distância real: ${currentDistance}m)`, "success");
                 document.getElementById('btn-maps').style.display = 'none';
                 document.getElementById('photo-area').style.display = 'block';
                 document.getElementById('q-agua').disabled = false;

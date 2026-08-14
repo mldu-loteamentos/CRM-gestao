@@ -227,21 +227,7 @@ window.VerificarConstrucaoApp = {
             // Populate Filter Selects
             this.populateFilterSelects();
 
-            // DEBUG BANNER
-            try {
-                let dbg = document.getElementById('vc-debug-banner');
-                if (!dbg) {
-                    dbg = document.createElement('div');
-                    dbg.id = 'vc-debug-banner';
-                    dbg.style.padding = '10px';
-                    dbg.style.background = '#fee2e2';
-                    dbg.style.color = '#991b1b';
-                    dbg.style.marginBottom = '10px';
-                    dbg.style.fontSize = '12px';
-                    results.insertBefore(dbg, results.firstChild);
-                }
-                dbg.innerHTML = `DEBUG => Total Clientes no rawClientList: ${clients.length} | thresholdDays: ${thresholdDays} | Elegíveis (>= ${thresholdDays}): ${elegiveis.length} | rows: ${rows.length}`;
-            } catch(e) {}
+            // Removed DEBUG BANNER
 
             this.renderTable();
 
@@ -574,7 +560,7 @@ window.VerificarConstrucaoApp = {
             if (host.includes('vercel.app')) port = '';
             
             const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
-            const cRes = await fetch(`http://${host}${port}/sienge-proxy/sales-contracts/${row.contractId}`, {
+            const cRes = await fetch(`/api/sienge-proxy/sales-contracts/${row.contractId}`, {
                 headers: { 'Authorization': authHeader }
             });
             if (!cRes.ok) throw new Error("Falha ao consultar contrato no Sienge.");
@@ -598,7 +584,7 @@ window.VerificarConstrucaoApp = {
                 const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i+1} - ${padraoData}.jpg`;
                 const descricaoSienge = `${padraoData} - Foto de Vistoria ${i+1}`;
                 
-                const apiUrl = `http://${host}${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                const apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
                 
                 const formData = new FormData();
                 formData.append('file', blob, nomeFinal);
