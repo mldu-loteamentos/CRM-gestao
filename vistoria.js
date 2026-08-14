@@ -294,7 +294,10 @@ function iniciarGPS() {
                 document.getElementById('q-estagio').disabled = false;
                 if(document.getElementById('q-obs')) document.getElementById('q-obs').disabled = false;
             } else {
-                setStatus(`⚠️ Você está a ${Math.round(currentDistance)}m do lote. Aproxime-se para menos de 20m para liberar as respostas.`, "error");
+                let distFormatStr = currentDistance > 999 
+                    ? (currentDistance / 1000).toFixed(1).replace('.', ',') + 'km' 
+                    : Math.round(currentDistance) + 'm';
+                setStatus(`⚠️ Você está a ${distFormatStr} do lote. Aproxime-se para menos de 20m para liberar as respostas.`, "error");
                 document.getElementById('btn-maps').style.display = 'block';
                 document.getElementById('photo-area').style.display = 'none';
                 document.getElementById('q-agua').disabled = true;

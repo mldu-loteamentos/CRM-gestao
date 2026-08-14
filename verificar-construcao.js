@@ -36,9 +36,16 @@ function _vcGetCity(costCenterId) {
 
 window.VerificarConstrucaoApp = {
     renderedRows: null,
+    allRows: null,
+    activeFilters: {
+        cidade: 'Todos',
+        empreendimento: 'Todos',
+        status: 'Todos'
+    },
 
     init() {
         this.render();
+        this.loadData();
     },
 
     render() {
@@ -55,8 +62,8 @@ window.VerificarConstrucaoApp = {
 
                 <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <div>
-                        <button class="btn btn-primary" onclick="window.VerificarConstrucaoApp.loadData()">
-                            <i data-lucide="refresh-cw" style="width: 16px;"></i> Carregar Pendentes
+                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="document.getElementById('modal-filtros-vistoria').style.display='flex'">
+                            <i data-lucide="filter" style="width: 16px;"></i> Filtros Avançados
                         </button>
                     </div>
                     <div style="display: flex; gap: 10px;">
@@ -108,6 +115,43 @@ window.VerificarConstrucaoApp = {
                     </div>
                 </div>
             </div>
+
+            <!-- Modal Filtros Avançados Vistoria -->
+            <div id="modal-filtros-vistoria" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
+                <div class="modal-content" style="width: 500px; max-width: 95%;">
+                    <div class="modal-header">
+                        <h2>Filtros Avançados (Vistoria)</h2>
+                        <button class="modal-close" onclick="document.getElementById('modal-filtros-vistoria').style.display='none'"><i data-lucide="x"></i></button>
+                    </div>
+                    <div class="modal-body" style="min-height: 200px;">
+                        <div style="margin-bottom: 15px;">
+                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Cidade</label>
+                            <select id="vc-filter-cidade" class="form-input" onchange="window.VerificarConstrucaoApp.updateFilterOptions()" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                                <option value="Todos">Todos</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Empreendimento</label>
+                            <select id="vc-filter-empreendimento" class="form-input" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                                <option value="Todos">Todos</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="font-weight: 600; color: #64748b; font-size: 0.9rem; display: block; margin-bottom: 5px;">Status</label>
+                            <select id="vc-filter-status" class="form-input" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                                <option value="Todos">Todos</option>
+                                <option value="Pendente de Vistoria">Pendente de Vistoria</option>
+                                <option value="Link Enviado – Aguardando Fotos">Link Enviado – Aguardando Fotos</option>
+                                <option value="Aguardando Validação">Aguardando Validação</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 25px;">
+                            <button class="btn btn-outline" style="flex:1; border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.clearFilters()">Limpar Filtros</button>
+                            <button class="btn btn-success" style="flex:1;" onclick="window.VerificarConstrucaoApp.applyFilters()">Aplicar Filtros</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
 
         if (window.lucide) lucide.createIcons();
@@ -116,7 +160,6 @@ window.VerificarConstrucaoApp = {
     async loadData() {
         const loading = document.getElementById('vc-loading');
         const results = document.getElementById('vc-results');
-        const tbody = document.getElementById('vc-tbody');
         const btnWpp = document.getElementById('btn-solicitar-wpp');
 
         loading.style.display = 'block';
@@ -126,22 +169,17 @@ window.VerificarConstrucaoApp = {
         const thresholdDays = _vcGetThreshold();
 
         try {
-            // 1. Filtrar clientes pelo atraso
             const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
             const elegiveis = clients.filter(c => {
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
                 return maxDelay >= thresholdDays;
             });
 
-            // 2. Buscar vistorias ativas no Firebase
             const checksByContract = {};
             if (window.firebaseDb && window.firebaseCollections) {
                 try {
                     const { collection, getDocs, query, where } = window.firebaseCollections;
-                    const q = query(
-                        collection(window.firebaseDb, 'vistorias'),
-                        where('status', '!=', 'concluida')
-                    );
+                    const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
                     const snap = await getDocs(q);
                     snap.forEach(doc => {
                         checksByContract[String(doc.data().contractId)] = { id: doc.id, ...doc.data() };
@@ -151,27 +189,18 @@ window.VerificarConstrucaoApp = {
                 }
             }
 
-            // 3. Montar linhas com campos corretos
             const rows = [];
             elegiveis.forEach(c => {
                 const costCenterId = c.costCenterId;
                 const city = _vcGetCity(costCenterId);
                 const ccName = _vcGetCostCenterName(costCenterId);
-
-                // Empreendimento: parte após o "-" do nome do centro de custo
                 let empreendimento = '-';
                 if (ccName && ccName !== '-') {
-                    if (ccName.includes('-')) {
-                        empreendimento = ccName.split('-').slice(1).join('-').trim();
-                    } else {
-                        empreendimento = ccName.trim();
-                    }
+                    empreendimento = ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
                 }
 
                 const contractId = c.saleId || c.contractId || c.id;
-                // unitName é o campo correto do objeto consolidated
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
-
                 const vistoriaAtiva = checksByContract[String(contractId)];
 
                 let statusLabel = 'Pendente de Vistoria';
@@ -187,40 +216,19 @@ window.VerificarConstrucaoApp = {
                     }
                 }
 
-                rows.push({ customerId: c.customerId, contractId, cidade: city, costCenterId, empreendimento, unidade, statusLabel, statusColor, vistoriaAtiva });
+                rows.push({ customerId: c.customerId, contractId, cidade: city, costCenterId, empreendimento, unidade, statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length });
             });
 
-            // Ordenar: validação primeiro, depois aguardando, depois pendente, por cidade, empreendimento, unidade
-            rows.sort((a, b) => {
-                const rank = s => s.includes('Validar') ? 0 : (s.includes('Aguardando') ? 1 : 2);
-                if (rank(a.statusLabel) !== rank(b.statusLabel)) return rank(a.statusLabel) - rank(b.statusLabel);
-                return a.cidade.localeCompare(b.cidade) || a.empreendimento.localeCompare(b.empreendimento) || a.unidade.localeCompare(b.unidade);
-            });
+            // Update originalIdx explicitly
+            rows.forEach((r, i) => r.originalIdx = i);
+            this.allRows = rows;
+            this.renderedRows = []; // Will be populated by renderTable
+            
+            // Populate Filter Selects
+            this.populateFilterSelects();
 
-            this.renderedRows = rows;
+            this.renderTable();
 
-            let html = '';
-            if (rows.length === 0) {
-                html = `<tr><td colspan="5" style="padding: 20px; text-align: center; color: #666;">Nenhum título com atraso >= ${thresholdDays} dias.</td></tr>`;
-            } else {
-                rows.forEach((r, idx) => {
-                    html += `
-                        <tr style="border-bottom: 1px solid #e2e8f0;" data-idx="${idx}">
-                            <td style="padding: 12px; text-align: center;">
-                                <input type="checkbox" class="vc-row-checkbox" value="${idx}" onchange="window.VerificarConstrucaoApp.updateBtn()">
-                            </td>
-                            <td style="padding: 12px;">${r.cidade}</td>
-                            <td style="padding: 12px;">${r.empreendimento}</td>
-                            <td style="padding: 12px; font-weight: 600;">${r.unidade}</td>
-                            <td style="padding: 12px; ${r.statusColor}">
-                                ${r.statusLabel === 'Aguardando Validação' ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${idx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` : r.statusLabel}
-                            </td>
-                        </tr>
-                    `;
-                });
-            }
-
-            tbody.innerHTML = html;
             loading.style.display = 'none';
             results.style.display = 'block';
 
@@ -230,8 +238,157 @@ window.VerificarConstrucaoApp = {
         }
     },
 
+    populateFilterSelects() {
+        if (!this.allRows) return;
+        const cidades = new Set();
+        const empreendimentos = new Set();
+        this.allRows.forEach(r => {
+            cidades.add(r.cidade);
+            empreendimentos.add(r.empreendimento);
+        });
+
+        const cidSel = document.getElementById('vc-filter-cidade');
+        const empSel = document.getElementById('vc-filter-empreendimento');
+        
+        if(cidSel) {
+            cidSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(cidades).sort().map(c => `<option value="${c}">${c}</option>`).join('');
+            cidSel.value = this.activeFilters.cidade;
+        }
+        if(empSel) {
+            empSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(empreendimentos).sort().map(e => `<option value="${e}">${e}</option>`).join('');
+            empSel.value = this.activeFilters.empreendimento;
+        }
+    },
+
+    updateFilterOptions() {
+        const cid = document.getElementById('vc-filter-cidade').value;
+        const empSel = document.getElementById('vc-filter-empreendimento');
+        if (!this.allRows || !empSel) return;
+        
+        const empreendimentos = new Set();
+        this.allRows.forEach(r => {
+            if (cid === 'Todos' || r.cidade === cid) empreendimentos.add(r.empreendimento);
+        });
+        
+        empSel.innerHTML = '<option value="Todos">Todos</option>' + Array.from(empreendimentos).sort().map(e => `<option value="${e}">${e}</option>`).join('');
+        empSel.value = 'Todos';
+    },
+
+    applyFilters() {
+        this.activeFilters.cidade = document.getElementById('vc-filter-cidade').value;
+        this.activeFilters.empreendimento = document.getElementById('vc-filter-empreendimento').value;
+        this.activeFilters.status = document.getElementById('vc-filter-status').value;
+        document.getElementById('modal-filtros-vistoria').style.display = 'none';
+        this.renderTable();
+    },
+
+    clearFilters() {
+        this.activeFilters = { cidade: 'Todos', empreendimento: 'Todos', status: 'Todos' };
+        document.getElementById('vc-filter-cidade').value = 'Todos';
+        this.updateFilterOptions();
+        document.getElementById('vc-filter-empreendimento').value = 'Todos';
+        document.getElementById('vc-filter-status').value = 'Todos';
+        this.applyFilters();
+    },
+
+    renderTable() {
+        const tbody = document.getElementById('vc-tbody');
+        if (!tbody || !this.allRows) return;
+
+        let filtered = this.allRows.filter(r => {
+            if (this.activeFilters.cidade !== 'Todos' && r.cidade !== this.activeFilters.cidade) return false;
+            if (this.activeFilters.empreendimento !== 'Todos' && r.empreendimento !== this.activeFilters.empreendimento) return false;
+            if (this.activeFilters.status !== 'Todos' && r.statusLabel !== this.activeFilters.status) return false;
+            return true;
+        });
+
+        // Store linearly for idx matching
+        this.renderedRows = filtered;
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="padding: 20px; text-align: center; color: #666;">Nenhum título encontrado com os filtros atuais.</td></tr>`;
+            return;
+        }
+
+        // Grouping: Cidade -> Empreendimento
+        const grouped = {};
+        filtered.forEach((r, idx) => {
+            if (!grouped[r.cidade]) grouped[r.cidade] = {};
+            if (!grouped[r.cidade][r.empreendimento]) grouped[r.cidade][r.empreendimento] = [];
+            grouped[r.cidade][r.empreendimento].push({ ...r, currentIdx: idx });
+        });
+
+        let html = '';
+        
+        Object.keys(grouped).sort().forEach(cidade => {
+            const safeCidade = cidade.replace(/[^a-zA-Z0-9]/g, '_');
+            
+            // City Header Row
+            html += `
+                <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                    <td style="padding: 10px; text-align: center; width: 40px;">
+                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')">
+                    </td>
+                    <td colspan="4" style="padding: 10px; font-weight: bold; font-size: 0.9rem;">
+                        <i data-lucide="map-pin" style="width: 14px; margin-right: 5px;"></i> ${cidade}
+                    </td>
+                </tr>
+            `;
+
+            Object.keys(grouped[cidade]).sort().forEach(emp => {
+                const safeEmp = emp.replace(/[^a-zA-Z0-9]/g, '_');
+                
+                // Empreendimento Header Row
+                html += `
+                    <tr style="background: #fdfdfd; border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 8px; text-align: center; width: 40px; border-right: 1px solid #e2e8f0;"></td>
+                        <td style="padding: 8px; text-align: center; width: 40px;">
+                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')">
+                        </td>
+                        <td colspan="3" style="padding: 8px; font-weight: 600; color: #475569;">
+                            ${emp}
+                        </td>
+                    </tr>
+                `;
+
+                // Unidades Rows
+                const unidades = grouped[cidade][emp].sort((a, b) => a.unidade.localeCompare(b.unidade));
+                unidades.forEach(u => {
+                    const validAction = u.statusLabel === 'Aguardando Validação' 
+                        ? `<button class="btn btn-primary btn-sm" onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding: 4px 8px; font-size: 0.8rem;">Validar Vistoria</button>` 
+                        : u.statusLabel;
+
+                    html += `
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td colspan="2" style="border-right: 1px solid #e2e8f0;"></td>
+                            <td style="padding: 8px 8px 8px 20px; text-align: center; width: 40px;">
+                                <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()">
+                            </td>
+                            <td style="padding: 8px; font-weight: 600;">${u.unidade}</td>
+                            <td style="padding: 8px; ${u.statusColor}">${validAction}</td>
+                        </tr>
+                    `;
+                });
+            });
+        });
+
+        tbody.innerHTML = html;
+        if (window.lucide) lucide.createIcons();
+        this.updateBtn();
+    },
+
     toggleAll(cb) {
-        document.querySelectorAll('.vc-row-checkbox').forEach(c => c.checked = cb.checked);
+        document.querySelectorAll('.vc-row-checkbox, .vc-city-cb, .vc-emp-cb').forEach(c => c.checked = cb.checked);
+        this.updateBtn();
+    },
+
+    toggleCity(cb, safeCidade) {
+        document.querySelectorAll(\`.city-\${safeCidade}\`).forEach(c => c.checked = cb.checked);
+        this.updateBtn();
+    },
+
+    toggleEmp(cb, safeCidade, safeEmp) {
+        document.querySelectorAll(\`.emp-\${safeEmp}\`).forEach(c => c.checked = cb.checked);
         this.updateBtn();
     },
 
@@ -242,12 +399,13 @@ window.VerificarConstrucaoApp = {
     },
 
     editarRegua() {
-        if (typeof window.switchTab === 'function') {
+        if (typeof switchRegrasTab === 'function') {
             window.switchTab('config');
             setTimeout(() => {
-                const regrasTab = document.querySelector('.config-tab-btn[data-tab="regras"]');
-                if (regrasTab) regrasTab.click();
-            }, 100);
+                switchRegrasTab('regra-regua');
+            }, 150);
+        } else {
+            alert('Acesso direto à régua não disponível.');
         }
     },
 
@@ -327,9 +485,9 @@ window.VerificarConstrucaoApp = {
             else if (hour >= 18) greeting = 'Boa noite';
             
             let numCidades = Object.keys(cityGroups).length;
-            let cidadeStr = numCidades > 1 ? 'cidades' : 'cidade';
+            let prefixo = numCidades > 1 ? 'nas cidades:' : 'na cidade:';
             
-            let message = `${greeting}! Segue a lista de vistorias a serem realizadas na(s) ${cidadeStr}:\n\n`;
+            let message = `${greeting}! Segue a lista de vistorias a serem realizadas ${prefixo}\n\n`;
 
             for (const city in cityGroups) {
                 message += `*${city.toUpperCase()}*\n`;
