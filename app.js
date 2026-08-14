@@ -22487,9 +22487,9 @@ window.exportAgendaToExcel = function() {
     document.body.removeChild(link);
 };
 
-window.calculateRenegotiation = function(prefix = '') {
+window.calculateSimpleRenegotiation = function(prefix = '') {
     if (AppState.currentContractInstallments) {
-        const allUnpaidBills = AppState.currentContractInstallments.filter(i => i.status === 1 || i.status === 'Vencida' || i.status === 'A vencer' || i.status === 'A Vencer');
+        const allUnpaidBills = AppState.currentContractInstallments.filter(i => i.installmentSituation === 1 || i.installmentSituation === '1' || i.status === 1 || i.status === 'Vencida' || i.status === 'A vencer' || i.status === 'A Vencer');
         g_renegBills = allUnpaidBills.map(b => {
             let corrected = b.value || 0;
             let multa = 0;

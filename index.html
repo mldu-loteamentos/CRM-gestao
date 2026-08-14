@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.167 &nbsp;Â·&nbsp; 13/08/2026
+            v1.0.168 &nbsp;Â·&nbsp; 13/08/2026
           </span>
         </div>
       </div>
@@ -3677,21 +3677,21 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                               <div style="flex: 1; min-width: 0;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Sinal (Entrada)</label>
                                  <div style="display: flex; gap: 5px;">
-                                    <select id="reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                                    <select id="reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation()">
                                        <option value="%">%</option>
                                        <option value="R$">R$</option>
                                     </select>
-                                    <input type="number" id="reneg-sinal-value" class="form-control" style="flex: 1; min-width: 0;" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation()" placeholder="Valor">
+                                    <input type="number" id="reneg-sinal-value" class="form-control" style="flex: 1; min-width: 0;" oninput="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation()" placeholder="Valor">
                                  </div>
                                  <small id="reneg-sinal-feedback" style="font-size: 0.7rem; color: #666;"></small>
                               </div>
                               <div style="flex: 1; min-width: 120px;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Nº Parcelas</label>
-                                 <input type="number" id="reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                                 <input type="number" id="reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation()">
                               </div>
                               <div style="flex: 1; min-width: 120px;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Data 1º Vencimento</label>
-                                 <input type="date" id="reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation()">
+                                 <input type="date" id="reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation()">
                               </div>
                            </div>
                            <div style="font-size: 0.8rem; background: white; padding: 10px; border-radius: 4px; border: 1px dashed #ccc; margin-bottom: 10px; line-height: 1.6;">
@@ -3830,7 +3830,7 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                     <i data-lucide="scale" style="width: 20px;"></i> Registro de Ocorrências Judiciais
                   </h3>
                   
-                  <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 1.5rem; align-items: stretch; height: 550px;">
+                  <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 1.5rem; align-items: stretch; min-height: 550px;">
                     <!-- Coluna Esquerda: Form -->
                     <div style="display: flex; flex-direction: column; gap: 1rem; height: 100%; min-height: 0;">
                       
@@ -3868,21 +3868,21 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                               <div style="flex: 1; min-width: 0;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Sinal (Entrada)</label>
                                  <div style="display: flex; gap: 5px;">
-                                    <select id="jud-reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                                    <select id="jud-reneg-sinal-type" class="form-control" style="width: 60px;" onchange="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation('jud-')">
                                        <option value="%">%</option>
                                        <option value="R$">R$</option>
                                     </select>
-                                    <input type="number" id="jud-reneg-sinal-value" class="form-control" style="flex: 1; min-width: 0;" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')" placeholder="Valor">
+                                    <input type="number" id="jud-reneg-sinal-value" class="form-control" style="flex: 1; min-width: 0;" oninput="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation('jud-')" placeholder="Valor">
                                  </div>
                                  <small id="jud-reneg-sinal-feedback" style="font-size: 0.7rem; color: #666;"></small>
                               </div>
                               <div style="flex: 1; min-width: 120px;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Nº Parcelas</label>
-                                 <input type="number" id="jud-reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                                 <input type="number" id="jud-reneg-installments" class="form-control" style="width: 100%;" min="3" max="5" value="3" oninput="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation('jud-')">
                               </div>
                               <div style="flex: 1; min-width: 120px;">
                                  <label style="font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; display: block;">Data 1º Vencimento</label>
-                                 <input type="date" id="jud-reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateRenegotiation) window.calculateRenegotiation('jud-')">
+                                 <input type="date" id="jud-reneg-first-date" class="form-control" style="width: 100%;" onchange="if(window.calculateSimpleRenegotiation) window.calculateSimpleRenegotiation('jud-')">
                               </div>
                            </div>
                            <div style="font-size: 0.8rem; background: white; padding: 10px; border-radius: 4px; border: 1px dashed #ccc; margin-bottom: 10px; line-height: 1.6;">
@@ -4765,25 +4765,25 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     }
   </script>
 
-  <script defer src="data.js?v=167"></script>
-  <script defer src="sienge-api.js?v=167"></script>
-  <script defer src="azure-auth.js?v=167"></script>
-  <script defer src="app.js?v=167"></script>
-  <script defer src="anexos.js?v=167"></script>
-  <script defer src="contas-pagar.js?v=167"></script>
-  <script defer src="config-tags.js?v=167"></script>
-  <script defer src="config-users.js?v=167"></script>
-  <script defer src="construcao.js?v=167"></script>
+  <script defer src="data.js?v=168"></script>
+  <script defer src="sienge-api.js?v=168"></script>
+  <script defer src="azure-auth.js?v=168"></script>
+  <script defer src="app.js?v=168"></script>
+  <script defer src="anexos.js?v=168"></script>
+  <script defer src="contas-pagar.js?v=168"></script>
+  <script defer src="config-tags.js?v=168"></script>
+  <script defer src="config-users.js?v=168"></script>
+  <script defer src="construcao.js?v=168"></script>
 
-  <script defer src="empresas.js?v=167"></script>
-  <script defer src="relacionamento.js?v=167"></script>
+  <script defer src="empresas.js?v=168"></script>
+  <script defer src="relacionamento.js?v=168"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=167"></script>
-  <script defer src="plano-financeiro.js?v=167"></script>
-  <script defer src="fiscal.js?v=167"></script>
-  <script defer src="indexadores.js?v=167"></script>
-  <script defer src="verificar-construcao.js?v=167"></script>
+  <script defer src="centros-custo.js?v=168"></script>
+  <script defer src="plano-financeiro.js?v=168"></script>
+  <script defer src="fiscal.js?v=168"></script>
+  <script defer src="indexadores.js?v=168"></script>
+  <script defer src="verificar-construcao.js?v=168"></script>
   
   <!-- Modal Compartilhar Anotação -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; pointer-events: auto !important; z-index: 999999 !important; visibility: visible !important; opacity: 1 !important; width: 100vw !important; height: 100vh !important; top: 0 !important; left: 0 !important;">
@@ -5132,7 +5132,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
     </div>
   </div>
 
-  <script src="repactuacoes.js?v=167"></script>
+  <script src="repactuacoes.js?v=168"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

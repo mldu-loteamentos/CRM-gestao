@@ -368,10 +368,26 @@ window.previewImage = function(input, previewId) {
                 const canvas = document.createElement("canvas");
                 const ctx = canvas.getContext("2d");
                 
-                // Manter resolução original
-                canvas.width = imgObj.width;
-                canvas.height = imgObj.height;
-                ctx.drawImage(imgObj, 0, 0);
+                // Redimensionar para max 1600px para evitar uploads gigantescos
+                const MAX_DIMENSION = 1600;
+                let width = imgObj.width;
+                let height = imgObj.height;
+                
+                if (width > height) {
+                    if (width > MAX_DIMENSION) {
+                        height = Math.round(height * (MAX_DIMENSION / width));
+                        width = MAX_DIMENSION;
+                    }
+                } else {
+                    if (height > MAX_DIMENSION) {
+                        width = Math.round(width * (MAX_DIMENSION / height));
+                        height = MAX_DIMENSION;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(imgObj, 0, 0, width, height);
                 
                 // Configurar texto de marca d'água
                 const dateStr = new Date().toLocaleString("pt-BR");
@@ -489,10 +505,10 @@ window.enviarVistoria = async function() {
         
         let url1 = null, url2 = null, url3 = null;
 
-        const uploadWithTimeout = (ref, file, timeoutMs = 15000) => {
+        const uploadWithTimeout = (ref, file, timeoutMs = 60000) => {
             return Promise.race([
                 uploadBytes(ref, file),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("Tempo limite de upload excedido (CORS ou Falha de Rede).")), timeoutMs))
+                new Promise((_, reject) => setTimeout(() => reject(new Error("Tempo limite de upload excedido (CORS ou Falha de Rede). O arquivo pode ser muito grande ou a internet está lenta.")), timeoutMs))
             ]);
         };
 
