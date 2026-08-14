@@ -76,7 +76,7 @@ window.VerificarConstrucaoApp = {
                         </button>
                     </div>
                     <div>
-                        <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
+                        <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:8px 18px; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 8px rgba(45,107,62,0.3); opacity:0.5; transition:opacity 0.2s;" onmouseover="if(!this.disabled)this.style.opacity='0.9'" onmouseout="this.style.opacity=this.disabled?'0.5':'1'">
                             <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
                         </button>
                     </div>
@@ -89,17 +89,17 @@ window.VerificarConstrucaoApp = {
                 <div id="vc-results" style="display: none;">
                     <div style="max-height: 75vh; overflow-y: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;" id="vc-table">
-                            <thead style="position: sticky; top: 0; background: #1e293b; z-index: 10;">
+                            <thead style="position: sticky; top: 0; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); z-index: 10;">
                                 <tr>
-                                    <th style="padding: 12px 10px; width: 40px; text-align: center; color: #94a3b8;">
+                                    <th style="padding: 12px 10px; width: 40px; text-align: center; color: rgba(255,255,255,0.8);">
                                         <input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)">
                                     </th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">VALOR VENCIDO</th>
-                                    <th style="padding: 12px 10px; color: #94a3b8; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">VALOR VENCIDO</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
                                 </tr>
                             </thead>
                             <tbody id="vc-tbody"></tbody>
@@ -123,7 +123,7 @@ window.VerificarConstrucaoApp = {
             <!-- Modal Validar Vistoria -->
             <div id="modal-validar-vistoria" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:99999; align-items:flex-start; justify-content:center; padding-top:40px; overflow-y:auto;">
                 <div style="background:#fff; border-radius:14px; width:900px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
-                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius: 14px 14px 0 0;">
+                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); border-radius: 14px 14px 0 0;">
                         <div style="display:flex; align-items:center; gap:12px;">
                             <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center;">
                                 <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -149,7 +149,7 @@ window.VerificarConstrucaoApp = {
             <!-- Modal Obras em Andamento -->
             <div id="modal-obras-andamento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:99999; align-items:flex-start; justify-content:center; padding-top:40px; overflow-y:auto;">
                 <div style="background:#fff; border-radius:14px; width:660px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
-                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius: 14px 14px 0 0;">
+                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); border-radius: 14px 14px 0 0;">
                         <div style="display:flex; align-items:center; gap:12px;">
                             <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center;">
                                 <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
@@ -230,8 +230,8 @@ window.VerificarConstrucaoApp = {
                 // Dados financeiros do cliente
                 const clienteName = c.customerName || c.name || c.nome || '-';
                 const titulo = c.saleCode || c.contractCode || c.titulo || c.codigo || contractId || '-';
-                const parcelasVencidas = parseInt(c.overdueInstallments || c.parcelasVencidas || c.overdue_count || 0);
-                const valorVencido = parseFloat(c.totalOverdue || c.valorVencido || c.overdue_amount || 0);
+                const parcelasVencidas = parseInt(c.billCount || c.overdueInstallments || c.parcelasVencidas || 0);
+                const valorVencido = parseFloat((c.overdueValue || 0) + (c.overdueCharges || 0));
 
                 let statusLabel = 'Pendente de Vistoria';
                 let statusColor = 'color: #dc2626; font-weight: bold;';
@@ -303,11 +303,11 @@ window.VerificarConstrucaoApp = {
 
             // City Header Row
             html += `
-                <tr style="background: linear-gradient(135deg, #0f1e17 0%, #1a3628 100%);">
+                <tr style="background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%);">
                     <td style="padding: 10px 12px; text-align: center; width: 40px;">
-                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')" style="accent-color: #22c55e;">
+                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')" style="accent-color: #86efac;">
                     </td>
-                    <td colspan="6" style="padding: 10px 12px; font-weight: 700; font-size: 0.85rem; color: #86efac; letter-spacing: 0.08em; text-transform: uppercase;">
+                    <td colspan="6" style="padding: 10px 12px; font-weight: 700; font-size: 0.85rem; color: #fff; letter-spacing: 0.08em; text-transform: uppercase;">
                         📍 ${cidade}
                     </td>
                 </tr>
@@ -321,11 +321,11 @@ window.VerificarConstrucaoApp = {
 
                 // Empreendimento Header Row
                 html += `
-                    <tr style="background: #f0fdf4; border-bottom: 1px solid #bbf7d0;">
+                    <tr style="background: #eaf4ee; border-bottom: 1px solid #a7d4b4;">
                         <td style="padding: 9px 12px; text-align: center; width: 40px;">
-                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''} style="accent-color: #16a34a;">
+                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''} style="accent-color: #3d7a4a;">
                         </td>
-                        <td colspan="6" style="padding: 9px 12px; font-weight: 700; color: #15803d; font-size: 0.83rem;">
+                        <td colspan="6" style="padding: 9px 12px; font-weight: 700; color: #2e6b3e; font-size: 0.83rem;">
                             🏗️ ${empLabelDisplay}
                             ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:2px 8px; border-radius:4px; font-size:0.72rem; margin-left:10px; font-weight:600;">⚠ Obra em Andamento</span>' : ''}
                         </td>
@@ -345,7 +345,7 @@ window.VerificarConstrucaoApp = {
                     unidades.forEach((u, uIdx) => {
                         const rowBg = uIdx % 2 === 0 ? '#fff' : '#f9fafb';
                         const validAction = u.statusLabel === 'Aguardando Validação'
-                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:5px 12px; font-size:0.78rem; border:none; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(21,49,35,0.3);">Validar Vistoria</button>`
+                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:5px 12px; font-size:0.78rem; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(45,107,62,0.35);">Validar Vistoria</button>`
                             : `<span style="${u.statusColor}">${u.statusLabel}</span>`;
 
                         const valorFmt = u.valorVencido > 0
