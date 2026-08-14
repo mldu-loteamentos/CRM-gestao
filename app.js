@@ -8352,6 +8352,16 @@ async function saveCustomerOccurrence() {
       const canalEl = document.getElementById("note-canal");
       const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
   
+  const canal = canalEl ? canalEl.value : "";
+  
+  if (canal === "Proposta de renegociação") {
+      if (typeof window.applyRenegotiationText === 'function') {
+          if (window.applyRenegotiationText() === false) {
+              return;
+          }
+      }
+  }
+
   const text = textEl.value.trim().toUpperCase();
   const promiseDate = pDateEl.value;
   
@@ -8654,7 +8664,7 @@ window.validateOccurrenceForm = function() {
     if (iniciativaGroup) iniciativaGroup.style.display = "none";
     if (promiseRow) promiseRow.style.display = "none";
     if (installmentsGroup) installmentsGroup.style.display = "none";
-    if (pinGroup) pinGroup.style.display = "block";
+    if (pinGroup) pinGroup.style.display = (canal === "Nota interna") ? "block" : "none";
     
     if (labelNoteText) labelNoteText.innerHTML = (canal === "Proposta de renegociação") ? 'Proposta <span style="color: var(--color-danger);">*</span>' : 'Nota interna <span style="color: var(--color-danger);">*</span>';
     if (saveBtn) saveBtn.innerHTML = (canal === "Proposta de renegociação") ? '<i data-lucide="save" style="width: 16px;"></i> Gravar Proposta' : '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
@@ -22469,6 +22479,28 @@ window.exportAgendaToExcel = function() {
 };
 
 window.calculateRenegotiation = function(prefix = '') {
+    if (AppState.currentContractInstallments) {
+        const allUnpaidBills = AppState.currentContractInstallments.filter(i => i.status === 1 || i.status === 'Vencida' || i.status === 'A vencer' || i.status === 'A Vencer');
+        g_renegBills = allUnpaidBills.map(b => {
+            let corrected = b.value || 0;
+            let multa = 0;
+            let juros = 0;
+            let isOverdue = false;
+            if (b.dueDate) {
+               const due = new Date(b.dueDate + 'T12:00:00');
+               const diffTime = new Date() - due;
+               const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+               if (diffDays > 0) {
+                 isOverdue = true;
+                 multa = corrected * 0.02;
+                 juros = corrected * 0.01 * (diffDays / 30);
+                 corrected = corrected + multa + juros;
+               }
+            }
+            return { ...b, computedCorrected: corrected, isOverdue: isOverdue, multa, juros };
+        });
+    }
+
     if (!g_renegBills) return;
 
     const overdueBills = g_renegBills.filter(b => b.isOverdue);
@@ -22519,6 +22551,9 @@ window.calculateRenegotiation = function(prefix = '') {
 };
 
 window.applyRenegotiationText = function(prefix = '') {
+    if ((!g_renegBills || g_renegBills.length === 0) && AppState.currentContractInstallments) {
+        if (window.calculateRenegotiation) window.calculateRenegotiation(prefix);
+    }
     if (!g_renegBills) return;
 
     const overdueBills = g_renegBills.filter(b => b.isOverdue);
@@ -22548,12 +22583,12 @@ window.applyRenegotiationText = function(prefix = '') {
 
     if (sinalPct < 30 || sinalPct > 50) {
         alert('O valor da entrada deve ficar entre 30% e 50% do total em atraso para poder gerar a proposta.');
-        return;
+        return false;
     }
     
     if (!sinalDateRaw) {
         alert('Por favor, informe a Data do 1º Vencimento da entrada.');
-        return;
+        return false;
     }
 
     const sinalDateObj = new Date(sinalDateRaw + 'T12:00:00');
@@ -22600,4 +22635,5 @@ window.applyRenegotiationText = function(prefix = '') {
             window.validateOccurrenceForm();
         }
     }
+    return true;
 };
