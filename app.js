@@ -16128,12 +16128,18 @@ window.renderEtapasJudiciais = function() {
   const renderNode = (node, level, prefix) => {
       const children = sorted.filter(e => e.parentId === node.id);
       
+      let bgColor = '#ffffff';
+      if (level === 0) bgColor = '#f8fafc'; // cinza claro
+      else if (level === 1) bgColor = '#f0fdf4'; // verde bem claro
+      else if (level === 2) bgColor = '#eff6ff'; // azul bem claro
+      else if (level === 3) bgColor = '#fefce8'; // amarelo bem claro
+      
       let html = `
       <div class="jud-node" style="margin-left: ${level > 0 ? 25 : 0}px; position: relative;">
         ${level > 0 ? '<div style="position: absolute; left: -15px; top: 18px; width: 12px; height: 1px; background: #cbd5e1;"></div>' : ''}
         ${level > 0 ? '<div style="position: absolute; left: -15px; top: 0; width: 1px; height: 100%; background: #cbd5e1;"></div>' : ''}
         
-        <div class="jud-node-target" data-id="${node.id}" draggable="true" ondragstart="window.onDragStartJud(event, '${node.id}')" ondrop="window.onDropJudNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${level === 0 ? '#f8fafc' : '#ffffff'}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: grab; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
+        <div class="jud-node-target" data-id="${node.id}" draggable="true" ondragstart="window.onDragStartJud(event, '${node.id}')" ondrop="window.onDropJudNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${bgColor}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: grab; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <i data-lucide="grip-vertical" style="width: 16px; height: 16px; color: #94a3b8; cursor: grab;"></i>
             <div>

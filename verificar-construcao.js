@@ -383,12 +383,12 @@ window.VerificarConstrucaoApp = {
     },
 
     toggleCity(cb, safeCidade) {
-        document.querySelectorAll(\`.city-\${safeCidade}\`).forEach(c => c.checked = cb.checked);
+        document.querySelectorAll(`.city-${safeCidade}`).forEach(c => c.checked = cb.checked);
         this.updateBtn();
     },
 
     toggleEmp(cb, safeCidade, safeEmp) {
-        document.querySelectorAll(\`.emp-\${safeEmp}\`).forEach(c => c.checked = cb.checked);
+        document.querySelectorAll(`.emp-${safeEmp}`).forEach(c => c.checked = cb.checked);
         this.updateBtn();
     },
 
