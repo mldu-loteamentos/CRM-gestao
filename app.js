@@ -16480,7 +16480,7 @@ window.handleJudFaseChange = function(sel) {
 
    if (sel.value === 'Nota Interna' || sel.value === 'Proposta de renegociação') {
        if (prazoRow) prazoRow.style.display = 'none';
-       if (pinRow) pinRow.style.display = 'block';
+       if (pinRow) pinRow.style.display = (sel.value === 'Nota Interna') ? 'block' : 'none';
        if (btnSave) btnSave.innerHTML = `<i data-lucide="save" style="width: 16px;"></i> Gravar ${sel.value === 'Proposta de renegociação' ? 'proposta' : 'nota interna'}`;
        if (prazoInput) {
            prazoInput.removeAttribute('readonly');
@@ -20453,6 +20453,14 @@ window.saveJudicialOccurrence = function() {
   const pinEl = document.getElementById("jud-pin-checkbox");
 
   const fase = faseEl ? faseEl.value : "";
+  if (fase === "Proposta de renegociação") {
+      if (typeof window.applyRenegotiationText === 'function') {
+          if (window.applyRenegotiationText('jud-') === false) {
+              return;
+          }
+      }
+  }
+
   const text = noteEl ? noteEl.value.trim().toUpperCase() : "";
   const prazo = prazoEl ? prazoEl.value : "";
   const isPinned = pinEl ? pinEl.checked : false;
@@ -20466,7 +20474,7 @@ window.saveJudicialOccurrence = function() {
     return;
   }
   
-  if (fase !== 'Nota Interna') {
+  if (fase !== 'Nota Interna' && fase !== 'Proposta de renegociação') {
     if (!prazo) {
       alert("Informe o prazo para resolução.");
       return;
