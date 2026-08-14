@@ -76,8 +76,8 @@ window.VerificarConstrucaoApp = {
                         </button>
                     </div>
                     <div>
-                        <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:8px 18px; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 8px rgba(45,107,62,0.3); opacity:0.5; transition:opacity 0.2s;" onmouseover="if(!this.disabled)this.style.opacity='0.9'" onmouseout="this.style.opacity=this.disabled?'0.5':'1'">
-                            <i data-lucide="message-circle" style="width: 16px;"></i> Solicitar Vistoria (WhatsApp)
+                        <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:10px 24px; border:none; background:linear-gradient(135deg, #16a34a 0%, #15803d 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(22,163,74,0.4); opacity:0.5; transition:all 0.2s;" onmouseover="if(!this.disabled) { this.style.opacity='1'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(22,163,74,0.5)'; }" onmouseout="if(!this.disabled) { this.style.opacity='1'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; } else { this.style.opacity='0.5'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; }">
+                            <i data-lucide="message-circle" style="width: 20px; height: 20px;"></i> Solicitar Vistoria (WhatsApp)
                         </button>
                     </div>
                 </div>
@@ -198,6 +198,7 @@ window.VerificarConstrucaoApp = {
             });
 
             const checksByContract = {};
+            const completedChecksByContract = {};
             if (window.firebaseDb && window.firebaseCollections) {
                 try {
                     const { collection, getDocs, query, where } = window.firebaseCollections;
@@ -206,6 +207,14 @@ window.VerificarConstrucaoApp = {
                     snap.forEach(doc => {
                         checksByContract[String(doc.data().contractId)] = { id: doc.id, ...doc.data() };
                     });
+
+                    const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
+                    snapChecks.forEach(doc => {
+                        const data = doc.data();
+                        if (data.stage && data.stage.trim() !== '') {
+                            completedChecksByContract[String(data.contractId)] = true;
+                        }
+                    });
                 } catch (err) {
                     console.warn('[Vistoria] Erro ao buscar histórico:', err);
                 }
@@ -213,6 +222,13 @@ window.VerificarConstrucaoApp = {
 
             const rows = [];
             elegiveis.forEach(c => {
+                const contractId = c.saleId || c.contractId || c.id;
+                
+                // Se o contrato já tem histórico de construção registrado, ignorar do módulo
+                if (completedChecksByContract[String(contractId)]) {
+                    return;
+                }
+
                 const costCenterId = c.costCenterId;
                 const city = _vcGetCity(costCenterId);
                 const ccName = _vcGetCostCenterName(costCenterId);
@@ -223,7 +239,6 @@ window.VerificarConstrucaoApp = {
                 // Label completo: "13900 - AVARÉ - CENTRAL PARQUE II"
                 const empLabel = _vcGetEmpLabel(costCenterId);
 
-                const contractId = c.saleId || c.contractId || c.id;
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
                 const vistoriaAtiva = checksByContract[String(contractId)];
 
@@ -247,7 +262,7 @@ window.VerificarConstrucaoApp = {
                 }
 
                 rows.push({
-                    customerId: c.customerId, contractId, cidade: city, costCenterId,
+                    customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
                     empreendimento, empLabel, unidade,
                     clienteName, titulo, parcelasVencidas, valorVencido,
                     statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length
@@ -315,7 +330,11 @@ window.VerificarConstrucaoApp = {
 
             Object.keys(grouped[cidade]).sort().forEach(emp => {
                 const safeEmp = emp.replace(/[^a-zA-Z0-9]/g, '_');
-                const isObraAndamento = savedState[emp] === true;
+                let isObraAndamento = false;
+                if (savedState[emp]) {
+                    if (typeof savedState[emp] === 'boolean') isObraAndamento = savedState[emp];
+                    else isObraAndamento = savedState[emp].isOn;
+                }
                 const empData = grouped[cidade][emp];
                 const empLabelDisplay = empData.label || emp;
 
@@ -396,7 +415,10 @@ window.VerificarConstrucaoApp = {
     updateBtn() {
         const cbs = document.querySelectorAll('.vc-row-checkbox:checked');
         const btn = document.getElementById('btn-solicitar-wpp');
-        if (btn) btn.disabled = cbs.length === 0;
+        if (btn) {
+            btn.disabled = cbs.length === 0;
+            btn.style.opacity = btn.disabled ? '0.5' : '1';
+        }
     },
 
     abrirModalObrasAndamento() {
@@ -429,27 +451,59 @@ window.VerificarConstrucaoApp = {
         });
 
         const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+        const isFirstRun = !localStorage.getItem('crm_obras_andamento_init');
+        
+        // Converter estado antigo
+        Object.keys(savedState).forEach(k => {
+            if (typeof savedState[k] === 'boolean') {
+                savedState[k] = { isOn: savedState[k], previsao: '' };
+            }
+        });
+
+        // Auto-enable new
+        empList.forEach(e => {
+            if (!isFirstRun && !savedState[e.empreendimento]) {
+                // Novo empreendimento!
+                savedState[e.empreendimento] = { isOn: true, previsao: '', isNew: true };
+            } else if (!savedState[e.empreendimento]) {
+                savedState[e.empreendimento] = { isOn: false, previsao: '' };
+            }
+        });
+
+        if (isFirstRun) localStorage.setItem('crm_obras_andamento_init', 'true');
+
         // Guardar estado temporário para o botão Salvar
-        this._tempObrasState = { ...savedState };
+        this._tempObrasState = JSON.parse(JSON.stringify(savedState));
 
         let html = '';
         if (empList.length === 0) {
             html = '<p style="color: #64748b;">Nenhum empreendimento listado no momento.</p>';
         } else {
             empList.sort((a, b) => a.id - b.id).forEach(({ empreendimento: emp, label }) => {
-                const isOn = savedState[emp] === true;
+                const state = this._tempObrasState[emp] || { isOn: false, previsao: '' };
+                const isOn = state.isOn;
+                const previsao = state.previsao || '';
                 const toggleId = `oa-toggle-${emp.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                
+                const badgeNew = state.isNew ? '<span style="background:#ef4444; color:white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight:bold; margin-left: 8px;">NOVO</span>' : '';
+                
                 html += `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 16px;">
-                        <div>
-                            <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label}</div>
+                    <div style="display: flex; flex-direction: column; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+                            <div>
+                                <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label} ${badgeNew}</div>
+                            </div>
+                            <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
+                                <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${emp.replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
+                                <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
+                                    <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
+                                </span>
+                            </label>
                         </div>
-                        <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
-                            <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${emp.replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
-                            <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
-                                <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
-                            </span>
-                        </label>
+                        <div id="${toggleId}-date-container" style="display: ${isOn ? 'flex' : 'none'}; align-items: center; gap: 8px; margin-top: 4px;">
+                            <span style="font-size: 0.8rem; color: #64748b;">Previsão de término:</span>
+                            <input type="date" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${emp.replace(/"/g, '\\"')}', this.value)" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; color: #334155; outline: none;">
+                        </div>
                     </div>
                 `;
             });
@@ -465,14 +519,29 @@ window.VerificarConstrucaoApp = {
         const id = input.id;
         const track = document.getElementById(id + '-track');
         const thumb = document.getElementById(id + '-thumb');
+        const dateContainer = document.getElementById(id + '-date-container');
         if (track) track.style.backgroundColor = checked ? '#16a34a' : '#cbd5e1';
         if (thumb) thumb.style.left = checked ? '24px' : '3px';
+        if (dateContainer) dateContainer.style.display = checked ? 'flex' : 'none';
+        
         if (!this._tempObrasState) this._tempObrasState = {};
-        this._tempObrasState[emp] = checked;
+        if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
+        this._tempObrasState[emp].isOn = checked;
+        this._tempObrasState[emp].isNew = false; // remove the NEW badge state once interacted
+    },
+
+    _onPrevisaoChange(emp, val) {
+        if (!this._tempObrasState) this._tempObrasState = {};
+        if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
+        this._tempObrasState[emp].previsao = val;
     },
 
     salvarObrasAndamento() {
         if (this._tempObrasState) {
+            // Limpa flag de isNew ao salvar para todos
+            Object.keys(this._tempObrasState).forEach(k => {
+                if (this._tempObrasState[k]) this._tempObrasState[k].isNew = false;
+            });
             localStorage.setItem('crm_obras_andamento', JSON.stringify(this._tempObrasState));
         }
         document.getElementById('modal-obras-andamento').style.display = 'none';
@@ -482,7 +551,8 @@ window.VerificarConstrucaoApp = {
     // Mantido para compatibilidade mas não é mais chamado diretamente
     toggleObraEmAndamento(emp, checked) {
         if (!this._tempObrasState) this._tempObrasState = {};
-        this._tempObrasState[emp] = checked;
+        if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
+        this._tempObrasState[emp].isOn = checked;
     },
 
     editarRegua() {
@@ -804,27 +874,46 @@ window.VerificarConstrucaoApp = {
                 const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i + 1} - ${padraoData}.jpg`;
                 const descricaoSienge = `${padraoData} - Foto de Vistoria ${i + 1}`;
 
-                const apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+                const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
+                const apiUrl = `http://${host}:${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
 
-                const formData = new FormData();
-                formData.append('file', blob, nomeFinal);
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', apiUrl);
+                    if (authHeader) xhr.setRequestHeader('Authorization', authHeader);
+                    xhr.setRequestHeader('Accept', 'application/json');
 
-                const uploadRes = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Authorization': authHeader, 'Accept': 'application/json' },
-                    body: formData
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                        else reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+                    };
+                    xhr.onerror = () => reject(new Error('Erro de rede'));
+
+                    const formData = new FormData();
+                    formData.append('file', blob, nomeFinal);
+                    xhr.send(formData);
                 });
-
-                if (!uploadRes.ok) {
-                    throw new Error(`Falha ao enviar foto ${i + 1}: HTTP ${uploadRes.status}`);
-                }
 
                 document.getElementById('vc-validar-status').textContent = `Enviando foto ${i + 1} de ${listRes.items.length}...`;
             }
 
             document.getElementById('vc-validar-status').textContent = 'Finalizando Vistoria...';
-            const { doc, updateDoc } = window.firebaseCollections;
+            const { doc, updateDoc, collection, addDoc } = window.firebaseCollections;
             await updateDoc(doc(window.firebaseDb, 'vistorias', v.id), { status: 'concluida' });
+
+            const newCheck = {
+                customerId: String(row.customerId || ''),
+                contractId: String(row.contractId || ''),
+                companyId: String(row.companyId || ''),
+                date: padraoData.replace(/\./g, '-').split('-').reverse().join('-'),
+                responsible: "Vistoriador App",
+                stage: "Vistoria Validada",
+                fileUrl: await getDownloadURL(listRes.items[0]),
+                fileName: "Foto Vistoria 1.jpg",
+                createdAt: new Date().toISOString()
+            };
+            await addDoc(collection(window.firebaseDb, "construction_checks"), newCheck);
 
             alert(`✅ Vistoria validada com sucesso!\n${listRes.items.length} foto(s) anexada(s) na unidade ${row.unidade} (ID Sienge: ${siengeUnitId}).`);
             await this.loadData();

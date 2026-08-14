@@ -240,7 +240,7 @@ window.openNewConstrucaoModal = function() {
     <div id="modal-nova-vistoria" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center;">
         <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
             <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="plus-circle" style="width: 20px;"></i> Registrar Nova Vistoria
+                <i data-lucide="plus-circle" style="width: 20px;"></i> Inserir Vistoria Manual
             </h3>
             
             <div style="display: flex; gap: 15px; margin-bottom: 15px;">
