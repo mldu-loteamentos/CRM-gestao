@@ -1,4 +1,13 @@
-module.exports = async function handler(req, res) {
+const https = require('https');
+
+// Desabilitar o bodyParser da Vercel para podermos lidar com streams binários (multipart/form-data)
+module.exports.config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+module.exports = function handler(req, res) {
   const SIENGE_HOST = 'api.sienge.com.br';
   const SIENGE_PATH_PREFIX = '/mouraleite/public/api/v1';
 
@@ -10,77 +19,69 @@ module.exports = async function handler(req, res) {
     return res.status(204).end();
   }
 
-  try {
-    let targetPath = req.url.replace('/api/sienge-proxy', '');
-    
-    if (targetPath.startsWith('/bulk-data/')) {
-      targetPath = '/mouraleite/public/api' + targetPath;
-    } else {
-      targetPath = SIENGE_PATH_PREFIX + targetPath;
-    }
-
-    const proxyHeaders = { ...req.headers };
-    delete proxyHeaders.origin;
-    delete proxyHeaders.referer;
-    delete proxyHeaders.host;
-    delete proxyHeaders.connection;
-    proxyHeaders.host = SIENGE_HOST;
-
-    const options = {
-      method: req.method,
-      headers: proxyHeaders,
-    };
-
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      options.body = req.body;
-      if (typeof options.body === 'object' && !Buffer.isBuffer(options.body)) {
-        options.body = JSON.stringify(options.body);
-      }
-    }
-
-    const response = await fetch(`https://${SIENGE_HOST}${targetPath}`, options);
-    
-    if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
-      const redirectUrl = response.headers.get('location');
-      const s3Response = await fetch(redirectUrl);
-      
-      const responseHeaders = new Headers(s3Response.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
-      responseHeaders.delete('content-encoding');
-      responseHeaders.delete('content-length');
-      responseHeaders.delete('transfer-encoding');
-      
-      res.status(s3Response.status);
-      responseHeaders.forEach((value, key) => res.setHeader(key, value));
-      
-      if (s3Response.body) {
-        const { Readable } = require('stream');
-        return Readable.fromWeb(s3Response.body).pipe(res);
-      } else {
-        return res.end();
-      }
-    } else {
-      // HANDLE NORMAL 2xx, 4xx, 5xx RESPONSES
-      const responseHeaders = new Headers(response.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
-      responseHeaders.delete('content-encoding');
-      responseHeaders.delete('content-length');
-      responseHeaders.delete('transfer-encoding');
-      responseHeaders.delete('www-authenticate'); // Previne popup de senha no navegador
-      
-      res.status(response.status);
-      responseHeaders.forEach((value, key) => res.setHeader(key, value));
-      
-      if (response.body) {
-        const { Readable } = require('stream');
-        return Readable.fromWeb(response.body).pipe(res);
-      } else {
-        return res.end();
-      }
-    }
-
-  } catch (error) {
-    console.error('Erro no proxy de conexão Sienge:', error);
-    res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: error.message });
+  let targetPath = req.url.replace('/api/sienge-proxy', '');
+  
+  if (targetPath.startsWith('/bulk-data/')) {
+    targetPath = '/mouraleite/public/api' + targetPath;
+  } else {
+    targetPath = SIENGE_PATH_PREFIX + targetPath;
   }
-}
+
+  const proxyHeaders = { ...req.headers };
+  delete proxyHeaders.origin;
+  delete proxyHeaders.referer;
+  delete proxyHeaders.host;
+  delete proxyHeaders.connection;
+
+  const options = {
+    hostname: SIENGE_HOST,
+    port: 443,
+    path: targetPath,
+    method: req.method,
+    headers: {
+      ...proxyHeaders,
+      host: SIENGE_HOST
+    }
+  };
+
+  const proxyReq = https.request(options, (proxyRes) => {
+    // Tratar redirecionamento (Sienge retorna 302 para links do S3 no download de anexos)
+    if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+      const redirectUrl = proxyRes.headers.location;
+      https.get(redirectUrl, (s3Res) => {
+        const headers = { ...s3Res.headers };
+        headers['access-control-allow-origin'] = '*';
+        delete headers['Access-Control-Allow-Origin']; // cleanup dupes
+        res.writeHead(s3Res.statusCode, headers);
+        s3Res.pipe(res);
+      }).on('error', (err) => {
+          res.status(500).json({ error: 'Erro ao baixar anexo redirecionado', details: err.message });
+      });
+      return;
+    }
+
+    const headers = { ...proxyRes.headers };
+    headers['access-control-allow-origin'] = '*';
+    headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    headers['access-control-allow-headers'] = 'Content-Type, Authorization';
+    headers['access-control-expose-headers'] = 'Location, location, X-Pagination-Total-Count';
+    
+    // Cleanup uppercase duplicate headers that Node might combine awkwardly
+    delete headers['Access-Control-Allow-Origin'];
+    delete headers['Access-Control-Allow-Methods'];
+    delete headers['Access-Control-Allow-Headers'];
+    delete headers['Access-Control-Expose-Headers'];
+    delete headers['www-authenticate']; // Evitar popup de senha do navegador
+
+    res.writeHead(proxyRes.statusCode, headers);
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('Erro no proxy de conexão Sienge Vercel:', err);
+    res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: err.message });
+  });
+
+  // Repassar o body original via stream
+  req.pipe(proxyReq);
+};
