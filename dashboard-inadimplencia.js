@@ -447,37 +447,29 @@ const DashboardInadimplencia = (function() {
 
     const bills = window.rawClientList;
     
-    // 1. KPI Totals
     let totalOverdue = 0;
     let totalBills = 0;
     const uniqueClients = new Set();
     let sumMaxDaysDelay = 0;
-    
-    // 2. Por Empresa/Empreendimento (costCenterId)
     const companyData = {};
-    
-    // 3. Por Operador
     const operatorData = {};
-    
-    // 4. Zero Paid
     const zeroPaidClients = [];
     
     bills.forEach(b => {
-      // Basic KPIs
       totalOverdue += b.overdueValue || 0;
       uniqueClients.add(b.customerId);
       totalBills += (b.billCount || 1);
       sumMaxDaysDelay += (b.maxDaysDelay || 0);
 
       const delay = b.maxDaysDelay || 0;
-      let delayBucketCompany = '';
-      if (delay <= 30) delayBucketCompany = 'd30';
-      else if (delay <= 60) delayBucketCompany = 'd60';
-      else if (delay <= 90) delayBucketCompany = 'd90';
-      else if (delay <= 120) delayBucketCompany = 'd120';
-      else delayBucketCompany = 'd120p';
+      let delayBucket = '';
+      if (delay <= 30) delayBucket = 'd30';
+      else if (delay <= 60) delayBucket = 'd60';
+      else if (delay <= 90) delayBucket = 'd90';
+      else if (delay <= 120) delayBucket = 'd120';
+      else delayBucket = 'd120p';
 
-      // 1. Empresa
+      // Empresa
       const compId = String(b.companyId || 'N/D');
       if (!companyData[compId]) {
          let compName = 'N/D';
@@ -485,312 +477,172 @@ const DashboardInadimplencia = (function() {
              const cObj = window.AppState.companies.find(c => String(c.id) === compId);
              if (cObj) compName = cObj.tradeName || cObj.name || `EMPRESA ${compId}`;
          }
-         if (compName === 'N/D' && typeof window.getCompanyName === 'function') {
-             compName = window.getCompanyName(compId);
-         }
-         compName = compName.toUpperCase();
-         
-         companyData[compId] = {
-            id: compId,
-            name: compName,
-            totalBills: 0,
-            totalValue: 0,
-            d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0,
-            subjudice_v: 0
-         };
+         if (compName === 'N/D' && typeof window.getCompanyName === 'function') compName = window.getCompanyName(compId);
+         companyData[compId] = { id: compId, name: compName.toUpperCase(), totalBills: 0, totalValue: 0, d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0 };
       }
-      
       const comp = companyData[compId];
       comp.totalBills += (b.billCount || 1);
       comp.totalValue += (b.overdueValue || 0);
-      
-      if (b.subjudice === 'S') {
-         comp.subjudice_v += (b.overdueValue || 0);
-      } else {
-         if (delayBucketCompany === 'd30') comp.d30_v += (b.overdueValue || 0);
-         else if (delayBucketCompany === 'd60') comp.d60_v += (b.overdueValue || 0);
-         else if (delayBucketCompany === 'd90') comp.d90_v += (b.overdueValue || 0);
-         else if (delayBucketCompany === 'd120') comp.d120_v += (b.overdueValue || 0);
-         else comp.d120p_v += (b.overdueValue || 0);
-      }
+      if (b.subjudice === 'S') comp.subjudice_v += (b.overdueValue || 0);
+      else comp[delayBucket + '_v'] += (b.overdueValue || 0);
 
-      // 2. Operador Aging (Títulos > 31 dias)
-      let opName = b.subjudice === 'S' ? 'APOIO JURÍDICO INTERNO' : (b.assignedOperator || 'NÃO ATRIBUÍDO');
-      opName = opName.toUpperCase();
-      
+      // Operador
+      let opName = b.subjudice === 'S' ? 'APOIO JURÍDICO' : (b.assignedOperator || 'NÃO ATRIBUÍDO');
+      opName = opName.toUpperCase().trim();
       if (!operatorData[opName]) {
-          operatorData[opName] = {
-              name: opName,
-              d31_90_c: 0, d31_90_v: 0,
-              d91_120_c: 0, d91_120_v: 0,
-              d120p_c: 0, d120p_v: 0,
-              customers: []
-          };
+          operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[], isSubjudice: b.subjudice === 'S' };
       }
-      
       const op = operatorData[opName];
       op.customers.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
-      
-      // Bucket operator (> 31)
-      if (delay >= 31 && delay <= 90) {
-          op.d31_90_c += (b.billCount || 1);
-          op.d31_90_v += (b.overdueValue || 0);
-      } else if (delay >= 91 && delay <= 120) {
-          op.d91_120_c += (b.billCount || 1);
-          op.d91_120_v += (b.overdueValue || 0);
-      } else if (delay > 120) {
-          op.d120p_c += (b.billCount || 1);
-          op.d120p_v += (b.overdueValue || 0);
-      }
+      op.total_c += (b.billCount||1); op.total_v += (b.overdueValue||0);
+      op[delayBucket+'_c'] += (b.billCount||1); op[delayBucket+'_v'] += (b.overdueValue||0);
 
-      // 3. 0% Pago
-      if (b.isZeroPaid) {
-          zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
-      }
+      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
     });
 
     const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
     const dateStr = new Date().toLocaleDateString('pt-BR');
-    
-    // Sort company data by totalValue DESC
-    const compSorted = Object.values(companyData).sort((a,b) => b.totalValue - a.totalValue);
-    
-    // Total row for company data
-    const compTotals = {
-        totalBills: 0, totalValue: 0,
-        d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0
-    };
-    compSorted.forEach(c => {
-        compTotals.totalBills += c.totalBills;
-        compTotals.totalValue += c.totalValue;
-        compTotals.d30_v += c.d30_v;
-        compTotals.d60_v += c.d60_v;
-        compTotals.d90_v += c.d90_v;
-        compTotals.d120_v += c.d120_v;
-        compTotals.d120p_v += c.d120p_v;
-        compTotals.subjudice_v += c.subjudice_v;
-    });
 
-    const getPct = (val, total) => total > 0 ? ((val/total)*100).toFixed(1) + '%' : '0.0%';
+    const opSorted = Object.values(operatorData).filter(op => !op.isSubjudice).sort((a,b) => b.total_v - a.total_v);
+    const subjudiceOps = Object.values(operatorData).filter(op => op.isSubjudice);
+    const subjudiceTotal = subjudiceOps.reduce((acc, op) => ({ c: acc.c + op.total_c, v: acc.v + op.total_v }), { c:0, v:0 });
+    const subjudiceClients = subjudiceOps.flatMap(op => op.customers).sort((a,b) => b.value - a.value);
+    const opTotals = { d30_c:0,d30_v:0,d60_c:0,d60_v:0,d90_c:0,d90_v:0,d120_c:0,d120_v:0,d120p_c:0,d120p_v:0,total_c:0,total_v:0 };
+    opSorted.forEach(op => { ['d30','d60','d90','d120','d120p','total'].forEach(k => { opTotals[k+'_c'] += op[k+'_c']; opTotals[k+'_v'] += op[k+'_v']; }); });
 
-    let html = `
-      <html>
-        <head>
-          <title>Sprint Diário - ${dateStr}</title>
-          <style>
-            @page { size: A4 landscape; margin: 8mm; }
-            body { font-family: 'Inter', 'Segoe UI', sans-serif; padding: 0; color: #1e293b; font-size: 10px; background: #f8fafc; -webkit-print-color-adjust: exact; }
-            .print-btn { text-align: center; margin-bottom: 10px; }
-            .print-btn button { padding: 8px 16px; background: #0f172a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-            @media print { .print-btn { display: none !important; } body { background: white; } }
-            h1 { text-align: center; color: #0f172a; margin: 0 0 5px 0; font-size: 14px; text-transform: uppercase; }
-            h2 { font-size: 11px; margin: 10px 0 5px 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 3px; display: flex; align-items: center; gap: 4px; }
-            
-            .kpi-container { display: flex; gap: 10px; justify-content: space-between; margin-bottom: 15px; }
-            .kpi { flex: 1; background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-            .kpi-title { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
-            .kpi-value { font-size: 16px; font-weight: 800; color: #0f172a; }
+    const snaps = snapshots.slice(-8);
+    const snapLabels = snaps.map((s,i) => { if(s.is_month_close) return 'Fecham.'; const diff=snaps.length-1-i; return diff===0?'Hoje':`d-${diff}`; });
+    const fechSnap = snaps.find(s=>s.is_month_close) || snaps[0];
+    const hojeSnap = snaps[snaps.length-1];
 
-            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-            th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; font-size: 9px; }
-            th { background-color: #f1f5f9; font-weight: 700; color: #334155; text-transform: uppercase; text-align: center; }
-            .val { text-align: right; }
-            .center { text-align: center; }
-            .row-total { background-color: #fff7ed; font-weight: 800; }
-            .row-total td { color: #c2410c; }
-            
-            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-            .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
-            
-            .pct-badge { display: block; font-size: 7.5px; color: #64748b; margin-top: 2px; }
-            .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 3px; }
-            .dot-green { background: #22c55e; }
-            .dot-yellow { background: #eab308; }
-            .dot-orange { background: #f97316; }
-            .dot-red { background: #ef4444; }
-            .dot-darkred { background: #991b1b; }
-            .dot-gray { background: #64748b; }
-          </style>
-        </head>
-        <body>
-          <div class="print-btn"><button onclick="window.print()">🖨️ Imprimir Relatório</button></div>
-          <h1>Posição de Inadimplência Geral (${dateStr})</h1>
+    function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
+    function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${formatMoney(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} cliente${c>1?'s':''}</span>`; }
 
-          <div class="kpi-container">
-            <div class="kpi" style="border-left: 4px solid #ef4444;">
-              <div class="kpi-title">Valor em Atraso</div>
-              <div class="kpi-value" style="color: #0f172a;">${formatMoney(totalOverdue)}</div>
-            </div>
-            <div class="kpi" style="border-left: 4px solid #f59e0b;">
-              <div class="kpi-title">Clientes em Atraso</div>
-              <div class="kpi-value">${uniqueClients.size}</div>
-            </div>
-            <div class="kpi" style="border-left: 4px solid #22c55e;">
-              <div class="kpi-title">Títulos Vencidos</div>
-              <div class="kpi-value">${totalBills}</div>
-            </div>
-            <div class="kpi" style="border-left: 4px solid #3b82f6;">
-              <div class="kpi-title">Atraso Médio</div>
-              <div class="kpi-value">${avgDelay} dias</div>
-            </div>
-          </div>
+    function stackedBarSvg(snap, label) {
+      if (!snap) return `<div style="text-align:center;color:#94a3b8;font-size:9px;">${label}<br>Sem dados</div>`;
+      const total = snap.total_value || totalOverdue || 1;
+      const bands = [{ v:snap.d30_value||0,color:'#3b82f6'},{v:snap.d60_value||0,color:'#22c55e'},{v:snap.d90_value||0,color:'#f59e0b'},{v:snap.d120_value||0,color:'#ef4444'},{v:snap.above120_value||0,color:'#7f1d1d'}];
+      const H=140, W=44; let y=0;
+      const rects = bands.map(b=>{ const h=(b.v/total)*H; const r=`<rect x="0" y="${H-y-h}" width="${W}" height="${h}" fill="${b.color}"/>`; y+=h; return r; }).join('');
+      return `<div style="text-align:center;"><div style="font-size:8.5px;font-weight:700;color:#334155;margin-bottom:3px;">${fmtK(total)}</div><svg width="${W}" height="${H}" style="display:block;margin:0 auto;">${rects}</svg><div style="font-size:8.5px;color:#64748b;margin-top:3px;">${label}</div></div>`;
+    }
 
-          <h3>Inadimplência por Empresa</h3>
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 30px;">ID</th>
-                 <th style="text-align: left; width: 30%;">EMPRESA</th>
-                <th>TÍTULOS</th>
-                <th class="val">R$ ATUALIZADO</th>
-                <th class="val">ATÉ 30 DIAS</th>
-                <th class="val">ATÉ 60 DIAS</th>
-                <th class="val">ATÉ 90 DIAS</th>
-                <th class="val">ATÉ 120 DIAS</th>
-                <th class="val">ACIMA 120 DIAS</th>
-                <th class="val">SUB JUDICE</th>
-              </tr>
-            </thead>
-            <tbody>
-    `;
+    function sparklineSvg(data, color) {
+      if (!data || data.length < 2 || !data.some(v=>v>0)) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem dados históricos</div>';
+      const max=Math.max(...data)||1, min=Math.min(...data);
+      const W=280, H=55, pad=12;
+      const pts = data.map((v,i)=>{ const x=pad+(i/(data.length-1))*(W-pad*2); const y=H-pad-((v-min)/(max-min||1))*(H-pad*2); return `${x},${y}`; }).join(' ');
+      const dotPts = data.map((v,i)=>{ const x=pad+(i/(data.length-1))*(W-pad*2); const y=H-pad-((v-min)/(max-min||1))*(H-pad*2); return {x,y,v}; });
+      const dots = dotPts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"/><text x="${p.x}" y="${p.y-7}" text-anchor="middle" font-size="7.5" fill="#334155">${fmtK(p.v)}</text>`).join('');
+      const labels = (snapLabels||[]).map((l,i)=>`<text x="${pad+(i/(data.length-1))*(W-pad*2)}" y="${H+10}" text-anchor="middle" font-size="7.5" fill="#94a3b8">${l}</text>`).join('');
+      return `<svg width="${W}" height="${H+14}" style="overflow:visible;display:block;margin:0 auto;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>${dots}${labels}</svg>`;
+    }
 
-    compSorted.forEach(c => {
-        html += `
-              <tr>
-                <td class="center">${c.id}</td>
-                <td><strong>${c.name}</strong></td>
-                <td class="center">${c.totalBills}</td>
-                <td class="val"><strong>${formatMoney(c.totalValue)}</strong></td>
-                <td class="val">${c.d30_v > 0 ? formatMoney(c.d30_v) + '<span class="pct-badge"><span class="dot dot-green"></span>'+getPct(c.d30_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">${c.d60_v > 0 ? formatMoney(c.d60_v) + '<span class="pct-badge"><span class="dot dot-yellow"></span>'+getPct(c.d60_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">${c.d90_v > 0 ? formatMoney(c.d90_v) + '<span class="pct-badge"><span class="dot dot-orange"></span>'+getPct(c.d90_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">${c.d120_v > 0 ? formatMoney(c.d120_v) + '<span class="pct-badge"><span class="dot dot-red"></span>'+getPct(c.d120_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">${c.d120p_v > 0 ? formatMoney(c.d120p_v) + '<span class="pct-badge"><span class="dot dot-darkred"></span>'+getPct(c.d120p_v, c.totalValue)+'</span>' : '-'}</td>
-                <td class="val">${c.subjudice_v > 0 ? formatMoney(c.subjudice_v) + '<span class="pct-badge"><span class="dot dot-gray"></span>'+getPct(c.subjudice_v, c.totalValue)+'</span>' : '-'}</td>
-              </tr>
-        `;
-    });
+    zeroPaidClients.sort((a,b)=>b.delay-a.delay);
+    const zeroPaidTotalValue = zeroPaidClients.reduce((acc,c)=>acc+c.value,0);
+    const zeroPaidTop5 = zeroPaidClients.slice(0,5);
+    subjudiceClients.sort((a,b)=>b.value-a.value);
+    const subjudiceTop5 = subjudiceClients.slice(0,5);
+    const spark31v = snaps.map(s=>s.above31_value||0);
+    const spark31t = snaps.map(s=>s.above31_count||0);
 
-    html += `
-              <tr class="row-total">
-                <td colspan="2" class="val">TOTAL GERAL</td>
-                <td class="center">${compTotals.totalBills}</td>
-                <td class="val">${formatMoney(compTotals.totalValue)}</td>
-                <td class="val">${formatMoney(compTotals.d30_v)}<span class="pct-badge">${getPct(compTotals.d30_v, compTotals.totalValue)}</span></td>
-                <td class="val">${formatMoney(compTotals.d60_v)}<span class="pct-badge">${getPct(compTotals.d60_v, compTotals.totalValue)}</span></td>
-                <td class="val">${formatMoney(compTotals.d90_v)}<span class="pct-badge">${getPct(compTotals.d90_v, compTotals.totalValue)}</span></td>
-                <td class="val">${formatMoney(compTotals.d120_v)}<span class="pct-badge">${getPct(compTotals.d120_v, compTotals.totalValue)}</span></td>
-                <td class="val">${formatMoney(compTotals.d120p_v)}<span class="pct-badge">${getPct(compTotals.d120p_v, compTotals.totalValue)}</span></td>
-                <td class="val">${formatMoney(compTotals.subjudice_v)}<span class="pct-badge">${getPct(compTotals.subjudice_v, compTotals.totalValue)}</span></td>
-              </tr>
-            </tbody>
-          </table>
-    `;
-
-    // Operator Aging
-    html += `
-          <div class="grid-2">
-            <div>
-              <h2>Aging por Operador (Títulos Vencidos)</h2>
-              <table>
-                <thead>
-                  <tr>
-                    <th style="text-align:left;">OPERADOR</th>
-                    <th class="val">31 a 90 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
-                    <th class="val">91 a 120 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
-                    <th class="val">Acima 120 Dias<br><span style="font-size:7px;font-weight:normal">(Qtd | R$)</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-    `;
-
-    const opSorted = Object.values(operatorData).sort((a,b) => (b.d31_90_v+b.d91_120_v+b.d120p_v) - (a.d31_90_v+a.d91_120_v+a.d120p_v));
-    opSorted.forEach(op => {
-       const hasData = op.d31_90_c > 0 || op.d91_120_c > 0 || op.d120p_c > 0;
-       if (!hasData) return;
-       html += `
-          <tr>
-            <td><strong>${op.name}</strong></td>
-            <td class="val">${op.d31_90_c > 0 ? op.d31_90_c + ' | ' + formatMoney(op.d31_90_v) : '-'}</td>
-            <td class="val">${op.d91_120_c > 0 ? op.d91_120_c + ' | ' + formatMoney(op.d91_120_v) : '-'}</td>
-            <td class="val">${op.d120p_c > 0 ? op.d120p_c + ' | ' + formatMoney(op.d120p_v) : '-'}</td>
-          </tr>
-       `;
-    });
-    
-    html += `
-                </tbody>
-              </table>
-            </div>
-            
-            <div>
-              <h2>Clientes 0% Pago</h2>
-    `;
-    
-    // Top 5 0% Pago
-    zeroPaidClients.sort((a,b) => b.delay - a.delay);
-    const zeroPaidTotalValue = zeroPaidClients.reduce((acc, c) => acc + c.value, 0);
-    const zeroPaidTop5 = zeroPaidClients.slice(0, 5);
-
-    html += `
-              <div style="display:flex; justify-content:space-between; margin-bottom: 5px; background: #fff; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px;">
-                <span style="font-weight:bold; color: #ef4444; font-size: 10px;">Total Contratos: ${zeroPaidClients.length}</span>
-                <span style="font-weight:bold; font-size: 10px;">Valor Total: ${formatMoney(zeroPaidTotalValue)}</span>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style="text-align:left;">TOP 5 - CLIENTE (MAIOR ATRASO)</th>
-                    <th class="center">DIAS</th>
-                    <th class="val">VALOR (R$)</th>
-                  </tr>
-                </thead>
-                <tbody>
-    `;
-    zeroPaidTop5.forEach(c => {
-       html += `<tr><td>${c.name}</td><td class="center" style="color:#ef4444;font-weight:bold;">${c.delay}</td><td class="val">${formatMoney(c.value)}</td></tr>`;
-    });
-    if (zeroPaidTop5.length === 0) html += `<tr><td colspan="3" class="center">Nenhum cliente 0% pago</td></tr>`;
-    
-    html += `
-                </tbody>
-              </table>
-            </div>
-          </div>
-          
-          <h2>Top Maiores Valores por Operador</h2>
-          <div class="grid-3" style="align-items: start; display: flex; flex-wrap: wrap; gap: 10px;">
-    `;
-    
-    // Top 5 operators (only those with customers)
-    opSorted.forEach(op => {
-       if (op.customers.length === 0) return;
-       // Sort customers by value desc
-       op.customers.sort((a,b) => b.value - a.value);
-       const top5 = op.customers.slice(0, 5);
-       
-       html += `
-            <table style="margin-bottom:0; flex: 1 1 30%; min-width: 250px;">
-              <thead>
-                <tr><th colspan="2" style="background:#0f172a; color:white; text-align:left;">${op.name}</th></tr>
-                <tr><th style="text-align:left;">CLIENTE</th><th class="val">VALOR (R$)</th></tr>
-              </thead>
-              <tbody>
-       `;
-       top5.forEach(c => {
-          html += `<tr><td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 140px;" title="${c.name}">${c.name}</td><td class="val"><strong>${formatMoney(c.value)}</strong></td></tr>`;
-       });
-       html += `
-              </tbody>
-            </table>
-       `;
-    });
-
-    html += `
-          </div>
-        </body>
-      </html>
-    `;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
+@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;padding:0;color:#1e293b;font-size:10px;background:#f1f5f9;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+@media print{.no-print{display:none!important}body{background:white}}
+.no-print{text-align:center;padding:8px;background:#0f172a}
+.no-print button{padding:7px 24px;background:#22c55e;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:700;font-size:11px}
+h1{text-align:center;color:#0f172a;margin:0 0 10px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.kpi{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;text-align:center}
+.kpi-label{font-size:8.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em}
+.kpi-value{font-size:18px;font-weight:800;color:#0f172a;margin-top:3px}
+.row-2{display:grid;grid-template-columns:196px 1fr;gap:10px;margin-bottom:10px;align-items:start}
+.bar-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px}
+.bar-title{font-size:9px;font-weight:700;color:#334155;margin-bottom:4px}
+.bar-delta{font-size:11px;font-weight:800;color:#16a34a;margin-bottom:8px}
+.bars-row{display:flex;gap:20px;justify-content:center;align-items:flex-end}
+.legend-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;justify-content:center}
+.legend-item{display:flex;align-items:center;gap:3px;font-size:7.5px;color:#64748b}
+.legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.op-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th{background:#f8fafc;padding:6px 8px;font-size:8px;font-weight:700;color:#475569;text-transform:uppercase;border-bottom:2px solid #e2e8f0;text-align:center}
+th.L{text-align:left}
+td{padding:5px 8px;font-size:8.5px;border-bottom:1px solid #f1f5f9;text-align:center;vertical-align:middle}
+td.L{text-align:left;font-weight:700;color:#1e293b}
+tr:nth-child(even) td{background:#fafafa}
+tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:2px solid #fed7aa}
+.trends-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.trend-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px}
+.trend-title{font-size:9.5px;font-weight:700;color:#334155;text-align:center;margin-bottom:8px}
+.summary-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.sbox{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:start}
+.stag{display:inline-block;font-size:9px;font-weight:800;color:#fff;padding:2px 10px;border-radius:12px;margin-bottom:6px}
+.sstat{font-size:9px;color:#475569;line-height:1.8}
+.sstat strong{color:#1e293b}
+.sright table{margin:0}
+.sright td{padding:3px 6px;font-size:9px;border:none;border-bottom:1px solid #f1f5f9}
+.sright td:first-child{text-align:left;font-weight:600;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sright td:last-child{text-align:right;color:#dc2626;font-weight:700}
+.op-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.op-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.op-head{background:#0f172a;color:#fff;padding:6px 10px;font-size:9px;font-weight:700;text-align:center}
+.op-card td{padding:4px 8px;font-size:8.5px}
+.op-card td:first-child{text-align:left;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.op-card td:last-child{text-align:right;font-weight:700;color:#0f172a}
+</style></head><body>
+<div class="no-print"><button onclick="window.print()">🖨️ Imprimir Sprint Diário</button></div>
+<h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
+<div class="kpi-strip">
+  <div class="kpi"><div class="kpi-label">Valor em Atraso</div><div class="kpi-value">${fmtK(totalOverdue)}</div></div>
+  <div class="kpi"><div class="kpi-label">Clientes em Atraso</div><div class="kpi-value">${uniqueClients.size}</div></div>
+  <div class="kpi"><div class="kpi-label">Títulos Vencidos</div><div class="kpi-value">${totalBills}</div></div>
+  <div class="kpi"><div class="kpi-label">Atraso Médio · Em dias</div><div class="kpi-value">${avgDelay}</div></div>
+</div>
+<div class="row-2">
+  <div class="bar-panel">
+    <div class="bar-title">Valor em Atraso</div>
+    ${fechSnap&&hojeSnap?`<div class="bar-delta">+ ${fmtK(Math.abs(hojeSnap.total_value-fechSnap.total_value))} | ${(((hojeSnap.total_value-fechSnap.total_value)/(fechSnap.total_value||1))*100).toFixed(1)}%</div>`:''}
+    <div class="bars-row">${stackedBarSvg(fechSnap,'Fechamento')}${stackedBarSvg(hojeSnap,'Hoje')}</div>
+    <div class="legend-row">
+      <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>até 30</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>31-60</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>61-90</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>91-120</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7f1d1d"></div>ac.120</div>
+    </div>
+  </div>
+  <div class="op-wrap"><table>
+    <thead><tr><th class="L">Operador</th><th>Até 30</th><th>31 a 60</th><th>61 a 90</th><th>91 a 120</th><th>Acima 120</th><th>Total</th></tr></thead>
+    <tbody>
+      ${opSorted.map(op=>`<tr><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${formatMoney(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
+      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td>${formatMoney(opTotals.total_v)}</td></tr>
+    </tbody>
+  </table></div>
+</div>
+<div class="trends-row">
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${sparklineSvg(spark31v,'#f59e0b')}</div>
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${sparklineSvg(spark31t,'#3b82f6')}</div>
+</div>
+<div class="summary-row">
+  <div class="sbox">
+    <div><span class="stag" style="background:#dc2626">0% pago</span><div class="sstat">Total de clientes: <strong>${zeroPaidClients.length}</strong><br>Valor total: <strong>${fmtK(zeroPaidTotalValue)}</strong></div></div>
+    <div class="sright"><table><tbody>${zeroPaidTop5.map(c=>`<tr><td>${c.name.split(' ').slice(0,2).join(' ')}</td><td>${c.delay} dias</td></tr>`).join('')}${zeroPaidTop5.length===0?'<tr><td colspan="2" style="color:#94a3b8;text-align:center">Nenhum</td></tr>':''}</tbody></table></div>
+  </div>
+  <div class="sbox">
+    <div><span class="stag" style="background:#7c3aed">Sub judice</span><div class="sstat">Total de clientes: <strong>${subjudiceClients.length}</strong><br>Valor total: <strong>${fmtK(subjudiceTotal.v)}</strong></div></div>
+    <div class="sright"><table><tbody>${subjudiceTop5.map(c=>`<tr><td>${c.name.split(' ').slice(0,2).join(' ')}</td><td>${fmtK(c.value)}</td></tr>`).join('')}${subjudiceTop5.length===0?'<tr><td colspan="2" style="color:#94a3b8;text-align:center">Nenhum</td></tr>':''}</tbody></table></div>
+  </div>
+</div>
+<div class="op-grid">
+  ${opSorted.filter(op=>op.customers.length>0).map(op=>{
+    op.customers.sort((a,b)=>b.value-a.value);
+    const top5=op.customers.slice(0,5);
+    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>${top5.map(c=>`<tr><td title="${c.name}">${c.name.split(' ').slice(0,2).join(' ')}</td><td>${formatMoney(c.value)}</td></tr>`).join('')}</tbody></table></div>`;
+  }).join('')}
+</div>
+</body></html>`;
 
     const win = window.open('', '_blank');
     win.document.write(html);
