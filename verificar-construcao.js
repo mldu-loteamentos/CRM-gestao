@@ -867,7 +867,9 @@ window.VerificarConstrucaoApp = {
 
             document.getElementById('vc-validar-status').textContent = 'Enviando fotos para o Sienge...';
 
-            const padraoData = new Date().toLocaleDateString('pt-BR').replace(/\//g, '.');
+            const dateObj = new Date();
+            const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\//g, '-');
+            const dateStrDesc = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('.');
 
             for (let i = 0; i < listRes.items.length; i++) {
                 const itemRef = listRes.items[i];
@@ -876,8 +878,11 @@ window.VerificarConstrucaoApp = {
                 const imgRes = await fetch(url);
                 const blob = await imgRes.blob();
 
-                const nomeFinal = `${row.empreendimento} - ${row.unidade} - Foto de Vistoria ${i + 1} - ${padraoData}.jpg`;
-                const descricaoSienge = `${padraoData} - Foto de Vistoria ${i + 1}`;
+                const unitFormatted = (row.unidade || '').replace(/-/g, ' ');
+                const projId = row.costCenterId || '';
+                const baseName = `${projId} ${unitFormatted} - FOTO VISTORIA ${i + 1} - ${dateStrFileName}`.toUpperCase();
+                const nomeFinal = `${baseName}.jpg`;
+                const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA ${i + 1}`;
 
                 const isVercel = window.location.hostname.includes('vercel.app');
                 let apiUrl = '';

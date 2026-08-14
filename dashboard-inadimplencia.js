@@ -492,7 +492,7 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
       const op = operatorData[opName];
-      op.customers.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
+      op.customers.push({ name: b.customerName || 'N/D', title: b.documentNumber || b.id || '', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
       op.total_c += (b.billCount||1); op.total_v += (b.overdueValue||0);
       op[delayBucket+'_c'] += (b.billCount||1); op[delayBucket+'_v'] += (b.overdueValue||0);
 
@@ -522,7 +522,8 @@ const DashboardInadimplencia = (function() {
     const hojeSnap = snaps[snaps.length-1];
 
     function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
-    function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${formatMoney(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} cliente${c>1?'s':''}</span>`; }
+    function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} cliente${c>1?'s':''}</span>`; }
 
     function stackedBarSvg(snap, label) {
       if (!snap) return `<div style="text-align:center;color:#94a3b8;font-size:9px;">${label}<br>Sem dados</div>`;
@@ -628,8 +629,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div class="op-wrap"><table>
     <thead><tr><th class="L">Operador</th><th>Até 30</th><th>31 a 60</th><th>61 a 90</th><th>91 a 120</th><th>Acima 120</th><th>Total</th></tr></thead>
     <tbody>
-      ${opSorted.map(op=>`<tr><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${formatMoney(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
-      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td>${formatMoney(opTotals.total_v)}</td></tr>
+      ${opSorted.map(op=>`<tr><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
+      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td>${fmtMoneyNoRs(opTotals.total_v)}</td></tr>
     </tbody>
   </table></div>
 </div>
@@ -647,11 +648,12 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     <div class="sright"><table><tbody>${subjudiceTop5.map(c=>`<tr><td>${c.name.split(' ').slice(0,2).join(' ')}</td><td>${fmtK(c.value)}</td></tr>`).join('')}${subjudiceTop5.length===0?'<tr><td colspan="2" style="color:#94a3b8;text-align:center">Nenhum</td></tr>':''}</tbody></table></div>
   </div>
 </div>
+<div style="background: linear-gradient(90deg, #1e293b, #334155); color: #fff; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; font-weight: 600; font-size: 14px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"><i class="fas fa-trophy" style="margin-right: 10px; color: #fbbf24;"></i> TOP 5 TÍTULOS COM MAIORES VALORES EM ATRASO POR OPERADOR</div>
 <div class="op-grid">
   ${opSorted.filter(op=>op.customers.length>0).map(op=>{
     op.customers.sort((a,b)=>b.value-a.value);
     const top5=op.customers.slice(0,5);
-    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>${top5.map(c=>`<tr><td title="${c.name}">${c.name.split(' ').slice(0,2).join(' ')}</td><td>${formatMoney(c.value)}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>${top5.map(c=>`<tr><td title="${c.name}">${c.name} <span style="color:#94a3b8; font-size:9px;">[${c.title||''}]</span></td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody></table></div>`;
   }).join('')}
 </div>
 </body></html>`;

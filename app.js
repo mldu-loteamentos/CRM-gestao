@@ -3191,11 +3191,8 @@ document.addEventListener("click", function(e) {
     };
     const getPriority = (client) => {
         // Mantendo no final os clientes que já possuem ocorrência agendada ativa
-        if (hasScheduledOcc(client)) {
-            if (client.subjudice === "S") return 4;
-            return 1;
-        }
-        
+        if (hasScheduledOcc(client)) return 1;
+
         // 1. PRIMEIRO 0% PAGO
         if (client.isZeroPaid) return 5;
         
