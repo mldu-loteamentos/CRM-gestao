@@ -3190,13 +3190,24 @@ document.addEventListener("click", function(e) {
       return notes.some(n => n.promiseDate && n.status !== "Cancelada");
     };
     const getPriority = (client) => {
+        // Mantendo no final os clientes que já possuem ocorrência agendada ativa
         if (hasScheduledOcc(client)) {
-            if (client.subjudice === "S") return 3;
+            if (client.subjudice === "S") return 4;
             return 1;
         }
-        if (client.isZeroPaid) return 4;
-        if (client.subjudice === "S" || client.maxDaysDelay >= thresholdJuridico) return 3;
-        return 1;
+        
+        // 1. PRIMEIRO 0% PAGO
+        if (client.isZeroPaid) return 5;
+        
+        // 2. DEPOIS OS QUE ESTÃO SUB JUDICE E OS QUE DEVEM IR PARA O JURIDICO
+        if (client.subjudice === "S" || client.maxDaysDelay >= thresholdJuridico) return 4;
+        
+        // 3. DEPOIS OS CLIENTES QUE NÃO TEM TAGS ESPECIAIS
+        const hasTags = client.tags && client.tags.length > 0;
+        if (!hasTags) return 3;
+        
+        // 4. POR ÚLTIMO OS CLIENTES COM TAGS ESPECIAIS
+        return 2;
     };
 
     const prioA = getPriority(a);
