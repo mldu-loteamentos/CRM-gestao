@@ -8370,7 +8370,6 @@ async function saveCustomerOccurrence() {
     reminder = selectEl.value;
   }
   
-  const canal = canalEl ? canalEl.value : "";
   const iniciativa = iniciativaEl ? iniciativaEl.value : "";
   
   if (!text) {
