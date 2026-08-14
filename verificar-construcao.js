@@ -99,46 +99,57 @@ window.VerificarConstrucaoApp = {
                     </div>
                 </div>
             </div>
+        `;
 
+        // Inject modals into body (not inside the tab section) so they work as true overlays
+        this._ensureModals();
+
+        if (window.lucide) lucide.createIcons();
+    },
+
+    _ensureModals() {
+        // Avoid duplicating modals if already present in body
+        if (document.getElementById('modal-validar-vistoria')) return;
+
+        const wrapper = document.createElement('div');
+        wrapper.id = 'vc-modals-wrapper';
+        wrapper.innerHTML = `
             <!-- Modal Validar Vistoria -->
-            <div id="modal-validar-vistoria" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
-                <div class="modal-content" style="width: 800px; max-width: 95%;">
-                    <div class="modal-header">
-                        <h2>Validar Vistoria</h2>
-                        <button class="modal-close" onclick="document.getElementById('modal-validar-vistoria').style.display='none'"><i data-lucide="x"></i></button>
+            <div id="modal-validar-vistoria" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999; align-items:flex-start; justify-content:center; padding-top:50px; overflow-y:auto;">
+                <div style="background:#fff; border-radius:12px; width:800px; max-width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.3); margin-bottom:40px;">
+                    <div style="padding:20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0; font-size:1.2rem; color:#1e293b;">Validar Vistoria</h2>
+                        <button onclick="document.getElementById('modal-validar-vistoria').style.display='none'" style="background:none; border:none; cursor:pointer; color:#64748b; font-size:1.2rem;">✕</button>
                     </div>
-                    <div class="modal-body" id="validar-vistoria-body" style="min-height: 200px;">
+                    <div id="validar-vistoria-body" style="padding:20px; min-height:200px;">
                         Carregando...
                     </div>
-                    <div class="modal-footer" style="padding: 15px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
-                        <button class="btn btn-outline" style="border-color: var(--color-danger); color: var(--color-danger);" onclick="window.VerificarConstrucaoApp.rejeitarVistoriaModal()">
-                            <i data-lucide="x-circle" style="width: 16px;"></i> Rejeitar
+                    <div style="padding:15px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:10px;">
+                        <button class="btn btn-outline" style="border-color:var(--color-danger,#dc2626); color:var(--color-danger,#dc2626);" onclick="window.VerificarConstrucaoApp.rejeitarVistoriaModal()">
+                            ✕ Rejeitar
                         </button>
                         <button class="btn btn-success" onclick="window.VerificarConstrucaoApp.aprovarVistoriaModal()">
-                            <i data-lucide="check-circle" style="width: 16px;"></i> Aprovar
+                            ✓ Aprovar
                         </button>
                     </div>
                 </div>
             </div>
 
             <!-- Modal Obras em Andamento -->
-            <div id="modal-obras-andamento" class="modal-overlay" style="display:none; align-items:flex-start; padding-top:50px; z-index: 9999;">
-                <div class="modal-content" style="width: 600px; max-width: 95%;">
-                    <div class="modal-header">
-                        <h2>Obras em Andamento</h2>
-                        <button class="modal-close" onclick="document.getElementById('modal-obras-andamento').style.display='none'"><i data-lucide="x"></i></button>
+            <div id="modal-obras-andamento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:99999; align-items:flex-start; justify-content:center; padding-top:50px; overflow-y:auto;">
+                <div style="background:#fff; border-radius:12px; width:600px; max-width:95%; box-shadow:0 20px 60px rgba(0,0,0,0.3); margin-bottom:40px;">
+                    <div style="padding:20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0; font-size:1.2rem; color:#1e293b;">Obras em Andamento</h2>
+                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="background:none; border:none; cursor:pointer; color:#64748b; font-size:1.2rem;">✕</button>
                     </div>
-                    <div class="modal-body" style="min-height: 200px; max-height: 60vh; overflow-y: auto;">
-                        <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 15px;">Ligue a chave para os empreendimentos que estão com obras em andamento. Os clientes desses empreendimentos serão dispensados de vistoria.</p>
-                        <div id="obras-andamento-list">
-                            Carregando...
-                        </div>
+                    <div style="padding:20px; min-height:200px; max-height:60vh; overflow-y:auto;">
+                        <p style="font-size:0.9rem; color:#64748b; margin-bottom:15px;">Ligue a chave para os empreendimentos que estão com obras em andamento. Os clientes desses empreendimentos serão dispensados de vistoria.</p>
+                        <div id="obras-andamento-list">Carregando...</div>
                     </div>
                 </div>
             </div>
         `;
-
-        if (window.lucide) lucide.createIcons();
+        document.body.appendChild(wrapper);
     },
 
     async loadData() {
@@ -398,9 +409,16 @@ window.VerificarConstrucaoApp = {
     },
 
     abrirModalObrasAndamento() {
+        this._ensureModals();
         const modal = document.getElementById('modal-obras-andamento');
         const listDiv = document.getElementById('obras-andamento-list');
-        if (!this.allRows || !listDiv) return;
+        if (!modal || !listDiv) return;
+
+        if (!this.allRows) {
+            listDiv.innerHTML = '<p style="color:#64748b;">Aguarde, dados ainda carregando...</p>';
+            modal.style.display = 'flex';
+            return;
+        }
 
         const empreendimentos = new Set();
         this.allRows.forEach(r => {
