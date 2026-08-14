@@ -22469,9 +22469,9 @@ window.exportAgendaToExcel = function() {
 };
 
 window.calculateRenegotiation = function(prefix = '') {
-    if (!window.g_renegBills) return;
+    if (!g_renegBills) return;
 
-    const overdueBills = window.g_renegBills.filter(b => b.isOverdue);
+    const overdueBills = g_renegBills.filter(b => b.isOverdue);
     const totalDebt = overdueBills.reduce((acc, b) => acc + (b.computedCorrected || 0), 0);
 
     const typeEl = document.getElementById(prefix + 'reneg-sinal-type');
@@ -22519,9 +22519,9 @@ window.calculateRenegotiation = function(prefix = '') {
 };
 
 window.applyRenegotiationText = function(prefix = '') {
-    if (!window.g_renegBills) return;
+    if (!g_renegBills) return;
 
-    const overdueBills = window.g_renegBills.filter(b => b.isOverdue);
+    const overdueBills = g_renegBills.filter(b => b.isOverdue);
     const totalDebt = overdueBills.reduce((acc, b) => acc + (b.computedCorrected || 0), 0);
 
     const typeEl = document.getElementById(prefix + 'reneg-sinal-type');
@@ -22563,7 +22563,7 @@ window.applyRenegotiationText = function(prefix = '') {
     const parcelaVal = numInst > 0 ? saldo / numInst : 0;
 
     // Vincendas
-    const aVencerBills = window.g_renegBills.filter(b => !b.isOverdue);
+    const aVencerBills = g_renegBills.filter(b => !b.isOverdue);
     const numVincendas = aVencerBills.length;
     let valorVincenda = 0;
     let dataVincendaStr = 'N/A';

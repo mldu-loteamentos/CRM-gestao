@@ -256,16 +256,17 @@ async function buscarCoordenadasLote() {
         }
         
         // --- DEBUG INFO ---
-        try {
-            const debugDiv = document.createElement('div');
-            debugDiv.style.fontSize = '10px';
-            debugDiv.style.color = '#888';
-            debugDiv.style.marginTop = '10px';
-            debugDiv.style.textAlign = 'center';
-            debugDiv.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}`;
-            document.getElementById('card-content').appendChild(debugDiv);
-        } catch(e){}
-        // ------------------
+    try {
+        const debugDiv = document.createElement('div');
+        debugDiv.id = 'debug-coord-div';
+        debugDiv.style.fontSize = '10px';
+        debugDiv.style.color = '#888';
+        debugDiv.style.marginTop = '10px';
+        debugDiv.style.textAlign = 'center';
+        debugDiv.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}<br>Lote: ${loteCoords.lat.toFixed(5)}, ${loteCoords.lng.toFixed(5)}`;
+        document.getElementById('card-content').appendChild(debugDiv);
+    } catch(e){}
+    // ------------------
 
         iniciarGPS();
         
@@ -294,6 +295,13 @@ function iniciarGPS() {
             
             const dist = calcCrow(userLat, userLng, loteCoords.lat, loteCoords.lng);
             currentDistance = Math.round(dist * 1000);
+            
+            try {
+                const dbg = document.getElementById('debug-coord-div');
+                if(dbg) {
+                    dbg.innerHTML = `DEBUG: ID:${currentVistoriaDoc.costCenterId || 'null'} | Fonte: ${window._debugCoordSource || 'N/A'}<br>Lote: ${loteCoords.lat.toFixed(5)}, ${loteCoords.lng.toFixed(5)}<br>User: ${userLat.toFixed(5)}, ${userLng.toFixed(5)}<br>Dist: ${currentDistance}m`;
+                }
+            } catch(e){}
             
             // Salvar GPS atual globalmente para a marca d'água
             window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
