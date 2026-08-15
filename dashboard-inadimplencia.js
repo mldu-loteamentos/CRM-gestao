@@ -656,7 +656,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     op.customers.sort((a,b)=>b.value-a.value);
     const top5=op.customers.slice(0,5);
     const totalTop5 = top5.reduce((sum, c) => sum + c.value, 0);
-    return \`<div class="op-card"><div class="op-head">\${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>\${top5.map(c=>\`<tr><td>\${c.name.split(' ').slice(0,3).join(' ')} <span style="color:#64748b;font-size:7.5px">\${c.title ? '['+c.title+']' : ''}</span></td><td>\${fmtMoney(c.value)}</td></tr>\`).join('')}</tbody><tfoot><tr><td style="text-align:right;font-weight:bold;">Total Top 5:</td><td style="font-weight:bold;color:#0f1e17;">\${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>\`;
+    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>${top5.map(c=>`<tr><td>${c.name.split(' ').slice(0,3).join(' ')} <span style="color:#64748b;font-size:7.5px">${c.title ? '['+c.title+']' : ''}</span></td><td>${fmtMoney(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td style="text-align:right;font-weight:bold;">Total Top 5:</td><td style="font-weight:bold;color:#0f1e17;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
 </body></html>\`;
