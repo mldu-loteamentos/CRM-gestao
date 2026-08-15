@@ -292,7 +292,7 @@ window.openNewConstrucaoModal = function() {
         if (window.lucide) lucide.createIcons();
     } catch(err) {
         console.error("Erro ao abrir modal:", err);
-        alert("Erro ao abrir janela de vistoria. Verifique se há um contrato válido.");
+        alert("ERRO AO ABRIR JANELA DE VISTORIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
     }
 };
 
@@ -378,7 +378,7 @@ window.saveNovaVistoria = async function() {
 
     } catch(e) {
         console.error("Erro ao salvar vistoria:", e);
-        alert("Erro ao salvar vistoria: " + e.message);
+        alert("ERRO AO SALVAR VISTORIA:\n\n" + e.message + "\n\nStack:\n" + e.stack);
         btn.disabled = false;
         btn.innerHTML = 'Salvar Vistoria';
     }
