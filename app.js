@@ -18758,14 +18758,7 @@ window.loadRelacionamentoUnidades = async function(cc) {
     let hasMore = true;
 
     while (hasMore) {
-      const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-      const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-      const url = `http://${host}:${port}/sienge-proxy/units?limit=${limit}&offset=${offset}&enterpriseId=${cc}&additionalData=NONE`;
-      
-      const res = await fetch(url, { headers: { 'Authorization': window.getBasicAuthHeader ? getBasicAuthHeader() : '' } });
-      if (!res.ok) throw new Error("Falha Sienge HTTP " + res.status);
-      
-      const data = await res.json();
+      const data = await window.siengeFetchWithRetry(`/units?limit=${limit}&offset=${offset}&enterpriseId=${cc}&additionalData=NONE`);
       const results = data.results || [];
       allUnits = allUnits.concat(results);
       
@@ -18786,8 +18779,6 @@ window.loadRelacionamentoUnidades = async function(cc) {
     selectUnidade.innerHTML = '<option value="">Selecione uma unidade...</option>';
     
     // Buscar contratos para mostrar cliente
-    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-    const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
     
     for (const u of allUnits) {
       selectUnidade.innerHTML += `<option value="${u.id}">${u.name}</option>`;
