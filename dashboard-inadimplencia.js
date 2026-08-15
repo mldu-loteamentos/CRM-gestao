@@ -516,10 +516,30 @@ const DashboardInadimplencia = (function() {
     const opTotals = { d30_c:0,d30_v:0,d60_c:0,d60_v:0,d90_c:0,d90_v:0,d120_c:0,d120_v:0,d120p_c:0,d120p_v:0,total_c:0,total_v:0 };
     opSorted.forEach(op => { ['d30','d60','d90','d120','d120p','total'].forEach(k => { opTotals[k+'_c'] += op[k+'_c']; opTotals[k+'_v'] += op[k+'_v']; }); });
 
-    const snaps = snapshots.slice(-8);
-    const snapLabels = snaps.map((s,i) => { if(s.is_month_close) return 'Fecham.'; const diff=snaps.length-1-i; return diff===0?'Hoje':`d-${diff}`; });
-    const fechSnap = snaps.find(s=>s.is_month_close) || snaps[0];
-    const hojeSnap = snaps[snaps.length-1];
+    const fechSnapReal = snapshots.find(s => s.is_month_close) || snapshots[0];
+    let chartSnaps = [];
+    if (fechSnapReal) chartSnaps.push(fechSnapReal);
+    const lastSnaps = snapshots.slice(-7);
+    lastSnaps.forEach(s => {
+        if (!fechSnapReal || s.date !== fechSnapReal.date) {
+            chartSnaps.push(s);
+        }
+    });
+    if (chartSnaps.length > 8) {
+        chartSnaps = [chartSnaps[0], ...chartSnaps.slice(-7)];
+    }
+    const chartLabels = chartSnaps.map((s, i) => {
+        if (i === 0 && s.is_month_close) return 'Fechamento';
+        if (s.date === snapshots[snapshots.length-1].date) return 'Hoje';
+        if (s.date) {
+            const parts = s.date.split('-');
+            const months = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+            if (parts.length === 3) return `${parts[2]}/${months[parseInt(parts[1],10)-1]}`;
+        }
+        return `d-${chartSnaps.length - 1 - i}`;
+    });
+    const fechSnap = fechSnapReal;
+    const hojeSnap = snapshots[snapshots.length-1];
 
     function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
     function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -536,15 +556,62 @@ const DashboardInadimplencia = (function() {
       return `<div style="text-align:center;"><div style="font-size:8.5px;font-weight:700;color:#334155;margin-bottom:3px;">${fmtK(total)}</div><svg width="${W}" height="${H}" style="display:block;margin:0 auto;">${rects}</svg><div style="font-size:8.5px;color:#64748b;margin-top:3px;">${label}</div></div>`;
     }
 
-    function sparklineSvg(data, color) {
+    function barChartSvg(data, labels, color, isValue) {
       if (!data || data.length < 2 || !data.some(v=>v>0)) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem dados históricos</div>';
-      const max=Math.max(...data)||1, min=Math.min(...data);
-      const W=280, H=55, pad=12;
-      const pts = data.map((v,i)=>{ const x=pad+(i/(data.length-1))*(W-pad*2); const y=H-pad-((v-min)/(max-min||1))*(H-pad*2); return `${x},${y}`; }).join(' ');
-      const dotPts = data.map((v,i)=>{ const x=pad+(i/(data.length-1))*(W-pad*2); const y=H-pad-((v-min)/(max-min||1))*(H-pad*2); return {x,y,v}; });
-      const dots = dotPts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"/><text x="${p.x}" y="${p.y-7}" text-anchor="middle" font-size="7.5" fill="#334155">${fmtK(p.v)}</text>`).join('');
-      const labels = (snapLabels||[]).map((l,i)=>`<text x="${pad+(i/(data.length-1))*(W-pad*2)}" y="${H+10}" text-anchor="middle" font-size="7.5" fill="#94a3b8">${l}</text>`).join('');
-      return `<svg width="${W}" height="${H+14}" style="overflow:visible;display:block;margin:0 auto;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>${dots}${labels}</svg>`;
+      
+      const W = 330, H = 160, padTop = 35, padBot = 20, padSide = 30;
+      const maxVal = Math.max(...data) || 1;
+      
+      const barCount = data.length;
+      const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
+      const barWidth = Math.min(22, stepX * 0.6); 
+      
+      let bars = '';
+      let textLabels = '';
+      let xLabels = '';
+      
+      const firstVal = data[0];
+      const lastVal = data[data.length - 1];
+      const diff = lastVal - firstVal;
+      const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : 0;
+      const sign = diff > 0 ? '+' : '';
+      const diffText = isValue ? `${sign}${fmtK(diff)} | ${sign}${pct}%` : `${sign}${diff} | ${sign}${pct}%`;
+      
+      const arrowY = 15;
+      const arrowStartX = padSide;
+      const arrowEndX = W - padSide;
+      const arrowPath = `M ${arrowStartX} ${arrowY+6} L ${arrowStartX} ${arrowY} L ${arrowEndX} ${arrowY} L ${arrowEndX} ${arrowY+6}`;
+      const arrowHead = `M ${arrowEndX-3.5} ${arrowY+2.5} L ${arrowEndX} ${arrowY+6} L ${arrowEndX+3.5} ${arrowY+2.5}`;
+      
+      const topArrowSvg = `
+        <path d="${arrowPath}" fill="none" stroke="#0f1e17" stroke-width="1.5" />
+        <path d="${arrowHead}" fill="none" stroke="#0f1e17" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        <rect x="${W/2 - 40}" y="${arrowY - 10}" width="80" height="16" fill="#fff" />
+        <text x="${W/2}" y="${arrowY + 3}" text-anchor="middle" font-size="10" font-weight="800" fill="#0f1e17">${diffText}</text>
+      `;
+
+      data.forEach((v, i) => {
+          const xCenter = padSide + i * stepX;
+          const barH = (v / maxVal) * (H - padTop - padBot);
+          const y = H - padBot - barH;
+          
+          bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${color}" rx="2" />`;
+          
+          const valText = isValue ? fmtK(v) : v;
+          textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${valText}</text>`;
+          
+          xLabels += `<text x="${xCenter}" y="${H - 5}" text-anchor="middle" font-size="8.5" fill="#64748b">${labels[i]}</text>`;
+      });
+      
+      const axisLine = `<line x1="${0}" y1="${H - padBot}" x2="${W}" y2="${H - padBot}" stroke="#e2e8f0" stroke-width="1.5" />`;
+
+      return `<svg width="${W}" height="${H}" style="overflow:visible;display:block;margin:0 auto;">
+          ${topArrowSvg}
+          ${axisLine}
+          ${bars}
+          ${textLabels}
+          ${xLabels}
+      </svg>`;
     }
 
     zeroPaidClients.sort((a,b)=>b.delay-a.delay);
@@ -576,8 +643,8 @@ const DashboardInadimplencia = (function() {
         zeroPaidEmp[emp] += (c.billCount||1);
     });
     const zeroPaidEmpList = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
-    const spark31v = snaps.map(s=>s.above31_value||0);
-    const spark31t = snaps.map(s=>s.above31_count||0);
+    const chart31v = chartSnaps.map(s=>s.above31_value||0);
+    const chart31t = chartSnaps.map(s=>s.above31_count||0);
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
 @page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}
@@ -664,8 +731,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   </table></div>
 </div>
 <div class="trends-row">
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${sparklineSvg(spark31v,'#f59e0b')}</div>
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${sparklineSvg(spark31t,'#3b82f6')}</div>
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${barChartSvg(chart31t, chartLabels, '#176381', false)}</div>
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${barChartSvg(chart31v, chartLabels, '#176381', true)}</div>
 </div>
 <div style="margin-bottom:12px;">
   <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">

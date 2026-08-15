@@ -201,7 +201,7 @@ function renderConstrucaoHistory(checks) {
             <td style="padding: 12px; font-weight: 500; font-size: 0.9rem;">${dateStr}</td>
             <td style="padding: 12px; font-size: 0.9rem;">${check.responsible || '-'}</td>
             <td style="padding: 12px; font-size: 0.9rem;">
-                <span style="background: #e0f2fe; color: #0284c7; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
+                <span style="background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
                     ${check.stage || '-'}
                 </span>
             </td>
