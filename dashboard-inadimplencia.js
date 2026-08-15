@@ -643,8 +643,24 @@ const DashboardInadimplencia = (function() {
         zeroPaidEmp[emp] += (c.billCount||1);
     });
     const zeroPaidEmpList = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
-    const chart31v = chartSnaps.map(s=>s.above31_value||0);
-    const chart31t = chartSnaps.map(s=>s.above31_count||0);
+    function getAbove31(snap) {
+        let v = 0, c = 0;
+        if (snap && snap.data_json && snap.data_json.companies) {
+            snap.data_json.companies.forEach(comp => {
+                if (comp.aging) {
+                    ['d31_60', 'd61_90', 'd91_180', 'd181_365', 'd365p'].forEach(k => {
+                        if (comp.aging[k]) {
+                            v += comp.aging[k].value || 0;
+                            c += comp.aging[k].count || 0;
+                        }
+                    });
+                }
+            });
+        }
+        return { v, c };
+    }
+    const chart31v = chartSnaps.map(s => getAbove31(s).v);
+    const chart31t = chartSnaps.map(s => getAbove31(s).c);
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
 @page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}
@@ -731,8 +747,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   </table></div>
 </div>
 <div class="trends-row">
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${barChartSvg(chart31t, chartLabels, '#176381', false)}</div>
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${barChartSvg(chart31v, chartLabels, '#176381', true)}</div>
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${barChartSvg(chart31t, chartLabels, '#ea580c', false)}</div>
+  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${barChartSvg(chart31v, chartLabels, '#ea580c', true)}</div>
 </div>
 <div style="margin-bottom:12px;">
   <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
