@@ -1,4 +1,4 @@
-# _version_bump.ps1
+﻿# _version_bump.ps1
 # Helper chamado pelo deploy.bat para incrementar a versao automaticamente no index.html
 
 param(
@@ -7,7 +7,7 @@ param(
 
 $content = [System.IO.File]::ReadAllText($IndexFile, [System.Text.Encoding]::UTF8)
 
-# Lê a versão atual do badge no sidebar
+# LÃª a versÃ£o atual do badge no sidebar
 if ($content -match 'v(\d+)\.(\d+)\.(\d+)\s*&nbsp;') {
     $major = [int]$Matches[1]
     $minor = [int]$Matches[2]
@@ -19,7 +19,7 @@ if ($content -match 'v(\d+)\.(\d+)\.(\d+)\s*&nbsp;') {
 
 $newVer    = "$major.$minor.$patch"
 $today     = Get-Date -Format "dd/MM/yyyy"
-$newBadge  = "v$newVer &nbsp;·&nbsp; $today"
+$newBadge  = "v$newVer &nbsp;Â·&nbsp; $today"
 
 # Substitui o badge antigo pelo novo
 $content = $content -replace `
@@ -28,10 +28,10 @@ $content = $content -replace `
 
 [System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
 
-# Substitui também as strings de cache dos scripts (ex: app.js?v=114 -> app.js?v=121)
+# Substitui tambÃ©m as strings de cache dos scripts (ex: app.js?v=114 -> app.js?v=121)
 $content = $content -replace '\?v=\d+', "?v=$patch"
 
 [System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
 
-# Retorna a versão nova para o deploy.bat capturar
+# Retorna a versÃ£o nova para o deploy.bat capturar
 Write-Output $newVer
