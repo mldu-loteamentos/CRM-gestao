@@ -205,6 +205,8 @@ window.VerificarConstrucaoApp = {
 
             const checksByContract = {};
             const completedChecksByContract = {};
+            const latestCheckDateByContract = {};
+            
             if (window.firebaseDb && window.firebaseCollections) {
                 try {
                     const { collection, getDocs, query, where } = window.firebaseCollections;
@@ -218,7 +220,19 @@ window.VerificarConstrucaoApp = {
                     snapChecks.forEach(doc => {
                         const data = doc.data();
                         if (data.stage && data.stage.trim() !== '') {
-                            completedChecksByContract[String(data.contractId)] = true;
+                            const cId = String(data.contractId);
+                            const cDate = data.date || data.createdAt || '1970-01-01';
+                            
+                            if (!latestCheckDateByContract[cId] || cDate >= latestCheckDateByContract[cId]) {
+                                latestCheckDateByContract[cId] = cDate;
+                                
+                                const stageUpper = data.stage.trim().toUpperCase();
+                                if (stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO') {
+                                    completedChecksByContract[cId] = false;
+                                } else {
+                                    completedChecksByContract[cId] = true;
+                                }
+                            }
                         }
                     });
                 } catch (err) {

@@ -1,7 +1,7 @@
 // Lógica para a aba de Construção e Histórico de Vistorias
 
 window.ConstrucaoApp = {
-    stages: ["Terraplanagem", "Fundação / Alicerce", "Alvenaria", "Cobertura", "Acabamento", "Concluído"],
+    stages: ['Sem construção', 'Terraplanagem', 'Alicerce', 'Apenas muro', 'Altura de laje', 'Telhado', 'Casa pronta sem acabamento', 'Casa pronta'],
     currentChecks: [],
     
     init() {
@@ -181,7 +181,8 @@ function renderConstrucaoHistory(checks) {
                 <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">DATA</th>
                 <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">RESPONSÁVEL</th>
                 <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">ESTÁGIO</th>
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; text-align: center;">ANEXO</th>
+                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; width: 35%;">OBSERVAÇÕES</th>
+                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; text-align: right;">AÇÕES</th>
             </tr>
         </thead>
         <tbody>
@@ -190,9 +191,9 @@ function renderConstrucaoHistory(checks) {
     checks.forEach(check => {
         // Date parse keeping local timezone to avoid off-by-one errors (if date was saved as YYYY-MM-DD)
         const dateStr = check.date.split('-').reverse().join('/');
-        let fileLink = '-';
+        let fileLink = '';
         if (check.fileUrl) {
-            fileLink = `<a href="${check.fileUrl}" target="_blank" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem;"><i data-lucide="download" style="width:14px; height:14px; margin-right:4px;"></i> Ver Arquivo</a>`;
+            fileLink = `<a href="${check.fileUrl}" target="_blank" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Ver Foto/Arquivo"><i data-lucide="image" style="width:14px; height:14px;"></i></a>`;
         }
 
         html += `
@@ -204,7 +205,14 @@ function renderConstrucaoHistory(checks) {
                     ${check.stage || '-'}
                 </span>
             </td>
-            <td style="padding: 12px; text-align: center;">${fileLink}</td>
+            <td style="padding: 12px; font-size: 0.8rem; color: #64748b; line-height: 1.3;">
+                ${check.observations || '-'}
+            </td>
+            <td style="padding: 12px; text-align: right; white-space: nowrap;">
+                ${fileLink}
+                <button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>
+                <button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>
+            </td>
         </tr>
         `;
     });
@@ -217,7 +225,7 @@ function renderConstrucaoHistory(checks) {
     }
 }
 
-window.openNewConstrucaoModal = function() {
+window.openNewConstrucaoModal = function(editId = null) {
     try {
         let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
         let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
@@ -245,38 +253,54 @@ window.openNewConstrucaoModal = function() {
             if (saleObj) contractObj = saleObj;
         }
 
-        const today = new Date().toISOString().split('T')[0];
+        let editCheck = null;
+        if (editId) {
+            editCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === editId);
+        }
+
         const responsible = window.ConstrucaoApp.getResponsibleOperator(contractObj);
         
-        let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}">${s}</option>`).join('');
+        const defaultDate = editCheck ? editCheck.date : new Date().toISOString().split('T')[0];
+        const defaultResp = editCheck ? (editCheck.responsible || responsible) : responsible;
+        const defaultObs = editCheck ? (editCheck.observations || '') : '';
+        const defaultStage = editCheck ? editCheck.stage : '';
+
+        let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}" ${s === defaultStage ? 'selected' : ''}>${s}</option>`).join('');
 
         const modalHtml = `
         <div id="modal-nova-vistoria" class="modal-overlay active" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center; opacity: 1 !important; visibility: visible !important; pointer-events: auto !important;">
-            <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+            <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 750px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
                 <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="plus-circle" style="width: 20px;"></i> Inserir Vistoria Manual
+                    <i data-lucide="${editCheck ? 'edit' : 'plus-circle'}" style="width: 20px;"></i> ${editCheck ? 'Editar Vistoria Manual' : 'Inserir Vistoria Manual'}
                 </h3>
+                
+                <input type="hidden" id="vistoria-edit-id" value="${editCheck ? editCheck.id : ''}">
                 
                 <div style="display: flex; gap: 15px; margin-bottom: 15px;">
                     <div style="flex: 1;">
                         <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Data da Vistoria</label>
-                        <input type="date" id="vistoria-data" value="${today}" class="form-control" style="width: 100%;">
+                        <input type="date" id="vistoria-data" value="${defaultDate}" class="form-control" style="width: 100%;">
                     </div>
                     <div style="flex: 1;">
                         <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Responsável</label>
-                        <input type="text" id="vistoria-resp" value="${responsible}" class="form-control" style="width: 100%; background: #f1f5f9;">
+                        <input type="text" id="vistoria-resp" value="${defaultResp}" class="form-control" style="width: 100%; background: #f1f5f9;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Estágio da Obra</label>
+                        <select id="vistoria-stage" class="form-control" style="width: 100%;">
+                            <option value="">Selecione...</option>
+                            ${stageOptions}
+                        </select>
                     </div>
                 </div>
 
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Estágio da Obra</label>
-                    <select id="vistoria-stage" class="form-control" style="width: 100%;">
-                        ${stageOptions}
-                    </select>
+                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Observações</label>
+                    <textarea id="vistoria-obs" class="form-control" rows="3" style="width: 100%; padding: 8px;">${defaultObs}</textarea>
                 </div>
 
                 <div style="margin-bottom: 20px;">
-                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivo (Foto ou PDF)</label>
+                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivo (Foto ou PDF) ${editCheck && editCheck.fileUrl ? '- <i>(Deixe em branco para manter a foto atual)</i>' : ''}</label>
                     <input type="file" id="vistoria-file" accept="image/*,.pdf" class="form-control" style="width: 100%; padding: 8px;">
                 </div>
 
@@ -292,16 +316,14 @@ window.openNewConstrucaoModal = function() {
         if (window.lucide) lucide.createIcons();
     } catch(err) {
         console.error("Erro ao abrir modal:", err);
-        alert("ERRO AO ABRIR JANELA DE VISTORIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
-    }
-};
-
-window.saveNovaVistoria = async function() {
+        alert("ERRO AO ABRIR JANELA DE VISTORIA:\n\n" + err.message + "\n\nStwindow.saveNovaVistoria = async function() {
     const btn = document.getElementById('btn-salvar-vistoria');
     const date = document.getElementById('vistoria-data').value;
     const responsible = document.getElementById('vistoria-resp').value;
     const stage = document.getElementById('vistoria-stage').value;
+    const obs = document.getElementById('vistoria-obs').value;
     const fileInput = document.getElementById('vistoria-file');
+    const editId = document.getElementById('vistoria-edit-id').value;
 
     if (!date || !stage) {
         alert("Preencha a data e o estágio.");
@@ -355,22 +377,34 @@ window.saveNovaVistoria = async function() {
             const uploadRes = await window.ConstrucaoApp.uploadFile(file, customerId);
             fileUrl = uploadRes.url;
             fileName = uploadRes.name;
+        } else if (editId) {
+            const editCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === editId);
+            if (editCheck) {
+                fileUrl = editCheck.fileUrl;
+                fileName = editCheck.fileName;
+            }
         }
 
-        const { collection, addDoc } = window.firebaseCollections;
-        const newCheck = {
+        const { collection, addDoc, doc, updateDoc } = window.firebaseCollections;
+        const checkData = {
             customerId: String(customerId),
             contractId: String(contractNumber),
             companyId: String(companyId),
             date: date,
             responsible: responsible,
             stage: stage,
+            observations: obs,
             fileUrl: fileUrl,
             fileName: fileName,
-            createdAt: new Date().toISOString()
+            updatedAt: new Date().toISOString()
         };
 
-        await addDoc(collection(window.firebaseDb, "construction_checks"), newCheck);
+        if (editId) {
+            await updateDoc(doc(window.firebaseDb, "construction_checks", editId), checkData);
+        } else {
+            checkData.createdAt = new Date().toISOString();
+            await addDoc(collection(window.firebaseDb, "construction_checks"), checkData);
+        }
         
         document.getElementById('modal-nova-vistoria').remove();
         alert("Vistoria salva com sucesso!");
@@ -384,48 +418,29 @@ window.saveNovaVistoria = async function() {
     }
 };
 
-window.openConstrucaoSettingsModal = function() {
-    const stagesText = window.ConstrucaoApp.stages.join('\\n');
-    
-    const modalHtml = `
-    <div id="modal-settings-vistoria" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center;">
-        <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-            <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="settings" style="width: 20px;"></i> Estágios da Construção
-            </h3>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Adicione um estágio por linha:</label>
-                <textarea id="settings-stages-text" rows="8" class="form-control" style="width: 100%; padding: 10px;">${stagesText}</textarea>
-            </div>
-
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-settings-vistoria').remove()">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="window.saveConstrucaoSettings()">Salvar</button>
-            </div>
-        </div>
-    </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    if (window.lucide) lucide.createIcons();
+window.editNovaVistoria = function(id) {
+    window.openNewConstrucaoModal(id);
 };
 
-window.saveConstrucaoSettings = function() {
-    const text = document.getElementById('settings-stages-text').value;
-    const newStages = text.split('\\n').map(s => s.trim()).filter(s => s.length > 0);
+window.deleteNovaVistoria = async function(id) {
+    if (!confirm("Tem certeza que deseja excluir esta vistoria? Esta ação não poderá ser desfeita.")) return;
     
-    if (newStages.length === 0) {
-        alert("É necessário ter pelo menos um estágio.");
-        return;
+    try {
+        const { doc, deleteDoc } = window.firebaseCollections;
+        const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
+        if (!check) return;
+        
+        await deleteDoc(doc(window.firebaseDb, "construction_checks", id));
+        
+        alert("Vistoria excluída com sucesso!");
+        window.loadConstrucoes();
+    } catch(err) {
+        console.error("Erro ao excluir vistoria:", err);
+        alert("Erro ao excluir vistoria: " + err.message);
     }
-
-    window.ConstrucaoApp.saveStages(newStages).then(() => {
-        document.getElementById('modal-settings-vistoria').remove();
-    });
 };
 
 // Initialize after script load
 setTimeout(() => {
     window.ConstrucaoApp.init();
-}, 1500);
+}, 500);
