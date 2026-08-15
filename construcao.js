@@ -370,7 +370,7 @@ window.saveNovaVistoria = async function() {
     }
     
     btn.disabled = true;
-    btn.innerHTML = 'Salvando...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 5px;"></i> Salvando...';
 
     try {
         let fileUrl = null;

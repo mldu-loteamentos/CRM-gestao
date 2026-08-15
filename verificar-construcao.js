@@ -268,7 +268,10 @@ window.VerificarConstrucaoApp = {
                 let statusLabel = 'Pendente de Vistoria';
                 let statusColor = 'color: #dc2626; font-weight: bold;';
 
-                if (vistoriaAtiva) {
+                if (hasConstruction) {
+                    statusLabel = 'Construção Identificada (Dispensado)';
+                    statusColor = 'color: #16a34a; font-weight: 600;';
+                } else if (vistoriaAtiva) {
                     if (vistoriaAtiva.status === 'aguardando_fotos') {
                         statusLabel = 'Link Enviado – Aguardando Fotos';
                         statusColor = 'color: #d97706; font-weight: 600;';
@@ -396,7 +399,7 @@ window.VerificarConstrucaoApp = {
                         html += `
                             <tr style="border-bottom: 1px solid #f1f5f9; background:${rowBg}; transition: background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${rowBg}'">
                                 <td style="padding: 10px 12px; text-align: center; width: 40px;">
-                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" style="accent-color: #16a34a;">
+                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''} style="accent-color: #16a34a;">
                                 </td>
                                 <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
                                 <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
