@@ -662,12 +662,16 @@ const DashboardInadimplencia = (function() {
     const chart31v = chartSnaps.map(s => getAbove31(s).v);
     const chart31t = chartSnaps.map(s => getAbove31(s).c);
 
+    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}\n👥 *Clientes em Atraso:* ${uniqueClients.size}\n📄 *Títulos Vencidos:* ${totalBills}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n\n_Gerado pelo CRM_`;
+    const teamsLink = `https://teams.microsoft.com/l/chat/19:1d1e6bd7448a479bace24f762a30b425@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D&message=${encodeURIComponent(teamsText)}`;
+
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
 @page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;padding:0;color:#1e293b;font-size:9.5px;background:#f1f5f9;-webkit-print-color-adjust:exact;print-color-adjust:exact;line-height:1.2}
 @media print{.no-print{display:none!important}body{background:white}}
-.no-print{text-align:center;padding:6px;background:#0f1e17}
-.no-print button{padding:6px 20px;background:#22c55e;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:700;font-size:11px}
+.no-print{text-align:center;padding:10px;background:#0f1e17;display:flex;justify-content:center;gap:15px;}
+.no-print button{padding:8px 24px;background:#22c55e;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.2);transition:opacity 0.2s}
+.no-print button:hover{opacity:0.9}
 h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
 .kpi-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:10px; }
 .kpi { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
@@ -717,7 +721,10 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
       .op-card td:nth-child(2){font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;}
       .op-card td:last-child{text-align:right;font-weight:800;color:#1e293b}
 </style></head><body>
-<div class="no-print"><button onclick="window.print()">🖨️ Imprimir Sprint Diário</button></div>
+<div class="no-print">
+    <button onclick="window.print()">🖨️ Imprimir</button>
+    <button onclick="window.open('${teamsLink}', '_blank')" style="background:#464eb8;">💬 Enviar por Teams</button>
+</div>
 <h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
 <div class="kpi-strip">
   <div class="kpi danger"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div><div class="kpi-content"><span class="kpi-label">Valor em Atraso</span><span class="kpi-value">${fmtInteiro(totalOverdue)}</span></div></div>
@@ -798,7 +805,6 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 </div>
 </body></html>`;
 
-    alert("HTML do relatório gerado. Tentando abrir nova aba (Pop-up)... Verifique o bloqueador de pop-ups se não abrir!");
     const win = window.open('', '_blank');
     if (!win) {
       alert("Navegador bloqueou a abertura da nova aba! Por favor, libere os pop-ups.");

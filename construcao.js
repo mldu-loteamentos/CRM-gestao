@@ -411,7 +411,6 @@ window.saveNovaVistoria = async function() {
         }
         
         document.getElementById('modal-nova-vistoria').remove();
-        alert("Vistoria salva com sucesso!");
         window.loadConstrucoes();
 
     } catch(e) {
@@ -427,21 +426,45 @@ window.editNovaVistoria = function(id) {
 };
 
 window.deleteNovaVistoria = async function(id) {
-    if (!confirm("Tem certeza que deseja excluir esta vistoria? Esta ação não poderá ser desfeita.")) return;
-    
-    try {
-        const { doc, deleteDoc } = window.firebaseCollections;
-        const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
-        if (!check) return;
-        
-        await deleteDoc(doc(window.firebaseDb, "construction_checks", id));
-        
-        alert("Vistoria excluída com sucesso!");
-        window.loadConstrucoes();
-    } catch(err) {
-        console.error("Erro ao excluir vistoria:", err);
-        alert("Erro ao excluir vistoria: " + err.message);
-    }
+    const modalHtml = `
+    <div id="modal-delete-vistoria" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
+        <div style="background: white; border-radius: 12px; width: 380px; max-width: 90%; padding: 30px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); text-align: center; animation: modalIn 0.2s ease-out;">
+            <div style="width: 56px; height: 56px; border-radius: 50%; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px;">
+                <i data-lucide="alert-triangle" style="width: 32px; height: 32px;"></i>
+            </div>
+            <h3 style="margin: 0 0 12px; font-size: 1.25rem; font-weight: 700; color: #0f1e29;">Excluir Vistoria</h3>
+            <p style="margin: 0 0 24px; font-size: 0.95rem; color: #64748b; line-height: 1.5;">Tem certeza que deseja excluir esta vistoria? Esta ação não poderá ser desfeita.</p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button id="btn-cancel-del" style="flex: 1; padding: 10px 16px; border: 1px solid #cbd5e1; background: #fff; color: #475569; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Cancelar</button>
+                <button id="btn-confirm-del" style="flex: 1; padding: 10px 16px; border: none; background: #ef4444; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Sim, excluir</button>
+            </div>
+        </div>
+    </div>
+    <style>@keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }</style>
+    `;
+    const div = document.createElement('div');
+    div.innerHTML = modalHtml;
+    document.body.appendChild(div);
+    if(window.lucide) lucide.createIcons();
+
+    document.getElementById('btn-cancel-del').onclick = () => {
+        document.body.removeChild(div);
+    };
+
+    document.getElementById('btn-confirm-del').onclick = async () => {
+        document.body.removeChild(div);
+        try {
+            const { doc, deleteDoc } = window.firebaseCollections;
+            const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
+            if (!check) return;
+            
+            await deleteDoc(doc(window.firebaseDb, "construction_checks", id));
+            window.loadConstrucoes();
+        } catch(err) {
+            console.error("Erro ao excluir vistoria:", err);
+            alert("Erro ao excluir vistoria: " + err.message);
+        }
+    };
 };
 
 // Initialize after script load
