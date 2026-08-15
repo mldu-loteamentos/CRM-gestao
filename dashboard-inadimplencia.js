@@ -559,7 +559,7 @@ const DashboardInadimplencia = (function() {
     function barChartSvg(data, labels, color, isValue) {
       if (!data || data.length < 2 || !data.some(v=>v>0)) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem dados históricos</div>';
       
-      const W = 330, H = 160, padTop = 35, padBot = 20, padSide = 30;
+      const W = 330, H = 160, padTop = 45, padBot = 20, padSide = 30;
       const maxVal = Math.max(...data) || 1;
       
       const barCount = data.length;
@@ -575,7 +575,14 @@ const DashboardInadimplencia = (function() {
       const diff = lastVal - firstVal;
       const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : 0;
       const sign = diff > 0 ? '+' : '';
-      const diffText = isValue ? `${sign}${fmtK(diff)} | ${sign}${pct}%` : `${sign}${diff} | ${sign}${pct}%`;
+      
+      function formatVal(v) {
+          if (!isValue) return v;
+          return (v / 1000000).toFixed(3).replace('.', ',');
+      }
+      
+      const diffStr = isValue ? formatVal(diff) : diff;
+      const diffText = `${sign}${diffStr} | ${sign}${pct}%`;
       
       const arrowY = 15;
       const arrowStartX = padSide;
@@ -597,7 +604,7 @@ const DashboardInadimplencia = (function() {
           
           bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${color}" rx="2" />`;
           
-          const valText = isValue ? fmtK(v) : v;
+          const valText = formatVal(v);
           textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${valText}</text>`;
           
           xLabels += `<text x="${xCenter}" y="${H - 5}" text-anchor="middle" font-size="8.5" fill="#64748b">${labels[i]}</text>`;
@@ -656,7 +663,10 @@ const DashboardInadimplencia = (function() {
                     });
                 }
             });
-        }
+        // Se as propriedades sumadas derem zero, tenta usar os campos que já vinham calculados na raiz
+        if (v === 0 && snap.above31_value) v = snap.above31_value;
+        if (c === 0 && snap.above31_count) c = snap.above31_count;
+        
         return { v, c };
     }
     const chart31v = chartSnaps.map(s => getAbove31(s).v);
@@ -753,9 +763,24 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     </tbody>
   </table></div>
 </div>
-<div class="trends-row">
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${barChartSvg(chart31t, chartLabels, '#ea580c', false)}</div>
-  <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${barChartSvg(chart31v, chartLabels, '#ea580c', true)}</div>
+<div style="margin-bottom:12px;">
+  <div style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(249, 115, 22, 0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🕒 Títulos com 31 dias de atraso ou mais</div>
+      <div style="font-size:12px; font-weight:700;">${chart31t[chart31t.length-1] || 0} Títulos</div>
+      <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(chart31v[chart31v.length-1] || 0)}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px; justify-content:space-around;">
+      <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
+          <div style="font-size:9.5px; font-weight:800; color:#475569; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Título</div>
+          ${barChartSvg(chart31t, chartLabels, '#ea580c', false)}
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column; align-items:center; border-left:1px solid #e2e8f0;">
+          <div style="font-size:9.5px; font-weight:800; color:#475569; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Valores (em milhões)</div>
+          ${barChartSvg(chart31v, chartLabels, '#ea580c', true)}
+      </div>
+    </div>
+  </div>
 </div>
 <div style="margin-bottom:12px;">
   <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
