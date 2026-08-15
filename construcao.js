@@ -370,7 +370,7 @@ window.saveNovaVistoria = async function() {
     }
     
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 5px;"></i> Salvando...';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><style>@keyframes vc-spin { 100% { transform: rotate(360deg); } }</style> Salvando...';
 
     try {
         let fileUrl = null;

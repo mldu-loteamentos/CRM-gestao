@@ -663,6 +663,7 @@ const DashboardInadimplencia = (function() {
                     });
                 }
             });
+        }
         // Se as propriedades sumadas derem zero, tenta usar os campos que já vinham calculados na raiz
         if (v === 0 && snap.above31_value) v = snap.above31_value;
         if (c === 0 && snap.above31_count) c = snap.above31_count;

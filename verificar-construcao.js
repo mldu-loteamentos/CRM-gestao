@@ -245,6 +245,7 @@ window.VerificarConstrucaoApp = {
                 const contractId = c.saleId || c.contractId || c.id;
                 
                 const hasConstruction = !!completedChecksByContract[String(contractId)];
+                if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
                 const costCenterId = c.costCenterId;
                 const city = _vcGetCity(costCenterId);
