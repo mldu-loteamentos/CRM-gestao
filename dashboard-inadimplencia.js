@@ -545,7 +545,69 @@ const DashboardInadimplencia = (function() {
     function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
     function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
     function fmtInteiro(v) { return 'R$ ' + Math.floor(v).toLocaleString('pt-BR'); }
-    function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} cliente${c>1?'s':''}</span>`; }
+    function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
+    
+    function dualStackedBarWithArrow(snap1, snap2, label1, label2) {
+      if (!snap1 || !snap2) return '';
+      
+      function getBands(snap) {
+          let d30=0, d60=0, d90=0, d120=0, above120=0;
+          if (snap && snap.data_json && snap.data_json.companies) {
+              snap.data_json.companies.forEach(c => {
+                  if (c.aging) {
+                      d30 += (c.aging.d0_30 && c.aging.d0_30.value) || 0;
+                      d60 += (c.aging.d31_60 && c.aging.d31_60.value) || 0;
+                      d90 += (c.aging.d61_90 && c.aging.d61_90.value) || 0;
+                      d120 += (c.aging.d91_180 && c.aging.d91_180.value) || 0;
+                      above120 += ((c.aging.d181_365 && c.aging.d181_365.value) || 0) + ((c.aging.d365p && c.aging.d365p.value) || 0);
+                  }
+              });
+          }
+          return [
+              {v: d30, color:'#3b82f6'},
+              {v: d60, color:'#22c55e'},
+              {v: d90, color:'#f59e0b'},
+              {v: d120, color:'#ef4444'},
+              {v: above120, color:'#7f1d1d'}
+          ];
+      }
+      
+      const b1 = getBands(snap1), b2 = getBands(snap2);
+      const t1 = snap1.total_value || 1, t2 = snap2.total_value || 1;
+      const diff = t2 - t1;
+      const pct = t1 ? ((diff / t1) * 100).toFixed(1) : 0;
+      const sign = diff > 0 ? '+' : '';
+      const diffText = `${sign}R$ ${(diff/1000000).toFixed(3).replace('.',',')}M | ${sign}${pct}%`;
+      
+      const W = 320, H = 145, padTop = 40, padBot = 25, padSide = 80;
+      const barW = 30;
+      const x1 = padSide, x2 = W - padSide;
+      
+      const arrowY = 15;
+      const arrowPath = `M ${x1} ${arrowY+6} L ${x1} ${arrowY} L ${x2} ${arrowY} L ${x2} ${arrowY+6}`;
+      const arrowHead = `M ${x2-3.5} ${arrowY+2.5} L ${x2} ${arrowY+6} L ${x2+3.5} ${arrowY+2.5}`;
+      const topArrowSvg = `
+        <path d="${arrowPath}" fill="none" stroke="#0f1e17" stroke-width="1.5" />
+        <path d="${arrowHead}" fill="none" stroke="#0f1e17" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        <rect x="${W/2 - 45}" y="${arrowY - 10}" width="90" height="16" fill="#fff" />
+        <text x="${W/2}" y="${arrowY + 3}" text-anchor="middle" font-size="10" font-weight="800" fill="#0f1e17">${diffText}</text>
+      `;
+      
+      let rects = '';
+      let y1 = 0;
+      b1.forEach(b => { const h = (b.v/t1)*(H-padTop-padBot); rects += `<rect x="${x1 - barW/2}" y="${H-padBot-y1-h}" width="${barW}" height="${h}" fill="${b.color}"/>`; y1+=h; });
+      let y2 = 0;
+      b2.forEach(b => { const h = (b.v/t2)*(H-padTop-padBot); rects += `<rect x="${x2 - barW/2}" y="${H-padBot-y2-h}" width="${barW}" height="${h}" fill="${b.color}"/>`; y2+=h; });
+      
+      return `<svg width="${W}" height="${H}" style="overflow:visible;display:block;margin:0 auto;">
+          ${topArrowSvg}
+          ${rects}
+          <text x="${x1}" y="${H-5}" text-anchor="middle" font-size="8.5" fill="#64748b">${label1}</text>
+          <text x="${x2}" y="${H-5}" text-anchor="middle" font-size="8.5" fill="#64748b">${label2}</text>
+          <text x="${x1}" y="${H-padBot-y1-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${fmtK(t1)}</text>
+          <text x="${x2}" y="${H-padBot-y2-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${fmtK(t2)}</text>
+      </svg>`;
+    }
 
     function stackedBarSvg(snap, label) {
       if (!snap) return `<div style="text-align:center;color:#94a3b8;font-size:9px;">${label}<br>Sem dados</div>`;
@@ -744,8 +806,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 <div class="row-2">
   <div class="bar-panel">
     <div class="bar-title">Valor em Atraso</div>
-    ${fechSnap&&hojeSnap?`<div class="bar-delta">+ ${fmtK(Math.abs(hojeSnap.total_value-fechSnap.total_value))} | ${(((hojeSnap.total_value-fechSnap.total_value)/(fechSnap.total_value||1))*100).toFixed(1)}%</div>`:''}
-    <div class="bars-row">${stackedBarSvg(fechSnap,'Fechamento')}${stackedBarSvg(hojeSnap,'Hoje')}</div>
+    <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fechamento', 'Hoje')}</div>
     <div class="legend-row">
       <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>até 30</div>
       <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>31-60</div>
@@ -754,11 +815,12 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
       <div class="legend-item"><div class="legend-dot" style="background:#7f1d1d"></div>ac.120</div>
     </div>
   </div>
-  <div class="op-wrap"><table>
-    <thead><tr><th class="L">Operador</th><th>Até 30</th><th>31 a 60</th><th>61 a 90</th><th>91 a 120</th><th>Acima 120</th><th>Total</th></tr></thead>
+  <div class="op-wrap">
+  <table class="tb" style="width:100%; border-collapse:collapse; margin-top:5px;">
+    <thead style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white;"><tr><th class="L" style="padding:8px;">Operador</th><th style="padding:8px;">Até 30</th><th style="padding:8px;">31 a 60</th><th style="padding:8px;">61 a 90</th><th style="padding:8px;">91 a 120</th><th style="padding:8px;">Acima 120</th><th style="padding:8px;">Total</th></tr></thead>
     <tbody>
       ${opSorted.map(op=>`<tr><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
-      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td>${fmtMoneyNoRs(opTotals.total_v)}</td></tr>
+      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít.</span></td></tr>
     </tbody>
   </table></div>
 </div>
