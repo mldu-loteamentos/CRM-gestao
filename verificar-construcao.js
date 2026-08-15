@@ -243,8 +243,9 @@ window.VerificarConstrucaoApp = {
             const rows = [];
             elegiveis.forEach(c => {
                 const contractId = c.saleId || c.contractId || c.id;
+                const titulo = c.saleCode || c.contractCode || c.titulo || c.codigo || contractId;
                 
-                const hasConstruction = !!completedChecksByContract[String(contractId)];
+                const hasConstruction = !!(completedChecksByContract[String(contractId)] || completedChecksByContract[String(titulo)]);
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
                 const costCenterId = c.costCenterId;

@@ -279,7 +279,7 @@ window.openNewConstrucaoModal = function(editId = null) {
                 <div style="display: flex; gap: 15px; margin-bottom: 15px;">
                     <div style="flex: 1;">
                         <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Data da Vistoria</label>
-                        <input type="date" id="vistoria-data" value="${defaultDate}" class="form-control" style="width: 100%;">
+                        <input type="date" id="vistoria-data" value="${defaultDate}" max="${new Date().toISOString().split('T')[0]}" class="form-control" style="width: 100%;">
                     </div>
                     <div style="flex: 1;">
                         <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Responsável</label>

@@ -556,15 +556,13 @@ const DashboardInadimplencia = (function() {
       return `<div style="text-align:center;"><div style="font-size:8.5px;font-weight:700;color:#334155;margin-bottom:3px;">${fmtK(total)}</div><svg width="${W}" height="${H}" style="display:block;margin:0 auto;">${rects}</svg><div style="font-size:8.5px;color:#64748b;margin-top:3px;">${label}</div></div>`;
     }
 
-    function barChartSvg(data, labels, color, isValue) {
-      if (!data || data.length < 2 || !data.some(v=>v>0)) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem dados históricos</div>';
-      
-      const W = 330, H = 160, padTop = 45, padBot = 20, padSide = 30;
-      const maxVal = Math.max(...data) || 1;
-      
+    function barChartSvg(data, labels, color, isVal=false) {
+      if (!data||data.length===0) return '';
+      const maxVal = Math.max(...data, 1);
+      const W = 320, H = 145, padTop = 40, padBot = 25, padSide = 40;
       const barCount = data.length;
       const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
-      const barWidth = Math.min(22, stepX * 0.6); 
+      const barWidth = Math.min(18, stepX * 0.5);
       
       let bars = '';
       let textLabels = '';
@@ -577,11 +575,11 @@ const DashboardInadimplencia = (function() {
       const sign = diff > 0 ? '+' : '';
       
       function formatVal(v) {
-          if (!isValue) return v;
+          if (!isVal) return v;
           return (v / 1000000).toFixed(3).replace('.', ',');
       }
       
-      const diffStr = isValue ? formatVal(diff) : diff;
+      const diffStr = isVal ? formatVal(diff) : diff;
       const diffText = `${sign}${diffStr} | ${sign}${pct}%`;
       
       const arrowY = 15;
@@ -768,7 +766,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(249, 115, 22, 0.2);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🕒 Títulos com 31 dias de atraso ou mais</div>
-      <div style="font-size:12px; font-weight:700;">${chart31t[chart31t.length-1] || 0} Títulos</div>
+      <div style="font-size:12px; font-weight:700;">${chart31t[chart31t.length-1] || 0} Títulos <span style="font-size:10px; font-weight:500;">(${(((chart31t[chart31t.length-1] || 0) / (totalBills || 1)) * 100).toFixed(1)}% do total de Títulos)</span></div>
       <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(chart31v[chart31v.length-1] || 0)}</div>
     </div>
     <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px; justify-content:space-around;">
@@ -786,8 +784,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 <div style="margin-bottom:12px;">
   <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🔥 0% Pago</div>
-      <div style="font-size:12px; font-weight:700;">${zeroPaidTotalTitles} Títulos</div>
+      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">💸 0% Pago</div>
+      <div style="font-size:12px; font-weight:700;">${zeroPaidTotalTitles} Títulos <span style="font-size:10px; font-weight:500;">(${((zeroPaidTotalTitles / (totalBills || 1)) * 100).toFixed(1)}% do total de Títulos)</span></div>
       <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(zeroPaidTotalValue)}</div>
     </div>
     <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px;">
