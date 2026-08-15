@@ -3194,16 +3194,19 @@ document.addEventListener("click", function(e) {
         if (hasScheduledOcc(client)) return 1;
 
         // 1. PRIMEIRO 0% PAGO
-        if (client.isZeroPaid) return 5;
+        if (client.isZeroPaid) return 6;
         
-        // 2. DEPOIS OS QUE ESTÃO SUB JUDICE E OS QUE DEVEM IR PARA O JURIDICO
-        if (client.subjudice === "S" || client.maxDaysDelay >= thresholdJuridico) return 4;
+        // 2. DEPOIS O GRUPO DO SUB JUDICE
+        if (client.subjudice === "S") return 5;
         
-        // 3. DEPOIS OS CLIENTES QUE NÃO TEM TAGS ESPECIAIS
+        // 3. DEPOIS O ENVIAR PARA JURIDICO
+        if (client.maxDaysDelay >= thresholdJuridico) return 4;
+        
+        // 4. DEPOIS OS CLIENTES QUE NÃO TEM TAGS ESPECIAIS
         const hasTags = client.tags && client.tags.length > 0;
         if (!hasTags) return 3;
         
-        // 4. POR ÚLTIMO OS CLIENTES COM TAGS ESPECIAIS
+        // 5. POR ÚLTIMO OS CLIENTES COM TAGS ESPECIAIS
         return 2;
     };
 
