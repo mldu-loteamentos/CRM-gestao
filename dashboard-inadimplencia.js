@@ -497,15 +497,16 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
         const op = operatorData[opName];
-        op.customers.push({ name: b.customerName || 'N/D', title: (b.titles && b.titles.length) ? b.titles.join(', ') : (b.documentNumber || b.id || ''), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
-        const numTitulos = (b.titles && b.titles.length > 0) ? b.titles.length : 1;
+        const numTitulos = (b.billIds && b.billIds.length > 0) ? b.billIds.length : (b.billCount || 1);
+        const bTitle = b.saleId || (b.billIds && b.billIds.length ? b.billIds[0] : '-');
+        op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
         op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
         op[delayBucket+'_c'] += numTitulos; op[delayBucket+'_v'] += (b.overdueValue||0);
 
-      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
+      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
       if (b.subjudice === 'S') {
           if (!window._subjudiceClientsList) window._subjudiceClientsList = [];
-          window._subjudiceClientsList.push({ name: b.customerName || 'N/D', value: b.overdueValue || 0, delay: b.maxDaysDelay || 0, billCount: (b.titles && b.titles.length > 0) ? b.titles.length : 1 });
+          window._subjudiceClientsList.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0, billCount: numTitulos });
       }
     });
 
@@ -649,14 +650,24 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${sparklineSvg(spark31v,'#f59e0b')}</div>
   <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${sparklineSvg(spark31t,'#3b82f6')}</div>
 </div>
-<div class="summary-row">
-  <div class="sbox">
-    <div><span class="stag" style="background:#dc2626">0% pago</span><div class="sstat">Total de clientes: <strong>${zeroPaidClients.length}</strong><br>Valor total: <strong>${fmtInteiro(zeroPaidTotalValue)}</strong></div></div>
-    <div class="sleft"><table><tbody>${zeroPaidTop5.map(c=>`<tr><td style="line-height:1.4; padding:6px 0;">${c.name.split(' ').slice(0,3).join(' ')}<br><span style="color:#334155;font-size:7.5px;font-weight:700">TÍTULO: ${c.title || '-'}</span></td><td style="font-weight:600;">${fmtInteiro(c.value)}</td></tr>`).join('')}${zeroPaidTop5.length===0?'<tr><td colspan="2" style="color:#94a3b8;text-align:center">Nenhum</td></tr>':''}</tbody></table></div>
+<div style="display:flex; gap:15px; margin-bottom:12px;">
+  <div style="flex:1; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+      <div><div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🔥 0% Pago</div><div style="font-size:8.5px; opacity:0.8;">${zeroPaidClients.length} clientes</div></div>
+      <div style="text-align:right;"><div style="font-size:14px; font-weight:800; letter-spacing:-0.5px;">${fmtMoneyNoRs(zeroPaidTotalValue)}</div></div>
+    </div>
+    <div style="background:rgba(255,255,255,0.95); border-radius:6px; flex:1; padding:6px 10px;">
+      <table style="width:100%; border-collapse:collapse; font-size:7.5px; color:#1e293b;"><tbody>${zeroPaidTop5.map(c=>`<tr><td style="padding:4px 0; border-bottom:1px solid #f1f5f9;"><span style="font-weight:700; color:#334155;">TÍT. ${c.title || '-'}</span><br>${c.name.split(' ').slice(0,3).join(' ')}</td><td style="padding:4px 0; text-align:right; font-weight:800; color:#ef4444; border-bottom:1px solid #f1f5f9;">${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}${zeroPaidTop5.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum cliente 0% pago</td></tr>':''}</tbody></table>
+    </div>
   </div>
-  <div class="sbox">
-    <div><span class="stag" style="background:#7c3aed">Sub judice</span><div class="sstat">Total de clientes: <strong>${subjudiceClients.length}</strong><br>Valor total: <strong>${fmtInteiro(subjudiceTotal.v)}</strong></div></div>
-    <div class="sleft"><table><tbody>${subjudiceTop5.map(c=>`<tr><td style="line-height:1.4; padding:6px 0;">${c.name.split(' ').slice(0,3).join(' ')}<br><span style="color:#334155;font-size:7.5px;font-weight:700">TÍTULO: ${c.title || '-'}</span></td><td style="font-weight:600;">${fmtInteiro(c.value)}</td></tr>`).join('')}${subjudiceTop5.length===0?'<tr><td colspan="2" style="color:#94a3b8;text-align:center">Nenhum</td></tr>':''}</tbody></table></div>
+  <div style="flex:1; background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(139, 92, 246, 0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+      <div><div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">⚖️ Sub Judice</div><div style="font-size:8.5px; opacity:0.8;">${subjudiceClients.length} clientes</div></div>
+      <div style="text-align:right;"><div style="font-size:14px; font-weight:800; letter-spacing:-0.5px;">${fmtMoneyNoRs(subjudiceTotal.v)}</div></div>
+    </div>
+    <div style="background:rgba(255,255,255,0.95); border-radius:6px; flex:1; padding:6px 10px;">
+      <table style="width:100%; border-collapse:collapse; font-size:7.5px; color:#1e293b;"><tbody>${subjudiceTop5.map(c=>`<tr><td style="padding:4px 0; border-bottom:1px solid #f1f5f9;"><span style="font-weight:700; color:#334155;">TÍT. ${c.title || '-'}</span><br>${c.name.split(' ').slice(0,3).join(' ')}</td><td style="padding:4px 0; text-align:right; font-weight:800; color:#7c3aed; border-bottom:1px solid #f1f5f9;">${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}${subjudiceTop5.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum cliente sub judice</td></tr>':''}</tbody></table>
+    </div>
   </div>
 </div>
 <div style="background: #fff7ed; border-top: 3px solid #ea580c; color: #ea580c; padding: 6px 15px; border-radius: 6px; margin-bottom: 8px; font-weight: 800; font-size: 11px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"><i class="fas fa-trophy" style="margin-right: 8px; color: #ea580c;"></i> TOP 5 TÍTULOS COM MAIORES VALORES EM ATRASO POR OPERADOR</div>
@@ -665,7 +676,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     op.customers.sort((a,b)=>b.value-a.value);
     const top5=op.customers.slice(0,5);
     const totalTop5 = top5.reduce((sum, c) => sum + c.value, 0);
-    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><thead><tr><th>TÍTULO</th><th>CLIENTE</th><th style="text-align:right">VALOR</th></tr></thead><tbody>${top5.map(c=>`<tr><td>${c.title || '-'}</td><td>${c.name.split(' ').slice(0,3).join(' ')}</td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="2" style="text-align:right;font-weight:800;border-top:1px solid #ea580c;color:#ea580c;padding-top:4px;">Total Top 5:</td><td style="font-weight:800;color:#ea580c;border-top:1px solid #ea580c;padding-top:4px;text-align:right;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
+    return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><thead><tr><th style="text-align:left">TÍTULO</th><th style="text-align:left">CLIENTE</th><th style="text-align:right">VALOR</th></tr></thead><tbody>${top5.map(c=>`<tr><td style="text-align:left">${c.title || '-'}</td><td style="text-align:left">${c.name.split(' ').slice(0,3).join(' ')}</td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="2" style="text-align:left;font-weight:800;border-top:1px solid #ea580c;color:#ea580c;padding-top:4px;">Total</td><td style="font-weight:800;color:#ea580c;border-top:1px solid #ea580c;padding-top:4px;text-align:right;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
 </body></html>`;
