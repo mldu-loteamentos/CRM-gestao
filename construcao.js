@@ -329,14 +329,17 @@ window.saveNovaVistoria = async function() {
     let contractNumber = saleId;
     let companyId = "N/D";
     
+    let contractObj = {};
     if (window.AnexosState && window.AnexosState.activeContract && (String(window.AnexosState.activeContract.id) === String(saleId) || String(window.AnexosState.activeContract.receivableBillId) === String(saleId))) {
         contractNumber = window.AnexosState.activeContract.contractNumber || window.AnexosState.activeContract.id || saleId;
         companyId = window.AnexosState.activeContract.companyId || companyId;
+        contractObj = window.AnexosState.activeContract;
     } else if (typeof AppState !== 'undefined' && AppState.sales) {
         const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
         if (saleObj) {
             contractNumber = saleObj.contractNumber || saleObj.id || saleId;
             companyId = saleObj.companyId || companyId;
+            contractObj = saleObj;
         }
     }
     
