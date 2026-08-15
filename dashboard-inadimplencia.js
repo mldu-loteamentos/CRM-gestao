@@ -546,6 +546,7 @@ const DashboardInadimplencia = (function() {
     function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
     function fmtInteiro(v) { return 'R$ ' + Math.floor(v).toLocaleString('pt-BR'); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
+    function cellOpTot(c, v, totC) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#ea580c;">${c} tít. | ${Math.round((c/totC)*100)}%</span>`; }
     
     function dualStackedBarWithArrow(snap1, snap2, label1, label2) {
       if (!snap1 || !snap2) return '';
@@ -562,6 +563,13 @@ const DashboardInadimplencia = (function() {
                       above120 += ((c.aging.d181_365 && c.aging.d181_365.value) || 0) + ((c.aging.d365p && c.aging.d365p.value) || 0);
                   }
               });
+          }
+          if (d30===0 && d60===0 && d90===0) {
+              d30 = snap.d30_value || 0;
+              d60 = snap.d60_value || 0;
+              d90 = snap.d90_value || 0;
+              d120 = snap.d120_value || 0;
+              above120 = snap.above120_value || 0;
           }
           return [
               {v: d30, color:'#3b82f6'},
@@ -819,8 +827,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <table class="tb" style="width:100%; border-collapse:collapse; margin-top:5px;">
     <thead style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white;"><tr><th class="L" style="padding:8px;">Operador</th><th style="padding:8px;">Até 30</th><th style="padding:8px;">31 a 60</th><th style="padding:8px;">61 a 90</th><th style="padding:8px;">91 a 120</th><th style="padding:8px;">Acima 120</th><th style="padding:8px;">Total</th></tr></thead>
     <tbody>
-      ${opSorted.map(op=>`<tr><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
-      <tr class="tot"><td class="L">Total</td><td>${cellOp(opTotals.d30_c,opTotals.d30_v)}</td><td>${cellOp(opTotals.d60_c,opTotals.d60_v)}</td><td>${cellOp(opTotals.d90_c,opTotals.d90_v)}</td><td>${cellOp(opTotals.d120_c,opTotals.d120_v)}</td><td>${cellOp(opTotals.d120p_c,opTotals.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít.</span></td></tr>
+      ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#fff7ed'}"><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
+      <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c)}</td><td><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | 100%</span></td></tr>
     </tbody>
   </table></div>
 </div>

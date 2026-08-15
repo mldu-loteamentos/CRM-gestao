@@ -243,7 +243,9 @@ window.VerificarConstrucaoApp = {
             const rows = [];
             elegiveis.forEach(c => {
                 const contractId = c.saleId || c.contractId || c.id;
-                const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || contractId;
+                let fallbackTitle = contractId;
+                if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
+                const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
                 
                 const hasConstruction = !!(completedChecksByContract[String(contractId)] || completedChecksByContract[String(tituloKey)]);
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
@@ -263,7 +265,7 @@ window.VerificarConstrucaoApp = {
 
                 // Dados financeiros do cliente
                 const clienteName = c.customerName || c.name || c.nome || '-';
-                const titulo = c.saleCode || c.contractCode || c.titulo || c.codigo || contractId || '-';
+                const titulo = tituloKey || '-';
                 const parcelasVencidas = parseInt(c.billCount || c.overdueInstallments || c.parcelasVencidas || 0);
                 const valorVencido = parseFloat((c.overdueValue || 0) + (c.overdueCharges || 0));
 
