@@ -1,13 +1,13 @@
-﻿# _version_bump.ps1
-# Helper chamado pelo deploy.bat para incrementar a versao automaticamente no index.html
+param([string]$IndexFile = "index.html")
 
-param(
-    [string]$IndexFile = "index.html"
-)
+# Usa a mesma tecnica: ler como Latin1 e escrever como UTF8 sem BOM
+# para garantir que os caracteres especiais sejam preservados corretamente.
+$utf8NoBom  = New-Object System.Text.UTF8Encoding $false
 
-$content = [System.IO.File]::ReadAllText($IndexFile, [System.Text.Encoding]::UTF8)
+# Le o arquivo UTF-8 atual (ja corrigido)
+$content = [System.IO.File]::ReadAllText($IndexFile, $utf8NoBom)
 
-# LÃª a versÃ£o atual do badge no sidebar
+# Le a versao atual do badge
 if ($content -match 'v(\d+)\.(\d+)\.(\d+)\s*&nbsp;') {
     $major = [int]$Matches[1]
     $minor = [int]$Matches[2]
@@ -17,21 +17,17 @@ if ($content -match 'v(\d+)\.(\d+)\.(\d+)\s*&nbsp;') {
     exit 1
 }
 
-$newVer    = "$major.$minor.$patch"
-$today     = Get-Date -Format "dd/MM/yyyy"
-$newBadge  = "v$newVer &nbsp;Â·&nbsp; $today"
+$newVer   = "$major.$minor.$patch"
+$today    = Get-Date -Format "dd/MM/yyyy"
+$newBadge = "v$newVer &nbsp;&middot;&nbsp; $today"
 
-# Substitui o badge antigo pelo novo
-$content = $content -replace `
-    'v\d+\.\d+\.\d+\s*&nbsp;.+?\d{2}/\d{2}/\d{4}', `
-    $newBadge
+# Substitui o badge de versao
+$content = $content -replace 'v\d+\.\d+\.\d+\s*&nbsp;.+?\d{2}/\d{2}/\d{4}', $newBadge
 
-[System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
-
-# Substitui tambÃ©m as strings de cache dos scripts (ex: app.js?v=114 -> app.js?v=121)
+# Atualiza os cache-busters dos scripts (?v=NNN)
 $content = $content -replace '\?v=\d+', "?v=$patch"
 
-[System.IO.File]::WriteAllText($IndexFile, $content, [System.Text.Encoding]::UTF8)
+# Salva de volta como UTF-8 sem BOM - NUNCA como Latin1
+[System.IO.File]::WriteAllText($IndexFile, $content, $utf8NoBom)
 
-# Retorna a versÃ£o nova para o deploy.bat capturar
 Write-Output $newVer
