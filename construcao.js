@@ -316,7 +316,11 @@ window.openNewConstrucaoModal = function(editId = null) {
         if (window.lucide) lucide.createIcons();
     } catch(err) {
         console.error("Erro ao abrir modal:", err);
-        alert("ERRO AO ABRIR JANELA DE VISTORIA:\n\n" + err.message + "\n\nStwindow.saveNovaVistoria = async function() {
+        alert("ERRO AO ABRIR JANELA DE VISTORIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
+    }
+};
+
+window.saveNovaVistoria = async function() {
     const btn = document.getElementById('btn-salvar-vistoria');
     const date = document.getElementById('vistoria-data').value;
     const responsible = document.getElementById('vistoria-resp').value;
