@@ -328,76 +328,81 @@ const DashboardInadimplencia = (function() {
   }
   
   async function render() {
-    const container = document.getElementById('inadimplencia-dashboard-root');
-    if (!container) return;
-    
-    container.innerHTML = `
-      <div style="display: flex; justify-content: center; padding: 40px;">
-        <div class="loader" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-      </div>
-    `;
-    
-    await carregarDados();
-    
-    if (snapshots.length === 0) {
+    try {
+      const container = document.getElementById('inadimplencia-dashboard-root');
+      if (!container) return;
+      
       container.innerHTML = `
-        <div style="background: #fff; padding: 40px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
-          <i data-lucide="inbox" style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 15px;"></i>
-          <h3 style="margin: 0 0 10px 0; color: #1e293b;">Nenhum histórico disponível</h3>
-          <p style="color: #64748b; margin: 0;">O dashboard passará a ter dados após a primeira atualização da Fila de Cobrança.</p>
+        <div style="display: flex; justify-content: center; padding: 40px;">
+          <div class="loader" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
         </div>
       `;
-      if (window.lucide) window.lucide.createIcons();
-      return;
-    }
-    
-    let html = `
-      <div style="max-width: 1200px; margin: 0 auto;">
-        
-        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
-          <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
-            <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
-          </button>
-        </div>
+      
+      await carregarDados();
+      
+      if (snapshots.length === 0) {
+        container.innerHTML = `
+          <div style="background: #fff; padding: 40px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+            <i data-lucide="inbox" style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 15px;"></i>
+            <h3 style="margin: 0 0 10px 0; color: #1e293b;">Nenhum histórico disponível</h3>
+            <p style="color: #64748b; margin: 0;">O dashboard passará a ter dados após a primeira atualização da Fila de Cobrança.</p>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+      
+      let html = `
+        <div style="max-width: 1200px; margin: 0 auto;">
+          
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
+            <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
+              <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
+            </button>
+          </div>
 
-        ${renderCards()}
-        
-        <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
-          <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-            <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-              <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
-            </h3>
+          ${renderCards()}
+          
+          <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+              <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
+              </h3>
+            </div>
+            <div style="padding: 20px; height: 350px;">
+              <canvas id="inadimplencia-chart"></canvas>
+            </div>
           </div>
-          <div style="padding: 20px; height: 350px;">
-            <canvas id="inadimplencia-chart"></canvas>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
+            <div>
+              ${renderTabelaComparativa()}
+              ${renderAging()}
+            </div>
+            <div>
+              ${renderCentrosDeCusto()}
+            </div>
           </div>
         </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
-          <div>
-            ${renderTabelaComparativa()}
-            ${renderAging()}
-          </div>
-          <div>
-            ${renderCentrosDeCusto()}
-          </div>
-        </div>
-      </div>
-    `;
-    
-    container.innerHTML = html;
-    
-    // Atualiza ícones lucide
-    if (window.lucide) {
-      window.lucide.createIcons({
-        root: container
-      });
+      `;
+      
+      container.innerHTML = html;
+      
+      // Atualiza ícones lucide
+      if (window.lucide) {
+        window.lucide.createIcons({
+          root: container
+        });
+      }
+      
+      // Inicializa o Chart.js
+      setTimeout(() => {
+        initChart();
+      }, 100);
+    } catch(err) {
+      console.error("Erro ao renderizar dashboard de inadimplência:", err);
+      alert("ERRO NO DASHBOARD DE INADIMPLÊNCIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
     }
-    
-    // Inicializa o Chart.js
-    setTimeout(() => {
-      initChart();
-    }, 100);
   }
   
   // Intercepta a ativação da aba
@@ -659,7 +664,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><tbody>${top5.map(c=>`<tr><td>${c.name.split(' ').slice(0,3).join(' ')} <span style="color:#64748b;font-size:7.5px">${c.title ? '['+c.title+']' : ''}</span></td><td>${fmtMoney(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td style="text-align:right;font-weight:bold;">Total Top 5:</td><td style="font-weight:bold;color:#0f1e17;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
-</body></html>\`;
+</body></html>`;
 
     const win = window.open('', '_blank');
     win.document.write(html);
