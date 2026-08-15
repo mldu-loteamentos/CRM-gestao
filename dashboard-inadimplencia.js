@@ -529,7 +529,7 @@ const DashboardInadimplencia = (function() {
         chartSnaps = [chartSnaps[0], ...chartSnaps.slice(-7)];
     }
     const chartLabels = chartSnaps.map((s, i) => {
-        if (i === 0 && s.is_month_close) return 'Fechamento';
+        if (i === 0 && s.is_month_close) return 'Fech.';
         if (s.date === snapshots[snapshots.length-1].date) return 'Hoje';
         if (s.date) {
             const parts = s.date.split('-');
@@ -571,23 +571,43 @@ const DashboardInadimplencia = (function() {
               d120 = snap.d120_value || 0;
               above120 = snap.above120_value || 0;
           }
-          return [
-              {v: d30, color:'#3b82f6'},
-              {v: d60, color:'#22c55e'},
-              {v: d90, color:'#f59e0b'},
-              {v: d120, color:'#ef4444'},
-              {v: above120, color:'#7f1d1d'}
-          ];
+          return { d30, d60, d90, d120, above120 };
       }
       
-      const b1 = getBands(snap1), b2 = getBands(snap2);
+      const b1Raw = getBands(snap1), b2Raw = getBands(snap2);
       const t1 = snap1.total_value || 1, t2 = snap2.total_value || 1;
+      
+      // Proporcional fallback para o fechamento se não tivermos histórico de aging
+      if (b1Raw.d30 === 0 && b1Raw.d60 === 0 && b1Raw.d90 === 0 && snap1.total_value > 0) {
+          const tot2 = b2Raw.d30 + b2Raw.d60 + b2Raw.d90 + b2Raw.d120 + b2Raw.above120 || 1;
+          b1Raw.d30 = (b2Raw.d30 / tot2) * snap1.total_value;
+          b1Raw.d60 = (b2Raw.d60 / tot2) * snap1.total_value;
+          b1Raw.d90 = (b2Raw.d90 / tot2) * snap1.total_value;
+          b1Raw.d120 = (b2Raw.d120 / tot2) * snap1.total_value;
+          b1Raw.above120 = (b2Raw.above120 / tot2) * snap1.total_value;
+      }
+      
+      const b1 = [
+          {v: b1Raw.d30, color:'#22c55e'},
+          {v: b1Raw.d60, color:'#eab308'},
+          {v: b1Raw.d90, color:'#f97316'},
+          {v: b1Raw.d120, color:'#ef4444'},
+          {v: b1Raw.above120, color:'#991b1b'}
+      ];
+      const b2 = [
+          {v: b2Raw.d30, color:'#22c55e'},
+          {v: b2Raw.d60, color:'#eab308'},
+          {v: b2Raw.d90, color:'#f97316'},
+          {v: b2Raw.d120, color:'#ef4444'},
+          {v: b2Raw.above120, color:'#991b1b'}
+      ];
+      
       const diff = t2 - t1;
       const pct = t1 ? ((diff / t1) * 100).toFixed(1) : 0;
       const sign = diff > 0 ? '+' : '';
       const diffText = `${sign}R$ ${(diff/1000000).toFixed(3).replace('.',',')}M | ${sign}${pct}%`;
       
-      const W = 320, H = 145, padTop = 40, padBot = 25, padSide = 80;
+      const W = 320, H = 165, padTop = 40, padBot = 25, padSide = 80;
       const barW = 30;
       const x1 = padSide, x2 = W - padSide;
       
@@ -644,6 +664,8 @@ const DashboardInadimplencia = (function() {
       const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : 0;
       const sign = diff > 0 ? '+' : '';
       
+      const barColor = diff < 0 ? '#4ade80' : '#f87171';
+      
       function formatVal(v) {
           if (!isVal) return v;
           return (v / 1000000).toFixed(3).replace('.', ',');
@@ -670,7 +692,7 @@ const DashboardInadimplencia = (function() {
           const barH = (v / maxVal) * (H - padTop - padBot);
           const y = H - padBot - barH;
           
-          bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${color}" rx="2" />`;
+          bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${barColor}" rx="2" />`;
           
           const valText = formatVal(v);
           textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${valText}</text>`;
@@ -814,20 +836,20 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 <div class="row-2">
   <div class="bar-panel">
     <div class="bar-title">Valor em Atraso</div>
-    <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fechamento', 'Hoje')}</div>
+    <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fech.', 'Hoje')}</div>
     <div class="legend-row">
-      <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>até 30</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>31-60</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>61-90</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>até 30</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#eab308"></div>31-60</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>61-90</div>
       <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>91-120</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#7f1d1d"></div>ac.120</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#991b1b"></div>ac.120</div>
     </div>
   </div>
   <div class="op-wrap">
   <table class="tb" style="width:100%; border-collapse:collapse; margin-top:5px;">
-    <thead style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white;"><tr><th class="L" style="padding:8px;">Operador</th><th style="padding:8px;">Até 30</th><th style="padding:8px;">31 a 60</th><th style="padding:8px;">61 a 90</th><th style="padding:8px;">91 a 120</th><th style="padding:8px;">Acima 120</th><th style="padding:8px;">Total</th></tr></thead>
+    <thead style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white;"><tr><th class="L" style="padding:8px; color:white;">Operador</th><th style="padding:8px; color:white;">Até 30</th><th style="padding:8px; color:white;">31 a 60</th><th style="padding:8px; color:white;">61 a 90</th><th style="padding:8px; color:white;">91 a 120</th><th style="padding:8px; color:white;">Acima 120</th><th style="padding:8px; color:white;">Total</th></tr></thead>
     <tbody>
-      ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#fff7ed'}"><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
+      ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
       <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c)}</td><td><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | 100%</span></td></tr>
     </tbody>
   </table></div>
@@ -842,11 +864,11 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px; justify-content:space-around;">
       <div style="flex:1; display:flex; flex-direction:column; align-items:center;">
           <div style="font-size:9.5px; font-weight:800; color:#475569; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Título</div>
-          ${barChartSvg(chart31t, chartLabels, '#ea580c', false)}
+          ${barChartSvg(chart31t, chartLabels, '#c2410c', false)}
       </div>
       <div style="flex:1; display:flex; flex-direction:column; align-items:center; border-left:1px solid #e2e8f0;">
           <div style="font-size:9.5px; font-weight:800; color:#475569; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Valores (em milhões)</div>
-          ${barChartSvg(chart31v, chartLabels, '#ea580c', true)}
+          ${barChartSvg(chart31v, chartLabels, '#c2410c', true)}
       </div>
     </div>
   </div>

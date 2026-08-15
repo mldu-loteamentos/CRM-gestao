@@ -246,8 +246,9 @@ window.VerificarConstrucaoApp = {
                 let fallbackTitle = contractId;
                 if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
                 const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
+                const customerIdStr = String(c.customerId || c.clientId || '');
                 
-                const hasConstruction = !!(completedChecksByContract[String(contractId)] || completedChecksByContract[String(tituloKey)]);
+                const hasConstruction = !!(completedChecksByContract[String(contractId)] || completedChecksByContract[String(tituloKey)] || (customerIdStr && completedChecksByContract[customerIdStr]));
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
                 const costCenterId = c.costCenterId;
