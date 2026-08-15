@@ -503,22 +503,13 @@ const DashboardInadimplencia = (function() {
         op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
         op[delayBucket+'_c'] += numTitulos; op[delayBucket+'_v'] += (b.overdueValue||0);
 
-      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0 });
-      if (b.subjudice === 'S') {
-          if (!window._subjudiceClientsList) window._subjudiceClientsList = [];
-          window._subjudiceClientsList.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0, billCount: numTitulos });
-      }
+      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: numTitulos, unitName: b.unitName, costCenterId: b.costCenterId });
     });
 
     const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
     const dateStr = new Date().toLocaleDateString('pt-BR');
 
     const opSorted = Object.values(operatorData).sort((a,b) => b.total_v - a.total_v);
-    
-    let subjudiceClientsList = window._subjudiceClientsList || [];
-    window._subjudiceClientsList = []; // clear for next run
-    const subjudiceTotal = subjudiceClientsList.reduce((acc, c) => ({ c: acc.c + c.billCount, v: acc.v + c.value }), { c:0, v:0 });
-    const subjudiceClients = subjudiceClientsList.sort((a,b) => b.value - a.value);
 
     const opTotals = { d30_c:0,d30_v:0,d60_c:0,d60_v:0,d90_c:0,d90_v:0,d120_c:0,d120_v:0,d120p_c:0,d120p_v:0,total_c:0,total_v:0 };
     opSorted.forEach(op => { ['d30','d60','d90','d120','d120p','total'].forEach(k => { opTotals[k+'_c'] += op[k+'_c']; opTotals[k+'_v'] += op[k+'_v']; }); });
@@ -556,9 +547,30 @@ const DashboardInadimplencia = (function() {
 
     zeroPaidClients.sort((a,b)=>b.delay-a.delay);
     const zeroPaidTotalValue = zeroPaidClients.reduce((acc,c)=>acc+c.value,0);
+    const zeroPaidTotalTitles = zeroPaidClients.reduce((acc,c)=>acc+(c.billCount||1),0);
     const zeroPaidTop5 = zeroPaidClients.slice(0,5);
-    subjudiceClients.sort((a,b)=>b.value-a.value);
-    const subjudiceTop5 = subjudiceClients.slice(0,5);
+    
+    const zeroPaidEmp = {};
+    zeroPaidClients.forEach(c => {
+        let emp = 'Outros';
+        if (c.costCenterId && c.costCenterId !== 'N/D') {
+            let ccName = '';
+            if (window.AppState && window.AppState.cachedCostCenters) {
+                const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === String(c.costCenterId));
+                if (ccObj) ccName = ccObj.name || '';
+            }
+            if (ccName && ccName.includes('-')) {
+                // Se for algo como '13900 - Avaré - Central Parque II', vamos pegar a partir do primeiro '-' e usar como nome.
+                const parts = ccName.split('-');
+                parts.shift();
+                ccName = parts.join('-').trim();
+            }
+            emp = ccName ? `${c.costCenterId} - ${ccName}` : c.costCenterId;
+        }
+        if (!zeroPaidEmp[emp]) zeroPaidEmp[emp] = 0;
+        zeroPaidEmp[emp] += (c.billCount||1);
+    });
+    const zeroPaidEmpList = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
     const spark31v = snaps.map(s=>s.above31_value||0);
     const spark31t = snaps.map(s=>s.above31_count||0);
 
@@ -650,23 +662,40 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div class="trend-panel"><div class="trend-title">Acima 31 dias — valores</div>${sparklineSvg(spark31v,'#f59e0b')}</div>
   <div class="trend-panel"><div class="trend-title">Acima 31 dias — títulos</div>${sparklineSvg(spark31t,'#3b82f6')}</div>
 </div>
-<div style="display:flex; gap:15px; margin-bottom:12px;">
-  <div style="flex:1; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-      <div><div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🔥 0% Pago</div><div style="font-size:8.5px; opacity:0.8;">${zeroPaidClients.length} clientes</div></div>
-      <div style="text-align:right;"><div style="font-size:14px; font-weight:800; letter-spacing:-0.5px;">${fmtMoneyNoRs(zeroPaidTotalValue)}</div></div>
+<div style="margin-bottom:12px;">
+  <div style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(239, 68, 68, 0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🔥 0% Pago</div>
+      <div style="font-size:12px; font-weight:700;">${zeroPaidTotalTitles} Títulos</div>
+      <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(zeroPaidTotalValue)}</div>
     </div>
-    <div style="background:rgba(255,255,255,0.95); border-radius:6px; flex:1; padding:6px 10px;">
-      <table style="width:100%; border-collapse:collapse; font-size:7.5px; color:#1e293b;"><tbody>${zeroPaidTop5.map(c=>`<tr><td style="padding:4px 0; border-bottom:1px solid #f1f5f9;"><span style="font-weight:700; color:#334155;">TÍT. ${c.title || '-'}</span><br>${c.name.split(' ').slice(0,3).join(' ')}</td><td style="padding:4px 0; text-align:right; font-weight:800; color:#ef4444; border-bottom:1px solid #f1f5f9;">${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}${zeroPaidTop5.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum cliente 0% pago</td></tr>':''}</tbody></table>
-    </div>
-  </div>
-  <div style="flex:1; background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(139, 92, 246, 0.2);">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-      <div><div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">⚖️ Sub Judice</div><div style="font-size:8.5px; opacity:0.8;">${subjudiceClients.length} clientes</div></div>
-      <div style="text-align:right;"><div style="font-size:14px; font-weight:800; letter-spacing:-0.5px;">${fmtMoneyNoRs(subjudiceTotal.v)}</div></div>
-    </div>
-    <div style="background:rgba(255,255,255,0.95); border-radius:6px; flex:1; padding:6px 10px;">
-      <table style="width:100%; border-collapse:collapse; font-size:7.5px; color:#1e293b;"><tbody>${subjudiceTop5.map(c=>`<tr><td style="padding:4px 0; border-bottom:1px solid #f1f5f9;"><span style="font-weight:700; color:#334155;">TÍT. ${c.title || '-'}</span><br>${c.name.split(' ').slice(0,3).join(' ')}</td><td style="padding:4px 0; text-align:right; font-weight:800; color:#7c3aed; border-bottom:1px solid #f1f5f9;">${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}${subjudiceTop5.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum cliente sub judice</td></tr>':''}</tbody></table>
+    <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px;">
+      <div style="flex:1;">
+        <table style="width:100%; border-collapse:collapse; font-size:8.5px; color:#1e293b;">
+          <thead>
+            <tr><th class="L" style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;font-weight:700;text-transform:none;">Título</th><th class="L" style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;font-weight:700;text-transform:none;">Cliente</th><th style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;font-weight:700;text-transform:none;">Dias em Atraso</th><th style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;font-weight:700;text-transform:none;">Parcelas</th></tr>
+          </thead>
+          <tbody>
+            ${zeroPaidTop5.map(c=>`<tr><td class="L" style="padding:4px;">${c.title || '-'}</td><td class="L" style="padding:4px;">${c.name.split(' ').slice(0,3).join(' ')}</td><td style="padding:4px;text-align:center;">${c.delay}</td><td style="padding:4px;text-align:center;">${c.billCount}</td></tr>`).join('')}
+            ${zeroPaidTop5.length===0?'<tr><td colspan="4" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum título 0% pago</td></tr>':''}
+          </tbody>
+        </table>
+      </div>
+      <div style="width:1px; background:#0284c7; opacity: 0.3;"></div>
+      <div style="flex:1;">
+        <table style="width:100%; border-collapse:collapse; font-size:8.5px; color:#1e293b;">
+          <thead>
+            <tr><th class="L" style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;font-weight:700;text-transform:none;">Empreendimento</th><th style="background:transparent;border-bottom:1px solid #e2e8f0;padding:2px 4px;text-align:center;font-weight:700;text-transform:none;">Título</th></tr>
+          </thead>
+          <tbody>
+            ${zeroPaidEmpList.slice(0,6).map(e=>`<tr><td class="L" style="padding:4px;">${e.name}</td><td style="padding:4px;text-align:center;">${e.count}</td></tr>`).join('')}
+            ${zeroPaidEmpList.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum empreendimento</td></tr>':''}
+          </tbody>
+          <tfoot>
+            <tr><td class="L" style="padding:4px;font-weight:700;border-top:1px solid #e2e8f0;">Total</td><td style="padding:4px;text-align:center;font-weight:700;border-top:1px solid #e2e8f0;">${zeroPaidTotalTitles}</td></tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   </div>
 </div>
