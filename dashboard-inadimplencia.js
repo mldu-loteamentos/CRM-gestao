@@ -311,9 +311,11 @@ const DashboardInadimplencia = (function() {
       let nome = cc.id;
       if (window.MouraAuth && window.MouraAuth.costCenters) {
          const found = window.MouraAuth.costCenters.find(x => String(x.id) === String(cc.id));
-         if (found) nome = `${cc.id} - ${found.name}`;
+         if (found) nome = `${cc.id} - ${found.name.toUpperCase()}`;
+      } else if (window.AppState && window.AppState.cachedCostCenters) {
+         const found = window.AppState.cachedCostCenters.find(x => String(x.id) === String(cc.id));
+         if (found) nome = `${cc.id} - ${found.name.toUpperCase()}`;
       }
-      
       html += `
         <tr style="border-bottom: 1px solid #e2e8f0;">
           <td style="padding: 12px 20px; color: #334155; font-size: 0.85rem;">${nome}</td>
@@ -559,11 +561,14 @@ const DashboardInadimplencia = (function() {
                 const ccObj = window.AppState.cachedCostCenters.find(cc => String(cc.id) === String(c.costCenterId));
                 if (ccObj) ccName = ccObj.name || '';
             }
-            if (ccName && ccName.includes('-')) {
-                // Se for algo como '13900 - Avaré - Central Parque II', vamos pegar a partir do primeiro '-' e usar como nome.
-                const parts = ccName.split('-');
-                parts.shift();
-                ccName = parts.join('-').trim();
+            if (ccName) {
+                ccName = ccName.trim().toUpperCase();
+                // Se por acaso o nome já vier com o ID, removemos para padronizar
+                if (ccName.startsWith(c.costCenterId + ' - ')) {
+                    ccName = ccName.substring((c.costCenterId + ' - ').length).trim();
+                } else if (ccName.startsWith(c.costCenterId + '-')) {
+                    ccName = ccName.substring((c.costCenterId + '-').length).trim();
+                }
             }
             emp = ccName ? `${c.costCenterId} - ${ccName}` : c.costCenterId;
         }
