@@ -445,7 +445,6 @@ const DashboardInadimplencia = (function() {
   }
 
   function gerarRelatorioDiarioPdf() {
-    alert("Função gerarRelatorioDiarioPdf ACIONADA!");
     if (!window.rawClientList || window.rawClientList.length === 0) {
       alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
       return;
@@ -530,6 +529,7 @@ const DashboardInadimplencia = (function() {
 
     function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
     function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} cliente${c>1?'s':''}</span>`; }
 
     function stackedBarSvg(snap, label) {
