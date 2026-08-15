@@ -218,6 +218,7 @@ function renderConstrucaoHistory(checks) {
 }
 
 window.openNewConstrucaoModal = function() {
+    alert("Função openNewConstrucaoModal ACIONADA!");
     try {
         let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
         let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;

@@ -445,6 +445,7 @@ const DashboardInadimplencia = (function() {
   }
 
   function gerarRelatorioDiarioPdf() {
+    alert("Função gerarRelatorioDiarioPdf ACIONADA!");
     if (!window.rawClientList || window.rawClientList.length === 0) {
       alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
       return;
@@ -666,7 +667,12 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 </div>
 </body></html>`;
 
+    alert("HTML do relatório gerado. Tentando abrir nova aba (Pop-up)... Verifique o bloqueador de pop-ups se não abrir!");
     const win = window.open('', '_blank');
+    if (!win) {
+      alert("Navegador bloqueou a abertura da nova aba! Por favor, libere os pop-ups.");
+      return;
+    }
     win.document.write(html);
     win.document.close();
   }
