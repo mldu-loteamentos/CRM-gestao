@@ -143,7 +143,7 @@ window.loadConstrucoes = async function() {
         const q = query(
             collection(window.firebaseDb, "construction_checks"),
             where("customerId", "==", String(customerId)),
-            where("contractId", "in", [...new Set([String(contractNumber), String(saleId)])])
+            where("contractId", "in", Array.from(new Set([String(contractNumber), String(saleId)])))
         );
         
         const snapshot = await getDocs(q);
