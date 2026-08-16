@@ -320,6 +320,83 @@ window.openNewConstrucaoModal = function(editId = null) {
     }
 };
 
+window.solicitarWhatsAppFromClient = async function() {
+    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+    
+    let contractObj = null;
+    if (window.AnexosState && window.AnexosState.activeContract) {
+        contractObj = window.AnexosState.activeContract;
+    } else if (typeof AppState !== 'undefined' && AppState.sales) {
+        contractObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (!contractObj && AppState.sales.length > 0) contractObj = AppState.sales[0];
+    }
+
+    if (!contractObj) {
+        alert("Nenhum contrato ativo encontrado para solicitar vistoria.");
+        return;
+    }
+
+    const contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
+    const companyId = contractObj.companyId || '';
+    const empreendimento = contractObj.enterpriseName || 'Empreendimento N/D';
+    const unidade = contractObj.units || contractObj.unit || contractObj.unitIdentifier || 'Unidade N/D';
+    const clienteName = contractObj.customerName || 'Cliente';
+    const cidade = contractObj.city || 'Cidade N/D';
+    const tituloKey = contractObj.receivableBillId || '';
+
+    try {
+        const btn = document.getElementById('btn-solicitar-wpp-client');
+        if (btn) btn.disabled = true;
+
+        const { collection, addDoc, query, where, getDocs, updateDoc, doc } = window.firebaseCollections;
+        const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+        
+        let vId = null;
+        const q = query(collection(window.firebaseDb, 'vistorias'), where("contractId", "==", String(contractNumber)), where("status", "==", "aguardando_fotos"));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+            vId = snap.docs[0].id;
+        }
+
+        const newData = {
+            customerId: String(customerId),
+            contractId: String(contractNumber),
+            companyId: String(companyId),
+            empreendimento: empreendimento,
+            unidade: unidade,
+            clienteName: clienteName,
+            cidade: cidade,
+            tituloKey: String(tituloKey),
+            status: 'aguardando_fotos',
+            createdAt: new Date().toISOString()
+        };
+
+        if (!vId) {
+            const docRef = await addDoc(collection(window.firebaseDb, 'vistorias'), newData);
+            vId = docRef.id;
+        } else {
+            await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { updatedAt: new Date().toISOString() });
+        }
+
+        const url = `${baseUrl}vistoria.html?id=${vId}`;
+        const message = `*SOLICITAÇÃO DE VISTORIA*\n\n*${empreendimento} - ${unidade}*\n\nAcesse o link abaixo para realizar a vistoria:\n${url}`;
+        
+        const phone = '5515998118246'; // Default phone
+        window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
+        
+        if (btn) btn.disabled = false;
+
+    } catch (e) {
+        console.error("Erro ao solicitar vistoria via Wpp:", e);
+        alert("Erro ao solicitar vistoria: " + e.message);
+        const btn = document.getElementById('btn-solicitar-wpp-client');
+        if (btn) btn.disabled = false;
+    }
+};
+
 window.saveNovaVistoria = async function() {
     const btn = document.getElementById('btn-salvar-vistoria');
     const date = document.getElementById('vistoria-data').value;

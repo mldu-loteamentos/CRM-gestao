@@ -517,12 +517,20 @@ const DashboardInadimplencia = (function() {
     opSorted.forEach(op => { ['d30','d60','d90','d120','d120p','total'].forEach(k => { opTotals[k+'_c'] += op[k+'_c']; opTotals[k+'_v'] += op[k+'_v']; }); });
 
     const fechSnapReal = snapshots.find(s => s.is_month_close) || snapshots[0];
+    const dateSet = new Set();
     let chartSnaps = [];
-    if (fechSnapReal) chartSnaps.push(fechSnapReal);
-    const lastSnaps = snapshots.slice(-7);
+    if (fechSnapReal) {
+        chartSnaps.push(fechSnapReal);
+        dateSet.add(fechSnapReal.date);
+    }
+    const lastSnaps = snapshots.slice(-30);
     lastSnaps.forEach(s => {
-        if (!fechSnapReal || s.date !== fechSnapReal.date) {
+        if (!dateSet.has(s.date)) {
+            dateSet.add(s.date);
             chartSnaps.push(s);
+        } else {
+            const idx = chartSnaps.findIndex(cs => cs.date === s.date && !cs.is_month_close);
+            if (idx !== -1) chartSnaps[idx] = s;
         }
     });
     if (chartSnaps.length > 8) {
@@ -868,7 +876,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     </div>
   </div>
   <div class="op-wrap">
-  <table class="tb" style="width:100%; border-collapse:separate; border-spacing:0; margin-top:0;">
+    <table class="tb" style="width:100%; height:100%; border-collapse:separate; border-spacing:0; margin-top:0;">
     <thead><tr><th class="L" style="padding:8px; background: #ea580c; color: white !important; border-top-left-radius: 5px;">Operador</th><th style="padding:8px; background: #ea580c; color: white !important;">Até 30</th><th style="padding:8px; background: #ea580c; color: white !important;">31 a 60</th><th style="padding:8px; background: #ea580c; color: white !important;">61 a 90</th><th style="padding:8px; background: #ea580c; color: white !important;">91 a 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Acima 120</th><th style="padding:8px; background: #ea580c; color: white !important; border-top-right-radius: 5px;">Total</th></tr></thead>
     <tbody>
       ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name !== 'NÃO ATRIBUÍDO' && op.name.split(' ').length > 1 ? op.name.split(' ')[0] + ' ' + op.name.split(' ')[1][0] + '.' : op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
@@ -879,7 +887,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 <div style="margin-bottom:12px;">
   <div style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(249, 115, 22, 0.2);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🕒 Títulos com 31 dias de atraso ou mais</div>
+      <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">📅 Títulos com 31 dias de atraso ou mais</div>
       <div style="font-size:12px; font-weight:700;">${chart31t[chart31t.length-1] || 0} Títulos <span style="font-size:10px; font-weight:500;">(${(((chart31t[chart31t.length-1] || 0) / (totalBills || 1)) * 100).toFixed(1)}% do total de Títulos)</span></div>
       <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(chart31v[chart31v.length-1] || 0)}</div>
     </div>

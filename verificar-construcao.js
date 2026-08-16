@@ -78,7 +78,6 @@ window.VerificarConstrucaoApp = {
                         <select onchange="window.VerificarConstrucaoApp.activeFilters.obras = this.value; window.VerificarConstrucaoApp.renderTable();" style="padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; color: #334155; background: #fff; cursor: pointer; outline: none;">
                             <option value="Sem Obra">Pendentes (Sem Obra Identificada)</option>
                             <option value="Com Obra">Obras Identificadas</option>
-                            <option value="Todos">Todas as Unidades</option>
                         </select>
                     </div>
                     <div>
@@ -104,7 +103,7 @@ window.VerificarConstrucaoApp = {
                                     <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
                                     <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
                                     <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">VALOR VENCIDO</th>
+                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">ÚLTIMA VISTORIA</th>
                                     <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
                                 </tr>
                             </thead>
@@ -297,12 +296,38 @@ window.VerificarConstrucaoApp = {
                     }
                 }
 
+                let lastCheckDateStr = '-';
+                let lastCheckDays = '-';
+                const keysToCheck = [String(contractId)];
+                if (tituloKey) keysToCheck.push(String(tituloKey));
+                if (contractNumberStr) keysToCheck.push(String(contractNumberStr));
+                if (realSaleIdStr) keysToCheck.push(String(realSaleIdStr));
+                
+                let maxDate = null;
+                keysToCheck.forEach(k => {
+                    const d = latestCheckDateByContract[k];
+                    if (d && d !== '1970-01-01') {
+                        if (!maxDate || d > maxDate) maxDate = d;
+                    }
+                });
+
+                if (maxDate) {
+                    const parts = maxDate.split('T')[0].split('-');
+                    if (parts.length === 3) lastCheckDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    
+                    const dt = new Date(maxDate.split('T')[0] + 'T12:00:00');
+                    const now = new Date();
+                    now.setHours(12, 0, 0, 0);
+                    const diffTime = now.getTime() - dt.getTime();
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                    lastCheckDays = diffDays >= 0 ? `${diffDays} dia(s)` : 'Hoje';
+                }
+
                 rows.push({
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
                     empreendimento, empLabel, unidade,
-                    clienteName, titulo, parcelasVencidas, valorVencido,
-                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction,
-                    debugKeys: `contractId: ${contractId}\\ntituloKey: ${tituloKey}\\ncontractNumber: ${contractNumberStr}\\nrealSaleId: ${realSaleIdStr}`
+                    clienteName, titulo, parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
+                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction
                 });
             });
 
@@ -420,12 +445,11 @@ window.VerificarConstrucaoApp = {
                                 </td>
                                 <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
                                 <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
-                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">
-                                    ${u.titulo}
-                                    <button onclick="alert('${u.debugKeys}')" style="background:transparent; border:none; cursor:pointer; font-size:12px; margin-left:4px;" title="Debug Keys">❓</button>
-                                </td>
+                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
                                 <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
-                                <td style="padding: 10px 12px; text-align: right; font-weight: 600; color: ${u.valorVencido > 0 ? '#dc2626' : '#94a3b8'}; font-size: 0.83rem;">${valorFmt}</td>
+                                <td style="padding: 10px 12px; text-align: right; font-weight: 600; color: #475569; font-size: 0.83rem;">
+                                    ${u.lastCheckDateStr !== '-' ? `<span style="font-size: 0.75rem;">${u.lastCheckDateStr}</span><br><span style="color: #ea580c; font-size: 0.7rem;">Há ${u.lastCheckDays}</span>` : '<span style="color: #94a3b8; font-weight: 400;">Nunca</span>'}
+                                </td>
                                 <td style="padding: 10px 12px;">${validAction}</td>
                             </tr>
                         `;
