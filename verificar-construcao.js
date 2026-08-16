@@ -56,6 +56,22 @@ window.VerificarConstrucaoApp = {
     init() {
         this.render();
         this.loadData();
+        
+        if (this._unsubscribeVistorias) this._unsubscribeVistorias();
+        if (window.firebaseCollections && window.firebaseDb) {
+            const { collection, onSnapshot, query, where } = window.firebaseCollections;
+            const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
+            this._unsubscribeVistorias = onSnapshot(q, (snapshot) => {
+                clearTimeout(this._reloadTimeout);
+                this._reloadTimeout = setTimeout(() => {
+                    // Only reload if the container is visible
+                    const root = document.getElementById('verificar-construcao-root');
+                    if (root && root.closest('.tab-pane') && root.closest('.tab-pane').classList.contains('active')) {
+                        this.loadData();
+                    }
+                }, 1500);
+            });
+        }
     },
 
     render() {
@@ -208,7 +224,17 @@ window.VerificarConstrucaoApp = {
                     const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
                     const snap = await getDocs(q);
                     snap.forEach(doc => {
-                        checksByContract[String(doc.data().contractId)] = { id: doc.id, ...doc.data() };
+                        const data = doc.data();
+                        const docObj = { id: doc.id, ...data };
+                        checksByContract[String(data.contractId)] = docObj;
+                        if (data.contractKeys && Array.isArray(data.contractKeys)) {
+                            data.contractKeys.forEach(k => {
+                                checksByContract[String(k)] = docObj;
+                            });
+                        }
+                        if (data.tituloKey) {
+                            checksByContract[String(data.tituloKey)] = docObj;
+                        }
                     });
 
                     const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
@@ -691,11 +717,18 @@ window.VerificarConstrucaoApp = {
             for (const r of selected) {
                 let vId = r.vistoriaAtiva ? r.vistoriaAtiva.id : null;
                 const loteCoords = await this._fetchLoteCoords(r.costCenterId);
+                
+                const contractKeys = [String(r.contractId)];
+                if (r.tituloKey) contractKeys.push(String(r.tituloKey));
+                if (r.contractNumberStr) contractKeys.push(String(r.contractNumberStr));
+                if (r.realSaleIdStr) contractKeys.push(String(r.realSaleIdStr));
 
                 if (!vId) {
                     const docRef = await addDoc(collection(window.firebaseDb, 'vistorias'), {
                         customerId: r.customerId,
                         contractId: r.contractId,
+                        contractKeys: contractKeys,
+                        tituloKey: r.tituloKey || '',
                         cidade: r.cidade,
                         empreendimento: r.empreendimento,
                         costCenterId: r.costCenterId,

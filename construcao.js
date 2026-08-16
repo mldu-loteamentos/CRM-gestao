@@ -196,13 +196,8 @@ function renderConstrucaoHistory(checks) {
         }
         
         let obsBtn = '';
-        if (check.detailsText) {
-            const safeObs = check.detailsText.replace(/'/g, "\\'").replace(/\n/g, "<br>");
-            obsBtn = `<button onclick="window.Swal.fire({title: 'Detalhes da Vistoria', html: '${safeObs}', icon: 'info'})" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
-        } else if (check.observations && check.observations.includes('Respostas do Cliente:')) {
-            // Fallback for old records
-            const safeObs = check.observations.replace(/'/g, "\\'").replace(/\n/g, "<br>");
-            obsBtn = `<button onclick="window.Swal.fire({title: 'Detalhes da Vistoria', html: '${safeObs}', icon: 'info'})" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
+        if (check.detailsText || check.observations) {
+            obsBtn = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
         }
 
         html += `
@@ -234,6 +229,43 @@ function renderConstrucaoHistory(checks) {
         lucide.createIcons();
     }
 }
+
+window.showVistoriaInfo = function(id) {
+    const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
+    if (!check) return;
+    
+    let text = check.detailsText || check.observations || "Nenhuma informação adicional.";
+    text = text.replace(/\n/g, '<br>');
+    
+    let imgHtml = '';
+    if (check.fileUrl) {
+        imgHtml = `<div style="margin-top: 20px;"><strong style="display:block; margin-bottom: 10px; color: #1e293b;">Foto/Anexo:</strong><img src="${check.fileUrl}" style="max-width: 100%; max-height: 400px; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer;" onclick="window.open('${check.fileUrl}', '_blank')"></div>`;
+    }
+
+    const modalHtml = `
+    <div id="modal-vistoria-info" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.55); z-index: 100000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
+        <div style="background: white; border-radius: 12px; width: 600px; max-width: 95%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; display: flex; flex-direction: column; animation: modalIn 0.2s ease-out;">
+            <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
+                <h3 style="margin: 0; font-size: 1.15rem; color: #0f1e29; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="clipboard-list" style="width: 20px;"></i> Detalhes da Vistoria
+                </h3>
+                <button onclick="document.body.removeChild(document.getElementById('modal-vistoria-info'))" style="background: none; border: none; cursor: pointer; color: #64748b; font-size: 1.2rem;">✕</button>
+            </div>
+            <div style="padding: 24px; overflow-y: auto; color: #334155; font-size: 0.95rem; line-height: 1.6;">
+                <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    ${text}
+                </div>
+                ${imgHtml}
+            </div>
+        </div>
+    </div>
+    <style>@keyframes modalIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }</style>
+    `;
+    const div = document.createElement('div');
+    div.innerHTML = modalHtml;
+    document.body.appendChild(div.firstElementChild);
+    if(window.lucide) lucide.createIcons();
+};
 
 window.openNewConstrucaoModal = function(editId = null) {
     try {
@@ -314,6 +346,19 @@ window.openNewConstrucaoModal = function(editId = null) {
                     <input type="file" id="vistoria-file" accept="image/*,.pdf" class="form-control" style="width: 100%; padding: 8px;">
                 </div>
 
+                <div style="margin-bottom: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <strong style="display: block; color: #1e293b; font-size: 0.9rem;">Enviar para o Sienge</strong>
+                        <span style="color: #64748b; font-size: 0.8rem;">Anexar a foto selecionada ao contrato no Sienge</span>
+                    </div>
+                    <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                        <input type="checkbox" id="vistoria-send-sienge" style="opacity: 0; width: 0; height: 0;" onchange="document.getElementById('send-sienge-track').style.background = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.left = this.checked ? '22px' : '2px';">
+                        <span id="send-sienge-track" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px;">
+                            <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></span>
+                        </span>
+                    </label>
+                </div>
+
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
                     <button type="button" class="btn btn-primary" onclick="window.saveNovaVistoria()" id="btn-salvar-vistoria">Salvar Vistoria</button>
@@ -349,9 +394,9 @@ window.solicitarWhatsAppFromClient = async function() {
         return;
     }
 
-    let ccName = '';
+    let ccName = contractObj.costCenterName || '';
     const empIdStr = String(contractObj.enterpriseId || contractObj.costCenterId || contractObj.unitId?.split('-')[1] || '');
-    if (typeof AppState !== 'undefined' && AppState.cachedCostCenters && empIdStr) {
+    if (!ccName && typeof AppState !== 'undefined' && AppState.cachedCostCenters && empIdStr) {
         const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === empIdStr);
         if (ccObj) ccName = ccObj.name || '';
     }
@@ -369,7 +414,7 @@ window.solicitarWhatsAppFromClient = async function() {
         }
     }
     
-    let unitStr = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || '').replace('Quadra-Lote: ', '').trim();
+    let unitStr = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim();
     if (!unitStr && contractObj.block && contractObj.lot) {
         unitStr = `${contractObj.block}-${contractObj.lot}`;
     }
@@ -397,9 +442,20 @@ window.solicitarWhatsAppFromClient = async function() {
             vId = snap.docs[0].id;
         }
 
+        const allKeys = new Set([
+            String(contractNumber),
+            String(saleId)
+        ]);
+        if (contractObj) {
+            if (contractObj.receivableBillId) allKeys.add(String(contractObj.receivableBillId));
+            if (contractObj.id) allKeys.add(String(contractObj.id));
+            if (contractObj.saleCode) allKeys.add(String(contractObj.saleCode));
+        }
+
         const newData = {
             customerId: String(customerId),
             contractId: String(contractNumber),
+            contractKeys: Array.from(allKeys),
             companyId: String(companyId),
             empreendimento: empreendimento,
             unidade: unidade,
@@ -424,7 +480,7 @@ window.solicitarWhatsAppFromClient = async function() {
         if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
         else if (hour >= 18) greeting = 'Boa noite';
 
-        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n- ${empreendimento.toUpperCase()} - ${unidade.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
+        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n· ${empreendimento.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
         
         const phone = '5515998118246'; // Default phone
         window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
@@ -494,6 +550,7 @@ window.saveNovaVistoria = async function() {
     try {
         let fileUrl = null;
         let fileName = null;
+        const sendToSienge = document.getElementById('vistoria-send-sienge') && document.getElementById('vistoria-send-sienge').checked;
         
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
@@ -505,6 +562,53 @@ window.saveNovaVistoria = async function() {
             if (editCheck) {
                 fileUrl = editCheck.fileUrl;
                 fileName = editCheck.fileName;
+            }
+        }
+        
+        if (sendToSienge && fileInput.files.length > 0) {
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge...';
+            const costCenterId = contractObj.enterpriseId || contractObj.costCenterId || contractObj.unitId?.split('-')[1];
+            const unitNameNorm = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim().toUpperCase();
+            
+            if (costCenterId && unitNameNorm) {
+                const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
+                let siengeUnitId = null;
+                let offset = 0;
+                let found = false;
+                while (!found && offset < 1000) {
+                    const uRes = await fetch(`/api/sienge-proxy/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
+                    if (!uRes.ok) break;
+                    const uData = await uRes.json();
+                    const uResults = uData.results || [];
+                    const match = uResults.find(u => (u.name || '').trim().toUpperCase() === unitNameNorm || (u.name || '').trim().replace(/[\\s-]+/g, '').toUpperCase() === unitNameNorm.replace(/[\\s-]+/g, ''));
+                    if (match) { siengeUnitId = match.id; found = true; }
+                    else if (uResults.length < 200) break;
+                    else offset += 200;
+                }
+                
+                if (siengeUnitId) {
+                    const dateObj = new Date();
+                    const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\\//g, '-');
+                    const dateStrDesc = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('.');
+                    const baseName = `${costCenterId} ${unitNameNorm} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
+                    const nomeFinal = `${baseName}.jpg`;
+                    const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
+                    
+                    const isVercel = window.location.hostname.includes('vercel.app');
+                    let apiUrl = isVercel ? `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}` : `http://${window.location.hostname || 'localhost'}:${window.location.port || '3000'}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                    
+                    await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', apiUrl);
+                        if (authHeader) xhr.setRequestHeader('Authorization', authHeader);
+                        xhr.setRequestHeader('Accept', 'application/json');
+                        xhr.onload = () => resolve(xhr.responseText);
+                        xhr.onerror = () => resolve(null);
+                        const formData = new FormData();
+                        formData.append('file', fileInput.files[0], nomeFinal);
+                        xhr.send(formData);
+                    });
+                }
             }
         }
 
