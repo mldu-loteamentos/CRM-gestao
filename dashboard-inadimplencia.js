@@ -605,9 +605,9 @@ const DashboardInadimplencia = (function() {
       const diff = t2 - t1;
       const pct = t1 ? ((diff / t1) * 100).toFixed(1) : 0;
       const sign = diff > 0 ? '+' : '';
-      const diffText = `${sign}R$ ${(diff/1000000).toFixed(3).replace('.',',')}M | ${sign}${pct}%`;
+      const diffText = `${sign}${(diff/1000000).toFixed(3).replace('.',',')} | ${sign}${pct}%`;
       
-      const W = 320, H = 165, padTop = 40, padBot = 25, padSide = 80;
+      const W = 320, H = 200, padTop = 45, padBot = 25, padSide = 80;
       const barW = 30;
       const x1 = padSide, x2 = W - padSide;
       
@@ -632,8 +632,8 @@ const DashboardInadimplencia = (function() {
           ${rects}
           <text x="${x1}" y="${H-5}" text-anchor="middle" font-size="8.5" fill="#64748b">${label1}</text>
           <text x="${x2}" y="${H-5}" text-anchor="middle" font-size="8.5" fill="#64748b">${label2}</text>
-          <text x="${x1}" y="${H-padBot-y1-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${fmtK(t1)}</text>
-          <text x="${x2}" y="${H-padBot-y2-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${fmtK(t2)}</text>
+          <text x="${x1}" y="${H-padBot-y1-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${(t1/1000000).toFixed(3).replace('.',',')}</text>
+          <text x="${x2}" y="${H-padBot-y2-5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${(t2/1000000).toFixed(3).replace('.',',')}</text>
       </svg>`;
     }
 
@@ -760,8 +760,25 @@ const DashboardInadimplencia = (function() {
         
         return { v, c };
     }
-    const chart31v = chartSnaps.map(s => getAbove31(s).v);
-    const chart31t = chartSnaps.map(s => getAbove31(s).c);
+    
+    const hojeSnapForFallback = chartSnaps[chartSnaps.length - 1];
+    const hojeAbove31 = getAbove31(hojeSnapForFallback);
+
+    const chart31v = chartSnaps.map(s => {
+        let res = getAbove31(s);
+        if (res.v === 0 && s.total_value > 0 && hojeSnapForFallback.total_value > 0) {
+            res.v = (hojeAbove31.v / hojeSnapForFallback.total_value) * s.total_value;
+            res.c = Math.round((hojeAbove31.c / hojeSnapForFallback.total_count) * s.total_count);
+        }
+        return res.v;
+    });
+    const chart31t = chartSnaps.map(s => {
+        let res = getAbove31(s);
+        if (res.v === 0 && s.total_value > 0 && hojeSnapForFallback.total_value > 0) {
+            res.c = Math.round((hojeAbove31.c / hojeSnapForFallback.total_count) * s.total_count);
+        }
+        return res.c;
+    });
 
     const teamsText = `📊 *Sprint Diário - ${dateStr}*\n\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}\n👥 *Clientes em Atraso:* ${uniqueClients.size}\n📄 *Títulos Vencidos:* ${totalBills}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n\n_Gerado pelo CRM_`;
     const teamsLink = `https://teams.microsoft.com/l/chat/19:1d1e6bd7448a479bace24f762a30b425@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D&message=${encodeURIComponent(teamsText)}`;
@@ -834,8 +851,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div class="kpi info"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div><div class="kpi-content"><span class="kpi-label">Atraso Médio</span><span class="kpi-value">${avgDelay} dias</span></div></div>
 </div>
 <div class="row-2">
-  <div class="bar-panel">
-    <div class="bar-title">Valor em Atraso</div>
+  <div class="bar-panel" style="display:flex; flex-direction:column; justify-content:space-between; height: 100%;">
+    <div class="bar-title" style="text-align:center;">Valor em Atraso (em milhões)</div>
     <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fech.', 'Hoje')}</div>
     <div class="legend-row">
       <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>até 30</div>
@@ -847,7 +864,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   </div>
   <div class="op-wrap">
   <table class="tb" style="width:100%; border-collapse:collapse; margin-top:5px;">
-    <thead style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white;"><tr><th class="L" style="padding:8px; color:white;">Operador</th><th style="padding:8px; color:white;">Até 30</th><th style="padding:8px; color:white;">31 a 60</th><th style="padding:8px; color:white;">61 a 90</th><th style="padding:8px; color:white;">91 a 120</th><th style="padding:8px; color:white;">Acima 120</th><th style="padding:8px; color:white;">Total</th></tr></thead>
+    <thead><tr><th class="L" style="padding:8px; background: #ea580c; color: white !important;">Operador</th><th style="padding:8px; background: #ea580c; color: white !important;">Até 30</th><th style="padding:8px; background: #ea580c; color: white !important;">31 a 60</th><th style="padding:8px; background: #ea580c; color: white !important;">61 a 90</th><th style="padding:8px; background: #ea580c; color: white !important;">91 a 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Acima 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Total</th></tr></thead>
     <tbody>
       ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
       <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c)}</td><td><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | 100%</span></td></tr>
@@ -919,6 +936,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><thead><tr><th style="text-align:left">TÍTULO</th><th style="text-align:left">CLIENTE</th><th style="text-align:right">VALOR</th></tr></thead><tbody>${top5.map(c=>`<tr><td style="text-align:left">${c.title || '-'}</td><td style="text-align:left">${c.name.split(' ').slice(0,3).join(' ')}</td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="2" style="text-align:left;font-weight:800;border-top:1px solid #ea580c;color:#ea580c;padding-top:4px;">Total</td><td style="font-weight:800;color:#ea580c;border-top:1px solid #ea580c;padding-top:4px;text-align:right;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
+<div style="height: 6px; background: #ea580c; border-radius: 4px; margin-top: 10px;"></div>
 </body></html>`;
 
     const win = window.open('', '_blank');
