@@ -797,7 +797,7 @@ const SiengeApiService = {
         });
 
         console.log(`[Sienge] Retornou ${normalizedArray.length} títulos inadimplentes da empresa ${cId}`);
-        allNormalized.push(...normalizedArray);
+        allNormalized.push(...normalizedArray.filter(b => b.daysDelay > 0));
 
       } catch (err) {
         console.error(`[Sienge] Erro na API Bulk Data da empresa ${cId}:`, err);

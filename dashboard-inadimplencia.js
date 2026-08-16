@@ -649,7 +649,7 @@ const DashboardInadimplencia = (function() {
     function barChartSvg(data, labels, color, isVal=false) {
       if (!data||data.length===0) return '';
       const maxVal = Math.max(...data, 1);
-      const W = 320, H = 145, padTop = 40, padBot = 25, padSide = 40;
+      const W = 320, H = 115, padTop = 35, padBot = 25, padSide = 40;
       const barCount = data.length;
       const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
       const barWidth = Math.min(18, stepX * 0.5);
@@ -852,7 +852,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 </div>
 <div class="row-2">
   <div class="bar-panel" style="display:flex; flex-direction:column; justify-content:space-between; height: 100%;">
-    <div class="bar-title" style="text-align:center;">Valor em Atraso (em milhões)</div>
+    <div style="background: #ea580c; color: white; padding: 8px; font-size: 9px; font-weight: 800; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; margin: -8px -8px 8px -8px; border-top-left-radius: 6px; border-top-right-radius: 6px;">VALOR EM ATRASO (EM MILHÕES)</div>
     <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fech.', 'Hoje')}</div>
     <div class="legend-row">
       <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>até 30</div>
@@ -936,7 +936,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><thead><tr><th style="text-align:left">TÍTULO</th><th style="text-align:left">CLIENTE</th><th style="text-align:right">VALOR</th></tr></thead><tbody>${top5.map(c=>`<tr><td style="text-align:left">${c.title || '-'}</td><td style="text-align:left">${c.name.split(' ').slice(0,3).join(' ')}</td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="2" style="text-align:left;font-weight:800;border-top:1px solid #ea580c;color:#ea580c;padding-top:4px;">Total</td><td style="font-weight:800;color:#ea580c;border-top:1px solid #ea580c;padding-top:4px;text-align:right;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
-<div style="height: 6px; background: #ea580c; border-radius: 4px; margin-top: 10px;"></div>
+<div style="background: #fff7ed; border-bottom: 3px solid #ea580c; padding: 6px 15px; border-radius: 6px; margin-top: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 15px;"></div>
 </body></html>`;
 
     const win = window.open('', '_blank');
