@@ -220,19 +220,24 @@ window.VerificarConstrucaoApp = {
                     snapChecks.forEach(doc => {
                         const data = doc.data();
                         if (data.stage && data.stage.trim() !== '') {
-                            const cId = String(data.contractId);
                             const cDate = data.date || data.createdAt || '1970-01-01';
                             
-                            if (!latestCheckDateByContract[cId] || cDate >= latestCheckDateByContract[cId]) {
-                                latestCheckDateByContract[cId] = cDate;
-                                
-                                const stageUpper = data.stage.trim().toUpperCase();
-                                if (stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO') {
-                                    completedChecksByContract[cId] = false;
-                                } else {
-                                    completedChecksByContract[cId] = true;
+                            const keysToSet = data.contractKeys ? [...data.contractKeys] : [String(data.contractId)];
+                            if (data.realSaleId) keysToSet.push(String(data.realSaleId));
+                            if (data.tituloKey) keysToSet.push(String(data.tituloKey));
+                            
+                            keysToSet.forEach(key => {
+                                if (!latestCheckDateByContract[key] || cDate >= latestCheckDateByContract[key]) {
+                                    latestCheckDateByContract[key] = cDate;
+                                    
+                                    const stageUpper = data.stage.trim().toUpperCase();
+                                    if (stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO') {
+                                        completedChecksByContract[key] = false;
+                                    } else {
+                                        completedChecksByContract[key] = true;
+                                    }
                                 }
-                            }
+                            });
                         }
                     });
                 } catch (err) {

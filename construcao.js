@@ -390,9 +390,19 @@ window.saveNovaVistoria = async function() {
         }
 
         const { collection, addDoc, doc, updateDoc } = window.firebaseCollections;
+        const allKeys = new Set([
+            String(contractNumber),
+            String(saleId)
+        ]);
+        if (contractObj) {
+            if (contractObj.receivableBillId) allKeys.add(String(contractObj.receivableBillId));
+            if (contractObj.id) allKeys.add(String(contractObj.id));
+        }
+
         const checkData = {
             customerId: String(customerId),
             contractId: String(contractNumber),
+            contractKeys: Array.from(allKeys),
             companyId: String(companyId),
             date: date,
             responsible: responsible,
