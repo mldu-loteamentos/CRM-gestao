@@ -692,7 +692,9 @@ const DashboardInadimplencia = (function() {
           const barH = (v / maxVal) * (H - padTop - padBot);
           const y = H - padBot - barH;
           
-          bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${barColor}" rx="2" />`;
+          const currentBarColor = labels[i] === 'Fech.' ? '#94a3b8' : barColor;
+          
+          bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${currentBarColor}" rx="2" />`;
           
           const valText = formatVal(v);
           textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${valText}</text>`;
@@ -831,13 +833,13 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 .sright td:last-child{text-align:right;color:#dc2626;font-weight:700}
 .op-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .op-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
-      .op-head{background:#fff7ed;color:#ea580c;padding:5px;font-size:9px;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #ea580c;}
-      .op-card table{width:100%;border-collapse:collapse;margin:0;font-size:7px}
-      .op-card th{padding:3px 5px;border-bottom:1px solid #f1f5f9;color:#64748b;font-weight:700;text-align:left;}
-      .op-card td{padding:3px 5px;border-bottom:1px solid #f1f5f9;color:#334155}
-      .op-card td:nth-child(1){font-weight:700;color:#64748b;max-width:35px;overflow:hidden;text-overflow:ellipsis;}
-      .op-card td:nth-child(2){font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;}
-      .op-card td:last-child{text-align:right;font-weight:800;color:#1e293b}
+.op-head{background:#fff7ed;color:#ea580c;padding:3px;font-size:8px;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #ea580c;}
+.op-card table{width:100%;border-collapse:collapse;margin:0;font-size:6.5px}
+.op-card th{padding:2px 4px;border-bottom:1px solid #f1f5f9;color:#64748b;font-weight:700;text-align:left;}
+.op-card td{padding:2px 4px;border-bottom:1px solid #f1f5f9;color:#334155}
+.op-card td:nth-child(1){font-weight:700;color:#64748b;max-width:35px;overflow:hidden;text-overflow:ellipsis;}
+.op-card td:nth-child(2){font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;}
+.op-card td:last-child{text-align:right;font-weight:800;color:#1e293b}
 </style></head><body>
 <div class="no-print">
     <button onclick="window.print()">🖨️ Imprimir</button>
@@ -930,7 +932,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     </div>
   </div>
 </div>
-<div style="background: #fff7ed; border-top: 3px solid #ea580c; color: #ea580c; padding: 6px 15px; border-radius: 6px; margin-bottom: 8px; font-weight: 800; font-size: 11px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"><i class="fas fa-trophy" style="margin-right: 8px; color: #ea580c;"></i> TOP 5 TÍTULOS COM MAIORES VALORES EM ATRASO POR OPERADOR</div>
+<div style="background: #fff7ed; border-top: 3px solid #ea580c; color: #ea580c; padding: 4px 10px; border-radius: 6px; margin-bottom: 4px; font-weight: 800; font-size: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05);"><i class="fas fa-trophy" style="margin-right: 8px; color: #ea580c;"></i> TOP 5 TÍTULOS COM MAIORES VALORES EM ATRASO POR OPERADOR</div>
 <div class="op-grid">
   ${opSorted.filter(op=>op.customers.length>0).map(op=>{
     op.customers.sort((a,b)=>b.value-a.value);
@@ -939,7 +941,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     return `<div class="op-card"><div class="op-head">${op.name.split(' ').slice(0,2).join(' ')}</div><table><thead><tr><th style="text-align:left">TÍTULO</th><th style="text-align:left">CLIENTE</th><th style="text-align:right">VALOR</th></tr></thead><tbody>${top5.map(c=>`<tr><td style="text-align:left">${c.title || '-'}</td><td style="text-align:left">${c.name.split(' ').slice(0,3).join(' ')}</td><td>${fmtMoneyNoRs(c.value)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="2" style="text-align:left;font-weight:800;border-top:1px solid #ea580c;color:#ea580c;padding-top:4px;">Total</td><td style="font-weight:800;color:#ea580c;border-top:1px solid #ea580c;padding-top:4px;text-align:right;">${fmtMoneyNoRs(totalTop5)}</td></tr></tfoot></table></div>`;
   }).join('')}
 </div>
-<div style="background: #fff7ed; border-bottom: 3px solid #ea580c; padding: 6px 15px; border-radius: 6px; margin-top: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 15px;"></div>
+<div style="background: #fff7ed; border-bottom: 3px solid #ea580c; padding: 4px 10px; border-radius: 6px; margin-top: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); height: 8px;"></div>
 </body></html>`;
 
     const win = window.open('', '_blank');
