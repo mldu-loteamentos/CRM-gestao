@@ -607,7 +607,7 @@ const DashboardInadimplencia = (function() {
       const sign = diff > 0 ? '+' : '';
       const diffText = `${sign}${(diff/1000000).toFixed(3).replace('.',',')} | ${sign}${pct}%`;
       
-      const W = 320, H = 200, padTop = 45, padBot = 25, padSide = 80;
+      const W = 320, H = 240, padTop = 50, padBot = 25, padSide = 80;
       const barW = 30;
       const x1 = padSide, x2 = W - padSide;
       
@@ -649,7 +649,7 @@ const DashboardInadimplencia = (function() {
     function barChartSvg(data, labels, color, isVal=false) {
       if (!data||data.length===0) return '';
       const maxVal = Math.max(...data, 1);
-      const W = 320, H = 115, padTop = 35, padBot = 25, padSide = 40;
+      const W = 320, H = 100, padTop = 30, padBot = 25, padSide = 40;
       const barCount = data.length;
       const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
       const barWidth = Math.min(18, stepX * 0.5);
@@ -780,7 +780,7 @@ const DashboardInadimplencia = (function() {
         return res.c;
     });
 
-    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}\n👥 *Clientes em Atraso:* ${uniqueClients.size}\n📄 *Títulos Vencidos:* ${totalBills}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n\n_Gerado pelo CRM_`;
+    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}\n👥 *Clientes em Atraso:* ${uniqueClients.size}\n📄 *Títulos Vencidos:* ${totalBills}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n\n_(Atenção: anexe o PDF gerado ou a imagem dos resultados junto a esta mensagem)_`;
     const teamsLink = `https://teams.microsoft.com/l/chat/19:1d1e6bd7448a479bace24f762a30b425@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D&message=${encodeURIComponent(teamsText)}`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
@@ -791,7 +791,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;padding:0;color:#1e293b;font-size:9
 .no-print button{padding:8px 24px;background:#22c55e;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.2);transition:opacity 0.2s}
 .no-print button:hover{opacity:0.9}
 h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-.kpi-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:10px; }
+.kpi-strip { display:grid; grid-template-columns: auto repeat(4, 1fr); gap:10px; margin-bottom:10px; }
 .kpi { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
 .kpi-icon-wrapper { width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .kpi.danger .kpi-icon-wrapper { background:#fee2e2; color:#ef4444; }
@@ -845,6 +845,9 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 </div>
 <h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
 <div class="kpi-strip">
+  <div style="display:flex; align-items:center; justify-content:center; padding: 0 5px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+    <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" style="width: 45px; height: 45px; object-fit: contain; border-radius: 50%;">
+  </div>
   <div class="kpi danger"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div><div class="kpi-content"><span class="kpi-label">Valor em Atraso</span><span class="kpi-value">${fmtInteiro(totalOverdue)}</span></div></div>
   <div class="kpi warning"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></div><div class="kpi-content"><span class="kpi-label">Clientes em Atraso</span><span class="kpi-value">${uniqueClients.size}</span></div></div>
   <div class="kpi success"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg></div><div class="kpi-content"><span class="kpi-label">Títulos Vencidos</span><span class="kpi-value">${totalBills}</span></div></div>
@@ -863,10 +866,10 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     </div>
   </div>
   <div class="op-wrap">
-  <table class="tb" style="width:100%; border-collapse:collapse; margin-top:5px;">
+  <table class="tb" style="width:100%; border-collapse:separate; border-spacing:0; margin-top:0;">
     <thead><tr><th class="L" style="padding:8px; background: #ea580c; color: white !important;">Operador</th><th style="padding:8px; background: #ea580c; color: white !important;">Até 30</th><th style="padding:8px; background: #ea580c; color: white !important;">31 a 60</th><th style="padding:8px; background: #ea580c; color: white !important;">61 a 90</th><th style="padding:8px; background: #ea580c; color: white !important;">91 a 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Acima 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Total</th></tr></thead>
     <tbody>
-      ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
+      ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name !== 'NÃO ATRIBUÍDO' && op.name.split(' ').length > 1 ? op.name.split(' ')[0] + ' ' + op.name.split(' ')[1][0] + '.' : op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
       <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c)}</td><td><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)}</span><br><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | 100%</span></td></tr>
     </tbody>
   </table></div>
