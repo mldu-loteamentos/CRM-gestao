@@ -66,7 +66,7 @@ window.VerificarConstrucaoApp = {
                 this._reloadTimeout = setTimeout(() => {
                     // Only reload if the container is visible
                     const root = document.getElementById('verificar-construcao-root');
-                    if (root && root.closest('.tab-pane') && root.closest('.tab-pane').classList.contains('active')) {
+                    if (root && root.closest('.tab-pane') && root.closest('.tab-pane').style.display !== 'none') {
                         this.loadData();
                     }
                 }, 1500);

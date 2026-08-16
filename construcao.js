@@ -431,11 +431,10 @@ window.openNewConstrucaoModal = function(editId = null) {
                         <strong style="display: block; color: #1e293b; font-size: 0.9rem;">Enviar para o Sienge</strong>
                         <span style="color: #64748b; font-size: 0.8rem;">Anexar a foto selecionada ao contrato no Sienge</span>
                     </div>
-                    <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                        <input type="checkbox" id="vistoria-send-sienge" style="opacity: 0; width: 0; height: 0;" onchange="document.getElementById('send-sienge-track').style.background = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.left = this.checked ? '22px' : '2px';">
-                        <span id="send-sienge-track" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px;">
-                            <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></span>
-                        </span>
+                    <label style="position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer;">
+                        <input type="checkbox" id="vistoria-send-sienge" style="opacity: 0; width: 0; height: 0; position: absolute;" onchange="document.getElementById('send-sienge-track').style.backgroundColor = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';">
+                        <span id="send-sienge-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px; pointer-events: none;"></span>
+                        <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); pointer-events: none; transform: translateX(0);"></span>
                     </label>
                 </div>
 
@@ -461,26 +460,27 @@ window.solicitarWhatsAppFromClient = async function() {
     if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
     if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
     
-    let contractObj = null;
     let saleObj = null;
     if (typeof AppState !== 'undefined' && AppState.sales) {
         saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (!saleObj && window.AnexosState && window.AnexosState.activeContract) {
+            saleObj = AppState.sales.find(s => String(s.saleId || s.contractId || s.id) === String(window.AnexosState.activeContract.id));
+        }
         if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
     }
     
+    let contractObj = { ...(saleObj || {}) };
     if (window.AnexosState && window.AnexosState.activeContract) {
-        contractObj = window.AnexosState.activeContract;
-    } else {
-        contractObj = saleObj;
+        contractObj = { ...contractObj, ...window.AnexosState.activeContract };
     }
 
-    if (!contractObj) {
+    if (!contractObj || Object.keys(contractObj).length === 0) {
         alert("Nenhum contrato ativo encontrado para solicitar vistoria.");
         return;
     }
 
     let ccName = contractObj.costCenterName || '';
-    const empIdStr = String(contractObj.enterpriseId || contractObj.costCenterId || contractObj.unitId?.split('-')[1] || '');
+    const empIdStr = String(contractObj.enterpriseId || contractObj.costCenterId || (contractObj.property && contractObj.property.costCenterId) || contractObj.unitId?.split('-')[1] || '');
     if (!ccName && typeof AppState !== 'undefined' && AppState.cachedCostCenters && empIdStr) {
         const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === empIdStr);
         if (ccObj) ccName = ccObj.name || '';
@@ -500,6 +500,7 @@ window.solicitarWhatsAppFromClient = async function() {
     }
     
     let unitStr = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim();
+    if (!unitStr && contractObj.property && contractObj.property.unitName) unitStr = contractObj.property.unitName;
     if (!unitStr && contractObj.block && contractObj.lot) {
         unitStr = `${contractObj.block}-${contractObj.lot}`;
     }
@@ -612,27 +613,22 @@ window.saveNovaVistoria = async function() {
         return;
     }
 
-    let contractNumber = saleId;
-    let companyId = "N/D";
-    
-    let contractObj = null;
     let saleObj = null;
     if (typeof AppState !== 'undefined' && AppState.sales) {
         saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (!saleObj && window.AnexosState && window.AnexosState.activeContract) {
+            saleObj = AppState.sales.find(s => String(s.saleId || s.contractId || s.id) === String(window.AnexosState.activeContract.id));
+        }
         if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
     }
     
+    let contractObj = { ...(saleObj || {}) };
     if (window.AnexosState && window.AnexosState.activeContract) {
-        contractObj = window.AnexosState.activeContract;
-        contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
-        companyId = contractObj.companyId || companyId;
-    } else if (saleObj) {
-        contractObj = saleObj;
-        contractNumber = saleObj.saleCode || saleObj.contractCode || saleObj.contractNumber || saleObj.id || saleId;
-        companyId = saleObj.companyId || companyId;
-    } else {
-        contractObj = {};
+        contractObj = { ...contractObj, ...window.AnexosState.activeContract };
     }
+    
+    let contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
+    let companyId = contractObj.companyId || "N/D";
     
     btn.disabled = true;
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><style>@keyframes vc-spin { 100% { transform: rotate(360deg); } }</style> Salvando...';
@@ -657,20 +653,24 @@ window.saveNovaVistoria = async function() {
         
         if (sendToSienge && fileInput.files.length > 0) {
             btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge...';
-            const costCenterId = contractObj.enterpriseId || contractObj.costCenterId || contractObj.unitId?.split('-')[1];
-            const unitNameNorm = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim().toUpperCase();
+            const costCenterId = contractObj.enterpriseId || contractObj.costCenterId || (contractObj.property && contractObj.property.costCenterId) || contractObj.unitId?.split('-')[1];
+            let unitNameNorm = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim().toUpperCase();
+            if (!unitNameNorm && contractObj.property && contractObj.property.unitName) unitNameNorm = contractObj.property.unitName.toUpperCase();
             
             if (costCenterId && unitNameNorm) {
                 const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
+                const isVercel = window.location.hostname.includes('vercel.app');
+                const baseUrl = isVercel ? '/api/sienge-proxy' : `http://${window.location.hostname || 'localhost'}:${window.location.port || '3000'}/sienge-proxy`;
+
                 let siengeUnitId = null;
                 let offset = 0;
                 let found = false;
                 while (!found && offset < 1000) {
-                    const uRes = await fetch(`/api/sienge-proxy/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
+                    const uRes = await fetch(`${baseUrl}/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
                     if (!uRes.ok) break;
                     const uData = await uRes.json();
                     const uResults = uData.results || [];
-                    const match = uResults.find(u => (u.name || '').trim().toUpperCase() === unitNameNorm || (u.name || '').trim().replace(/[\\s-]+/g, '').toUpperCase() === unitNameNorm.replace(/[\\s-]+/g, ''));
+                    const match = uResults.find(u => (u.name || '').trim().toUpperCase() === unitNameNorm || (u.name || '').trim().replace(/[\s-]+/g, '').toUpperCase() === unitNameNorm.replace(/[\s-]+/g, ''));
                     if (match) { siengeUnitId = match.id; found = true; }
                     else if (uResults.length < 200) break;
                     else offset += 200;
@@ -678,14 +678,13 @@ window.saveNovaVistoria = async function() {
                 
                 if (siengeUnitId) {
                     const dateObj = new Date();
-                    const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\\//g, '-');
+                    const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\//g, '-');
                     const dateStrDesc = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('.');
                     const baseName = `${costCenterId} ${unitNameNorm} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
                     const nomeFinal = `${baseName}.jpg`;
                     const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
                     
-                    const isVercel = window.location.hostname.includes('vercel.app');
-                    let apiUrl = isVercel ? `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}` : `http://${window.location.hostname || 'localhost'}:${window.location.port || '3000'}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                    let apiUrl = `${baseUrl}/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
                     
                     await new Promise((resolve, reject) => {
                         const xhr = new XMLHttpRequest();
