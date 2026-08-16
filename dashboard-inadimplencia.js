@@ -607,7 +607,7 @@ const DashboardInadimplencia = (function() {
       const sign = diff > 0 ? '+' : '';
       const diffText = `${sign}${(diff/1000000).toFixed(3).replace('.',',')} | ${sign}${pct}%`;
       
-      const W = 320, H = 240, padTop = 50, padBot = 25, padSide = 80;
+      const W = 320, H = 180, padTop = 50, padBot = 25, padSide = 80;
       const barW = 30;
       const x1 = padSide, x2 = W - padSide;
       
@@ -649,7 +649,7 @@ const DashboardInadimplencia = (function() {
     function barChartSvg(data, labels, color, isVal=false) {
       if (!data||data.length===0) return '';
       const maxVal = Math.max(...data, 1);
-      const W = 320, H = 100, padTop = 30, padBot = 25, padSide = 40;
+      const W = 320, H = 140, padTop = 45, padBot = 25, padSide = 40;
       const barCount = data.length;
       const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
       const barWidth = Math.min(18, stepX * 0.5);

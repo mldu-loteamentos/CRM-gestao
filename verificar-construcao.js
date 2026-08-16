@@ -247,8 +247,14 @@ window.VerificarConstrucaoApp = {
                 if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
                 const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
                 const realSaleIdStr = String(c.realSaleId || '');
+                const contractNumberStr = String(c.contractNumber || '');
                 
-                const hasConstruction = !!(completedChecksByContract[String(contractId)] || completedChecksByContract[String(tituloKey)] || (realSaleIdStr && completedChecksByContract[realSaleIdStr]));
+                const hasConstruction = !!(
+                    completedChecksByContract[String(contractId)] || 
+                    completedChecksByContract[String(tituloKey)] || 
+                    (contractNumberStr && completedChecksByContract[contractNumberStr]) ||
+                    (realSaleIdStr && completedChecksByContract[realSaleIdStr])
+                );
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
                 const costCenterId = c.costCenterId;
@@ -262,7 +268,7 @@ window.VerificarConstrucaoApp = {
                 const empLabel = _vcGetEmpLabel(costCenterId);
 
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
-                const vistoriaAtiva = checksByContract[String(contractId)];
+                const vistoriaAtiva = checksByContract[String(contractId)] || checksByContract[String(tituloKey)] || (contractNumberStr && checksByContract[contractNumberStr]) || (realSaleIdStr && checksByContract[realSaleIdStr]);
 
                 // Dados financeiros do cliente
                 const clienteName = c.customerName || c.name || c.nome || '-';
