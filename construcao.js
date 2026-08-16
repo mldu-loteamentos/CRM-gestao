@@ -188,22 +188,26 @@ function renderConstrucaoHistory(checks) {
     `;
 
     checks.forEach(check => {
-        // Date parse keeping local timezone to avoid off-by-one errors (if date was saved as YYYY-MM-DD)
-        const dateStr = check.date.split('-').reverse().join('/');
-        let fileLink = '';
+        const dateObj = new Date(check.date + 'T00:00:00');
+        const dateStr = dateObj.toLocaleDateString('pt-BR');
+
+        let fileLink = '-';
         if (check.fileUrl) {
-            fileLink = `<a href="${check.fileUrl}" target="_blank" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Ver Foto/Arquivo"><i data-lucide="image" style="width:14px; height:14px;"></i></a>`;
+            fileLink = `<button onclick="window.open('${check.fileUrl}', '_blank')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Ver Anexo"><i data-lucide="image" style="width:14px; height:14px;"></i></button>`;
         }
         
         let obsBtn = '';
-        if (check.detailsText || check.observations) {
+        const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
+        if (isAppVistoria) {
             obsBtn = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
         }
+        
+        const respName = check.responsible === 'Vistoriador App' ? '(15) 99811-8246' : (check.responsible || '-');
 
         html += `
         <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
             <td style="padding: 12px; font-weight: 500; font-size: 0.9rem;">${dateStr}</td>
-            <td style="padding: 12px; font-size: 0.9rem;">${check.responsible || '-'}</td>
+            <td style="padding: 12px; font-size: 0.9rem;">${respName}</td>
             <td style="padding: 12px; font-size: 0.9rem;">
                 <span style="background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
                     ${check.stage || '-'}
@@ -235,26 +239,102 @@ window.showVistoriaInfo = function(id) {
     if (!check) return;
     
     let text = check.detailsText || check.observations || "Nenhuma informação adicional.";
-    text = text.replace(/\n/g, '<br>');
+    
+    let hasCards = false;
+    let cardsHtml = '';
+    
+    if (text.includes("Respostas do Cliente:") || text.includes("Possui Água:")) {
+        const extract = (key) => {
+            const regex = new RegExp(`- ${key}:\\s*(.*?)(?:\\n|$)`, 'i');
+            const match = text.match(regex);
+            return match ? match[1].trim().toLowerCase() : null;
+        };
+        
+        const agua = extract("Possui Água");
+        const energia = extract("Possui Energia");
+        const entulho = extract("Possui Entulho");
+        const acesso = extract("Permite Acesso");
+        const estagio = extract("Estágio da Obra");
+        
+        if (agua || energia || entulho || acesso || estagio) {
+            hasCards = true;
+            const renderCard = (title, val, icon, color) => {
+                if (!val) return '';
+                const isSim = val === 'sim';
+                return `
+                <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; min-width: 120px;">
+                    <div style="color: #64748b; font-size: 0.8rem; font-weight: 600; margin-bottom: 8px; display:flex; align-items:center;"><i data-lucide="${icon}" style="width: 14px; margin-right: 4px; color: ${color};"></i> ${title}</div>
+                    <div style="${isSim ? 'color: #16a34a;' : 'color: #dc2626;'} font-weight: bold; font-size: 1.1rem;">
+                        ${isSim ? '✓ Sim' : '✗ Não'}
+                    </div>
+                </div>`;
+            };
+            
+            cardsHtml = `
+            <div style="margin-bottom: 20px;">
+                <h4 style="margin: 0 0 15px 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="clipboard-list" style="width: 18px; color: #f97316;"></i> Respostas do Questionário
+                </h4>
+                <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                    ${renderCard('ÁGUA', agua, 'droplet', '#3b82f6')}
+                    ${renderCard('ENERGIA', energia, 'zap', '#eab308')}
+                    ${renderCard('ENTULHO', entulho, 'trash-2', '#f97316')}
+                    ${renderCard('ACESSO', acesso, 'door-open', '#8b5cf6')}
+                </div>
+                ${estagio ? `
+                <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="color: #64748b; font-size: 0.85rem; font-weight: 600; display:flex; align-items:center;"><i data-lucide="hammer" style="width: 16px; margin-right: 6px; color: #10b981;"></i> ESTÁGIO DA OBRA</div>
+                    <div style="font-weight: bold; font-size: 1.1rem; color: #10b981; text-transform: uppercase;">${estagio.replace(/_/g, ' ')}</div>
+                </div>` : ''}
+            </div>`;
+            
+            text = text.replace(/Respostas do Cliente:\n/g, '')
+                       .replace(/- Possui Água:.*?\n/g, '')
+                       .replace(/- Possui Energia:.*?\n/g, '')
+                       .replace(/- Possui Entulho:.*?\n/g, '')
+                       .replace(/- Permite Acesso:.*?\n/g, '')
+                       .replace(/- Estágio da Obra:.*?(?:\n|$)/g, '');
+        }
+    }
+    
+    text = text.trim();
+    let textHtml = '';
+    if (text && text !== '-') {
+        textHtml = `
+        <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+            <strong style="display:block; margin-bottom: 8px; color: #475569; font-size: 0.9rem;">Observações Adicionais:</strong>
+            ${text.replace(/\n/g, '<br>')}
+        </div>`;
+    }
     
     let imgHtml = '';
     if (check.fileUrl) {
-        imgHtml = `<div style="margin-top: 20px;"><strong style="display:block; margin-bottom: 10px; color: #1e293b;">Foto/Anexo:</strong><img src="${check.fileUrl}" style="max-width: 100%; max-height: 400px; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer;" onclick="window.open('${check.fileUrl}', '_blank')"></div>`;
+        imgHtml = `
+        <div style="margin-top: 20px;">
+            <h4 style="margin: 0 0 15px 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="camera" style="width: 18px; color: #64748b;"></i> Fotos Recebidas
+            </h4>
+            <div style="display: flex; gap: 15px;">
+                <div style="position: relative; width: 220px; height: 220px; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; cursor: pointer; background: #000;" onclick="window.open('${check.fileUrl}', '_blank')" title="Clique para ampliar">
+                    <img src="${check.fileUrl}" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.9; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">
+                    <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: white; padding: 6px; text-align: center; font-size: 0.8rem; font-weight: bold;">Foto da Vistoria</div>
+                </div>
+            </div>
+        </div>`;
     }
 
     const modalHtml = `
     <div id="modal-vistoria-info" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.55); z-index: 100000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
-        <div style="background: white; border-radius: 12px; width: 600px; max-width: 95%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; display: flex; flex-direction: column; animation: modalIn 0.2s ease-out;">
-            <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
-                <h3 style="margin: 0; font-size: 1.15rem; color: #0f1e29; display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="clipboard-list" style="width: 20px;"></i> Detalhes da Vistoria
+        <div style="background: white; border-radius: 12px; width: 800px; max-width: 95%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; display: flex; flex-direction: column; animation: modalIn 0.2s ease-out;">
+            <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #166534; color: white; border-radius: 12px 12px 0 0;">
+                <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="check-circle" style="width: 20px;"></i> Detalhes da Vistoria
                 </h3>
-                <button onclick="document.body.removeChild(document.getElementById('modal-vistoria-info'))" style="background: none; border: none; cursor: pointer; color: #64748b; font-size: 1.2rem;">✕</button>
+                <button onclick="document.body.removeChild(document.getElementById('modal-vistoria-info'))" style="background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.8); font-size: 1.2rem;">✕</button>
             </div>
             <div style="padding: 24px; overflow-y: auto; color: #334155; font-size: 0.95rem; line-height: 1.6;">
-                <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                    ${text}
-                </div>
+                ${cardsHtml}
+                ${textHtml}
                 ${imgHtml}
             </div>
         </div>
@@ -382,11 +462,16 @@ window.solicitarWhatsAppFromClient = async function() {
     if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
     
     let contractObj = null;
+    let saleObj = null;
+    if (typeof AppState !== 'undefined' && AppState.sales) {
+        saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
+    }
+    
     if (window.AnexosState && window.AnexosState.activeContract) {
         contractObj = window.AnexosState.activeContract;
-    } else if (typeof AppState !== 'undefined' && AppState.sales) {
-        contractObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
-        if (!contractObj && AppState.sales.length > 0) contractObj = AppState.sales[0];
+    } else {
+        contractObj = saleObj;
     }
 
     if (!contractObj) {
@@ -530,18 +615,23 @@ window.saveNovaVistoria = async function() {
     let contractNumber = saleId;
     let companyId = "N/D";
     
-    let contractObj = {};
-    if (window.AnexosState && window.AnexosState.activeContract && (String(window.AnexosState.activeContract.id) === String(saleId) || String(window.AnexosState.activeContract.receivableBillId) === String(saleId))) {
-        contractNumber = window.AnexosState.activeContract.saleCode || window.AnexosState.activeContract.contractCode || window.AnexosState.activeContract.contractNumber || window.AnexosState.activeContract.id || saleId;
-        companyId = window.AnexosState.activeContract.companyId || companyId;
+    let contractObj = null;
+    let saleObj = null;
+    if (typeof AppState !== 'undefined' && AppState.sales) {
+        saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+        if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
+    }
+    
+    if (window.AnexosState && window.AnexosState.activeContract) {
         contractObj = window.AnexosState.activeContract;
-    } else if (typeof AppState !== 'undefined' && AppState.sales) {
-        const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
-        if (saleObj) {
-            contractNumber = saleObj.saleCode || saleObj.contractCode || saleObj.contractNumber || saleObj.id || saleId;
-            companyId = saleObj.companyId || companyId;
-            contractObj = saleObj;
-        }
+        contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
+        companyId = contractObj.companyId || companyId;
+    } else if (saleObj) {
+        contractObj = saleObj;
+        contractNumber = saleObj.saleCode || saleObj.contractCode || saleObj.contractNumber || saleObj.id || saleId;
+        companyId = saleObj.companyId || companyId;
+    } else {
+        contractObj = {};
     }
     
     btn.disabled = true;

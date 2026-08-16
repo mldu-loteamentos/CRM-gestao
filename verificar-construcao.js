@@ -1051,7 +1051,7 @@ window.VerificarConstrucaoApp = {
                 contractKeys: row.contractKeys || [],
                 companyId: String(row.companyId || ''),
                 date: new Date().toISOString().split('T')[0],
-                responsible: "Vistoriador App",
+                responsible: "(15) 99811-8246",
                 stage: resps.estagioObra || "Vistoria Validada",
                 observations: resps.observacoes || "-",
                 detailsText: detailsText,
