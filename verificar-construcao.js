@@ -298,13 +298,13 @@ window.VerificarConstrucaoApp = {
 
                 let lastCheckDateStr = '-';
                 let lastCheckDays = '-';
-                const keysToCheck = [String(contractId)];
-                if (tituloKey) keysToCheck.push(String(tituloKey));
-                if (contractNumberStr) keysToCheck.push(String(contractNumberStr));
-                if (realSaleIdStr) keysToCheck.push(String(realSaleIdStr));
+                const contractKeys = [String(contractId)];
+                if (tituloKey) contractKeys.push(String(tituloKey));
+                if (contractNumberStr) contractKeys.push(String(contractNumberStr));
+                if (realSaleIdStr) contractKeys.push(String(realSaleIdStr));
                 
                 let maxDate = null;
-                keysToCheck.forEach(k => {
+                contractKeys.forEach(k => {
                     const d = latestCheckDateByContract[k];
                     if (d && d !== '1970-01-01') {
                         if (!maxDate || d > maxDate) maxDate = d;
@@ -327,7 +327,7 @@ window.VerificarConstrucaoApp = {
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
                     empreendimento, empLabel, unidade,
                     clienteName, titulo, parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
-                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction
+                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys
                 });
             });
 
@@ -979,13 +979,21 @@ window.VerificarConstrucaoApp = {
             const { doc, updateDoc, collection, addDoc } = window.firebaseCollections;
             await updateDoc(doc(window.firebaseDb, 'vistorias', v.id), { status: 'concluida' });
 
+            const resps = v.respostasFormulario || {};
+            let obsText = "Respostas do Cliente:\\n";
+            for (const [k, val] of Object.entries(resps)) {
+                obsText += `- ${k.replace(/_/g, ' ').toUpperCase()}: ${val}\\n`;
+            }
+
             const newCheck = {
                 customerId: String(row.customerId || ''),
                 contractId: String(row.contractId || ''),
+                contractKeys: row.contractKeys || [],
                 companyId: String(row.companyId || ''),
                 date: padraoData.replace(/\./g, '-').split('-').reverse().join('-'),
                 responsible: "Vistoriador App",
                 stage: "Vistoria Validada",
+                observations: obsText,
                 fileUrl: await getDownloadURL(listRes.items[0]),
                 fileName: "Foto Vistoria 1.jpg",
                 createdAt: new Date().toISOString()

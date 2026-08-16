@@ -195,6 +195,12 @@ function renderConstrucaoHistory(checks) {
         if (check.fileUrl) {
             fileLink = `<a href="${check.fileUrl}" target="_blank" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Ver Foto/Arquivo"><i data-lucide="image" style="width:14px; height:14px;"></i></a>`;
         }
+        
+        let obsBtn = '';
+        if (check.observations && check.observations.includes('Respostas do Cliente:')) {
+            const safeObs = check.observations.replace(/'/g, "\\'").replace(/\\n/g, "\\n");
+            obsBtn = `<button onclick="alert('${safeObs}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Respostas do Cliente"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
+        }
 
         html += `
         <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -206,9 +212,10 @@ function renderConstrucaoHistory(checks) {
                 </span>
             </td>
             <td style="padding: 12px; font-size: 0.8rem; color: #64748b; line-height: 1.3;">
-                ${check.observations || '-'}
+                ${check.observations ? check.observations.replace(/\\n/g, '<br>') : '-'}
             </td>
             <td style="padding: 12px; text-align: right; white-space: nowrap;">
+                ${obsBtn}
                 ${fileLink}
                 <button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>
                 <button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>

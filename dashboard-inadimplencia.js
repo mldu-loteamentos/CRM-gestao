@@ -848,10 +848,25 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
 .op-card td:nth-child(1){font-weight:700;color:#64748b;max-width:35px;overflow:hidden;text-overflow:ellipsis;}
 .op-card td:nth-child(2){font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;}
 .op-card td:last-child{text-align:right;font-weight:800;color:#1e293b}
-</style></head><body>
+</style>
+<script>
+    function sendToTeams() {
+        const txt = \`${teamsText.replace(/`/g, "\\`").replace(/\\/g, "\\\\")}\`;
+        navigator.clipboard.writeText(txt).then(() => {
+            alert("O texto padrão foi copiado para a área de transferência (Ctrl+C)!\\n\\nSalve o PDF na próxima tela e cole-o na janela do Teams que será aberta a seguir.");
+            window.print();
+            setTimeout(() => { window.open('${teamsLink}', '_blank'); }, 1000);
+        }).catch(e => {
+            console.error("Erro ao copiar", e);
+            window.print();
+            setTimeout(() => { window.open('${teamsLink}', '_blank'); }, 1000);
+        });
+    }
+</script>
+</head><body>
 <div class="no-print">
     <button onclick="window.print()">🖨️ Imprimir</button>
-    <button onclick="window.open('${teamsLink}', '_blank')" style="background:#464eb8;">💬 Enviar por Teams</button>
+    <button onclick="sendToTeams()" style="background:#464eb8;">💬 Enviar por Teams</button>
 </div>
 <h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
 <div class="kpi-strip">
