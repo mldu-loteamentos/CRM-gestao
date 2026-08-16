@@ -196,9 +196,13 @@ function renderConstrucaoHistory(checks) {
         }
         
         let obsBtn = '';
-        if (check.observations && check.observations.includes('Respostas do Cliente:')) {
-            const safeObs = check.observations.replace(/'/g, "\\'").replace(/\\n/g, "\\n");
-            obsBtn = `<button onclick="alert('${safeObs}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Respostas do Cliente"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
+        if (check.detailsText) {
+            const safeObs = check.detailsText.replace(/'/g, "\\'").replace(/\n/g, "<br>");
+            obsBtn = `<button onclick="window.Swal.fire({title: 'Detalhes da Vistoria', html: '${safeObs}', icon: 'info'})" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
+        } else if (check.observations && check.observations.includes('Respostas do Cliente:')) {
+            // Fallback for old records
+            const safeObs = check.observations.replace(/'/g, "\\'").replace(/\n/g, "<br>");
+            obsBtn = `<button onclick="window.Swal.fire({title: 'Detalhes da Vistoria', html: '${safeObs}', icon: 'info'})" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
         }
 
         html += `
@@ -420,7 +424,7 @@ window.solicitarWhatsAppFromClient = async function() {
         if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
         else if (hour >= 18) greeting = 'Boa noite';
 
-        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n- ${empreendimento.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
+        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n- ${empreendimento.toUpperCase()} - ${unidade.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
         
         const phone = '5515998118246'; // Default phone
         window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');

@@ -197,11 +197,7 @@ window.VerificarConstrucaoApp = {
 
         try {
             const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
-            const elegiveis = clients.filter(c => {
-                const maxDelay = parseInt(c.maxDaysDelay) || 0;
-                return maxDelay >= thresholdDays;
-            });
-
+            // Filter will be applied after loading checksByContract
             const checksByContract = {};
             const completedChecksByContract = {};
             const latestCheckDateByContract = {};
@@ -243,6 +239,27 @@ window.VerificarConstrucaoApp = {
                     console.warn('[Vistoria] Erro ao buscar histórico:', err);
                 }
             }
+
+            const elegiveis = clients.filter(c => {
+                const maxDelay = parseInt(c.maxDaysDelay) || 0;
+                if (maxDelay >= thresholdDays) return true;
+
+                const contractId = c.saleId || c.contractId || c.id;
+                let fallbackTitle = contractId;
+                if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
+                const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
+                const realSaleIdStr = String(c.realSaleId || '');
+                const contractNumberStr = String(c.contractNumber || '');
+                
+                const hasActive = !!(
+                    checksByContract[String(contractId)] || 
+                    checksByContract[String(tituloKey)] || 
+                    (contractNumberStr && checksByContract[contractNumberStr]) ||
+                    (realSaleIdStr && checksByContract[realSaleIdStr])
+                );
+                
+                return hasActive;
+            });
 
             const rows = [];
             elegiveis.forEach(c => {
@@ -980,9 +997,19 @@ window.VerificarConstrucaoApp = {
             await updateDoc(doc(window.firebaseDb, 'vistorias', v.id), { status: 'concluida' });
 
             const resps = v.respostasFormulario || {};
-            let obsText = "Respostas do Cliente:\\n";
+            const labels = {
+                possuiEnergia: "Possui Energia",
+                possuiAgua: "Possui Água",
+                estagioObra: "Estágio da Obra",
+                permiteAcesso: "Permite Acesso",
+                possuiEntulho: "Possui Entulho"
+            };
+            
+            let detailsText = "Respostas do Cliente:\n";
             for (const [k, val] of Object.entries(resps)) {
-                obsText += `- ${k.replace(/_/g, ' ').toUpperCase()}: ${val}\\n`;
+                if (k === 'observacoes') continue;
+                const label = labels[k] || k;
+                detailsText += `- ${label}: ${val}\n`;
             }
 
             const newCheck = {
@@ -992,8 +1019,9 @@ window.VerificarConstrucaoApp = {
                 companyId: String(row.companyId || ''),
                 date: new Date().toISOString().split('T')[0],
                 responsible: "Vistoriador App",
-                stage: "Vistoria Validada",
-                observations: obsText,
+                stage: resps.estagioObra || "Vistoria Validada",
+                observations: resps.observacoes || "-",
+                detailsText: detailsText,
                 fileUrl: await getDownloadURL(listRes.items[0]),
                 fileName: "Foto Vistoria 1.jpg",
                 createdAt: new Date().toISOString()
