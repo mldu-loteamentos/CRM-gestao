@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Vistoria de Lote</title>
+    <script>
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
+        if (!isMobile && window.innerWidth > 1024) {
+            document.write("<div style='padding: 20px; text-align: center; color: #991b1b; font-family: sans-serif; margin-top: 50px;'><h2>Acesso Negado</h2><p>Por favor, abra este link em um <b>Celular ou Tablet</b> para realizar a vistoria e garantir a captura das fotos no local.</p></div>");
+            document.close();
+            window.stop();
+        }
+    </script>
     
     <!-- CSS Básico -->
     <style>

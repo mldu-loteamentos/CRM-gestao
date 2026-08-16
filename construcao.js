@@ -168,11 +168,10 @@ function renderConstrucaoHistory(checks) {
     
     loading.style.display = 'none';
     container.style.display = 'block';
-    
-    if (checks.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666; background: #f8f9fa; border-radius: 8px;">Nenhuma vistoria registrada para este contrato.</div>';
-        return;
-    }
+        if (checks.length === 0) {
+          container.innerHTML = '<div style="display: flex; justify-content: center; align-items: center; min-height: 100px; padding: 20px; color: #666; background: #f8f9fa; border-radius: 8px;">Nenhuma vistoria registrada para este contrato.</div>';
+          return;
+      }
 
     let html = `
     <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
@@ -346,12 +345,38 @@ window.solicitarWhatsAppFromClient = async function() {
         return;
     }
 
+    let ccName = '';
+    const empIdStr = String(contractObj.enterpriseId || contractObj.costCenterId || contractObj.unitId?.split('-')[1] || '');
+    if (typeof AppState !== 'undefined' && AppState.cachedCostCenters && empIdStr) {
+        const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === empIdStr);
+        if (ccObj) ccName = ccObj.name || '';
+    }
+
+    let extractedCity = 'Cidade N/D';
+    let extractedEmp = contractObj.enterpriseName || empIdStr || 'Empreendimento N/D';
+    
+    if (ccName) {
+        if (ccName.includes('-')) {
+            extractedCity = ccName.split('-')[0].trim();
+            extractedEmp = ccName.substring(ccName.indexOf('-') + 1).trim();
+        } else {
+            extractedCity = ccName;
+            extractedEmp = ccName;
+        }
+    }
+    
+    let unitStr = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || '').replace('Quadra-Lote: ', '').trim();
+    if (!unitStr && contractObj.block && contractObj.lot) {
+        unitStr = `${contractObj.block}-${contractObj.lot}`;
+    }
+    if (!unitStr) unitStr = 'Unidade N/D';
+
     const contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
     const companyId = contractObj.companyId || '';
-    const empreendimento = contractObj.enterpriseName || 'Empreendimento N/D';
-    const unidade = contractObj.units || contractObj.unit || contractObj.unitIdentifier || 'Unidade N/D';
+    const empreendimento = extractedEmp;
+    const unidade = unitStr;
     const clienteName = contractObj.customerName || 'Cliente';
-    const cidade = contractObj.city || 'Cidade N/D';
+    const cidade = extractedCity;
     const tituloKey = contractObj.receivableBillId || '';
 
     try {
@@ -388,8 +413,14 @@ window.solicitarWhatsAppFromClient = async function() {
             await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { updatedAt: new Date().toISOString() });
         }
 
-        const url = `${baseUrl}vistoria.html?id=${vId}`;
-        const message = `*SOLICITAÇÃO DE VISTORIA*\n\n*${empreendimento} - ${unidade}*\n\nAcesse o link abaixo para realizar a vistoria:\n${url}`;
+        const url = `${baseUrl}vistoria.html?ids=${vId}`;
+        
+        const hour = new Date().getHours();
+        let greeting = 'Bom dia';
+        if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
+        else if (hour >= 18) greeting = 'Boa noite';
+
+        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n- ${empreendimento.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
         
         const phone = '5515998118246'; // Default phone
         window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');

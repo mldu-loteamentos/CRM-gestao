@@ -990,7 +990,7 @@ window.VerificarConstrucaoApp = {
                 contractId: String(row.contractId || ''),
                 contractKeys: row.contractKeys || [],
                 companyId: String(row.companyId || ''),
-                date: padraoData.replace(/\./g, '-').split('-').reverse().join('-'),
+                date: new Date().toISOString().split('T')[0],
                 responsible: "Vistoriador App",
                 stage: "Vistoria Validada",
                 observations: obsText,
