@@ -296,7 +296,8 @@ window.VerificarConstrucaoApp = {
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
                     empreendimento, empLabel, unidade,
                     clienteName, titulo, parcelasVencidas, valorVencido,
-                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction
+                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction,
+                    debugKeys: `contractId: ${contractId}\\ntituloKey: ${tituloKey}\\ncontractNumber: ${contractNumberStr}\\nrealSaleId: ${realSaleIdStr}`
                 });
             });
 
@@ -414,7 +415,10 @@ window.VerificarConstrucaoApp = {
                                 </td>
                                 <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
                                 <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
-                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
+                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">
+                                    ${u.titulo}
+                                    <button onclick="alert('${u.debugKeys}')" style="background:transparent; border:none; cursor:pointer; font-size:12px; margin-left:4px;" title="Debug Keys">❓</button>
+                                </td>
                                 <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
                                 <td style="padding: 10px 12px; text-align: right; font-weight: 600; color: ${u.valorVencido > 0 ? '#dc2626' : '#94a3b8'}; font-size: 0.83rem;">${valorFmt}</td>
                                 <td style="padding: 10px 12px;">${validAction}</td>

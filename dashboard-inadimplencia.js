@@ -542,7 +542,7 @@ const DashboardInadimplencia = (function() {
     const hojeSnap = snapshots[snapshots.length-1];
 
     function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
-    function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
     function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
     function fmtInteiro(v) { return 'R$ ' + Math.floor(v).toLocaleString('pt-BR'); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
@@ -803,7 +803,7 @@ h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800
 .kpi-content { display:flex; flex-direction:column; gap:2px; }
 .kpi-label { font-size:8.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
 .kpi-value { font-size:16px; font-weight:800; color:#0f1e17; line-height:1; }
-.row-2{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-bottom:10px;align-items:start}
+.row-2{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-bottom:10px;align-items:stretch}
 .bar-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px}
 .bar-title{font-size:9.5px;font-weight:700;color:#334155;margin-bottom:4px}
 .bar-delta{font-size:11px;font-weight:800;color:#16a34a;margin-bottom:6px}
