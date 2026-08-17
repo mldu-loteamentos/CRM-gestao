@@ -659,14 +659,12 @@ window.saveNovaVistoria = async function() {
             
             if (costCenterId && unitNameNorm) {
                 const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
-                const isVercel = window.location.hostname.includes('vercel.app');
-                const baseUrl = isVercel ? '/api/sienge-proxy' : `http://${window.location.hostname || 'localhost'}:${window.location.port || '3000'}/sienge-proxy`;
 
                 let siengeUnitId = null;
                 let offset = 0;
                 let found = false;
                 while (!found && offset < 1000) {
-                    const uRes = await fetch(`${baseUrl}/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
+                    const uRes = await fetch(`/api/sienge-proxy/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
                     if (!uRes.ok) break;
                     const uData = await uRes.json();
                     const uResults = uData.results || [];
@@ -684,7 +682,15 @@ window.saveNovaVistoria = async function() {
                     const nomeFinal = `${baseName}.jpg`;
                     const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
                     
-                    let apiUrl = `${baseUrl}/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                    const isVercel = window.location.hostname.includes('vercel.app');
+                    let apiUrl = '';
+                    if (isVercel) {
+                        apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                    } else {
+                        const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+                        const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
+                        apiUrl = `http://${host}:${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+                    }
                     
                     await new Promise((resolve, reject) => {
                         const xhr = new XMLHttpRequest();
