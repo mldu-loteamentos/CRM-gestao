@@ -69,6 +69,15 @@ const ConfigUsersApp = {
       name: "Relacionamento", icon: "users", key: "mod_rel",
       submodules: [{ name: "Geral", key: "sub_rel_geral", actions: [{ id: "relacionamento", label: "Relacionamento" }] }]
     },
+      {
+         name: "Vistoria", icon: "camera", key: "mod_vistoria",
+         submodules: [
+            { name: "Geral", key: "sub_vistoria_geral", actions: [
+                  { id: "vistoria", label: "Vistoria" },
+                  { id: "verificar_construcao", label: "Verificar Construção" }
+            ] }
+         ]
+      },
     {
       name: "Compromissário", icon: "building", key: "mod_compromissario",
       submodules: [{ name: "Geral", key: "sub_compromissario_geral", actions: [{ id: "prefeitura", label: "Prefeitura" }, { id: "associacoes", label: "Associações" }] }]
