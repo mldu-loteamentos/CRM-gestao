@@ -20056,15 +20056,44 @@ setTimeout(() => {
 }, 2000);
 
 // --- GERENCIAMENTO DE OPÇÕES (CANAL E LEMBRETE) ---
+function getCanonicalOptionList(type) {
+  const isCanal = type === 'canal';
+  const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
+  const canonical = isCanal
+    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna']
+    : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
+
+  try {
+    const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    const merged = Array.isArray(stored) ? stored.filter(v => typeof v === 'string' && v.trim()) : [];
+
+    canonical.forEach(opt => {
+      if (!merged.includes(opt)) merged.push(opt);
+    });
+
+    if (!Array.isArray(stored) || merged.length !== stored.length) {
+      localStorage.setItem(storageKey, JSON.stringify(merged));
+    }
+
+    return merged;
+  } catch (error) {
+    localStorage.setItem(storageKey, JSON.stringify(canonical));
+    return [...canonical];
+  }
+}
+
 window.openOptionsEditor = function(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
-  const defaultOptions = isCanal 
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial'] 
-    : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
+  const defaultOptions = getCanonicalOptionList(type);
     
   let currentOptions = JSON.parse(localStorage.getItem(storageKey));
-  if (!currentOptions) currentOptions = defaultOptions;
+  if (!currentOptions || !Array.isArray(currentOptions)) currentOptions = defaultOptions;
+  else {
+    const merged = [...new Set([...defaultOptions, ...currentOptions].filter(v => typeof v === 'string' && v.trim()))];
+    currentOptions = merged;
+    localStorage.setItem(storageKey, JSON.stringify(merged));
+  }
   if (!isCanal && !currentOptions.includes('Aprovação Gestor')) currentOptions.push('Aprovação Gestor');
   
   // Create Modal Overlay
@@ -20242,12 +20271,14 @@ window.renderSelectOptions = function(type) {
   const selectId = isCanal ? 'note-canal' : 'note-reminder-select';
   const reprocessSelectId = isCanal ? 'reprocess-canal' : 'reprocess-reminder';
   
-  const defaultOptions = isCanal 
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial'] 
-    : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
+  const defaultOptions = getCanonicalOptionList(type);
     
-  let currentOptions = JSON.parse(localStorage.getItem(storageKey));
-  if (!currentOptions) currentOptions = defaultOptions;
+  let currentOptions = JSON.parse(localStorage.getItem(storageKey) || 'null');
+  if (!Array.isArray(currentOptions)) currentOptions = defaultOptions;
+  else {
+    currentOptions = [...new Set([...defaultOptions, ...currentOptions].filter(v => typeof v === 'string' && v.trim()))];
+    localStorage.setItem(storageKey, JSON.stringify(currentOptions));
+  }
   if (!isCanal && !currentOptions.includes('Aprovação Gestor')) currentOptions.push('Aprovação Gestor');
   
   const disabledOptions = JSON.parse(localStorage.getItem('crm_disabled_options') || '[]');
