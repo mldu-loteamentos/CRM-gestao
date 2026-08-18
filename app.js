@@ -895,8 +895,22 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     });
 
     if (candidateOps.length === 0) {
-        if (requiredType === 'interno_absoluto') {
-            return defaultOp; // Para 0% pago, DEVE ser interno, não faz fallback pra terceirizada
+        if (requiredType === 'interno_absoluto' || requiredType === 'interno') {
+            const internalNames = users
+              .filter(u => u && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' && u.operator_type === 'interno' && u.status !== 'INATIVO')
+              .map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : (u.name ? u.name.toUpperCase() : ''))
+              .filter(Boolean);
+            if (internalNames.length > 0) {
+                if (customerId) {
+                    let hash = 0;
+                    const strId = String(customerId);
+                    for (let i = 0; i < strId.length; i++) hash = Math.imul(31, hash) + strId.charCodeAt(i) | 0;
+                    hash = Math.abs(hash);
+                    return internalNames[hash % internalNames.length];
+                }
+                return internalNames[0];
+            }
+            return defaultOp;
         }
         
         if (requiredType === 'apoio_juridico') {
@@ -14283,12 +14297,12 @@ function renderRulesSettingsTable() {
   // Forçar configuração v2 de Cidades (Operadores)
   if (!localStorage.getItem("crm_moura_cidades_v2")) {
      const defaultCities = {
-         "ARAÇARIGUAMA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO"],
-         "AVARÉ": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO"],
-         "BOITUVA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO"],
+         "ARAÇARIGUAMA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
+         "AVARÉ": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
+         "BOITUVA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
          "BOTUCATU": ["MICHELLE PEREIRA"],
-         "CERQUEIRA CÉSAR": ["LETICIA OLIVEIRA"],
-         "FARTURA": ["LETICIA OLIVEIRA"],
+         "CERQUEIRA CÉSAR": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
+         "FARTURA": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
          "ITATINGA": ["MICHELLE VIEIRA"],
          "PIRAJU": ["MICHELLE VIEIRA"],
          "TAGUAI": ["MICHELLE VIEIRA"],
@@ -22104,6 +22118,15 @@ window.getDynamicOperators = function(type = 'all') {
     } catch(e) {
         console.error("Erro ao buscar operadores", e);
     }
+    
+    // Fallback caso o CRM local ainda não tenha Lucélia carregada.
+    const fallbackUsers = [
+        { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "LUCELIA JUSTO", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "ATIVO" }
+    ];
+    if (users.length === 0) users = fallbackUsers;
     
     // Filtrar APENAS usuários com perfil exato "OPERADOR COBRANÇA" e que estejam ativos
     let ops = users.filter(u => {
