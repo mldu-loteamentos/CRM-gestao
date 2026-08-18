@@ -23,8 +23,37 @@ const SIENGE_CONFIG = {
   })()
 };
 
-// Empresas permitidas — somente estas serão consultadas (restringido para Empresa 2 apenas)
-const ALLOWED_COMPANY_IDS = [2];
+// Empresas permitidas por padrão. Quando estiver parametrizado em "Cobrança Interna",
+// a lista passa a seguir o que estiver no crm_empresas_custom; a empresa 1 não pode continuar
+// sendo bloqueada por um fallback rígido de [2].
+const ALLOWED_COMPANY_IDS = [1, 2];
+
+function getConfiguredInternalCompanyIds() {
+  try {
+    const localCustom = localStorage.getItem('crm_empresas_custom');
+    if (!localCustom) return [...ALLOWED_COMPANY_IDS];
+
+    const customData = JSON.parse(localCustom);
+    const isCompanyInternal = (company) => {
+      if (!company || typeof company !== 'object') return false;
+      const value = company.cobranca_interna;
+      return value === 1 || value === true || value === '1' || value === 'true';
+    };
+
+    const internalIds = Object.entries(customData)
+      .filter(([id, c]) => isCompanyInternal(c))
+      .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
+      .filter(Number.isFinite);
+
+    if (internalIds.length > 0) {
+      return [...new Set(internalIds)];
+    }
+  } catch (e) {
+    console.warn('[Sienge] Erro ao ler crm_empresas_custom para empresas internas:', e);
+  }
+
+  return [...ALLOWED_COMPANY_IDS];
+}
 
 function getBasicAuthHeader() {
   const credentials = `${SIENGE_CONFIG.user}:${SIENGE_CONFIG.pass}`;
@@ -636,7 +665,7 @@ const SiengeApiService = {
       return value === 1 || value === true || value === "1" || value === "true";
     };
 
-    let targetCompanies = [2];
+    let targetCompanies = getConfiguredInternalCompanyIds();
     let customData = null;
     if (companyId) {
       targetCompanies = [companyId];
