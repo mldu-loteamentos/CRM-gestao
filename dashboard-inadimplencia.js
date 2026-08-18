@@ -499,13 +499,13 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
         const op = operatorData[opName];
-        const numTitulos = (b.billIds && b.billIds.length > 0) ? b.billIds.length : (b.billCount || 1);
+        const numParcelas = Number(b.totalInstallmentsCount || b.billCount || (b.billIds && b.billIds.length) || 1);
         const bTitle = b.saleId || (b.billIds && b.billIds.length ? b.billIds[0] : '-');
         op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
-        op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
-        op[delayBucket+'_c'] += numTitulos; op[delayBucket+'_v'] += (b.overdueValue||0);
+        op.total_c += numParcelas; op.total_v += (b.overdueValue||0);
+        op[delayBucket+'_c'] += numParcelas; op[delayBucket+'_v'] += (b.overdueValue||0);
 
-      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: numTitulos, unitName: b.unitName, costCenterId: b.costCenterId });
+      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: numParcelas, unitName: b.unitName, costCenterId: b.costCenterId });
     });
 
     const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
