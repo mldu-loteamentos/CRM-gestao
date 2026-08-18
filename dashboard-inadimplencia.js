@@ -499,13 +499,13 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
         const op = operatorData[opName];
-        const numParcelas = Number(b.totalInstallmentsCount || b.billCount || (b.billIds && b.billIds.length) || 1);
+        const numTitulos = Number(b.billCount || (b.billIds && b.billIds.length) || 1);
         const bTitle = b.saleId || (b.billIds && b.billIds.length ? b.billIds[0] : '-');
         op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
-        op.total_c += numParcelas; op.total_v += (b.overdueValue||0);
-        op[delayBucket+'_c'] += numParcelas; op[delayBucket+'_v'] += (b.overdueValue||0);
+        op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
+        op[delayBucket+'_c'] += numTitulos; op[delayBucket+'_v'] += (b.overdueValue||0);
 
-      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: numParcelas, unitName: b.unitName, costCenterId: b.costCenterId });
+      if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: Number(b.totalInstallmentsCount || b.billCount || (b.billIds && b.billIds.length) || 1), unitName: b.unitName, costCenterId: b.costCenterId });
     });
 
     const avgDelay = bills.length > 0 ? Math.round(sumMaxDaysDelay / bills.length) : 0;
@@ -554,7 +554,12 @@ const DashboardInadimplencia = (function() {
     function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
     function fmtInteiro(v) { return Math.floor(v).toLocaleString('pt-BR'); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
-    function cellOpTot(c, v, totC) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#ea580c;">${c} tít. | ${Math.round((c/totC)*100)}%</span>`; }
+    function cellOpTot(c, v, totC, totalValue, totalTitles) {
+      if (c === 0) return '<span style="color:#cbd5e1;">—</span>';
+      const pctValue = totalValue > 0 ? Math.round((v / totalValue) * 100) : 0;
+      const pctTitles = totalTitles > 0 ? Math.round((c / totalTitles) * 100) : 0;
+      return `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;"><span style="font-weight:700;">${fmtMoneyNoRs(v)} | ${pctValue}%</span><span style="font-size:7.5px;color:#ea580c;">${c} tít. | ${pctTitles}%</span></div>`;
+    }
     
     function dualStackedBarWithArrow(snap1, snap2, label1, label2) {
       if (!snap1 || !snap2) return '';
@@ -811,7 +816,7 @@ h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800
 .kpi-content { display:flex; flex-direction:column; gap:2px; }
 .kpi-label { font-size:8.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
 .kpi-value { font-size:16px; font-weight:800; color:#0f1e17; line-height:1; }
-.row-2{display:grid;grid-template-columns:3fr 7fr;gap:10px;margin-bottom:10px;align-items:stretch}
+.row-2{display:grid;grid-template-columns:minmax(260px,30%) minmax(0,70%);gap:10px;margin-bottom:10px;align-items:stretch}
 .bar-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px}
 .bar-title{font-size:9.5px;font-weight:700;color:#334155;margin-bottom:4px}
 .bar-delta{font-size:11px;font-weight:800;color:#16a34a;margin-bottom:6px}
@@ -895,7 +900,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     <thead><tr><th class="L" style="padding:8px; background: #ea580c; color: white !important; border-top-left-radius: 5px;">Operador</th><th style="padding:8px; background: #ea580c; color: white !important;">Até 30</th><th style="padding:8px; background: #ea580c; color: white !important;">31 a 60</th><th style="padding:8px; background: #ea580c; color: white !important;">61 a 90</th><th style="padding:8px; background: #ea580c; color: white !important;">91 a 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Acima 120</th><th style="padding:8px; background: #ea580c; color: white !important; border-top-right-radius: 5px;">Total</th></tr></thead>
     <tbody>
       ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name !== 'NÃO ATRIBUÍDO' && op.name.split(' ').length > 1 ? op.name.split(' ')[0] + ' ' + op.name.split(' ')[1][0] + '.' : op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
-      <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c; border-bottom-left-radius: 5px;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c)}</td><td style="border-bottom-right-radius: 5px;"><div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;"><div><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)}</span> <span style="font-size:7.5px;color:#ea580c; font-weight:700;">| ${Math.round((opTotals.total_v / (totalOverdue || 1)) * 100)}%</span></div><div><span style="font-size:7.5px;color:#ea580c; font-weight:700;">${opTotals.total_c} tít.</span> <span style="font-size:7.5px;color:#ea580c; font-weight:700;">| ${Math.round((opTotals.total_c / (totalBills || 1)) * 100)}%</span></div></div></td></tr>
+      <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c; border-bottom-left-radius: 5px;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c, totalOverdue, totalBills)}</td><td style="border-bottom-right-radius: 5px;"><div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;"><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)} | ${Math.round((opTotals.total_v / (totalOverdue || 1)) * 100)}%</span><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | ${Math.round((opTotals.total_c / (totalBills || 1)) * 100)}%</span></div></td></tr>
     </tbody>
   </table></div>
 </div>
