@@ -552,7 +552,7 @@ const DashboardInadimplencia = (function() {
     function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
     function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
     function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
-    function fmtInteiro(v) { return 'R$ ' + Math.floor(v).toLocaleString('pt-BR'); }
+    function fmtInteiro(v) { return Math.floor(v).toLocaleString('pt-BR'); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
     function cellOpTot(c, v, totC) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#ea580c;">${c} tít. | ${Math.round((c/totC)*100)}%</span>`; }
     
