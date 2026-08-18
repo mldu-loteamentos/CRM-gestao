@@ -267,9 +267,15 @@ const ConfigUsersApp = {
              const localCustom = localStorage.getItem('crm_empresas_custom');
              if (localCustom) {
                  const customData = JSON.parse(localCustom);
+                 const isCompanyInternal = (company) => {
+                     if (!company || typeof company !== 'object') return false;
+                     const value = company.cobranca_interna;
+                     return value === 1 || value === true || value === "1" || value === "true";
+                 };
                  const internalIds = Object.entries(customData)
-                     .filter(([id, c]) => c && (c.cobranca_interna === 1 || c.cobranca_interna === true || c.cobranca_interna === "1"))
-                     .map(([id, c]) => Number(id));
+                     .filter(([id, c]) => isCompanyInternal(c))
+                     .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
+                     .filter(Number.isFinite);
                  companies = allComps.filter(c => internalIds.includes(Number(c.id))).map(c => {
                      const custom = customData[c.id] || {};
                      return { ...c, nome_usual: custom.nome_usual || c.name || c.nome };

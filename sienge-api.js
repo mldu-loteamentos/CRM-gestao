@@ -630,6 +630,12 @@ const SiengeApiService = {
 
 
   async _getDefaultersInternal(companyId, onProgress) {
+    const isCompanyInternal = (company) => {
+      if (!company || typeof company !== 'object') return false;
+      const value = company.cobranca_interna;
+      return value === 1 || value === true || value === "1" || value === "true";
+    };
+
     let targetCompanies = [2];
     let customData = null;
     if (companyId) {
@@ -639,12 +645,12 @@ const SiengeApiService = {
         const localCustom = localStorage.getItem('crm_empresas_custom');
         if (localCustom) {
           customData = JSON.parse(localCustom);
-          // Consultar APENAS empresas marcadas explicitamente como true em Cobrança Interna
           const internalIds = Object.entries(customData)
-            .filter(([id, c]) => c && (c.cobranca_interna === 1 || c.cobranca_interna === true || c.cobranca_interna === "1"))
-            .map(([id, c]) => Number(id));
+            .filter(([id, c]) => isCompanyInternal(c))
+            .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
+            .filter(Number.isFinite);
           if (internalIds.length > 0) {
-            targetCompanies = internalIds;
+            targetCompanies = [...new Set(internalIds)];
           }
         }
       } catch(e) {
@@ -690,14 +696,20 @@ const SiengeApiService = {
       let cName = customData && customData[cId] ? (customData[cId].nome_usual || customData[cId].nome || `Empresa ${cId}`) : `Empresa ${cId}`;
       if (onProgress) onProgress(cId, null, _companyIndex, targetCompanies.length, cName, { pctBefore, pctAfter, expectedDuration: thisWeight });
 
-      // Centros de custo desta empresa cujo ID começa com 1, 2 ou 3
-      // (loteamentos ativos — exclui corporativo, diretoria, sócios etc.)
-      const companyCcs = allCcs
+      // Para a empresa 1, a consulta precisa complementar também pelo Centro de Custo,
+      // porque algumas unidades e lotes são carregadas por empreendimento e não aparecem
+      // apenas pela empresa. Mantemos a regra de lotes ativos para as demais empresas.
+      const companyCcsRaw = allCcs
         .filter(cc => Number(cc.companyId) === Number(cId))
         .map(cc => String(cc.id || cc.costCenterId || '').trim())
-        .filter(id => id.startsWith('1') || id.startsWith('2') || id.startsWith('3'));
+        .filter(Boolean);
 
-      console.log(`[Sienge] Empresa ${cId} — ${companyCcs.length} centros de custo (1/2/3): ${companyCcs.join(', ')}`);
+      const companyCcs = companyCcsRaw.filter(id => {
+        const isActivePrefix = id.startsWith('1') || id.startsWith('2') || id.startsWith('3');
+        return Number(cId) === 1 ? true : isActivePrefix;
+      });
+
+      console.log(`[Sienge] Empresa ${cId} — ${companyCcs.length} centros de custo elegíveis: ${companyCcs.join(', ')}`);
 
       // Divisão em lotes menores (2 CCs) para evitar requests muito longos e timeout na Vercel (60s limit)
       const BATCH_SIZE = 2;
