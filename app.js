@@ -1562,7 +1562,6 @@ async function initializeApplication() {
   }
   
   window.saveNotesToFirebase = async function(customerId) {
-      window._fbNotesLastPayload = window._fbNotesLastPayload || {};
       window._isFirebaseSyncing = true;
       try {
         localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
@@ -1574,12 +1573,13 @@ async function initializeApplication() {
               if (customerId) {
            const customerKey = String(customerId);
            const payload = JSON.stringify(AppState.notes[customerKey] || AppState.notes[customerId] || []);
-           if (window._fbNotesLastPayload[customerKey] === payload) return;
-           window._fbNotesLastPayload[customerKey] = payload;
+               if (window._fbNotesLastSavedPayload && window._fbNotesLastSavedPayload[customerKey] === payload) return;
                  console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
            await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
+                 window._fbNotesLastSavedPayload = window._fbNotesLastSavedPayload || {};
+                 window._fbNotesLastSavedPayload[customerKey] = payload;
                  console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
               } else {
                  console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
@@ -1596,7 +1596,7 @@ async function initializeApplication() {
                  console.log("[Firebase RT] Salvamento em massa (sharded) concluído!");
               }
           } catch(e) {
-              if (customerId) delete window._fbNotesLastPayload[String(customerId)];
+              if (customerId && window._fbNotesLastSavedPayload) delete window._fbNotesLastSavedPayload[String(customerId)];
               console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
               alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
           }
@@ -1614,6 +1614,7 @@ async function initializeApplication() {
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', shardId);
       window.activeCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
         const data = snapshot.exists() ? snapshot.data() : {};
+          if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
         if (JSON.stringify(AppState.notes[customerKey] || []) === JSON.stringify(notes)) return;
         AppState.notes[customerKey] = notes;
@@ -1719,7 +1720,6 @@ async function initializeApplication() {
   }
   
   window.saveJudNotesToFirebase = async function(customerId) {
-      window._fbJudNotesLastPayload = window._fbJudNotesLastPayload || {};
       window._isFirebaseSyncing = true;
       try {
         localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
@@ -1731,11 +1731,12 @@ async function initializeApplication() {
               if (customerId) {
            const customerKey = String(customerId);
            const payload = JSON.stringify(AppState.judNotes[customerKey] || AppState.judNotes[customerId] || []);
-           if (window._fbJudNotesLastPayload[customerKey] === payload) return;
-           window._fbJudNotesLastPayload[customerKey] = payload;
+                 if (window._fbJudNotesLastSavedPayload && window._fbJudNotesLastSavedPayload[customerKey] === payload) return;
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
            await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.judNotes[customerId] || AppState.judNotes[customerKey] || [] }, { merge: true });
+                 window._fbJudNotesLastSavedPayload = window._fbJudNotesLastSavedPayload || {};
+                 window._fbJudNotesLastSavedPayload[customerKey] = payload;
               } else {
                  const chunks = {};
                  for (const custId of Object.keys(AppState.judNotes)) {
@@ -1749,7 +1750,7 @@ async function initializeApplication() {
                  }
               }
           } catch(e) {
-                if (customerId) delete window._fbJudNotesLastPayload[String(customerId)];
+                if (customerId && window._fbJudNotesLastSavedPayload) delete window._fbJudNotesLastSavedPayload[String(customerId)];
               console.error('Erro ao salvar jud_notes no Firebase', e);
           }
       }
@@ -1766,6 +1767,7 @@ async function initializeApplication() {
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', shardId);
       window.activeCustomerJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
         const data = snapshot.exists() ? snapshot.data() : {};
+          if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
         if (JSON.stringify(AppState.judNotes[customerKey] || []) === JSON.stringify(notes)) return;
         AppState.judNotes[customerKey] = notes;
