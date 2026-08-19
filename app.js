@@ -7223,23 +7223,34 @@ function formatCpfCnpj(val) {
                let multa = 0;
                let juros = 0;
                
-               if (diasAtraso >= 1) { // 1 day delay applies fine and interest
-                  const isToday = targetDateStr === hojeIso;
-                  
-                  if (isToday) {
-                      let apiMulta = inst.fine || 0;
-                      let apiJuros = (inst.interest || 0) + (inst.monetaryCorrection || 0);
-                      let matchedExact = false;
+              if (diasAtraso >= 1) { // 1 day delay applies fine and interest
+                let apiMulta = inst.fine || 0;
+                let apiJuros = (inst.interest || 0) + (inst.monetaryCorrection || 0);
+                let matchedExact = false;
                       
                       // Match exactly with the defaulters list to mirror the Fila de Cobrança
-                      if (AppState.defaultersBills) {
-                          const matchingBill = AppState.defaultersBills.find(b => String(b.saleId) === String(saleId) || String(b.receivableBillId) === String(saleId) || String(b.id) === String(saleId));
+                        if (AppState.defaultersBills) {
+                          const matchingBill = AppState.defaultersBills.find(b =>
+                            String(b.saleId) === String(saleId) ||
+                            String(b.receivableBillId) === String(saleId) ||
+                            String(b.id) === String(saleId) ||
+                            (String(b.customerId) === String(customerId) && b.defaulterInstallments && b.defaulterInstallments.some(di =>
+                              String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
+                              String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
+                            ))
+                          );
                           if (matchingBill && matchingBill.defaulterInstallments) {
-                              const matchingInst = matchingBill.defaulterInstallments.find(di => String(di.installmentId || di.installmentNumber) === String(inst.installmentId));
+                            const matchingInst = matchingBill.defaulterInstallments.find(di =>
+                              String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
+                              String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
+                            );
                               if (matchingInst) {
+                                const correctedBase = matchingInst.correctedValueWithoutAdditions !== undefined
+                                  ? matchingInst.correctedValueWithoutAdditions
+                                  : (matchingInst.value !== undefined ? matchingInst.value : inst.cb);
                                   const totalWithAdd = matchingInst.correctedValueWithAdditions !== undefined 
                                                      ? matchingInst.correctedValueWithAdditions 
-                                                     : (matchingInst.value || 0) + (matchingInst.interest || 0) + (matchingInst.fine || 0);
+                                         : correctedBase + (matchingInst.interest || 0) + (matchingInst.fine || 0);
                                   const totalJurosEMulta = totalWithAdd - inst.cb;
                                   if (totalJurosEMulta > 0) {
                                       apiMulta = matchingInst.fine || 0;
@@ -7269,17 +7280,16 @@ function formatCpfCnpj(val) {
                           }
                       }
 
-                      if (matchedExact || apiMulta > 0 || apiJuros > 0) {
-                          multa = apiMulta * taxaMultiplier;
-                          juros = apiJuros * taxaMultiplier;
-                      } else {
-                          multa = (inst.cb * 0.02) * taxaMultiplier;
-                          juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
-                      }
-                  } else {
-                      multa = (inst.cb * 0.02) * taxaMultiplier; // 2% fixo * multiplier
-                      juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier; // 1% ao mês pró-rata (30 dias) * multiplier
-                  }
+                    // O Sienge já devolve os acréscimos calculados para a data de
+                    // correção da consulta. Esses valores prevalecem sobre o pró-rata
+                    // local, inclusive quando a data do simulador foi informada manualmente.
+                    if (matchedExact || apiMulta > 0 || apiJuros > 0) {
+                      multa = apiMulta * taxaMultiplier;
+                      juros = apiJuros * taxaMultiplier;
+                    } else {
+                      multa = (inst.cb * 0.02) * taxaMultiplier;
+                      juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
+                    }
                }
                
                if (inst.selected) {
