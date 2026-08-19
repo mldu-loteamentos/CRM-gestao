@@ -1503,7 +1503,7 @@ async function initializeApplication() {
   // Firebase wins on a per-customer basis if the customer exists in Firebase.
   try {
      const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
-     if (window.firebaseDb && window.firebaseCollections) {
+    if (false && window.firebaseDb && window.firebaseCollections) {
          // 1) Carga inicial + listener em tempo real para TODA a coleção customer_notes
          //    Isso garante que gravações de QUALQUER operadora cheguem para TODAS em tempo real
          if (window.globalCustomerNotesUnsubscribe) {
@@ -1562,16 +1562,24 @@ async function initializeApplication() {
   }
   
   window.saveNotesToFirebase = async function(customerId) {
+      window._fbNotesLastPayload = window._fbNotesLastPayload || {};
       window._isFirebaseSyncing = true;
-      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-      window._isFirebaseSyncing = false;
+      try {
+        localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+      } finally {
+        window._isFirebaseSyncing = false;
+      }
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
+           const customerKey = String(customerId);
+           const payload = JSON.stringify(AppState.notes[customerKey] || AppState.notes[customerId] || []);
+           if (window._fbNotesLastPayload[customerKey] === payload) return;
+           window._fbNotesLastPayload[customerKey] = payload;
                  console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-                 await window.firebaseCollections.setDoc(docRef, { [String(customerId)]: AppState.notes[customerId] || [] }, { merge: true });
+           await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
                  console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
               } else {
                  console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
@@ -1588,16 +1596,41 @@ async function initializeApplication() {
                  console.log("[Firebase RT] Salvamento em massa (sharded) concluído!");
               }
           } catch(e) {
+              if (customerId) delete window._fbNotesLastPayload[String(customerId)];
               console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
               alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
           }
       }
   };
+
+    window.subscribeCustomerNotes = function(customerId) {
+      if (window.activeCustomerNotesUnsubscribe) {
+        window.activeCustomerNotesUnsubscribe();
+        window.activeCustomerNotesUnsubscribe = null;
+      }
+      if (!customerId || !window.firebaseDb || !window.firebaseCollections) return;
+      const customerKey = String(customerId);
+      const shardId = window.getCustomerNoteChunkId(customerKey);
+      const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', shardId);
+      window.activeCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
+        const data = snapshot.exists() ? snapshot.data() : {};
+        const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
+        if (JSON.stringify(AppState.notes[customerKey] || []) === JSON.stringify(notes)) return;
+        AppState.notes[customerKey] = notes;
+        window._isFirebaseSyncing = true;
+        try {
+          localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+        } finally {
+          window._isFirebaseSyncing = false;
+        }
+        if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
+      }, error => console.error('[Firebase RT] Erro nas notas do cliente ativo:', error));
+    };
   // --- FIM MIGRACAO FIREBASE NOTES ---
   
   // --- INICIO MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
   try {
-     if (window.firebaseDb && window.firebaseCollections) {
+    if (false && window.firebaseDb && window.firebaseCollections) {
          // Jud Notes — listener em tempo real (ocorrências judiciais)
          if (window.globalJudNotesUnsubscribe) window.globalJudNotesUnsubscribe();
          AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
@@ -1686,15 +1719,23 @@ async function initializeApplication() {
   }
   
   window.saveJudNotesToFirebase = async function(customerId) {
+      window._fbJudNotesLastPayload = window._fbJudNotesLastPayload || {};
       window._isFirebaseSyncing = true;
-      localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
-      window._isFirebaseSyncing = false;
+      try {
+        localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+      } finally {
+        window._isFirebaseSyncing = false;
+      }
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
+           const customerKey = String(customerId);
+           const payload = JSON.stringify(AppState.judNotes[customerKey] || AppState.judNotes[customerId] || []);
+           if (window._fbJudNotesLastPayload[customerKey] === payload) return;
+           window._fbJudNotesLastPayload[customerKey] = payload;
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
-                 window.firebaseCollections.setDoc(docRef, { [String(customerId)]: AppState.judNotes[customerId] || [] }, { merge: true }).catch(e => console.error(e));
+           await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.judNotes[customerId] || AppState.judNotes[customerKey] || [] }, { merge: true });
               } else {
                  const chunks = {};
                  for (const custId of Object.keys(AppState.judNotes)) {
@@ -1704,14 +1745,39 @@ async function initializeApplication() {
                  }
                  for (const [chunkId, data] of Object.entries(chunks)) {
                      const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
-                     window.firebaseCollections.setDoc(docRef, data, { merge: true }).catch(e => console.error(e));
+                   await window.firebaseCollections.setDoc(docRef, data, { merge: true });
                  }
               }
           } catch(e) {
+                if (customerId) delete window._fbJudNotesLastPayload[String(customerId)];
               console.error('Erro ao salvar jud_notes no Firebase', e);
           }
       }
   };
+
+    window.subscribeCustomerJudNotes = function(customerId) {
+      if (window.activeCustomerJudNotesUnsubscribe) {
+        window.activeCustomerJudNotesUnsubscribe();
+        window.activeCustomerJudNotesUnsubscribe = null;
+      }
+      if (!customerId || !window.firebaseDb || !window.firebaseCollections) return;
+      const customerKey = String(customerId);
+      const shardId = window.getCustomerNoteChunkId(customerKey);
+      const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', shardId);
+      window.activeCustomerJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
+        const data = snapshot.exists() ? snapshot.data() : {};
+        const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
+        if (JSON.stringify(AppState.judNotes[customerKey] || []) === JSON.stringify(notes)) return;
+        AppState.judNotes[customerKey] = notes;
+        window._isFirebaseSyncing = true;
+        try {
+          localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+        } finally {
+          window._isFirebaseSyncing = false;
+        }
+        if (window.renderJudicialTimeline) window.renderJudicialTimeline();
+      }, error => console.error('[Firebase RT] Erro nas etapas judiciais do cliente ativo:', error));
+    };
 
   window.saveAgendaNotesToFirebase = async function() {
       window._isFirebaseSyncing = true;
@@ -4430,27 +4496,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   sessionStorage.setItem('currentCustomerId', customerId);
   sessionStorage.setItem('currentSaleId', saleId);
 
-  // FETCH CUSTOMER NOTES FROM FIREBASE IN REAL-TIME
-  if (window.firebaseDb && window.firebaseCollections) {
-      if (window.currentCustomerNotesUnsubscribe) {
-          window.currentCustomerNotesUnsubscribe();
-      }
-      try {
-          const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes', String(customerId));
-          window.currentCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(docRef, (docSnap) => {
-              if (docSnap.exists()) {
-                  const data = docSnap.data();
-                  if (data && data.notes) {
-                      AppState.notes[customerId] = data.notes;
-                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-                      if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
-                  }
-              }
-          });
-      } catch (e) {
-          console.error("Erro ao sincronizar ocorrencias do cliente em tempo real:", e);
-      }
-  }
+    if (window.subscribeCustomerNotes) window.subscribeCustomerNotes(customerId);
+    if (window.subscribeCustomerJudNotes) window.subscribeCustomerJudNotes(customerId);
 
   // Limpar Score
   const pointsEl = document.getElementById("score-points");
@@ -8444,6 +8491,7 @@ async function saveCustomerOccurrence() {
   const isPinned = pinCheckbox ? pinCheckbox.checked : false;
 
   const occurrence = {
+    id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     date: new Date().toISOString(),
     author: AppState.currentUser.name,
     saleId: AppState.selectedSaleId || null,
@@ -8563,8 +8611,9 @@ window.crossContractAction = function(action) {
 };
 
 window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skipFormClear = false) {
-  // Push the occurrence
-  AppState.notes[AppState.selectedCustomerId].push(occurrence);
+  const customerNotes = AppState.notes[AppState.selectedCustomerId] || (AppState.notes[AppState.selectedCustomerId] = []);
+  const alreadySaved = occurrence.id && customerNotes.some(item => item.id === occurrence.id);
+  if (!alreadySaved) customerNotes.push(occurrence);
   if(window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   
   // Limpar contador de dias na fila do contrato ATUAL apenas se tiver promessa pendente
@@ -8858,7 +8907,11 @@ function updatePromiseStatus(occDateStr, newStatus) {
   const item = list.find(x => x.date === occDateStr);
   if (item) {
     item.promiseStatus = newStatus;
-    localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    if (window.saveNotesToFirebase) {
+      window.saveNotesToFirebase(AppState.selectedCustomerId);
+    } else {
+      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    }
     renderCustomerOccurrences();
     loadDashboardData();
   }
