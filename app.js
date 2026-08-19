@@ -17099,6 +17099,12 @@ window.uploadMapa = function() {
     return;
   }
 
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    statusDiv.style.color = "var(--color-danger)";
+    statusDiv.innerHTML = "Selecione um arquivo PDF válido.";
+    return;
+  }
+
   statusDiv.style.color = "var(--color-primary)";
   statusDiv.innerHTML = '<div class="loading-spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:8px;"></div> Processando arquivo...';
 
@@ -17106,7 +17112,6 @@ window.uploadMapa = function() {
   reader.onload = async function(e) {
     try {
       const base64Data = e.target.result.split(',')[1];
-      
       const res = await fetch('/api/upload-map', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -17115,19 +17120,27 @@ window.uploadMapa = function() {
           map_base64: base64Data
         })
       });
-      
-      const data = await res.json();
-      if (data.success) {
+
+      const rawText = await res.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch (parseErr) {
+        const preview = rawText ? rawText.replace(/\s+/g, ' ').slice(0, 220) : 'Resposta vazia do servidor';
+        throw new Error(`Servidor respondeu com conteúdo inválido para o upload do PDF. Detalhe: ${preview}`);
+      }
+
+      if (res.ok && data.success) {
         statusDiv.style.color = "#2e7d32";
         statusDiv.innerHTML = "✅ Projeto carregado com sucesso!";
         fileInput.value = "";
         if (window.loadMapaList) window.loadMapaList();
       } else {
-        throw new Error(data.error || "Erro desconhecido ao salvar o projeto.");
+        throw new Error(data.error || `Erro do servidor (${res.status}).`);
       }
     } catch (err) {
       statusDiv.style.color = "var(--color-danger)";
-      statusDiv.innerHTML = "❌ Erro: " + err.message;
+      statusDiv.innerHTML = "❌ Erro: " + (err && err.message ? err.message : 'Não foi possível concluir o upload do PDF.');
     }
   };
   reader.readAsDataURL(file);
@@ -17242,41 +17255,42 @@ async function uploadKMZ() {
 
   try {
     const zip = await JSZip.loadAsync(file);
-    let kmlContent = null;
-    
     const placemarks = [];
     const parser = new DOMParser();
 
-    // Buscar todos os arquivos .kml dentro do KMZ
+    const collectPlacemarkNodes = (node, out) => {
+      if (!node || !node.childNodes) return;
+      for (const child of node.childNodes) {
+        if (!child || child.nodeType !== 1) continue;
+        const localName = child.localName || child.nodeName;
+        if (localName === 'Placemark') {
+          out.push(child);
+        }
+        collectPlacemarkNodes(child, out);
+      }
+    };
+
     for (const filename of Object.keys(zip.files)) {
       if (filename.toLowerCase().endsWith('.kml')) {
         const kmlContent = await zip.files[filename].async("string");
-        
-        // Extrair os Placemarks
         const xmlDoc = parser.parseFromString(kmlContent, "text/xml");
-        
-        // Google Earth usa namespaces, getElementsByTagName pode falhar dependendo de como o XML é lido. 
-        // Usar localName é mais seguro, mas getElementsByTagName("*") e checar nodeName funciona bem.
-        const allNodes = xmlDoc.getElementsByTagName("*");
-        for (let i = 0; i < allNodes.length; i++) {
-          if (allNodes[i].localName === "Placemark") {
-            const pm = allNodes[i];
-            let nameNode = null;
-            let coordsNode = null;
-            
-            // Buscar name e coordinates dentro do Placemark
-            const children = pm.getElementsByTagName("*");
-            for (let j = 0; j < children.length; j++) {
-              if (children[j].localName === "name" && !nameNode) nameNode = children[j];
-              if (children[j].localName === "coordinates" && !coordsNode) coordsNode = children[j];
-            }
-            
-            if (nameNode && coordsNode) {
-              const name = nameNode.textContent.trim();
-              const coords = coordsNode.textContent.trim().replace(/\s+/g, ' '); // normalizar espaços
-              if (name && coords) {
-                placemarks.push({ name, coords });
-              }
+        const nodes = [];
+        collectPlacemarkNodes(xmlDoc.documentElement, nodes);
+
+        for (const pm of nodes) {
+          let nameNode = null;
+          let coordsNode = null;
+          const children = pm.getElementsByTagName("*");
+          for (let j = 0; j < children.length; j++) {
+            if (children[j].localName === "name" && !nameNode) nameNode = children[j];
+            if (children[j].localName === "coordinates" && !coordsNode) coordsNode = children[j];
+          }
+
+          if (nameNode && coordsNode) {
+            const name = nameNode.textContent.trim();
+            const coords = coordsNode.textContent.trim().replace(/\s+/g, ' ');
+            if (name && coords) {
+              placemarks.push({ name, coords });
             }
           }
         }
@@ -17287,9 +17301,8 @@ async function uploadKMZ() {
       throw new Error("Nenhuma marcação (Placemark) com coordenada encontrada.");
     }
 
-    const { doc, setDoc, ref, uploadBytes, collection, getDocs, deleteDoc } = window.firebaseCollections;
-    
-    // 1. Salvar coordenadas no Firestore PRIMEIRO para evitar travamento por CORS no Storage
+    const { doc, setDoc, ref, uploadBytes } = window.firebaseCollections;
+
     const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
     await setDoc(docRef, {
       empreendimento_id: empId,
@@ -17298,17 +17311,15 @@ async function uploadKMZ() {
       updatedAt: new Date().toISOString()
     });
 
-    // Atualiza a UI imediatamente!
     statusDiv.textContent = `Sucesso! ${placemarks.length} lotes mapeados e salvos para o Empreendimento ${empId}.`;
     statusDiv.style.color = "var(--color-success)";
     fileInput.value = "";
     loadKMZList();
 
-    // 2. Upload do KMZ para o Storage em background (sem await)
     try {
       const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
-      uploadBytes(storageRef, file).catch(e => {
-          console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas já foram salvas.");
+      uploadBytes(storageRef, file).catch(() => {
+        console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas já foram salvas.");
       });
     } catch (e) {
       console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");

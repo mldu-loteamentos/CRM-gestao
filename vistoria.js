@@ -216,10 +216,31 @@ async function buscarCoordenadasLote() {
             if (docSnap.exists()) {
                 const list = docSnap.data().placemarks || [];
                 const unitNameRaw = String(currentVistoriaDoc.unidade).toLowerCase().replace(/[^a-z0-9]/g, '');
-                
+                const empIdRaw = String(currentVistoriaDoc.costCenterId || '').replace(/\D/g, '');
+                const normalizedUnit = String(currentVistoriaDoc.unidade || '').trim();
+                const candidateNames = new Set([
+                    normalizedUnit,
+                    normalizedUnit.toUpperCase(),
+                    normalizedUnit.toLowerCase(),
+                    normalizedUnit.replace(/-/g, ''),
+                    `${empIdRaw}-${normalizedUnit}`,
+                    `${empIdRaw}${normalizedUnit}`,
+                    `${empIdRaw}-${normalizedUnit.toUpperCase()}`,
+                    `${empIdRaw}${normalizedUnit.toUpperCase()}`
+                ]);
+
                 let found = null;
                 for (let item of list) {
-                    let itemNameRaw = item.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const itemName = String(item.name || '').trim();
+                    const itemNameRaw = itemName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const matches = Array.from(candidateNames).some(candidate => {
+                        const candidateNorm = String(candidate).toLowerCase().replace(/[^a-z0-9]/g, '');
+                        return itemNameRaw === candidateNorm || itemNameRaw.includes(candidateNorm) || candidateNorm.includes(itemNameRaw) || itemName.toUpperCase().includes(String(candidate).toUpperCase());
+                    });
+                    if (matches) {
+                        found = item;
+                        break;
+                    }
                     if (itemNameRaw === unitNameRaw || itemNameRaw.includes(unitNameRaw) || unitNameRaw.includes(itemNameRaw)) {
                         found = item;
                         break;

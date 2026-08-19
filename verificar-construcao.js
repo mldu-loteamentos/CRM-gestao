@@ -707,11 +707,40 @@ window.VerificarConstrucaoApp = {
         btnWpp.disabled = true;
         btnWpp.innerHTML = 'Gerando Links...';
 
+        const normalizePhone = (phone) => {
+            if (!phone) return '';
+            const digits = String(phone).replace(/\D/g, '');
+            if (!digits) return '';
+            if (digits.length === 11 && digits.startsWith('55')) return digits;
+            if (digits.length === 11) return `55${digits}`;
+            if (digits.length === 10) return `55${digits}`;
+            return digits;
+        };
+
+        const getResponsibleUsersByCity = (city) => {
+            const usersStr = localStorage.getItem('crm_users');
+            if (!usersStr) return [];
+            try {
+                const users = JSON.parse(usersStr);
+                return users.filter(u => {
+                    const active = !u.status || String(u.status).toUpperCase() !== 'INATIVO';
+                    const isConstruction = !!u.check_construction;
+                    const cities = Array.isArray(u.const_cities) ? u.const_cities : [];
+                    const matchesCity = !!city && cities.map(String).map(v => v.toUpperCase().trim()).includes(String(city).toUpperCase().trim());
+                    return active && isConstruction && matchesCity && normalizePhone(u.phone);
+                });
+            } catch (e) {
+                console.warn('[Vistoria] Não foi possível ler crm_users para atribuição por cidade.', e);
+                return [];
+            }
+        };
+
         try {
             const { collection, addDoc, doc, updateDoc, serverTimestamp } = window.firebaseCollections;
             const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
 
             const cityGroups = {};
+            const targetGroups = {};
             const generatedIds = [];
 
             for (const r of selected) {
@@ -747,6 +776,29 @@ window.VerificarConstrucaoApp = {
                 if (!cityGroups[r.cidade]) cityGroups[r.cidade] = {};
                 if (!cityGroups[r.cidade][r.empreendimento]) cityGroups[r.cidade][r.empreendimento] = 0;
                 cityGroups[r.cidade][r.empreendimento]++;
+
+                const responsibleUsers = getResponsibleUsersByCity(r.cidade);
+                if (responsibleUsers.length === 0) {
+                    const fallbackKey = `sem-responsavel|5515998118246`;
+                    if (!targetGroups[fallbackKey]) {
+                        targetGroups[fallbackKey] = { city: r.cidade, phone: '5515998118246', name: 'Responsável não configurado', rows: [] };
+                    }
+                    targetGroups[fallbackKey].rows.push(r);
+                    continue;
+                }
+
+                responsibleUsers.forEach(user => {
+                    const phone = normalizePhone(user.phone);
+                    const key = `${r.cidade}|${phone}`;
+                    if (!targetGroups[key]) {
+                        targetGroups[key] = { city: r.cidade, phone, name: user.name, rows: [] };
+                    }
+                    targetGroups[key].rows.push(r);
+                });
+            }
+
+            if (Object.keys(targetGroups).length === 0) {
+                throw new Error('Nenhum responsável por checar vistoria foi encontrado para as cidades selecionadas.');
             }
 
             const hour = new Date().getHours();
@@ -754,26 +806,22 @@ window.VerificarConstrucaoApp = {
             if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
             else if (hour >= 18) greeting = 'Boa noite';
 
-            let numCidades = Object.keys(cityGroups).length;
-            let prefixo = numCidades > 1 ? 'nas cidades:' : 'na cidade:';
-
-            let message = `${greeting}! Segue a lista de vistorias a serem realizadas ${prefixo}\n\n`;
-
-            for (const city in cityGroups) {
-                message += `*${city.toUpperCase()}*\n`;
-                for (const emp in cityGroups[city]) {
-                    const count = cityGroups[city][emp];
-                    message += `- ${emp.toUpperCase()} (${count} lote${count > 1 ? 's' : ''})\n`;
-                }
-                message += '\n';
-            }
-
             const idsParam = generatedIds.join(',');
             const link = `${baseUrl}vistoria.html?ids=${idsParam}`;
-            message += `Acesse o link abaixo para realizar a(s) vistoria(s):\n${link}`;
 
-            const phone = '5515998118246';
-            window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
+            Object.values(targetGroups).forEach(target => {
+                let message = `${greeting}!\n\nSegue a lista de vistorias a serem realizadas na cidade *${String(target.city).toUpperCase()}*\n\n`;
+                const empMap = {};
+                target.rows.forEach(r => {
+                    const key = r.empreendimento || 'Empreendimento N/D';
+                    empMap[key] = (empMap[key] || 0) + 1;
+                });
+                Object.entries(empMap).forEach(([emp, count]) => {
+                    message += `- ${String(emp).toUpperCase()} (${count} lote${count > 1 ? 's' : ''})\n`;
+                });
+                message += `\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${link}`;
+                window.open(`https://api.whatsapp.com/send?phone=${target.phone}&text=${encodeURIComponent(message)}`, '_blank');
+            });
 
             await this.loadData();
 
