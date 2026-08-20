@@ -2,11 +2,25 @@ const HomeDashboard = {
   // Mascotes disponíveis
   pets: [
     { 
-      id: '3d_robot', 
+      id: '3d_eve', 
       is3DModel: true, 
       glbUrl: 'assets/pets/eve.glb', 
       thumbnail: 'assets/pets/robot.jpg', 
       name: 'Eve (Assistente 3D)' 
+    },
+    { 
+      id: '3d_pikachu', 
+      is3DModel: true, 
+      glbUrl: 'assets/pets/pikachu_dancing.glb', 
+      thumbnail: 'assets/pets/dog.jpg', 
+      name: 'Pikachu (Assistente 3D)' 
+    },
+    { 
+      id: '3d_bulbasaur', 
+      is3DModel: true, 
+      glbUrl: 'assets/pets/bulbasaur.glb', 
+      thumbnail: 'assets/pets/superboy.jpg', 
+      name: 'Bulbasaur (Assistente 3D)' 
     },
     { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
     { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
@@ -106,7 +120,7 @@ const HomeDashboard = {
     const container = document.getElementById('home-pet-emoji');
     if (container) {
        if (pet.is3DModel) {
-           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan style="width: 250px; height: 350px; margin-bottom: -40px; margin-right: -40px; outline: none; --poster-color: transparent; background-color: transparent;"></model-viewer>`;
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan style="width: 212px; height: 297px; margin-bottom: -30px; margin-right: -20px; outline: none; --poster-color: transparent; background: radial-gradient(circle at center 65%, rgba(255,255,255,1) 0%, rgba(255,255,255,0.9) 35%, rgba(255,255,255,0) 70%); border-radius: 50%;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
