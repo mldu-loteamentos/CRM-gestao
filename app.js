@@ -7290,7 +7290,7 @@ function formatCpfCnpj(val) {
                  String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
                  String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
                );
-               const directFine = Number(matchingInst?.fine ?? matchingInst?.fineAmount ?? inst.fine);
+               const directFine = Number(inst.fine ?? matchingInst?.fine ?? matchingInst?.fineAmount);
                const referenceDays = Number(matchingInst?.daysOfDelay ?? matchingInst?.daysDelay ?? inst.apiDaysDelay) ||
                  Math.max(1, Math.round((new Date() - inst.due) / (1000 * 60 * 60 * 24)));
                if (Number.isFinite(directFine) && directFine > 0 && Number.isFinite(referenceDays) && referenceDays > 0) {
