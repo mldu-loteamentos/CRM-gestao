@@ -112,9 +112,9 @@ const HomeDashboard = {
     const pet = this.pets.find(p => p.id === this.selectedPetId) || this.pets[0];
     const container = document.getElementById('home-pet-emoji');
     if (container) {
-       if (pet.is3DModel) {
-           // Usando camera-orbit para reduzir visualmente em ~20% e caixa 350x350 sem margem direita negativa para não sair da tela
-           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 220%" style="width: 350px; height: 350px; outline: none; --poster-color: transparent; background-color: transparent; margin-bottom: -20px;"></model-viewer>`;
+        if (pet.is3DModel) {
+           // Aumentando o camera-orbit para 300% (afasta bastante a câmera) e reduzindo a caixa para 200x200 para ficar no tamanho ideal
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 300%" style="width: 200px; height: 200px; outline: none; --poster-color: transparent; background-color: transparent; margin-bottom: 0px; margin-right: 0px;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
@@ -280,7 +280,7 @@ const HomeDashboard = {
                modelViewer.style.animation = 'none';
                void modelViewer.offsetWidth;
                modelViewer.style.animation = randAnim;
-               msg = "Este modelo 3D não possui animações nativas no arquivo, então eu fiz uma dancinha por conta própria! 🕺";
+               // Removed the msg so it defaults to standard quotes later
            }
        } else if (petEl) {
            const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
