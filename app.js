@@ -15619,6 +15619,7 @@ window.renderTimeline = function() {
     const labelAbove = index % 2 === 0;
 
     nodeEl.innerHTML = `
+      <div style="position: absolute; ${labelAbove ? 'bottom: 100%;' : 'top: 100%;'} left: 50%; transform: translateX(-50%); width: 2px; height: 8px; background: ${color}; opacity: 0.75; pointer-events: none;"></div>
       <div style="position: absolute; ${labelAbove ? 'bottom: 100%; margin-bottom: 8px;' : 'top: 100%; margin-top: 8px;'} font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
         ${acaoLabel}<br>
         <span class="node-dias-text" style="color: ${color}; font-size: 0.9rem;">${node.dias} dias</span>
