@@ -5,14 +5,14 @@ const HomeDashboard = {
       id: '3d_eve', 
       is3DModel: true, 
       glbUrl: 'assets/pets/eve.glb', 
-      icon: 'fa-robot', 
+      icon: '🤖', 
       name: 'IA.EL' 
     },
     { 
       id: '3d_pikachu', 
       is3DModel: true, 
       glbUrl: 'assets/pets/pikachu_dancing.glb', 
-      icon: 'fa-bolt', 
+      icon: '⚡', 
       name: 'Pikachu' 
     }
   ],
@@ -102,7 +102,7 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        <i class="fa-solid ${p.icon}" style="font-size: 32px; color: #94a3b8; margin-bottom: 8px;"></i>
+        <div style="font-size: 32px; margin-bottom: 8px;">${p.icon}</div>
         <div style="font-size: 0.75rem; color: #475569; font-weight: 600;">${p.name}</div>
       </div>
     `).join('');
