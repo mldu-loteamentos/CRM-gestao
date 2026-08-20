@@ -13618,7 +13618,13 @@ async function _loadZeroPaidTab_Impl() {
       const customConfigStr = localStorage.getItem('crm_centros_custo_custom');
       if (customConfigStr) {
         const configMap = JSON.parse(customConfigStr);
-        const ccConfig = configMap[client.costCenterId] || {};
+        let ccConfig = configMap[client.costCenterId] || {};
+        if (!ccConfig.clausula_suspensiva_ativa && client.unitName) {
+            const match = client.unitName.match(/^(\d{4,5})/);
+            if (match && configMap[match[1]]) {
+                ccConfig = configMap[match[1]];
+            }
+        }
         if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
           btnSuspensaoHtml = `
             <button class="btn btn-warning btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2; background: #ea580c; border-color: #ea580c; color: white;" title="Gerar termo de suspensão (PDF)">
@@ -13666,6 +13672,7 @@ async function _loadZeroPaidTab_Impl() {
         <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
           <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
         </button>
+        ${btnSuspensaoHtml}
         <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
           <i data-lucide="eye" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Detalhes
         </button>
