@@ -113,8 +113,8 @@ const HomeDashboard = {
     const container = document.getElementById('home-pet-emoji');
     if (container) {
        if (pet.is3DModel) {
-           // Removido scale, usando camera-orbit para afastar a câmera e reduzir tamanho sem bugar a renderização
-           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 130%" style="width: 300px; height: 350px; margin-bottom: -40px; margin-right: -40px; outline: none; --poster-color: transparent; background-color: transparent;"></model-viewer>`;
+           // Usando CSS transform para reduzir 15% do tamanho e um container de 400px para não cortar as animações.
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan style="width: 400px; height: 400px; margin-bottom: -50px; margin-right: -50px; outline: none; --poster-color: transparent; background-color: transparent; transform: scale(0.85); transform-origin: bottom right;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
