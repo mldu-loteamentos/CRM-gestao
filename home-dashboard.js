@@ -1,29 +1,12 @@
-// home-dashboard.js
-// Lógica para o Dashboard da página Home (exclusivo para perfil Operador de Cobrança)
-
 const HomeDashboard = {
-  // Mascotes disponíveis (corpo inteiro, misturados)
+  // Mascotes disponíveis (Modelos 3D Pixar Style)
   pets: [
-    { id: 'super_h', emoji: '🦸‍♂️', name: 'Super-Herói' },
-    { id: 'fada', emoji: '🧚‍♀️', name: 'Fada' },
-    { id: 'mago', emoji: '🧙‍♂️', name: 'Mago' },
-    { id: 'sereia', emoji: '🧜‍♀️', name: 'Sereia' },
-    { id: 'ninja', emoji: '🥷', name: 'Ninja' },
-    { id: 'astronauta_f', emoji: '👩‍🚀', name: 'Astronauta' },
-    { id: 'detetive', emoji: '🕵️‍♂️', name: 'Detetive' },
-    { id: 'princesa', emoji: '👸', name: 'Princesa' },
-    { id: 'astronauta_m', emoji: '👨‍🚀', name: 'Astronauta' },
-    { id: 'vampira', emoji: '🧛‍♀️', name: 'Vampira' },
-    { id: 'elfo', emoji: '🧝‍♂️', name: 'Elfo' },
-    { id: 'dancarino', emoji: '🕺', name: 'Dançarino' },
-    { id: 'dancarina', emoji: '💃', name: 'Dançarina' },
-    { id: 'guarda', emoji: '💂‍♂️', name: 'Guarda' },
-    { id: 'elfa', emoji: '🧝‍♀️', name: 'Elfa' },
-    { id: 'vampiro', emoji: '🧛‍♂️', name: 'Vampiro' },
-    { id: 'cantora', emoji: '👩‍🎤', name: 'Cantora' },
-    { id: 'genio', emoji: '🧞‍♂️', name: 'Gênio' },
-    { id: 'super_m', emoji: '🦸‍♀️', name: 'Super-Heroína' },
-    { id: 'zumbi', emoji: '🧟‍♂️', name: 'Zumbi' }
+    { id: 'robot', url: 'assets/pets/robot.jpg', name: 'Robô Zeca' },
+    { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
+    { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
+    { id: 'fairy', url: 'assets/pets/fairy.jpg', name: 'Fada Madrinha' },
+    { id: 'ninja', url: 'assets/pets/ninja.jpg', name: 'Ninja' },
+    { id: 'astronaut', url: 'assets/pets/astronaut.jpg', name: 'Astronauta' }
   ],
   
   motivationalQuotes: [
@@ -106,15 +89,18 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        ${p.emoji}
+        <img src="${p.url}" alt="${p.name}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <div style="font-size: 0.65rem; margin-top: 5px; color: #64748b; font-weight: 500;">${p.name}</div>
       </div>
     `).join('');
   },
 
   updatePetIcon() {
     const pet = this.pets.find(p => p.id === this.selectedPetId) || this.pets[0];
-    const el = document.getElementById('home-pet-emoji');
-    if (el) el.textContent = pet.emoji;
+    const container = document.getElementById('home-pet-emoji');
+    if (container) {
+       container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 15px rgba(0,0,0,0.2); border: 3px solid white; display: block;">`;
+    }
   },
 
   async loadData() {
