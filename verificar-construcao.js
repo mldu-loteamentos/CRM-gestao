@@ -64,7 +64,7 @@ window.VerificarConstrucaoApp = {
         cidade: 'Todos',
         empreendimento: 'Todos',
         status: 'Todos',
-        obras: 'Sem Obra'
+        obras: 'Todos'
     },
 
     init() {
@@ -105,10 +105,9 @@ window.VerificarConstrucaoApp = {
                         <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.abrirModalObrasAndamento()">
                             <i data-lucide="building" style="width: 16px;"></i> Obras em andamento
                         </button>
-                        <select onchange="window.VerificarConstrucaoApp.activeFilters.obras = this.value; window.VerificarConstrucaoApp.renderTable();" style="padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; color: #334155; background: #fff; cursor: pointer; outline: none;">
-                            <option value="Sem Obra">Pendentes (Sem Obra Identificada)</option>
-                            <option value="Com Obra">Obras Identificadas</option>
-                        </select>
+                        <button class="btn btn-outline" style="border-color: #0f766e; color: #0f766e;" onclick="window.openVistoriaRecurrenceModal()">
+                            <i data-lucide="refresh-cw" style="width: 16px;"></i> Recorrência de Vistoria
+                        </button>
                     </div>
                     <div>
                         <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:10px 24px; border:none; background:linear-gradient(135deg, #16a34a 0%, #15803d 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(22,163,74,0.4); opacity:0.5; transition:all 0.2s;" onmouseover="if(!this.disabled) { this.style.opacity='1'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(22,163,74,0.5)'; }" onmouseout="if(!this.disabled) { this.style.opacity='1'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; } else { this.style.opacity='0.5'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; }">
@@ -422,8 +421,6 @@ window.VerificarConstrucaoApp = {
             if (this.activeFilters.cidade !== 'Todos' && r.cidade !== this.activeFilters.cidade) return false;
             if (this.activeFilters.empreendimento !== 'Todos' && r.empreendimento !== this.activeFilters.empreendimento) return false;
             if (this.activeFilters.status !== 'Todos' && r.statusLabel !== this.activeFilters.status) return false;
-            if (this.activeFilters.obras === 'Sem Obra' && r.hasConstruction) return false;
-            if (this.activeFilters.obras === 'Com Obra' && !r.hasConstruction) return false;
             return true;
         });
 
