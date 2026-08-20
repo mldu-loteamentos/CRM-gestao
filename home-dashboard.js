@@ -85,10 +85,15 @@ const HomeDashboard = {
     
     const quote = this.motivationalQuotes[Math.floor(Math.random() * this.motivationalQuotes.length)];
     
-    document.getElementById('home-op-greeting').innerHTML = `
-      <div style="font-size: 1.5rem; font-weight: 700;">${greeting}, ${name.toUpperCase()}!</div>
-      <div style="font-size: 0.9rem; margin-top: 5px; opacity: 0.9; font-style: italic;">"${quote}"</div>
-    `;
+    const greetingEl = document.getElementById('home-op-greeting');
+    if (greetingEl) {
+        greetingEl.textContent = `${greeting}, ${name.toUpperCase()}!`;
+    }
+    
+    const quoteEl = document.getElementById('home-op-motivational');
+    if (quoteEl) {
+        quoteEl.textContent = `"${quote}"`;
+    }
   },
 
   renderPetSelector() {
@@ -108,9 +113,8 @@ const HomeDashboard = {
     const container = document.getElementById('home-pet-emoji');
     if (container) {
        if (pet.is3DModel) {
-           // width e height maiores para não cortar a animação, e scale="0.8 0.8 0.8" para reduzir o tamanho real do boneco.
-           // Removido o radial-gradient (ovo)
-           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan scale="0.8 0.8 0.8" style="width: 300px; height: 350px; margin-bottom: -40px; margin-right: -40px; outline: none; --poster-color: transparent; background-color: transparent;"></model-viewer>`;
+           // Removido scale, usando camera-orbit para afastar a câmera e reduzir tamanho sem bugar a renderização
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 130%" style="width: 300px; height: 350px; margin-bottom: -40px; margin-right: -40px; outline: none; --poster-color: transparent; background-color: transparent;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
