@@ -14,6 +14,13 @@ const HomeDashboard = {
       glbUrl: 'assets/pets/Pikachu.glb', 
       icon: '⚡', 
       name: 'Pikachu' 
+    },
+    { 
+      id: '3d_yoshi', 
+      is3DModel: true, 
+      glbUrl: 'assets/pets/yoshi.glb', 
+      icon: '🦖', 
+      name: 'Yoshi' 
     }
   ],
   
