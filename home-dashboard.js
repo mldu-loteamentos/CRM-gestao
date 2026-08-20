@@ -1,6 +1,7 @@
 const HomeDashboard = {
-  // Mascotes disponíveis (Modelos 3D Pixar Style)
+  // Mascotes disponíveis (Agora com suporte a animações Lottie)
   pets: [
+    { id: 'lottie_dog', isLottie: true, url: 'https://lottie.host/8b56b35b-40b5-4928-8686-27756774f285/1G3nN6Qd0A.json', name: 'Cachorro (Animado)' },
     { id: 'robot', url: 'assets/pets/robot.jpg', name: 'Robô Zeca' },
     { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
     { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
@@ -89,7 +90,10 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        <img src="${p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">
+        ${p.isLottie 
+          ? `<lottie-player src="${p.url}" background="transparent" speed="1" style="width: 60px; height: 60px;" loop autoplay></lottie-player>` 
+          : `<img src="${p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">`
+        }
         <div style="font-size: 0.65rem; margin-top: 5px; color: #64748b; font-weight: 500;">${p.name}</div>
       </div>
     `).join('');
@@ -99,7 +103,11 @@ const HomeDashboard = {
     const pet = this.pets.find(p => p.id === this.selectedPetId) || this.pets[0];
     const container = document.getElementById('home-pet-emoji');
     if (container) {
-       container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
+       if (pet.isLottie) {
+           container.innerHTML = `<lottie-player src="${pet.url}" background="transparent" speed="1" style="width: 150px; height: 150px; display: block; margin-bottom: -15px;" loop autoplay></lottie-player>`;
+       } else {
+           container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
+       }
     }
   },
 
