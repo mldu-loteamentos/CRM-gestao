@@ -2,19 +2,28 @@
 // Lógica para o Dashboard da página Home (exclusivo para perfil Operador de Cobrança)
 
 const HomeDashboard = {
-  // Mascotes disponíveis
+  // Mascotes disponíveis (corpo inteiro, misturados)
   pets: [
-    { id: 'robo', emoji: '🤖', name: 'Zeca' },
-    { id: 'cachorro', emoji: '🐶', name: 'Tobby' },
-    { id: 'gato', emoji: '🐱', name: 'Mingau' },
-    { id: 'coruja', emoji: '🦉', name: 'Sabida' },
-    { id: 'raposa', emoji: '🦊', name: 'Foxy' },
-    { id: 'coelho', emoji: '🐰', name: 'Pernalonga' },
-    { id: 'tigre', emoji: '🐯', name: 'Tigrão' },
-    { id: 'urso', emoji: '🐼', name: 'Panda' },
-    { id: 'sapo', emoji: '🐸', name: 'Sapo' },
-    { id: 'macaco', emoji: '🐵', name: 'Kong' },
-    { id: 'clipe', emoji: '📎', name: 'Clippy' }
+    { id: 'super_h', emoji: '🦸‍♂️', name: 'Super-Herói' },
+    { id: 'fada', emoji: '🧚‍♀️', name: 'Fada' },
+    { id: 'mago', emoji: '🧙‍♂️', name: 'Mago' },
+    { id: 'sereia', emoji: '🧜‍♀️', name: 'Sereia' },
+    { id: 'ninja', emoji: '🥷', name: 'Ninja' },
+    { id: 'astronauta_f', emoji: '👩‍🚀', name: 'Astronauta' },
+    { id: 'detetive', emoji: '🕵️‍♂️', name: 'Detetive' },
+    { id: 'princesa', emoji: '👸', name: 'Princesa' },
+    { id: 'astronauta_m', emoji: '👨‍🚀', name: 'Astronauta' },
+    { id: 'vampira', emoji: '🧛‍♀️', name: 'Vampira' },
+    { id: 'elfo', emoji: '🧝‍♂️', name: 'Elfo' },
+    { id: 'dancarino', emoji: '🕺', name: 'Dançarino' },
+    { id: 'dancarina', emoji: '💃', name: 'Dançarina' },
+    { id: 'guarda', emoji: '💂‍♂️', name: 'Guarda' },
+    { id: 'elfa', emoji: '🧝‍♀️', name: 'Elfa' },
+    { id: 'vampiro', emoji: '🧛‍♂️', name: 'Vampiro' },
+    { id: 'cantora', emoji: '👩‍🎤', name: 'Cantora' },
+    { id: 'genio', emoji: '🧞‍♂️', name: 'Gênio' },
+    { id: 'super_m', emoji: '🦸‍♀️', name: 'Super-Heroína' },
+    { id: 'zumbi', emoji: '🧟‍♂️', name: 'Zumbi' }
   ],
   
   motivationalQuotes: [
@@ -30,7 +39,8 @@ const HomeDashboard = {
     "O segredo do sucesso é a constância do propósito."
   ],
 
-  selectedPetId: localStorage.getItem('crm_home_pet') || 'robo',
+  selectedPetId: localStorage.getItem('crm_home_pet') || 'super_h',
+  intervalId: null,
   
   init() {
     const user = window.AppState?.currentUser;
@@ -46,7 +56,6 @@ const HomeDashboard = {
       this.updatePetIcon();
       
       if (!window.rawClientList || window.rawClientList.length === 0) {
-         // Dados não carregados
          document.getElementById('home-op-load-data-container').style.display = 'block';
          document.getElementById('home-op-grids-container').style.display = 'none';
          document.getElementById('home-op-lembretes-container').style.display = 'none';
@@ -57,13 +66,21 @@ const HomeDashboard = {
          
          this.renderGrids();
          this.renderLembretes();
-         // Fala inicial com feedback
-         setTimeout(() => { this.speak(true); }, 2000);
+         
+         setTimeout(() => { this.speak(true, false); }, 2000);
       }
+      
+      // Enviar mensagens motivacionais automaticamente
+      if (this.intervalId) clearInterval(this.intervalId);
+      this.intervalId = setInterval(() => {
+          this.speak(false, false);
+      }, 90000); // 1 minuto e meio
+
     } else {
       document.getElementById('home-em-construcao-container').style.display = 'flex';
       document.getElementById('home-operador-container').style.display = 'none';
       document.getElementById('home-pet-container').style.display = 'none';
+      if (this.intervalId) clearInterval(this.intervalId);
     }
   },
 
@@ -234,9 +251,19 @@ const HomeDashboard = {
     }
   },
 
-  speak(includeFeedback = false) {
+  speak(includeFeedback = false, isClick = false) {
     const box = document.getElementById('home-pet-speech');
     const textEl = document.getElementById('home-pet-speech-text');
+    const petEl = document.getElementById('home-pet-emoji');
+    
+    if (isClick && petEl) {
+       const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
+       const randAnim = animations[Math.floor(Math.random() * animations.length)];
+       petEl.style.animation = 'none';
+       // trigger reflow
+       void petEl.offsetWidth;
+       petEl.style.animation = randAnim;
+    }
     
     if (!box || !textEl) return;
     
@@ -264,7 +291,8 @@ const HomeDashboard = {
           "Não se esqueça de registrar os contatos nas ocorrências.",
           "Dica: Tente ligar para os clientes com maiores valores primeiro!",
           "Lembre-se de conferir sua agenda de lembretes.",
-          "Uma cobrança feita com empatia tem mais chances de sucesso. 💙"
+          "Uma cobrança feita com empatia tem mais chances de sucesso. 💙",
+          "O segredo para um bom acordo é ouvir o cliente. 🚀"
        ];
        msg = msgs[Math.floor(Math.random() * msgs.length)];
     }
@@ -288,6 +316,6 @@ window.selectHomePet = (id) => {
    localStorage.setItem('crm_home_pet', id);
    HomeDashboard.updatePetIcon();
    document.getElementById('home-pet-selector-modal').style.display = 'none';
-   HomeDashboard.speak();
+   HomeDashboard.speak(false, true);
 };
-window.homePetSpeak = (includeFeedback) => HomeDashboard.speak(includeFeedback);
+window.homePetSpeak = (includeFeedback) => HomeDashboard.speak(includeFeedback, true);

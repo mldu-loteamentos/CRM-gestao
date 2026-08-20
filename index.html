@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.255 &nbsp;&middot;&nbsp; 20/08/2026
+            v1.0.256 &nbsp;&middot;&nbsp; 20/08/2026
           </span>
         </div>
       </div>
@@ -1766,14 +1766,31 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                75% { transform: translateY(-10px) rotate(5deg); }
                100% { transform: translateY(0px) rotate(0deg); }
              }
+             
+             /* Animações ao clicar */
+             @keyframes petSpin { 100% { transform: rotate(360deg); } }
+             @keyframes petBounce { 
+               0%, 100% { transform: translateY(0); } 
+               50% { transform: translateY(-30px); } 
+             }
+             @keyframes petFlip { 
+               0% { transform: perspective(400px) rotateY(0deg); } 
+               100% { transform: perspective(400px) rotateY(360deg); } 
+             }
+             @keyframes petWiggle { 
+               0%, 100% { transform: rotate(0deg); } 
+               25% { transform: rotate(-20deg); } 
+               75% { transform: rotate(20deg); } 
+             }
+
              .pet-animated {
                animation: petFloat 4s ease-in-out infinite;
                cursor: pointer;
-               transition: transform 0.2s;
                display: flex; 
                align-items: flex-end; 
                justify-content: center;
                filter: drop-shadow(0px 10px 10px rgba(0,0,0,0.2));
+               transform-origin: center bottom;
              }
              .pet-animated:hover {
                transform: scale(1.15) !important;
@@ -5280,30 +5297,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
-  <script defer src="data.js?v=255"></script>
-  <script defer src="sienge-api.js?v=255"></script>
-  <script defer src="azure-auth.js?v=255"></script>
-  <script defer src="app.js?v=255"></script>
-  <script defer src="home-dashboard.js?v=255"></script>
-  <script defer src="anexos.js?v=255"></script>
-  <script defer src="contas-pagar.js?v=255"></script>
-  <script defer src="config-tags.js?v=255"></script>
-  <script defer src="config-users.js?v=255"></script>
-  <script defer src="construcao.js?v=255"></script>
-  <script defer src="empresas.js?v=255"></script>
-  <script defer src="relacionamento.js?v=255"></script>
+  <script defer src="data.js?v=256"></script>
+  <script defer src="sienge-api.js?v=256"></script>
+  <script defer src="azure-auth.js?v=256"></script>
+  <script defer src="app.js?v=256"></script>
+  <script defer src="home-dashboard.js?v=256"></script>
+  <script defer src="anexos.js?v=256"></script>
+  <script defer src="contas-pagar.js?v=256"></script>
+  <script defer src="config-tags.js?v=256"></script>
+  <script defer src="config-users.js?v=256"></script>
+  <script defer src="construcao.js?v=256"></script>
+  <script defer src="empresas.js?v=256"></script>
+  <script defer src="relacionamento.js?v=256"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=255"></script>
-  <script defer src="plano-financeiro.js?v=255"></script>
-  <script defer src="fiscal.js?v=255"></script>
-  <script defer src="indexadores.js?v=255"></script>
-  <script defer src="verificar-construcao.js?v=255"></script>
-  <script src="repactuacoes.js?v=255"></script>
+  <script defer src="centros-custo.js?v=256"></script>
+  <script defer src="plano-financeiro.js?v=256"></script>
+  <script defer src="fiscal.js?v=256"></script>
+  <script defer src="indexadores.js?v=256"></script>
+  <script defer src="verificar-construcao.js?v=256"></script>
+  <script src="repactuacoes.js?v=256"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=255"></script>
+  <script defer src="dashboard-inadimplencia.js?v=256"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
