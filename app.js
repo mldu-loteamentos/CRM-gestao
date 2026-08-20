@@ -13612,6 +13612,22 @@ async function _loadZeroPaidTab_Impl() {
     }
     rowClass += " table-row-hover";
     row.className = rowClass.trim();
+
+    let btnSuspensaoHtml = '';
+    try {
+      const customConfigStr = localStorage.getItem('crm_centros_custo_custom');
+      if (customConfigStr) {
+        const configMap = JSON.parse(customConfigStr);
+        const ccConfig = configMap[client.costCenterId] || {};
+        if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
+          btnSuspensaoHtml = `
+            <button class="btn btn-warning btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2; background: #ea580c; border-color: #ea580c; color: white;" title="Gerar termo de suspensão (PDF)">
+              <i data-lucide="file-warning" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Suspensão
+            </button>
+          `;
+        }
+      }
+    } catch (e) {}
     
     row.innerHTML = `
       <td style="text-align: center;"><span>${client.companyId}</span></td>
@@ -17152,6 +17168,69 @@ function loadDocPadraoTemplates() {
     }
   });
 }
+
+// ----------------------------------------------------
+// GERAR PDF DE SUSPENSÃO (Zero Paid)
+window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
+  const customer = getCustomerFromState(customerId);
+  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
+  const sale = salesList.find(s => s.id === saleId) || {};
+  const unit = AppState.units[sale.unitId] || {};
+  const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+  
+  let companyCnpj = '64.860.139/0001-98';
+  if (AppState.companies) {
+      const c = AppState.companies.find(x => String(x.id) === String(costCenter.companyId));
+      if (c && c.cnpj) companyCnpj = c.cnpj;
+  }
+  
+  const templateStr = localStorage.getItem('crm_docpadrao_suspensao');
+  let ref = 'NOTIFICAÇÃO EXTRAJUDICIAL – CANCELAMENTO DE CONTRATO POR IMPLEMENTO DE CONDIÇÃO SUSPENSIVA';
+  let corpo = '';
+  
+  if (templateStr) {
+      try {
+          const t = JSON.parse(templateStr);
+          ref = t['doc-suspensao-ref'] || ref;
+          corpo = t['doc-suspensao-corpo'] || '';
+      } catch(e) {}
+  }
+  
+  if (!corpo) {
+      alert("O corpo da 'Carta de Suspensão de Contrato' não foi configurado em Documentos Padrões.");
+      return;
+  }
+  
+  const address = customer.address || '';
+  let cep = '';
+  const matchCep = address.match(/\d{5}-\d{3}/);
+  if (matchCep) cep = matchCep[0];
+  
+  let text = corpo;
+  text = text.replace(/{{NOME_CLIENTE}}/g, customer.name);
+  text = text.replace(/{{CPF_CLIENTE}}/g, customer.cpfCnpj);
+  text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
+  text = text.replace(/{{CEP_CLIENTE}}/g, cep);
+  text = text.replace(/{{EMPREENDIMENTO}}/g, costCenter.name || '');
+  text = text.replace(/{{QUADRA}}/g, unit.block || '');
+  text = text.replace(/{{LOTE}}/g, unit.lot || '');
+  text = text.replace(/{{DATA_CONTRATO}}/g, sale.saleDate ? new Date(sale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '');
+  text = text.replace(/{{EMPRESA_NOME}}/g, costCenter.name ? costCenter.name.split('-')[0].trim() : 'MOURA LEITE LOTEAMENTOS');
+  text = text.replace(/{{EMPRESA_CNPJ}}/g, companyCnpj);
+  
+  const docHtml = `
+    <div style="margin-bottom: 2rem;">
+      <h2 style="text-align:center; color: #105436; font-size: 14pt; font-weight: bold;">${ref}</h2>
+      <hr style="border: 1px solid #ccc; margin: 20px 0;">
+      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; text-align: justify;">${text}</pre>
+    </div>
+  `;
+  
+  document.getElementById("pdf-modal-title").textContent = "Carta de Suspensão de Contrato";
+  document.getElementById("pdf-document-content").innerHTML = docHtml;
+  document.getElementById("pdf-view-overlay").classList.add("active");
+  if (window.lucide) lucide.createIcons();
+};
 
 // ----------------------------------------------------
 // REGRAS DE NEGOCIAÇÃO

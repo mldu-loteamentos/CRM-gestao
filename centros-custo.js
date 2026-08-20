@@ -102,6 +102,12 @@ const CentrosCustoApp = {
     const impostoPagoEl = document.getElementById(`edit-imposto-pago-${id}`);
     if (impostoPagoEl) custom.imposto_pago_empresa = impostoPagoEl.checked;
 
+    const suspensivaAtivaEl = document.getElementById(`edit-suspensiva-ativa-${id}`);
+    if (suspensivaAtivaEl) custom.clausula_suspensiva_ativa = suspensivaAtivaEl.checked;
+
+    const suspensivaDiasEl = document.getElementById(`edit-suspensiva-dias-${id}`);
+    if (suspensivaDiasEl) custom.clausula_suspensiva_dias = parseInt(suspensivaDiasEl.value) || 30;
+
     CentrosCustoState.customFields[id] = custom;
     localStorage.setItem('crm_centros_custo_custom', JSON.stringify(CentrosCustoState.customFields));
     
@@ -120,6 +126,8 @@ const CentrosCustoApp = {
     const perc_terrenista = custom.perc_terrenista || 0;
     const tipo_cc = custom.tipo_cc || '';
     const imposto_pago = custom.imposto_pago_empresa === true;
+    const suspensiva_ativa = custom.clausula_suspensiva_ativa === true;
+    const suspensiva_dias = custom.clausula_suspensiva_dias || 30;
 
     const modalHtml = `
       <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
@@ -160,6 +168,19 @@ const CentrosCustoApp = {
             <div style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="edit-imposto-pago-${id}" ${imposto_pago ? 'checked' : ''} style="width: 16px; height: 16px;">
                 <label for="edit-imposto-pago-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">Imposto pago pela empresa?</label>
+            </div>
+            
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0;">
+            <h4 style="margin: 0; color: #334155; font-size: 0.95rem;">Automações de Cobrança</h4>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="edit-suspensiva-ativa-${id}" ${suspensiva_ativa ? 'checked' : ''} style="width: 16px; height: 16px;" onchange="document.getElementById('edit-suspensiva-dias-${id}').disabled = !this.checked">
+                    <label for="edit-suspensiva-ativa-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: #b91c1c;">Habilitar Termo de Cláusula Suspensiva (Sinal)</label>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="edit-suspensiva-dias-${id}" style="font-size: 0.85rem; color: #64748b;">Dias pós-vencimento:</label>
+                    <input type="number" id="edit-suspensiva-dias-${id}" class="form-control" style="width: 70px; padding: 4px;" value="${suspensiva_dias}" ${!suspensiva_ativa ? 'disabled' : ''}>
+                </div>
             </div>
           </div>
           <div style="padding: 16px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; background: #f9f9f9; border-radius: 0 0 8px 8px;">
