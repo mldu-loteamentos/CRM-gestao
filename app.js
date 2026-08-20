@@ -15619,8 +15619,8 @@ window.renderTimeline = function() {
     const labelAbove = index % 2 === 0;
 
     nodeEl.innerHTML = `
-      <div style="position: absolute; ${labelAbove ? 'bottom: 100%;' : 'top: 100%;'} left: 50%; transform: translateX(-50%); width: 2px; height: 8px; background: ${color}; opacity: 0.75; pointer-events: none;"></div>
-      <div style="position: absolute; ${labelAbove ? 'bottom: 100%; margin-bottom: 8px;' : 'top: 100%; margin-top: 8px;'} font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
+      <div class="timeline-node-connector" style="position: absolute; ${labelAbove ? 'bottom: 100%;' : 'top: 100%;'} left: 50%; transform: translateX(-50%); width: 2px; height: 8px; background: ${color}; opacity: 0.75; pointer-events: none;"></div>
+      <div class="timeline-node-label" data-side="${labelAbove ? 'above' : 'below'}" style="position: absolute; ${labelAbove ? 'bottom: 100%; margin-bottom: 8px;' : 'top: 100%; margin-top: 8px;'} font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
         ${acaoLabel}<br>
         <span class="node-dias-text" style="color: ${color}; font-size: 0.9rem;">${node.dias} dias</span>
       </div>
@@ -15693,6 +15693,26 @@ window.renderTimeline = function() {
     };
 
     container.appendChild(nodeEl);
+  });
+
+  // Quando rótulos próximos se sobrepõem, cria níveis verticais e alonga os conectores.
+  const labelsBySide = { above: [], below: [] };
+  container.querySelectorAll('.timeline-node-label').forEach(label => {
+    labelsBySide[label.dataset.side].push(label);
+  });
+  Object.values(labelsBySide).forEach(labels => {
+    labels.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    for (let i = 1; i < labels.length; i++) {
+      const previous = labels[i - 1];
+      const current = labels[i];
+      if (current.getBoundingClientRect().left < previous.getBoundingClientRect().right) {
+        const node = current.parentElement;
+        const connector = node.querySelector('.timeline-node-connector');
+        const isAbove = current.dataset.side === 'above';
+        current.style[isAbove ? 'marginBottom' : 'marginTop'] = '28px';
+        if (connector) connector.style.height = '28px';
+      }
+    }
   });
 };
 
