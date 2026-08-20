@@ -488,7 +488,7 @@ const DashboardInadimplencia = (function() {
          companyData[compId] = { id: compId, name: compName.toUpperCase(), totalBills: 0, totalValue: 0, d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0 };
       }
       const comp = companyData[compId];
-      comp.totalBills += (b.billCount || 1);
+      comp.totalBills += (b.titles && b.titles.length > 0) ? b.titles.length : 1;
       comp.totalValue += (b.overdueValue || 0);
       if (b.subjudice === 'S') comp.subjudice_v += (b.overdueValue || 0);
       else comp[delayBucket + '_v'] += (b.overdueValue || 0);
@@ -499,7 +499,7 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
         const op = operatorData[opName];
-        const numTitulos = Number(b.billCount || (b.billIds && b.billIds.length) || 1);
+        const numTitulos = (b.titles && b.titles.length > 0) ? b.titles.length : 1;
         const bTitle = b.saleId || (b.billIds && b.billIds.length ? b.billIds[0] : '-');
         op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
         op.total_c += numTitulos; op.total_v += (b.overdueValue||0);

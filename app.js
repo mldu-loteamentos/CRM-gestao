@@ -3134,16 +3134,17 @@ document.addEventListener("click", function(e) {
   // 1. Calcular Carga de Trabalho por Operador (Workload)
   const workload = {};
   window.getDynamicOperators().forEach(op => {
-      workload[op] = { name: op, clientCount: 0, overdueSum: 0 };
+      workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
   });
-  workload["NÃO ATRIBUÍDO"] = { name: "NÃO ATRIBUÍDO", clientCount: 0, overdueSum: 0 };
+  workload["NÃO ATRIBUÍDO"] = { name: "NÃO ATRIBUÍDO", uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
 
   Object.values(consolidated).forEach(c => {
     const op = c.assignedOperator || "NÃO ATRIBUÍDO";
     if (!workload[op]) {
-      workload[op] = { name: op, clientCount: 0, overdueSum: 0 };
+      workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
     }
-    workload[op].clientCount++;
+    workload[op].uniqueClients.add(c.customerId);
+    workload[op].titlesCount += (c.billIds ? c.billIds.length : (c.billCount || 1));
     workload[op].overdueSum += (c.overdueValue + c.overdueCharges);
   });
 
@@ -3156,7 +3157,8 @@ document.addEventListener("click", function(e) {
       card.className = `operator-workload-card ${cardClass}`;
       card.innerHTML = `
         <h4>${wl.name}</h4>
-        <div class="workload-detail">Clientes: <strong>${wl.clientCount}</strong></div>
+        <div class="workload-detail">Clientes: <strong>${wl.uniqueClients.size}</strong></div>
+        <div class="workload-detail">Títulos: <strong>${wl.titlesCount}</strong></div>
         <div class="workload-detail">Vencido: <strong>${wl.overdueSum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
       `;
       workloadContainer.appendChild(card);
