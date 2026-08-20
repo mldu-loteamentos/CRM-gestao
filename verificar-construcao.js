@@ -16,6 +16,20 @@ function _vcGetThreshold() {
     return thresholdDays;
 }
 
+function _vcGetRecurrenceDays() {
+    const value = parseInt(localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90', 10);
+    return Number.isFinite(value) && value > 0 ? value : 90;
+}
+
+function _vcDaysSince(dateValue) {
+    if (!dateValue) return null;
+    const date = new Date(String(dateValue).split('T')[0] + 'T12:00:00');
+    if (Number.isNaN(date.getTime())) return null;
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    return Math.max(0, Math.floor((today - date) / (1000 * 60 * 60 * 24)));
+}
+
 function _vcGetCostCenterName(costCenterId) {
     if (!costCenterId) return '-';
     const ccList = (window.AppState && window.AppState.cachedCostCenters) || [];
@@ -79,6 +93,7 @@ window.VerificarConstrucaoApp = {
         if (!root) return;
 
         const thresholdDays = _vcGetThreshold();
+        const recurrenceDays = _vcGetRecurrenceDays();
 
         root.innerHTML = `
             <div class="crm-card" style="padding: 24px;">
@@ -268,7 +283,7 @@ window.VerificarConstrucaoApp = {
 
             const elegiveis = clients.filter(c => {
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
-                if (maxDelay >= thresholdDays) return true;
+                if (maxDelay < thresholdDays) return false;
 
                 const contractId = c.saleId || c.contractId || c.id;
                 let fallbackTitle = contractId;
@@ -284,7 +299,14 @@ window.VerificarConstrucaoApp = {
                     (realSaleIdStr && checksByContract[realSaleIdStr])
                 );
                 
-                return hasActive;
+                const latestCheckDate = [String(contractId), String(tituloKey), contractNumberStr, realSaleIdStr]
+                    .map(key => latestCheckDateByContract[key])
+                    .filter(Boolean)
+                    .sort()
+                    .pop();
+                const daysSinceCheck = _vcDaysSince(latestCheckDate);
+
+                return !latestCheckDate || daysSinceCheck >= recurrenceDays || hasActive;
             });
 
             const rows = [];
@@ -365,6 +387,9 @@ window.VerificarConstrucaoApp = {
                     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
                     lastCheckDays = diffDays >= 0 ? `${diffDays} dia(s)` : 'Hoje';
                 }
+
+                const daysSinceCheck = maxDate ? _vcDaysSince(maxDate) : null;
+                if (daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !vistoriaAtiva) return;
 
                 rows.push({
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',

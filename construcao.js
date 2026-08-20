@@ -203,6 +203,15 @@ function renderConstrucaoHistory(checks) {
         }
         
         const respName = check.responsible === 'Vistoriador App' ? '(15) 99811-8246' : (check.responsible || '-');
+        const currentUser = window.AppState && window.AppState.currentUser;
+        const isAdmin = !!(currentUser && (
+            (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
+            (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
+            (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
+        ));
+        const deleteBtn = !isAppVistoria || isAdmin
+            ? `<button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>`
+            : '<span style="color:#64748b; font-size:0.75rem;" title="Vistorias do aplicativo aprovadas só podem ser excluídas pelo administrador.">Protegida</span>';
 
         html += `
         <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -220,7 +229,7 @@ function renderConstrucaoHistory(checks) {
                 ${obsBtn}
                 ${fileLink}
                 <button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>
-                <button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>
+                ${deleteBtn}
             </td>
         </tr>
         `;
@@ -785,6 +794,18 @@ window.deleteNovaVistoria = async function(id) {
             const { doc, deleteDoc } = window.firebaseCollections;
             const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
             if (!check) return;
+
+            const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
+            const currentUser = window.AppState && window.AppState.currentUser;
+            const isAdmin = !!(currentUser && (
+                (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
+                (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
+                (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
+            ));
+            if (isAppVistoria && !isAdmin) {
+                alert('Vistorias realizadas pelo aplicativo só podem ser excluídas pelo administrador.');
+                return;
+            }
             
             await deleteDoc(doc(window.firebaseDb, "construction_checks", id));
             window.loadConstrucoes();

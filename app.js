@@ -1810,7 +1810,7 @@ async function initializeApplication() {
     { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
     { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
   ];
-  if (!localStorage.getItem("crm_moura_timeline_v2")) {
+  if (!timelineStr) {
       window.TimelineState = [
         { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
         { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
@@ -1818,6 +1818,10 @@ async function initializeApplication() {
       ];
       localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
       localStorage.setItem("crm_moura_timeline_v2", "true");
+  }
+
+  if (!localStorage.getItem('crm_moura_vistoria_recurrence_days')) {
+    localStorage.setItem('crm_moura_vistoria_recurrence_days', '90');
   }
 
   const judStr = localStorage.getItem("crm_moura_judiciais");
@@ -15511,19 +15515,33 @@ window.saveRulesConfig = function() {
   }
 };
 
+window.openVistoriaRecurrenceModal = function() {
+  const modal = document.getElementById('vistoria-recurrence-modal');
+  const input = document.getElementById('vistoria-recurrence-days');
+  if (!modal || !input) return;
+  input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+  modal.style.display = 'flex';
+};
+
+window.saveVistoriaRecurrence = function() {
+  const input = document.getElementById('vistoria-recurrence-days');
+  const days = parseInt(input?.value || '', 10);
+  if (!Number.isFinite(days) || days < 1) {
+    alert('Informe um intervalo válido maior que zero.');
+    return;
+  }
+  localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
+  if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+  const modal = document.getElementById('vistoria-recurrence-modal');
+  if (modal) modal.style.display = 'none';
+  if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.loadData === 'function') {
+    window.VerificarConstrucaoApp.loadData();
+  }
+};
+
 window.renderTimeline = function() {
   const container = document.getElementById('interactive-timeline-container');
   if (!container) return;
-
-  // Autocorreção: remover nós órfãos ou corrompidos
-  if (window.TimelineState && window.TimelineAcoesList) {
-    const initialLen = window.TimelineState.length;
-    window.TimelineState = window.TimelineState.filter(n => n.acao === 'custom' || window.TimelineAcoesList.find(a => a.id === n.acao));
-    if (window.TimelineState.length !== initialLen) {
-        localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
-        console.warn('Nós corrompidos (sem ação definida) removidos via autocorreção no renderTimeline.');
-    }
-  }
 
   container.style.minHeight = '100px';
   container.style.marginTop = '60px'; 
@@ -15826,17 +15844,6 @@ window.removeTimelineAcao = function(id) {
   if (!confirm('Deseja realmente remover esta ação? Os pontos que usam ela ficarão sem ação definida.')) return;
   window.TimelineAcoesList = window.TimelineAcoesList.filter(a => a.id !== id);
   localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
-  
-  // Rotina de autocorreção: Remover os nós que dependiam dessa ação que foi excluída (ou estavam corrompidos)
-  if (window.TimelineState) {
-    const initialLen = window.TimelineState.length;
-    window.TimelineState = window.TimelineState.filter(n => n.acao === 'custom' || window.TimelineAcoesList.find(a => a.id === n.acao));
-    if (window.TimelineState.length !== initialLen) {
-        localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
-        if (window.renderTimeline) window.renderTimeline();
-        alert('Alguns nós corrompidos ou sem ação definida foram removidos automaticamente da régua de cobrança.');
-    }
-  }
   
   if (window.forceUploadLocalConfig) {
       window.forceUploadLocalConfig(true).catch(console.error);
@@ -22274,6 +22281,7 @@ window.SYNC_KEYS = [
     "crm_moura_timeline_nodes",
     "crm_moura_timeline_acoes",
     "crm_moura_timeline_gatilhos"
+    ,"crm_moura_vistoria_recurrence_days"
 ];
 
 // Função que baixa configurações na inicialização
