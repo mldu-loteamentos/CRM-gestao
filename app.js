@@ -1159,7 +1159,11 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   });
 
   // Carregar dados específicos da aba
-  if (tabId === "dashboard") {
+  if (tabId === "construcao-home") {
+    if (typeof renderOperadorHomeDashboard === 'function') {
+      renderOperadorHomeDashboard();
+    }
+  } else if (tabId === "dashboard") {
     if (!AppState.dashboardRendered) {
       loadDashboardData();
     }
@@ -15612,9 +15616,10 @@ window.renderTimeline = function() {
     const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === node.acao);
     let acaoLabel = acaoObj ? acaoObj.label : node.acao;
     let color = acaoObj ? (acaoObj.color || '#94a3b8') : '#94a3b8';
+    const labelAbove = index % 2 === 0;
 
     nodeEl.innerHTML = `
-      <div style="position: absolute; bottom: 100%; margin-bottom: 8px; font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
+      <div style="position: absolute; ${labelAbove ? 'bottom: 100%; margin-bottom: 8px;' : 'top: 100%; margin-top: 8px;'} font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
         ${acaoLabel}<br>
         <span class="node-dias-text" style="color: ${color}; font-size: 0.9rem;">${node.dias} dias</span>
       </div>
