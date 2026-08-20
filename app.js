@@ -628,6 +628,10 @@ function switchCustomerTab(tabId) {
         window.pendingOccurrenceClone = null;
     }
   }
+
+  if (tabId === 'tab-cobranca-judicial' && typeof window.updateJudFaseDropdown === 'function') {
+    window.updateJudFaseDropdown();
+  }
   
   const activeBtn = document.querySelector(`.customer-tab-btn[data-target="${tabId}"]`);
   if (activeBtn) {
@@ -16566,6 +16570,14 @@ window.saveJudicialOptionsList = function() {
 window.updateJudFaseDropdown = function() {
   const sel = document.getElementById("jud-fase");
   if(!sel) return;
+  if (!Array.isArray(window.EtapasJudiciaisState)) {
+    try {
+      const saved = JSON.parse(localStorage.getItem("crm_moura_judiciais") || "[]");
+      if (Array.isArray(saved)) window.EtapasJudiciaisState = saved;
+    } catch (e) {
+      console.warn('[Judicial] Não foi possível carregar as etapas salvas.', e);
+    }
+  }
   let html = `<option value="">Selecione...</option>`;
   if(window.EtapasJudiciaisState) {
     const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));

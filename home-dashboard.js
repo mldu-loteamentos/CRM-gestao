@@ -293,6 +293,41 @@ const HomeDashboard = {
     
     if (!box || !textEl) return;
 
+    const msgs = [
+        // Saúde e Bem-Estar
+        "Lembre-se de beber água! Manter-se hidratado ajuda no foco. 💧",
+        "Respire fundo... Inspire em 4 segundos, segure por 4, solte em 4. Ajuda muito em ligações difíceis! 🧘",
+        "Dê uma espreguiçada rápida! Sua postura agradece. 🙆‍♂️",
+        "Olhe um pouco para longe da tela para descansar a vista. 👀",
+        
+        // Boa Comunicação e Educação
+        "Um 'bom dia' sincero e um sorriso na voz mudam o tom de qualquer ligação. 😊",
+        "O segredo para um bom acordo é ouvir o cliente antes de propor a solução. 🚀",
+        "Seja sempre educado, mesmo quando o cliente estiver estressado. A calma contagia! 🕊️",
+        "Chamar o cliente pelo nome demonstra respeito e gera conexão. 🤝",
+        
+        // Dicas de Negociação de Dívidas
+        "Uma cobrança feita com empatia tem mais chances de sucesso. 💙",
+        "Tente entender o motivo do atraso. Muitas vezes é apenas um imprevisto! 💡",
+        "Ofereça alternativas reais. O objetivo é ajudar o cliente a voltar a ficar em dia! 📊",
+        "Destaque os benefícios de estar com o nome limpo e com as parcelas em dia. ✨",
+        
+        // Organização
+        "Não se esqueça de registrar todos os detalhes da conversa nas ocorrências! 📝",
+        "Dica: Tente ligar para os clientes com maiores valores ou mais dias de atraso primeiro!",
+        "Lembre-se de conferir sua agenda de lembretes para não perder nenhum retorno. 📅",
+        "Organize suas abas e deixe as informações do cliente prontas antes de ligar. 🗂️",
+        
+        // Inspiração
+        "Estou de olho nos seus resultados! Vamos bater essa meta! 🎯",
+        "Cada ligação é uma nova oportunidade. Acredite no seu potencial! 🌟",
+        "Você está fazendo um ótimo trabalho. Continue assim! 💪"
+    ];
+
+    if (!isClick) {
+        msg = msgs[Math.floor(Math.random() * msgs.length)];
+    }
+
     const hour = new Date().getHours();
     let greeting = 'Boa noite';
     if (hour < 12) greeting = 'Bom dia';
@@ -309,16 +344,6 @@ const HomeDashboard = {
        } else {
            msg = `${greeting}! Você tem ${qtd} clientes na sua fila hoje totalizando R$ ${totalVal.toLocaleString('pt-BR',{minimumFractionDigits:2})}. Vamos com tudo fechar essas negociações! 💪`;
        }
-    } else if (!isClick) {
-       const msgs = [
-          "Estou de olho nos seus resultados! 👀",
-          "Não se esqueça de registrar os contatos nas ocorrências.",
-          "Dica: Tente ligar para os clientes com maiores valores primeiro!",
-          "Lembre-se de conferir sua agenda de lembretes.",
-          "Uma cobrança feita com empatia tem mais chances de sucesso. 💙",
-          "O segredo para um bom acordo é ouvir o cliente. 🚀"
-       ];
-       msg = msgs[Math.floor(Math.random() * msgs.length)];
     }
     
     textEl.textContent = msg;
