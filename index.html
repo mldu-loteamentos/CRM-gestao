@@ -966,7 +966,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.291 &nbsp;&middot;&nbsp; 20/08/2026
+            v1.0.292 &nbsp;&middot;&nbsp; 20/08/2026
           </span>
         </div>
       </div>
@@ -1221,6 +1221,9 @@
               <div class="doc-menu-item" onclick="selectDocTemplate('carta')" id="menu-doc-carta">
                 <i data-lucide="mail"></i> Carta de Cobrança
               </div>
+              <div class="doc-menu-item" onclick="selectDocTemplate('suspensao')" id="menu-doc-suspensao">
+                <i data-lucide="file-warning"></i> Suspensão de Contrato
+              </div>
               <div class="doc-menu-item" onclick="selectDocTemplate('distrato')" id="menu-doc-distrato">
                 <i data-lucide="file-x"></i> Distrato / Rescisão
               </div>
@@ -1355,6 +1358,49 @@ Solicitamos que entre em contato com nossa equipe para regularização.</textare
                     <i data-lucide="save" style="width:18px;"></i> Salvar Modelo
                   </button>
                   <button class="btn btn-outline" onclick="previewDocPadrao('carta')">
+                    <i data-lucide="eye" style="width:18px;"></i> Simular PDF
+                  </button>
+                </div>
+              </div>
+
+              <!-- Form: Suspensão de Contrato -->
+              <div id="editor-suspensao" class="doc-editor-form">
+                <h3 style="margin-top: 0; color: #1e293b; font-size: 1.3rem; margin-bottom: 20px;">Carta de Suspensão de Contrato</h3>
+                <div class="form-group">
+                  <label>Título / Referência</label>
+                  <input type="text" class="form-control" id="doc-suspensao-ref" value="NOTIFICAÇÃO EXTRAJUDICIAL – CANCELAMENTO DE CONTRATO POR IMPLEMENTO DE CONDIÇÃO SUSPENSIVA">
+                </div>
+                <div class="form-group">
+                  <label>Corpo do Documento Padrão</label>
+                  <textarea class="form-control" id="doc-suspensao-corpo" rows="18" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">Ao(À)(s) Ilmo(a)(s). Sr(a)(s).
+{{NOME_CLIENTE}}, portador(a) do C.P.F. nº {{CPF_CLIENTE}},
+e {{NOME_CONJUGE}} , portador(a) do C.P.F. nº {{CPF_CONJUGE}} .
+{{ENDERECO_CLIENTE}}
+{{CEP_CLIENTE}} - {{CIDADE_CLIENTE}} - {{ESTADO_CLIENTE}}
+Via : carta com “AR” e Mão própria.
+
+Ref.: {{TITULO_REF}}
+firmado em {{DATA_CONTRATO}}, com pagamento de forma parcelada,
+Quadra e lote: {{QUADRA}}-{{LOTE}}, no Loteamento: {{EMPREENDIMENTO}}.
+
+Prezado(a)(s) Senhor(a)(es),
+
+A {{EMPRESA_NOME}}, inscrita no CNPJ sob nº {{EMPRESA_CNPJ}}, vem, por meio da presente, notificá-lo(a) de que o Contrato de Compromisso de Compra e Venda, do loteamento {{EMPREENDIMENTO}}, não produziu efeitos jurídicos, tendo em vista o não cumprimento da condição suspensiva prevista no instrumento contratual.
+
+Conforme expressamente estabelecido no contrato, sua eficácia estava condicionada ao pagamento do valor indicado no Item 1.2, no prazo improrrogável de até 30 (trinta) dias contados do vencimento do boleto. Em razão da ausência desse pagamento dentro do prazo contratualmente estipulado, o contrato é considerado como não celebrado para todos os fins de direito, independentemente de notificação ou interpelação.
+
+Dessa forma, comunicamos o cancelamento do contrato, em estrita observância às disposições contratuais pactuadas entre as partes.
+
+Caso V.Sa. entenda que a situação decorre de equívoco ou possua documentação que demonstre a regularização do pagamento dentro do prazo contratual, solicitamos que entre em contato com nossa empresa, apresentando o respectivo comprovante para análise.
+
+Atenciosamente,
+{{EMPRESA_NOME}}</textarea>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="saveDocPadrao('suspensao')">
+                    <i data-lucide="save" style="width:18px;"></i> Salvar Modelo
+                  </button>
+                  <button class="btn btn-outline" onclick="previewDocPadrao('suspensao')">
                     <i data-lucide="eye" style="width:18px;"></i> Simular PDF
                   </button>
                 </div>
@@ -5298,30 +5344,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=291"></script>
-  <script defer src="sienge-api.js?v=291"></script>
-  <script defer src="azure-auth.js?v=291"></script>
-  <script defer src="app.js?v=291"></script>
-  <script defer src="home-dashboard.js?v=291"></script>
-  <script defer src="anexos.js?v=291"></script>
-  <script defer src="contas-pagar.js?v=291"></script>
-  <script defer src="config-tags.js?v=291"></script>
-  <script defer src="config-users.js?v=291"></script>
-  <script defer src="construcao.js?v=291"></script>
-  <script defer src="empresas.js?v=291"></script>
-  <script defer src="relacionamento.js?v=291"></script>
+  <script defer src="data.js?v=292"></script>
+  <script defer src="sienge-api.js?v=292"></script>
+  <script defer src="azure-auth.js?v=292"></script>
+  <script defer src="app.js?v=292"></script>
+  <script defer src="home-dashboard.js?v=292"></script>
+  <script defer src="anexos.js?v=292"></script>
+  <script defer src="contas-pagar.js?v=292"></script>
+  <script defer src="config-tags.js?v=292"></script>
+  <script defer src="config-users.js?v=292"></script>
+  <script defer src="construcao.js?v=292"></script>
+  <script defer src="empresas.js?v=292"></script>
+  <script defer src="relacionamento.js?v=292"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=291"></script>
-  <script defer src="plano-financeiro.js?v=291"></script>
-  <script defer src="fiscal.js?v=291"></script>
-  <script defer src="indexadores.js?v=291"></script>
-  <script defer src="verificar-construcao.js?v=291"></script>
-  <script src="repactuacoes.js?v=291"></script>
+  <script defer src="centros-custo.js?v=292"></script>
+  <script defer src="plano-financeiro.js?v=292"></script>
+  <script defer src="fiscal.js?v=292"></script>
+  <script defer src="indexadores.js?v=292"></script>
+  <script defer src="verificar-construcao.js?v=292"></script>
+  <script src="repactuacoes.js?v=292"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=291"></script>
+  <script defer src="dashboard-inadimplencia.js?v=292"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

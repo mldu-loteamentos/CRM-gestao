@@ -26,6 +26,10 @@ echo.
 
 REM --- 2) GIT ADD + COMMIT ---
 echo [2/5] Registrando alteracoes no Git...
+if exist "assets\pets" (
+    echo       Incluindo todos os arquivos novos da pasta assets\pets...
+    git add "assets/pets"
+)
 git add .
 git commit -m "v!NEW_VER! - !TODAY!"
 echo       OK - Commit criado
