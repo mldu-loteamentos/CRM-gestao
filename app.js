@@ -7281,73 +7281,12 @@ function formatCpfCnpj(val) {
                let multa = 0;
                let juros = 0;
                
-              if (diasAtraso >= 1) { // 1 day delay applies fine and interest
-                let apiMulta = inst.fine || 0;
-                let apiJuros = (inst.interest || 0) + (inst.monetaryCorrection || 0);
-                let matchedExact = false;
-                      
-                      // Match exactly with the defaulters list to mirror the Fila de Cobrança
-                        if (AppState.defaultersBills) {
-                          const matchingBill = AppState.defaultersBills.find(b =>
-                            String(b.saleId) === String(saleId) ||
-                            String(b.receivableBillId) === String(saleId) ||
-                            String(b.id) === String(saleId) ||
-                            (String(b.customerId) === String(customerId) && b.defaulterInstallments && b.defaulterInstallments.some(di =>
-                              String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
-                              String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
-                            ))
-                          );
-                          if (matchingBill && matchingBill.defaulterInstallments) {
-                            const matchingInst = matchingBill.defaulterInstallments.find(di =>
-                              String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
-                              String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
-                            );
-                              if (matchingInst) {
-                                const correctedBase = matchingInst.correctedValueWithoutAdditions !== undefined
-                                  ? matchingInst.correctedValueWithoutAdditions
-                                  : (matchingInst.value !== undefined ? matchingInst.value : inst.cb);
-                                  const totalWithAdd = matchingInst.correctedValueWithAdditions !== undefined 
-                                                     ? matchingInst.correctedValueWithAdditions 
-                                         : correctedBase + (matchingInst.interest || 0) + (matchingInst.fine || 0);
-                                  const totalJurosEMulta = totalWithAdd - inst.cb;
-                                  if (totalJurosEMulta > 0) {
-                                      apiMulta = matchingInst.fine || 0;
-                                      apiJuros = totalJurosEMulta - apiMulta;
-                                      matchedExact = true;
-                                  } else if (totalJurosEMulta === 0) {
-                                      apiMulta = 0; apiJuros = 0; matchedExact = true;
-                                  }
-                              }
-                          }
-                      }
-                      
-                      if (!matchedExact && (inst.fine !== undefined || inst.interest !== undefined || inst.overdueCharges !== undefined || inst.currentBalanceWithAddition !== undefined)) {
-                          // Caso a API não separe e mande apenas overdueCharges
-                          if (apiMulta === 0 && apiJuros === 0 && inst.overdueCharges) {
-                              apiJuros = inst.overdueCharges;
-                          }
-                          
-                          // Caso não tenha multas/juros explícitos, mas temos o total da API
-                          if (apiMulta === 0 && apiJuros === 0 && inst.currentBalanceWithAddition > inst.cb) {
-                              apiMulta = inst.cb * 0.02; // assume 2% de multa
-                              apiJuros = (inst.currentBalanceWithAddition - inst.cb) - apiMulta;
-                              if (apiJuros < 0) {
-                                  apiJuros = inst.currentBalanceWithAddition - inst.cb;
-                                  apiMulta = 0;
-                              }
-                          }
-                      }
-
-                    // O Sienge já devolve os acréscimos calculados para a data de
-                    // correção da consulta. Esses valores prevalecem sobre o pró-rata
-                    // local, inclusive quando a data do simulador foi informada manualmente.
-                    if (matchedExact || apiMulta > 0 || apiJuros > 0) {
-                      multa = apiMulta * taxaMultiplier;
-                      juros = apiJuros * taxaMultiplier;
-                    } else {
-                      multa = (inst.cb * 0.02) * taxaMultiplier;
-                      juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
-                    }
+              if (diasAtraso >= 1) {
+                // Os valores da API refletem a data da consulta, não a data simulada.
+                // A multa contratual é fixa; os juros são proporcionais aos dias até targetDate.
+                const apiMulta = Number(inst.fine);
+                multa = (Number.isFinite(apiMulta) && apiMulta > 0 ? apiMulta : inst.cb * 0.02) * taxaMultiplier;
+                juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
                }
                
                if (inst.selected) {
@@ -7433,10 +7372,12 @@ function formatCpfCnpj(val) {
             
             // KPI cards: valor = soma de TODAS as vencidas (independente de seleção)
             const totalAtualizadoKPI = vencidasSimulador.reduce((acc, inst) => {
-               const hoje2 = new Date();
-               const diasAtraso2 = Math.max(0, Math.round((hoje2 - inst.due) / (1000 * 60 * 60 * 24)));
-               const multaK = diasAtraso2 >= 1 ? inst.cb * 0.02 : 0;
-               const jurosK = diasAtraso2 >= 1 ? inst.cb * 0.01 * (diasAtraso2 / 30) : 0;
+              const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
+              const multaBaseK = Number(inst.fine);
+              const multaK = diasAtraso2 >= 1
+                ? (Number.isFinite(multaBaseK) && multaBaseK > 0 ? multaBaseK : inst.cb * 0.02) * taxaMultiplier
+                : 0;
+              const jurosK = diasAtraso2 >= 1 ? inst.cb * 0.01 * (diasAtraso2 / 30) * taxaMultiplier : 0;
                return acc + inst.cb + multaK + jurosK;
             }, 0);
 
