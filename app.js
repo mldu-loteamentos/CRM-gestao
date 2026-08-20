@@ -17054,6 +17054,7 @@ function saveDocPadrao(tipo) {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
     carta: ['doc-carta-assunto', 'doc-carta-saudacao', 'doc-carta-corpo', 'doc-carta-assinatura'],
+    suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
   const ids = keyMap[tipo] || [];
@@ -17088,6 +17089,7 @@ function previewDocPadrao(tipo) {
     reneg: 'Termo de Acordo',
     boleto: 'Boleto de Cobrança',
     carta: 'Carta de Cobrança',
+    suspensao: 'Suspensão de Contrato',
     distrato: 'Distrato / Rescisão',
   };
   const label = labelMap[tipo] || tipo;
@@ -17109,6 +17111,10 @@ function previewDocPadrao(tipo) {
     const corpo = document.getElementById('doc-carta-corpo')?.value || '';
     const assinatura = document.getElementById('doc-carta-assinatura')?.value || '';
     content = `<h2>Prévia: ${assunto}</h2><p>${saudacao}</p><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre><br><p><strong>${assinatura}</strong></p>`;
+  } else if (tipo === 'suspensao') {
+    const ref = document.getElementById('doc-suspensao-ref')?.value || '';
+    const corpo = document.getElementById('doc-suspensao-corpo')?.value || '';
+    content = `<h2 style="text-align:center;">${ref}</h2><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre>`;
   } else if (tipo === 'distrato') {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
@@ -17125,11 +17131,12 @@ function previewDocPadrao(tipo) {
 
 // Carregar templates salvos ao inicializar
 function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'distrato'];
+  const tipos = ['reneg', 'boleto', 'carta', 'suspensao', 'distrato'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
     carta: ['doc-carta-assunto', 'doc-carta-saudacao', 'doc-carta-corpo', 'doc-carta-assinatura'],
+    suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
   tipos.forEach(tipo => {
