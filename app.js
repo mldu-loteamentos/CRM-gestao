@@ -16111,6 +16111,10 @@ window.saveTimelineNode = function() {
       window.forceUploadLocalConfig(true).catch(console.error);
   }
   window.renderTimeline();
+  if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.loadData === 'function') {
+    window.VerificarConstrucaoApp.render();
+    window.VerificarConstrucaoApp.loadData();
+  }
   const listModal = document.getElementById('timeline-list-modal');
   if (listModal && listModal.style.display === 'flex') {
     window.openTimelineListModal();
