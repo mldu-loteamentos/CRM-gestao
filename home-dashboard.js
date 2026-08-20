@@ -1,8 +1,13 @@
 const HomeDashboard = {
-  // Mascotes disponíveis (Agora com suporte a animações Lottie)
+  // Mascotes disponíveis
   pets: [
-    { id: 'lottie_dog', isLottie: true, url: 'https://lottie.host/8b56b35b-40b5-4928-8686-27756774f285/1G3nN6Qd0A.json', name: 'Cachorro (Animado)' },
-    { id: 'robot', url: 'assets/pets/robot.jpg', name: 'Robô Zeca' },
+    { 
+      id: '3d_robot', 
+      is3DModel: true, 
+      glbUrl: 'https://modelviewer.dev/shared-assets/models/RobotExpressive.glb', 
+      thumbnail: 'assets/pets/robot.jpg', 
+      name: 'Robô 3D (Oficial)' 
+    },
     { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
     { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
     { id: 'fairy', url: 'assets/pets/fairy.jpg', name: 'Fada Madrinha' },
@@ -23,7 +28,7 @@ const HomeDashboard = {
     "O segredo do sucesso é a constância do propósito."
   ],
 
-  selectedPetId: localStorage.getItem('crm_home_pet') || 'super_h',
+  selectedPetId: localStorage.getItem('crm_home_pet') || '3d_robot',
   intervalId: null,
   
   init() {
@@ -69,19 +74,19 @@ const HomeDashboard = {
   },
 
   updateGreeting() {
+    const user = window.AppState?.currentUser;
+    const name = user?.name?.split(' ')[0] || '';
     const hour = new Date().getHours();
     let greeting = 'Boa noite';
     if (hour < 12) greeting = 'Bom dia';
     else if (hour < 18) greeting = 'Boa tarde';
     
-    const user = window.AppState?.currentUser;
-    const name = user?.name ? user.name.split(' ')[0] : 'Operador';
-    
-    document.getElementById('home-op-greeting').textContent = `${greeting}, ${name}!`;
-    
-    // Set random quote
     const quote = this.motivationalQuotes[Math.floor(Math.random() * this.motivationalQuotes.length)];
-    document.getElementById('home-op-motivational').textContent = `"${quote}"`;
+    
+    document.getElementById('home-op-greeting').innerHTML = `
+      <div style="font-size: 1.5rem; font-weight: 700;">${greeting}, ${name.toUpperCase()}!</div>
+      <div style="font-size: 0.9rem; margin-top: 5px; opacity: 0.9; font-style: italic;">"${quote}"</div>
+    `;
   },
 
   renderPetSelector() {
@@ -90,10 +95,7 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        ${p.isLottie 
-          ? `<lottie-player src="${p.url}" background="transparent" speed="1" style="width: 60px; height: 60px;" loop autoplay></lottie-player>` 
-          : `<img src="${p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">`
-        }
+        <img src="${p.is3DModel ? p.thumbnail : p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">
         <div style="font-size: 0.65rem; margin-top: 5px; color: #64748b; font-weight: 500;">${p.name}</div>
       </div>
     `).join('');
@@ -103,8 +105,8 @@ const HomeDashboard = {
     const pet = this.pets.find(p => p.id === this.selectedPetId) || this.pets[0];
     const container = document.getElementById('home-pet-emoji');
     if (container) {
-       if (pet.isLottie) {
-           container.innerHTML = `<lottie-player src="${pet.url}" background="transparent" speed="1" style="width: 150px; height: 150px; display: block; margin-bottom: -15px;" loop autoplay></lottie-player>`;
+       if (pet.is3DModel) {
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan style="width: 250px; height: 350px; margin-bottom: -40px; margin-right: -40px; outline: none; --poster-color: transparent; background-color: transparent;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
@@ -248,15 +250,24 @@ const HomeDashboard = {
   speak(includeFeedback = false, isClick = false) {
     const box = document.getElementById('home-pet-speech');
     const textEl = document.getElementById('home-pet-speech-text');
-    const petEl = document.getElementById('home-pet-emoji');
+    const petEl = document.getElementById('home-pet-emoji')?.querySelector('img');
+    const modelViewer = document.getElementById('my-3d-assistant');
     
-    if (isClick && petEl) {
-       const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
-       const randAnim = animations[Math.floor(Math.random() * animations.length)];
-       petEl.style.animation = 'none';
-       // trigger reflow
-       void petEl.offsetWidth;
-       petEl.style.animation = randAnim;
+    if (isClick) {
+       if (modelViewer) {
+           const anims = ['Wave', 'Dance', 'ThumbsUp', 'Jump'];
+           const randAnim = anims[Math.floor(Math.random() * anims.length)];
+           modelViewer.setAttribute('animation-name', randAnim);
+           setTimeout(() => {
+               modelViewer.setAttribute('animation-name', 'Idle');
+           }, 3000);
+       } else if (petEl) {
+           const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
+           const randAnim = animations[Math.floor(Math.random() * animations.length)];
+           petEl.style.animation = 'none';
+           void petEl.offsetWidth;
+           petEl.style.animation = randAnim;
+       }
     }
     
     if (!box || !textEl) return;
