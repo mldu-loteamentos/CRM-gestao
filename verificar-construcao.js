@@ -30,6 +30,37 @@ function _vcDaysSince(dateValue) {
     return Math.max(0, Math.floor((today - date) / (1000 * 60 * 60 * 24)));
 }
 
+window.openVistoriaRecurrenceModal = function() {
+    const modal = document.getElementById('vistoria-recurrence-modal');
+    const input = document.getElementById('vistoria-recurrence-days');
+    if (!modal || !input) {
+        console.error('[Vistoria] Modal de recorrência não encontrado no HTML.');
+        return;
+    }
+    input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+};
+
+window.saveVistoriaRecurrence = function() {
+    const input = document.getElementById('vistoria-recurrence-days');
+    const days = parseInt(input?.value || '', 10);
+    if (!Number.isFinite(days) || days < 1) {
+        alert('Informe um intervalo válido maior que zero.');
+        return;
+    }
+    localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
+    const modal = document.getElementById('vistoria-recurrence-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+    }
+    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+    if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.loadData === 'function') {
+        window.VerificarConstrucaoApp.loadData();
+    }
+};
+
 function _vcGetCostCenterName(costCenterId) {
     if (!costCenterId) return '-';
     const ccList = (window.AppState && window.AppState.cachedCostCenters) || [];
