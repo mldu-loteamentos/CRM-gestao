@@ -324,7 +324,7 @@ const HomeDashboard = {
         "Você está fazendo um ótimo trabalho. Continue assim! 💪"
     ];
 
-    if (!isClick) {
+    if (msg === "Olá! Estou por aqui se precisar.") {
         msg = msgs[Math.floor(Math.random() * msgs.length)];
     }
 
