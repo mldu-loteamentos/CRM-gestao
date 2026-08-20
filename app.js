@@ -17212,11 +17212,32 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   const matchCep = address.match(/\d{5}-\d{3}/);
   if (matchCep) cep = matchCep[0];
   
+  let cidade = customer.city || '';
+  let estado = customer.state || '';
+  if (!cidade && address) {
+      const parts = address.split(',');
+      if (parts.length > 1) {
+          const lastPart = parts[parts.length - 1].trim();
+          const cityState = lastPart.split('-');
+          if (cityState.length >= 2) {
+              cidade = cityState[0].trim();
+              estado = cityState[cityState.length - 1].trim();
+          } else {
+              cidade = lastPart;
+          }
+      }
+  }
+  
   let text = corpo;
-  text = text.replace(/{{NOME_CLIENTE}}/g, customer.name);
-  text = text.replace(/{{CPF_CLIENTE}}/g, customer.cpfCnpj);
+  text = text.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
+  text = text.replace(/{{CPF_CLIENTE}}/g, customer.cpfCnpj || '');
+  text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName || '- X -');
+  text = text.replace(/{{CPF_CONJUGE}}/g, customer.spouseCpf || '- X -');
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
+  text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
+  text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
+  text = text.replace(/{{TITULO_REF}}/g, ref);
   text = text.replace(/{{EMPREENDIMENTO}}/g, costCenter.name || '');
   text = text.replace(/{{QUADRA}}/g, unit.block || '');
   text = text.replace(/{{LOTE}}/g, unit.lot || '');
