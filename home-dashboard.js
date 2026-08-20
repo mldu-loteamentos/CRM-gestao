@@ -39,6 +39,99 @@ const HomeDashboard = {
 
   selectedPetId: localStorage.getItem('crm_home_pet') || '3d_robot',
   intervalId: null,
+  DEFAULT_PREVIEW_SIENGE: 'LETICIA.OLIVEIRA',
+
+  normalizeOperatorKey(value) {
+    return String(value || '')
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\./g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  isAdminUser(user) {
+    const profile = (user?.profile_name || '').toUpperCase();
+    const email = (user?.email || '').toLowerCase();
+    return profile.includes('ADMIN') || profile.includes('GESTOR') || profile.includes('GERENTE')
+      || email === 'israel@mouraleite.com.br' || email === 'admin@mouraleite.com.br';
+  },
+
+  getCrmUsers() {
+    try {
+      return JSON.parse(localStorage.getItem('crm_users') || '[]') || [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  getOperatorUsers() {
+    const fromStorage = this.getCrmUsers().filter(u => {
+      const profile = (u.profile_name || '').toUpperCase();
+      const status = (u.status || '').toUpperCase();
+      return profile.includes('OPERADOR') && status !== 'INATIVO';
+    });
+    if (fromStorage.length) return fromStorage;
+    return [
+      { name: 'LETICIA PEREIRA DE OLIVEIRA', sienge_user: 'LETICIA.OLIVEIRA', profile_name: 'OPERADOR COBRANÇA' },
+      { name: 'MICHELLE FRANCINE VIEIRA', sienge_user: 'MICHELLE.VIEIRA', profile_name: 'OPERADOR COBRANÇA' },
+      { name: 'MICHELLE PEREIRA YAMASHIRO', sienge_user: 'MICHELLE.PEREIRA', profile_name: 'OPERADOR COBRANÇA' },
+      { name: 'THAIANE CRISTINA', sienge_user: 'THAIANE.CORDEIRO', profile_name: 'OPERADOR COBRANÇA' },
+      { name: 'LUCELIA SALVADOR JUSTO', sienge_user: 'LUCELIA JUSTO', profile_name: 'OPERADOR COBRANÇA' }
+    ];
+  },
+
+  getViewUser() {
+    const real = window.AppState?.currentUser;
+    if (!this.isAdminUser(real)) return real;
+
+    const operators = this.getOperatorUsers();
+    const stored = sessionStorage.getItem('crm_home_preview_op') || this.DEFAULT_PREVIEW_SIENGE;
+    const wanted = this.normalizeOperatorKey(stored);
+    const preview = operators.find(u =>
+      this.normalizeOperatorKey(u.sienge_user) === wanted
+      || this.normalizeOperatorKey(u.name) === wanted
+      || String(u.id) === String(stored)
+    ) || operators.find(u => this.normalizeOperatorKey(u.sienge_user).includes('LETICIA'))
+      || operators[0];
+
+    return preview || real;
+  },
+
+  getViewOperatorKey() {
+    const user = this.getViewUser();
+    return this.normalizeOperatorKey(user?.sienge_user || user?.name || '');
+  },
+
+  getMyClients() {
+    const list = window.rawClientList || [];
+    const opKey = this.getViewOperatorKey();
+    if (!opKey) return list;
+    return list.filter(c => this.normalizeOperatorKey(c.assignedOperator) === opKey);
+  },
+
+  renderPreviewBar() {
+    const bar = document.getElementById('home-op-preview-bar');
+    const select = document.getElementById('home-op-preview-select');
+    if (!bar || !select) return;
+
+    const real = window.AppState?.currentUser;
+    if (!this.isAdminUser(real)) {
+      bar.style.display = 'none';
+      return;
+    }
+
+    const operators = this.getOperatorUsers();
+    const currentKey = this.getViewOperatorKey();
+    select.innerHTML = operators.map(u => {
+      const key = u.sienge_user || u.name;
+      const selected = this.normalizeOperatorKey(key) === currentKey ? 'selected' : '';
+      const first = (u.name || key || '').split(' ')[0];
+      return `<option value="${key}" ${selected}>${first} — ${u.name}</option>`;
+    }).join('');
+    bar.style.display = 'flex';
+  },
   
   init() {
     const user = window.AppState?.currentUser;
@@ -49,6 +142,7 @@ const HomeDashboard = {
       document.getElementById('home-operador-container').style.display = 'block';
       document.getElementById('home-pet-container').style.display = 'flex';
       
+      this.renderPreviewBar();
       this.updateGreeting();
       this.renderPetSelector();
       this.updatePetIcon();
@@ -84,7 +178,7 @@ const HomeDashboard = {
   },
 
   updateGreeting() {
-    const user = window.AppState?.currentUser;
+    const user = this.getViewUser();
     const name = user?.name?.split(' ')[0] || '';
     const hour = new Date().getHours();
     let greeting = 'Boa noite';
@@ -152,15 +246,7 @@ const HomeDashboard = {
   renderGrids() {
     if (!window.rawClientList) return;
     
-    const opSienge = window.AppState?.currentUser?.sienge_user || '';
-    
-    // Filtrar clientes da carteira do operador (opcional, ou pega todos atribuídos a ele)
-    // Na fila de cobrança os clientes têm .operatorSienge (atribuído)
-    let myClients = window.rawClientList;
-    
-    if (opSienge) {
-        myClients = myClients.filter(c => c.operatorSienge === opSienge);
-    }
+    const myClients = this.getMyClients();
     
     // Ordenar Top 10 Maiores Valores
     const topValores = [...myClients].sort((a, b) => b.overdueValue - a.overdueValue).slice(0, 10);
@@ -218,17 +304,16 @@ const HomeDashboard = {
     if (typeof window.getAgendaTasksForDate === 'function') {
         const todayStr = new Date().toISOString().split('T')[0];
         const tasks = window.getAgendaTasksForDate(todayStr);
-        const opSienge = window.AppState?.currentUser?.sienge_user || '';
-        const userOp = window.AppState?.currentUser?.name?.split(' ')[0] || '';
+        const viewUser = this.getViewUser();
+        const userOp = viewUser?.name?.split(' ')[0] || '';
+        const opKey = this.getViewOperatorKey();
         
-        // Filtra para o operador logado (como na agenda)
         const myTasks = tasks.filter(t => {
-           if (t.operator && t.operator !== 'NÃO ATRIBUÍDO' && t.operator !== 'OUTROS' && opSienge) {
-               // Verifica se é o operador atual
-               if (t.operator !== userOp && !t.operator.includes(userOp.toUpperCase())) {
-                   // Verificar shares
+           if (t.operator && t.operator !== 'NÃO ATRIBUÍDO' && t.operator !== 'OUTROS' && opKey) {
+               const taskKey = this.normalizeOperatorKey(t.operator);
+               if (taskKey !== opKey && !taskKey.includes(this.normalizeOperatorKey(userOp))) {
                    if (t.sharedWith && t.sharedWith.includes(userOp)) return true;
-                   return false; // Não é dele
+                   return false;
                }
            }
            return true;
@@ -342,10 +427,9 @@ const HomeDashboard = {
     else if (hour < 18) greeting = 'Boa tarde';
 
     if (includeFeedback && window.rawClientList) {
-       // Cálculo simples: quantos títulos em atraso hoje?
-       const myClients = window.rawClientList.filter(c => c.operatorSienge === window.AppState?.currentUser?.sienge_user);
+       const myClients = this.getMyClients();
        const qtd = myClients.length;
-       const totalVal = myClients.reduce((acc, c) => acc + c.overdueValue, 0);
+       const totalVal = myClients.reduce((acc, c) => acc + (Number(c.overdueValue) || 0), 0);
        
        if (qtd === 0) {
            msg = `${greeting}! Sua carteira está impecável hoje, zero inadimplência! 🎉`;
@@ -367,6 +451,10 @@ const HomeDashboard = {
 // Funções globais necessárias para os botões do HTML
 window.renderOperadorHomeDashboard = () => HomeDashboard.init();
 window.loadOperadorHomeData = () => HomeDashboard.loadData();
+window.setHomePreviewOperator = (siengeUser) => {
+   sessionStorage.setItem('crm_home_preview_op', siengeUser);
+   HomeDashboard.init();
+};
 window.openPetSelector = () => document.getElementById('home-pet-selector-modal').style.display = 'flex';
 window.selectHomePet = (id) => {
    HomeDashboard.selectedPetId = id;

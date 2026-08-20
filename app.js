@@ -13613,7 +13613,7 @@ async function _loadZeroPaidTab_Impl() {
     rowClass += " table-row-hover";
     row.className = rowClass.trim();
 
-    let btnSuspensaoHtml = '';
+    let delayBadge = getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
     try {
       const customConfigStr = localStorage.getItem('crm_centros_custo_custom');
       if (customConfigStr) {
@@ -13626,9 +13626,9 @@ async function _loadZeroPaidTab_Impl() {
             }
         }
         if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
-          btnSuspensaoHtml = `
-            <button class="btn btn-warning btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2; background: #ea580c; border-color: #ea580c; color: white;" title="Gerar termo de suspensão (PDF)">
-              <i data-lucide="file-warning" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Suspensão
+          delayBadge = `
+            <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
+              <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
             </button>
           `;
         }
@@ -13653,7 +13653,7 @@ async function _loadZeroPaidTab_Impl() {
       </td>
       <td style="white-space: nowrap; text-align: center; width: 1%;">
         <div style="display: flex; align-items: center; justify-content: center;">
-          ${getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid)}
+          ${delayBadge}
         </div>
       </td>
       <td style="white-space: nowrap; text-align: center; width: 1%;">
@@ -13672,7 +13672,6 @@ async function _loadZeroPaidTab_Impl() {
         <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
           <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
         </button>
-        ${btnSuspensaoHtml}
         <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
           <i data-lucide="eye" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Detalhes
         </button>
