@@ -6657,6 +6657,7 @@ function formatCpfCnpj(val) {
             isValidReceipt: isValidReceipt,
             correctedValueWithoutAdditions: inst.correctedValueWithoutAdditions,
             correctedValueWithAdditions: inst.correctedValueWithAdditions,
+            apiDaysDelay: inst.daysOfDelay !== undefined ? inst.daysOfDelay : inst.daysDelay,
             fine: inst.fine !== undefined ? inst.fine : (inst.fineAmount !== undefined ? inst.fineAmount : undefined),
             interest: inst.interest !== undefined ? inst.interest : (inst.interestAmount !== undefined ? inst.interestAmount : undefined),
             monetaryCorrection: inst.monetaryCorrection !== undefined ? inst.monetaryCorrection : (inst.correctionAmount !== undefined ? inst.correctionAmount : undefined),
@@ -7289,6 +7290,14 @@ function formatCpfCnpj(val) {
                  String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
                  String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
                );
+               const directFine = Number(matchingInst?.fine ?? matchingInst?.fineAmount ?? inst.fine);
+               const referenceDays = Number(matchingInst?.daysOfDelay ?? matchingInst?.daysDelay ?? inst.apiDaysDelay) ||
+                 Math.max(1, Math.round((new Date() - inst.due) / (1000 * 60 * 60 * 24)));
+               if (Number.isFinite(directFine) && directFine > 0 && Number.isFinite(referenceDays) && referenceDays > 0) {
+                 const simulatedDays = Math.max(1, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
+                 return directFine * (simulatedDays / referenceDays);
+               }
+
                const correctedBase = Number(
                  matchingInst?.correctedValueWithoutAdditions ??
                  inst.correctedValueWithoutAdditions
@@ -7298,7 +7307,6 @@ function formatCpfCnpj(val) {
                const correction = Number(matchingInst?.monetaryCorrection ?? matchingInst?.correctionAmount ?? inst.monetaryCorrection);
                if (Number.isFinite(correction) && correction > 0) return (inst.cb + correction) * 0.02;
 
-               const directFine = Number(matchingInst?.fine ?? matchingInst?.fineAmount ?? inst.fine);
                return Number.isFinite(directFine) && directFine > 0 ? directFine : inst.cb * 0.02;
             };
 
