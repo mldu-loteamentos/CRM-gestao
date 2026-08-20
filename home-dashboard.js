@@ -5,28 +5,16 @@ const HomeDashboard = {
       id: '3d_eve', 
       is3DModel: true, 
       glbUrl: 'assets/pets/eve.glb', 
-      thumbnail: 'assets/pets/robot.jpg', 
-      name: 'Eve (Assistente 3D)' 
+      icon: 'fa-robot', 
+      name: 'IA.EL' 
     },
     { 
       id: '3d_pikachu', 
       is3DModel: true, 
       glbUrl: 'assets/pets/pikachu_dancing.glb', 
-      thumbnail: 'assets/pets/dog.jpg', 
-      name: 'Pikachu (Assistente 3D)' 
-    },
-    { 
-      id: '3d_bulbasaur', 
-      is3DModel: true, 
-      glbUrl: 'assets/pets/bulbasaur.glb', 
-      thumbnail: 'assets/pets/superboy.jpg', 
-      name: 'Bulbasaur (Assistente 3D)' 
-    },
-    { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
-    { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
-    { id: 'fairy', url: 'assets/pets/fairy.jpg', name: 'Fada Madrinha' },
-    { id: 'ninja', url: 'assets/pets/ninja.jpg', name: 'Ninja' },
-    { id: 'astronaut', url: 'assets/pets/astronaut.jpg', name: 'Astronauta' }
+      icon: 'fa-bolt', 
+      name: 'Pikachu' 
+    }
   ],
   
   motivationalQuotes: [
@@ -109,8 +97,8 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        <img src="${p.is3DModel ? p.thumbnail : p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">
-        <div style="font-size: 0.65rem; margin-top: 5px; color: #64748b; font-weight: 500;">${p.name}</div>
+        <i class="fa-solid ${p.icon}" style="font-size: 32px; color: #94a3b8; margin-bottom: 8px;"></i>
+        <div style="font-size: 0.75rem; color: #475569; font-weight: 600;">${p.name}</div>
       </div>
     `).join('');
   },
@@ -269,14 +257,21 @@ const HomeDashboard = {
     const petEl = document.getElementById('home-pet-emoji')?.querySelector('img');
     const modelViewer = document.getElementById('my-3d-assistant');
     
+    let msg = "Olá! Estou por aqui se precisar.";
+
     if (isClick) {
        if (modelViewer) {
-           const anims = ['Wave', 'Dance', 'ThumbsUp', 'Jump'];
-           const randAnim = anims[Math.floor(Math.random() * anims.length)];
-           modelViewer.setAttribute('animation-name', randAnim);
-           setTimeout(() => {
-               modelViewer.setAttribute('animation-name', 'Idle');
-           }, 3000);
+           const anims = modelViewer.availableAnimations;
+           if (anims && anims.length > 0) {
+               const randAnim = anims[Math.floor(Math.random() * anims.length)];
+               modelViewer.setAttribute('animation-name', randAnim);
+               msg = `Animação atual: "${randAnim}". Animações que encontrei no arquivo: ${anims.join(', ')}`;
+               setTimeout(() => {
+                   modelViewer.setAttribute('animation-name', anims[0]);
+               }, 3000);
+           } else {
+               msg = "Este modelo 3D não possui animações configuradas no arquivo.";
+           }
        } else if (petEl) {
            const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
            const randAnim = animations[Math.floor(Math.random() * animations.length)];
@@ -287,9 +282,7 @@ const HomeDashboard = {
     }
     
     if (!box || !textEl) return;
-    
-    let msg = "Olá! Estou por aqui se precisar.";
-    
+
     const hour = new Date().getHours();
     let greeting = 'Boa noite';
     if (hour < 12) greeting = 'Bom dia';
@@ -306,7 +299,7 @@ const HomeDashboard = {
        } else {
            msg = `${greeting}! Você tem ${qtd} clientes na sua fila hoje totalizando R$ ${totalVal.toLocaleString('pt-BR',{minimumFractionDigits:2})}. Vamos com tudo fechar essas negociações! 💪`;
        }
-    } else {
+    } else if (!isClick) {
        const msgs = [
           "Estou de olho nos seus resultados! 👀",
           "Não se esqueça de registrar os contatos nas ocorrências.",
