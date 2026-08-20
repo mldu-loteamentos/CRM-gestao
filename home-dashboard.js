@@ -274,7 +274,13 @@ const HomeDashboard = {
                    modelViewer.setAttribute('animation-name', anims[0]);
                }, 3000);
            } else {
-               msg = "Este modelo 3D não possui animações configuradas no arquivo.";
+               // Fallback CSS Animations for static 3D models
+               const cssAnims = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
+               const randAnim = cssAnims[Math.floor(Math.random() * cssAnims.length)];
+               modelViewer.style.animation = 'none';
+               void modelViewer.offsetWidth;
+               modelViewer.style.animation = randAnim;
+               msg = "Este modelo 3D não possui animações nativas no arquivo, então eu fiz uma dancinha por conta própria! 🕺";
            }
        } else if (petEl) {
            const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
