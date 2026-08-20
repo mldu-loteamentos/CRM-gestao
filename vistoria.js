@@ -1,8 +1,9 @@
 let currentVistoriaId = null;
 let currentVistoriaDoc = null;
 let loteCoords = null; // {lat, lng}
+let hasKmzReference = false;
 let currentDistance = Infinity;
-const MAX_DISTANCE = 20; // meters
+const MAX_DISTANCE = 25; // meters
 const files = { file1: null, file2: null, file3: null };
 
 // Lista de lotes carregados
@@ -201,11 +202,16 @@ async function abrirVistoria(id) {
 }
 
 async function buscarCoordenadasLote() {
+    hasKmzReference = false;
+    loteCoords = null;
     try {
         setStatus("Buscando coordenadas...", "wait");
         
         const empId = currentVistoriaDoc.costCenterId;
-        if (!empId) throw new Error("Sem Centro de Custo vinculado");
+        if (!empId) {
+            liberarVistoriaSemReferencia();
+            return;
+        }
 
         const { doc, getDoc } = window.firebaseCollections;
         const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', String(empId));
@@ -247,16 +253,13 @@ async function buscarCoordenadasLote() {
                     }
                 }
                 
-                if (!found && list.length > 0) {
-                    found = list[0];
-                    alert(`Atenção: O lote "${currentVistoriaDoc.unidade}" não foi encontrado dentro do arquivo KMZ! O sistema vai usar a coordenada do primeiro item que achou no arquivo: "${found.name}".`);
-                }
-                
                 if (found) {
                     const coordsStr = found.coords.trim().split(' ')[0];
                     const coordsArr = coordsStr.split(',');
-                    if (coordsArr && coordsArr.length >= 2) {
-                        foundLiveCoords = { lng: parseFloat(coordsArr[0]), lat: parseFloat(coordsArr[1]) };
+                    const lng = parseFloat(coordsArr[0]);
+                    const lat = parseFloat(coordsArr[1]);
+                    if (coordsArr && coordsArr.length >= 2 && Number.isFinite(lat) && Number.isFinite(lng)) {
+                        foundLiveCoords = { lng, lat };
                     }
                 }
             }
@@ -266,14 +269,12 @@ async function buscarCoordenadasLote() {
 
         if (foundLiveCoords) {
             loteCoords = foundLiveCoords;
+            hasKmzReference = true;
             console.log("Usando KMZ ao vivo:", loteCoords);
             window._debugCoordSource = "KMZ (Live)";
-        } else if (currentVistoriaDoc.loteCoords && currentVistoriaDoc.loteCoords.lat && currentVistoriaDoc.loteCoords.lng) {
-            loteCoords = currentVistoriaDoc.loteCoords;
-            console.log("Usando coordenadas salvas em cache no documento da vistoria.");
-            window._debugCoordSource = "Cache (Antigo)";
         } else {
-            throw new Error("Lote não encontrado no arquivo KMZ nem no cache da vistoria.");
+            liberarVistoriaSemReferencia();
+            return;
         }
         
         // Removed DEBUG INFO
@@ -282,9 +283,26 @@ async function buscarCoordenadasLote() {
         
     } catch(e) {
         console.error(e);
-        showError("Erro de Mapa: " + e.message + " (Não será possível validar a distância).");
-        document.getElementById('photo-area').style.display = 'block';
+        liberarVistoriaSemReferencia();
     }
+}
+
+function liberarVistoriaSemReferencia() {
+    hasKmzReference = false;
+    loteCoords = null;
+    if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+    document.getElementById('btn-maps').style.display = 'none';
+    document.getElementById('photo-area').style.display = 'block';
+    document.getElementById('q-agua').disabled = false;
+    document.getElementById('q-energia').disabled = false;
+    document.getElementById('q-entulho').disabled = false;
+    document.getElementById('q-acesso').disabled = false;
+    document.getElementById('q-estagio').disabled = false;
+    if (document.getElementById('q-obs')) document.getElementById('q-obs').disabled = false;
+    setStatus("KMZ não localizado. Preencha a vistoria e tire as fotos normalmente.", "success");
 }
 
 function iniciarGPS() {
@@ -303,6 +321,7 @@ function iniciarGPS() {
             const userLat = pos.coords.latitude;
             const userLng = pos.coords.longitude;
             
+            if (!hasKmzReference || !loteCoords) return;
             const dist = calcCrow(userLat, userLng, loteCoords.lat, loteCoords.lng);
             currentDistance = Math.round(dist * 1000);
             
@@ -311,9 +330,8 @@ function iniciarGPS() {
             // Salvar GPS atual globalmente para a marca d'água
             window.currentVistoriaGps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             
-            // BYPASS PARA TESTE (Sempre aprova a distância)
-            if (currentDistance <= 20 || true) {
-                setStatus(`📍 Você chegou no local! (Distância real: ${currentDistance}m)`, "success");
+            if (currentDistance <= MAX_DISTANCE) {
+                setStatus(`📍 Você chegou no local! (Distância real: ${formatDistance(currentDistance)})`, "success");
                 document.getElementById('btn-maps').style.display = 'none';
                 document.getElementById('photo-area').style.display = 'block';
                 document.getElementById('q-agua').disabled = false;
@@ -323,10 +341,7 @@ function iniciarGPS() {
                 document.getElementById('q-estagio').disabled = false;
                 if(document.getElementById('q-obs')) document.getElementById('q-obs').disabled = false;
             } else {
-                let distFormatStr = currentDistance > 999 
-                    ? (currentDistance / 1000).toFixed(1).replace('.', ',') + 'km' 
-                    : Math.round(currentDistance) + 'm';
-                setStatus(`⚠️ Você está a ${distFormatStr} do lote. Aproxime-se para menos de 20m para liberar as respostas.`, "error");
+                setStatus(`⚠️ Você está a ${formatDistance(currentDistance)} do lote. Aproxime-se para até ${MAX_DISTANCE} m para liberar a vistoria.`, "error");
                 document.getElementById('btn-maps').style.display = 'block';
                 document.getElementById('photo-area').style.display = 'none';
                 document.getElementById('q-agua').disabled = true;
@@ -347,6 +362,11 @@ function iniciarGPS() {
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
+}
+
+function formatDistance(distanceMeters) {
+    if (distanceMeters <= 999) return `${Math.round(distanceMeters)} m`;
+    return `${(distanceMeters / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
 // Escopo global para HTML attributes (onclick/onchange)

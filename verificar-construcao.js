@@ -273,6 +273,8 @@ window.VerificarConstrucaoApp = {
                     const snap = await getDocs(q);
                     snap.forEach(doc => {
                         const data = doc.data();
+                        // Links de teste não concluídos devem voltar para a fila como pendentes.
+                        if (data.status === 'aguardando_fotos') return;
                         const docObj = { id: doc.id, ...data };
                         checksByContract[String(data.contractId)] = docObj;
                         if (data.contractKeys && Array.isArray(data.contractKeys)) {
