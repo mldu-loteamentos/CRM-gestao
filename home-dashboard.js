@@ -89,7 +89,7 @@ const HomeDashboard = {
     
     grid.innerHTML = this.pets.map(p => `
       <div class="pet-selector-item" onclick="window.selectHomePet('${p.id}')" title="${p.name}">
-        <img src="${p.url}" alt="${p.name}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <img src="${p.url}" alt="${p.name}" style="width: 60px; height: 60px; object-fit: contain; mix-blend-mode: multiply;">
         <div style="font-size: 0.65rem; margin-top: 5px; color: #64748b; font-weight: 500;">${p.name}</div>
       </div>
     `).join('');
@@ -99,7 +99,7 @@ const HomeDashboard = {
     const pet = this.pets.find(p => p.id === this.selectedPetId) || this.pets[0];
     const container = document.getElementById('home-pet-emoji');
     if (container) {
-       container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 15px rgba(0,0,0,0.2); border: 3px solid white; display: block;">`;
+       container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
     }
   },
 
