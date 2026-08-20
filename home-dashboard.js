@@ -34,7 +34,7 @@ const HomeDashboard = {
   
   init() {
     const user = window.AppState?.currentUser;
-    const isOperador = user?.profile_name?.toUpperCase().includes('OPERADOR');
+    const isOperador = user?.profile_name?.toUpperCase().includes('OPERADOR') || user?.profile_name?.toUpperCase().includes('ADMIN');
     
     if (isOperador) {
       document.getElementById('home-em-construcao-container').style.display = 'none';
