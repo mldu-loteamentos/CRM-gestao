@@ -93,7 +93,6 @@ window.VerificarConstrucaoApp = {
         if (!root) return;
 
         const thresholdDays = _vcGetThreshold();
-        const recurrenceDays = _vcGetRecurrenceDays();
 
         root.innerHTML = `
             <div class="crm-card" style="padding: 24px;">
@@ -225,6 +224,7 @@ window.VerificarConstrucaoApp = {
         if (btnWpp) btnWpp.disabled = true;
 
         const thresholdDays = _vcGetThreshold();
+        const recurrenceDays = _vcGetRecurrenceDays();
 
         try {
             const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];

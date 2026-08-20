@@ -3156,6 +3156,9 @@ document.addEventListener("click", function(e) {
   if (workloadContainer) {
     workloadContainer.innerHTML = "";
     Object.values(workload).forEach(wl => {
+      if (wl.titlesCount === 0 && wl.name !== "NÃO ATRIBUÍDO") {
+        return;
+      }
       const cardClass = wl.name.replace(/\s+/g, '-').toUpperCase();
       const card = document.createElement("div");
       card.className = `operator-workload-card ${cardClass}`;
