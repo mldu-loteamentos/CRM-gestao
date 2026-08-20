@@ -61,11 +61,12 @@ const HomeDashboard = {
          setTimeout(() => { this.speak(true, false); }, 2000);
       }
       
-      // Enviar mensagens motivacionais automaticamente
+      // Enviar mensagens motivacionais automaticamente e atualizar a frase do banner
       if (this.intervalId) clearInterval(this.intervalId);
       this.intervalId = setInterval(() => {
-          this.speak(false, false);
-      }, 90000); // 1 minuto e meio
+          this.speak(false, true); // true para forçar a dancinha/animação
+          this.updateGreeting();
+      }, 60000); // 1 minuto
 
     } else {
       document.getElementById('home-em-construcao-container').style.display = 'flex';

@@ -10327,9 +10327,23 @@ window.generateDemonstrativoDistratoPDF = function() {
       <head>
         <title>${pageTitle}</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
+          @page { size: A4 portrait; margin: 8mm; }
+          body { font-family: Arial, sans-serif; margin: 0; padding: 0; font-size: 8.5pt; line-height: 1.15; }
+          body > div { max-width: 100%; }
+          h2 { font-size: 13pt !important; margin: 0 0 2px !important; }
+          h3 { font-size: 9.5pt !important; }
+          h4 { font-size: 9.5pt !important; }
+          h5 { font-size: 9pt !important; margin: 0 0 4px !important; }
+          p { margin-top: 0 !important; margin-bottom: 6px !important; }
+          table { font-size: 8.5pt !important; }
+          td { padding: 2px 4px !important; line-height: 1.1; }
+          body > div > div { margin-bottom: 8px !important; }
+          body > div > div[style*="margin-top"] { margin-top: 8px !important; }
+          body > div > p[style*="margin-top"] { margin-top: 8px !important; }
+          body > div > p[style*="margin-bottom"] { margin-bottom: 6px !important; }
+          body > div > div:last-child { margin-top: 8px !important; }
           table { width: 100%; border-collapse: collapse; }
-          td { padding: 5px 0; }
+          tr { page-break-inside: avoid; }
           @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
