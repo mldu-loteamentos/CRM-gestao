@@ -4,9 +4,9 @@ const HomeDashboard = {
     { 
       id: '3d_robot', 
       is3DModel: true, 
-      glbUrl: 'https://modelviewer.dev/shared-assets/models/RobotExpressive.glb', 
+      glbUrl: 'assets/pets/eve.glb', 
       thumbnail: 'assets/pets/robot.jpg', 
-      name: 'Robô 3D (Oficial)' 
+      name: 'Eve (Assistente 3D)' 
     },
     { id: 'dog', url: 'assets/pets/dog.jpg', name: 'Cachorrinho' },
     { id: 'superboy', url: 'assets/pets/superboy.jpg', name: 'Super-Herói' },
