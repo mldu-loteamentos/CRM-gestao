@@ -7273,6 +7273,26 @@ function formatCpfCnpj(val) {
                 else simThJuros.textContent = "Juros (0% a.m)";
             }
 
+            const getSimulatedFine = (inst) => {
+               const directFine = Number(inst.fine);
+               if (Number.isFinite(directFine) && directFine > 0) return directFine;
+               const matchingBill = (AppState.defaultersBills || []).find(b =>
+                 String(b.saleId) === String(saleId) ||
+                 String(b.receivableBillId) === String(saleId) ||
+                 String(b.id) === String(saleId) ||
+                 (String(b.customerId) === String(customerId) && b.defaulterInstallments && b.defaulterInstallments.some(di =>
+                   String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
+                   String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
+                 ))
+               );
+               const matchingInst = matchingBill?.defaulterInstallments?.find(di =>
+                 String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
+                 String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
+               );
+               const siengeFine = Number(matchingInst?.fine ?? matchingInst?.fineAmount);
+               return Number.isFinite(siengeFine) && siengeFine > 0 ? siengeFine : inst.cb * 0.02;
+            };
+
             vencidasSimulador.forEach((inst, index) => {
                // Calculate fine/interest
                let diasAtraso = Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24));
@@ -7284,8 +7304,7 @@ function formatCpfCnpj(val) {
               if (diasAtraso >= 1) {
                 // Os valores da API refletem a data da consulta, não a data simulada.
                 // A multa contratual é fixa; os juros são proporcionais aos dias até targetDate.
-                const apiMulta = Number(inst.fine);
-                multa = (Number.isFinite(apiMulta) && apiMulta > 0 ? apiMulta : inst.cb * 0.02) * taxaMultiplier;
+                multa = getSimulatedFine(inst) * taxaMultiplier;
                 juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
                }
                
@@ -7373,9 +7392,8 @@ function formatCpfCnpj(val) {
             // KPI cards: valor = soma de TODAS as vencidas (independente de seleção)
             const totalAtualizadoKPI = vencidasSimulador.reduce((acc, inst) => {
               const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
-              const multaBaseK = Number(inst.fine);
               const multaK = diasAtraso2 >= 1
-                ? (Number.isFinite(multaBaseK) && multaBaseK > 0 ? multaBaseK : inst.cb * 0.02) * taxaMultiplier
+                 ? getSimulatedFine(inst) * taxaMultiplier
                 : 0;
               const jurosK = diasAtraso2 >= 1 ? inst.cb * 0.01 * (diasAtraso2 / 30) * taxaMultiplier : 0;
                return acc + inst.cb + multaK + jurosK;
