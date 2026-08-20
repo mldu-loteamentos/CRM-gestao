@@ -4,14 +4,14 @@ const HomeDashboard = {
     { 
       id: '3d_eve', 
       is3DModel: true, 
-      glbUrl: 'assets/pets/eve.glb', 
+      glbUrl: 'assets/pets/IA.eL.glb', 
       icon: '🤖', 
       name: 'IA.EL' 
     },
     { 
       id: '3d_pikachu', 
       is3DModel: true, 
-      glbUrl: 'assets/pets/pikachu_dancing.glb', 
+      glbUrl: 'assets/pets/Pikachu.glb', 
       icon: '⚡', 
       name: 'Pikachu' 
     }
