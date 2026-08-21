@@ -274,14 +274,15 @@ const HomeDashboard = {
     } else {
         let html = topValores.map(c => {
             const hasHighDelay = top20DiasIds.has(`${c.customerId}-${c.saleId}`);
-            const warningIcon = hasHighDelay ? `<i data-lucide="alert-triangle" style="width: 14px; color: #f59e0b; margin-left: 5px;" title="Também possui um alto tempo de atraso (${c.maxDaysDelay} dias)"></i>` : '';
+            const warningIcon = hasHighDelay ? `<i data-lucide="alert-triangle" style="width: 14px; height: 14px; color: #f59e0b; margin-left: 5px; vertical-align: -2px;"></i>` : '';
             const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
             
             const customerNotes = window.AppState?.notes?.[c.customerId] || [];
             const lastContact = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
             const promiseNotes = customerNotes.filter(n => n.promiseDate);
             const lastPromise = promiseNotes.length > 0 ? new Date(Math.max(...promiseNotes.map(n => new Date(n.promiseDate + 'T12:00:00')))).toLocaleDateString('pt-BR') : "Nenhum";
-            const tooltip = `Parcelas em atraso: ${c.billCount || 1}&#10;Dias em atraso: ${c.maxDaysDelay} dias&#10;Último contato: ${lastContact}&#10;Próximo retorno: ${lastPromise}`;
+            const extraInfo = hasHighDelay ? `&#10;Atenção: Cliente está no topo de dias em atraso.` : '';
+            const tooltip = `Parcelas em atraso: ${c.billCount || 1}&#10;Dias em atraso: ${c.maxDaysDelay} dias&#10;Último contato: ${lastContact}&#10;Próximo retorno: ${lastPromise}${extraInfo}`;
             
             return `
             <tr onclick="window.viewCustomerCard(${c.customerId}, ${c.saleId})" style="cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'" title="${tooltip}">
