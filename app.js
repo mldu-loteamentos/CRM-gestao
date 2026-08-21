@@ -17230,7 +17230,7 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   }
   
   const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
-  const sale = salesList.find(s => s.id === saleId) || {};
+  const sale = salesList.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId)) || {};
   const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
   
   const rawSale = (window.rawClientList || []).find(c => c.saleId == saleId);
@@ -17313,6 +17313,7 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   
   // Also replace any legacy hardcoded text from old templates to be safe
   text = text.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao Ilmo. Sr.');
+  text = text.replace(/Prezado\(a\)\(s\)\s*Senhor\(a\)\(es\),/gi, 'Prezado Senhor,');
   text = text.replace(/A MOURA LEITE LOTEAMENTOS/gi, `A ${companyName}`);
   text = text.replace(/64\.860\.139\/0001-98/g, maskCpfCnpj(companyCnpj));
   text = text.replace(/Atenciosamente,(\s|<br>)*MOURA LEITE LOTEAMENTOS/gi, `Atenciosamente,\n${companyName}`);
@@ -17405,17 +17406,13 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   
   const headerCidade = cidade || 'Botucatu';
   const headerDateStr = `${headerCidade}, ${dateStr}`;
-  const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
 
   const docHtml = `
-    <div style="margin-bottom: 2rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-        <span style="font-family: 'Times New Roman', serif; font-size: 12pt;">${headerDateStr}</span>
-        <img src="${logoUrl}" alt="Logo Moura Leite" style="height: 60px; object-fit: contain;">
-      </div>
-      <h2 style="text-align:center; color: #105436; font-size: 14pt; font-weight: bold;">${ref}</h2>
-      <hr style="border: 1px solid #ccc; margin: 20px 0;">
-      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; text-align: justify;">${text}</pre>
+    <div style="margin-bottom: 0;">
+      <h2 style="text-align:center; color: #105436; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 5px;">${ref}</h2>
+      <hr style="border: 1px solid #ccc; margin: 10px 0;">
+      <div style="font-family: 'Times New Roman', serif; font-size: 11.5pt; margin-bottom: 15px; text-align: left;">${headerDateStr}</div>
+      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.4; text-align: justify; margin: 0;">${text}</pre>
     </div>
   `;
   
