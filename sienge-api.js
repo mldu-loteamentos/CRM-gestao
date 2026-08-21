@@ -1705,6 +1705,7 @@ const SiengeApiService = {
         comp.aging[agingKey].count++;
         comp.aging[agingKey].value += b.value;
       });
+      const uniqueCustomers = new Set(bills.map(b => b.customerId));
       
       const payload = {
         date: dateStr,
@@ -1712,6 +1713,7 @@ const SiengeApiService = {
         is_week_start,
         is_week_end,
         total_count: bills.length,
+        total_customers: uniqueCustomers.size,
         total_value: totalValue,
         avg_ticket: totalValue / bills.length,
         subjudice_count: subjudiceCount,

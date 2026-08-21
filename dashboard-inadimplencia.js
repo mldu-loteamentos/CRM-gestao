@@ -795,7 +795,34 @@ const DashboardInadimplencia = (function() {
         return res.c;
     });
 
-    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}\n👥 *Clientes em Atraso:* ${uniqueClients.size}\n📄 *Títulos Vencidos:* ${totalBills}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n\n_(Atenção: anexe o PDF gerado ou a imagem dos resultados junto a esta mensagem)_`;
+    const ontemSnap = chartSnaps.length > 1 ? chartSnaps[chartSnaps.length - 2] : null;
+    let diffValueStr = "";
+    let diffClientsStr = "";
+    let diffBillsStr = "";
+    
+    if (ontemSnap) {
+        const diffVal = totalOverdue - (ontemSnap.total_value || 0);
+        if (Math.abs(diffVal) > 1) { // Evita mostrar +0 se não mudou
+            const diffValFmt = Math.abs(diffVal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            diffValueStr = ` (${diffVal > 0 ? '+' : '-'} ${diffValFmt} do que ontem)`;
+        }
+        
+        if (ontemSnap.total_customers !== undefined) {
+            const diffCli = uniqueClients.size - ontemSnap.total_customers;
+            if (diffCli !== 0) {
+                diffClientsStr = ` (${diffCli > 0 ? '+' : '-'} ${Math.abs(diffCli)} clientes do que ontem)`;
+            }
+        }
+        
+        if (ontemSnap.total_count !== undefined) {
+            const diffTit = totalBills - ontemSnap.total_count;
+            if (diffTit !== 0) {
+                diffBillsStr = ` (${diffTit > 0 ? '+' : '-'} ${Math.abs(diffTit)} títulos do que ontem)`;
+            }
+        }
+    }
+
+    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}${diffValueStr}\n👥 *Clientes em Atraso:* ${uniqueClients.size}${diffClientsStr}\n📄 *Títulos Vencidos:* ${totalBills}${diffBillsStr}\n⏱️ *Atraso Médio:* ${avgDelay} dias`;
     const teamsLink = `https://teams.microsoft.com/l/chat/19:1d1e6bd7448a479bace24f762a30b425@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D&message=${encodeURIComponent(teamsText)}`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>

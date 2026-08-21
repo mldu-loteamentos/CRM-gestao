@@ -17238,6 +17238,33 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       }
   }
   
+  if (getSiengeApiMode() !== "simulado" && (!customer.address || customer.address === 'N/D' || customer.address.trim() === '')) {
+      try {
+          const detail = await SiengeApiService.getCustomer(customerId);
+          if (detail) {
+              if (detail.addresses && detail.addresses.length > 0) {
+                  const addr = detail.addresses[0];
+                  const street = addr.street || addr.streetName || "";
+                  const num = addr.number ? `, ${addr.number}` : "";
+                  const compl = addr.complement ? ` - ${addr.complement}` : "";
+                  const neigh = addr.neighborhood ? `, ${addr.neighborhood}` : "";
+                  const city = addr.cityName || addr.city || "";
+                  const state = addr.stateName || addr.state || "";
+                  const zip = addr.postalCode || addr.zipCode ? ` - CEP: ${addr.postalCode || addr.zipCode}` : "";
+                  
+                  customer.address = `${street}${num}${compl}${neigh}, ${city}/${state}${zip}`;
+                  customer.city = city;
+                  customer.state = state;
+              }
+              customer.cpfCnpj = detail.cpfCnpj || customer.cpfCnpj;
+              customer.spouseName = detail.spouseName || customer.spouseName;
+              customer.spouseCpf = detail.spouseCpf || customer.spouseCpf;
+          }
+      } catch (e) {
+          console.error("Erro ao buscar detalhes do cliente no Sienge para PDF", e);
+      }
+  }
+  
   let salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
   let sale = salesList.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
   
@@ -17252,6 +17279,29 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       } catch (e) {
           console.error("Erro ao buscar sales no Sienge para PDF", e);
       }
+  }
+  
+  let contractNumFull = 'N/D';
+  try {
+      const billsRes = await SiengeApiService.getReceivableBills(customerId);
+      const receivableBills = billsRes.results || [];
+      const ctContracts = receivableBills.filter(c => (c.documentId || "").trim() === "CT");
+      
+      const rawSaleToMatch = (window.rawClientList || []).find(c => String(c.saleId) === String(saleId));
+      const matchedContract = ctContracts.find(c => 
+          String(c.receivableBillId) === String(saleId) || 
+          (rawSaleToMatch && String(c.saleId) === String(rawSaleToMatch.realSaleId))
+      );
+      
+      if (matchedContract) {
+          contractNumFull = (matchedContract.documentId || '').trim() + (matchedContract.documentNumber || '');
+      } else {
+          // Fallback just in case
+          const firstCt = ctContracts[0];
+          if (firstCt) contractNumFull = (firstCt.documentId || '').trim() + (firstCt.documentNumber || '');
+      }
+  } catch(e) {
+      console.error("Erro ao buscar receivableBills para o pdf:", e);
   }
   sale = sale || {};
   const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
@@ -17416,7 +17466,13 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   text = text.replace(/{{DATA_CONTRATO}}/g, formattedSaleDate);
   
   const tituloAReceber = sale.receivableBillId || saleId || 'N/D';
+  
+  // Fix legacy template mistakes where user wrote {{TITULO_RECEBER}} or hardcoded 12878 for the contract
+  text = text.replace(/Compra e Venda \{\{TITULO_RECEBER\}\}, do loteamento/gi, 'Compra e Venda {{CONTRATO}}, do loteamento');
+  text = text.replace(/Compra e Venda \d+, do loteamento/gi, 'Compra e Venda {{CONTRATO}}, do loteamento');
+  
   text = text.replace(/{{TITULO_RECEBER}}/g, tituloAReceber);
+  text = text.replace(/{{CONTRATO}}/g, contractNumFull);
   
   // Cleanup any lingering dangling characters if variables were empty
   text = text.replace(/^\s*-\s*-\s*$/gm, '');
