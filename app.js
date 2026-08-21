@@ -17248,7 +17248,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
               if (detail.addresses && detail.addresses.length > 0) {
                   const addr = detail.addresses[0];
                   
-                  const streetType = addr.streetType || addr.streetTypeDescription || addr.addressType || "";
+                  const streetType = addr.type || addr.streetType || addr.streetTypeDescription || addr.addressType || "";
                   const street = addr.street || addr.streetName || "";
                   const fullStreet = streetType ? `${streetType} ${street}` : street;
                   
@@ -17457,11 +17457,16 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
           "15300": "AVARÉ - VILLA DO LAGO",
           "16100": "PARDINHO - NONA INES",
           "16200": "PARDINHO - NONA INES 2",
+          "16103": "ITATINGA - NOVO HORIZONTE",
           "30200": "PARDINHO - RECANTO MARISTELA 2"
       };
       
+      let ccIdStr = effectiveCostCenterId ? String(effectiveCostCenterId) : "";
+      
       if (empNameMap[tempEmpId]) {
           empreendimento = empNameMap[tempEmpId];
+      } else if (ccIdStr && empNameMap[ccIdStr]) {
+          empreendimento = empNameMap[ccIdStr];
       } else if (costCenter && costCenter.id) {
           empreendimento = `CC ${costCenter.id}`;
       }
@@ -17469,12 +17474,12 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
 
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
   
-  if (!cep && !cidade && !estado) {
-      text = text.replace(/{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
-  }
-  
+  // O endereco_cliente já traz tudo (incluindo CEP, Cidade e Estado), então se a linha dupla existir no template, nós removemos inteira para evitar duplicidade.
+  text = text.replace(/{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
   text = text.replace(/-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
   text = text.replace(/-\s*Itatinga\s*-\s*SP/gi, '');
+  
+  // E se sobrou variavel solta
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
   text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
   text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
