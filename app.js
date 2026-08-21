@@ -8478,10 +8478,10 @@ async function saveCustomerOccurrence() {
   
   if (canal !== "Nota interna") {
     if (!promiseDate) {
-      alert("A data de promessa é obrigatória.");
+      alert(canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória.");
       return;
     }
-    if (!reminder) {
+    if (canal !== "Retorno Agendado" && !reminder) {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
@@ -8766,15 +8766,37 @@ window.validateOccurrenceForm = function() {
     if (saveBtn) saveBtn.innerHTML = (canal === "Proposta de renegociação") ? '<i data-lucide="save" style="width: 16px;"></i> Gravar Proposta' : '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
     
     isValid = text.length > 0;
+  } else if (canal === "Retorno Agendado") {
+    if (iniciativaGroup) iniciativaGroup.style.display = "block";
+    if (promiseRow) promiseRow.style.display = "grid";
+    if (installmentsGroup) installmentsGroup.style.display = "none";
+    if (pinGroup) pinGroup.style.display = "none";
+    if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
+    
+    if (labelNoteText) labelNoteText.innerHTML = 'Conversa com o Cliente <span style="color: var(--color-danger);">*</span>';
+    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Agendamento';
+    
+    const pDateLabel = document.getElementById('label-promise-date');
+    if (pDateLabel) pDateLabel.innerHTML = 'Data de Retorno <span style="color: var(--color-danger);">*</span>';
+
+    const pDate = pDateEl ? pDateEl.value.trim() : "";
+    const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
+    const iniciativa = iniciativaEl ? iniciativaEl.value : "";
+    
+    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0 && iniciativa.length > 0;
   } else {
     if (iniciativaGroup) iniciativaGroup.style.display = "block";
     if (promiseRow) promiseRow.style.display = "grid";
     if (installmentsGroup) installmentsGroup.style.display = "block";
     if (pinGroup) pinGroup.style.display = "none";
+    if (reminderEl) reminderEl.closest('.form-group').style.display = "block";
     
     if (labelNoteText) labelNoteText.innerHTML = 'Conversa com o Cliente <span style="color: var(--color-danger);">*</span>';
     if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Ocorrência';
     
+    const pDateLabel = document.getElementById('label-promise-date');
+    if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
+
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     const reminder = reminderEl ? reminderEl.value : "";
     const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
@@ -17186,8 +17208,14 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   const customer = getCustomerFromState(customerId);
   const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
   const sale = salesList.find(s => s.id === saleId) || {};
-  const unit = AppState.units[sale.unitId] || {};
-  const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+  const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
+  
+  let costCenter = {};
+  if (getSiengeApiMode() === "simulado") {
+      costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+  } else {
+      costCenter = (AppState.costCenters || []).find(c => c.id == unit.costCenterId) || {};
+  }
   
   let companyCnpj = '64.860.139/0001-98';
   if (AppState.companies) {
@@ -17233,22 +17261,55 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       }
   }
   
+  const maskCpfCnpj = (v) => {
+    if (!v) return '';
+    v = String(v).replace(/\D/g,"");
+    if (v.length <= 11) {
+      return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+    } else {
+      return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
+    }
+  };
+
   let text = corpo;
   text = text.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
-  text = text.replace(/{{CPF_CLIENTE}}/g, customer.cpfCnpj || '');
-  text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName || '- X -');
-  text = text.replace(/{{CPF_CONJUGE}}/g, customer.spouseCpf || '- X -');
+  text = text.replace(/{{CPF_CLIENTE}}/g, maskCpfCnpj(customer.cpfCnpj));
+  
+  if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
+      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
+      text = text.replace(/e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
+      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
+      text = text.replace(/{{NOME_CONJUGE}}/g, '- X -');
+      text = text.replace(/{{CPF_CONJUGE}}/g, '- X -');
+  } else {
+      text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
+      text = text.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(customer.spouseCpf));
+  }
+
+  let quadra = unit.block || sale.block || '';
+  let lote = unit.lot || sale.lot || '';
+  if (!quadra && !lote) {
+      const uName = unit.name || sale.unitName || sale.unitId || '';
+      if (uName.includes('-')) {
+          quadra = uName.split('-')[0];
+          lote = uName.split('-')[1];
+      } else {
+          lote = uName;
+      }
+  }
+  let empreendimento = costCenter.name || sale.enterpriseName || sale.costCenterName || '';
+
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
   text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
   text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
   text = text.replace(/{{TITULO_REF}}/g, ref);
-  text = text.replace(/{{EMPREENDIMENTO}}/g, costCenter.name || '');
-  text = text.replace(/{{QUADRA}}/g, unit.block || '');
-  text = text.replace(/{{LOTE}}/g, unit.lot || '');
+  text = text.replace(/{{EMPREENDIMENTO}}/g, empreendimento);
+  text = text.replace(/{{QUADRA}}/g, quadra);
+  text = text.replace(/{{LOTE}}/g, lote);
   text = text.replace(/{{DATA_CONTRATO}}/g, sale.saleDate ? new Date(sale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '');
-  text = text.replace(/{{EMPRESA_NOME}}/g, costCenter.name ? costCenter.name.split('-')[0].trim() : 'MOURA LEITE LOTEAMENTOS');
-  text = text.replace(/{{EMPRESA_CNPJ}}/g, companyCnpj);
+  text = text.replace(/{{EMPRESA_NOME}}/g, empreendimento ? empreendimento.split('-')[0].trim() : 'MOURA LEITE LOTEAMENTOS');
+  text = text.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpj));
   
   const docHtml = `
     <div style="margin-bottom: 2rem;">
@@ -20301,7 +20362,7 @@ function getCanonicalOptionList(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
   const canonical = isCanal
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna']
+    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Retorno Agendado']
     : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
 
   try {
