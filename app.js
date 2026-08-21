@@ -17202,7 +17202,16 @@ function loadDocPadraoTemplates() {
 
 // ----------------------------------------------------
 // GERAR PDF DE SUSPENSÃO (Zero Paid)
-window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
+window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
+  // Show a loading state if called from a button
+  const btn = document.activeElement;
+  let oldHtml = null;
+  if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('Suspender')) {
+      oldHtml = btn.innerHTML;
+      btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
+      if (window.lucide) lucide.createIcons();
+  }
+
   let customer = getCustomerFromState(customerId);
   // Enhance customer data always to ensure we grab address and other details
   if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
@@ -17229,8 +17238,22 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       }
   }
   
-  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
-  const sale = salesList.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId)) || {};
+  let salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
+  let sale = salesList.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  
+  if (!sale && getSiengeApiMode() !== "simulado") {
+      try {
+          const fetchedSales = await SiengeApiService.getSales(customerId);
+          if (!AppState.sales) AppState.sales = [];
+          fetchedSales.forEach(s => {
+              if (!AppState.sales.find(x => x.id === s.id)) AppState.sales.push(s);
+          });
+          sale = fetchedSales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+      } catch (e) {
+          console.error("Erro ao buscar sales no Sienge para PDF", e);
+      }
+  }
+  sale = sale || {};
   const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
   
   const rawSale = (window.rawClientList || []).find(c => c.saleId == saleId);
@@ -17339,7 +17362,8 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   }
   
   // Auto-correct legacy cached template text for the contract line
-  text = text.replace(/firmado em (.*?), com pagamento de forma parcelada,\n?Quadra e lote: (.*?), no Loteamento: (.*?)(, t.tulo a receber.*?)?\./gi, 'Contrato firmado em $1, com pagamento de forma parcelada, na Quadra e lote: $2, no Loteamento: $3.');
+  text = text.replace(/firmado em (.*?), com pagamento de forma parcelada,\n?Quadra e lote: (.*?), no Loteamento: (.*?)(, t.tulo a receber.*?)?\./gi, 'Contrato firmado em $1, com pagamento de forma parcelada, da Quadra e lote: $2, no Loteamento: $3.');
+  text = text.replace(/Contrato firmado em (.*?), com pagamento de forma parcelada, na Quadra/gi, 'Contrato firmado em $1, com pagamento de forma parcelada, da Quadra');
 
 
   let quadra = unit.block || sale.block || '';
@@ -17422,13 +17446,25 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   
   document.getElementById("pdf-modal-title").textContent = "Carta de Suspensão de Contrato";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
-  document.getElementById("pdf-view-overlay").classList.add("active");
+  const overlay = document.getElementById("pdf-view-overlay");
+  overlay.style.opacity = '0';
+  overlay.style.pointerEvents = 'none';
+  overlay.classList.add("active");
   if (window.lucide) lucide.createIcons();
   
-  // Automagicamente abre a tela de impressão
+  // Automagicamente abre a tela de impressão sem mostrar o modal na tela
   setTimeout(() => {
       window.print();
-  }, 500);
+      
+      // Cleanup after print dialog closes
+      overlay.classList.remove("active");
+      overlay.style.opacity = '';
+      overlay.style.pointerEvents = '';
+  }, 100);
+  
+  if (btn && oldHtml) {
+      btn.innerHTML = oldHtml;
+  }
 };
 
 // ----------------------------------------------------

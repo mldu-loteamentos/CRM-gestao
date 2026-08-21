@@ -533,6 +533,7 @@
         left: 0;
         top: 0;
         width: 100%;
+        opacity: 1 !important;
         height: auto !important;
         margin: 0;
         padding: 0;
@@ -1017,7 +1018,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.320 &nbsp;&middot;&nbsp; 21/08/2026
+            v1.0.321 &nbsp;&middot;&nbsp; 21/08/2026
           </span>
         </div>
       </div>
@@ -1896,8 +1897,22 @@ Atenciosamente,
                transform-origin: center bottom;
              }
              .pet-animated:hover {
-               transform: scale(1.15) !important;
                animation-play-state: paused;
+             }
+             #home-pet-container .pet-trocar-btn {
+               opacity: 0;
+               visibility: hidden;
+               transition: all 0.2s ease;
+             }
+             #home-pet-container:hover .pet-trocar-btn {
+               opacity: 1;
+               visibility: visible;
+             }
+             #home-pet-container {
+               cursor: grab;
+             }
+             #home-pet-container:active {
+               cursor: grabbing;
              }
              .pet-selector-item {
                 padding: 10px; border-radius: 12px; cursor: pointer; transition: all 0.2s; text-align: center;
@@ -1915,10 +1930,68 @@ Atenciosamente,
            </div>
 
            <!-- Botão para trocar mascote -->
-           <div onclick="window.openPetSelector()" style="background: rgba(255,255,255,0.9); padding: 5px 10px; border-radius: 12px; font-size: 0.75rem; color: #64748b; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 5px; text-align: center; font-weight: 600; border: 1px solid #e2e8f0; z-index: 10;">
+           <div class="pet-trocar-btn" onclick="window.openPetSelector()" style="background: rgba(255,255,255,0.9); padding: 5px 10px; border-radius: 12px; font-size: 0.75rem; color: #64748b; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 5px; text-align: center; font-weight: 600; border: 1px solid #e2e8f0; z-index: 10;">
              Trocar Assistente
            </div>
         </div>
+        
+        <!-- Script para Drag & Drop do Mascote -->
+        <script>
+          document.addEventListener('DOMContentLoaded', () => {
+             const petContainer = document.getElementById('home-pet-container');
+             if (!petContainer) return;
+             
+             let isDragging = false;
+             let offsetX = 0, offsetY = 0;
+             let dragStartX = 0, dragStartY = 0;
+
+             petContainer.addEventListener('mousedown', function(e) {
+                 if (e.target.closest('.pet-trocar-btn') || e.target.closest('#home-pet-speech') || e.target.closest('i[data-lucide]')) {
+                     return; 
+                 }
+                 isDragging = true;
+                 dragStartX = e.clientX;
+                 dragStartY = e.clientY;
+                 
+                 const rect = petContainer.getBoundingClientRect();
+                 offsetX = e.clientX - rect.left;
+                 offsetY = e.clientY - rect.top;
+                 
+                 // Bloqueia animação e transições durante o arraste
+                 petContainer.style.transition = 'none';
+             });
+
+             document.addEventListener('mousemove', function(e) {
+                 if (isDragging) {
+                     e.preventDefault();
+                     // Remove posicionamento bottom/right e usa top/left
+                     petContainer.style.bottom = 'auto';
+                     petContainer.style.right = 'auto';
+                     
+                     // Mantem na tela (bounds simples)
+                     let newX = e.clientX - offsetX;
+                     let newY = e.clientY - offsetY;
+                     
+                     petContainer.style.left = newX + 'px';
+                     petContainer.style.top = newY + 'px';
+                 }
+             });
+
+             document.addEventListener('mouseup', function(e) {
+                 if (isDragging) {
+                     isDragging = false;
+                 }
+             });
+             
+             // Previne click fantasma se moveu muito o mouse (arrastou)
+             petContainer.addEventListener('click', function(e) {
+                 if (Math.abs(e.clientX - dragStartX) > 5 || Math.abs(e.clientY - dragStartY) > 5) {
+                     e.stopPropagation();
+                     e.preventDefault();
+                 }
+             }, true);
+          });
+        </script>
 
         <!-- Seletor de Mascotes -->
         <div id="home-pet-selector-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100000; align-items: center; justify-content: center;">
@@ -5405,30 +5478,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=320"></script>
-  <script defer src="sienge-api.js?v=320"></script>
-  <script defer src="azure-auth.js?v=320"></script>
-  <script defer src="app.js?v=320"></script>
-  <script defer src="home-dashboard.js?v=320"></script>
-  <script defer src="anexos.js?v=320"></script>
-  <script defer src="contas-pagar.js?v=320"></script>
-  <script defer src="config-tags.js?v=320"></script>
-  <script defer src="config-users.js?v=320"></script>
-  <script defer src="construcao.js?v=320"></script>
-  <script defer src="empresas.js?v=320"></script>
-  <script defer src="relacionamento.js?v=320"></script>
+  <script defer src="data.js?v=321"></script>
+  <script defer src="sienge-api.js?v=321"></script>
+  <script defer src="azure-auth.js?v=321"></script>
+  <script defer src="app.js?v=321"></script>
+  <script defer src="home-dashboard.js?v=321"></script>
+  <script defer src="anexos.js?v=321"></script>
+  <script defer src="contas-pagar.js?v=321"></script>
+  <script defer src="config-tags.js?v=321"></script>
+  <script defer src="config-users.js?v=321"></script>
+  <script defer src="construcao.js?v=321"></script>
+  <script defer src="empresas.js?v=321"></script>
+  <script defer src="relacionamento.js?v=321"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=320"></script>
-  <script defer src="plano-financeiro.js?v=320"></script>
-  <script defer src="fiscal.js?v=320"></script>
-  <script defer src="indexadores.js?v=320"></script>
-  <script defer src="verificar-construcao.js?v=320"></script>
-  <script src="repactuacoes.js?v=320"></script>
+  <script defer src="centros-custo.js?v=321"></script>
+  <script defer src="plano-financeiro.js?v=321"></script>
+  <script defer src="fiscal.js?v=321"></script>
+  <script defer src="indexadores.js?v=321"></script>
+  <script defer src="verificar-construcao.js?v=321"></script>
+  <script src="repactuacoes.js?v=321"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=320"></script>
+  <script defer src="dashboard-inadimplencia.js?v=321"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
