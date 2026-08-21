@@ -17204,20 +17204,28 @@ function loadDocPadraoTemplates() {
 // GERAR PDF DE SUSPENSÃO (Zero Paid)
 window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   let customer = getCustomerFromState(customerId);
-  // Enhance customer data if missing
-  if (!customer.name || customer.name.startsWith("Cliente Sienge") || !customer.cpfCnpj || customer.cpfCnpj === "N/D") {
-      if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
-          const cached = window.GlobalCustomerCache.data.find(c => c.customerId == customerId || c.id == customerId);
-          if (cached) {
-              customer.name = cached.name || cached.customerName || customer.name;
-              customer.cpfCnpj = cached.cpfCnpj || cached.cpf || customer.cpfCnpj;
-          }
+  // Enhance customer data always to ensure we grab address and other details
+  if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+      const cached = window.GlobalCustomerCache.data.find(c => c.customerId == customerId || c.id == customerId);
+      if (cached) {
+          customer.name = cached.name || cached.customerName || customer.name;
+          customer.cpfCnpj = cached.cpfCnpj || cached.cpf || customer.cpfCnpj;
+          customer.address = cached.address || customer.address;
+          customer.city = cached.city || customer.city;
+          customer.state = cached.state || customer.state;
       }
-      if (window.rawClientList) {
-          const rawCust = window.rawClientList.find(c => c.customerId == customerId);
-          if (rawCust && rawCust.customerName && customer.name.startsWith("Cliente Sienge")) {
-              customer.name = rawCust.customerName;
-          }
+  }
+  
+  if (window.customerData && (window.customerData.id == customerId || window.customerData.customerId == customerId)) {
+      customer.address = window.customerData.address || customer.address;
+      customer.city = window.customerData.city || customer.city;
+      customer.state = window.customerData.state || customer.state;
+  }
+  
+  if (window.rawClientList) {
+      const rawCust = window.rawClientList.find(c => c.customerId == customerId);
+      if (rawCust && rawCust.customerName && (!customer.name || customer.name.startsWith("Cliente Sienge"))) {
+          customer.name = rawCust.customerName;
       }
   }
   
@@ -17359,8 +17367,24 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   text = text.replace(/{{QUADRA}}/g, quadra);
   text = text.replace(/{{LOTE}}/g, lote);
   
-  const saleDateRaw = sale.saleDate || sale.contractDate || (rawSale ? rawSale.saleDate : null);
-  text = text.replace(/{{DATA_CONTRATO}}/g, saleDateRaw ? new Date(saleDateRaw + 'T12:00:00').toLocaleDateString('pt-BR') : '');
+  const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate || (rawSale ? rawSale.saleDate : null);
+  
+  let formattedSaleDate = '';
+  if (saleDateRaw) {
+      const sd = new Date(saleDateRaw);
+      if (!isNaN(sd.getTime())) {
+          const userTimezoneOffset = sd.getTimezoneOffset() * 60000;
+          const adjustedDate = new Date(sd.getTime() + userTimezoneOffset);
+          const d = adjustedDate.getDate().toString().padStart(2, '0');
+          const m = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
+          const y = adjustedDate.getFullYear();
+          formattedSaleDate = `${d}/${m}/${y}`;
+      } else {
+          formattedSaleDate = saleDateRaw;
+      }
+  }
+  
+  text = text.replace(/{{DATA_CONTRATO}}/g, formattedSaleDate);
   
   // Cleanup any lingering dangling characters if variables were empty
   text = text.replace(/^\s*-\s*-\s*$/gm, '');

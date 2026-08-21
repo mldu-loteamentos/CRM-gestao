@@ -253,7 +253,7 @@ const HomeDashboard = {
     // Ordenar Top 10 Maiores Valores
     const sortedByValue = [...myClients].sort((a, b) => b.overdueValue - a.overdueValue);
     const topValores = sortedByValue.slice(0, 10);
-    const idValores = new Set(topValores.map(c => c.id));
+    const idValores = new Set(topValores.map(c => `${c.customerId}-${c.saleId}`));
     
     const othersByValue = sortedByValue.slice(10);
     const sumOthersValue = othersByValue.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
@@ -261,19 +261,19 @@ const HomeDashboard = {
     // Ordenar Top 10 Maiores Dias (ignorar os que estão no top valores)
     const topDias = [...myClients]
         .sort((a, b) => b.maxDaysDelay - a.maxDaysDelay)
-        .filter(c => !idValores.has(c.id))
+        .filter(c => !idValores.has(`${c.customerId}-${c.saleId}`))
         .slice(0, 10);
         
     // Mas precisamos saber quais do topValores TAMBÉM estão no topo de dias (para a bolinha de info)
     const allDiasSorted = [...myClients].sort((a, b) => b.maxDaysDelay - a.maxDaysDelay);
-    const top20DiasIds = new Set(allDiasSorted.slice(0, 20).map(c => c.id));
+    const top20DiasIds = new Set(allDiasSorted.slice(0, 20).map(c => `${c.customerId}-${c.saleId}`));
 
     const tbodyValores = document.getElementById('home-op-tbody-valores');
     if (topValores.length === 0) {
         tbodyValores.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum cliente em atraso na sua fila! 🎉</td></tr>';
     } else {
         let html = topValores.map(c => {
-            const hasHighDelay = top20DiasIds.has(c.id);
+            const hasHighDelay = top20DiasIds.has(`${c.customerId}-${c.saleId}`);
             const warningIcon = hasHighDelay ? `<i data-lucide="alert-triangle" style="width: 14px; color: #f59e0b; margin-left: 5px;" title="Também possui um alto tempo de atraso (${c.maxDaysDelay} dias)"></i>` : '';
             const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
             
@@ -321,7 +321,7 @@ const HomeDashboard = {
     } else {
         const othersDias = [...myClients]
             .sort((a, b) => b.maxDaysDelay - a.maxDaysDelay)
-            .filter(c => !idValores.has(c.id))
+            .filter(c => !idValores.has(`${c.customerId}-${c.saleId}`))
             .slice(10);
             
         const sumOthersDiasValue = othersDias.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
