@@ -8485,7 +8485,7 @@ async function saveCustomerOccurrence() {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
-    if (!iniciativaEl) {
+    if (canal !== "Retorno Agendado" && !iniciativaEl) {
       alert("O campo Iniciativa é obrigatório.");
       return;
     }
@@ -8767,23 +8767,21 @@ window.validateOccurrenceForm = function() {
     
     isValid = text.length > 0;
   } else if (canal === "Retorno Agendado") {
-    if (iniciativaGroup) iniciativaGroup.style.display = "block";
+    if (iniciativaGroup) iniciativaGroup.style.display = "none";
     if (promiseRow) promiseRow.style.display = "grid";
     if (installmentsGroup) installmentsGroup.style.display = "none";
     if (pinGroup) pinGroup.style.display = "none";
     if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
     
-    if (labelNoteText) labelNoteText.innerHTML = 'Conversa com o Cliente <span style="color: var(--color-danger);">*</span>';
+    if (labelNoteText) labelNoteText.innerHTML = 'Observação <span style="color: var(--color-danger);">*</span>';
     if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Agendamento';
     
     const pDateLabel = document.getElementById('label-promise-date');
     if (pDateLabel) pDateLabel.innerHTML = 'Data de Retorno <span style="color: var(--color-danger);">*</span>';
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
-    const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
-    const iniciativa = iniciativaEl ? iniciativaEl.value : "";
     
-    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0 && iniciativa.length > 0;
+    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
   } else {
     if (iniciativaGroup) iniciativaGroup.style.display = "block";
     if (promiseRow) promiseRow.style.display = "grid";
@@ -17217,10 +17215,12 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       costCenter = (AppState.costCenters || []).find(c => c.id == unit.costCenterId) || {};
   }
   
+  let companyName = 'MOURA LEITE LOTEAMENTOS';
   let companyCnpj = '64.860.139/0001-98';
   if (AppState.companies) {
       const c = AppState.companies.find(x => String(x.id) === String(costCenter.companyId));
       if (c && c.cnpj) companyCnpj = c.cnpj;
+      if (c && c.name) companyName = c.name;
   }
   
   const templateStr = localStorage.getItem('crm_docpadrao_suspensao');
@@ -17272,8 +17272,18 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   };
 
   let text = corpo;
+  
+  // Replace variables
   text = text.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
   text = text.replace(/{{CPF_CLIENTE}}/g, maskCpfCnpj(customer.cpfCnpj));
+  text = text.replace(/{{EMPRESA_NOME}}/g, companyName || '');
+  text = text.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpj));
+  
+  // Also replace any legacy hardcoded text from old templates to be safe
+  text = text.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao Ilmo. Sr.');
+  text = text.replace(/A MOURA LEITE LOTEAMENTOS/gi, `A ${companyName}`);
+  text = text.replace(/64\.860\.139\/0001-98/g, maskCpfCnpj(companyCnpj));
+  text = text.replace(/Atenciosamente,(\s|<br>)*MOURA LEITE LOTEAMENTOS/gi, `Atenciosamente,\n${companyName}`);
   
   if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');

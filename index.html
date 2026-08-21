@@ -516,7 +516,11 @@
     /* Print Styles for PDF Modal */
     @media print {
       @page {
-        margin: 20mm;
+        margin: 10mm 15mm 15mm 15mm;
+      }
+      html, body {
+        height: auto !important;
+        overflow: visible !important;
       }
       body * {
         visibility: hidden;
@@ -529,9 +533,11 @@
         left: 0;
         top: 0;
         width: 100%;
+        height: auto !important;
         margin: 0;
         padding: 0;
         background: transparent !important;
+        overflow: visible !important;
       }
       .modal-box {
         box-shadow: none !important;
@@ -541,6 +547,7 @@
         padding: 0 !important;
         margin: 0 !important;
         background: transparent !important;
+        overflow: visible !important;
       }
       .modal-header, .print-hidden-buttons {
         display: none !important;
@@ -1010,7 +1017,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.306 &nbsp;&middot;&nbsp; 21/08/2026
+            v1.0.307 &nbsp;&middot;&nbsp; 21/08/2026
           </span>
         </div>
       </div>
@@ -4857,8 +4864,8 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
         <h3 id="pdf-modal-title">Termo de Acordo Jurídico</h3>
         <button class="modal-close" onclick="closePdfModal()"><i data-lucide="x"></i></button>
       </div>
-      <div id="print-logo" style="display: none; justify-content: flex-end; margin-bottom: 20px;">
-        <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 80px; object-fit: contain;">
+      <div id="print-logo" style="display: none; justify-content: flex-end; margin-bottom: 5px;">
+        <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 60px; object-fit: contain;">
       </div>
       <div class="pdf-preview-box" id="pdf-document-content">
         <!-- Conteúdo do termo estruturado -->
@@ -5396,30 +5403,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=306"></script>
-  <script defer src="sienge-api.js?v=306"></script>
-  <script defer src="azure-auth.js?v=306"></script>
-  <script defer src="app.js?v=306"></script>
-  <script defer src="home-dashboard.js?v=306"></script>
-  <script defer src="anexos.js?v=306"></script>
-  <script defer src="contas-pagar.js?v=306"></script>
-  <script defer src="config-tags.js?v=306"></script>
-  <script defer src="config-users.js?v=306"></script>
-  <script defer src="construcao.js?v=306"></script>
-  <script defer src="empresas.js?v=306"></script>
-  <script defer src="relacionamento.js?v=306"></script>
+  <script defer src="data.js?v=307"></script>
+  <script defer src="sienge-api.js?v=307"></script>
+  <script defer src="azure-auth.js?v=307"></script>
+  <script defer src="app.js?v=307"></script>
+  <script defer src="home-dashboard.js?v=307"></script>
+  <script defer src="anexos.js?v=307"></script>
+  <script defer src="contas-pagar.js?v=307"></script>
+  <script defer src="config-tags.js?v=307"></script>
+  <script defer src="config-users.js?v=307"></script>
+  <script defer src="construcao.js?v=307"></script>
+  <script defer src="empresas.js?v=307"></script>
+  <script defer src="relacionamento.js?v=307"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=306"></script>
-  <script defer src="plano-financeiro.js?v=306"></script>
-  <script defer src="fiscal.js?v=306"></script>
-  <script defer src="indexadores.js?v=306"></script>
-  <script defer src="verificar-construcao.js?v=306"></script>
-  <script src="repactuacoes.js?v=306"></script>
+  <script defer src="centros-custo.js?v=307"></script>
+  <script defer src="plano-financeiro.js?v=307"></script>
+  <script defer src="fiscal.js?v=307"></script>
+  <script defer src="indexadores.js?v=307"></script>
+  <script defer src="verificar-construcao.js?v=307"></script>
+  <script src="repactuacoes.js?v=307"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=306"></script>
+  <script defer src="dashboard-inadimplencia.js?v=307"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
