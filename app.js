@@ -23321,7 +23321,10 @@ window.toggleWhatsappAlert = async function() {
     await saveWhatsappAlerts();
 };
 
-window.updateWhatsappAlertButtonState = function() {
+window.updateWhatsappAlertButtonState = async function() {
+    if (!window.whatsappAlertsData || !window.whatsappAlertsData.clients) {
+        await loadWhatsappAlerts();
+    }
     const btn = document.getElementById("btn-toggle-whatsapp-alert");
     const icon = document.getElementById("icon-whatsapp-alert");
     const text = document.getElementById("text-whatsapp-alert");
@@ -23388,34 +23391,27 @@ window.checkMonthlyBilletAlerts = async function() {
         return; // Já feito este mês
     }
     
-    const bDays = getBusinessDaysOfMonth(year, month);
-    if (bDays.length < 2) return;
+    const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
+    if (clientIds.length === 0) return;
     
-    const todayDate = today.getDate();
-    const isFirstOrSecondBusinessDay = (todayDate === bDays[0] || todayDate === bDays[1]);
+    const listEl = document.getElementById("whatsapp-alerts-list");
+    if (!listEl) return;
     
-    if (isFirstOrSecondBusinessDay) {
-        const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
-        if (clientIds.length === 0) return;
-        
-        const listEl = document.getElementById("whatsapp-alerts-list");
-        if (!listEl) return;
-        
-        listEl.innerHTML = "";
-        
-        let clientDataMap = {};
-        if (window.rawClientList) {
-            window.rawClientList.forEach(c => {
-                clientDataMap[String(c.customerId)] = c;
-            });
-        }
-        if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
-            window.GlobalCustomerCache.data.forEach(c => {
-                clientDataMap[String(c.id || c.customerId)] = c;
-            });
-        }
-        
-        clientIds.forEach(id => {
+    listEl.innerHTML = "";
+    
+    let clientDataMap = {};
+    if (window.rawClientList) {
+        window.rawClientList.forEach(c => {
+            clientDataMap[String(c.customerId)] = c;
+        });
+    }
+    if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+        window.GlobalCustomerCache.data.forEach(c => {
+            clientDataMap[String(c.id || c.customerId)] = c;
+        });
+    }
+    
+    clientIds.forEach(id => {
             const data = clientDataMap[id] || {};
             const name = data.name || data.customerName || `Cliente #${id}`;
             const email = data.email || "N/D";
@@ -23433,10 +23429,9 @@ window.checkMonthlyBilletAlerts = async function() {
             listEl.appendChild(card);
         });
         
-        const modal = document.getElementById("modal-whatsapp-alerts");
-        if (modal) modal.style.display = "flex";
-        if (window.lucide) lucide.createIcons();
-    }
+    const modal = document.getElementById("modal-whatsapp-alerts");
+    if (modal) modal.style.display = "flex";
+    if (window.lucide) lucide.createIcons();
 };
 
 window.markWhatsappAlertsAsDone = async function() {
