@@ -17248,8 +17248,35 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
               if (detail.addresses && detail.addresses.length > 0) {
                   const addr = detail.addresses[0];
                   
-                  const streetType = addr.type || addr.streetType || addr.streetTypeDescription || addr.addressType || "";
-                  const street = addr.street || addr.streetName || "";
+                  let streetType = addr.type || addr.streetType || addr.streetTypeDescription || addr.addressType || "";
+                  let street = addr.street || addr.streetName || "";
+                  
+                  let rawZip = addr.postalCode || addr.zipCode || "";
+                  rawZip = rawZip.replace(/\D/g, "");
+                  const zip = rawZip ? ` - CEP: ${rawZip.replace(/(\d{5})(\d{3})/, "$1-$2")}` : "";
+                  
+                  if (streetType.toLowerCase() === "residencial" || streetType.toLowerCase() === "outros") {
+                      streetType = "";
+                  }
+                  
+                  if (rawZip && rawZip.length === 8) {
+                      try {
+                          const viaCepRes = await fetch(`https://viacep.com.br/ws/${rawZip}/json/`);
+                          if (viaCepRes.ok) {
+                              const viaCepData = await viaCepRes.json();
+                              if (viaCepData && viaCepData.logradouro) {
+                                  const firstWord = viaCepData.logradouro.split(" ")[0];
+                                  if (firstWord && ["rua", "avenida", "praça", "rodovia", "alameda", "travessa", "estrada", "viela", "loteamento"].includes(firstWord.toLowerCase())) {
+                                      streetType = firstWord;
+                                      if (street.toLowerCase().startsWith(firstWord.toLowerCase() + " ")) {
+                                          street = street.substring(firstWord.length).trim();
+                                      }
+                                  }
+                              }
+                          }
+                      } catch(e) {}
+                  }
+                  
                   const fullStreet = streetType ? `${streetType} ${street}` : street;
                   
                   const num = addr.number ? `, ${addr.number}` : "";
@@ -17257,9 +17284,6 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
                   const neigh = addr.neighborhood ? `, ${addr.neighborhood}` : "";
                   const city = addr.cityName || addr.city || "";
                   const state = addr.stateName || addr.state || "";
-                  let rawZip = addr.postalCode || addr.zipCode || "";
-                  rawZip = rawZip.replace(/\D/g, "");
-                  const zip = rawZip ? ` - CEP: ${rawZip.replace(/(\d{5})(\d{3})/, "$1-$2")}` : "";
                   
                   customer.address = `${fullStreet}${num}${compl}${neigh}, ${city}/${state}${zip}`;
                   customer.city = city;
@@ -17313,6 +17337,35 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       console.error("Erro ao buscar receivableBills para o pdf:", e);
   }
   sale = sale || {};
+  
+  let secondaryBuyersText = "";
+  if (sale && sale.customers && sale.customers.length > 1) {
+      const secondaryCustomers = sale.customers.filter(c => !c.main && String(c.id) !== String(customerId));
+      for (const sec of secondaryCustomers) {
+          try {
+              const secDetail = await SiengeApiService.getCustomer(sec.id);
+              if (secDetail) {
+                  const secName = secDetail.name || sec.name || '';
+                  const secCpf = (secDetail.cpfCnpj || '').replace(/\D/g,"");
+                  let formattedCpf = secCpf;
+                  if (secCpf.length <= 11) {
+                      formattedCpf = secCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+                  } else {
+                      formattedCpf = secCpf.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
+                  }
+                  
+                  let secSpouse = '';
+                  if (secDetail.spouseName && secDetail.spouseName.trim() !== '' && secDetail.spouseName !== '- X -') {
+                      let sCpf = (secDetail.spouseCpf || '').replace(/\D/g,"");
+                      if (sCpf.length <= 11) sCpf = sCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+                      secSpouse = ` e ${secDetail.spouseName}, portador(a) do C.P.F. nº ${sCpf}`;
+                  }
+                  secondaryBuyersText += `, e ${secName}, portador(a) do C.P.F. nº ${formattedCpf}${secSpouse}`;
+              }
+          } catch (e) {}
+      }
+  }
+  
   const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
   
   const rawSale = (window.rawClientList || []).find(c => c.saleId == saleId);
@@ -17411,12 +17464,13 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   
   if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
-      text = text.replace(/e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
+      text = text.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
       text = text.replace(/{{NOME_CONJUGE}}/g, '- X -');
       text = text.replace(/{{CPF_CONJUGE}}/g, '- X -');
   } else {
       text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
+      text = text.replace(/{{CPF_CONJUGE}}\s*\./g, maskCpfCnpj(customer.spouseCpf) + "." + secondaryBuyersText);
       text = text.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(customer.spouseCpf));
   }
   
@@ -17472,12 +17526,14 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       }
   }
 
+  // Inline address string by removing leading dot/comma and newlines
+  text = text.replace(/[\.,]?\s*[\r\n]+{{ENDERECO_CLIENTE}}/g, `, residente e domiciliado em {{ENDERECO_CLIENTE}}`);
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
   
   // O endereco_cliente já traz tudo (incluindo CEP, Cidade e Estado), então se a linha dupla existir no template, nós removemos inteira para evitar duplicidade.
-  text = text.replace(/{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
-  text = text.replace(/-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
-  text = text.replace(/-\s*Itatinga\s*-\s*SP/gi, '');
+  text = text.replace(/[\r\n]*{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
+  text = text.replace(/[\r\n]*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
+  text = text.replace(/[\r\n]*-\s*Itatinga\s*-\s*SP/gi, '');
   
   // E se sobrou variavel solta
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
@@ -23289,6 +23345,7 @@ async function loadWhatsappAlerts() {
         }
     }
     if (!window.whatsappAlertsData.clients) window.whatsappAlertsData.clients = {};
+    window.whatsappAlertsLoaded = true;
 }
 
 async function saveWhatsappAlerts() {
@@ -23322,7 +23379,7 @@ window.toggleWhatsappAlert = async function() {
 };
 
 window.updateWhatsappAlertButtonState = async function() {
-    if (!window.whatsappAlertsData || !window.whatsappAlertsData.clients) {
+    if (!window.whatsappAlertsLoaded) {
         await loadWhatsappAlerts();
     }
     const btn = document.getElementById("btn-toggle-whatsapp-alert");
@@ -23367,12 +23424,12 @@ function getBusinessDaysOfMonth(year, month) {
 }
 
 window.checkMonthlyBilletAlerts = async function() {
-    // Check if the current logged in user has the flag enabled
+    // Check if the current logged in user has the flag enabled (or if it's admin for testing)
     const currentUserStr = localStorage.getItem("crm_logged_user");
     if (currentUserStr) {
         try {
             const currentUser = JSON.parse(currentUserStr);
-            if (!currentUser.resend_billet) {
+            if (!currentUser.resend_billet && currentUser.nivel !== 'Administrador') {
                 return; // User is not responsible for resending billets
             }
         } catch(e) {}

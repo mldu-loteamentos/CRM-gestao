@@ -941,7 +941,8 @@ const SiengeApiService = {
           lastPaymentDate: c.lastUpdateDate,
           status: c.situation === "Distratado" ? "Distratado" : c.outstandingBalance === 0 ? "Quitado" : "Ativo",
           receivableBillId: c.receivableBillId,
-          enterpriseId: c.enterpriseId
+          enterpriseId: c.enterpriseId,
+          customers: c.salesContractCustomers || []
         };
       });
 
