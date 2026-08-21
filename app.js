@@ -22793,8 +22793,10 @@ window.SYNC_KEYS = [
     "crm_indexadores_ativos",
     "crm_moura_timeline_nodes",
     "crm_moura_timeline_acoes",
-    "crm_moura_timeline_gatilhos"
-    ,"crm_moura_vistoria_recurrence_days"
+    "crm_moura_timeline_gatilhos",
+    "crm_moura_vistoria_recurrence_days",
+    "crm_centros_custo_custom",
+    "crm_centros_custo_tipos"
 ];
 
 // Função que baixa configurações na inicialização
@@ -23444,7 +23446,16 @@ window.checkMonthlyBilletAlerts = async function() {
     const month = today.getMonth() + 1; // 1-12
     const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
     
-    if (window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
+    let isAdmin = false;
+    try {
+        const currentUserStr = localStorage.getItem("crm_logged_user");
+        if (currentUserStr) {
+            const currentUser = JSON.parse(currentUserStr);
+            if (currentUser.nivel === 'Administrador') isAdmin = true;
+        }
+    } catch(e) {}
+    
+    if (!isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
         return; // Já feito este mês
     }
     
