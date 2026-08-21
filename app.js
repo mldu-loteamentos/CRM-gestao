@@ -2046,6 +2046,101 @@ window.toggleSort = function(col) {
   loadDashboardData();
 };
 
+window.getFilaQueueGroup = function(client, thresholdJuridico) {
+  const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
+  if (client && client.isZeroPaid) return 0;
+  if (client && (client.subjudice === "S" || client.subjudice === true)) return 1;
+  if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return 2;
+  return 3;
+};
+
+window.getFilaQueueGroupMeta = function(group) {
+  const map = {
+    0: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
+    1: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
+    2: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
+    3: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
+  };
+  return map[group] || map[3];
+};
+
+window.getFilaSortValue = function(client, sortCol) {
+  if (!client) return { value: 0, type: 'number', missing: true };
+  switch (sortCol) {
+    case 'customerName':
+      return { value: String(client.customerName || ''), type: 'string' };
+    case 'title':
+    case 'saleId': {
+      const raw = String((client.billIds && client.billIds[0]) || client.saleId || '');
+      const num = parseInt(String(raw).replace(/^B-/i, '').split('-')[0], 10);
+      if (Number.isFinite(num)) return { value: num, type: 'number' };
+      return { value: raw.toLowerCase(), type: 'string' };
+    }
+    case 'projectName': {
+      const cc = (typeof getPrimaryCostCenter === 'function') ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '');
+      return { value: `${cc} ${client.unitName || ''}`.trim(), type: 'string' };
+    }
+    case 'assignedOperator':
+      return { value: String(client.assignedOperator || ''), type: 'string' };
+    case 'maxDaysDelay':
+      return { value: Number(client.maxDaysDelay) || 0, type: 'number' };
+    case 'billCount':
+      return { value: Number(client.billCount) || 0, type: 'number' };
+    case 'overdueValue':
+      return { value: (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0), type: 'number' };
+    case 'lastContactDate': {
+      const notes = (AppState.notes && AppState.notes[client.customerId]) || [];
+      let max = 0;
+      notes.forEach(n => {
+        const d = new Date(n.date).getTime();
+        if (Number.isFinite(d) && d > max) max = d;
+      });
+      return { value: max, type: 'number', missing: max === 0 };
+    }
+    case 'lastPaymentDays': {
+      let min = Infinity;
+      const paidMap = (window.advFiltersFila && window.advFiltersFila.paidMap) || (window.advFilters && window.advFilters.paidMap);
+      if (client.billIds && paidMap && typeof paidMap.has === 'function') {
+        client.billIds.forEach(bid => {
+          if (paidMap.has(String(bid))) {
+            const d = Number(paidMap.get(String(bid)));
+            if (Number.isFinite(d) && d < min) min = d;
+          }
+        });
+      }
+      const missing = !Number.isFinite(min);
+      return { value: missing ? 0 : min, type: 'number', missing };
+    }
+    case 'saleDate': {
+      const d = new Date(client.saleDate).getTime();
+      const missing = !client.saleDate || !Number.isFinite(d);
+      return { value: missing ? 0 : d, type: 'number', missing };
+    }
+    default:
+      return { value: (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0), type: 'number' };
+  }
+};
+
+window.compareFilaClients = function(a, b, sortCol, sortDir, thresholdJuridico, preserveGroups = true) {
+  if (preserveGroups) {
+    const gA = window.getFilaQueueGroup(a, thresholdJuridico);
+    const gB = window.getFilaQueueGroup(b, thresholdJuridico);
+    if (gA !== gB) return gA - gB;
+  }
+  const dir = (sortDir === 'asc' || sortDir === 1) ? 1 : -1;
+  const sa = window.getFilaSortValue(a, sortCol);
+  const sb = window.getFilaSortValue(b, sortCol);
+  if (sa.missing && sb.missing) return 0;
+  if (sa.missing) return 1;
+  if (sb.missing) return -1;
+  if (sa.type === 'string' || sb.type === 'string') {
+    return String(sa.value).localeCompare(String(sb.value), 'pt-BR', { numeric: true, sensitivity: 'base' }) * dir;
+  }
+  if (sa.value < sb.value) return -1 * dir;
+  if (sa.value > sb.value) return 1 * dir;
+  return 0;
+};
+
 window.toggleSortZero = function(col) {
   if (window._currentSortZeroCol === col) {
     window._currentSortZeroDir = window._currentSortZeroDir === 'asc' ? 'desc' : 'asc';
@@ -3280,102 +3375,13 @@ document.addEventListener("click", function(e) {
   filteredSubjudice = window.applyAdvFiltersTo(filteredSubjudice);
   window.advFilters = originalAdvFilters; // Restore
 
-  // 2. Ordenação da Lista principal
-  const sortCol = AppState.currentSortCol;
-  const sortDir = AppState.currentSortDir === 'asc' ? 1 : -1;
-  const sortFunc = (a, b) => {
-    const hasScheduledOcc = (client) => {
-      const notes = AppState.notes[client.customerId] || [];
-      return notes.some(n => n.promiseDate && n.status !== "Cancelada");
-    };
-    const getPriority = (client) => {
-        // Mantendo no final os clientes que já possuem ocorrência agendada ativa
-        if (hasScheduledOcc(client)) return 1;
-
-        // 1. PRIMEIRO 0% PAGO
-        if (client.isZeroPaid) return 6;
-        
-        // 2. DEPOIS O GRUPO DO SUB JUDICE
-        if (client.subjudice === "S") return 5;
-        
-        // 3. DEPOIS O ENVIAR PARA JURIDICO
-        if (client.maxDaysDelay >= thresholdJuridico) return 4;
-        
-        // 4. DEPOIS OS CLIENTES QUE NÃO TEM TAGS ESPECIAIS
-        const hasTags = client.tags && client.tags.length > 0;
-        if (!hasTags) return 3;
-        
-        // 5. POR ÚLTIMO OS CLIENTES COM TAGS ESPECIAIS
-        return 2;
-    };
-
-    const prioA = getPriority(a);
-    const prioB = getPriority(b);
-    
-    if (prioA !== prioB) {
-        return prioB - prioA;
-    }
-
-    let valA, valB;
-    if (sortCol === 'customerName') {
-      valA = a.customerName.toLowerCase();
-      valB = b.customerName.toLowerCase();
-    } else if (sortCol === 'projectName') {
-      valA = String(a.costCenterId || '').toLowerCase();
-      valB = String(b.costCenterId || '').toLowerCase();
-    } else if (sortCol === 'assignedOperator') {
-      valA = a.assignedOperator.toLowerCase();
-      valB = b.assignedOperator.toLowerCase();
-    } else if (sortCol === 'maxDaysDelay') {
-      valA = a.maxDaysDelay;
-      valB = b.maxDaysDelay;
-    } else if (sortCol === 'billCount') {
-      valA = a.billCount;
-      valB = b.billCount;
-    } else if (sortCol === 'overdueValue') {
-      valA = a.overdueValue + a.overdueCharges;
-      valB = b.overdueValue + b.overdueCharges;
-    } else if (sortCol === 'lastContactDate') {
-      // Find latest note for a
-      const notesA = AppState.notes[a.customerId] || [];
-      valA = 0;
-      notesA.forEach(n => {
-          const d = new Date(n.date).getTime();
-          if (d > valA) valA = d;
-      });
-      // Find latest note for b
-      const notesB = AppState.notes[b.customerId] || [];
-      valB = 0;
-      notesB.forEach(n => {
-          const d = new Date(n.date).getTime();
-          if (d > valB) valB = d;
-      });
-    } else if (sortCol === 'lastPaymentDays') {
-      const getMinDiff = (client) => {
-          let min = Infinity;
-          if (client.billIds && window.advFilters && window.advFilters.paidMap) {
-              client.billIds.forEach(bid => {
-                  if (window.advFilters.paidMap.has(String(bid))) {
-                      const d = window.advFilters.paidMap.get(String(bid));
-                      if (d < min) min = d;
-                  }
-              });
-          }
-          return min;
-      };
-      valA = getMinDiff(a);
-      valB = getMinDiff(b);
-    } else {
-      valA = a.overdueValue;
-      valB = b.overdueValue;
-    }
-    if (valA < valB) return -1 * sortDir;
-    if (valA > valB) return 1 * sortDir;
-    return 0;
-  };
+  // 2. Ordenação da Lista principal — grupos fixos, coluna só dentro do grupo
+  const sortCol = AppState.currentSortCol || 'maxDaysDelay';
+  const sortDir = AppState.currentSortDir || 'desc';
+  const sortFunc = (a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, true);
 
   clientList.sort(sortFunc);
-  filteredSubjudice.sort(sortFunc);
+  filteredSubjudice.sort((a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, false));
   window.clientList = clientList;
   window._subjudiceList = filteredSubjudice;
 
@@ -3661,7 +3667,16 @@ document.addEventListener("click", function(e) {
       const retroLimitDate = new Date();
       retroLimitDate.setDate(retroLimitDate.getDate() - retroDaysAgo);
 
+      let lastQueueGroup = null;
       clientList.forEach(client => {
+        const queueGroup = window.getFilaQueueGroup(client, thresholdJuridico);
+        if (queueGroup !== lastQueueGroup) {
+          lastQueueGroup = queueGroup;
+          const meta = window.getFilaQueueGroupMeta(queueGroup);
+          const headerRow = document.createElement("tr");
+          headerRow.innerHTML = `<td colspan="11" style="background:${meta.bg}; color:${meta.color}; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; text-transform:uppercase; padding:8px 12px;">${meta.label}</td>`;
+          body.appendChild(headerRow);
+        }
         const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const isZeroPaid = client.isZeroPaid;
         const zeroPaidHighlightClass = isZeroPaid ? "zero-paid-highlight" : "";
@@ -13562,18 +13577,8 @@ async function _loadZeroPaidTab_Impl() {
 
   if (window._currentSortZeroCol) {
     const col = window._currentSortZeroCol;
-    const dir = window._currentSortZeroDir;
-    zeroPaidList.sort((a, b) => {
-      let valA = a[col];
-      let valB = b[col];
-      
-      if (typeof valA === 'string') valA = valA.toLowerCase();
-      if (typeof valB === 'string') valB = valB.toLowerCase();
-      
-      if (valA < valB) return dir === 'asc' ? -1 : 1;
-      if (valA > valB) return dir === 'asc' ? 1 : -1;
-      return 0;
-    });
+    const dir = window._currentSortZeroDir || 'desc';
+    zeroPaidList.sort((a, b) => window.compareFilaClients(a, b, col, dir, 151, false));
   } else {
     // Ordenar por aging (maxDaysDelay) descrente como padrão
     zeroPaidList.sort((a, b) => b.maxDaysDelay - a.maxDaysDelay);
@@ -22944,7 +22949,13 @@ window.applyRenegotiationText = function(prefix = '') {
     }
 
     if (textEl) {
-        textEl.value = msg;
+        const rawObs = (textEl.value || '').trim();
+        let observation = rawObs;
+        if (/^entrada de /i.test(rawObs)) {
+            observation = rawObs.split(/\n\s*\n/).slice(1).join('\n\n').trim();
+        }
+
+        textEl.value = observation ? `${msg}\n\n${observation}` : msg;
         if (typeof window.validateOccurrenceForm === 'function' && prefix === '') {
             window.validateOccurrenceForm();
         }

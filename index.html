@@ -512,6 +512,47 @@
       color: #94a3b8;
       font-weight: 500;
     }
+
+    /* Print Styles for PDF Modal */
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #pdf-view-overlay, #pdf-view-overlay * {
+        visibility: visible;
+      }
+      #pdf-view-overlay {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background: transparent !important;
+      }
+      .modal-box {
+        box-shadow: none !important;
+        border: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: transparent !important;
+      }
+      .modal-header, .print-hidden-buttons {
+        display: none !important;
+      }
+      .pdf-preview-box {
+        border: none !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        max-height: none !important;
+      }
+      #print-logo {
+        display: block !important;
+      }
+    }
   </style>
 </head>
 
@@ -966,7 +1007,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.304 &nbsp;&middot;&nbsp; 20/08/2026
+            v1.0.305 &nbsp;&middot;&nbsp; 21/08/2026
           </span>
         </div>
       </div>
@@ -2184,7 +2225,7 @@ Atenciosamente,
                   <th title="ID da Empresa" style="width: 1%; white-space: nowrap; text-align: center; padding-right: 5px !important;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px;">ID <i data-lucide="info" style="width: 12px; cursor: help; color: #64748b;"></i></div></th>
                   <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i
                       data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th>TÍTULO</th>
+                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i>
                   </th>
                   <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
@@ -2270,7 +2311,7 @@ Atenciosamente,
                 <tr>
                   <th>ID Empresa</th>
                   <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th>TÍTULO</th>
+                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: left;">Fase Processual <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th style="cursor: default; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Data Fase</th>
@@ -2524,7 +2565,7 @@ Atenciosamente,
                 <tr>
                   <th title="ID da Empresa" style="width: 1%; white-space: nowrap; text-align: center; padding-right: 5px !important;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px;">ID <i data-lucide="info" style="width: 12px; cursor: help; color: #64748b;"></i></div></th>
                   <th onclick="toggleSortZero('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th>TÍTULO</th>
+                  <th onclick="toggleSortZero('title')" style="cursor: pointer; user-select: none;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSortZero('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSortZero('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSortZero('maxDaysDelay')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Dias em Atraso (Aging) <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
@@ -4812,10 +4853,14 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
         <h3 id="pdf-modal-title">Termo de Acordo Jurídico</h3>
         <button class="modal-close" onclick="closePdfModal()"><i data-lucide="x"></i></button>
       </div>
+      <div id="print-logo" style="display: none; text-align: right; margin-bottom: 20px; color: #105436;">
+        <h2 style="font-size: 1.8rem; font-weight: 800; margin: 0; letter-spacing: 1px;">MOURA LEITE</h2>
+        <span style="font-size: 0.9rem; letter-spacing: 3px; font-weight: 600;">LOTEAMENTOS</span>
+      </div>
       <div class="pdf-preview-box" id="pdf-document-content">
         <!-- Conteúdo do termo estruturado -->
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.5rem;">
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.5rem;" class="print-hidden-buttons">
         <button class="btn btn-outline" onclick="closePdfModal()">Fechar</button>
         <button class="btn btn-primary" onclick="window.print()"><i data-lucide="printer" style="width: 16px;"></i>
           Imprimir / Salvar PDF</button>
@@ -5348,30 +5393,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=304"></script>
-  <script defer src="sienge-api.js?v=304"></script>
-  <script defer src="azure-auth.js?v=304"></script>
-  <script defer src="app.js?v=304"></script>
-  <script defer src="home-dashboard.js?v=304"></script>
-  <script defer src="anexos.js?v=304"></script>
-  <script defer src="contas-pagar.js?v=304"></script>
-  <script defer src="config-tags.js?v=304"></script>
-  <script defer src="config-users.js?v=304"></script>
-  <script defer src="construcao.js?v=304"></script>
-  <script defer src="empresas.js?v=304"></script>
-  <script defer src="relacionamento.js?v=304"></script>
+  <script defer src="data.js?v=305"></script>
+  <script defer src="sienge-api.js?v=305"></script>
+  <script defer src="azure-auth.js?v=305"></script>
+  <script defer src="app.js?v=305"></script>
+  <script defer src="home-dashboard.js?v=305"></script>
+  <script defer src="anexos.js?v=305"></script>
+  <script defer src="contas-pagar.js?v=305"></script>
+  <script defer src="config-tags.js?v=305"></script>
+  <script defer src="config-users.js?v=305"></script>
+  <script defer src="construcao.js?v=305"></script>
+  <script defer src="empresas.js?v=305"></script>
+  <script defer src="relacionamento.js?v=305"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=304"></script>
-  <script defer src="plano-financeiro.js?v=304"></script>
-  <script defer src="fiscal.js?v=304"></script>
-  <script defer src="indexadores.js?v=304"></script>
-  <script defer src="verificar-construcao.js?v=304"></script>
-  <script src="repactuacoes.js?v=304"></script>
+  <script defer src="centros-custo.js?v=305"></script>
+  <script defer src="plano-financeiro.js?v=305"></script>
+  <script defer src="fiscal.js?v=305"></script>
+  <script defer src="indexadores.js?v=305"></script>
+  <script defer src="verificar-construcao.js?v=305"></script>
+  <script src="repactuacoes.js?v=305"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=304"></script>
+  <script defer src="dashboard-inadimplencia.js?v=305"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
