@@ -288,8 +288,8 @@ const HomeDashboard = {
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500; font-size: 0.85rem;">${c.saleId || '-'}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.customerName || ''} ${warningIcon}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">${c.maxDaysDelay} dias</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percent}%</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">${c.maxDaysDelay} dias</td>
             </tr>
             `;
         }).join('');
@@ -301,8 +301,8 @@ const HomeDashboard = {
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">-</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; font-weight: 700;">Outros (${othersByValue.length} clientes)</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${sumOthersValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">-</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percentOthers}%</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">-</td>
             </tr>`;
         }
         
@@ -311,8 +311,8 @@ const HomeDashboard = {
           <td style="padding: 8px 15px; font-weight: 500;">-</td>
           <td style="padding: 8px 15px; color: #1e293b; font-size: 0.85rem; font-weight: 800;">TOTAL GERAL (${myClients.length} clientes)</td>
           <td style="padding: 8px 15px; text-align: right; color: #ef4444; font-weight: 800; font-size: 0.9rem;">${totalDelayedValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-          <td style="padding: 8px 15px; text-align: right; color: #f59e0b; font-weight: 800; font-size: 0.9rem;">-</td>
           <td style="padding: 8px 15px; text-align: right; font-weight: 800; color: #1e293b; font-size: 0.9rem;">100%</td>
+          <td style="padding: 8px 15px; text-align: right; color: #f59e0b; font-weight: 800; font-size: 0.9rem;">-</td>
         </tr>`;
         
         tbodyValores.innerHTML = html;
@@ -341,9 +341,9 @@ const HomeDashboard = {
             <tr onclick="window.viewCustomerCard(${c.customerId}, ${c.saleId})" style="cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'" title="${tooltip}">
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500; font-size: 0.85rem;">${c.saleId || '-'}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.customerName || ''}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">${c.maxDaysDelay} dias</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percent}%</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
             </tr>
             `;
         }).join('');
@@ -354,9 +354,9 @@ const HomeDashboard = {
             <tr style="background: #f8fafc;">
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">-</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; font-weight: 700;">Outros (${othersDias.length} clientes)</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${sumOthersDiasValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">-</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percentOthersDias}%</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${sumOthersDiasValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
             </tr>`;
         }
         
@@ -367,10 +367,10 @@ const HomeDashboard = {
         htmlDias += `
         <tr style="background: #f1f5f9; border-top: 2px solid #cbd5e1;">
           <td style="padding: 8px 15px; font-weight: 500;">-</td>
-          <td style="padding: 8px 15px; color: #1e293b; font-size: 0.85rem; font-weight: 800;">TOTAL DA LISTA (${topDias.length + othersDias.length} clientes)</td>
-          <td style="padding: 8px 15px; text-align: right; color: #ef4444; font-weight: 800; font-size: 0.9rem;">${totalDiasValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+          <td style="padding: 8px 15px; color: #1e293b; font-size: 0.85rem; font-weight: 800;">TOTAL GERAL (${myClients.length} clientes)</td>
           <td style="padding: 8px 15px; text-align: right; color: #f59e0b; font-weight: 800; font-size: 0.9rem;">-</td>
-          <td style="padding: 8px 15px; text-align: right; font-weight: 800; color: #1e293b; font-size: 0.9rem;">${totalDiasPercent}%</td>
+          <td style="padding: 8px 15px; text-align: right; font-weight: 800; color: #1e293b; font-size: 0.9rem;">100%</td>
+          <td style="padding: 8px 15px; text-align: right; color: #ef4444; font-weight: 800; font-size: 0.9rem;">${totalDelayedValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
         </tr>`;
         
         tbodyDias.innerHTML = htmlDias;
