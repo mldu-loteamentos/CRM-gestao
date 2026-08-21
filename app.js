@@ -4550,6 +4550,12 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (globalFichaLoader) {
       globalFichaLoader.style.display = "none";
       if (window.globalFichaLoaderTimeout) clearTimeout(window.globalFichaLoaderTimeout);
+      document.getElementById("view-customer-details").style.display = "block";
+  if (typeof updateWhatsappAlertButtonState === "function") {
+      updateWhatsappAlertButtonState();
+  }
+  
+  if (document.getElementById("global-ficha-loader")) {
       window.globalFichaLoaderTimeout = setTimeout(() => {
           globalFichaLoader.style.display = "flex";
       }, 2000);
@@ -23221,3 +23227,181 @@ window.applyRenegotiationText = function(prefix = '') {
     }
     return true;
 };
+
+// --- WHATSAPP BILLET ALERTS LOGIC ---
+window.whatsappAlertsData = { clients: {}, lastCompletedMonth: "" };
+
+async function loadWhatsappAlerts() {
+    if (window.firebaseCollections && window.firebaseDb) {
+        try {
+            const { doc, getDoc } = window.firebaseCollections;
+            const ref = doc(window.firebaseDb, 'settings', 'whatsapp_alerts');
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+                window.whatsappAlertsData = snap.data();
+            }
+        } catch (e) {
+            console.error("Erro ao carregar whatsapp_alerts do Firebase", e);
+        }
+    } else {
+        // Fallback local
+        const local = localStorage.getItem("whatsapp_alerts_data");
+        if (local) {
+            try {
+                window.whatsappAlertsData = JSON.parse(local);
+            } catch(e) {}
+        }
+    }
+    if (!window.whatsappAlertsData.clients) window.whatsappAlertsData.clients = {};
+}
+
+async function saveWhatsappAlerts() {
+    if (window.firebaseCollections && window.firebaseDb) {
+        try {
+            const { doc, setDoc } = window.firebaseCollections;
+            const ref = doc(window.firebaseDb, 'settings', 'whatsapp_alerts');
+            await setDoc(ref, window.whatsappAlertsData);
+        } catch (e) {
+            console.error("Erro ao salvar whatsapp_alerts no Firebase", e);
+        }
+    }
+    localStorage.setItem("whatsapp_alerts_data", JSON.stringify(window.whatsappAlertsData));
+}
+
+window.toggleWhatsappAlert = async function() {
+    const customerId = String(AppState.selectedCustomerId);
+    if (!customerId || customerId === "null" || customerId === "undefined") return;
+    
+    // Certificar de que está atualizado com o servidor antes de gravar
+    await loadWhatsappAlerts();
+    
+    if (window.whatsappAlertsData.clients[customerId]) {
+        delete window.whatsappAlertsData.clients[customerId];
+    } else {
+        window.whatsappAlertsData.clients[customerId] = true;
+    }
+    
+    updateWhatsappAlertButtonState();
+    await saveWhatsappAlerts();
+};
+
+window.updateWhatsappAlertButtonState = function() {
+    const btn = document.getElementById("btn-toggle-whatsapp-alert");
+    const icon = document.getElementById("icon-whatsapp-alert");
+    const text = document.getElementById("text-whatsapp-alert");
+    if (!btn || !icon || !text) return;
+    
+    const customerId = String(AppState.selectedCustomerId);
+    const isOn = !!window.whatsappAlertsData.clients[customerId];
+    
+    if (isOn) {
+        btn.style.backgroundColor = "#dcfce7";
+        btn.style.borderColor = "#86efac";
+        btn.style.color = "#166534";
+        icon.setAttribute("data-lucide", "bell-ring");
+        icon.style.color = "#16a34a";
+        text.textContent = "Alerta WhatsApp ON";
+    } else {
+        btn.style.backgroundColor = "#f1f5f9";
+        btn.style.borderColor = "#cbd5e1";
+        btn.style.color = "#64748b";
+        icon.setAttribute("data-lucide", "bell-off");
+        icon.style.color = "#64748b";
+        text.textContent = "Alerta WhatsApp OFF";
+    }
+    if (window.lucide) lucide.createIcons();
+};
+
+function getBusinessDaysOfMonth(year, month) {
+    const days = [];
+    const numDays = new Date(year, month, 0).getDate(); // month is 1-based, 0 gives last day of prev month, so it's correct
+    for (let i = 1; i <= numDays; i++) {
+        const d = new Date(year, month - 1, i);
+        const dayOfWeek = d.getDay(); // 0 is Sunday, 6 is Saturday
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            days.push(i);
+        }
+    }
+    return days;
+}
+
+window.checkMonthlyBilletAlerts = async function() {
+    await loadWhatsappAlerts();
+    
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1; // 1-12
+    const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
+    
+    if (window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
+        return; // Já feito este mês
+    }
+    
+    const bDays = getBusinessDaysOfMonth(year, month);
+    if (bDays.length < 2) return;
+    
+    const todayDate = today.getDate();
+    const isFirstOrSecondBusinessDay = (todayDate === bDays[0] || todayDate === bDays[1]);
+    
+    if (isFirstOrSecondBusinessDay) {
+        const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
+        if (clientIds.length === 0) return;
+        
+        const listEl = document.getElementById("whatsapp-alerts-list");
+        if (!listEl) return;
+        
+        listEl.innerHTML = "";
+        
+        let clientDataMap = {};
+        if (window.rawClientList) {
+            window.rawClientList.forEach(c => {
+                clientDataMap[String(c.customerId)] = c;
+            });
+        }
+        if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+            window.GlobalCustomerCache.data.forEach(c => {
+                clientDataMap[String(c.id || c.customerId)] = c;
+            });
+        }
+        
+        clientIds.forEach(id => {
+            const data = clientDataMap[id] || {};
+            const name = data.name || data.customerName || `Cliente #${id}`;
+            const email = data.email || "N/D";
+            const phone = data.phones && data.phones[0] ? data.phones[0].number : (data.phoneNumber || "N/D");
+            
+            const card = document.createElement("div");
+            card.style.cssText = "padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;";
+            card.innerHTML = `
+                <div style="font-weight: 600; color: #0f172a; margin-bottom: 4px;">${id} - ${name}</div>
+                <div style="font-size: 0.85rem; color: #64748b; display: flex; gap: 15px;">
+                    <span><i data-lucide="mail" style="width: 12px; display: inline-block;"></i> ${email}</span>
+                    <span><i data-lucide="phone" style="width: 12px; display: inline-block;"></i> ${phone}</span>
+                </div>
+            `;
+            listEl.appendChild(card);
+        });
+        
+        const modal = document.getElementById("modal-whatsapp-alerts");
+        if (modal) modal.style.display = "flex";
+        if (window.lucide) lucide.createIcons();
+    }
+};
+
+window.markWhatsappAlertsAsDone = async function() {
+    const today = new Date();
+    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    window.whatsappAlertsData.lastCompletedMonth = currentMonthStr;
+    await saveWhatsappAlerts();
+    const modal = document.getElementById("modal-whatsapp-alerts");
+    if (modal) modal.style.display = "none";
+};
+
+// Start initialization check
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+        if (typeof window.checkMonthlyBilletAlerts === 'function') {
+            window.checkMonthlyBilletAlerts();
+        }
+    }, 4500); // Wait 4.5s for Firebase and rawClientList to be loaded initially
+});
