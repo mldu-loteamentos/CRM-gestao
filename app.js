@@ -23331,13 +23331,15 @@ window.updateWhatsappAlertButtonState = function() {
     const isOn = !!window.whatsappAlertsData.clients[customerId];
     
     if (isOn) {
-        btn.style.backgroundColor = "#dcfce7";
-        btn.style.borderColor = "#86efac";
-        btn.style.color = "#166534";
+        btn.className = "btn btn-primary btn-sm";
+        btn.style.backgroundColor = "";
+        btn.style.borderColor = "";
+        btn.style.color = "";
         icon.setAttribute("data-lucide", "bell-ring");
-        icon.style.color = "#16a34a";
+        icon.style.color = "";
         text.textContent = "Alerta WhatsApp ON";
     } else {
+        btn.className = "btn btn-sm";
         btn.style.backgroundColor = "#f1f5f9";
         btn.style.borderColor = "#cbd5e1";
         btn.style.color = "#64748b";
@@ -23362,6 +23364,19 @@ function getBusinessDaysOfMonth(year, month) {
 }
 
 window.checkMonthlyBilletAlerts = async function() {
+    // Check if the current logged in user has the flag enabled
+    const currentUserStr = localStorage.getItem("crm_logged_user");
+    if (currentUserStr) {
+        try {
+            const currentUser = JSON.parse(currentUserStr);
+            if (!currentUser.resend_billet) {
+                return; // User is not responsible for resending billets
+            }
+        } catch(e) {}
+    } else {
+        return; // No user logged in
+    }
+
     await loadWhatsappAlerts();
     
     const today = new Date();
