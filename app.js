@@ -17337,6 +17337,10 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
       text = text.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(customer.spouseCpf));
   }
+  
+  // Auto-correct legacy cached template text for the contract line
+  text = text.replace(/firmado em (.*?), com pagamento de forma parcelada,\n?Quadra e lote: (.*?), no Loteamento: (.*?)(, t.tulo a receber.*?)?\./gi, 'Contrato firmado em $1, com pagamento de forma parcelada, na Quadra e lote: $2, no Loteamento: $3.');
+
 
   let quadra = unit.block || sale.block || '';
   let lote = unit.lot || sale.lot || '';
@@ -17420,6 +17424,11 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
   if (window.lucide) lucide.createIcons();
+  
+  // Automagicamente abre a tela de impressão
+  setTimeout(() => {
+      window.print();
+  }, 500);
 };
 
 // ----------------------------------------------------
