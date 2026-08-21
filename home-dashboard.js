@@ -248,9 +248,15 @@ const HomeDashboard = {
     
     const myClients = this.getMyClients();
     
+    const totalDelayedValue = myClients.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
+    
     // Ordenar Top 10 Maiores Valores
-    const topValores = [...myClients].sort((a, b) => b.overdueValue - a.overdueValue).slice(0, 10);
+    const sortedByValue = [...myClients].sort((a, b) => b.overdueValue - a.overdueValue);
+    const topValores = sortedByValue.slice(0, 10);
     const idValores = new Set(topValores.map(c => c.id));
+    
+    const othersByValue = sortedByValue.slice(10);
+    const sumOthersValue = othersByValue.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
     
     // Ordenar Top 10 Maiores Dias (ignorar os que estão no top valores)
     const topDias = [...myClients]
@@ -264,19 +270,33 @@ const HomeDashboard = {
 
     const tbodyValores = document.getElementById('home-op-tbody-valores');
     if (topValores.length === 0) {
-        tbodyValores.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum cliente em atraso na sua fila! 🎉</td></tr>';
+        tbodyValores.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum cliente em atraso na sua fila! 🎉</td></tr>';
     } else {
-        tbodyValores.innerHTML = topValores.map(c => {
+        let html = topValores.map(c => {
             const hasHighDelay = top20DiasIds.has(c.id);
             const warningIcon = hasHighDelay ? `<i data-lucide="alert-triangle" style="width: 14px; color: #f59e0b; margin-left: 5px;" title="Também possui um alto tempo de atraso (${c.maxDaysDelay} dias)"></i>` : '';
+            const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
             return `
             <tr>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">${c.title}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem;">${c.name} ${warningIcon}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">${c.saleId || '-'}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem;">${c.customerName || ''} ${warningIcon}</td>
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600;">R$ ${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b;">${percent}%</td>
             </tr>
             `;
         }).join('');
+        
+        if (sumOthersValue > 0) {
+            const percentOthers = totalDelayedValue > 0 ? ((sumOthersValue / totalDelayedValue) * 100).toFixed(1) : 0;
+            html += `
+            <tr style="background: #f8fafc;">
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">-</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem; font-weight: 700;">Outros (${othersByValue.length} clientes)</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600;">R$ ${sumOthersValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b;">${percentOthers}%</td>
+            </tr>`;
+        }
+        tbodyValores.innerHTML = html;
     }
 
     const tbodyDias = document.getElementById('home-op-tbody-dias');

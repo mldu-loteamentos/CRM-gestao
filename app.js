@@ -17203,22 +17203,46 @@ function loadDocPadraoTemplates() {
 // ----------------------------------------------------
 // GERAR PDF DE SUSPENSÃO (Zero Paid)
 window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
-  const customer = getCustomerFromState(customerId);
+  let customer = getCustomerFromState(customerId);
+  // Enhance customer data if missing
+  if (!customer.name || customer.name.startsWith("Cliente Sienge") || !customer.cpfCnpj || customer.cpfCnpj === "N/D") {
+      if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+          const cached = window.GlobalCustomerCache.data.find(c => c.customerId == customerId || c.id == customerId);
+          if (cached) {
+              customer.name = cached.name || cached.customerName || customer.name;
+              customer.cpfCnpj = cached.cpfCnpj || cached.cpf || customer.cpfCnpj;
+          }
+      }
+      if (window.rawClientList) {
+          const rawCust = window.rawClientList.find(c => c.customerId == customerId);
+          if (rawCust && rawCust.customerName && customer.name.startsWith("Cliente Sienge")) {
+              customer.name = rawCust.customerName;
+          }
+      }
+  }
+  
   const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
   const sale = salesList.find(s => s.id === saleId) || {};
   const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
   
+  const rawSale = (window.rawClientList || []).find(c => c.saleId == saleId);
+  const effectiveCostCenterId = unit.costCenterId || sale.costCenterId || (rawSale ? rawSale.costCenterId : null);
+  const effectiveCompanyId = sale.companyId || (rawSale ? rawSale.companyId : null);
+  
   let costCenter = {};
   if (getSiengeApiMode() === "simulado") {
-      costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+      costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === effectiveCostCenterId) || {};
   } else {
-      costCenter = (AppState.costCenters || []).find(c => c.id == unit.costCenterId) || {};
+      costCenter = (AppState.costCenters || []).find(c => c.id == effectiveCostCenterId) || {};
   }
   
   let companyName = 'MOURA LEITE LOTEAMENTOS';
   let companyCnpj = '64.860.139/0001-98';
   if (AppState.companies) {
-      const c = AppState.companies.find(x => String(x.id) === String(costCenter.companyId));
+      let c = AppState.companies.find(x => String(x.id) === String(effectiveCompanyId));
+      if (!c && costCenter && costCenter.companyId) {
+          c = AppState.companies.find(x => String(x.id) === String(costCenter.companyId));
+      }
       if (c && c.cnpj) companyCnpj = c.cnpj;
       if (c && c.name) companyName = c.name;
   }
@@ -17299,7 +17323,7 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   let quadra = unit.block || sale.block || '';
   let lote = unit.lot || sale.lot || '';
   if (!quadra && !lote) {
-      const uName = unit.name || sale.unitName || sale.unitId || '';
+      const uName = unit.name || sale.unitName || sale.unitId || (rawSale ? rawSale.unitName : '') || '';
       if (uName.includes('-')) {
           quadra = uName.split('-')[0];
           lote = uName.split('-')[1];
@@ -17308,6 +17332,9 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       }
   }
   let empreendimento = costCenter.name || sale.enterpriseName || sale.costCenterName || '';
+  if (!empreendimento && costCenter && costCenter.id) {
+     empreendimento = `CC ${costCenter.id}`;
+  }
 
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
