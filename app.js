@@ -4550,12 +4550,6 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (globalFichaLoader) {
       globalFichaLoader.style.display = "none";
       if (window.globalFichaLoaderTimeout) clearTimeout(window.globalFichaLoaderTimeout);
-      document.getElementById("view-customer-details").style.display = "block";
-  if (typeof updateWhatsappAlertButtonState === "function") {
-      updateWhatsappAlertButtonState();
-  }
-  
-  if (document.getElementById("global-ficha-loader")) {
       window.globalFichaLoaderTimeout = setTimeout(() => {
           globalFichaLoader.style.display = "flex";
       }, 2000);
@@ -4566,6 +4560,9 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const viewDistrato = document.getElementById("view-distrato");
   if (viewDistrato) viewDistrato.style.display = "none";
   document.getElementById("view-customer-details").style.display = "block";
+  if (typeof updateWhatsappAlertButtonState === "function") {
+      updateWhatsappAlertButtonState();
+  }
   switchFichaTab('ficha-cadastro');
   // Conditionally hide tabs if coming from Sub Judice
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
@@ -17250,15 +17247,21 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
           if (detail) {
               if (detail.addresses && detail.addresses.length > 0) {
                   const addr = detail.addresses[0];
+                  
+                  const streetType = addr.streetType || addr.streetTypeDescription || addr.addressType || "";
                   const street = addr.street || addr.streetName || "";
+                  const fullStreet = streetType ? `${streetType} ${street}` : street;
+                  
                   const num = addr.number ? `, ${addr.number}` : "";
                   const compl = addr.complement ? ` - ${addr.complement}` : "";
                   const neigh = addr.neighborhood ? `, ${addr.neighborhood}` : "";
                   const city = addr.cityName || addr.city || "";
                   const state = addr.stateName || addr.state || "";
-                  const zip = addr.postalCode || addr.zipCode ? ` - CEP: ${addr.postalCode || addr.zipCode}` : "";
+                  let rawZip = addr.postalCode || addr.zipCode || "";
+                  rawZip = rawZip.replace(/\D/g, "");
+                  const zip = rawZip ? ` - CEP: ${rawZip.replace(/(\d{5})(\d{3})/, "$1-$2")}` : "";
                   
-                  customer.address = `${street}${num}${compl}${neigh}, ${city}/${state}${zip}`;
+                  customer.address = `${fullStreet}${num}${compl}${neigh}, ${city}/${state}${zip}`;
                   customer.city = city;
                   customer.state = state;
               }
@@ -17434,8 +17437,34 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       }
   }
   let empreendimento = costCenter.name || sale.enterpriseName || sale.costCenterName || '';
-  if (!empreendimento && costCenter && costCenter.id) {
-     empreendimento = `CC ${costCenter.id}`;
+  if (!empreendimento || empreendimento.trim() === '') {
+      let tempEmpId = sale.companyId;
+      if (String(sale.companyId) === "1" && String(sale.costCenterId) === "14201") {
+          tempEmpId = "14201";
+      } else if (String(sale.companyId) === "2") {
+          tempEmpId = "10100";
+      }
+      
+      const empNameMap = {
+          "14201": "ARAÇARIGUAMA - TERRA DO ARAÇARI",
+          "10100": "ITATINGA - NOVO HORIZONTE",
+          "10200": "ITATINGA - NOVO HORIZONTE 2",
+          "11100": "ITATINGA - PAULISTA",
+          "12100": "CERQUEIRA CÉSAR - BELA VISTA",
+          "12300": "CERQUEIRA CESAR - BELA VISTA 2",
+          "13100": "BOITUVA - RESERVA DNA",
+          "15200": "AVARÉ - QUINTA DO LAGO",
+          "15300": "AVARÉ - VILLA DO LAGO",
+          "16100": "PARDINHO - NONA INES",
+          "16200": "PARDINHO - NONA INES 2",
+          "30200": "PARDINHO - RECANTO MARISTELA 2"
+      };
+      
+      if (empNameMap[tempEmpId]) {
+          empreendimento = empNameMap[tempEmpId];
+      } else if (costCenter && costCenter.id) {
+          empreendimento = `CC ${costCenter.id}`;
+      }
   }
 
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
@@ -17444,6 +17473,8 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       text = text.replace(/{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
   }
   
+  text = text.replace(/-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
+  text = text.replace(/-\s*Itatinga\s*-\s*SP/gi, '');
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
   text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
   text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
@@ -17494,7 +17525,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       dateStr = parts.join(' de ');
   }
   
-  const headerCidade = cidade || 'Botucatu';
+  const headerCidade = 'Botucatu';
   const headerDateStr = `${headerCidade}, ${dateStr}`;
 
   const docHtml = `
