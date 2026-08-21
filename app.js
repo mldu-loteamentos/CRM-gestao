@@ -17264,13 +17264,13 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
       return;
   }
   
-  const address = customer.address || '';
+  const address = (customer.address && customer.address !== 'N/D') ? customer.address : '';
   let cep = '';
   const matchCep = address.match(/\d{5}-\d{3}/);
   if (matchCep) cep = matchCep[0];
   
-  let cidade = customer.city || '';
-  let estado = customer.state || '';
+  let cidade = (customer.city && customer.city !== 'N/D') ? customer.city : '';
+  let estado = (customer.state && customer.state !== 'N/D') ? customer.state : '';
   if (!cidade && address) {
       const parts = address.split(',');
       if (parts.length > 1) {
@@ -17309,6 +17309,15 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   text = text.replace(/64\.860\.139\/0001-98/g, maskCpfCnpj(companyCnpj));
   text = text.replace(/Atenciosamente,(\s|<br>)*MOURA LEITE LOTEAMENTOS/gi, `Atenciosamente,\n${companyName}`);
   
+  let numeroContrato = sale.contractNumber || sale.number || unit.contractNumber || sale.id || saleId || '';
+  text = text.replace(/{{NUMERO_CONTRATO}}/g, numeroContrato);
+  
+  if (text.indexOf('{{NUMERO_CONTRATO}}') === -1 && text.indexOf(numeroContrato) === -1) {
+      text = text.replace(/Contrato de Compromisso de Compra e Venda,/gi, `Contrato de Compromisso de Compra e Venda ${numeroContrato},`);
+  }
+  
+  text = text.replace(/Via\s*:\s*carta\s*com\s*“AR”\s*e\s*Mão\s*própria\./gi, '');
+  
   if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
       text = text.replace(/e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
@@ -17337,6 +17346,11 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   }
 
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
+  
+  if (!cep && !cidade && !estado) {
+      text = text.replace(/{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
+  }
+  
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
   text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
   text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
@@ -17344,7 +17358,13 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   text = text.replace(/{{EMPREENDIMENTO}}/g, empreendimento);
   text = text.replace(/{{QUADRA}}/g, quadra);
   text = text.replace(/{{LOTE}}/g, lote);
-  text = text.replace(/{{DATA_CONTRATO}}/g, sale.saleDate ? new Date(sale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '');
+  
+  const saleDateRaw = sale.saleDate || sale.contractDate || (rawSale ? rawSale.saleDate : null);
+  text = text.replace(/{{DATA_CONTRATO}}/g, saleDateRaw ? new Date(saleDateRaw + 'T12:00:00').toLocaleDateString('pt-BR') : '');
+  
+  // Cleanup any lingering dangling characters if variables were empty
+  text = text.replace(/^\s*-\s*-\s*$/gm, '');
+  text = text.replace(/^\s*-\s*$/gm, '');
   text = text.replace(/{{EMPRESA_NOME}}/g, empreendimento ? empreendimento.split('-')[0].trim() : 'MOURA LEITE LOTEAMENTOS');
   text = text.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpj));
   

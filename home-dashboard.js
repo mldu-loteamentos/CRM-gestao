@@ -276,12 +276,19 @@ const HomeDashboard = {
             const hasHighDelay = top20DiasIds.has(c.id);
             const warningIcon = hasHighDelay ? `<i data-lucide="alert-triangle" style="width: 14px; color: #f59e0b; margin-left: 5px;" title="Também possui um alto tempo de atraso (${c.maxDaysDelay} dias)"></i>` : '';
             const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
+            
+            const customerNotes = window.AppState?.notes?.[c.customerId] || [];
+            const lastContact = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+            const promiseNotes = customerNotes.filter(n => n.promiseDate);
+            const lastPromise = promiseNotes.length > 0 ? new Date(Math.max(...promiseNotes.map(n => new Date(n.promiseDate + 'T12:00:00')))).toLocaleDateString('pt-BR') : "Nenhum";
+            const tooltip = `Parcelas em atraso: ${c.billCount || 1}&#10;Dias em atraso: ${c.maxDaysDelay} dias&#10;Último contato: ${lastContact}&#10;Próximo retorno: ${lastPromise}`;
+            
             return `
-            <tr>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">${c.saleId || '-'}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem;">${c.customerName || ''} ${warningIcon}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600;">R$ ${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b;">${percent}%</td>
+            <tr onclick="window.viewCustomerCard(${c.customerId}, ${c.saleId})" style="cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'" title="${tooltip}">
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500; font-size: 0.85rem;">${c.saleId || '-'}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.customerName || ''} ${warningIcon}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percent}%</td>
             </tr>
             `;
         }).join('');
@@ -291,27 +298,76 @@ const HomeDashboard = {
             html += `
             <tr style="background: #f8fafc;">
               <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">-</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem; font-weight: 700;">Outros (${othersByValue.length} clientes)</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600;">R$ ${sumOthersValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b;">${percentOthers}%</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; font-weight: 700;">Outros (${othersByValue.length} clientes)</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #ef4444; font-weight: 600; font-size: 0.85rem;">${sumOthersValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percentOthers}%</td>
             </tr>`;
         }
+        
+        html += `
+        <tr style="background: #f1f5f9; border-top: 2px solid #cbd5e1;">
+          <td style="padding: 8px 15px; font-weight: 500;">-</td>
+          <td style="padding: 8px 15px; color: #1e293b; font-size: 0.85rem; font-weight: 800;">TOTAL GERAL (${myClients.length} clientes)</td>
+          <td style="padding: 8px 15px; text-align: right; color: #ef4444; font-weight: 800; font-size: 0.9rem;">${totalDelayedValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+          <td style="padding: 8px 15px; text-align: right; font-weight: 800; color: #1e293b; font-size: 0.9rem;">100%</td>
+        </tr>`;
+        
         tbodyValores.innerHTML = html;
     }
 
     const tbodyDias = document.getElementById('home-op-tbody-dias');
     if (topDias.length === 0) {
-        tbodyDias.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum outro cliente.</td></tr>';
+        tbodyDias.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum outro cliente.</td></tr>';
     } else {
-        tbodyDias.innerHTML = topDias.map(c => {
+        const othersDias = [...myClients]
+            .sort((a, b) => b.maxDaysDelay - a.maxDaysDelay)
+            .filter(c => !idValores.has(c.id))
+            .slice(10);
+            
+        const sumOthersDiasValue = othersDias.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
+        
+        let htmlDias = topDias.map(c => {
+            const customerNotes = window.AppState?.notes?.[c.customerId] || [];
+            const lastContact = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+            const promiseNotes = customerNotes.filter(n => n.promiseDate);
+            const lastPromise = promiseNotes.length > 0 ? new Date(Math.max(...promiseNotes.map(n => new Date(n.promiseDate + 'T12:00:00')))).toLocaleDateString('pt-BR') : "Nenhum";
+            const tooltip = `Parcelas em atraso: ${c.billCount || 1}&#10;Dias em atraso: ${c.maxDaysDelay} dias&#10;Último contato: ${lastContact}&#10;Próximo retorno: ${lastPromise}&#10;Valor atrasado: R$ ${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+            
+            const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
             return `
-            <tr>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">${c.title}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.85rem;">${c.name}</td>
-              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600;">${c.maxDaysDelay} dias</td>
+            <tr onclick="window.viewCustomerCard(${c.customerId}, ${c.saleId})" style="cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='white'" title="${tooltip}">
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500; font-size: 0.85rem;">${c.saleId || '-'}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.customerName || ''}</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">${c.maxDaysDelay} dias</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percent}%</td>
             </tr>
             `;
         }).join('');
+        
+        if (sumOthersDiasValue > 0) {
+            const percentOthersDias = totalDelayedValue > 0 ? ((sumOthersDiasValue / totalDelayedValue) * 100).toFixed(1) : 0;
+            htmlDias += `
+            <tr style="background: #f8fafc;">
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; font-weight: 500;">-</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; color: #475569; font-size: 0.8rem; font-weight: 700;">Outros (${othersDias.length} clientes)</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; color: #f59e0b; font-weight: 600; font-size: 0.85rem;">-</td>
+              <td style="padding: 8px 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 600; color: #64748b; font-size: 0.85rem;">${percentOthersDias}%</td>
+            </tr>`;
+        }
+        
+        const topDiasSumValue = topDias.reduce((sum, c) => sum + (c.overdueValue || 0), 0);
+        const totalDiasValue = topDiasSumValue + sumOthersDiasValue;
+        const totalDiasPercent = totalDelayedValue > 0 ? ((totalDiasValue / totalDelayedValue) * 100).toFixed(1) : 0;
+        
+        htmlDias += `
+        <tr style="background: #f1f5f9; border-top: 2px solid #cbd5e1;">
+          <td style="padding: 8px 15px; font-weight: 500;">-</td>
+          <td style="padding: 8px 15px; color: #1e293b; font-size: 0.85rem; font-weight: 800;">TOTAL DA LISTA (${topDias.length + othersDias.length} clientes)</td>
+          <td style="padding: 8px 15px; text-align: right; color: #f59e0b; font-weight: 800; font-size: 0.9rem;">-</td>
+          <td style="padding: 8px 15px; text-align: right; font-weight: 800; color: #1e293b; font-size: 0.9rem;">${totalDiasPercent}%</td>
+        </tr>`;
+        
+        tbodyDias.innerHTML = htmlDias;
     }
     
     if(window.lucide) window.lucide.createIcons();
