@@ -444,7 +444,7 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="document.getElementById('umodal-operator-type-container').style.display = this.value.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="const isOp = this.value.toUpperCase() === 'OPERADOR COBRANÇA'; document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
@@ -479,11 +479,18 @@ const ConfigUsersApp = {
                </div>
             </div>
 
-            <div style="margin-bottom: 16px;">
+            <div style="margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
                <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
                   <input type="checkbox" id="umodal-check-const" ${user && user.check_construction ? 'checked' : ''} onchange="document.getElementById('umodal-const-config').style.display = this.checked ? 'block' : 'none';" style="margin-right: 8px; width: 16px; height: 16px;">
                   Responsável por Checar Construção
                </label>
+               
+               <div id="umodal-resend-billet-container" style="display: ${user && user.profile_name && user.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : (!user ? 'block' : 'none')};">
+                   <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
+                      <input type="checkbox" id="umodal-resend-billet" ${user && user.resend_billet ? 'checked' : ''} style="margin-right: 8px; width: 16px; height: 16px;">
+                      Responsável por reenviar boleto de cliente
+                   </label>
+               </div>
             </div>
 
             <div id="umodal-const-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && user.check_construction ? 'block' : 'none'};">
@@ -557,6 +564,8 @@ const ConfigUsersApp = {
       const checkConstruction = document.getElementById('umodal-check-const') ? document.getElementById('umodal-check-const').checked : false;
       const constCities = Array.from(document.querySelectorAll('input[name="umodal-const-cities"]:checked')).map(el => el.value);
 
+      const resendBillet = document.getElementById('umodal-resend-billet') ? document.getElementById('umodal-resend-billet').checked : false;
+
       if (!name || !email) {
           alert("Nome e E-mail são obrigatórios.");
           return;
@@ -580,6 +589,7 @@ const ConfigUsersApp = {
               user.manager_name = managerName;
               user.manager_email = managerEmail;
               user.badge_color = badgeColor;
+              user.resend_billet = resendBillet;
           }
       } else {
           const newId = this.users.length ? Math.max(...this.users.map(u => u.id)) + 1 : 1;
@@ -600,6 +610,7 @@ const ConfigUsersApp = {
              manager_name: managerName,
              manager_email: managerEmail,
              badge_color: badgeColor,
+             resend_billet: resendBillet,
              status: "PENDENTE"
           });
       }
