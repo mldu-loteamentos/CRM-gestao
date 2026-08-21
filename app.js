@@ -17386,14 +17386,33 @@ window.gerarTermoSuspensaoPdf = function(customerId, saleId) {
   
   text = text.replace(/{{DATA_CONTRATO}}/g, formattedSaleDate);
   
+  const tituloAReceber = sale.receivableBillId || saleId || 'N/D';
+  text = text.replace(/{{TITULO_RECEBER}}/g, tituloAReceber);
+  
   // Cleanup any lingering dangling characters if variables were empty
   text = text.replace(/^\s*-\s*-\s*$/gm, '');
   text = text.replace(/^\s*-\s*$/gm, '');
   text = text.replace(/{{EMPRESA_NOME}}/g, empreendimento ? empreendimento.split('-')[0].trim() : 'MOURA LEITE LOTEAMENTOS');
   text = text.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpj));
   
+  const today = new Date();
+  let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const parts = dateStr.split(' de ');
+  if (parts.length === 3) {
+      parts[1] = parts[1].charAt(0).toUpperCase() + parts[1].slice(1);
+      dateStr = parts.join(' de ');
+  }
+  
+  const headerCidade = cidade || 'Botucatu';
+  const headerDateStr = `${headerCidade}, ${dateStr}`;
+  const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
+
   const docHtml = `
     <div style="margin-bottom: 2rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <span style="font-family: 'Times New Roman', serif; font-size: 12pt;">${headerDateStr}</span>
+        <img src="${logoUrl}" alt="Logo Moura Leite" style="height: 60px; object-fit: contain;">
+      </div>
       <h2 style="text-align:center; color: #105436; font-size: 14pt; font-weight: bold;">${ref}</h2>
       <hr style="border: 1px solid #ccc; margin: 20px 0;">
       <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; text-align: justify;">${text}</pre>
