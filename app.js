@@ -17573,7 +17573,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
 
   // Inline address string by removing leading dot/comma and newlines
   text = text.replace(/[\.,]?\s*[\r\n]+{{ENDERECO_CLIENTE}}/g, `, residente e domiciliado em {{ENDERECO_CLIENTE}}`);
-  text = text.replace(/{{ENDERECO_CLIENTE}}/g, address);
+  text = text.replace(/{{ENDERECO_CLIENTE}}/g, (address || '').toUpperCase());
   
   // O endereco_cliente já traz tudo (incluindo CEP, Cidade e Estado), então se a linha dupla existir no template, nós removemos inteira para evitar duplicidade.
   text = text.replace(/[\r\n]*{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
@@ -17582,13 +17582,15 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   
   // E se sobrou variavel solta
   text = text.replace(/{{CEP_CLIENTE}}/g, cep);
-  text = text.replace(/{{CIDADE_CLIENTE}}/g, cidade);
-  text = text.replace(/{{ESTADO_CLIENTE}}/g, estado);
+  text = text.replace(/{{CIDADE_CLIENTE}}/g, (cidade || '').toUpperCase());
+  text = text.replace(/{{ESTADO_CLIENTE}}/g, (estado || '').toUpperCase());
   text = text.replace(/{{TITULO_REF}}/g, ref);
   text = text.replace(/{{EMPREENDIMENTO}}/g, empreendimento);
   text = text.replace(/{{QUADRA}}/g, quadra);
   text = text.replace(/{{LOTE}}/g, lote);
-  text = text.replace(/{{UNIDADE}}/g, uName);
+  
+  let formattedUName = (uName || '').replace(/^U\s*-\s*/i, '');
+  text = text.replace(/{{UNIDADE}}/g, formattedUName);
   
   const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate || (rawSale ? rawSale.saleDate : null);
   
@@ -17646,10 +17648,10 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
 
   const docHtml = `
     <div style="margin-bottom: 0;">
-      <h2 style="text-align:center; color: #105436; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 5px;">${ref}</h2>
-      <hr style="border: 1px solid #ccc; margin: 10px 0;">
-      ${!hasHeaderInTemplate ? `<div style="font-family: 'Times New Roman', serif; font-size: 11.5pt; margin-bottom: 15px; text-align: left;">${headerDateStr}</div>` : ''}
-      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.4; text-align: justify; margin: 0;">${text}</pre>
+      <h2 style="text-align:center; color: #105436; font-size: 12.5pt; font-weight: bold; margin-top: 0; margin-bottom: 3px;">${ref}</h2>
+      <hr style="border: 1px solid #ccc; margin: 8px 0;">
+      ${!hasHeaderInTemplate ? `<div style="font-family: 'Times New Roman', serif; font-size: 11pt; margin-bottom: 12px; text-align: left;">${headerDateStr}</div>` : ''}
+      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; text-align: justify; margin: 0;">${text}</pre>
     </div>
   `;
   
