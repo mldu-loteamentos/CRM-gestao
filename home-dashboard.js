@@ -519,7 +519,27 @@ const HomeDashboard = {
         
         if (now - playState.lockTime < lockDuration) {
             // Travado
+            
+            // Verifica se está no período de silêncio (15 min)
+            if (playState.silenceUntil && now < playState.silenceUntil) {
+                return; // Fica completamente mudo e não reage
+            }
+            
+            // Computa a bronca
+            playState.warningCount = (playState.warningCount || 0) + 1;
+            
+            // Se já deu 5 broncas, entra em silêncio por 15 min
+            if (playState.warningCount >= 5) {
+                playState.silenceUntil = now + 900000; // 15 minutos
+                playState.warningCount = 0; // Reseta para o próximo lote depois de 15 min
+            }
+            
+            localStorage.setItem('mascotPlayState', JSON.stringify(playState));
+            
             if (box && textEl) {
+                // Para qualquer animação em andamento instantaneamente
+                petContainer.getAnimations().forEach(anim => anim.cancel());
+                
                 if (playState.lastMascotName === currentPetId) {
                     textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
                 } else {
@@ -532,16 +552,24 @@ const HomeDashboard = {
             return;
         }
         
-        // Se não estiver travado, incrementa contador
+        // Se passou do castigo de 1 hora, zera as variáveis de bronca
+        playState.warningCount = 0;
+        playState.silenceUntil = 0;
+        
+        // Incrementa contador de brincadeira
         playState.clickCount = (playState.clickCount || 0) + 1;
         
         if (playState.clickCount >= 10) {
             playState.lockTime = now;
             playState.lastMascotName = currentPetId;
             playState.clickCount = 0;
+            playState.warningCount = 1; // Já conta a primeira bronca
             localStorage.setItem('mascotPlayState', JSON.stringify(playState));
             
             if (box && textEl) {
+                // Para qualquer animação em andamento instantaneamente
+                petContainer.getAnimations().forEach(anim => anim.cancel());
+                
                 textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
                 box.style.display = 'block';
                 if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
