@@ -17525,8 +17525,9 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
 
   let quadra = unit.block || sale.block || '';
   let lote = unit.lot || sale.lot || '';
+  const uName = unit.name || sale.unitName || sale.unitId || (rawSale ? rawSale.unitName : '') || '';
+  
   if (!quadra && !lote) {
-      const uName = unit.name || sale.unitName || sale.unitId || (rawSale ? rawSale.unitName : '') || '';
       if (uName.includes('-')) {
           quadra = uName.split('-')[0];
           lote = uName.split('-')[1];
