@@ -437,26 +437,31 @@ const HomeDashboard = {
     const modelViewer = document.getElementById('my-3d-assistant');
     const petContainer = document.getElementById('home-pet-container');
     
+    const user = this.getViewUser();
+    let rawOpName = (user?.name || user?.profile_name || 'Parceiro').split(' ')[0];
+    const opName = rawOpName.charAt(0).toUpperCase() + rawOpName.slice(1).toLowerCase();
+    
     if (isClick && petContainer) {
-        // Gerar 30 caminhos aleatórios pela tela, sem zoom (apenas translate e rotate horizontal)
+        // Gerar 30 caminhos aleatórios pela tela, sem virar no eixo Y (apenas translate e leve tilt no Z)
         const paths = [];
         for (let i = 0; i < 30; i++) {
-            const path = [{ transform: 'translate(0px, 0px) rotateY(0deg)' }];
+            const path = [{ transform: 'translate(0px, 0px) rotateZ(0deg)' }];
             const numPoints = Math.floor(Math.random() * 3) + 3; // 3 a 5 pontos intermediários
             for (let j = 1; j < numPoints; j++) {
                 const x = (Math.random() - 0.5) * 700; // range de -350 a 350
                 const y = (Math.random() - 0.5) * 400; // range de -200 a 200
-                const rotateY = Math.random() > 0.5 ? 180 : 0; // vira o "drone" pra esquerda ou direita
-                path.push({ transform: `translate(${x}px, ${y}px) rotateY(${rotateY}deg)`, offset: j / numPoints });
+                const rotateZ = (Math.random() - 0.5) * 20; // leve inclinação de -10 a 10 graus
+                path.push({ transform: `translate(${x}px, ${y}px) rotateZ(${rotateZ}deg)`, offset: j / numPoints });
             }
-            path.push({ transform: 'translate(0px, 0px) rotateY(0deg)' });
+            path.push({ transform: 'translate(0px, 0px) rotateZ(0deg)' });
             paths.push(path);
         }
         
         const randomPath = paths[Math.floor(Math.random() * paths.length)];
+        const duration = 1800 + Math.random() * 700;
         
         petContainer.animate(randomPath, {
-            duration: 1800 + Math.random() * 700, // Duração variável entre 1.8s e 2.5s
+            duration: duration,
             easing: 'ease-in-out'
         });
         
@@ -465,16 +470,30 @@ const HomeDashboard = {
             modelViewer.setAttribute('animation-name', randAnim);
         }
         
-        // Se foi clique, apenas faz a animação. Não mostra texto.
+        // Se foi clique, esconde o box inicialmente, e quando terminar, mostra as frases brincando
         if (box) box.style.display = 'none';
+        
+        setTimeout(() => {
+            if (box && textEl) {
+                const playPhrases = [
+                    "Isso é divertido! 🤩",
+                    "Uauu! Que rolêêê! 🚀",
+                    "O Israel vai brigar com a gente se ficarmos brincando kkkkk 🤫",
+                    "Será se a Ju fez café? ☕",
+                    "Você vai jogar Uno essa semana? 🃏",
+                    "Amei esse passeio! ✨",
+                    "Uhull! Mais rápido na próxima! 💨"
+                ];
+                textEl.innerHTML = playPhrases[Math.floor(Math.random() * playPhrases.length)];
+                box.style.display = 'block';
+                setTimeout(() => { box.style.display = 'none'; }, 6000);
+            }
+        }, duration);
         return;
     }
     
     if (!box || !textEl) return;
     
-    const user = this.getViewUser();
-    let rawOpName = (user?.name || user?.profile_name || 'Parceiro').split(' ')[0];
-    const opName = rawOpName.charAt(0).toUpperCase() + rawOpName.slice(1).toLowerCase();
     const petName = this.pets.find(p => p.id === this.selectedPetId)?.name || 'seu Assistente';
     
     if (isNewSelection) {
@@ -504,19 +523,40 @@ const HomeDashboard = {
     // 20% Saudação
     if (rand < 0.20) {
         const dayOfWeek = new Date().getDay();
-        if (dayOfWeek === 1) finalMsg = `Oii ${opName}! Eu sou o ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰 Que bom que voltou!`;
-        else if (dayOfWeek === 5) finalMsg = `${timeGreeting}, ${opName}! Sextou! Vamos fechar a semana com chave de ouro! 🎉`;
+        if (dayOfWeek === 1) finalMsg = `Oii ${opName}! Eu sou o ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰`;
+        else if (dayOfWeek === 5) {
+            const sexPhrases = [
+                `Vamos fechar com chave de ouro, ${opName}! 🔑✨`,
+                `Vamos sextar com força e bons resultados, ${opName}! 🎉🚀`,
+                `Sextou, ${opName}! Dia de bater meta e comemorar! 🍻`,
+                `Sexta-feira chegou, ${opName}! Vamos fechar a semana com chave de ouro! 🏆`
+            ];
+            finalMsg = sexPhrases[Math.floor(Math.random() * sexPhrases.length)];
+        }
         else finalMsg = `${timeGreeting}, ${opName}! Eu sou o ${petName} e adoro trabalhar com você! 🥰`;
     }
     // 10% Clima
     else if (rand < 0.30) {
         try {
-            const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
+            const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&current=temperature_2m,weather_code&timezone=America%2FSao_Paulo');
             if (res.ok) {
                 const data = await res.json();
-                const prob = data.daily?.precipitation_probability_max?.[0] || 0;
-                if (prob > 50) finalMsg = `${opName}, a previsão indica ${prob}% de chance de chuva hoje em Botucatu. Não esqueça o guarda-chuva! ☔`;
-                else finalMsg = `${opName}, o clima hoje em Botucatu parece tranquilo (chance de chuva de ${prob}%). ☀️ Dia perfeito pra bater meta!`;
+                const temp = data.current?.temperature_2m || 25;
+                const code = data.current?.weather_code || 0;
+                // Códigos de chuva pela OMM (51-65, 80-82)
+                const isRaining = [51,53,55,61,63,65,80,81,82].includes(code);
+                
+                if (temp >= 28) {
+                    finalMsg = `Que calor, ${opName}! 🥵 Está marcando ${Math.round(temp)}°C. Mantenha a água por perto!`;
+                } else if (isRaining && temp < 22) {
+                    finalMsg = `Queria estar debaixo de uma cobertinha... 🥶 Tá chovendo e fazendo ${Math.round(temp)}°C.`;
+                } else if (temp <= 18) {
+                    finalMsg = `Ai que friooo! ⛄ A temperatura está em ${Math.round(temp)}°C. Melhor pegar um casaco!`;
+                } else if (isRaining) {
+                    finalMsg = `${opName}, parece que está chovendo agora (${Math.round(temp)}°C). Não esqueça o guarda-chuva! ☔`;
+                } else {
+                    finalMsg = `${opName}, o clima está agradável (${Math.round(temp)}°C). ☀️ Dia perfeito pra bater meta!`;
+                }
             }
         } catch(e) {}
         if (!finalMsg) finalMsg = `Ei ${opName}, o clima está ótimo para fecharmos bons negócios hoje! 🚀`;
