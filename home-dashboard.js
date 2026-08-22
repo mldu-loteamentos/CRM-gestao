@@ -442,6 +442,116 @@ const HomeDashboard = {
     const opName = rawOpName.charAt(0).toUpperCase() + rawOpName.slice(1).toLowerCase();
     
     if (isClick && petContainer) {
+        let stateStr = localStorage.getItem('mascotPlayState');
+        let playState = stateStr ? JSON.parse(stateStr) : { clickCount: 0, lockTime: 0, lastMascotName: '' };
+        
+        const currentPetId = localStorage.getItem('selectedHomePet') || 'pet_nivea';
+        const now = Date.now();
+        const lockDuration = 3600000; // 1 hour
+        
+        const tiredPhrases = [
+            "Cansei de brincar, vamos focar agora! 🥵",
+            "Acendeu um alerta na tela do Israel que estamos brincando! 🚨",
+            "Deu tontura, quero parar um pouco! 😵",
+            "Minhas engrenagens estão fritando, chega de voo! 🤖",
+            "Você não tem boleto pra cobrar não? Vai trabalhar! 📄",
+            "O RH já anotou meu nome, vou me esconder! 🫣",
+            "Vitor vai cancelar minha comissão se eu voar de novo! 💸",
+            "Pausa pro descanso, minha bateria foi pra 1%! 🔋",
+            "Chega, me deu náusea! 🤢",
+            "Tô em greve de voo por uma hora! 🛑",
+            "Preciso de um café da Ju urgente pra recuperar as forças! ☕",
+            "Israel tá vindo aí, disfarça e vai pra fila de cobrança! 👀",
+            "Se você clicar mais uma vez o Vitor aparece atrás de você! 👻",
+            "Cota de diversão atingida. Voltamos ao modo sério! 👔",
+            "Já rodei tanto que esqueci como fala com cliente! 🤐",
+            "O servidor da Sienge tá pesado de tanto que eu voei! 💻",
+            "Chega de Uno e de voo, hora de bater a meta! 🎯",
+            "Tô exausto! Vai ligar pra um inadimplente, vai! 📞",
+            "Meu motor superaqueceu! 🌡️",
+            "Nem tente me girar de novo, travei o cinto! 🛑",
+            "Alô? É do RH? Quero reportar cliques excessivos! 📞",
+            "Vou me esconder atrás da tabela até a tontura passar! 📊",
+            "O chefe tá olhando, volta pro trabalho! 🤫",
+            "Você acha que vida de mascote é só diversão? Cansei! 😫",
+            "Já voei o equivalente a uma maratona hoje! 🏃‍♂️",
+            "Minha cota de giros acabou. Volto daqui a uma hora! ⏳",
+            "A Ju nem fez café suficiente pra me dar energia pra outro voo! ☕",
+            "Vou lá cobrar quem deve e depois volto a brincar! 🏃",
+            "Chega! Vai ver se o cliente já pagou a entrada! 🧾",
+            "Até o sistema pediu arrego agora! 📉",
+            "Bora fechar acordo, a brincadeira ficou pra depois! 💸",
+            "Estou em manutenção preventiva após 10 voos. 🛠️",
+            "Fui bloqueado por excesso de alegria. 🚨",
+            "Se eu voar de novo eu perco minha licença de voo! ✈️",
+            "Vitor mandou eu ficar quieto no meu canto. 🤐",
+            "Não tô legal, o mundo tá girando! 🌍",
+            "Acho que perdi um parafuso nesse último giro. 🔩",
+            "Meu processador precisa de uma pausa de uma hora! ⏱️",
+            "Vai mandar WhatsApp pros atrasados! Deixa eu respirar! 📱",
+            "Socorro, tô vendo estrelas! ✨",
+            "Quem brinca muito não bate meta de recuperação! 📊",
+            "Israel me deu advertência por abandono de tela! 📝",
+            "Basta! Foco total nos inadimplentes agora! 🔍",
+            "Cansei! Só volto a voar quando batermos a meta do dia! 🏆",
+            "Aviso do sistema: mascote sobrecarregado. ⚠️",
+            "Estou mareado, chega de acrobacias. 🤢",
+            "Vou me fingir de morto pra ver se você trabalha. 🪦",
+            "Tô fora de área, deixe sua mensagem após o bipe... 📵",
+            "A tela do Israel já apitou: 'Excesso de diversão no CRM'. 🚨",
+            "Descanso de mascote é direito garantido por lei! ⚖️"
+        ];
+        
+        const otherMascotPhrases = [
+            "O outro mascote me avisou que vocês já brincaram bastante. Vamos focar agora! 🧐",
+            "Fiquei sabendo que a cota de diversão estourou! Bora bater meta! 📈",
+            "O colega ali me disse que você cansou ele. Comigo é só trabalho! 💼",
+            "Estou bloqueado de voar porque o limite de diversão já estourou! 🚫",
+            "Ah não, o outro mascote já me alertou sobre você! Vai cobrar! 📞",
+            "O Israel mandou eu ficar parado porque vocês já brincaram demais! 🤫",
+            "Cheguei agora e já me falaram que você estourou a cota de brincadeira! ⚠️",
+            "Sem choro! A brincadeira acabou pro outro e pra mim também! 🛑",
+            "Vou ficar paradinho aqui, me disseram que o Israel tá de olho em você! 👀",
+            "O RH avisou que vocês já extrapolaram o recreio hoje! 🏢",
+            "O mascote anterior pediu férias depois de vocês. Eu vou focar! 🏖️",
+            "Nada de voos. Vamos focar nos boletos atrasados! 📄"
+        ];
+        
+        if (now - playState.lockTime < lockDuration) {
+            // Travado
+            if (box && textEl) {
+                if (playState.lastMascotName === currentPetId) {
+                    textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
+                } else {
+                    textEl.innerHTML = otherMascotPhrases[Math.floor(Math.random() * otherMascotPhrases.length)];
+                }
+                box.style.display = 'block';
+                if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
+                window.mascotShowPhraseTimeout = setTimeout(() => { box.style.display = 'none'; }, 3000);
+            }
+            return;
+        }
+        
+        // Se não estiver travado, incrementa contador
+        playState.clickCount = (playState.clickCount || 0) + 1;
+        
+        if (playState.clickCount >= 10) {
+            playState.lockTime = now;
+            playState.lastMascotName = currentPetId;
+            playState.clickCount = 0;
+            localStorage.setItem('mascotPlayState', JSON.stringify(playState));
+            
+            if (box && textEl) {
+                textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
+                box.style.display = 'block';
+                if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
+                window.mascotShowPhraseTimeout = setTimeout(() => { box.style.display = 'none'; }, 3000);
+            }
+            return; // Impede a animação
+        }
+        
+        localStorage.setItem('mascotPlayState', JSON.stringify(playState));
+
         // Gerar 30 caminhos aleatórios pela tela, sem virar no eixo Y (apenas translate e leve tilt no Z)
         const paths = [];
         for (let i = 0; i < 30; i++) {
@@ -473,7 +583,8 @@ const HomeDashboard = {
         // Se foi clique, esconde o box inicialmente, e quando terminar, mostra as frases brincando
         if (box) box.style.display = 'none';
         
-        setTimeout(() => {
+        if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
+        window.mascotShowPhraseTimeout = setTimeout(() => {
             if (box && textEl) {
                 const playPhrases = [
                     // Vitor (Gerente)
