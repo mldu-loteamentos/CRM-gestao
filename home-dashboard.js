@@ -433,103 +433,104 @@ const HomeDashboard = {
     }
   },
 
-  speak(includeFeedback = false, isClick = false) {
+  async speak(includeFeedback = false, isClick = false) {
     const box = document.getElementById('home-pet-speech');
     const textEl = document.getElementById('home-pet-speech-text');
-    const petEl = document.getElementById('home-pet-emoji')?.querySelector('img');
     const modelViewer = document.getElementById('my-3d-assistant');
-    
-    let msg = "Olá! Estou por aqui se precisar.";
-
-    if (isClick) {
-       if (modelViewer) {
-           const anims = modelViewer.availableAnimations;
-           if (anims && anims.length > 0) {
-               const randAnim = anims[Math.floor(Math.random() * anims.length)];
-               modelViewer.setAttribute('animation-name', randAnim);
-               msg = `Animação atual: "${randAnim}". Animações que encontrei no arquivo: ${anims.join(', ')}`;
-               setTimeout(() => {
-                   modelViewer.setAttribute('animation-name', anims[0]);
-               }, 3000);
-           } else {
-               // Fallback CSS Animations for static 3D models
-               const cssAnims = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
-               const randAnim = cssAnims[Math.floor(Math.random() * cssAnims.length)];
-               modelViewer.style.animation = 'none';
-               void modelViewer.offsetWidth;
-               modelViewer.style.animation = randAnim;
-               // Removed the msg so it defaults to standard quotes later
-           }
-       } else if (petEl) {
-           const animations = ['petSpin 1s', 'petBounce 1s', 'petFlip 1s', 'petWiggle 1s'];
-           const randAnim = animations[Math.floor(Math.random() * animations.length)];
-           petEl.style.animation = 'none';
-           void petEl.offsetWidth;
-           petEl.style.animation = randAnim;
-       }
-    }
+    const petContainer = document.getElementById('home-pet-container');
     
     if (!box || !textEl) return;
+    
+    // Mostra loading
+    textEl.textContent = "Pensando...";
+    box.style.display = 'block';
 
-    const msgs = [
-        // Saúde e Bem-Estar
-        "Lembre-se de beber água! Manter-se hidratado ajuda no foco. 💧",
-        "Respire fundo... Inspire em 4 segundos, segure por 4, solte em 4. Ajuda muito em ligações difíceis! 🧘",
-        "Dê uma espreguiçada rápida! Sua postura agradece. 🙆‍♂️",
-        "Olhe um pouco para longe da tela para descansar a vista. 👀",
+    if (isClick && petContainer) {
+        // Animação de rodopio feliz
+        petContainer.animate([
+            { transform: 'translate(0px, 0px) rotate(0deg) scale(1)' },
+            { transform: 'translate(50px, -50px) rotate(180deg) scale(1.2)' },
+            { transform: 'translate(-50px, -20px) rotate(360deg) scale(1.1)' },
+            { transform: 'translate(0px, 0px) rotate(720deg) scale(1)' }
+        ], {
+            duration: 1000,
+            easing: 'ease-in-out'
+        });
         
-        // Boa Comunicação e Educação
-        "Um 'bom dia' sincero e um sorriso na voz mudam o tom de qualquer ligação. 😊",
-        "O segredo para um bom acordo é ouvir o cliente antes de propor a solução. 🚀",
-        "Seja sempre educado, mesmo quando o cliente estiver estressado. A calma contagia! 🕊️",
-        "Chamar o cliente pelo nome demonstra respeito e gera conexão. 🤝",
-        
-        // Dicas de Negociação de Dívidas
-        "Uma cobrança feita com empatia tem mais chances de sucesso. 💙",
-        "Tente entender o motivo do atraso. Muitas vezes é apenas um imprevisto! 💡",
-        "Ofereça alternativas reais. O objetivo é ajudar o cliente a voltar a ficar em dia! 📊",
-        "Destaque os benefícios de estar com o nome limpo e com as parcelas em dia. ✨",
-        
-        // Organização
-        "Não se esqueça de registrar todos os detalhes da conversa nas ocorrências! 📝",
-        "Dica: Tente ligar para os clientes com maiores valores ou mais dias de atraso primeiro!",
-        "Lembre-se de conferir sua agenda de lembretes para não perder nenhum retorno. 📅",
-        "Organize suas abas e deixe as informações do cliente prontas antes de ligar. 🗂️",
-        
-        // Inspiração
-        "Estou de olho nos seus resultados! Vamos bater essa meta! 🎯",
-        "Cada ligação é uma nova oportunidade. Acredite no seu potencial! 🌟",
-        "Você está fazendo um ótimo trabalho. Continue assim! 💪"
-    ];
-
-    if (msg === "Olá! Estou por aqui se precisar.") {
-        msg = msgs[Math.floor(Math.random() * msgs.length)];
+        if (modelViewer && modelViewer.availableAnimations && modelViewer.availableAnimations.length > 0) {
+            const randAnim = modelViewer.availableAnimations[Math.floor(Math.random() * modelViewer.availableAnimations.length)];
+            modelViewer.setAttribute('animation-name', randAnim);
+        }
     }
 
     const hour = new Date().getHours();
-    let greeting = 'Boa noite';
-    if (hour < 12) greeting = 'Bom dia';
-    else if (hour < 18) greeting = 'Boa tarde';
+    let timeGreeting = 'Boa noite';
+    if (hour < 12) timeGreeting = 'Bom dia';
+    else if (hour < 18) timeGreeting = 'Boa tarde';
 
-    if (includeFeedback && window.rawClientList) {
-       const myClients = this.getMyClients();
-       const qtd = myClients.length;
-       const totalVal = myClients.reduce((acc, c) => acc + (Number(c.overdueValue) || 0), 0);
-       
-       if (qtd === 0) {
-           msg = `${greeting}! Sua carteira está impecável hoje, zero inadimplência! 🎉`;
-       } else {
-           msg = `${greeting}! Você tem ${qtd} clientes na sua fila hoje totalizando R$ ${totalVal.toLocaleString('pt-BR',{minimumFractionDigits:2})}. Vamos com tudo fechar essas negociações! 💪`;
-       }
-    }
+    const petName = this.pets.find(p => p.id === this.selectedPetId)?.name || 'seu Assistente';
+    const dayOfWeek = new Date().getDay();
     
-    textEl.textContent = msg;
+    let baseGreet = `Oii! Eu sou ${petName} e gosto muito de você! 🥰`;
+    if (dayOfWeek === 1) { // Segunda-feira
+        baseGreet = `Oii! Eu sou ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰 Que bom que voltou!`;
+    }
+
+    let weatherMsg = '';
+    try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
+        if (res.ok) {
+            const data = await res.json();
+            const prob = data.daily?.precipitation_probability_max?.[0] || 0;
+            if (prob > 50) {
+                weatherMsg = `Ah, a previsão indica ${prob}% de chance de chuva hoje em Botucatu. Não esqueça o guarda-chuva e uma blusa! ☔🧥`;
+            } else {
+                weatherMsg = `O clima hoje em Botucatu parece tranquilo (chance de chuva de ${prob}%). ☀️`;
+            }
+        }
+    } catch(e) {
+        console.log("Weather API failed");
+    }
+
+    let highestMsg = '';
+    if (window.rawClientList) {
+        const myClients = this.getMyClients();
+        if (myClients.length > 0) {
+            let highestClient = myClients[0];
+            myClients.forEach(c => {
+                if ((Number(c.overdueValue)||0) > (Number(highestClient.overdueValue)||0)) {
+                    highestClient = c;
+                }
+            });
+            const valStr = (Number(highestClient.overdueValue)||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+            highestMsg = `Hoje a nossa maior prioridade na fila é o cliente ${highestClient.customerName} (Título ${highestClient.receivableBillId || highestClient.saleId}, R$ ${valStr}). Vamos lá fechar esse acordo! 💪`;
+        } else {
+            highestMsg = `Sua carteira está impecável hoje, zero inadimplência! 🎉`;
+        }
+    }
+
+    const waterMsg = "Já bebeu água hoje? Que tal fazer uma pequena pausa para esticar as pernas? 💧🚶‍♀️";
+    const motivMsg = this.motivationalQuotes[Math.floor(Math.random() * this.motivationalQuotes.length)];
+
+    let finalMsg = '';
+    
+    if (isClick) {
+        finalMsg = `${baseGreet}\n\n${highestMsg}\n\n${weatherMsg}\n\n${waterMsg}\n\nLembre-se: ${motivMsg}`;
+    } else {
+        if (includeFeedback && highestMsg) {
+            finalMsg = `${timeGreeting}! ${highestMsg}\n\n${motivMsg}`;
+        } else {
+            finalMsg = `${timeGreeting}! ${waterMsg} ${motivMsg}`;
+        }
+    }
+
+    textEl.innerHTML = finalMsg.replace(/\n/g, '<br>');
     box.style.display = 'block';
     
-    // Fechar depois de 8 segundos
+    // Fechar depois de 15 segundos se for click (mensagem longa) ou 8s se for automatico
     setTimeout(() => {
        box.style.display = 'none';
-    }, 8000);
+    }, isClick ? 15000 : 8000);
   }
 };
 
