@@ -23568,7 +23568,6 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             listEl.appendChild(card);
         });
         
-    const modal = document.getElementById("modal-whatsapp-alerts");
     if (modal) modal.style.display = "flex";
     if (window.lucide) lucide.createIcons();
 };
