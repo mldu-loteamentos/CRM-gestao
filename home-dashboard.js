@@ -467,7 +467,7 @@ const HomeDashboard = {
             "Já rodei tanto que esqueci como fala com cliente! 🤐",
             "O servidor da Sienge tá pesado de tanto que eu voei! 💻",
             "Chega de Uno e de voo, hora de bater a meta! 🎯",
-            "Tô exausto! Vai ligar pra um inadimplente, vai! 📞",
+            "Tô {exausto}! Vai ligar pra um inadimplente, vai! 📞",
             "Meu motor superaqueceu! 🌡️",
             "Nem tente me girar de novo, travei o cinto! 🛑",
             "Alô? É do RH? Quero reportar cliques excessivos! 📞",
@@ -482,9 +482,9 @@ const HomeDashboard = {
             "Até o sistema pediu arrego agora! 📉",
             "Bora fechar acordo, a brincadeira ficou pra depois! 💸",
             "Estou em manutenção preventiva após 10 voos. 🛠️",
-            "Fui bloqueado por excesso de alegria. 🚨",
+            "Fui {bloqueado} por excesso de alegria. 🚨",
             "Se eu voar de novo eu perco minha licença de voo! ✈️",
-            "Vitor mandou eu ficar quieto no meu canto. 🤐",
+            "Vitor mandou eu ficar {quieto} no meu canto. 🤐",
             "Não tô legal, o mundo tá girando! 🌍",
             "Acho que perdi um parafuso nesse último giro. 🔩",
             "Meu processador precisa de uma pausa de uma hora! ⏱️",
@@ -494,9 +494,9 @@ const HomeDashboard = {
             "Israel me deu advertência por abandono de tela! 📝",
             "Basta! Foco total nos inadimplentes agora! 🔍",
             "Cansei! Só volto a voar quando batermos a meta do dia! 🏆",
-            "Aviso do sistema: mascote sobrecarregado. ⚠️",
-            "Estou mareado, chega de acrobacias. 🤢",
-            "Vou me fingir de morto pra ver se você trabalha. 🪦",
+            "Aviso do sistema: mascote {sobrecarregado}. ⚠️",
+            "Estou {mareado}, chega de acrobacias. 🤢",
+            "Vou me fingir de {morto} pra ver se você trabalha. 🪦",
             "Tô fora de área, deixe sua mensagem após o bipe... 📵",
             "A tela do Israel já apitou: 'Excesso de diversão no CRM'. 🚨",
             "Descanso de mascote é direito garantido por lei! ⚖️"
@@ -505,13 +505,13 @@ const HomeDashboard = {
         const otherMascotPhrases = [
             "O outro mascote me avisou que vocês já brincaram bastante. Vamos focar agora! 🧐",
             "Fiquei sabendo que a cota de diversão estourou! Bora bater meta! 📈",
-            "O colega ali me disse que você cansou ele. Comigo é só trabalho! 💼",
-            "Estou bloqueado de voar porque o limite de diversão já estourou! 🚫",
+            "{O_A} colega ali me disse que você cansou {ele_ela}. Comigo é só trabalho! 💼",
+            "Estou {bloqueado} de voar porque o limite de diversão já estourou! 🚫",
             "Ah não, o outro mascote já me alertou sobre você! Vai cobrar! 📞",
-            "O Israel mandou eu ficar parado porque vocês já brincaram demais! 🤫",
+            "O Israel mandou eu ficar {parado} porque vocês já brincaram demais! 🤫",
             "Cheguei agora e já me falaram que você estourou a cota de brincadeira! ⚠️",
             "Sem choro! A brincadeira acabou pro outro e pra mim também! 🛑",
-            "Vou ficar paradinho aqui, me disseram que o Israel tá de olho em você! 👀",
+            "Vou ficar {paradinho} aqui, me disseram que o Israel tá de olho em você! 👀",
             "O RH avisou que vocês já extrapolaram o recreio hoje! 🏢",
             "O mascote anterior pediu férias depois de vocês. Eu vou focar! 🏖️",
             "Nada de voos. Vamos focar nos boletos atrasados! 📄"
@@ -544,11 +544,29 @@ const HomeDashboard = {
                     }
                 });
                 
+                let selectedPhrase = "";
                 if (playState.lastMascotName === currentPetId) {
-                    textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
+                    selectedPhrase = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
                 } else {
-                    textEl.innerHTML = otherMascotPhrases[Math.floor(Math.random() * otherMascotPhrases.length)];
+                    selectedPhrase = otherMascotPhrases[Math.floor(Math.random() * otherMascotPhrases.length)];
                 }
+                
+                const isFemale = currentPetId === '3d_lety' || currentPetId === '3d_nial';
+                const wasFemale = playState.lastMascotName === '3d_lety' || playState.lastMascotName === '3d_nial';
+                
+                selectedPhrase = selectedPhrase.replace('{exausto}', isFemale ? 'exausta' : 'exausto');
+                selectedPhrase = selectedPhrase.replace('{bloqueado}', isFemale ? 'bloqueada' : 'bloqueado');
+                selectedPhrase = selectedPhrase.replace('{quieto}', isFemale ? 'quieta' : 'quieto');
+                selectedPhrase = selectedPhrase.replace('{sobrecarregado}', isFemale ? 'sobrecarregada' : 'sobrecarregado');
+                selectedPhrase = selectedPhrase.replace('{mareado}', isFemale ? 'mareada' : 'mareado');
+                selectedPhrase = selectedPhrase.replace('{morto}', isFemale ? 'morta' : 'morto');
+                selectedPhrase = selectedPhrase.replace('{parado}', isFemale ? 'parada' : 'parado');
+                selectedPhrase = selectedPhrase.replace('{paradinho}', isFemale ? 'paradinha' : 'paradinho');
+                
+                selectedPhrase = selectedPhrase.replace('{O_A}', wasFemale ? 'A' : 'O');
+                selectedPhrase = selectedPhrase.replace('{ele_ela}', wasFemale ? 'ela' : 'ele');
+                
+                textEl.innerHTML = selectedPhrase;
                 box.style.display = 'block';
                 if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
                 window.mascotShowPhraseTimeout = setTimeout(() => { box.style.display = 'none'; }, 3000);
@@ -578,7 +596,20 @@ const HomeDashboard = {
                     }
                 });
                 
-                textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
+                let selectedPhrase = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
+                
+                const isFemale = currentPetId === '3d_lety' || currentPetId === '3d_nial';
+                
+                selectedPhrase = selectedPhrase.replace('{exausto}', isFemale ? 'exausta' : 'exausto');
+                selectedPhrase = selectedPhrase.replace('{bloqueado}', isFemale ? 'bloqueada' : 'bloqueado');
+                selectedPhrase = selectedPhrase.replace('{quieto}', isFemale ? 'quieta' : 'quieto');
+                selectedPhrase = selectedPhrase.replace('{sobrecarregado}', isFemale ? 'sobrecarregada' : 'sobrecarregado');
+                selectedPhrase = selectedPhrase.replace('{mareado}', isFemale ? 'mareada' : 'mareado');
+                selectedPhrase = selectedPhrase.replace('{morto}', isFemale ? 'morta' : 'morto');
+                selectedPhrase = selectedPhrase.replace('{parado}', isFemale ? 'parada' : 'parado');
+                selectedPhrase = selectedPhrase.replace('{paradinho}', isFemale ? 'paradinha' : 'paradinho');
+                
+                textEl.innerHTML = selectedPhrase;
                 box.style.display = 'block';
                 if (window.mascotShowPhraseTimeout) clearTimeout(window.mascotShowPhraseTimeout);
                 window.mascotShowPhraseTimeout = setTimeout(() => { box.style.display = 'none'; }, 3000);
