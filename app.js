@@ -17633,6 +17633,14 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   }
   
   const headerCidade = 'Botucatu';
+  
+  // Substituir novas variáveis caso o usuário tenha adicionado no template
+  text = text.replace(/{{CIDADE_ATUAL}}/g, headerCidade);
+  text = text.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
+  text = text.replace(/{{TITULO}}/g, tituloAReceber);
+  text = text.replace(/{{UNIDADE}}/g, uName);
+  
+  const hasHeaderInTemplate = text.includes(headerCidade) && text.includes(dateStr);
   const tituloLineStr = `Título: ${tituloAReceber} - ${uName}`;
   const headerDateStr = `${headerCidade}, ${dateStr}<br><br>${tituloLineStr}`;
 
@@ -17640,7 +17648,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
     <div style="margin-bottom: 0;">
       <h2 style="text-align:center; color: #105436; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 5px;">${ref}</h2>
       <hr style="border: 1px solid #ccc; margin: 10px 0;">
-      <div style="font-family: 'Times New Roman', serif; font-size: 11.5pt; margin-bottom: 15px; text-align: left;">${headerDateStr}</div>
+      ${!hasHeaderInTemplate ? `<div style="font-family: 'Times New Roman', serif; font-size: 11.5pt; margin-bottom: 15px; text-align: left;">${headerDateStr}</div>` : ''}
       <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.4; text-align: justify; margin: 0;">${text}</pre>
     </div>
   `;
@@ -23507,6 +23515,24 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
         return;
     }
     
+    let modal = document.getElementById("modal-whatsapp-alerts");
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'modal-whatsapp-alerts';
+        modal.style.cssText = "display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;";
+        modal.innerHTML = `
+            <div style="background: white; width: 600px; max-width: 90vw; border-radius: 12px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 85vh; display: flex; flex-direction: column;">
+                <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 1.25rem;">Lembrete de Envio de Boletos (WhatsApp)</h2>
+                <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Os seguintes clientes estão com o alerta ativado para envio manual da remessa mensal via WhatsApp:</p>
+                <div id="whatsapp-alerts-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; padding-right: 5px;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                    <button class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="document.getElementById('modal-whatsapp-alerts').style.display='none'">Lembrar Mais Tarde</button>
+                    <button class="btn btn-primary" style="background: #0f766e; color: white; border: none; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.markWhatsappAlertsAsDone()">Marcar como Concluído neste Mês</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
     const listEl = document.getElementById("whatsapp-alerts-list");
     if (!listEl) return;
     
