@@ -740,7 +740,10 @@ const HomeDashboard = {
                     "No Uno eu jogo carta amarela só de sacanagem! 🟨",
                     "Vou ligar pro cliente só pra dizer oi... brincadeira, é pra cobrar! 📞",
                     "Se o RH ver isso... melhor a gente nem pensar! 😬",
-                    "Esse passeio valeu a pena! ✨"
+                    "Esse passeio valeu a pena! ✨",
+                    "Vou ver qual cliente deve mais pra cobrar primeiro! 🤑",
+                    "Vou lá no loteamento ver se ele construiu escondido! 🏗️👀",
+                    "Por que ele não paga a gente? Somos tão legais! 🥺💔"
                 ];
                 textEl.innerHTML = playPhrases[Math.floor(Math.random() * playPhrases.length)];
                 box.style.display = 'block';

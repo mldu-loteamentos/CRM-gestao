@@ -23572,7 +23572,6 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             if (!clientDataMap[cid]) {
                 clientDataMap[cid] = { ...c };
             } else {
-                // Merge para pegar as info detalhadas do cache global (como phones e email)
                 if (c.email) clientDataMap[cid].email = c.email;
                 if (c.phones) clientDataMap[cid].phones = c.phones;
                 if (c.phoneNumber) clientDataMap[cid].phoneNumber = c.phoneNumber;
@@ -23581,13 +23580,48 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             }
             
             if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
-            if (c.saleId && !clientTitlesMap[cid].includes(c.saleId)) {
-                clientTitlesMap[cid].push(c.saleId);
+            if (c.saleId && !clientTitlesMap[cid].includes(String(c.saleId))) {
+                clientTitlesMap[cid].push(String(c.saleId));
             }
             if (c.sales && Array.isArray(c.sales)) {
                 c.sales.forEach(s => {
                     const sid = String(s.id || s.saleId || '');
                     if (sid && !clientTitlesMap[cid].includes(sid)) clientTitlesMap[cid].push(sid);
+                });
+            }
+        });
+    }
+    if (window.AppState && window.AppState.customers) {
+        Object.values(window.AppState.customers).forEach(c => {
+            if (!c) return;
+            const cid = String(c.id || c.customerId);
+            if (!clientDataMap[cid]) {
+                clientDataMap[cid] = { ...c };
+            } else {
+                if (c.email) clientDataMap[cid].email = c.email;
+                if (c.phones) clientDataMap[cid].phones = c.phones;
+                if (c.phoneNumber) clientDataMap[cid].phoneNumber = c.phoneNumber;
+                if (c.name) clientDataMap[cid].name = c.name;
+                if (c.customerName) clientDataMap[cid].customerName = c.customerName;
+            }
+            if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
+            
+            if (c.receivableBills && Array.isArray(c.receivableBills)) {
+                c.receivableBills.forEach(rb => {
+                    if ((rb.documentId || "").trim() === "CT") {
+                        const sid = String(rb.receivableBillId || rb.id || '');
+                        if (sid && !clientTitlesMap[cid].includes(sid)) {
+                            clientTitlesMap[cid].push(sid);
+                        }
+                    }
+                });
+            }
+            if (c.sales && Array.isArray(c.sales)) {
+                c.sales.forEach(s => {
+                    const sid = String(s.id || s.saleId || s.receivableBillId || '');
+                    if (sid && !clientTitlesMap[cid].includes(sid)) {
+                        clientTitlesMap[cid].push(sid);
+                    }
                 });
             }
         });
