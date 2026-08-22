@@ -1,27 +1,13 @@
 const HomeDashboard = {
   // Mascotes disponíveis
   pets: [
-    { 
-      id: '3d_eve', 
-      is3DModel: true, 
-      glbUrl: 'assets/pets/IA.eL.glb', 
-      icon: '🤖', 
-      name: 'IA.EL' 
-    },
-    { 
-      id: '3d_pikachu', 
-      is3DModel: true, 
-      glbUrl: 'assets/pets/Pikachu.glb', 
-      icon: '⚡', 
-      name: 'Pikachu' 
-    },
-    { 
-      id: '3d_yoshi', 
-      is3DModel: true, 
-      glbUrl: 'assets/pets/yoshi.glb', 
-      icon: '🦖', 
-      name: 'Yoshi' 
-    }
+    { id: '3d_iael', is3DModel: true, glbUrl: 'assets/pets/IA.eL.glb', icon: '🤖', name: 'IA.EL' },
+    { id: '3d_bluy', is3DModel: true, glbUrl: 'assets/pets/Bluy.glb', icon: '🐾', name: 'Bluy' },
+    { id: '3d_ledis', is3DModel: true, glbUrl: 'assets/pets/Ledis.glb', icon: '🌟', name: 'Ledis' },
+    { id: '3d_lety', is3DModel: true, glbUrl: 'assets/pets/LeTy.glb', icon: '🎀', name: 'LeTy' },
+    { id: '3d_mich', is3DModel: true, glbUrl: 'assets/pets/MicH.glb', icon: '✨', name: 'MicH' },
+    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🚀', name: 'NiAL' },
+    { id: '3d_prince', is3DModel: true, glbUrl: 'assets/pets/PrincE.glb', icon: '👑', name: 'Prince' }
   ],
   
   motivationalQuotes: [
@@ -37,7 +23,23 @@ const HomeDashboard = {
     "O segredo do sucesso é a constância do propósito."
   ],
 
-  selectedPetId: localStorage.getItem('crm_home_pet') || '3d_robot',
+  get selectedPetId() {
+    let key = 'crm_home_pet';
+    try {
+      const u = JSON.parse(localStorage.getItem("crm_logged_user"));
+      if (u && (u.id || u.email)) key += '_' + (u.id || u.email);
+    } catch(e){}
+    return localStorage.getItem(key) || '3d_iael';
+  },
+  
+  set selectedPetId(value) {
+    let key = 'crm_home_pet';
+    try {
+      const u = JSON.parse(localStorage.getItem("crm_logged_user"));
+      if (u && (u.id || u.email)) key += '_' + (u.id || u.email);
+    } catch(e){}
+    localStorage.setItem(key, value);
+  },
   intervalId: null,
   DEFAULT_PREVIEW_SIENGE: 'LETICIA.OLIVEIRA',
 
@@ -541,7 +543,6 @@ window.setHomePreviewOperator = (siengeUser) => {
 window.openPetSelector = () => document.getElementById('home-pet-selector-modal').style.display = 'flex';
 window.selectHomePet = (id) => {
    HomeDashboard.selectedPetId = id;
-   localStorage.setItem('crm_home_pet', id);
    HomeDashboard.updatePetIcon();
    document.getElementById('home-pet-selector-modal').style.display = 'none';
    HomeDashboard.speak(false, true);
