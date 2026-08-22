@@ -1082,10 +1082,10 @@ setInterval(() => {
             const deltaX = e.clientX - startX;
             currentX = deltaX;
             
-            // Limitar a rotação entre -40 e 40 graus para o balão de fala não virar de cabeça para baixo
+            // Limitar a rotação entre -15 e 15 graus para o balão de fala não virar de cabeça para baixo
             let rotation = deltaX * 1.5;
-            if (rotation > 40) rotation = 40;
-            if (rotation < -40) rotation = -40;
+            if (rotation > 15) rotation = 15;
+            if (rotation < -15) rotation = -15;
             
             // O mascote translada e rotaciona proporcionalmente com limite
             petContainer.style.transform = `translate(${deltaX}px, 0px) rotateZ(${rotation}deg)`;

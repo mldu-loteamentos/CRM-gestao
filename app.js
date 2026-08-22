@@ -23629,31 +23629,65 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
         });
     }
     
+    const monthKey = window.currentMonthStr || new Date().toISOString().slice(0, 7);
+    let checkedState = {};
+    try { checkedState = JSON.parse(localStorage.getItem('whatsappAlertsIndividual_' + monthKey) || '{}'); } catch(e){}
+    
+    // Define a função global se ainda não existir
+    if (typeof window.toggleWhatsappIndividual === 'undefined') {
+        window.toggleWhatsappIndividual = function(cid, el) {
+            const mKey = window.currentMonthStr || new Date().toISOString().slice(0, 7);
+            let st = {};
+            try { st = JSON.parse(localStorage.getItem('whatsappAlertsIndividual_' + mKey) || '{}'); } catch(e){}
+            st[cid] = el.checked;
+            localStorage.setItem('whatsappAlertsIndividual_' + mKey, JSON.stringify(st));
+        };
+    }
+    
     clientIds.forEach(id => {
             const data = clientDataMap[id] || {};
             const name = data.name || data.customerName || `Cliente #${id}`;
             const email = data.email || "N/D";
             const phone = data.phones && data.phones[0] ? data.phones[0].number : (data.phoneNumber || "N/D");
-            const titles = clientTitlesMap[id] || [];
+            
+            // Tenta pegar o título direto do rawClientList (bTitle)
+            let rawC = window.rawClientList ? window.rawClientList.find(r => String(r.customerId) === String(id)) : null;
+            let finalTitles = clientTitlesMap[id] || [];
+            if (rawC && rawC.saleId && !finalTitles.includes(String(rawC.saleId))) {
+                finalTitles.push(String(rawC.saleId));
+            } else if (rawC && rawC.billIds && rawC.billIds.length > 0) {
+                rawC.billIds.forEach(bId => {
+                    if (!finalTitles.includes(String(bId))) finalTitles.push(String(bId));
+                });
+            }
             
             let titlesHtml = "";
-            if (titles.length > 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Títulos associados:</strong> ${titles.join(', ')}</div>`;
-            } else if (titles.length === 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> ${titles[0]}</div>`;
+            if (finalTitles.length > 1) {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Títulos associados:</strong> ${finalTitles.join(', ')}</div>`;
+            } else if (finalTitles.length === 1) {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> ${finalTitles[0]}</div>`;
             } else {
                 titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> Não identificado</div>`;
             }
             
+            const isChecked = checkedState[id] ? "checked" : "";
+            
             const card = document.createElement("div");
             card.style.cssText = "padding: 12px 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;";
             card.innerHTML = `
-                <div style="font-weight: 600; color: #0f172a; margin-bottom: 4px;">${id} - ${name}</div>
-                <div style="font-size: 0.85rem; color: #64748b; display: flex; gap: 15px;">
+                <div style="font-weight: 600; color: #0f172a; margin-bottom: 4px;">
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" onchange="window.toggleWhatsappIndividual('${id}', this)" ${isChecked} style="width: 16px; height: 16px; accent-color: #0f766e; cursor: pointer;">
+                        ${id} - ${name}
+                    </label>
+                </div>
+                <div style="font-size: 0.85rem; color: #64748b; display: flex; gap: 15px; margin-left: 24px;">
                     <span><i data-lucide="mail" style="width: 12px; display: inline-block;"></i> ${email}</span>
                     <span><i data-lucide="phone" style="width: 12px; display: inline-block;"></i> ${phone}</span>
                 </div>
-                ${titlesHtml}
+                <div style="margin-left: 24px;">
+                    ${titlesHtml}
+                </div>
             `;
             listEl.appendChild(card);
         });
