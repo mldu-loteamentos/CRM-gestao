@@ -5,9 +5,7 @@ const HomeDashboard = {
     { id: '3d_bluy', is3DModel: true, glbUrl: 'assets/pets/Bluy.glb', icon: '⚙️', name: 'Bluy' },
     { id: '3d_ledis', is3DModel: true, glbUrl: 'assets/pets/Ledis.glb', icon: '🦟', name: 'Ledis' },
     { id: '3d_lety', is3DModel: true, glbUrl: 'assets/pets/LeTy.glb', icon: '🛸', name: 'LeTy' },
-    { id: '3d_mich', is3DModel: true, glbUrl: 'assets/pets/MicH.glb', icon: '✨', name: 'MicH' },
-    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🍲', name: 'NiAL' },
-    { id: '3d_prince', is3DModel: true, glbUrl: 'assets/pets/PrincE.glb', icon: '👑', name: 'Prince' }
+    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🥘', name: 'NiAL' }
   ],
   
   motivationalQuotes: [
@@ -433,22 +431,30 @@ const HomeDashboard = {
     }
   },
 
-  async speak(includeFeedback = false, isClick = false) {
+  async speak(includeFeedback = false, isClick = false, isNewSelection = false) {
     const box = document.getElementById('home-pet-speech');
     const textEl = document.getElementById('home-pet-speech-text');
     const modelViewer = document.getElementById('my-3d-assistant');
     const petContainer = document.getElementById('home-pet-container');
     
     if (isClick && petContainer) {
-        // Animação de correr pela tela e voltar
-        petContainer.animate([
-            { transform: 'translate(0px, 0px) scale(1)' },
-            { transform: 'translate(400px, -50px) scale(1.5)', offset: 0.3 },
-            { transform: 'translate(200px, 100px) scale(1.2)', offset: 0.6 },
-            { transform: 'translate(-100px, 50px) scale(1.3)', offset: 0.8 },
-            { transform: 'translate(0px, 0px) scale(1)' }
-        ], {
-            duration: 1200,
+        // Animação de correr pela tela e voltar com 10 caminhos diferentes (zooms, horizontal, etc)
+        const paths = [
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-300px, 0px) scale(1.2) rotateY(0deg)', offset: 0.3 }, { transform: 'translate(400px, 0px) scale(1.2) rotateY(180deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, 50px) scale(3) rotateY(0deg)', offset: 0.5 }, { transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-200px, 100px) scale(1.5) rotateY(45deg)', offset: 0.25 }, { transform: 'translate(0px, 200px) scale(2) rotateY(90deg)', offset: 0.5 }, { transform: 'translate(200px, 100px) scale(1.2) rotateY(180deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, 300px) scale(0.8) rotateY(180deg)', offset: 0.4 }, { transform: 'translate(200px, -100px) scale(1.5) rotateY(360deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(720deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(600px, -200px) scale(0.5) rotateY(90deg)', offset: 0.4 }, { transform: 'translate(-400px, 200px) scale(2) rotateY(270deg)', offset: 0.8 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(300px, 0px) scale(1.2) rotateY(180deg)', offset: 0.25 }, { transform: 'translate(0px, 0px) scale(0.8) rotateY(360deg)', offset: 0.5 }, { transform: 'translate(-300px, 0px) scale(1.2) rotateY(540deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(720deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(100px, -50px) scale(2.5) rotateY(-45deg)', offset: 0.3 }, { transform: 'translate(-100px, 50px) scale(1.5) rotateY(45deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, -300px) scale(3) rotateY(720deg)', offset: 0.5 }, { transform: 'translate(0px, 0px) scale(1) rotateY(1440deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(200px, -200px) scale(0.5) rotateY(90deg)', offset: 0.25 }, { transform: 'translate(0px, -400px) scale(1) rotateY(180deg)', offset: 0.5 }, { transform: 'translate(-200px, -200px) scale(1.5) rotateY(270deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
+            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-200px, -200px) scale(1) rotateY(45deg)', offset: 0.2 }, { transform: 'translate(200px, -200px) scale(2) rotateY(135deg)', offset: 0.4 }, { transform: 'translate(200px, 200px) scale(1) rotateY(225deg)', offset: 0.6 }, { transform: 'translate(-200px, 200px) scale(1.5) rotateY(315deg)', offset: 0.8 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }]
+        ];
+        const randomPath = paths[Math.floor(Math.random() * paths.length)];
+        
+        petContainer.animate(randomPath, {
+            duration: 1500,
             easing: 'ease-in-out'
         });
         
@@ -464,13 +470,28 @@ const HomeDashboard = {
     
     if (!box || !textEl) return;
     
-    // Mostra loading rápido
-    textEl.textContent = "Pensando...";
-    box.style.display = 'block';
-
-    const u = JSON.parse(localStorage.getItem("crm_logged_user") || "{}");
-    const opName = (u.name || u.profile_name || 'Parceiro').split(' ')[0];
+    const user = this.getViewUser();
+    let rawOpName = (user?.name || user?.profile_name || 'Parceiro').split(' ')[0];
+    const opName = rawOpName.charAt(0).toUpperCase() + rawOpName.slice(1).toLowerCase();
     const petName = this.pets.find(p => p.id === this.selectedPetId)?.name || 'seu Assistente';
+    
+    if (isNewSelection) {
+        textEl.textContent = "Pensando...";
+        box.style.display = 'block';
+        const welcomePhrases = [
+            `Oii, eu sou o ${petName}! Vamos trabalhar juntos? 🤩`,
+            `Volteiiii, olha eu aqui. Sou o ${petName}! Prontinho para te ajudar.`,
+            `Cheguei, ${opName}! Eu sou o ${petName}, o seu novo parceiro de bater metas! 🚀`,
+            `Olá! Que bom que me escolheu! Eu sou o ${petName} e vou te acompanhar.`,
+            `Eba! Sou eu, o ${petName}! Já me sinto em casa por aqui! 🥰`,
+            `Apresentando-me para o trabalho! ${petName} a postos! 🫡`,
+            `Aí sim! Adoro trabalhar com você, ${opName}. Sou o ${petName}!`,
+            `Trocamos de ares! Eu sou o ${petName}, vamos fechar grandes acordos hoje! 💼`
+        ];
+        textEl.innerHTML = welcomePhrases[Math.floor(Math.random() * welcomePhrases.length)];
+        setTimeout(() => { box.style.display = 'none'; }, 8000);
+        return;
+    }
     
     const hour = new Date().getHours();
     let timeGreeting = hour < 12 ? 'Bom dia' : (hour < 18 ? 'Boa tarde' : 'Boa noite');
@@ -549,6 +570,7 @@ const HomeDashboard = {
     }
 
     textEl.innerHTML = finalMsg;
+    box.style.display = 'block';
     
     setTimeout(() => {
        box.style.display = 'none';
@@ -568,6 +590,6 @@ window.selectHomePet = (id) => {
    HomeDashboard.selectedPetId = id;
    HomeDashboard.updatePetIcon();
    document.getElementById('home-pet-selector-modal').style.display = 'none';
-   HomeDashboard.speak(false, true);
+   HomeDashboard.speak(false, false, true);
 };
 window.homePetSpeak = (includeFeedback) => HomeDashboard.speak(includeFeedback, true);
