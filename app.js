@@ -1181,7 +1181,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "centros-custo") {
     loadCentrosCustoTab();
   } else if (tabId === "doc-padrao") {
-    loadDocPadraoTab();
+    loadDocPadraoTemplates();
   } else if (tabId === "upload-kmz") {
     loadKMZList();
   } else if (tabId === "upload-mapa") {
@@ -23472,18 +23472,22 @@ function getBusinessDaysOfMonth(year, month) {
     return days;
 }
 
-window.checkMonthlyBilletAlerts = async function() {
+window.checkMonthlyBilletAlerts = async function(isTest = false) {
     // Check if the current logged in user has the flag enabled (or if it's admin for testing)
     const currentUserStr = localStorage.getItem("crm_logged_user");
+    let isAdmin = false;
     if (currentUserStr) {
         try {
             const currentUser = JSON.parse(currentUserStr);
-            if (!currentUser.resend_billet && currentUser.nivel !== 'Administrador') {
+            if (currentUser.nivel === 'Administrador' || (currentUser.profile_name && currentUser.profile_name.toUpperCase().includes('ADMIN'))) {
+                isAdmin = true;
+            }
+            if (!isTest && !currentUser.resend_billet && !isAdmin) {
                 return; // User is not responsible for resending billets
             }
         } catch(e) {}
     } else {
-        return; // No user logged in
+        if (!isTest) return; // No user logged in
     }
 
     await loadWhatsappAlerts();
@@ -23493,21 +23497,15 @@ window.checkMonthlyBilletAlerts = async function() {
     const month = today.getMonth() + 1; // 1-12
     const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
     
-    let isAdmin = false;
-    try {
-        const currentUserStr = localStorage.getItem("crm_logged_user");
-        if (currentUserStr) {
-            const currentUser = JSON.parse(currentUserStr);
-            if (currentUser.nivel === 'Administrador') isAdmin = true;
-        }
-    } catch(e) {}
-    
-    if (!isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
+    if (!isTest && !isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
         return; // Já feito este mês
     }
     
     const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
-    if (clientIds.length === 0) return;
+    if (clientIds.length === 0) {
+        if (isTest) alert("Nenhum cliente está com o Alerta de WhatsApp ativado.");
+        return;
+    }
     
     const listEl = document.getElementById("whatsapp-alerts-list");
     if (!listEl) return;

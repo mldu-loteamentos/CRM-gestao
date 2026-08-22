@@ -167,7 +167,7 @@ const HomeDashboard = {
       // Enviar mensagens motivacionais automaticamente e atualizar a frase do banner
       if (this.intervalId) clearInterval(this.intervalId);
       this.intervalId = setInterval(() => {
-          this.speak(false, true); // true para forçar a dancinha/animação
+          this.speak(false, false); // false para apenas mostrar balão, não correr
           this.updateGreeting();
       }, 60000); // 1 minuto
 
@@ -439,21 +439,16 @@ const HomeDashboard = {
     const modelViewer = document.getElementById('my-3d-assistant');
     const petContainer = document.getElementById('home-pet-container');
     
-    if (!box || !textEl) return;
-    
-    // Mostra loading
-    textEl.textContent = "Pensando...";
-    box.style.display = 'block';
-
     if (isClick && petContainer) {
-        // Animação de rodopio feliz
+        // Animação de correr pela tela e voltar
         petContainer.animate([
-            { transform: 'translate(0px, 0px) rotate(0deg) scale(1)' },
-            { transform: 'translate(50px, -50px) rotate(180deg) scale(1.2)' },
-            { transform: 'translate(-50px, -20px) rotate(360deg) scale(1.1)' },
-            { transform: 'translate(0px, 0px) rotate(720deg) scale(1)' }
+            { transform: 'translate(0px, 0px) scale(1)' },
+            { transform: 'translate(400px, -50px) scale(1.5)', offset: 0.3 },
+            { transform: 'translate(200px, 100px) scale(1.2)', offset: 0.6 },
+            { transform: 'translate(-100px, 50px) scale(1.3)', offset: 0.8 },
+            { transform: 'translate(0px, 0px) scale(1)' }
         ], {
-            duration: 1000,
+            duration: 1200,
             easing: 'ease-in-out'
         });
         
@@ -461,76 +456,103 @@ const HomeDashboard = {
             const randAnim = modelViewer.availableAnimations[Math.floor(Math.random() * modelViewer.availableAnimations.length)];
             modelViewer.setAttribute('animation-name', randAnim);
         }
+        
+        // Se foi clique, apenas faz a animação. Não mostra texto.
+        if (box) box.style.display = 'none';
+        return;
     }
-
-    const hour = new Date().getHours();
-    let timeGreeting = 'Boa noite';
-    if (hour < 12) timeGreeting = 'Bom dia';
-    else if (hour < 18) timeGreeting = 'Boa tarde';
-
-    const petName = this.pets.find(p => p.id === this.selectedPetId)?.name || 'seu Assistente';
-    const dayOfWeek = new Date().getDay();
     
-    let baseGreet = `Oii! Eu sou ${petName} e gosto muito de você! 🥰`;
-    if (dayOfWeek === 1) { // Segunda-feira
-        baseGreet = `Oii! Eu sou ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰 Que bom que voltou!`;
-    }
+    if (!box || !textEl) return;
+    
+    // Mostra loading rápido
+    textEl.textContent = "Pensando...";
+    box.style.display = 'block';
 
-    let weatherMsg = '';
-    try {
-        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
-        if (res.ok) {
-            const data = await res.json();
-            const prob = data.daily?.precipitation_probability_max?.[0] || 0;
-            if (prob > 50) {
-                weatherMsg = `Ah, a previsão indica ${prob}% de chance de chuva hoje em Botucatu. Não esqueça o guarda-chuva e uma blusa! ☔🧥`;
-            } else {
-                weatherMsg = `O clima hoje em Botucatu parece tranquilo (chance de chuva de ${prob}%). ☀️`;
+    const u = JSON.parse(localStorage.getItem("crm_logged_user") || "{}");
+    const opName = (u.name || u.profile_name || 'Parceiro').split(' ')[0];
+    const petName = this.pets.find(p => p.id === this.selectedPetId)?.name || 'seu Assistente';
+    
+    const hour = new Date().getHours();
+    let timeGreeting = hour < 12 ? 'Bom dia' : (hour < 18 ? 'Boa tarde' : 'Boa noite');
+    
+    const rand = Math.random();
+    let finalMsg = '';
+
+    // 15% Saudação
+    if (rand < 0.15) {
+        const dayOfWeek = new Date().getDay();
+        if (dayOfWeek === 1) finalMsg = `Oii ${opName}! Eu sou o ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰 Que bom que voltou!`;
+        else if (dayOfWeek === 5) finalMsg = `${timeGreeting}, ${opName}! Sextou! Vamos fechar a semana com chave de ouro! 🎉`;
+        else finalMsg = `${timeGreeting}, ${opName}! Eu sou o ${petName} e adoro trabalhar com você! 🥰`;
+    }
+    // 25% Clima
+    else if (rand < 0.40) {
+        try {
+            const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
+            if (res.ok) {
+                const data = await res.json();
+                const prob = data.daily?.precipitation_probability_max?.[0] || 0;
+                if (prob > 50) finalMsg = `${opName}, a previsão indica ${prob}% de chance de chuva hoje em Botucatu. Não esqueça o guarda-chuva! ☔`;
+                else finalMsg = `${opName}, o clima hoje em Botucatu parece tranquilo (chance de chuva de ${prob}%). ☀️ Dia perfeito pra bater meta!`;
             }
-        }
-    } catch(e) {
-        console.log("Weather API failed");
+        } catch(e) {}
+        if (!finalMsg) finalMsg = `Ei ${opName}, o clima está ótimo para fecharmos bons negócios hoje! 🚀`;
     }
-
-    let highestMsg = '';
-    if (window.rawClientList) {
+    // 30% Análise de Cliente Problemático
+    else if (rand < 0.70 && window.rawClientList) {
         const myClients = this.getMyClients();
         if (myClients.length > 0) {
-            let highestClient = myClients[0];
+            let worst = myClients[0];
             myClients.forEach(c => {
-                if ((Number(c.overdueValue)||0) > (Number(highestClient.overdueValue)||0)) {
-                    highestClient = c;
-                }
+                const cScore = (Number(c.overdueValue)||0) * (Number(c.overdueDays)||1);
+                const wScore = (Number(worst.overdueValue)||0) * (Number(worst.overdueDays)||1);
+                if (cScore > wScore) worst = c;
             });
-            const valStr = (Number(highestClient.overdueValue)||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
-            highestMsg = `Hoje a nossa maior prioridade na fila é o cliente ${highestClient.customerName} (Título ${highestClient.receivableBillId || highestClient.saleId}, R$ ${valStr}). Vamos lá fechar esse acordo! 💪`;
+            const cName = worst.customerName.split(' ')[0];
+            const cTitle = worst.receivableBillId || worst.saleId;
+            const cVal = (Number(worst.overdueValue)||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+            const cDays = worst.overdueDays || 0;
+            
+            if (cDays > 90) finalMsg = `Atenção ${opName}! O título ${cTitle} de ${cName} está atrasado há ${cDays} dias. Tente uma abordagem mais consultiva hoje! 📞`;
+            else finalMsg = `Foco total, ${opName}! Nossa maior prioridade agora é o cliente ${cName} (Título ${cTitle} - R$ ${cVal}). Vamos propor um acordo! 💪`;
         } else {
-            highestMsg = `Sua carteira está impecável hoje, zero inadimplência! 🎉`;
+            finalMsg = `${timeGreeting}, ${opName}! Sua carteira está impecável hoje, zero inadimplência! 🎉`;
         }
     }
-
-    const waterMsg = "Já bebeu água hoje? Que tal fazer uma pequena pausa para esticar as pernas? 💧🚶‍♀️";
-    const motivMsg = this.motivationalQuotes[Math.floor(Math.random() * this.motivationalQuotes.length)];
-
-    let finalMsg = '';
-    
-    if (isClick) {
-        finalMsg = `${baseGreet}\n\n${highestMsg}\n\n${weatherMsg}\n\n${waterMsg}\n\nLembre-se: ${motivMsg}`;
-    } else {
-        if (includeFeedback && highestMsg) {
-            finalMsg = `${timeGreeting}! ${highestMsg}\n\n${motivMsg}`;
-        } else {
-            finalMsg = `${timeGreeting}! ${waterMsg} ${motivMsg}`;
-        }
+    // 15% Bem-estar
+    else if (rand < 0.85) {
+        const wellness = [
+            `Já bebeu água hoje, ${opName}? Manter-se hidratado ajuda no foco. 💧`,
+            `Respire fundo, ${opName}... Inspire em 4s, segure 4s, solte 4s. Ajuda nas ligações difíceis! 🧘`,
+            `Ei ${opName}, dê uma espreguiçada rápida! Sua postura agradece. 🙆‍♂️`,
+            `Que tal olhar um pouco para longe da tela, ${opName}? Descansar a vista é importante! 👀`,
+            `Faça uma pausa de 2 minutinhos, ${opName}. Pegue um café e volte com tudo! ☕`
+        ];
+        finalMsg = wellness[Math.floor(Math.random() * wellness.length)];
+    }
+    // 15% Dicas e Motivação
+    else {
+        const tips = [
+            `Dica de ouro, ${opName}: Um 'bom dia' sincero e um sorriso na voz mudam o tom de qualquer ligação. 😊`,
+            `Lembre-se ${opName}: O segredo para um bom acordo é ouvir o cliente antes de propor a solução. 🚀`,
+            `Chamar o cliente pelo nome demonstra respeito e gera conexão. Tente isso hoje, ${opName}! 🤝`,
+            `Seja empático, ${opName}! Muitas vezes o atraso é apenas um imprevisto. 💡`,
+            `Ofereça alternativas reais, ${opName}. O objetivo é ajudar o cliente a voltar a ficar em dia! 📊`,
+            `Destaque os benefícios de estar com o nome limpo e com as parcelas em dia, ${opName}! ✨`,
+            `Dica, ${opName}: Tente ligar para os clientes com maiores valores ou mais dias de atraso primeiro!`,
+            `Organize suas abas e deixe as informações do cliente prontas antes de ligar. Boa sorte, ${opName}! 🗂️`,
+            `Acredite em si próprio, ${opName}, e chegará um dia em que os outros não terão outra escolha senão acreditar com você.`,
+            `O sucesso é a soma de pequenos esforços repetidos dia após dia. Pra cima, ${opName}!`,
+            `Com fé e dedicação, nenhum obstáculo é grande demais. Bom trabalho, ${opName}!`
+        ];
+        finalMsg = tips[Math.floor(Math.random() * tips.length)];
     }
 
-    textEl.innerHTML = finalMsg.replace(/\n/g, '<br>');
-    box.style.display = 'block';
+    textEl.innerHTML = finalMsg;
     
-    // Fechar depois de 15 segundos se for click (mensagem longa) ou 8s se for automatico
     setTimeout(() => {
        box.style.display = 'none';
-    }, isClick ? 15000 : 8000);
+    }, 8000);
   }
 };
 
