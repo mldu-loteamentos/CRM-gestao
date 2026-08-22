@@ -17099,7 +17099,7 @@ window.copyVar = function(el) {
   });
 };
 
-function saveDocPadrao(tipo) {
+async function saveDocPadrao(tipo) {
   const keyMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -17113,6 +17113,17 @@ function saveDocPadrao(tipo) {
     const el = document.getElementById(id);
     if (el) data[id] = el.value;
   });
+  
+  if (window.firebaseCollections && window.firebaseDb) {
+    try {
+      const { doc, setDoc } = window.firebaseCollections;
+      const ref = doc(window.firebaseDb, 'settings', 'docpadrao_' + tipo);
+      await setDoc(ref, data);
+    } catch (e) {
+      console.error("Erro ao salvar documento padrão no Firebase", e);
+    }
+  }
+  
   localStorage.setItem(`crm_docpadrao_${tipo}`, JSON.stringify(data));
   
   // Feedback visual
@@ -17122,7 +17133,7 @@ function saveDocPadrao(tipo) {
     btn.innerHTML = '<i data-lucide="check" style="width:13px;"></i> Salvo!';
     btn.style.background = 'var(--color-success, #16a34a)';
     btn.style.color = '#fff';
-    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.style.color = ''; lucide.createIcons(); }, 2000);
+    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.style.color = ''; if (window.lucide) lucide.createIcons(); }, 2000);
   }
   
   // Carregar templates salvos no editor de cláusulas da reneg se tipo for reneg
@@ -17180,7 +17191,7 @@ function previewDocPadrao(tipo) {
 }
 
 // Carregar templates salvos ao inicializar
-function loadDocPadraoTemplates() {
+async function loadDocPadraoTemplates() {
   const tipos = ['reneg', 'boleto', 'carta', 'suspensao', 'distrato'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
@@ -17189,18 +17200,51 @@ function loadDocPadraoTemplates() {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
-  tipos.forEach(tipo => {
-    const saved = localStorage.getItem(`crm_docpadrao_${tipo}`);
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        (fieldMap[tipo] || []).forEach(id => {
-          const el = document.getElementById(id);
-          if (el && data[id] !== undefined) el.value = data[id];
-        });
-      } catch(e) {}
+  
+  if (window.firebaseCollections && window.firebaseDb) {
+    try {
+      const { doc, getDoc } = window.firebaseCollections;
+      for (const tipo of tipos) {
+        const ref = doc(window.firebaseDb, 'settings', 'docpadrao_' + tipo);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const data = snap.data();
+          localStorage.setItem(`crm_docpadrao_${tipo}`, JSON.stringify(data));
+          (fieldMap[tipo] || []).forEach(id => {
+            const el = document.getElementById(id);
+            if (el && data[id] !== undefined) el.value = data[id];
+          });
+        } else {
+          // Fallback para localstorage caso nao tenha no firebase
+          const saved = localStorage.getItem(`crm_docpadrao_${tipo}`);
+          if (saved) {
+            try {
+              const data = JSON.parse(saved);
+              (fieldMap[tipo] || []).forEach(id => {
+                const el = document.getElementById(id);
+                if (el && data[id] !== undefined) el.value = data[id];
+              });
+            } catch(e) {}
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao carregar documentos padrões do Firebase", e);
     }
-  });
+  } else {
+    tipos.forEach(tipo => {
+      const saved = localStorage.getItem(`crm_docpadrao_${tipo}`);
+      if (saved) {
+        try {
+          const data = JSON.parse(saved);
+          (fieldMap[tipo] || []).forEach(id => {
+            const el = document.getElementById(id);
+            if (el && data[id] !== undefined) el.value = data[id];
+          });
+        } catch(e) {}
+      }
+    });
+  }
 }
 
 // ----------------------------------------------------
