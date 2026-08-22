@@ -5,7 +5,7 @@ const HomeDashboard = {
     { id: '3d_bluy', is3DModel: true, glbUrl: 'assets/pets/Bluy.glb', icon: '⚙️', name: 'Bluy' },
     { id: '3d_ledis', is3DModel: true, glbUrl: 'assets/pets/Ledis.glb', icon: '🦟', name: 'Ledis' },
     { id: '3d_lety', is3DModel: true, glbUrl: 'assets/pets/LeTy.glb', icon: '🛸', name: 'LeTy' },
-    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🥘', name: 'NiAL' }
+    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '<div style="width: 28px; height: 28px; background: #e11d48; border-radius: 50%; margin: 0 auto; box-shadow: inset 0 -6px 0 rgba(0,0,0,0.3); position: relative;"><div style="position: absolute; top: 8px; left: 6px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid white; transform: rotate(45deg);"></div><div style="position: absolute; top: 12px; right: 4px; width: 4px; height: 4px; background: black; border-radius: 50%;"></div></div>', name: 'NiAL' }
   ],
   
   motivationalQuotes: [
@@ -438,23 +438,25 @@ const HomeDashboard = {
     const petContainer = document.getElementById('home-pet-container');
     
     if (isClick && petContainer) {
-        // Animação de correr pela tela e voltar com 10 caminhos diferentes (zooms, horizontal, etc)
-        const paths = [
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-300px, 0px) scale(1.2) rotateY(0deg)', offset: 0.3 }, { transform: 'translate(400px, 0px) scale(1.2) rotateY(180deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, 50px) scale(3) rotateY(0deg)', offset: 0.5 }, { transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-200px, 100px) scale(1.5) rotateY(45deg)', offset: 0.25 }, { transform: 'translate(0px, 200px) scale(2) rotateY(90deg)', offset: 0.5 }, { transform: 'translate(200px, 100px) scale(1.2) rotateY(180deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, 300px) scale(0.8) rotateY(180deg)', offset: 0.4 }, { transform: 'translate(200px, -100px) scale(1.5) rotateY(360deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(720deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(600px, -200px) scale(0.5) rotateY(90deg)', offset: 0.4 }, { transform: 'translate(-400px, 200px) scale(2) rotateY(270deg)', offset: 0.8 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(300px, 0px) scale(1.2) rotateY(180deg)', offset: 0.25 }, { transform: 'translate(0px, 0px) scale(0.8) rotateY(360deg)', offset: 0.5 }, { transform: 'translate(-300px, 0px) scale(1.2) rotateY(540deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(720deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(100px, -50px) scale(2.5) rotateY(-45deg)', offset: 0.3 }, { transform: 'translate(-100px, 50px) scale(1.5) rotateY(45deg)', offset: 0.7 }, { transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(0px, -300px) scale(3) rotateY(720deg)', offset: 0.5 }, { transform: 'translate(0px, 0px) scale(1) rotateY(1440deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(200px, -200px) scale(0.5) rotateY(90deg)', offset: 0.25 }, { transform: 'translate(0px, -400px) scale(1) rotateY(180deg)', offset: 0.5 }, { transform: 'translate(-200px, -200px) scale(1.5) rotateY(270deg)', offset: 0.75 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }],
-            [{ transform: 'translate(0px, 0px) scale(1) rotateY(0deg)' }, { transform: 'translate(-200px, -200px) scale(1) rotateY(45deg)', offset: 0.2 }, { transform: 'translate(200px, -200px) scale(2) rotateY(135deg)', offset: 0.4 }, { transform: 'translate(200px, 200px) scale(1) rotateY(225deg)', offset: 0.6 }, { transform: 'translate(-200px, 200px) scale(1.5) rotateY(315deg)', offset: 0.8 }, { transform: 'translate(0px, 0px) scale(1) rotateY(360deg)' }]
-        ];
+        // Gerar 30 caminhos aleatórios pela tela, sem zoom (apenas translate e rotate horizontal)
+        const paths = [];
+        for (let i = 0; i < 30; i++) {
+            const path = [{ transform: 'translate(0px, 0px) rotateY(0deg)' }];
+            const numPoints = Math.floor(Math.random() * 3) + 3; // 3 a 5 pontos intermediários
+            for (let j = 1; j < numPoints; j++) {
+                const x = (Math.random() - 0.5) * 700; // range de -350 a 350
+                const y = (Math.random() - 0.5) * 400; // range de -200 a 200
+                const rotateY = Math.random() > 0.5 ? 180 : 0; // vira o "drone" pra esquerda ou direita
+                path.push({ transform: `translate(${x}px, ${y}px) rotateY(${rotateY}deg)`, offset: j / numPoints });
+            }
+            path.push({ transform: 'translate(0px, 0px) rotateY(0deg)' });
+            paths.push(path);
+        }
+        
         const randomPath = paths[Math.floor(Math.random() * paths.length)];
         
         petContainer.animate(randomPath, {
-            duration: 1500,
+            duration: 1800 + Math.random() * 700, // Duração variável entre 1.8s e 2.5s
             easing: 'ease-in-out'
         });
         
