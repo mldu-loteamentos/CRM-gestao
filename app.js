@@ -17663,7 +17663,18 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   
   // Automagicamente abre a tela de impressão sem mostrar o modal na tela
   setTimeout(() => {
+      const originalTitle = document.title;
+      // Tratar uName para remover nome do empreendimento se estiver longo, ou usar assim mesmo
+      let shortUnit = uName || "";
+      if (shortUnit.includes(" - ")) {
+          const parts = shortUnit.split(" - ");
+          shortUnit = parts.slice(1).join(" - ");
+      }
+      document.title = `SUSPENSAO DE CONTRATO - TITULO ${tituloAReceber} - UNIDADE ${shortUnit} - ${customer.name || 'CLIENTE'}`;
+      
       window.print();
+      
+      document.title = originalTitle;
       
       // Cleanup after print dialog closes
       overlay.classList.remove("active");
@@ -23543,7 +23554,11 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     if (window.rawClientList) {
         window.rawClientList.forEach(c => {
             const cid = String(c.customerId);
-            if (!clientDataMap[cid]) clientDataMap[cid] = c;
+            if (!clientDataMap[cid]) {
+                clientDataMap[cid] = { ...c };
+            } else {
+                clientDataMap[cid] = { ...clientDataMap[cid], ...c };
+            }
             
             if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
             if (c.saleId && !clientTitlesMap[cid].includes(c.saleId)) {
@@ -23554,7 +23569,16 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
         window.GlobalCustomerCache.data.forEach(c => {
             const cid = String(c.id || c.customerId);
-            if (!clientDataMap[cid]) clientDataMap[cid] = c;
+            if (!clientDataMap[cid]) {
+                clientDataMap[cid] = { ...c };
+            } else {
+                // Merge para pegar as info detalhadas do cache global (como phones e email)
+                if (c.email) clientDataMap[cid].email = c.email;
+                if (c.phones) clientDataMap[cid].phones = c.phones;
+                if (c.phoneNumber) clientDataMap[cid].phoneNumber = c.phoneNumber;
+                if (c.name) clientDataMap[cid].name = c.name;
+                if (c.customerName) clientDataMap[cid].customerName = c.customerName;
+            }
             
             if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
             if (c.saleId && !clientTitlesMap[cid].includes(c.saleId)) {
@@ -23562,7 +23586,7 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             }
             if (c.sales && Array.isArray(c.sales)) {
                 c.sales.forEach(s => {
-                    const sid = s.id || s.saleId;
+                    const sid = String(s.id || s.saleId || '');
                     if (sid && !clientTitlesMap[cid].includes(sid)) clientTitlesMap[cid].push(sid);
                 });
             }
