@@ -1031,8 +1031,71 @@ window.setHomePreviewOperator = (siengeUser) => {
 window.openPetSelector = () => document.getElementById('home-pet-selector-modal').style.display = 'flex';
 window.selectHomePet = (id) => {
    HomeDashboard.selectedPetId = id;
+   localStorage.setItem('selectedHomePet', id);
    HomeDashboard.updatePetIcon();
    document.getElementById('home-pet-selector-modal').style.display = 'none';
-   HomeDashboard.speak(false, false, true);
+   
+   // Verifica se estamos no castigo
+   let stateStr = localStorage.getItem('mascotPlayState');
+   let playState = stateStr ? JSON.parse(stateStr) : null;
+   const now = Date.now();
+   
+   if (playState && (now - playState.lockTime < 3600000)) {
+       // Se trocar de mascote durante o castigo, ele fura o silêncio atual para dar a fofoca
+       playState.silenceUntil = 0;
+       // Define a contagem como 3, assim ele dá a fofoca no momento da troca (vai pra 4), 
+       // e se a pessoa clicar de novo ele dá mais uma (vai pra 5) e trava por 15 min. (Total de 2 broncas).
+       playState.warningCount = 3; 
+       localStorage.setItem('mascotPlayState', JSON.stringify(playState));
+       
+       // Passa isClick = true para forçar a execução da lógica de bronca na função speak()
+       HomeDashboard.speak(false, true, false);
+   } else {
+       HomeDashboard.speak(false, false, true);
+   }
 };
 window.homePetSpeak = (includeFeedback) => HomeDashboard.speak(includeFeedback, true);
+
+// Lógica de arrastar (drag) o mascote pela tela e fazê-lo girar
+setInterval(() => {
+    const petContainer = document.getElementById('home-pet-container');
+    if (petContainer && !petContainer.dataset.dragInitialized) {
+        petContainer.dataset.dragInitialized = "true";
+        let isDragging = false;
+        let startX = 0;
+        let currentX = 0;
+        
+        petContainer.addEventListener('mousedown', (e) => {
+            // Se clicar no botão de fechar o balão, ignora o drag
+            if (e.target.closest('#home-pet-speech')) return;
+            
+            isDragging = true;
+            startX = e.clientX;
+            currentX = 0;
+            petContainer.style.transition = 'none';
+            // Para as animações de "voo" se houver alguma
+            petContainer.getAnimations().forEach(a => a.cancel());
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            currentX = deltaX;
+            // O mascote translada e rotaciona proporcionalmente
+            petContainer.style.transform = `translate(${deltaX}px, 0px) rotateZ(${deltaX * 1.5}deg)`;
+        });
+        
+        window.addEventListener('mouseup', (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            const deltaX = Math.abs(currentX);
+            
+            // Se soltar, faz ele "voltar" pro lugar original de forma suave
+            petContainer.style.transition = 'transform 0.5s ease-out';
+            petContainer.style.transform = 'translate(0px, 0px) rotateZ(0deg)';
+            
+            // Se o arrasto for menor que 10 pixels, consideramos que foi apenas um clique intencional
+            // O evento nativo 'onclick' do HTML já vai disparar, então não precisamos fazer nada a mais aqui
+        });
+    }
+}, 2000);
