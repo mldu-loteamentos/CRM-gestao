@@ -23539,14 +23539,33 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     listEl.innerHTML = "";
     
     let clientDataMap = {};
+    let clientTitlesMap = {};
     if (window.rawClientList) {
         window.rawClientList.forEach(c => {
-            clientDataMap[String(c.customerId)] = c;
+            const cid = String(c.customerId);
+            if (!clientDataMap[cid]) clientDataMap[cid] = c;
+            
+            if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
+            if (c.saleId && !clientTitlesMap[cid].includes(c.saleId)) {
+                clientTitlesMap[cid].push(c.saleId);
+            }
         });
     }
     if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
         window.GlobalCustomerCache.data.forEach(c => {
-            clientDataMap[String(c.id || c.customerId)] = c;
+            const cid = String(c.id || c.customerId);
+            if (!clientDataMap[cid]) clientDataMap[cid] = c;
+            
+            if (!clientTitlesMap[cid]) clientTitlesMap[cid] = [];
+            if (c.saleId && !clientTitlesMap[cid].includes(c.saleId)) {
+                clientTitlesMap[cid].push(c.saleId);
+            }
+            if (c.sales && Array.isArray(c.sales)) {
+                c.sales.forEach(s => {
+                    const sid = s.id || s.saleId;
+                    if (sid && !clientTitlesMap[cid].includes(sid)) clientTitlesMap[cid].push(sid);
+                });
+            }
         });
     }
     
@@ -23555,15 +23574,26 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             const name = data.name || data.customerName || `Cliente #${id}`;
             const email = data.email || "N/D";
             const phone = data.phones && data.phones[0] ? data.phones[0].number : (data.phoneNumber || "N/D");
+            const titles = clientTitlesMap[id] || [];
+            
+            let titlesHtml = "";
+            if (titles.length > 1) {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Títulos associados:</strong> ${titles.join(', ')}</div>`;
+            } else if (titles.length === 1) {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> ${titles[0]}</div>`;
+            } else {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> Não identificado</div>`;
+            }
             
             const card = document.createElement("div");
-            card.style.cssText = "padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;";
+            card.style.cssText = "padding: 12px 15px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;";
             card.innerHTML = `
                 <div style="font-weight: 600; color: #0f172a; margin-bottom: 4px;">${id} - ${name}</div>
                 <div style="font-size: 0.85rem; color: #64748b; display: flex; gap: 15px;">
                     <span><i data-lucide="mail" style="width: 12px; display: inline-block;"></i> ${email}</span>
                     <span><i data-lucide="phone" style="width: 12px; display: inline-block;"></i> ${phone}</span>
                 </div>
+                ${titlesHtml}
             `;
             listEl.appendChild(card);
         });
