@@ -2,11 +2,11 @@ const HomeDashboard = {
   // Mascotes disponíveis
   pets: [
     { id: '3d_iael', is3DModel: true, glbUrl: 'assets/pets/IA.eL.glb', icon: '🤖', name: 'IA.EL' },
-    { id: '3d_bluy', is3DModel: true, glbUrl: 'assets/pets/Bluy.glb', icon: '🐾', name: 'Bluy' },
-    { id: '3d_ledis', is3DModel: true, glbUrl: 'assets/pets/Ledis.glb', icon: '🌟', name: 'Ledis' },
-    { id: '3d_lety', is3DModel: true, glbUrl: 'assets/pets/LeTy.glb', icon: '🎀', name: 'LeTy' },
+    { id: '3d_bluy', is3DModel: true, glbUrl: 'assets/pets/Bluy.glb', icon: '⚙️', name: 'Bluy' },
+    { id: '3d_ledis', is3DModel: true, glbUrl: 'assets/pets/Ledis.glb', icon: '🦟', name: 'Ledis' },
+    { id: '3d_lety', is3DModel: true, glbUrl: 'assets/pets/LeTy.glb', icon: '🛸', name: 'LeTy' },
     { id: '3d_mich', is3DModel: true, glbUrl: 'assets/pets/MicH.glb', icon: '✨', name: 'MicH' },
-    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🚀', name: 'NiAL' },
+    { id: '3d_nial', is3DModel: true, glbUrl: 'assets/pets/niAL.glb', icon: '🍲', name: 'NiAL' },
     { id: '3d_prince', is3DModel: true, glbUrl: 'assets/pets/PrincE.glb', icon: '👑', name: 'Prince' }
   ],
   
@@ -478,15 +478,15 @@ const HomeDashboard = {
     const rand = Math.random();
     let finalMsg = '';
 
-    // 15% Saudação
-    if (rand < 0.15) {
+    // 20% Saudação
+    if (rand < 0.20) {
         const dayOfWeek = new Date().getDay();
         if (dayOfWeek === 1) finalMsg = `Oii ${opName}! Eu sou o ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰 Que bom que voltou!`;
         else if (dayOfWeek === 5) finalMsg = `${timeGreeting}, ${opName}! Sextou! Vamos fechar a semana com chave de ouro! 🎉`;
         else finalMsg = `${timeGreeting}, ${opName}! Eu sou o ${petName} e adoro trabalhar com você! 🥰`;
     }
-    // 25% Clima
-    else if (rand < 0.40) {
+    // 10% Clima
+    else if (rand < 0.30) {
         try {
             const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&daily=precipitation_probability_max&timezone=America%2FSao_Paulo');
             if (res.ok) {
@@ -498,7 +498,7 @@ const HomeDashboard = {
         } catch(e) {}
         if (!finalMsg) finalMsg = `Ei ${opName}, o clima está ótimo para fecharmos bons negócios hoje! 🚀`;
     }
-    // 30% Análise de Cliente Problemático
+    // 40% Análise de Cliente Problemático
     else if (rand < 0.70 && window.rawClientList) {
         const myClients = this.getMyClients();
         if (myClients.length > 0) {
@@ -519,8 +519,8 @@ const HomeDashboard = {
             finalMsg = `${timeGreeting}, ${opName}! Sua carteira está impecável hoje, zero inadimplência! 🎉`;
         }
     }
-    // 15% Bem-estar
-    else if (rand < 0.85) {
+    // 10% Bem-estar
+    else if (rand < 0.80) {
         const wellness = [
             `Já bebeu água hoje, ${opName}? Manter-se hidratado ajuda no foco. 💧`,
             `Respire fundo, ${opName}... Inspire em 4s, segure 4s, solte 4s. Ajuda nas ligações difíceis! 🧘`,
@@ -530,7 +530,7 @@ const HomeDashboard = {
         ];
         finalMsg = wellness[Math.floor(Math.random() * wellness.length)];
     }
-    // 15% Dicas e Motivação
+    // 20% Dicas e Motivação
     else {
         const tips = [
             `Dica de ouro, ${opName}: Um 'bom dia' sincero e um sorriso na voz mudam o tom de qualquer ligação. 😊`,

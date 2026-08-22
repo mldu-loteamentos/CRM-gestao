@@ -17587,7 +17587,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   text = text.replace(/{{EMPREENDIMENTO}}/g, empreendimento);
   text = text.replace(/{{QUADRA}}/g, quadra);
   text = text.replace(/{{LOTE}}/g, lote);
-  text = text.replace(/{{UNIDADE}}/g, uNameStr);
+  text = text.replace(/{{UNIDADE}}/g, uName);
   
   const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate || (rawSale ? rawSale.saleDate : null);
   
@@ -17632,8 +17632,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   }
   
   const headerCidade = 'Botucatu';
-  const uNameStr = unit.name || sale.unitName || sale.unitId || (rawSale ? rawSale.unitName : '') || '';
-  const tituloLineStr = `Título: ${tituloAReceber} - ${uNameStr}`;
+  const tituloLineStr = `Título: ${tituloAReceber} - ${uName}`;
   const headerDateStr = `${headerCidade}, ${dateStr}<br><br>${tituloLineStr}`;
 
   const docHtml = `
