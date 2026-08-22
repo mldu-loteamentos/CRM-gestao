@@ -216,7 +216,7 @@ const HomeDashboard = {
     if (container) {
         if (pet.is3DModel) {
            // Aumentando o camera-orbit para 300% (afasta bastante a câmera) e reduzindo a caixa para 200x200 para ficar no tamanho ideal
-           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 300%" style="width: 200px; height: 200px; outline: none; --poster-color: transparent; background-color: transparent; margin-bottom: 0px; margin-right: 0px;"></model-viewer>`;
+           container.innerHTML = `<model-viewer id="my-3d-assistant" src="${pet.glbUrl}" autoplay auto-rotate rotation-per-second="5deg" animation-name="Idle" camera-controls interaction-prompt="none" disable-zoom disable-pan camera-orbit="0deg 75deg 300%" min-camera-orbit="auto 75deg auto" max-camera-orbit="auto 75deg auto" style="width: 200px; height: 200px; outline: none; --poster-color: transparent; background-color: transparent; margin-bottom: 0px; margin-right: 0px;"></model-viewer>`;
        } else {
            container.innerHTML = `<img src="${pet.url}" alt="${pet.name}" style="width: 120px; height: 120px; object-fit: contain; mix-blend-mode: multiply; display: block; margin-bottom: -15px;">`;
        }
@@ -537,8 +537,12 @@ const HomeDashboard = {
             localStorage.setItem('mascotPlayState', JSON.stringify(playState));
             
             if (box && textEl) {
-                // Para qualquer animação em andamento instantaneamente
-                petContainer.getAnimations().forEach(anim => anim.cancel());
+                // Para qualquer animação de voo, mas preserva o float CSS
+                petContainer.getAnimations().forEach(anim => {
+                    if (anim.animationName !== 'petFloat' && anim.animationName !== 'popIn') {
+                        anim.cancel();
+                    }
+                });
                 
                 if (playState.lastMascotName === currentPetId) {
                     textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
@@ -567,8 +571,12 @@ const HomeDashboard = {
             localStorage.setItem('mascotPlayState', JSON.stringify(playState));
             
             if (box && textEl) {
-                // Para qualquer animação em andamento instantaneamente
-                petContainer.getAnimations().forEach(anim => anim.cancel());
+                // Para qualquer animação de voo instantaneamente, preservando CSS float
+                petContainer.getAnimations().forEach(anim => {
+                    if (anim.animationName !== 'petFloat' && anim.animationName !== 'popIn') {
+                        anim.cancel();
+                    }
+                });
                 
                 textEl.innerHTML = tiredPhrases[Math.floor(Math.random() * tiredPhrases.length)];
                 box.style.display = 'block';
@@ -1082,12 +1090,10 @@ setInterval(() => {
             const deltaX = e.clientX - startX;
             currentX = deltaX;
             
-            // Limitar a rotação entre -15 e 15 graus para o balão de fala não virar de cabeça para baixo
-            let rotation = deltaX * 1.5;
-            if (rotation > 15) rotation = 15;
-            if (rotation < -15) rotation = -15;
+            // A inclinação foi removida conforme solicitado (agora 0)
+            let rotation = 0;
             
-            // O mascote translada e rotaciona proporcionalmente com limite
+            // O mascote translada horizontalmente sem girar
             petContainer.style.transform = `translate(${deltaX}px, 0px) rotateZ(${rotation}deg)`;
         });
         

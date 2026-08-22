@@ -13659,6 +13659,12 @@ async function _loadZeroPaidTab_Impl() {
               <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
             </button>
           `;
+        } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= 31) {
+          delayBadge = `
+            <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #dc2626; color: #fff; border: 1px solid #991b1b; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);" onmouseover="this.style.background='#b91c1c';this.style.boxShadow='0 4px 6px rgba(220, 38, 38, 0.3)';" onmouseout="this.style.background='#dc2626';this.style.boxShadow='0 2px 4px rgba(220, 38, 38, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
+              <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - NEX
+            </button>
+          `;
         }
       }
     } catch (e) {}
@@ -14202,58 +14208,160 @@ function triggerWeSendNotification(saleId, name) {
   loadWeSendTab();
 }
 
-function triggerCorreiosNotification(customerId, saleId, value) {
-  const customer = getCustomerFromState(customerId);
-  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
-  const sale = salesList.find(s => s.id === saleId) || {};
-  const unit = AppState.units[sale.unitId] || {};
-  const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
-  
-  const preamble = AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.";
+window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
+    const btn = document.activeElement;
+    let oldHtml = null;
+    if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('NEX')) {
+        oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
+        if (window.lucide) lucide.createIcons();
+    }
 
-  const docHtml = `
-    <div style="text-align: center; margin-bottom: 3rem;">
-      <h2 style="color: #105436; font-size: 16pt; font-weight: bold;">NOTIFICAÇÃO EXTRAJUDICIAL DE INADIMPLEMENTO</h2>
-      <h3 style="font-size: 11pt; color: #666;">ENTREGA REGISTRADA - VIA CORREIOS</h3>
+    let customer = getCustomerFromState(customerId);
+    if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+        const cached = window.GlobalCustomerCache.data.find(c => c.customerId == customerId || c.id == customerId);
+        if (cached) {
+            customer.name = cached.name || cached.customerName || customer.name;
+            customer.cpfCnpj = cached.cpfCnpj || cached.cpf || customer.cpfCnpj;
+            customer.address = cached.address || customer.address;
+            customer.city = cached.city || customer.city;
+            customer.state = cached.state || customer.state;
+            customer.zipCode = cached.zipCode || customer.zipCode;
+        }
+    }
+    
+    // Fallbacks
+    if (!customer.cpfCnpj) customer.cpfCnpj = "- X -";
+    if (!customer.address) customer.address = "Endereço não cadastrado";
+
+    const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
+    const sale = salesList.find(s => String(s.id) === String(saleId)) || {};
+    const unit = AppState.units[sale.unitId] || {};
+    const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || { name: "EMPRESA DO LOTEAMENTO" };
+    
+    const addressStr = `${customer.address}${customer.zipCode ? ` - CEP: ${customer.zipCode}` : ''}${customer.city ? ` - ${customer.city}` : ''}${customer.state ? ` - ${customer.state}` : ''}`;
+    
+    const allBills = AppState.defaultersReceivableBills || (getSiengeApiMode() === "simulado" ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []);
+    const myBills = allBills.filter(b => String(b.saleId) === String(saleId) && b.status !== "PAID" && (b.overdueValue > 0 || b.daysDelay > 0));
+    
+    // Sort by due date
+    myBills.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+    
+    let tableRows = '';
+    let totCorrigido = 0;
+    let totAcrescimo = 0;
+    let totGeral = 0;
+    
+    if (myBills.length === 0) {
+        tableRows = `<tr><td colspan="9" style="text-align: center; padding: 10px;">Nenhuma parcela em atraso encontrada.</td></tr>`;
+    } else {
+        myBills.forEach(b => {
+            const v = b.originalValue || b.overdueValue || 0;
+            const corr = v; // Sld Corrigido
+            const jurosMulta = Math.max(0, (b.overdueValue || 0) - v);
+            const tot = (b.overdueValue || v);
+            
+            totCorrigido += corr;
+            totAcrescimo += jurosMulta;
+            totGeral += tot;
+            
+            const dd = b.dueDate ? b.dueDate.split('-').reverse().join('/') : '-';
+            
+            tableRows += `
+            <tr style="border-bottom: 1px dashed #ccc; font-size: 9pt;">
+                <td style="padding: 4px;">${dd}</td>
+                <td style="padding: 4px;">${b.documentId || ''}</td>
+                <td style="padding: 4px;">${b.installmentNumber || ''}</td>
+                <td style="padding: 4px;">${b.taxCode || 'SI'}</td>
+                <td style="padding: 4px;">${b.id || ''}</td>
+                <td style="padding: 4px;">${corr.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                <td style="padding: 4px;">${b.daysDelay || 0}</td>
+                <td style="padding: 4px;">${jurosMulta.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                <td style="padding: 4px;">${tot.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+            </tr>`;
+        });
+    }
+    
+    const docHtml = `
+    <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
+        <p style="text-align: right; margin-bottom: 2rem;">
+            Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
+        </p>
+
+        <p style="margin-bottom: 2rem;">
+            Ao(À)(s) Ilmo(a)(s). Sr(a)(s).<br>
+            <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${customer.cpfCnpj},<br>
+            e - X - , portador(a) do C.P.F. nº - X -<br>
+            ${addressStr.toUpperCase()}
+        </p>
+
+        <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
+
+        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+            <strong>${costCenter.name.toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
+        </p>
+
+        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+            No entanto, o Notificado não cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, a quantia atualizada conforme tabela abaixo:
+        </p>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 9pt;">
+            <thead>
+                <tr style="border-bottom: 1px solid #000; text-align: left;">
+                    <th style="padding: 4px;">Vencimento</th>
+                    <th style="padding: 4px;">Documento</th>
+                    <th style="padding: 4px;">Tit/Parc.</th>
+                    <th style="padding: 4px;">TC</th>
+                    <th style="padding: 4px;">Id</th>
+                    <th style="padding: 4px;">Sld. Corrigido</th>
+                    <th style="padding: 4px;">Dias</th>
+                    <th style="padding: 4px;">Acréscimo</th>
+                    <th style="padding: 4px;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${tableRows}
+            </tbody>
+        </table>
+        
+        <div style="font-weight: bold; text-align: center; margin-bottom: 2rem; font-size: 10pt;">
+            Total Saldo Corrigido ${totCorrigido.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
+            &nbsp;&nbsp;&nbsp;Total Acréscimos ${totAcrescimo.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
+            &nbsp;&nbsp;&nbsp;Total ${totGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}
+        </div>
+
+        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+            Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
+        </p>
+
+        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+            Caso V. Sa. tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
+        </p>
+
+        <p style="text-indent: 2em; margin-bottom: 3rem;">
+            Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
+        </p>
+
+        <p style="margin-bottom: 3rem;">
+            Atenciosamente,<br>
+            <strong>${costCenter.name.toUpperCase()}</strong>
+        </p>
     </div>
+    `;
 
-    <p style="text-align: right; margin-bottom: 2rem;">
-      Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
-    </p>
+    document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
+    document.getElementById("pdf-document-content").innerHTML = docHtml;
+    document.getElementById("pdf-view-overlay").classList.add("active");
+    if (window.lucide) lucide.createIcons();
+    
+    if (btn && oldHtml) {
+        btn.innerHTML = oldHtml;
+    }
+};
 
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      À(Ao) Sr(a).<br>
-      <strong>${customer.name}</strong><br>
-      Endereço: ${customer.address}<br>
-      Ref: Unidade ${unit.id} (Quadra ${unit.block}, Lote ${unit.lot}) do ${costCenter.name}.
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      Prezado(a) Senhor(a),
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 1.5rem; text-indent: 2em;">
-      Notificamos Vossa Senhoria de que, na qualidade de adquirente da unidade imobiliária retro citada, consta em nossos registros de contas a receber o inadimplemento de parcelas de financiamento contratual cuja dívida consolidada importa na quantia de <strong>${value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>.
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 1.5rem; text-indent: 2em;">
-      Solicitamos o comparecimento ao escritório da Moura Leite Loteamentos no prazo improrrogável de 15 (quinze) dias a contar do recebimento desta para regularização do débito. O não atendimento da presente notificação caracterizará a mora definitiva para efeitos do art. 32 da Lei 6.766/79, ensejando a rescisão extrajudicial ou judicial da promessa de compra e venda.
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 3rem;">
-      Atenciosamente,
-    </p>
-
-    <div style="width: 250px; border-top: 1.5px solid #000; text-align: center; font-size: 10pt; padding-top: 5px;">
-      MOURA LEITE LOTEAMENTOS<br>Departamento de Cobrança Jurídica
-    </div>
-  `;
-
-  document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial Correios (Física)";
-  document.getElementById("pdf-document-content").innerHTML = docHtml;
-  document.getElementById("pdf-view-overlay").classList.add("active");
-  lucide.createIcons();
-}
+window.triggerCorreiosNotification = function(customerId, saleId, value) {
+    window.gerarDocumentoFisicoNEX(customerId, saleId);
+};
 
 // ----------------------------------------------------
 // 11. PREÂMBULOS & CONFIGURAÇÃO AZURE: AÇÕES REDESENHADAS
