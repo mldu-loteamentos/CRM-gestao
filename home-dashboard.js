@@ -1081,8 +1081,14 @@ setInterval(() => {
             if (!isDragging) return;
             const deltaX = e.clientX - startX;
             currentX = deltaX;
-            // O mascote translada e rotaciona proporcionalmente
-            petContainer.style.transform = `translate(${deltaX}px, 0px) rotateZ(${deltaX * 1.5}deg)`;
+            
+            // Limitar a rotação entre -40 e 40 graus para o balão de fala não virar de cabeça para baixo
+            let rotation = deltaX * 1.5;
+            if (rotation > 40) rotation = 40;
+            if (rotation < -40) rotation = -40;
+            
+            // O mascote translada e rotaciona proporcionalmente com limite
+            petContainer.style.transform = `translate(${deltaX}px, 0px) rotateZ(${rotation}deg)`;
         });
         
         window.addEventListener('mouseup', (e) => {
