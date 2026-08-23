@@ -14282,29 +14282,7 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
         });
     }
     
-    const docHtml = `
-    <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
-        <p style="text-align: right; margin-bottom: 2rem;">
-            Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
-        </p>
-
-        <p style="margin-bottom: 2rem;">
-            Ao(À)(s) Ilmo(a)(s). Sr(a)(s).<br>
-            <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${customer.cpfCnpj},<br>
-            e - X - , portador(a) do C.P.F. nº - X -<br>
-            ${addressStr.toUpperCase()}
-        </p>
-
-        <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
-
-        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-            <strong>${costCenter.name.toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
-        </p>
-
-        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-            No entanto, o Notificado não cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, a quantia atualizada conforme tabela abaixo:
-        </p>
-
+    const tableHtml = `
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 9pt;">
             <thead>
                 <tr style="border-bottom: 1px solid #000; text-align: left;">
@@ -14328,26 +14306,101 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             Total Saldo Corrigido ${totCorrigido.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
             &nbsp;&nbsp;&nbsp;Total Acréscimos ${totAcrescimo.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
             &nbsp;&nbsp;&nbsp;Total ${totGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}
+        </div>`;
+
+    const templateStr = localStorage.getItem('crm_docpadrao_carta');
+    let docHtml = '';
+    
+    if (templateStr) {
+        let t = {};
+        try { t = JSON.parse(templateStr); } catch(e){}
+        let corpo = t['doc-carta-corpo'] || '';
+        let assunto = t['doc-carta-assunto'] || 'NOTIFICAÇÃO EXTRAJUDICIAL';
+        
+        if (corpo) {
+            const today = new Date();
+            let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
+            corpo = corpo.replace(/{{CIDADE_ATUAL}}/g, 'Botucatu');
+            corpo = corpo.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
+            corpo = corpo.replace(/{{TITULO}}/g, saleId || 'N/D');
+            
+            const formatUName = (unit.name || sale.unitName || sale.unitId || '').replace(/^U\s*-\s*/i, '');
+            corpo = corpo.replace(/{{UNIDADE}}/g, formatUName);
+            
+            corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
+            const cpfCnpj = (customer.cpfCnpj || '').replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+            corpo = corpo.replace(/{{CPF_CLIENTE}}/g, cpfCnpj);
+            corpo = corpo.replace(/{{CPF_CNPJ}}/g, cpfCnpj);
+            
+            corpo = corpo.replace(/{{NOME_CONJUGE}}/g, customer.spouseName || '- X -');
+            corpo = corpo.replace(/{{CPF_CONJUGE}}/g, customer.spouseCpf ? customer.spouseCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : '- X -');
+            
+            corpo = corpo.replace(/{{ENDERECO_CLIENTE}}/g, (customer.address || '').toUpperCase());
+            corpo = corpo.replace(/{{CEP_CLIENTE}}/g, customer.zipCode || '');
+            corpo = corpo.replace(/{{CIDADE_CLIENTE}}/g, (customer.city || '').toUpperCase());
+            corpo = corpo.replace(/{{ESTADO_CLIENTE}}/g, (customer.state || '').toUpperCase());
+            corpo = corpo.replace(/{{TITULO_REF}}/g, assunto);
+            corpo = corpo.replace(/{{EMPREENDIMENTO}}/g, costCenter.name || sale.enterpriseName || '');
+            corpo = corpo.replace(/{{DATA_CONTRATO_ORIGINAL}}/g, sale.date ? sale.date.split('-').reverse().join('/') : '');
+            
+            corpo = corpo.replace(/{{TABELA_PARCELAS}}/g, tableHtml);
+            corpo = corpo.replace(/{{VALOR_DIVIDA}}/g, totGeral.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}));
+            
+            docHtml = `
+              <div style="margin-bottom: 0;">
+                <h2 style="text-align:center; color: #105436; font-size: 12.5pt; font-weight: bold; margin-top: 0; margin-bottom: 3px;">${assunto}</h2>
+                <hr style="border: 1px solid #ccc; margin: 8px 0;">
+                <div style="font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; text-align: justify; margin: 0; white-space: pre-wrap;">${corpo}</div>
+              </div>
+            `;
+        }
+    }
+    
+    if (!docHtml) {
+        docHtml = `
+        <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
+            <p style="text-align: right; margin-bottom: 2rem;">
+                Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
+            </p>
+
+            <p style="margin-bottom: 2rem;">
+                Ao(À)(s) Ilmo(a)(s). Sr(a)(s).<br>
+                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${customer.cpfCnpj},<br>
+                e - X - , portador(a) do C.P.F. nº - X -<br>
+                ${addressStr.toUpperCase()}
+            </p>
+
+            <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
+
+            <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+                <strong>${costCenter.name.toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
+            </p>
+
+            <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+                No entanto, o Notificado não cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, a quantia atualizada conforme tabela abaixo:
+            </p>
+
+            ${tableHtml}
+
+            <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+                Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
+            </p>
+
+            <p style="text-indent: 2em; margin-bottom: 1.5rem;">
+                Caso V. Sa. tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
+            </p>
+
+            <p style="text-indent: 2em; margin-bottom: 3rem;">
+                Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
+            </p>
+
+            <p style="margin-bottom: 3rem;">
+                Atenciosamente,<br>
+                <strong>${costCenter.name.toUpperCase()}</strong>
+            </p>
         </div>
-
-        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-            Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
-        </p>
-
-        <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-            Caso V. Sa. tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
-        </p>
-
-        <p style="text-indent: 2em; margin-bottom: 3rem;">
-            Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
-        </p>
-
-        <p style="margin-bottom: 3rem;">
-            Atenciosamente,<br>
-            <strong>${costCenter.name.toUpperCase()}</strong>
-        </p>
-    </div>
-    `;
+        `;
+    }
 
     document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
     document.getElementById("pdf-document-content").innerHTML = docHtml;
