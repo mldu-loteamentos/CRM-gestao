@@ -17211,7 +17211,7 @@ async function saveDocPadrao(tipo) {
   const keyMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
-    carta: ['doc-carta-assunto', 'doc-carta-saudacao', 'doc-carta-corpo', 'doc-carta-assinatura'],
+    carta: ['doc-carta-assunto', 'doc-carta-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
@@ -17276,10 +17276,8 @@ function previewDocPadrao(tipo) {
     content = `<h2>Prévia de Instruções do Boleto</h2><p><strong>Instrução 1:</strong> ${inst1}</p><p><strong>Instrução 2:</strong> ${inst2}</p><p><strong>Observações:</strong> ${obs}</p>`;
   } else if (tipo === 'carta') {
     const assunto = document.getElementById('doc-carta-assunto')?.value || '';
-    const saudacao = document.getElementById('doc-carta-saudacao')?.value || '';
     const corpo = document.getElementById('doc-carta-corpo')?.value || '';
-    const assinatura = document.getElementById('doc-carta-assinatura')?.value || '';
-    content = `<h2>Prévia: ${assunto}</h2><p>${saudacao}</p><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre><br><p><strong>${assinatura}</strong></p>`;
+    content = `<h2 style="text-align:center;">${assunto}</h2><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre>`;
   } else if (tipo === 'suspensao') {
     const ref = document.getElementById('doc-suspensao-ref')?.value || '';
     const corpo = document.getElementById('doc-suspensao-corpo')?.value || '';
@@ -17304,7 +17302,7 @@ async function loadDocPadraoTemplates() {
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
-    carta: ['doc-carta-assunto', 'doc-carta-saudacao', 'doc-carta-corpo', 'doc-carta-assinatura'],
+    carta: ['doc-carta-assunto', 'doc-carta-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
