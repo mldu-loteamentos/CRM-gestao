@@ -14091,7 +14091,6 @@ async function loadWeSendTab() {
       grouped[key].maxDaysDelay = bill.daysDelay;
     }
   });
-  });
 
   const fTitulo = document.getElementById('wesend-filter-titulo')?.value || '';
   const fContrato = document.getElementById('wesend-filter-contrato')?.value || '';
@@ -24031,5 +24030,45 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typeof window.checkMonthlyBilletAlerts === 'function') {
             window.checkMonthlyBilletAlerts();
         }
-    }, 4500); // Wait 4.5s for Firebase and rawClientList to be loaded initially
 });
+
+window.testarZerarFila = function() {
+    const table = document.querySelector('#agenda-selected-day-body').closest('table');
+    if (!table || !table.parentNode) return;
+    
+    const oldSummary = table.parentNode.querySelector('.agenda-queue-summary');
+    if (oldSummary) oldSummary.remove();
+    
+    const successDiv = document.createElement("div");
+    successDiv.className = 'agenda-queue-summary';
+    successDiv.style.cssText = "background: #f0fdf4; color: #166534; padding: 12px 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 700; border: 1px solid #bbf7d0; margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);";
+    successDiv.innerHTML = `
+      <style>
+        @keyframes seloPulseTest {
+          0% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(22, 101, 52, 0.4)); }
+          50% { transform: scale(1.05); filter: drop-shadow(0 0 20px rgba(22, 101, 52, 0.8)); }
+          100% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(22, 101, 52, 0.4)); }
+        }
+      </style>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+              <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
+              <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉 (MODO TESTE)</span>
+          </div>
+          <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: auto; border-radius: 50%; animation: seloPulseTest 2s infinite ease-in-out; border: 4px solid #166534;">
+      </div>
+    `;
+    table.parentNode.insertBefore(successDiv, table);
+    if (window.lucide) lucide.createIcons();
+    
+    if (typeof window.confetti !== 'function') {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+        script.onload = () => {
+            window.fireConfetti();
+        };
+        document.head.appendChild(script);
+    } else {
+        window.fireConfetti();
+    }
+};
