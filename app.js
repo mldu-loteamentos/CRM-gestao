@@ -24030,6 +24030,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typeof window.checkMonthlyBilletAlerts === 'function') {
             window.checkMonthlyBilletAlerts();
         }
+    }, 4500);
 });
 
 window.testarZerarFila = function() {
