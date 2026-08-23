@@ -14022,8 +14022,14 @@ async function loadWeSendTab() {
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
 
-  // Filtrar títulos com diasDelay >= 61
-  const overdue61 = bills.filter(b => b.daysDelay >= 61 && b.slipStatus === "Vencido");
+  // Filtrar títulos de acordo com a régua: 31 dias se 0% pago, 61 dias caso contrário
+  const overdueEligible = bills.filter(b => {
+    if (b.slipStatus !== "Vencido") return false;
+    const sale = sales.find(s => String(s.receivableBillId) === String(b.saleId) || String(s.id) === String(b.saleId));
+    if (!sale) return false;
+    const isZeroPaid = (sale.percPaid === undefined || sale.percPaid === 0);
+    return isZeroPaid ? b.daysDelay >= 31 : b.daysDelay >= 61;
+  });
   
   const body = document.getElementById("wesend-table-body");
   if (!body) return;
@@ -14032,14 +14038,14 @@ async function loadWeSendTab() {
   const chkAll = document.getElementById("chk-wesend-all");
   if (chkAll) chkAll.checked = false;
 
-  if (overdue61.length === 0) {
-    body.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum título em atraso há mais de 61 dias qualificado para notificação.</td></tr>`;
+  if (overdueEligible.length === 0) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum título qualificado para notificação.</td></tr>`;
     return;
   }
 
   // Agrupar por venda do cliente
   const grouped = {};
-  overdue61.forEach(bill => {
+  overdueEligible.forEach(bill => {
     const key = `${bill.customerId}-${bill.saleId}`;
     if (!grouped[key]) {
       const customer = customers[bill.customerId] || { name: bill.clientName || `Cliente #${bill.customerId}` };
@@ -14082,7 +14088,7 @@ async function loadWeSendTab() {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td style="text-align: center; vertical-align: middle;">
-        <input type="checkbox" class="chk-wesend-row" data-sale-id="${item.saleId}" style="width: 16px; height: 16px; cursor: pointer;">
+        <input type="checkbox" class="chk-wesend-row" data-sale-id="${item.saleId}" data-customer-id="${item.customerId}" style="width: 16px; height: 16px; cursor: pointer;">
       </td>
       <td><strong>${item.customerName}</strong></td>
       <td><strong>${costCenter.name || 'N/D'}</strong> (Q: ${unit.block}, L: ${unit.lot})</td>
@@ -14090,16 +14096,6 @@ async function loadWeSendTab() {
       <td><span class="badge badge-danger">${item.maxDaysDelay} dias</span></td>
       <td><strong>R$ ${item.totalOverdue.toLocaleString('pt-BR')}</strong></td>
       <td><span class="badge ${statusClass}">${currentStatus}</span></td>
-      <td>
-        <div style="display:flex; gap:5px;">
-          <button class="btn btn-outline btn-sm" onclick="triggerCorreiosNotification(${item.customerId}, ${item.saleId}, ${item.totalOverdue})">
-            <i data-lucide="printer" style="width:12px;"></i> Correios (Física)
-          </button>
-          <button class="btn btn-primary btn-sm" onclick="triggerWeSendNotification(${item.saleId}, '${item.customerName}')">
-            <i data-lucide="send" style="width:12px;"></i> We Send (ICP-Brasil)
-          </button>
-        </div>
-      </td>
     `;
     body.appendChild(row);
   });
@@ -14208,14 +14204,7 @@ function triggerWeSendNotification(saleId, name) {
   loadWeSendTab();
 }
 
-window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
-    const btn = document.activeElement;
-    let oldHtml = null;
-    if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('NEX')) {
-        oldHtml = btn.innerHTML;
-        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
-        if (window.lucide) lucide.createIcons();
-    }
+window.generateSingleNEXHtml = async function(customerId, saleId) {
 
     let customer = getCustomerFromState(customerId);
     if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
@@ -14311,13 +14300,14 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
     const templateStr = localStorage.getItem('crm_docpadrao_carta');
     let docHtml = '';
     
+    let t = {};
     if (templateStr) {
-        let t = {};
         try { t = JSON.parse(templateStr); } catch(e){}
-        let corpo = t['doc-carta-corpo'] || '';
-        let assunto = t['doc-carta-assunto'] || 'NOTIFICAÇÃO EXTRAJUDICIAL';
-        
-        if (corpo) {
+    }
+    let corpo = t['doc-carta-corpo'] || (document.getElementById('doc-carta-corpo') ? document.getElementById('doc-carta-corpo').value : '');
+    let assunto = t['doc-carta-assunto'] || (document.getElementById('doc-carta-assunto') ? document.getElementById('doc-carta-assunto').value : 'NOTIFICAÇÃO EXTRAJUDICIAL');
+    
+    if (corpo) {
             const today = new Date();
             let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
             corpo = corpo.replace(/{{CIDADE_ATUAL}}/g, 'Botucatu');
@@ -14354,7 +14344,6 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
               </div>
             `;
         }
-    }
     
     if (!docHtml) {
         docHtml = `
@@ -14402,8 +14391,61 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
         `;
     }
 
+    return docHtml;
+};
+
+window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
+    const btn = document.activeElement;
+    let oldHtml = null;
+    if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('NEX')) {
+        oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
+        if (window.lucide) lucide.createIcons();
+    }
+
+    const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
+    
     document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
     document.getElementById("pdf-document-content").innerHTML = docHtml;
+    document.getElementById("pdf-view-overlay").classList.add("active");
+    if (window.lucide) lucide.createIcons();
+    
+    if (btn && oldHtml) {
+        btn.innerHTML = oldHtml;
+    }
+};
+
+window.gerarDocumentosFisicosNEXEmMassa = async function() {
+    const checkboxes = document.querySelectorAll(".chk-wesend-row:checked");
+    if (checkboxes.length === 0) {
+        alert("Selecione pelo menos um cliente para gerar as notificações.");
+        return;
+    }
+    
+    const btn = document.activeElement;
+    let oldHtml = null;
+    if (btn && btn.tagName === 'BUTTON') {
+        oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 16px; height: 16px;"></i> Gerando...';
+        if (window.lucide) lucide.createIcons();
+    }
+
+    let fullHtml = '';
+    for (let i = 0; i < checkboxes.length; i++) {
+        const chk = checkboxes[i];
+        const saleId = chk.getAttribute('data-sale-id');
+        const customerId = chk.getAttribute('data-customer-id');
+        const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
+        
+        fullHtml += docHtml;
+        
+        if (i < checkboxes.length - 1) {
+            fullHtml += '<div style="page-break-after: always; height: 1px;"></div>';
+        }
+    }
+    
+    document.getElementById("pdf-modal-title").textContent = "Notificações Extrajudiciais (Lote)";
+    document.getElementById("pdf-document-content").innerHTML = fullHtml;
     document.getElementById("pdf-view-overlay").classList.add("active");
     if (window.lucide) lucide.createIcons();
     
