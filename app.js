@@ -11962,7 +11962,22 @@ window.fireConfetti = function() {
           const successDiv = document.createElement("div");
           successDiv.className = 'agenda-queue-summary';
           successDiv.style.cssText = "background: #f0fdf4; color: #166534; padding: 12px 15px; border-radius: 8px; font-size: 0.95rem; font-weight: 700; border: 1px solid #bbf7d0; margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);";
-          successDiv.innerHTML = `<i data-lucide="party-popper" style="width: 20px; height: 20px;"></i> Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉`;
+          successDiv.innerHTML = `
+            <style>
+              @keyframes seloPulse {
+                0% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(22, 101, 52, 0.4)); }
+                50% { transform: scale(1.05); filter: drop-shadow(0 0 20px rgba(22, 101, 52, 0.8)); }
+                100% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(22, 101, 52, 0.4)); }
+              }
+            </style>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
+                    <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉</span>
+                </div>
+                <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: auto; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
+            </div>
+          `;
           table.parentNode.insertBefore(successDiv, table);
           
           // Show confetti!
@@ -13660,11 +13675,15 @@ async function _loadZeroPaidTab_Impl() {
             </button>
           `;
         } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= 31) {
-          delayBadge = `
-            <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #dc2626; color: #fff; border: 1px solid #991b1b; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);" onmouseover="this.style.background='#b91c1c';this.style.boxShadow='0 4px 6px rgba(220, 38, 38, 0.3)';" onmouseout="this.style.background='#dc2626';this.style.boxShadow='0 2px 4px rgba(220, 38, 38, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
-              <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - NEX
-            </button>
-          `;
+          const statusKey = `crm_wesend_status_${client.saleId}`;
+          const currentStatus = localStorage.getItem(statusKey) || "Pendente";
+          if (currentStatus === "Pendente") {
+            delayBadge = `
+              <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
+                <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
+              </button>
+            `;
+          }
         }
       }
     } catch (e) {}
@@ -14072,8 +14091,59 @@ async function loadWeSendTab() {
       grouped[key].maxDaysDelay = bill.daysDelay;
     }
   });
+  });
 
-  Object.values(grouped).forEach(item => {
+  const fTitulo = document.getElementById('wesend-filter-titulo')?.value || '';
+  const fContrato = document.getElementById('wesend-filter-contrato')?.value || '';
+  const fDoc = (document.getElementById('wesend-filter-doc')?.value || '').replace(/\D/g, '');
+  const fEmp = document.getElementById('wesend-filter-emp')?.value || '';
+  const fUnidade = document.getElementById('wesend-filter-unidade')?.value || '';
+  const fNome = (document.getElementById('wesend-filter-nome')?.value || '').toLowerCase();
+  const fTelefone = (document.getElementById('wesend-filter-telefone')?.value || '').replace(/\D/g, '');
+  const fEmail = (document.getElementById('wesend-filter-email')?.value || '').toLowerCase();
+
+  const empSelect = document.getElementById('wesend-filter-emp');
+  if (empSelect && empSelect.options.length <= 1 && window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) {
+      window.MOCK_DATA.COST_CENTERS.forEach(cc => {
+          const opt = document.createElement('option');
+          opt.value = cc.id;
+          opt.textContent = cc.name;
+          empSelect.appendChild(opt);
+      });
+  }
+
+  let finalItems = Object.values(grouped);
+  finalItems = finalItems.filter(item => {
+    const unit = AppState.units[item.unitId] || {};
+    const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+    const customer = customers[item.customerId] || {};
+    
+    if (fTitulo && !item.billIds.some(id => String(id).includes(fTitulo))) return false;
+    if (fContrato && !String(item.saleId).includes(fContrato)) return false;
+    if (fDoc) {
+      const doc = (customer.cpfCnpj || customer.cpf || '').replace(/\D/g, '');
+      if (!doc.includes(fDoc)) return false;
+    }
+    if (fEmp && String(costCenter.id) !== String(fEmp)) return false;
+    if (fUnidade && String(unit.id) !== String(fUnidade)) return false;
+    if (fNome && !(item.customerName || '').toLowerCase().includes(fNome)) return false;
+    if (fTelefone) {
+      const phones = ((customer.phones || []).map(p => (p.number||'').replace(/\D/g, '')).join(' ') + ' ' + (customer.phone||'').replace(/\D/g, ''));
+      if (!phones.includes(fTelefone)) return false;
+    }
+    if (fEmail) {
+      const emails = ((customer.emails || []).map(e => e.email).join(' ') + ' ' + (customer.email||'')).toLowerCase();
+      if (!emails.includes(fEmail)) return false;
+    }
+    return true;
+  });
+
+  if (finalItems.length === 0) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum título encontrado com os filtros informados.</td></tr>`;
+    return;
+  }
+
+  finalItems.forEach(item => {
     const unit = AppState.units[item.unitId] || {};
     const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
     
@@ -14452,6 +14522,55 @@ window.gerarDocumentosFisicosNEXEmMassa = async function() {
     if (btn && oldHtml) {
         btn.innerHTML = oldHtml;
     }
+};
+
+window.clearWeSendSearch = function() {
+    document.getElementById('wesend-filter-titulo').value = '';
+    document.getElementById('wesend-filter-contrato').value = '';
+    document.getElementById('wesend-filter-doc').value = '';
+    document.getElementById('wesend-filter-emp').value = '';
+    document.getElementById('wesend-filter-unidade').innerHTML = '<option value="">Selecione o emp...</option>';
+    document.getElementById('wesend-filter-unidade').disabled = true;
+    document.getElementById('wesend-filter-nome').value = '';
+    document.getElementById('wesend-filter-telefone').value = '';
+    document.getElementById('wesend-filter-email').value = '';
+    loadWeSendTab();
+};
+
+window.loadWeSendUnidades = async function(cc) {
+  const selectUnidade = document.getElementById('wesend-filter-unidade');
+  if (!selectUnidade) return;
+
+  selectUnidade.innerHTML = '<option value="">Carregando unidades...</option>';
+  selectUnidade.disabled = true;
+
+  if (!cc) {
+    selectUnidade.innerHTML = '<option value="">Selecione o emp...</option>';
+    return;
+  }
+
+  try {
+    let allUnits = [];
+    let offset = 0;
+    const limit = 200;
+    let hasMore = true;
+    while (hasMore) {
+      const data = await window.siengeFetchWithRetry(`/units?limit=${limit}&offset=${offset}&enterpriseId=${cc}&additionalData=NONE`);
+      const results = data.results || [];
+      allUnits = allUnits.concat(results);
+      if (results.length < limit) hasMore = false; else offset += limit;
+    }
+    selectUnidade.innerHTML = '<option value="">Todas as Unidades</option>';
+    allUnits.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = u.name;
+      selectUnidade.appendChild(opt);
+    });
+    selectUnidade.disabled = false;
+  } catch (e) {
+    selectUnidade.innerHTML = '<option value="">Erro ao carregar</option>';
+  }
 };
 
 window.triggerCorreiosNotification = function(customerId, saleId, value) {
