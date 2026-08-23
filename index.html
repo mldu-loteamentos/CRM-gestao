@@ -1018,7 +1018,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.361 &nbsp;&middot;&nbsp; 22/08/2026
+            v1.0.362 &nbsp;&middot;&nbsp; 23/08/2026
           </span>
         </div>
       </div>
@@ -1377,21 +1377,32 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
                 <h3 style="margin-top: 0; color: #1e293b; font-size: 1.3rem; margin-bottom: 20px;">Notificação Extrajudicial / Carta</h3>
                 <div class="form-group">
                   <label>Assunto Padrão (E-mail)</label>
-                  <input type="text" class="form-control" id="doc-carta-assunto" value="Lembrete de Cobrança - {{NOME_CLIENTE}} - {{EMPREENDIMENTO}}">
+                  <input type="text" class="form-control" id="doc-carta-assunto" value="Notificação Extrajudicial - {{NOME_CLIENTE}} - {{EMPREENDIMENTO}}">
                 </div>
                 <div class="form-group">
                   <label>Saudação</label>
-                  <input type="text" class="form-control" id="doc-carta-saudacao" value="Prezado(a) {{NOME_CLIENTE}},">
+                  <input type="text" class="form-control" id="doc-carta-saudacao" value="Ao(À)(s) Ilmo(a)(s). Sr(a)(s).">
                 </div>
                 <div class="form-group">
                   <label>Corpo da Carta</label>
-                  <textarea class="form-control" id="doc-carta-corpo" rows="8">Vimos informar que identificamos parcelas em aberto referentes ao seu contrato {{NUM_CONTRATO}} no empreendimento {{EMPREENDIMENTO}}, unidade {{UNIDADE}}.
+                  <textarea class="form-control" id="doc-carta-corpo" rows="22" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">{{NOME_CLIENTE}}, portador(a) do C.P.F. nº {{CPF_CNPJ}},
+residente em {{ENDERECO_CLIENTE}}, {{CIDADE_CLIENTE}}
 
-Solicitamos que entre em contato com nossa equipe para regularização.</textarea>
+NOTIFICAÇÃO EXTRAJUDICIAL
+
+A {{EMPREENDIMENTO}} SPE LTDA (“Notificante”), com sede social na Rua Campos Salles nº 2175, Vila Sônia, na Cidade e Comarca de Botucatu/SP, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em {{DATA_CONTRATO_ORIGINAL}}, correspondente a quadra e lote {{UNIDADE}}, no Loteamento {{EMPREENDIMENTO}}, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
+
+No entando, o Notificado não cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, o valor total de {{VALOR_DIVIDA}}.
+
+Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
+
+Caso V. Sa. tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
+
+Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.</textarea>
                 </div>
                 <div class="form-group">
                   <label>Assinatura</label>
-                  <input type="text" class="form-control" id="doc-carta-assinatura" value="Equipe de Cobrança - Moura Leite Loteamentos">
+                  <input type="text" class="form-control" id="doc-carta-assinatura" value="{{EMPREENDIMENTO}} SPE Ltda">
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 16px;">
                   <button class="btn btn-primary" onclick="saveDocPadrao('carta')">
@@ -5503,30 +5514,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=361"></script>
-  <script defer src="sienge-api.js?v=361"></script>
-  <script defer src="azure-auth.js?v=361"></script>
-  <script defer src="app.js?v=361"></script>
-  <script defer src="home-dashboard.js?v=361"></script>
-  <script defer src="anexos.js?v=361"></script>
-  <script defer src="contas-pagar.js?v=361"></script>
-  <script defer src="config-tags.js?v=361"></script>
-  <script defer src="config-users.js?v=361"></script>
-  <script defer src="construcao.js?v=361"></script>
-  <script defer src="empresas.js?v=361"></script>
-  <script defer src="relacionamento.js?v=361"></script>
+  <script defer src="data.js?v=362"></script>
+  <script defer src="sienge-api.js?v=362"></script>
+  <script defer src="azure-auth.js?v=362"></script>
+  <script defer src="app.js?v=362"></script>
+  <script defer src="home-dashboard.js?v=362"></script>
+  <script defer src="anexos.js?v=362"></script>
+  <script defer src="contas-pagar.js?v=362"></script>
+  <script defer src="config-tags.js?v=362"></script>
+  <script defer src="config-users.js?v=362"></script>
+  <script defer src="construcao.js?v=362"></script>
+  <script defer src="empresas.js?v=362"></script>
+  <script defer src="relacionamento.js?v=362"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=361"></script>
-  <script defer src="plano-financeiro.js?v=361"></script>
-  <script defer src="fiscal.js?v=361"></script>
-  <script defer src="indexadores.js?v=361"></script>
-  <script defer src="verificar-construcao.js?v=361"></script>
-  <script src="repactuacoes.js?v=361"></script>
+  <script defer src="centros-custo.js?v=362"></script>
+  <script defer src="plano-financeiro.js?v=362"></script>
+  <script defer src="fiscal.js?v=362"></script>
+  <script defer src="indexadores.js?v=362"></script>
+  <script defer src="verificar-construcao.js?v=362"></script>
+  <script src="repactuacoes.js?v=362"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=361"></script>
+  <script defer src="dashboard-inadimplencia.js?v=362"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
