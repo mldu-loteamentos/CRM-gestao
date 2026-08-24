@@ -633,6 +633,10 @@ function switchCustomerTab(tabId) {
     window.updateJudFaseDropdown();
   }
   
+  if (tabId === 'tab-construcao' && typeof window.loadConstrucoes === 'function') {
+    window.loadConstrucoes();
+  }
+  
   const activeBtn = document.querySelector(`.customer-tab-btn[data-target="${tabId}"]`);
   if (activeBtn) {
     activeBtn.classList.add('active');
@@ -4803,15 +4807,24 @@ function formatCpfCnpj(val) {
   }).join("");
 
   let subjudiceAlertHtml = "";
-  if (!isSubjudice) {
-    let subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
-    if (subjudiceMemory[customerId]) {
-      const mem = subjudiceMemory[customerId];
-      if (mem.exitDate) {
-        subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">⚠️ JÁ PASSOU PELO SUB JUDICE</span>`;
-      } else {
-        subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}">🚨 ATIVO NO SUB JUDICE</span>`;
-      }
+  let subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
+  let mem = subjudiceMemory[customerId];
+  
+  if (!mem && window._subjudiceList) {
+      const inList = window._subjudiceList.find(c => String(c.customerId) === String(customerId));
+      if (inList) mem = { entryDate: new Date().toISOString().split('T')[0] };
+  }
+  if (!mem && AppState.judNotes && AppState.judNotes[String(customerId)]) {
+      const hasActiveJud = AppState.judNotes[String(customerId)].some(n => n.type === 'Judicial' && n.status !== 'Cancelada' && n.fase !== 'Nota Interna');
+      if (hasActiveJud) mem = { entryDate: new Date().toISOString().split('T')[0] };
+  }
+
+  if (mem) {
+    if (mem.exitDate) {
+      subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">⚠️ JÁ PASSOU PELO SUB JUDICE</span>`;
+    } else {
+      const entryTitle = mem.entryDate ? ` title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}"` : '';
+      subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;"${entryTitle}>🚨 ATIVO NO SUB JUDICE</span>`;
     }
   }
 
