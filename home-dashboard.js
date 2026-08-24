@@ -926,7 +926,7 @@ const HomeDashboard = {
                 textEl.innerHTML = playPhrases[Math.floor(Math.random() * playPhrases.length)];
                 box.style.display = 'block';
                 if (window.mascotHideTimeout) clearTimeout(window.mascotHideTimeout);
-                window.mascotHideTimeout = setTimeout(() => { box.style.display = 'none'; }, 3000);
+                window.mascotHideTimeout = setTimeout(() => { box.style.display = 'none'; }, 5000);
             }
         }, duration);
         return;

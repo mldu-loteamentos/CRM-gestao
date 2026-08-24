@@ -12869,9 +12869,6 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
 };
 
 window.checkAgendaAlarms = function() {
-    let op = document.getElementById("agenda-operator-select")?.value || "Todos";
-    op = op.trim();
-    
     let allNotes = {};
     try {
         allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
@@ -12881,11 +12878,34 @@ window.checkAgendaAlarms = function() {
     const now = new Date();
     const todayStr = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,'0') + "-" + String(now.getDate()).padStart(2,'0');
     
+    let currentUser = "TODOS";
+    let currentUserEmail = "";
+    if (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) {
+        currentUser = window.AppState.currentUser.name.toUpperCase();
+        currentUserEmail = window.AppState.currentUser.email ? window.AppState.currentUser.email.toLowerCase() : "";
+    } else {
+        try {
+            const stored = JSON.parse(localStorage.getItem('currentUser'));
+            if (stored && stored.name) {
+                currentUser = stored.name.toUpperCase();
+                currentUserEmail = stored.email ? stored.email.toLowerCase() : "";
+            }
+        } catch(e) {}
+    }
+    
     Object.keys(allNotes).forEach(key => {
-        if (op !== "Todos" && !key.startsWith(op + "_")) return;
+        const parts = key.split("_");
+        const owner = parts[0];
         
         allNotes[key].forEach((noteObj, idx) => {
             if (!noteObj.alarm) return;
+            
+            const isOwner = (owner === currentUser);
+            const isLegacyTodos = (owner === "TODOS" || owner === "Todos");
+            const isShared = (noteObj.sharedWith && noteObj.sharedWith.includes(currentUserEmail));
+            
+            // Só dispara o alerta se o usuário atual for o criador, se for um alerta público legado, ou se foi compartilhado com ele.
+            if (!isOwner && !isShared && !isLegacyTodos) return;
             
             let shouldTrigger = false;
             
@@ -12919,12 +12939,15 @@ window.checkAgendaAlarms = function() {
                 const alertDiv = document.createElement('div');
                 alertDiv.style.cssText = "position:fixed; bottom:20px; right:20px; background:#fff; border-left: 4px solid #10b981; padding:15px 20px; box-shadow:0 10px 25px rgba(0,0,0,0.2); border-radius:8px; z-index:9999999; min-width: 300px; max-width: 400px; animation: fade-in 0.3s ease-out;";
                 
+                const ownerInfo = (!isOwner && owner !== "TODOS") ? `<span style="font-size: 0.75rem; color: #64748b; font-weight: normal; margin-left: auto;">(De: ${owner})</span>` : '';
+                
                 alertDiv.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                        <h5 style="margin: 0; color: #10b981; font-size: 1rem; display: flex; align-items: center; gap: 6px;">
+                        <h5 style="margin: 0; color: #10b981; font-size: 1rem; display: flex; align-items: center; gap: 6px; width: 100%;">
                             <i data-lucide="bell-ringing" style="width: 18px;"></i> Lembrete
+                            ${ownerInfo}
                         </h5>
-                        <button style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0;" onclick="this.parentElement.parentElement.remove()">
+                        <button style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0; margin-left: 10px;" onclick="this.parentElement.parentElement.remove()">
                             <i data-lucide="x" style="width: 16px;"></i>
                         </button>
                     </div>
@@ -17845,8 +17868,25 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       } catch(e) {}
   }
   
+  if (!corpo && window.firebaseCollections && window.firebaseDb) {
+      try {
+          const { doc, getDoc } = window.firebaseCollections;
+          const fbRef = doc(window.firebaseDb, 'settings', 'docpadrao_suspensao');
+          const snap = await getDoc(fbRef);
+          if (snap.exists()) {
+              const data = snap.data();
+              localStorage.setItem('crm_docpadrao_suspensao', JSON.stringify(data));
+              ref = data['doc-suspensao-ref'] || ref;
+              corpo = data['doc-suspensao-corpo'] || '';
+          }
+      } catch(e) {
+          console.error("Erro ao buscar template de suspensão no Firebase:", e);
+      }
+  }
+  
   if (!corpo) {
       alert("O corpo da 'Carta de Suspensão de Contrato' não foi configurado em Documentos Padrões.");
+      if (oldHtml && btn) btn.innerHTML = oldHtml;
       return;
   }
   

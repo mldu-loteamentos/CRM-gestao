@@ -558,7 +558,7 @@ const DashboardInadimplencia = (function() {
       if (c === 0) return '<span style="color:#cbd5e1;">—</span>';
       const pctValue = totalValue > 0 ? Math.round((v / totalValue) * 100) : 0;
       const pctTitles = totalTitles > 0 ? Math.round((c / totalTitles) * 100) : 0;
-      return `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;"><span style="font-weight:700;">${fmtMoneyNoRs(v)} | ${pctValue}%</span><span style="font-size:7.5px;color:#ea580c;">${c} tít. | ${pctTitles}%</span></div>`;
+      return `<div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; white-space:nowrap;"><span style="font-weight:700; font-size:8px;">${fmtMoneyNoRs(v)} | ${pctValue}%</span><span style="font-size:7px;color:#ea580c;">${c} tít. | ${pctTitles}%</span></div>`;
     }
     
     function dualStackedBarWithArrow(snap1, snap2, label1, label2) {
@@ -705,7 +705,10 @@ const DashboardInadimplencia = (function() {
           const barH = (v / maxVal) * (H - padTop - padBot);
           const y = H - padBot - barH;
           
-          const currentBarColor = labels[i] === 'Fech.' ? '#94a3b8' : barColor;
+          let currentBarColor = '#94a3b8';
+          if (labels[i] !== 'Fech.') {
+              currentBarColor = (v <= firstVal) ? '#4ade80' : '#f87171';
+          }
           
           bars += `<rect x="${xCenter - barWidth/2}" y="${y}" width="${barWidth}" height="${barH}" fill="${currentBarColor}" rx="2" />`;
           
@@ -754,7 +757,15 @@ const DashboardInadimplencia = (function() {
         if (!zeroPaidEmp[emp]) zeroPaidEmp[emp] = 0;
         zeroPaidEmp[emp] += (c.billCount||1);
     });
-    const zeroPaidEmpList = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
+    const zeroPaidEmpListFull = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
+    let zeroPaidEmpList = [];
+    if (zeroPaidEmpListFull.length > 5) {
+        zeroPaidEmpList = zeroPaidEmpListFull.slice(0, 4);
+        const outrosCount = zeroPaidEmpListFull.slice(4).reduce((sum, item) => sum + item.count, 0);
+        zeroPaidEmpList.push({ name: 'OUTROS', count: outrosCount });
+    } else {
+        zeroPaidEmpList = zeroPaidEmpListFull;
+    }
     function getAbove31(snap) {
         let v = 0, c = 0;
         if (snap && snap.data_json && snap.data_json.companies) {
@@ -795,29 +806,56 @@ const DashboardInadimplencia = (function() {
         return res.c;
     });
 
-    const ontemSnap = chartSnaps.length > 1 ? chartSnaps[chartSnaps.length - 2] : null;
+    let ontemSnap = null;
+    if (snapshots.length > 1) {
+        const hojeDateStr = snapshots[snapshots.length-1].date;
+        for (let i = snapshots.length - 2; i >= 0; i--) {
+            const s = snapshots[i];
+            if (s.date === hojeDateStr) continue;
+            let isDiaUtil = true;
+            if (s.date) {
+                const d = new Date(s.date + 'T12:00:00');
+                const day = d.getDay();
+                if (day === 0 || day === 6) isDiaUtil = false; // Domingo ou Sábado
+            }
+            if (isDiaUtil) {
+                ontemSnap = s;
+                break;
+            }
+        }
+        if (!ontemSnap) {
+            ontemSnap = snapshots[snapshots.length - 2];
+        }
+    }
+
     let diffValueStr = "";
     let diffClientsStr = "";
     let diffBillsStr = "";
     
     if (ontemSnap) {
         const diffVal = totalOverdue - (ontemSnap.total_value || 0);
-        if (Math.abs(diffVal) > 1) { // Evita mostrar +0 se não mudou
+        if (Math.abs(diffVal) > 1) {
             const diffValFmt = Math.abs(diffVal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-            diffValueStr = ` (${diffVal > 0 ? '+' : '-'} ${diffValFmt} do que ontem)`;
+            diffValueStr = ` (${diffVal > 0 ? '+' : '-'} ${diffValFmt} do que o último dia útil)`;
         }
         
-        if (ontemSnap.total_customers !== undefined) {
-            const diffCli = uniqueClients.size - ontemSnap.total_customers;
+        let ontemTotCust = ontemSnap.total_customers;
+        if (ontemTotCust === undefined && ontemSnap.data_json && ontemSnap.data_json.companies) {
+            // Se não tem salvo, não temos como saber o numero exato de clientes unicos facilmente sem recalcular tudo,
+            // mas o CRM agora salva total_customers.
+        }
+        
+        if (ontemTotCust !== undefined) {
+            const diffCli = uniqueClients.size - ontemTotCust;
             if (diffCli !== 0) {
-                diffClientsStr = ` (${diffCli > 0 ? '+' : '-'} ${Math.abs(diffCli)} clientes do que ontem)`;
+                diffClientsStr = ` (${diffCli > 0 ? '+' : '-'} ${Math.abs(diffCli)} do que o último dia útil)`;
             }
         }
         
         if (ontemSnap.total_count !== undefined) {
             const diffTit = totalBills - ontemSnap.total_count;
             if (diffTit !== 0) {
-                diffBillsStr = ` (${diffTit > 0 ? '+' : '-'} ${Math.abs(diffTit)} títulos do que ontem)`;
+                diffBillsStr = ` (${diffTit > 0 ? '+' : '-'} ${Math.abs(diffTit)} do que o último dia útil)`;
             }
         }
     }
@@ -833,7 +871,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;padding:0;color:#1e293b;font-size:9
 .no-print button{padding:8px 24px;background:#22c55e;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.2);transition:opacity 0.2s}
 .no-print button:hover{opacity:0.9}
 h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-.kpi-strip { display:grid; grid-template-columns: auto repeat(4, 1fr); gap:10px; margin-bottom:10px; }
+.kpi-strip { display:grid; grid-template-columns: 60px repeat(4, 1fr); gap:10px; margin-bottom:10px; }
 .kpi { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
 .kpi-icon-wrapper { width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .kpi.danger .kpi-icon-wrapper { background:#fee2e2; color:#ef4444; }
@@ -843,7 +881,7 @@ h1{text-align:center;color:#0f1e17;margin:0 0 6px;font-size:12px;font-weight:800
 .kpi-content { display:flex; flex-direction:column; gap:2px; }
 .kpi-label { font-size:8.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
 .kpi-value { font-size:16px; font-weight:800; color:#0f1e17; line-height:1; }
-.row-2{display:grid;grid-template-columns:minmax(260px,30%) minmax(0,70%);gap:10px;margin-bottom:10px;align-items:stretch}
+.row-2{display:grid;grid-template-columns: 60px repeat(4, 1fr);gap:10px;margin-bottom:10px;align-items:stretch}
 .bar-panel{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px}
 .bar-title{font-size:9.5px;font-weight:700;color:#334155;margin-bottom:4px}
 .bar-delta{font-size:11px;font-weight:800;color:#16a34a;margin-bottom:6px}
@@ -856,7 +894,7 @@ table{width:100%;border-collapse:collapse}
 th{background:#f8fafc;padding:4px 6px;font-size:8px;font-weight:700;color:#475569;text-transform:uppercase;border-bottom:2px solid #e2e8f0;text-align:center}
 th.L{text-align:left}
 td{padding:4px 6px;font-size:8.5px;border-bottom:1px solid #f1f5f9;text-align:center;vertical-align:middle}
-td.L{text-align:left;font-weight:700;color:#1e293b}
+td.L{text-align:left;font-weight:700;color:#1e293b;white-space:nowrap;}
 tr:nth-child(even) td{background:#fafafa}
 tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:2px solid #fed7aa}
 .trends-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
@@ -911,7 +949,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div class="kpi info"><div class="kpi-icon-wrapper"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div><div class="kpi-content"><span class="kpi-label">Atraso Médio</span><span class="kpi-value">${avgDelay} dias</span></div></div>
 </div>
 <div class="row-2">
-  <div class="bar-panel" style="display:flex; flex-direction:column; justify-content:space-between; height: 100%;">
+  <div class="bar-panel" style="display:flex; flex-direction:column; justify-content:space-between; height: 100%; grid-column: 1 / 3;">
     <div style="background: #ea580c; color: white; padding: 8px; font-size: 9px; font-weight: 800; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; margin: -8px -8px 8px -8px; border-top-left-radius: 6px; border-top-right-radius: 6px;">VALOR EM ATRASO (EM MILHÕES)</div>
     <div class="bars-row">${dualStackedBarWithArrow(fechSnap, hojeSnap, 'Fech.', 'Hoje')}</div>
     <div class="legend-row">
@@ -922,12 +960,12 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
       <div class="legend-item"><div class="legend-dot" style="background:#991b1b"></div>ac.120</div>
     </div>
   </div>
-  <div class="op-wrap">
+  <div class="op-wrap" style="grid-column: 3 / 6;">
     <table class="tb" style="width:100%; height:100%; border-collapse:separate; border-spacing:0; margin-top:0;">
     <thead><tr><th class="L" style="padding:8px; background: #ea580c; color: white !important; border-top-left-radius: 5px;">Operador</th><th style="padding:8px; background: #ea580c; color: white !important;">Até 30</th><th style="padding:8px; background: #ea580c; color: white !important;">31 a 60</th><th style="padding:8px; background: #ea580c; color: white !important;">61 a 90</th><th style="padding:8px; background: #ea580c; color: white !important;">91 a 120</th><th style="padding:8px; background: #ea580c; color: white !important;">Acima 120</th><th style="padding:8px; background: #ea580c; color: white !important; border-top-right-radius: 5px;">Total</th></tr></thead>
     <tbody>
       ${opSorted.map((op, idx)=>`<tr style="background:${idx%2===0?'#ffffff':'#ffedd5'}"><td class="L">${op.name !== 'NÃO ATRIBUÍDO' && op.name.split(' ').length > 1 ? op.name.split(' ')[0] + ' ' + op.name.split(' ')[1][0] + '.' : op.name.split(' ')[0]}</td><td>${cellOp(op.d30_c,op.d30_v)}</td><td>${cellOp(op.d60_c,op.d60_v)}</td><td>${cellOp(op.d90_c,op.d90_v)}</td><td>${cellOp(op.d120_c,op.d120_v)}</td><td>${cellOp(op.d120p_c,op.d120p_v)}</td><td><span style="font-weight:800">${fmtMoneyNoRs(op.total_v)}</span><br><span style="font-size:7.5px;color:#64748b">${op.total_c} tít.</span></td></tr>`).join('')}
-      <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c; border-bottom-left-radius: 5px;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c, totalOverdue, totalBills)}</td><td style="border-bottom-right-radius: 5px;"><div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;"><span style="font-weight:800;color:#ea580c;">${fmtMoneyNoRs(opTotals.total_v)} | ${Math.round((opTotals.total_v / (totalOverdue || 1)) * 100)}%</span><span style="font-size:7.5px;color:#ea580c">${opTotals.total_c} tít. | ${Math.round((opTotals.total_c / (totalBills || 1)) * 100)}%</span></div></td></tr>
+      <tr class="tot" style="background:#ffedd5; border-top:2px solid #fdba74;"><td class="L" style="color:#ea580c; border-bottom-left-radius: 5px;">Total</td><td>${cellOpTot(opTotals.d30_c,opTotals.d30_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d60_c,opTotals.d60_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d90_c,opTotals.d90_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120_c,opTotals.d120_v,opTotals.total_c, totalOverdue, totalBills)}</td><td>${cellOpTot(opTotals.d120p_c,opTotals.d120p_v,opTotals.total_c, totalOverdue, totalBills)}</td><td style="border-bottom-right-radius: 5px;"><div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; white-space:nowrap;"><span style="font-weight:800;color:#ea580c; font-size:8px;">${fmtMoneyNoRs(opTotals.total_v)} | ${Math.round((opTotals.total_v / (totalOverdue || 1)) * 100)}%</span><span style="font-size:7px;color:#ea580c">${opTotals.total_c} tít. | ${Math.round((opTotals.total_c / (totalBills || 1)) * 100)}%</span></div></td></tr>
     </tbody>
   </table></div>
 </div>
