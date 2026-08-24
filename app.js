@@ -12941,6 +12941,8 @@ window.checkAgendaAlarms = function() {
                             <option value="15">Daqui a 15 min</option>
                             <option value="30">Daqui a 30 min</option>
                             <option value="60">Daqui a 1 hora</option>
+                            <option value="amanha">Amanhã</option>
+                            <option value="custom">Outra data...</option>
                         </select>
                     </div>
                 `;
@@ -12960,8 +12962,27 @@ if (window._alarmCheckInterval) clearInterval(window._alarmCheckInterval);
 window._alarmCheckInterval = setInterval(window.checkAgendaAlarms, 15000);
 
 window.snoozeAgendaAlarm = function(selectEl, key, idx) {
-    const mins = parseInt(selectEl.value, 10);
-    if (!mins) return;
+    const val = selectEl.value;
+    if (!val) return;
+    
+    if (val === 'custom') {
+        const wrapper = selectEl.parentElement;
+        wrapper.innerHTML = `
+            <input type="date" id="custom-snooze-date-${idx}" style="flex:1; padding: 5px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px; outline: none;">
+            <button onclick="window.snoozeAgendaAlarmCustom(this, '${key}', ${idx})" style="padding: 6px; font-size: 0.8rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">OK</button>
+            <button onclick="this.parentElement.parentElement.remove()" style="padding: 6px; background: #e2e8f0; color: #475569; border: none; border-radius: 4px; cursor: pointer;">X</button>
+        `;
+        return;
+    }
+    
+    let mins = 0;
+    let isTomorrow = false;
+    if (val === 'amanha') {
+        isTomorrow = true;
+    } else {
+        mins = parseInt(val, 10);
+        if (!mins) return;
+    }
     
     let allNotes = {};
     try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e){}
@@ -12970,7 +12991,11 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
         const note = allNotes[key][idx];
         
         const newAlarm = new Date();
-        newAlarm.setMinutes(newAlarm.getMinutes() + mins);
+        if (isTomorrow) {
+            newAlarm.setDate(newAlarm.getDate() + 1);
+        } else {
+            newAlarm.setMinutes(newAlarm.getMinutes() + mins);
+        }
         
         note.alarm = newAlarm.getFullYear() + "-" + 
                      String(newAlarm.getMonth()+1).padStart(2,'0') + "-" + 
@@ -12985,15 +13010,68 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
             const todayStr = nowLocal.getFullYear() + "-" + String(nowLocal.getMonth()+1).padStart(2,'0') + "-" + String(nowLocal.getDate()).padStart(2,'0');
             const tIdx = note.triggeredDates.indexOf(todayStr);
             if (tIdx > -1) note.triggeredDates.splice(tIdx, 1);
+            
+            const alarmTodayStr = note.alarm.split('T')[0];
+            const tIdx2 = note.triggeredDates.indexOf(alarmTodayStr);
+            if (tIdx2 > -1) note.triggeredDates.splice(tIdx2, 1);
         }
         
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
-        if (window.showToast) window.showToast(`Lembrete adiado em ${mins} minutos.`, "info");
+        if (window.showToast) {
+            if (isTomorrow) window.showToast(`Lembrete adiado para amanhã.`, "info");
+            else window.showToast(`Lembrete adiado em ${mins} minutos.`, "info");
+        }
     }
     
     if (selectEl.parentElement && selectEl.parentElement.parentElement) {
         selectEl.parentElement.parentElement.remove();
+    }
+};
+
+window.snoozeAgendaAlarmCustom = function(btnEl, key, idx) {
+    const input = btnEl.previousElementSibling;
+    const customDate = input.value;
+    if (!customDate) return;
+    
+    let allNotes = {};
+    try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e){}
+    
+    if (allNotes[key] && allNotes[key][idx]) {
+        const note = allNotes[key][idx];
+        
+        const currentAlarmParts = (note.alarm || "").split("T");
+        let timePart = "09:00"; 
+        if (currentAlarmParts.length === 2) {
+            timePart = currentAlarmParts[1];
+        } else {
+            const now = new Date();
+            timePart = String(now.getHours()).padStart(2,'0') + ":" + String(now.getMinutes()).padStart(2,'0');
+        }
+        
+        note.alarm = customDate + "T" + timePart;
+        note.triggered = false;
+        
+        if (note.triggeredDates && note.triggeredDates.length > 0) {
+            const nowLocal = new Date();
+            const todayStr = nowLocal.getFullYear() + "-" + String(nowLocal.getMonth()+1).padStart(2,'0') + "-" + String(nowLocal.getDate()).padStart(2,'0');
+            const tIdx = note.triggeredDates.indexOf(todayStr);
+            if (tIdx > -1) note.triggeredDates.splice(tIdx, 1);
+            
+            const tIdx2 = note.triggeredDates.indexOf(customDate);
+            if (tIdx2 > -1) note.triggeredDates.splice(tIdx2, 1);
+        }
+        
+        localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
+        if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+        if (window.showToast) {
+            const dateObj = new Date(customDate + "T12:00:00");
+            window.showToast(`Lembrete adiado para ${dateObj.toLocaleDateString('pt-BR')}.`, "info");
+        }
+    }
+    
+    if (btnEl.parentElement && btnEl.parentElement.parentElement) {
+        btnEl.parentElement.parentElement.remove();
     }
 };
 
