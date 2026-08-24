@@ -1019,7 +1019,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.384 &nbsp;&middot;&nbsp; 24/08/2026
+            v1.0.385 &nbsp;&middot;&nbsp; 24/08/2026
           </span>
         </div>
       </div>
@@ -2361,7 +2361,7 @@ Atenciosamente,
                   <tr style="background-color: #fff7ed; border-bottom: 2px solid #f97316;">
                     <th style="text-align: center; width: 60px;">ID</th>
                     <th style="text-align: left;">Empresa | Empreendimento</th>
-                    <th style="text-align: center;">Clientes</th>
+                    <th style="text-align: center;">Títulos</th>
                     <th style="text-align: center;">R$ Atualizado</th>
                     <th style="text-align: center;">Até 30 dias</th>
                     <th style="text-align: center;">Até 60 dias</th>
@@ -2385,14 +2385,14 @@ Atenciosamente,
                 placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" oninput="handleSubjudiceAutocomplete(this.value)" autocomplete="off">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-subjudice-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('subjudice')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
+              <button id="btn-subjudice-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('subjudice')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; height: 36px;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
                 <span id="subjudice-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
               </button>
-              <button class="btn btn-primary" onclick="gerarMapaJuridicoPDF()" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none;" title="Gerar Mapa Jurídico (Sprint Diário do Jurídico)">
+              <button class="btn btn-primary" onclick="gerarMapaJuridicoPDF()" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none; height: 36px;" title="Gerar Mapa Jurídico (Sprint Diário do Jurídico)">
                 <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa Jurídico
               </button>
-              <button class="btn btn-secondary" onclick="exportSubjudiceToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
+              <button class="btn btn-secondary" onclick="exportSubjudiceToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer; height: 36px;" title="Exportar tabela atual para Excel">
                 <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
               </button>
             </div>
@@ -5582,30 +5582,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=384"></script>
-  <script defer src="sienge-api.js?v=384"></script>
-  <script defer src="azure-auth.js?v=384"></script>
-  <script defer src="app.js?v=384"></script>
-  <script defer src="home-dashboard.js?v=384"></script>
-  <script defer src="anexos.js?v=384"></script>
-  <script defer src="contas-pagar.js?v=384"></script>
-  <script defer src="config-tags.js?v=384"></script>
-  <script defer src="config-users.js?v=384"></script>
-  <script defer src="construcao.js?v=384"></script>
-  <script defer src="empresas.js?v=384"></script>
-  <script defer src="relacionamento.js?v=384"></script>
+  <script defer src="data.js?v=385"></script>
+  <script defer src="sienge-api.js?v=385"></script>
+  <script defer src="azure-auth.js?v=385"></script>
+  <script defer src="app.js?v=385"></script>
+  <script defer src="home-dashboard.js?v=385"></script>
+  <script defer src="anexos.js?v=385"></script>
+  <script defer src="contas-pagar.js?v=385"></script>
+  <script defer src="config-tags.js?v=385"></script>
+  <script defer src="config-users.js?v=385"></script>
+  <script defer src="construcao.js?v=385"></script>
+  <script defer src="empresas.js?v=385"></script>
+  <script defer src="relacionamento.js?v=385"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=384"></script>
-  <script defer src="plano-financeiro.js?v=384"></script>
-  <script defer src="fiscal.js?v=384"></script>
-  <script defer src="indexadores.js?v=384"></script>
-  <script defer src="verificar-construcao.js?v=384"></script>
-  <script src="repactuacoes.js?v=384"></script>
+  <script defer src="centros-custo.js?v=385"></script>
+  <script defer src="plano-financeiro.js?v=385"></script>
+  <script defer src="fiscal.js?v=385"></script>
+  <script defer src="indexadores.js?v=385"></script>
+  <script defer src="verificar-construcao.js?v=385"></script>
+  <script src="repactuacoes.js?v=385"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=384"></script>
+  <script defer src="dashboard-inadimplencia.js?v=385"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

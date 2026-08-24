@@ -1662,7 +1662,7 @@ async function initializeApplication() {
   // --- INICIO MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
   try {
     if (false && window.firebaseDb && window.firebaseCollections) {
-         // Jud Notes â€” listener em tempo real (ocorrências judiciais)
+         // Jud Notes — listener em tempo real (ocorrências judiciais)
          if (window.globalJudNotesUnsubscribe) window.globalJudNotesUnsubscribe();
          AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
          window.globalJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(
@@ -2995,7 +2995,7 @@ document.addEventListener("click", function(e) {
         consolidated[key].assignedOperator = ruleVal.operator;
         consolidated[key].appliedRule = ruleVal.rule;
       } else {
-        // Modo real â€” Regras por Cidade
+        // Modo real — Regras por Cidade
         if (isSubjudiceStr === "S") {
           consolidated[key].assignedOperator = "NÃO ATRIBUÍDO";
           consolidated[key].appliedRule = "Contrato em Regime Sub Judice";
@@ -3397,7 +3397,7 @@ document.addEventListener("click", function(e) {
   filteredSubjudice = window.applyAdvFiltersTo(filteredSubjudice);
   window.advFilters = originalAdvFilters; // Restore
 
-  // 2. Ordenação da Lista principal â€” grupos fixos, coluna só dentro do grupo
+  // 2. Ordenação da Lista principal — grupos fixos, coluna só dentro do grupo
   const sortCol = AppState.currentSortCol || 'maxDaysDelay';
   const sortDir = AppState.currentSortDir || 'desc';
   const sortFunc = (a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, true);
@@ -4814,7 +4814,7 @@ function formatCpfCnpj(val) {
     if (subjudiceMemory[customerId]) {
       const mem = subjudiceMemory[customerId];
       if (mem.exitDate) {
-        subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">âš ï¸ JÃ PASSOU PELO SUB JUDICE</span>`;
+        subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">⚠️ JÁ PASSOU PELO SUB JUDICE</span>`;
       } else {
         subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}">ðŸš¨ ATIVO NO SUB JUDICE</span>`;
       }
@@ -4824,7 +4824,7 @@ function formatCpfCnpj(val) {
   document.getElementById("current-page-title").innerHTML = `<i data-lucide="user"></i> Ficha do Cliente: ${customerId} - ${customer.name}${headerSubtypesHtml}`;
   const subAlertSpan = document.getElementById("ctx-subjudice-alert");
   if (subAlertSpan) subAlertSpan.innerHTML = subjudiceAlertHtml;
-  // Reset context bar â€” dados do contrato são populados mais tarde (após blockLotFromName)
+  // Reset context bar — dados do contrato são populados mais tarde (após blockLotFromName)
   const ctxBar = document.getElementById('client-context-bar');
   if (ctxBar) { ctxBar.style.display = 'none'; }
   const ctxBadge = document.getElementById('ctx-page-badge');
@@ -5320,7 +5320,7 @@ function formatCpfCnpj(val) {
                  <i data-lucide="file" style="width: 20px; height: 20px; color: var(--color-secondary);"></i>
                  <div>
                    <div style="font-weight: 600; color: var(--color-primary); font-size: 0.9rem;">${att.name || 'Arquivo'}</div>
-                   <div style="font-size: 0.8rem; color: var(--color-text-muted);">${att.description || 'Documento do cliente'} â€¢ ${sizeKb}</div>
+                   <div style="font-size: 0.8rem; color: var(--color-text-muted);">${att.description || 'Documento do cliente'} • ${sizeKb}</div>
                  </div>
                </div>
                <button type="button" onclick="downloadSiengeDocument('${dlLink}', '${att.name || 'Arquivo'}', event)" class="btn btn-outline btn-sm" style="padding: 6px 12px; font-size: 0.8rem; cursor: pointer;">
@@ -5451,7 +5451,7 @@ function formatCpfCnpj(val) {
   const ctxEmpreendValEl = document.getElementById('ctx-empreend-val');
   if (ctxBarEl) {
     if (ctxTituloValEl) ctxTituloValEl.textContent = billIdValForCtx;
-    if (ctxEmpreendValEl) ctxEmpreendValEl.textContent = blockLotFromName !== 'N/D' ? blockLotFromName : (projectFromName !== 'N/D' ? projectFromName : 'â€”');
+    if (ctxEmpreendValEl) ctxEmpreendValEl.textContent = blockLotFromName !== 'N/D' ? blockLotFromName : (projectFromName !== 'N/D' ? projectFromName : '—');
     ctxBarEl.style.display = 'inline-flex';
   }
 
@@ -5530,7 +5530,7 @@ function formatCpfCnpj(val) {
               if (kmzMissing) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Necessário Upload do KMZ`;
+                badge.innerHTML = `⚠️ Necessário Upload do KMZ`;
                 badge.title = "Faça o upload do arquivo KMZ deste empreendimento para validar a distância.";
                 continue;
               }
@@ -5538,7 +5538,7 @@ function formatCpfCnpj(val) {
               if (!match || !match.coordinates) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Lote não encontrado no KMZ`;
+                badge.innerHTML = `⚠️ Lote não encontrado no KMZ`;
                 continue;
               }
 
@@ -5606,7 +5606,7 @@ function formatCpfCnpj(val) {
                 if (clientLat === null || clientLon === null) {
                   badge.style.background = "#e0e0e0";
                   badge.style.color = "#555";
-                  badge.innerHTML = `âš ï¸ Geocodificação falhou`;
+                  badge.innerHTML = `⚠️ Geocodificação falhou`;
                   badge.title = `O Nominatim, Google Maps e a BrasilAPI não encontraram as coordenadas para: "${queryAddr}".`;
                   console.warn("Geocodificação falhou para:", queryAddr);
                   continue;
@@ -5638,7 +5638,7 @@ function formatCpfCnpj(val) {
                   console.error("Failed to parse geometry", e);
                   badge.style.background = "#ffebee";
                   badge.style.color = "#c62828";
-                  badge.innerHTML = `âš ï¸ KMZ Inválido`;
+                  badge.innerHTML = `⚠️ KMZ Inválido`;
                   continue;
                 }
 
@@ -5683,7 +5683,7 @@ function formatCpfCnpj(val) {
                 console.error("Erro na validação espacial:", err);
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Erro`;
+                badge.innerHTML = `⚠️ Erro`;
               }
               
               // Rate limit Nominatim (max 1 req/sec)
@@ -5699,7 +5699,7 @@ function formatCpfCnpj(val) {
               if (badge) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Erro ao buscar KMZ`;
+                badge.innerHTML = `⚠️ Erro ao buscar KMZ`;
               }
             }
           }
@@ -6700,7 +6700,7 @@ function formatCpfCnpj(val) {
             });
             const firstReceipt = receipts[0];
             receiptDate = firstReceipt.receiptDate || inst.dueDate;
-            // No rId from receipts schema â€” default to Recebimento for paid installments
+            // No rId from receipts schema — default to Recebimento for paid installments
             rId = "2";
             rType = "Recebimento";
             const diff = net - orig;
@@ -7708,7 +7708,7 @@ function formatCpfCnpj(val) {
     
   // --- Build clientUnpaid from dbContract.installments (financial-statements source) ---
   // currentContractInstallments is built from allBillsInstsArrays which was removed as redundant.
-  // Use dbContract.installments directly â€” it contains all installments with currentBalance.
+  // Use dbContract.installments directly — it contains all installments with currentBalance.
   let clientUnpaid = [];
   if (dbContract && dbContract.installments && Array.isArray(dbContract.installments)) {
     clientUnpaid = dbContract.installments
@@ -8383,7 +8383,7 @@ window.openPromisedInstallmentsModal = function() {
         </td>
         <td style="padding: 10px;">
           <div style="font-weight: 500;">${datePart}</div>
-          <div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">âš ï¸ Parcela com boleto gerado</div>
+          <div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">⚠️ Parcela com boleto gerado</div>
         </td>
         <td style="padding: 10px;">${diasAtraso > 0 ? diasAtraso : '-'}</td>
         <td style="padding: 10px;">${baseVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"})}</td>
@@ -9152,7 +9152,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
       <div style="display:inline-flex; align-items:center; gap:6px; background: rgba(16,84,54,0.07); border:1px solid rgba(16,84,54,0.18); border-radius:20px; padding:4px 12px; font-size:0.78rem; font-weight:600;">
         <span style="color:var(--color-primary);">${type}:</span>
         <span>${data.count} parcela${data.count !== 1 ? 's' : ''}</span>
-        <span style="color:var(--color-text-muted);">â€¢</span>
+        <span style="color:var(--color-text-muted);">•</span>
         <span>${data.total.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})} (Orig.)</span>
       </div>
     `).join('');
@@ -9161,7 +9161,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
     summaryDiv.style.display = 'none';
   }
 
-  // Popular tabela de parcelas â€” elegíveis primeiro, depois não elegíveis (bloqueadas)
+  // Popular tabela de parcelas — elegíveis primeiro, depois não elegíveis (bloqueadas)
   const body = document.getElementById("reneg-selected-bills-body");
   body.innerHTML = "";
 
@@ -9550,7 +9550,7 @@ function calculateRenegotiation() {
         }
     }
     
-    // 3. Parcelas NÃO selecionadas â€” só exibir as que vencem APÓS a última parcela do ACORDO
+    // 3. Parcelas NÃO selecionadas — só exibir as que vencem APÓS a última parcela do ACORDO
     if (unselectedBills.length > 0) {
       // Calcular a data da última parcela do ACORDO
       let lastAcordoDate = null;
@@ -12031,7 +12031,7 @@ window.fireConfetti = function() {
             <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
-                    <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! ðŸŽ‰</span>
+                    <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉</span>
                 </div>
                 <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
             </div>
@@ -12688,7 +12688,7 @@ window.toggleNoteGearMenu = function(btn, menuId, dateStr, index, srcKey) {
     if (!isOpen) {
         const parentItem = btn.closest('div[style*="border-bottom"]');
         if (parentItem) parentItem.style.zIndex = '100';
-        // Usar position:fixed com coordenadas calculadas â€” evita corte pelo overflow do container
+        // Usar position:fixed com coordenadas calculadas — evita corte pelo overflow do container
         const rect = btn.getBoundingClientRect();
         menu.style.position = 'fixed';
         menu.style.top = (rect.bottom + 4) + 'px';
@@ -14004,7 +14004,7 @@ window.enviarLoteJuridico = async function() {
         </div>
       </div>
       <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:12px 16px; margin-bottom:16px;">
-        <p style="margin:0 0 8px; font-size:0.85rem; font-weight:600; color:#991b1b;">âš ï¸ ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} ser${clientes.length > 1 ? 'ão' : 'á'} encaminhado${clientes.length > 1 ? 's' : ''} ao Jurídico:</p>
+        <p style="margin:0 0 8px; font-size:0.85rem; font-weight:600; color:#991b1b;">⚠️ ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} ser${clientes.length > 1 ? 'ão' : 'á'} encaminhado${clientes.length > 1 ? 's' : ''} ao Jurídico:</p>
         <ul style="margin:0; padding-left:0; list-style:none; font-size:0.82rem; color:#1e293b; max-height:200px; overflow-y:auto;">${listHtml}</ul>
       </div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -16840,7 +16840,7 @@ window.renderEtapasJudiciais = function() {
                 <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${prefix}</span>
                 ${node.nome}
               </div>
-              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} â€¢ <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
+              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} • <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
             </div>
           </div>
           <div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
@@ -17665,7 +17665,7 @@ function previewDocPadrao(tipo) {
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
   if (win) {
-    win.document.write(`<!DOCTYPE html><html><head><title>Prévia - ${label}</title><style>body{font-family:Georgia,serif;padding:40px;max-width:700px;margin:auto;color:#222;}h2{color:#105436;}hr{border:1px solid #ccc;}</style></head><body>${content}<hr><p style="font-size:12px;color:#999;">Prévia gerada pelo CRM Moura Leite â€” Documentos Padrões</p></body></html>`);
+    win.document.write(`<!DOCTYPE html><html><head><title>Prévia - ${label}</title><style>body{font-family:Georgia,serif;padding:40px;max-width:700px;margin:auto;color:#222;}h2{color:#105436;}hr{border:1px solid #ccc;}</style></head><body>${content}<hr><p style="font-size:12px;color:#999;">Prévia gerada pelo CRM Moura Leite — Documentos Padrões</p></body></html>`);
     win.document.close();
   }
 }
@@ -24232,7 +24232,7 @@ window.testarZerarFila = function() {
       <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
           <div style="display: flex; align-items: center; gap: 10px;">
               <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
-              <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! ðŸŽ‰ (MODO TESTE)</span>
+              <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉 (MODO TESTE)</span>
           </div>
           <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulseTest 2s infinite ease-in-out; border: 4px solid #166534;">
       </div>
@@ -24347,7 +24347,7 @@ window.gerarMapaJuridicoPDF = function() {
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px;">
                 <div>
                     <h1 style="margin: 0; color: #0f172a; font-size: 28px; font-weight: 800;">Sprint Diário Jurídico</h1>
-                    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Mapa de clientes em Sub Judice â€” ${new Date().toLocaleDateString('pt-BR')}</p>
+                    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Mapa de clientes em Sub Judice — ${new Date().toLocaleDateString('pt-BR')}</p>
                 </div>
                 <div style="display: flex; gap: 20px;">
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
