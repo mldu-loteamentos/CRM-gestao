@@ -24243,7 +24243,8 @@ window.gerarMapaJuridicoPDF = function() {
     }
     if (window.lucide) window.lucide.createIcons();
 
-    try {
+    setTimeout(() => {
+        try {
         const prefixMap = {};
         const nameMap = {};
         const allStages = [...(window.EtapasJudiciaisState || [])].sort((a,b) => (a.order || 0) - (b.order || 0));
@@ -24304,16 +24305,16 @@ window.gerarMapaJuridicoPDF = function() {
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
-                        ? `<div style="background: white; border: 1.5px solid #10b981; border-radius: 6px; width: 44px; padding: 10px 2px 4px 2px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
-                            <div style="background: #10b981; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 8px; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); border: 2px solid white;">${item.prefix}</div>
+                        ? `<div style="background: white; border: 1.5px solid #065f46; border-radius: 6px; width: 44px; padding: 10px 2px 4px 2px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                            <div style="background: #065f46; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 8px; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); border: 2px solid white;">${item.prefix}</div>
                             <div style="color: #64748b; font-size: 7px; text-transform: uppercase; font-weight: 700; margin-bottom: 1px;">Tít.</div>
                             <div style="font-size: 11px; font-weight: 900; color: #0f172a;">${item.count}</div>
                             <div style="height: 1px; background: #e2e8f0; margin: 4px 0;"></div>
                             <div style="color: #ef4444; font-size: 8px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 1px;">${fmtBRL(item.value)}</div>
                         </div>`
                         : `<div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; width: 18px; padding: 6px 1px 2px 1px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.6;">
-                            <div style="background: #94a3b8; color: white; width: 12px; height: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 6px; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border: 1px solid white;">${item.prefix}</div>
-                            <div style="font-size: 8px; font-weight: 900; color: #94a3b8;">0</div>
+                            <div style="background: #475569; color: white; width: 12px; height: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 6px; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border: 1px solid white;">${item.prefix}</div>
+                            <div style="font-size: 8px; font-weight: 900; color: #475569;">0</div>
                         </div>`;
                     const arrowHtml = idx < sortedAgg.length - 1
                         ? `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 4px;">
@@ -24439,7 +24440,7 @@ window.gerarMapaJuridicoPDF = function() {
                 <div style="display: flex; flex-wrap: wrap; gap: 4px;">
                     ${generalResult.agg.map(item => `
                         <div style="display: flex; align-items: center; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 8px; border: 1px solid #e2e8f0;">
-                            <span style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 7px; margin-right: 4px;">
+                            <span style="background: ${item.count > 0 ? '#065f46' : '#475569'}; color: white; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 7px; margin-right: 4px;">
                                 ${item.prefix}
                             </span>
                             <span style="font-weight: 700; color: #334155; margin-right: 3px;">${item.name}</span>
@@ -24492,10 +24493,11 @@ window.gerarMapaJuridicoPDF = function() {
         });
 
     } catch (e) {
-        console.error(e);
-        if (btn) {
-            btn.innerHTML = oldHtml;
-            btn.disabled = false;
+            console.error(e);
+            if (btn) {
+                btn.innerHTML = oldHtml;
+                btn.disabled = false;
+            }
         }
-    }
+    }, 50);
 };
