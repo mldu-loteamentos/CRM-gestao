@@ -7467,7 +7467,7 @@ function formatCpfCnpj(val) {
             const totalAtualizadoKPI = vencidasSimulador.reduce((acc, inst) => {
               const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
               const multaK = diasAtraso2 >= 1
-                 ? getSimulatedFine(inst) * taxaMultiplier
+                 ? (inst.cb * 0.02) * taxaMultiplier
                 : 0;
               const jurosK = diasAtraso2 >= 1 ? inst.cb * 0.01 * (diasAtraso2 / 30) * taxaMultiplier : 0;
                return acc + inst.cb + multaK + jurosK;
