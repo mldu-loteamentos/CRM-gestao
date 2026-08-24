@@ -932,8 +932,8 @@ window.debugConstrucaoData = async function() {
             validIdsStr += ' (billId: ' + window.AnexosState.activeContract.receivableBillId + ')';
         }
 
-        const debugInfo = snapshot.map(s => \`ID_VISTORIA: ${s.id} | CONTRACT_ID_DB: ${s.contractId}\`).join('\\n');
-        alert(\`DEBUG VISTORIAS:\\n\\nCustomerId: ${customerId}\\nSaleId esperado: ${saleId}\\nValidIds na Busca: ${validIdsStr}\\n\\nVistorias no Banco para este cliente:\\n${debugInfo}\`);
+        const debugInfo = snapshot.map(s => `ID_VISTORIA: ${s.id} | CONTRACT_ID_DB: ${s.contractId}`).join('\n');
+        alert(`DEBUG VISTORIAS:\n\nCustomerId: ${customerId}\nSaleId esperado: ${saleId}\nValidIds na Busca: ${validIdsStr}\n\nVistorias no Banco para este cliente:\n${debugInfo}`);
     } catch(e) {
         alert('Erro ao depurar: ' + e.message);
     }
