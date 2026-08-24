@@ -1,4 +1,4 @@
-﻿// LÃ³gica Central do CRM de CobranÃ§a Moura Leite
+// LÃ³gica Central do CRM de CobranÃ§a Moura Leite
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
@@ -24266,7 +24266,7 @@ window.testarZerarFila = function() {
 };
 
 window.gerarMapaJuridicoPDF = function() {
-    if (!window._subjudiceList || window._subjudiceList.length === 0) {
+    if (!window.subjudiceClients || window.subjudiceClients.length === 0) {
         alert("NÃ£o hÃ¡ clientes no Sub Judice para gerar o mapa.");
         return;
     }
@@ -24312,7 +24312,7 @@ window.gerarMapaJuridicoPDF = function() {
         let totalDaysDelay = 0;
         let clientsWithDelay = 0;
 
-        window._subjudiceList.forEach(client => {
+        window.subjudiceClients.forEach(client => {
             const cid = String(client.customerId);
             const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
             const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
