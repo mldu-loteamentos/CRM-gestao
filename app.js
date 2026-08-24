@@ -672,7 +672,20 @@ window.switchFichaTab = function(tabId) {
 async function preloadCustomers(customerIds) {
   if (getSiengeApiMode() === "simulado") return;
   const uniqueIds = [...new Set(customerIds.filter(id => id != null))];
-  const uncachedIds = uniqueIds.filter(id => !AppState.customers[id]);
+  let uncachedIds = uniqueIds.filter(id => !AppState.customers[id]);
+  if (window.baseClientes) {
+      for (let i = uncachedIds.length - 1; i >= 0; i--) {
+          const cid = uncachedIds[i];
+          const found = window.baseClientes.find(c => String(c.customerId) === String(cid));
+          if (found) {
+              AppState.customers[cid] = found;
+              if (!AppState.sales) AppState.sales = [];
+              const custSales = window.baseClientes.filter(c => String(c.customerId) === String(cid));
+              AppState.sales.push(...custSales);
+              uncachedIds.splice(i, 1);
+          }
+      }
+  }
   if (uncachedIds.length > 0) {
     const batchSize = 2;
     for (let i = 0; i < uncachedIds.length; i += batchSize) {
