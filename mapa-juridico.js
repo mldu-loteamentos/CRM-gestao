@@ -12,8 +12,9 @@ window.gerarMapaJuridicoPDF = function() {
     const modal = document.createElement("div");
     modal.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: white; z-index: 10000; overflow: auto; font-family: 'Inter', sans-serif;";
     
-    // Configurações de fases do Sub Judice (usando a mesma ordem do sprint)
-    const rawStages = (window.ConfigApp && window.ConfigApp.juridicalStages) ? window.ConfigApp.juridicalStages : [
+    const normalizeText = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+
+    const initialRawStages = (window.ConfigApp && window.ConfigApp.juridicalStages) ? window.ConfigApp.juridicalStages : [
         { name: "Notificação", days: 10 },
         { name: "Aguardando Notificação Retornar", days: 5 },
         { name: "Natureza da Ação", days: 10 },
@@ -28,6 +29,17 @@ window.gerarMapaJuridicoPDF = function() {
         { name: "Recurso", days: 30 },
         { name: "Execução de Sentença", days: 30 }
     ];
+
+    const existingNormNames = rawStages.map(s => normalizeText(s.name));
+    window._subjudiceList.forEach(client => {
+        let pName = client.juridicalStageName || client.phaseName;
+        if (!pName || pName.trim() === "" || pName.toUpperCase() === "SEM FASE") return;
+        const norm = normalizeText(pName);
+        if (!existingNormNames.includes(norm)) {
+            existingNormNames.push(norm);
+            rawStages.push({ name: pName, days: 0 });
+        }
+    });
 
     const stages = [];
     stages.push({ prefix: "0", name: "Sem Fase", days: 0 }); // Fase inicial para os que estão vazios

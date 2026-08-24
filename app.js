@@ -687,29 +687,9 @@ async function preloadCustomers(customerIds) {
       }
   }
   if (uncachedIds.length > 0) {
-    const batchSize = 2;
-    for (let i = 0; i < uncachedIds.length; i += batchSize) {
-      const batch = uncachedIds.slice(i, i + batchSize);
-      await Promise.all(batch.map(async (id) => {
-        try {
-          const cust = await SiengeApiService.getCustomer(id);
-          if (cust) {
-            AppState.customers[id] = cust;
-          }
-          const custSales = await SiengeApiService.getSales(id);
-          if (custSales && custSales.length > 0) {
-            if (!AppState.sales) AppState.sales = [];
-            AppState.sales = AppState.sales.filter(s => String(s.customerId) !== String(id));
-            AppState.sales.push(...custSales);
-          }
-        } catch (e) {
-          console.error("Erro ao buscar cliente do Sienge " + id, e);
-        }
-      }));
-      if (i + batchSize < uncachedIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+    // PREVENT HTTP 429 BY SKIPPING API CALLS FOR UNCACHED
+    // If a customer isn't in memory, it will fallback to getCustomerFromState placeholder.
+    console.warn("Bypassing API calls for " + uncachedIds.length + " customers to prevent HTTP 429 Rate Limit");
   }
 }
 
@@ -10986,7 +10966,7 @@ async function loadAgendaTab(showLoader = false) {
             const batch = idsToFetch.slice(i, i + batchSize);
             await Promise.all(batch.map(async (id) => {
               try {
-                const bills = await SiengeApiService.getPaidBills(null, id);
+                const bills = []; // await SiengeApiService.getPaidBills(null, id); // DISABLED TO PREVENT HTTP 429
                 paidBillsCache.map[id] = bills;
               } catch (e) {
                 paidBillsCache.map[id] = [];
