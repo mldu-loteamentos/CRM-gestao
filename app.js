@@ -24376,7 +24376,7 @@ window.gerarMapaJuridicoPDF = function() {
                     </div>
                 </div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px; align-items: center;">
+            <div style="display: flex; flex-wrap: nowrap; gap: 4px; margin-top: 40px; margin-bottom: 40px; justify-content: space-between; padding-top: 20px; align-items: center; width: 100%;">
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
@@ -24393,7 +24393,7 @@ window.gerarMapaJuridicoPDF = function() {
                             <div style="font-size: 12px; font-weight: 900; color: #94a3b8;">0</div>
                         </div>`;
                     const arrowHtml = idx < sortedAgg.length - 1
-                        ? `<div style="display: flex; align-items: center; justify-content: center; width: 8px; flex-shrink: 0;">
+                        ? `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 6px;">
                             <div style="width: 100%; height: 2px; background: #cbd5e1; position: relative;">
                                 <div style="position: absolute; right: -2px; top: -3px; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid #cbd5e1;"></div>
                             </div>
