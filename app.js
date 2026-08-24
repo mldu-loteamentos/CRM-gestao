@@ -24335,7 +24335,7 @@ window.gerarMapaJuridicoPDF = function() {
             const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
             
             if (agg[info.prefix]) {
-                agg[info.prefix].count += 1;
+                agg[info.prefix].count += (client.billIds ? client.billIds.length : 1);
                 agg[info.prefix].value += value;
             }
             
@@ -24367,26 +24367,41 @@ window.gerarMapaJuridicoPDF = function() {
 
         container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px;">
-                <div>
-                    <h1 style="margin: 0; color: #0f172a; font-size: 28px; font-weight: 800;">Sprint Diário Jurídico</h1>
-                    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Mapa de clientes em Sub Judice — ${new Date().toLocaleDateString('pt-BR')}</p>
+                <div style="display: flex; align-items: center; gap: 20px;">
+                    <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 45px; object-fit: contain;">
+                    <div>
+                        <h1 style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800;">Mapa Jurídico</h1>
+                        <p style="margin: 5px 0 0 0; color: #64748b; font-size: 13px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                    </div>
                 </div>
-                <div style="display: flex; gap: 20px;">
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor em Atraso</div>
-                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">R$ ${fmtBRL(totalValue)}</div>
+                <div style="display: flex; gap: 15px;">
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Valor em Atraso</div>
+                        </div>
+                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${fmtBRL(totalValue)}</div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes em Atraso</div>
-                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${new Set(window._subjudiceList.map(c => c.customerId)).size}</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Clientes em Atraso</div>
+                        </div>
+                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${new Set(window._subjudiceList.map(c => c.customerId)).size}</div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Títulos Vencidos</div>
-                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${totalTitles}</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Títulos Vencidos</div>
+                        </div>
+                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${totalTitles}</div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Atraso Médio</div>
-                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${avgDelay} dias</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Atraso Médio</div>
+                        </div>
+                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${avgDelay} dias</div>
                     </div>
                 </div>
             </div>
@@ -24394,15 +24409,15 @@ window.gerarMapaJuridicoPDF = function() {
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
-                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 96px; padding: 25px 6px 15px 6px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 86px; padding: 25px 6px 15px 6px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
                             <div style="background: #10b981; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">${item.prefix}</div>
-                            <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes</div>
+                            <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Títulos</div>
                             <div style="font-size: 20px; font-weight: 900; color: #0f172a;">${item.count}</div>
                             <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
-                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor (R$)</div>
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor</div>
                             <div style="font-size: 11px; font-weight: 800; color: #ef4444;">${fmtBRL(item.value)}</div>
                         </div>`
-                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 47px; padding: 18px 2px 10px 2px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
+                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 42px; padding: 18px 2px 10px 2px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
                             <div style="background: #94a3b8; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; position: absolute; top: -13px; left: 50%; transform: translateX(-50%); border: 2px solid #f8fafc;">${item.prefix}</div>
                             <div style="font-size: 16px; font-weight: 900; color: #94a3b8;">0</div>
                         </div>`;
@@ -24416,16 +24431,16 @@ window.gerarMapaJuridicoPDF = function() {
                     return cardHtml + arrowHtml;
                 }).join('')}
             </div>
-            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <h3 style="margin: 0 0 15px 0; color: #0f172a; font-size: 16px; font-weight: 700;">Legenda das Etapas</h3>
-                <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <h3 style="margin: 0 0 10px 0; color: #0f172a; font-size: 14px; font-weight: 700;">Legenda das Etapas</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
                     ${sortedAgg.map(item => `
-                        <div style="display: flex; align-items: center; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #e2e8f0;">
-                            <span style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; margin-right: 8px;">
+                        <div style="display: flex; align-items: center; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #e2e8f0;">
+                            <span style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 9px; margin-right: 6px;">
                                 ${item.prefix}
                             </span>
                             <span style="font-weight: 700; color: #334155; margin-right: 4px;">${item.name}</span>
-                            <span style="color: #64748b; font-size: 11px;">(${item.days} dias)</span>
+                            <span style="color: #64748b; font-size: 9px;">(${item.days} d)</span>
                         </div>
                     `).join('')}
                 </div>
