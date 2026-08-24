@@ -4810,7 +4810,7 @@ function formatCpfCnpj(val) {
       if (mem.exitDate) {
         subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">⚠️ JÁ PASSOU PELO SUB JUDICE</span>`;
       } else {
-        subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}">ðŸš¨ ATIVO NO SUB JUDICE</span>`;
+        subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}">🚨 ATIVO NO SUB JUDICE</span>`;
       }
     }
   }

@@ -137,41 +137,51 @@ window.loadConstrucoes = async function() {
             unitId = saleObj.unitId || unitId;
         }
     }
-
+        
+    console.log('[Construção] Iniciando loadConstrucoes para cliente:', customerId, 'venda:', saleId);
     try {
         const { collection, query, where, getDocs } = window.firebaseCollections;
-
-        // Busca em construction_checks (inspeções manuais do CRM)
-        const qStr = query(
-            collection(window.firebaseDb, "construction_checks"),
-            where("customerId", "==", String(customerId))
-        );
-        const qNum = query(
-            collection(window.firebaseDb, "construction_checks"),
-            where("customerId", "==", Number(customerId))
-        );
-
-        // Busca em vistorias (vistoriador via link externo)
-        const qVistStr = query(
-            collection(window.firebaseDb, "vistorias"),
-            where("customerId", "==", String(customerId))
-        );
-        const qVistNum = query(
-            collection(window.firebaseDb, "vistorias"),
-            where("customerId", "==", Number(customerId))
-        );
+        const promises = [];
         
-        const [snapStr, snapNum, snapVistStr, snapVistNum] = await Promise.all([
-            getDocs(qStr), getDocs(qNum), getDocs(qVistStr), getDocs(qVistNum)
-        ]);
+        console.log('[Construção] Realizando busca em construction_checks (String)');
+        promises.push(getDocs(query(
+            collection(window.firebaseDb, "construction_checks"),
+            where("customerId", "==", String(customerId))
+        )));
+        
+        const numId = Number(customerId);
+        if (!isNaN(numId)) {
+            console.log('[Construção] Realizando busca em construction_checks (Number)');
+            promises.push(getDocs(query(
+                collection(window.firebaseDb, "construction_checks"),
+                where("customerId", "==", numId)
+            )));
+        }
+
+        console.log('[Construção] Realizando busca em vistorias (String)');
+        promises.push(getDocs(query(
+            collection(window.firebaseDb, "vistorias"),
+            where("customerId", "==", String(customerId))
+        )));
+        
+        if (!isNaN(numId)) {
+            console.log('[Construção] Realizando busca em vistorias (Number)');
+            promises.push(getDocs(query(
+                collection(window.firebaseDb, "vistorias"),
+                where("customerId", "==", numId)
+            )));
+        }
+        
+        loading.innerHTML = 'Carregando dados do servidor (pode demorar alguns segundos)...';
+        console.log('[Construção] Aguardando respostas do Firestore...');
+        
+        const snaps = await Promise.all(promises);
+        console.log('[Construção] Respostas do Firestore recebidas. Total de coleções consultadas:', snaps.length);
 
         const snapshot = [];
         const seenIds = new Set();
         const addUnique = (d) => { if (!seenIds.has(d.id)) { seenIds.add(d.id); snapshot.push(d); } };
-        snapStr.forEach(addUnique);
-        snapNum.forEach(addUnique);
-        snapVistStr.forEach(addUnique);
-        snapVistNum.forEach(addUnique);
+        snaps.forEach(snap => snap.forEach(addUnique));
         
         const results = [];
         
@@ -182,7 +192,6 @@ window.loadConstrucoes = async function() {
             if (window.AnexosState.activeContract.contractNumber) validIds.add(String(window.AnexosState.activeContract.contractNumber));
             if (window.AnexosState.activeContract.saleCode) validIds.add(String(window.AnexosState.activeContract.saleCode));
         }
-        // Adicionar também o titulo a receber via AppState.sales
         if (typeof AppState !== 'undefined' && AppState.sales) {
             const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
             if (saleObj) {
@@ -193,6 +202,7 @@ window.loadConstrucoes = async function() {
         }
         
         console.log('[Construção] IDs válidos para matching:', Array.from(validIds));
+        console.log('[Construção] Documentos retornados pelo Firebase (sem filtro):', snapshot.length);
 
         snapshot.forEach(doc => {
             const data = doc.data();
@@ -209,7 +219,6 @@ window.loadConstrucoes = async function() {
                 }
             }
             
-            // Se a vistoria foi salva sem contractId válido (ex: erro no webhook ou form), exibe para o cliente.
             if (!matches && (!data.contractId || data.contractId === "null" || data.contractId === "undefined" || String(data.contractId).trim() === "")) {
                 matches = true;
             }
@@ -219,13 +228,18 @@ window.loadConstrucoes = async function() {
             }
         });
         
+        console.log('[Construção] Vistorias processadas (com filtro aplicado):', results.length);
+        
         results.sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
         window.ConstrucaoApp.currentChecks = results;
         
         renderConstrucaoHistory(results);
     } catch(e) {
         console.error("Erro ao carregar vistorias:", e);
-        loading.innerHTML = '<span style="color:red">Erro ao carregar histórico.</span>';
+        loading.innerHTML = `
+            <div style="color:red; text-align:center; font-weight:bold; margin-bottom: 10px;">Erro ao carregar histórico: ${e.message}</div>
+            <button onclick="console.log('${e.message}'); alert('Erro detalhado: ' + '${e.message}'.replace(/'/g, ''));" style="padding:5px 10px; cursor:pointer;">Ver Detalhes do Erro</button>
+        `;
     }
 };
 
