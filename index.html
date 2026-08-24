@@ -315,6 +315,7 @@
   <!-- Bibliotecas para Geração de PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- Biblioteca para Leitura de ZIP / KMZ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Biblioteca Turf.js para Geoprocessamento -->
@@ -1018,7 +1019,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.378 &nbsp;&middot;&nbsp; 24/08/2026
+            v1.0.379 &nbsp;&middot;&nbsp; 24/08/2026
           </span>
         </div>
       </div>
@@ -2387,6 +2388,9 @@ Atenciosamente,
               <button id="btn-subjudice-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('subjudice')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
                 <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
                 <span id="subjudice-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
+              </button>
+              <button class="btn btn-secondary" onclick="gerarMapaJuridicoPDF()" style="background-color: #22c55e; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;" title="Gerar Mapa Jurídico (Sprint Diário do Jurídico)">
+                <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa Jurídico
               </button>
               <button class="btn btn-secondary" onclick="exportSubjudiceToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
                 <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
@@ -5581,30 +5585,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=378"></script>
-  <script defer src="sienge-api.js?v=378"></script>
-  <script defer src="azure-auth.js?v=378"></script>
-  <script defer src="app.js?v=378"></script>
-  <script defer src="home-dashboard.js?v=378"></script>
-  <script defer src="anexos.js?v=378"></script>
-  <script defer src="contas-pagar.js?v=378"></script>
-  <script defer src="config-tags.js?v=378"></script>
-  <script defer src="config-users.js?v=378"></script>
-  <script defer src="construcao.js?v=378"></script>
-  <script defer src="empresas.js?v=378"></script>
-  <script defer src="relacionamento.js?v=378"></script>
+  <script defer src="data.js?v=379"></script>
+  <script defer src="sienge-api.js?v=379"></script>
+  <script defer src="azure-auth.js?v=379"></script>
+  <script defer src="app.js?v=379"></script>
+  <script defer src="home-dashboard.js?v=379"></script>
+  <script defer src="anexos.js?v=379"></script>
+  <script defer src="contas-pagar.js?v=379"></script>
+  <script defer src="config-tags.js?v=379"></script>
+  <script defer src="config-users.js?v=379"></script>
+  <script defer src="construcao.js?v=379"></script>
+  <script defer src="empresas.js?v=379"></script>
+  <script defer src="relacionamento.js?v=379"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=378"></script>
-  <script defer src="plano-financeiro.js?v=378"></script>
-  <script defer src="fiscal.js?v=378"></script>
-  <script defer src="indexadores.js?v=378"></script>
-  <script defer src="verificar-construcao.js?v=378"></script>
-  <script src="repactuacoes.js?v=378"></script>
+  <script defer src="centros-custo.js?v=379"></script>
+  <script defer src="plano-financeiro.js?v=379"></script>
+  <script defer src="fiscal.js?v=379"></script>
+  <script defer src="indexadores.js?v=379"></script>
+  <script defer src="verificar-construcao.js?v=379"></script>
+  <script src="repactuacoes.js?v=379"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=378"></script>
+  <script defer src="dashboard-inadimplencia.js?v=379"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

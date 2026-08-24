@@ -68,8 +68,8 @@ function _vcGetCostCenterName(costCenterId) {
     if (!costCenterId) return '-';
     const ccList = (window.AppState && window.AppState.cachedCostCenters) || [];
     const cc = ccList.find(c => String(c.id) === String(costCenterId));
-    if (!cc) return '-';
-    return cc.name || '-';
+    if (!cc) return 'CC ' + costCenterId;
+    return cc.name || ('CC ' + costCenterId);
 }
 
 function _vcGetCity(costCenterId) {

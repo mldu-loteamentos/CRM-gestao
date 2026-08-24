@@ -140,12 +140,22 @@ window.loadConstrucoes = async function() {
 
     try {
         const { collection, query, where, getDocs } = window.firebaseCollections;
-        const q = query(
+        const qStr = query(
             collection(window.firebaseDb, "construction_checks"),
             where("customerId", "==", String(customerId))
         );
+        const qNum = query(
+            collection(window.firebaseDb, "construction_checks"),
+            where("customerId", "==", Number(customerId))
+        );
         
-        const snapshot = await getDocs(q);
+        const [snapStr, snapNum] = await Promise.all([getDocs(qStr), getDocs(qNum)]);
+        const snapshot = [];
+        snapStr.forEach(d => snapshot.push(d));
+        snapNum.forEach(d => {
+            if (!snapshot.find(existing => existing.id === d.id)) snapshot.push(d);
+        });
+        
         const results = [];
         
         const validIds = new Set([String(contractNumber), String(saleId)]);
@@ -849,26 +859,3 @@ window.deleteNovaVistoria = async function(id) {
 setTimeout(() => {
     window.ConstrucaoApp.init();
 }, 500);
-
-// SCRIPT TEMPORÁRIO DE CORREÇÃO (ID: gpT9ymb3dxxzlBA2Vuya)
-setTimeout(async () => {
-    try {
-        const { collection, doc, getDoc, setDoc, deleteDoc } = window.firebaseCollections || {};
-        if (!getDoc) return;
-        const docRef = doc(window.firebaseDb, 'vistorias', 'gpT9ymb3dxxzlBA2Vuya');
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            const tituloKey = data.B || '12781';
-            data.tituloKey = tituloKey;
-            data.contractId = tituloKey;
-            data.contractKeys = [tituloKey];
-            if (data.enviadoEm) data.date = data.enviadoEm;
-            
-            await setDoc(doc(window.firebaseDb, 'construction_checks', 'gpT9ymb3dxxzlBA2Vuya'), data);
-            await deleteDoc(docRef);
-            console.log('[Fix Vistoria] Documento 12781 corrigido e movido para construction_checks com sucesso!');
-        }
-    } catch(e) {
-        console.error('[Fix Vistoria] Erro ao corrigir doc:', e);
-}, 5000);

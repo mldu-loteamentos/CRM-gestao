@@ -4602,9 +4602,9 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const fichaProcuradoresBtn = document.querySelector('button[data-target="ficha-procuradores"]');
   
   if (isAdvogado) {
-      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'none';
-      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'none';
-      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'none';
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
       if (fichaAnexosBtn) fichaAnexosBtn.style.display = 'none';
       if (fichaScoreBtn) fichaScoreBtn.style.display = 'none';
   } else if (isInternoOuApoio) {
@@ -24249,5 +24249,211 @@ window.testarZerarFila = function() {
         document.head.appendChild(script);
     } else {
         window.fireConfetti();
+    }
+};
+
+window.gerarMapaJuridicoPDF = function() {
+    if (!window.subjudiceClients || window.subjudiceClients.length === 0) {
+        alert("Não há clientes no Sub Judice para gerar o mapa.");
+        return;
+    }
+
+    const btn = document.querySelector('button[onclick="gerarMapaJuridicoPDF()"]');
+    const oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.innerHTML = `<i data-lucide="loader-2" class="lucide-spin" style="width: 14px;"></i> Gerando...`;
+        btn.disabled = true;
+    }
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+        const prefixMap = {};
+        const nameMap = {};
+        const allStages = [...(window.EtapasJudiciaisState || [])].sort((a,b) => (a.order || 0) - (b.order || 0));
+        
+        let topIndex = 1;
+        allStages.filter(s => !s.parentId).forEach(s => {
+            prefixMap[s.id] = String(topIndex);
+            nameMap[s.name] = { prefix: String(topIndex), name: s.name, id: s.id, days: s.days || 0, order: topIndex };
+            
+            let childIndex = 1;
+            allStages.filter(child => child.parentId === s.id).forEach(child => {
+                const childPrefix = `${topIndex}.${childIndex}`;
+                prefixMap[child.id] = childPrefix;
+                nameMap[child.name] = { prefix: childPrefix, name: child.name, id: child.id, days: child.days || 0, order: topIndex + (childIndex/100) };
+                childIndex++;
+            });
+            topIndex++;
+        });
+
+        nameMap["Sem Fase"] = { prefix: "0", name: "Sem Fase", id: "sem-fase", days: 0, order: 0 };
+
+        const agg = {};
+        Object.values(nameMap).forEach(v => {
+            agg[v.prefix] = { ...v, count: 0, value: 0 };
+        });
+
+        let totalClients = 0;
+        let totalValue = 0;
+        let totalTitles = 0;
+        let totalDaysDelay = 0;
+        let clientsWithDelay = 0;
+
+        window.subjudiceClients.forEach(client => {
+            const cid = String(client.customerId);
+            const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
+            const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
+            let fase = "Sem Fase";
+            if (validJudNotes.length > 0) {
+                validJudNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
+                fase = validJudNotes[0].fase;
+            }
+            
+            const info = nameMap[fase] || nameMap["Sem Fase"];
+            const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
+            
+            if (agg[info.prefix]) {
+                agg[info.prefix].count += 1;
+                agg[info.prefix].value += value;
+            }
+            
+            totalClients++;
+            totalValue += value;
+            totalTitles += (client.billIds ? client.billIds.length : 1);
+            if (client.maxDaysDelay > 0) {
+                totalDaysDelay += client.maxDaysDelay;
+                clientsWithDelay++;
+            }
+        });
+
+        const avgDelay = clientsWithDelay > 0 ? Math.round(totalDaysDelay / clientsWithDelay) : 0;
+        const sortedAgg = Object.values(agg).sort((a, b) => a.order - b.order);
+
+        const container = document.createElement("div");
+        container.style.position = "absolute";
+        container.style.top = "-9999px";
+        container.style.left = "-9999px";
+        container.style.width = "1122px"; 
+        container.style.minHeight = "793px"; 
+        container.style.backgroundColor = "#f8fafc"; 
+        container.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
+        container.style.padding = "40px";
+        container.style.boxSizing = "border-box";
+        container.id = "mapa-juridico-pdf-container";
+
+        const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        container.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px;">
+                <div>
+                    <h1 style="margin: 0; color: #0f172a; font-size: 28px; font-weight: 800;">Sprint Diário Jurídico</h1>
+                    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Mapa de clientes em Sub Judice — ${new Date().toLocaleDateString('pt-BR')}</p>
+                </div>
+                <div style="display: flex; gap: 20px;">
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor em Atraso</div>
+                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">R$ ${fmtBRL(totalValue)}</div>
+                    </div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes em Atraso</div>
+                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${totalClients}</div>
+                    </div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Títulos Vencidos</div>
+                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${totalTitles}</div>
+                    </div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Atraso Médio</div>
+                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${avgDelay} dias</div>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px;">
+                ${sortedAgg.map((item, idx) => `
+                    <div style="background: white; border: 2px solid ${item.count > 0 ? '#10b981' : '#e2e8f0'}; border-radius: 8px; width: 125px; padding: 25px 10px 15px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative;">
+                        <div style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">
+                            ${item.prefix}
+                        </div>
+                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes</div>
+                        <div style="font-size: 22px; font-weight: 900; color: #0f172a;">${item.count}</div>
+                        
+                        <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
+                        
+                        <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor (R$)</div>
+                        <div style="font-size: 13px; font-weight: 800; color: ${item.value > 0 ? '#ef4444' : '#64748b'};">${fmtBRL(item.value)}</div>
+                    </div>
+                    ${idx < sortedAgg.length - 1 ? `
+                    <div style="display: flex; align-items: center; justify-content: center; width: 20px;">
+                        <div style="width: 100%; height: 2px; background: #cbd5e1; position: relative;">
+                            <div style="position: absolute; right: -4px; top: -4px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 6px solid #cbd5e1;"></div>
+                        </div>
+                    </div>
+                    ` : ''}
+                `).join('')}
+            </div>
+            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <h3 style="margin: 0 0 15px 0; color: #0f172a; font-size: 16px; font-weight: 700;">Legenda das Etapas</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                    ${sortedAgg.map(item => `
+                        <div style="display: flex; align-items: center; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #e2e8f0;">
+                            <span style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; margin-right: 8px;">
+                                ${item.prefix}
+                            </span>
+                            <span style="font-weight: 700; color: #334155; margin-right: 4px;">${item.name}</span>
+                            <span style="color: #64748b; font-size: 11px;">(${item.days} dias)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(container);
+
+        html2canvas(container, { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: "#f8fafc" 
+        }).then(canvas => {
+            const imgData = canvas.toDataURL("image/png");
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF("l", "mm", "a4");
+            
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            
+            const imgProps = pdf.getImageProperties(imgData);
+            const ratio = imgProps.width / imgProps.height;
+            let finalWidth = pdfWidth;
+            let finalHeight = pdfWidth / ratio;
+            
+            if (finalHeight > pdfHeight) {
+                finalHeight = pdfHeight;
+                finalWidth = pdfHeight * ratio;
+            }
+
+            pdf.addImage(imgData, "PNG", 0, 0, finalWidth, finalHeight);
+            pdf.save("Mapa_Juridico_SubJudice.pdf");
+            
+            document.body.removeChild(container);
+            if (btn) {
+                btn.innerHTML = oldHtml;
+                btn.disabled = false;
+            }
+        }).catch(err => {
+            console.error("Erro ao gerar mapa jurídico:", err);
+            alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
+            document.body.removeChild(container);
+            if (btn) {
+                btn.innerHTML = oldHtml;
+                btn.disabled = false;
+            }
+        });
+
+    } catch (e) {
+        console.error(e);
+        if (btn) {
+            btn.innerHTML = oldHtml;
+            btn.disabled = false;
+        }
     }
 };
