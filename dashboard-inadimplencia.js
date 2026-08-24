@@ -9,7 +9,10 @@ const DashboardInadimplencia = (function() {
         const fbDocs = await window.firebaseCollections.getDocs(q);
         snapshots = [];
         fbDocs.forEach(d => {
-          snapshots.push(d.data());
+          const data = d.data();
+          if (data.total_value > 1000) { // filter out anomalous/empty days
+            snapshots.push(data);
+          }
         });
       } else {
         console.warn('Firebase não inicializado para carregar snapshots');
