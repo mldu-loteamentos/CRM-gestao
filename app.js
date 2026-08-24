@@ -11975,7 +11975,7 @@ window.fireConfetti = function() {
                     <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
                     <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉</span>
                 </div>
-                <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: auto; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
+                <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
             </div>
           `;
           table.parentNode.insertBefore(successDiv, table);
@@ -24176,7 +24176,7 @@ window.testarZerarFila = function() {
               <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
               <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉 (MODO TESTE)</span>
           </div>
-          <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: auto; border-radius: 50%; animation: seloPulseTest 2s infinite ease-in-out; border: 4px solid #166534;">
+          <img src="selo_barriga.png" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulseTest 2s infinite ease-in-out; border: 4px solid #166534;">
       </div>
     `;
     table.parentNode.insertBefore(successDiv, table);

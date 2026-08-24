@@ -1017,9 +1017,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
             ${zeroPaidEmpList.slice(0,6).map(e=>`<tr><td class="L" style="padding:4px;">${e.name}</td><td style="padding:4px;text-align:center;">${e.count}</td></tr>`).join('')}
             ${zeroPaidEmpList.length===0?'<tr><td colspan="2" style="padding:10px 0; color:#94a3b8; text-align:center;">Nenhum empreendimento</td></tr>':''}
           </tbody>
-          <tfoot>
-            <tr><td class="L" style="padding:4px;font-weight:700;border-top:1px solid #e2e8f0;">Total</td><td style="padding:4px;text-align:center;font-weight:700;border-top:1px solid #e2e8f0;">${zeroPaidTotalTitles}</td></tr>
-          </tfoot>
+
         </table>
       </div>
     </div>
