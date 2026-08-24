@@ -24371,63 +24371,64 @@ window.gerarMapaJuridicoPDF = function() {
             timelinesHtml += buildTimelineHtml(compName, companyGroups[compId], false).html;
         });
 
-        const container = document.createElement("div");
-        container.style.position = "absolute";
-        container.style.top = "-9999px";
-        container.style.left = "-9999px";
-        container.style.width = "1122px"; 
-        container.style.minHeight = "793px"; 
-        container.style.backgroundColor = "#ffffff"; 
-        container.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
-        container.style.padding = "20px 30px";
-        container.style.boxSizing = "border-box";
-        container.id = "mapa-juridico-pdf-container";
+        const container1 = document.createElement("div");
+        container1.style.position = "absolute";
+        container1.style.top = "-9999px";
+        container1.style.left = "-9999px";
+        container1.style.width = "1122px";
+        container1.style.backgroundColor = "#ffffff";
+        container1.style.padding = "20px";
+        container1.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
+        container1.id = "mapa-juridico-pdf-container-1";
 
-        container.innerHTML = `
+        const kpiGrid = document.getElementById('subjudice-kpi-grid');
+        const tableCard = document.querySelector('#tab-subjudice .crm-card');
+        
+        const header1 = document.createElement("div");
+        header1.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; gap: 15px;">
                     <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 35px; object-fit: contain;">
                     <div>
-                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Mapa Jurídico</h1>
+                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Sub Judice por Empresa | Empreendimento</h1>
                         <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                 </div>
-                <div style="display: flex; gap: 8px; flex: 1; margin-left: 30px;">
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Valor em Atraso</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${fmtBRL(totalValue)}</div>
-                        </div>
-                        <div style="background: #fee2e2; color: #ef4444; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                        </div>
-                    </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Clientes</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${totalClients}</div>
-                        </div>
-                        <div style="background: #ffedd5; color: #f97316; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                        </div>
-                    </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Títulos</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${totalTitles}</div>
-                        </div>
-                        <div style="background: #dcfce7; color: #22c55e; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                        </div>
-                    </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Atraso Médio</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${avgDelay} dias</div>
-                        </div>
-                        <div style="background: #dbeafe; color: #3b82f6; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        </div>
+            </div>
+        `;
+        container1.appendChild(header1);
+
+        if (kpiGrid) container1.appendChild(kpiGrid.cloneNode(true));
+        if (tableCard) {
+            const tableClone = tableCard.cloneNode(true);
+            const tableContainerClone = tableClone.querySelector('.table-container');
+            if (tableContainerClone) {
+                tableContainerClone.style.overflow = 'visible';
+                tableContainerClone.style.maxHeight = 'none';
+                tableContainerClone.style.height = 'auto';
+            }
+            container1.appendChild(tableClone);
+        }
+        
+        const container2 = document.createElement("div");
+        container2.style.position = "absolute";
+        container2.style.top = "-9999px";
+        container2.style.left = "-9999px";
+        container2.style.width = "1122px"; 
+        container2.style.minHeight = "793px"; 
+        container2.style.backgroundColor = "#ffffff"; 
+        container2.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
+        container2.style.padding = "20px 30px";
+        container2.style.boxSizing = "border-box";
+        container2.id = "mapa-juridico-pdf-container-2";
+
+        container2.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 35px; object-fit: contain;">
+                    <div>
+                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Mapa Jurídico - Estágios</h1>
+                        <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                 </div>
             </div>
@@ -24450,46 +24451,49 @@ window.gerarMapaJuridicoPDF = function() {
                 </div>
             </div>
         `;
-        document.body.appendChild(container);
+        document.body.appendChild(container1);
+        document.body.appendChild(container2);
 
-        html2canvas(container, { 
-            scale: 2, 
-            useCORS: true, 
-            backgroundColor: "#ffffff" 
-        }).then(canvas => {
-            const imgData = canvas.toDataURL("image/png");
+        Promise.all([
+            html2canvas(container1, { scale: 2, useCORS: true, backgroundColor: "#ffffff" }),
+            html2canvas(container2, { scale: 2, useCORS: true, backgroundColor: "#ffffff" })
+        ]).then(([canvas1, canvas2]) => {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF("l", "mm", "a4");
             
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
             
-            const imgProps = pdf.getImageProperties(imgData);
-            const ratio = imgProps.width / imgProps.height;
-            let finalWidth = pdfWidth;
-            let finalHeight = pdfWidth / ratio;
+            // PAGE 1
+            let imgData1 = canvas1.toDataURL("image/png");
+            let imgProps1 = pdf.getImageProperties(imgData1);
+            let ratio1 = imgProps1.width / imgProps1.height;
+            let finalWidth1 = pdfWidth;
+            let finalHeight1 = pdfWidth / ratio1;
+            if (finalHeight1 > pdfHeight) { finalHeight1 = pdfHeight; finalWidth1 = pdfHeight * ratio1; }
+            pdf.addImage(imgData1, "PNG", (pdfWidth - finalWidth1)/2, 0, finalWidth1, finalHeight1);
             
-            if (finalHeight > pdfHeight) {
-                finalHeight = pdfHeight;
-                finalWidth = pdfHeight * ratio;
-            }
-
-            pdf.addImage(imgData, "PNG", 0, 0, finalWidth, finalHeight);
+            // PAGE 2
+            pdf.addPage();
+            let imgData2 = canvas2.toDataURL("image/png");
+            let imgProps2 = pdf.getImageProperties(imgData2);
+            let ratio2 = imgProps2.width / imgProps2.height;
+            let finalWidth2 = pdfWidth;
+            let finalHeight2 = pdfWidth / ratio2;
+            if (finalHeight2 > pdfHeight) { finalHeight2 = pdfHeight; finalWidth2 = pdfHeight * ratio2; }
+            pdf.addImage(imgData2, "PNG", (pdfWidth - finalWidth2)/2, 0, finalWidth2, finalHeight2);
+            
             pdf.save("Mapa_Juridico_SubJudice.pdf");
             
-            document.body.removeChild(container);
-            if (btn) {
-                btn.innerHTML = oldHtml;
-                btn.disabled = false;
-            }
+            document.body.removeChild(container1);
+            document.body.removeChild(container2);
+            if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
         }).catch(err => {
             console.error("Erro ao gerar mapa jurídico:", err);
             alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
-            document.body.removeChild(container);
-            if (btn) {
-                btn.innerHTML = oldHtml;
-                btn.disabled = false;
-            }
+            if(container1.parentNode) document.body.removeChild(container1);
+            if(container2.parentNode) document.body.removeChild(container2);
+            if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
         });
 
     } catch (e) {
