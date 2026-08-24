@@ -13451,14 +13451,14 @@ async function _loadZeroPaidTab_Impl() {
   // ========================================================
   let zeroTotalOverdue = 0;
   let zeroTotalClients = new Set();
-  let zeroTotalBills = 0;
+  let zeroTotalBills = zeroPaidList.length;
   let zeroMaxDelay = 0;
   let zeroSumDelay = 0;
 
   zeroPaidList.forEach(c => {
     zeroTotalOverdue += (c.overdueValue + c.overdueCharges);
     zeroTotalClients.add(c.customerId);
-    zeroTotalBills += (c.billCount || 0);
+
     if (c.maxDaysDelay > zeroMaxDelay) zeroMaxDelay = c.maxDaysDelay;
     zeroSumDelay += c.maxDaysDelay;
   });

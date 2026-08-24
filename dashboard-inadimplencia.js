@@ -731,7 +731,7 @@ const DashboardInadimplencia = (function() {
 
     zeroPaidClients.sort((a,b)=>b.delay-a.delay);
     const zeroPaidTotalValue = zeroPaidClients.reduce((acc,c)=>acc+c.value,0);
-    const zeroPaidTotalTitles = zeroPaidClients.reduce((acc,c)=>acc+(c.billCount||1),0);
+    const zeroPaidTotalTitles = zeroPaidClients.length;
     const zeroPaidTop5 = zeroPaidClients.slice(0,5);
     
     const zeroPaidEmp = {};
@@ -755,7 +755,7 @@ const DashboardInadimplencia = (function() {
             emp = ccName ? `${c.costCenterId} - ${ccName}` : c.costCenterId;
         }
         if (!zeroPaidEmp[emp]) zeroPaidEmp[emp] = 0;
-        zeroPaidEmp[emp] += (c.billCount||1);
+        zeroPaidEmp[emp] += 1;
     });
     const zeroPaidEmpListFull = Object.keys(zeroPaidEmp).map(k => ({ name: k, count: zeroPaidEmp[k] })).sort((a,b) => b.count - a.count);
     let zeroPaidEmpList = [];

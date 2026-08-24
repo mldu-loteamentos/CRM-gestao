@@ -142,6 +142,19 @@ window.VerificarConstrucaoApp = {
                         <button class="btn btn-outline" style="border-color: #0f766e; color: #0f766e;" onclick="window.openVistoriaRecurrenceModal()">
                             <i data-lucide="refresh-cw" style="width: 16px;"></i> Recorrência de Vistoria
                         </button>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 5px;">
+                            <div style="position: relative; width: 34px; height: 20px;">
+                                <input type="checkbox" id="vc-include-subjudice" onchange="window.VerificarConstrucaoApp.loadData()" style="opacity: 0; width: 0; height: 0; position: absolute;">
+                                <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
+                                    <span class="vc-toggle-knob" style="position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.3);"></span>
+                                </span>
+                            </div>
+                            <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">Incluir Sub Judice</span>
+                        </label>
+                        <style>
+                            #vc-include-subjudice:checked + span { background-color: #0f766e; }
+                            #vc-include-subjudice:checked + span .vc-toggle-knob { transform: translateX(14px); }
+                        </style>
                     </div>
                     <div>
                         <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:10px 24px; border:none; background:linear-gradient(135deg, #16a34a 0%, #15803d 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(22,163,74,0.4); opacity:0.5; transition:all 0.2s;" onmouseover="if(!this.disabled) { this.style.opacity='1'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(22,163,74,0.5)'; }" onmouseout="if(!this.disabled) { this.style.opacity='1'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; } else { this.style.opacity='0.5'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; }">
@@ -316,9 +329,13 @@ window.VerificarConstrucaoApp = {
                 }
             }
 
+            const includeSubjudice = document.getElementById('vc-include-subjudice') ? document.getElementById('vc-include-subjudice').checked : false;
+
             const elegiveis = clients.filter(c => {
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
                 if (maxDelay < thresholdDays) return false;
+                
+                if (!includeSubjudice && (c.subjudice === 'S' || c.subjudice === true)) return false;
 
                 const contractId = c.saleId || c.contractId || c.id;
                 let fallbackTitle = contractId;
@@ -594,28 +611,38 @@ window.VerificarConstrucaoApp = {
         const listDiv = document.getElementById('obras-andamento-list');
         if (!modal || !listDiv) return;
 
-        if (!this.allRows) {
-            listDiv.innerHTML = '<p style="color:#64748b; padding: 10px 0;">Aguarde, dados ainda carregando...</p>';
+        const allClientsForObras = window.rawClientList || (window.AppState && window.AppState.sales) || [];
+        if (!allClientsForObras || allClientsForObras.length === 0) {
+            listDiv.innerHTML = '<p style="color:#64748b; padding: 10px 0;">Nenhum centro de custo encontrado.</p>';
             modal.style.display = 'flex';
             return;
         }
 
-        // Array de empreendimentos para ordenação por ID
         const empList = [];
         const seenEmp = new Set();
         
-        this.allRows.forEach(r => {
-            if (r.empreendimento && r.empreendimento !== '-') {
-                if (!seenEmp.has(r.empreendimento)) {
-                    seenEmp.add(r.empreendimento);
+        allClientsForObras.forEach(c => {
+            const costCenterId = c.costCenterId;
+            if (costCenterId && costCenterId !== 'N/D') {
+                const ccName = _vcGetCostCenterName(costCenterId);
+                let empreendimento = '-';
+                if (ccName && ccName !== '-') {
+                    empreendimento = ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
+                }
+                const empLabel = _vcGetEmpLabel(costCenterId);
+                
+                if (empreendimento && empreendimento !== '-' && !seenEmp.has(empreendimento)) {
+                    seenEmp.add(empreendimento);
                     empList.push({
-                        empreendimento: r.empreendimento,
-                        label: r.empLabel || r.empreendimento,
-                        id: parseInt(r.costCenterId) || 0
+                        empreendimento: empreendimento,
+                        label: empLabel,
+                        id: parseInt(costCenterId) || 0
                     });
                 }
             }
         });
+        
+        empList.sort((a,b) => a.label.localeCompare(b.label));
 
         const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
         const isFirstRun = !localStorage.getItem('crm_obras_andamento_init');
