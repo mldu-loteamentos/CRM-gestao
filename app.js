@@ -7367,43 +7367,6 @@ function formatCpfCnpj(val) {
                 else simThJuros.textContent = "Juros (0% a.m)";
             }
 
-            const getSimulatedFine = (inst) => {
-               const matchingBill = (AppState.defaultersBills || []).find(b =>
-                 String(b.saleId) === String(saleId) ||
-                 String(b.receivableBillId) === String(saleId) ||
-                 String(b.id) === String(saleId) ||
-                 (String(b.customerId) === String(customerId) && b.defaulterInstallments && b.defaulterInstallments.some(di =>
-                   String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
-                   String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
-                 ))
-               );
-               const matchingInst = matchingBill?.defaulterInstallments?.find(di =>
-                 String(di.installmentId || di.installmentNumber) === String(inst.installmentId) ||
-                 String(di.dueDate || '').slice(0, 10) === String(inst.dueDate || '').slice(0, 10)
-               );
-               const directFine = Number(inst.fine);
-               if (Number.isFinite(directFine) && directFine > 0) return directFine;
-
-               const matchingFine = Number(matchingInst?.fine ?? matchingInst?.fineAmount);
-               const referenceDays = Number(matchingInst?.daysOfDelay ?? matchingInst?.daysDelay ?? inst.apiDaysDelay) ||
-                 Math.max(1, Math.round((new Date() - inst.due) / (1000 * 60 * 60 * 24)));
-               if (Number.isFinite(matchingFine) && matchingFine > 0 && Number.isFinite(referenceDays) && referenceDays > 0) {
-                 const simulatedDays = Math.max(1, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
-                 return matchingFine * (simulatedDays / referenceDays);
-               }
-
-               const correctedBase = Number(
-                 matchingInst?.correctedValueWithoutAdditions ??
-                 inst.correctedValueWithoutAdditions
-               );
-               if (Number.isFinite(correctedBase) && correctedBase > 0) return correctedBase * 0.02;
-
-               const correction = Number(matchingInst?.monetaryCorrection ?? matchingInst?.correctionAmount ?? inst.monetaryCorrection);
-               if (Number.isFinite(correction) && correction > 0) return (inst.cb + correction) * 0.02;
-
-               return Number.isFinite(matchingFine) && matchingFine > 0 ? matchingFine : inst.cb * 0.02;
-            };
-
             vencidasSimulador.forEach((inst, index) => {
                // Calculate fine/interest
                let diasAtraso = Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24));
@@ -7412,11 +7375,11 @@ function formatCpfCnpj(val) {
                let multa = 0;
                let juros = 0;
                
-              if (diasAtraso >= 1) {
-                // Os valores da API refletem a data da consulta, não a data simulada.
-                // A multa contratual é fixa; os juros são proporcionais aos dias até targetDate.
-                multa = getSimulatedFine(inst) * taxaMultiplier;
-                juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
+               if (diasAtraso >= 1) {
+                  // A multa contratual é fixa (2% do valor original)
+                  multa = (inst.cb * 0.02) * taxaMultiplier;
+                  // Os juros são proporcionais aos dias de atraso (1% a.m)
+                  juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
                }
                
                if (inst.selected) {
@@ -24357,13 +24320,13 @@ window.gerarMapaJuridicoPDF = function() {
         container.style.left = "-9999px";
         container.style.width = "1122px"; 
         container.style.minHeight = "793px"; 
-        container.style.backgroundColor = "#f8fafc"; 
+        container.style.backgroundColor = "#ffffff"; 
         container.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
         container.style.padding = "40px";
         container.style.boxSizing = "border-box";
         container.id = "mapa-juridico-pdf-container";
 
-        const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
         container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px;">
@@ -24374,57 +24337,65 @@ window.gerarMapaJuridicoPDF = function() {
                         <p style="margin: 5px 0 0 0; color: #64748b; font-size: 13px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                 </div>
-                <div style="display: flex; gap: 15px;">
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Valor em Atraso</div>
+                <div style="display: flex; gap: 12px; flex: 1; margin-left: 40px;">
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 16px; border-radius: 8px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700;">Valor em Atraso</div>
+                            <div style="color: #0f172a; font-size: 18px; font-weight: 900;">${fmtBRL(totalValue)}</div>
                         </div>
-                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${fmtBRL(totalValue)}</div>
+                        <div style="background: #fee2e2; color: #ef4444; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        </div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Clientes em Atraso</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 16px; border-radius: 8px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700;">Clientes em Atraso</div>
+                            <div style="color: #0f172a; font-size: 18px; font-weight: 900;">${new Set(window._subjudiceList.map(c => c.customerId)).size}</div>
                         </div>
-                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${new Set(window._subjudiceList.map(c => c.customerId)).size}</div>
+                        <div style="background: #ffedd5; color: #f97316; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                        </div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Títulos Vencidos</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 16px; border-radius: 8px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700;">Títulos Vencidos</div>
+                            <div style="color: #0f172a; font-size: 18px; font-weight: 900;">${totalTitles}</div>
                         </div>
-                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${totalTitles}</div>
+                        <div style="background: #dcfce7; color: #22c55e; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        </div>
                     </div>
-                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 8px; width: 140px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 5px; color: #64748b;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                            <div style="font-size: 10px; text-transform: uppercase; font-weight: 700;">Atraso Médio</div>
+                    <div style="background: white; border: 1px solid #e2e8f0; padding: 12px 16px; border-radius: 8px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700;">Atraso Médio</div>
+                            <div style="color: #0f172a; font-size: 18px; font-weight: 900;">${avgDelay} dias</div>
                         </div>
-                        <div style="color: #0f172a; font-size: 18px; font-weight: 800;">${avgDelay} dias</div>
+                        <div style="background: #dbeafe; color: #3b82f6; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px; align-items: center;">
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px; align-items: center;">
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
-                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 86px; padding: 25px 6px 15px 6px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
-                            <div style="background: #10b981; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">${item.prefix}</div>
-                            <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Títulos</div>
-                            <div style="font-size: 20px; font-weight: 900; color: #0f172a;">${item.count}</div>
-                            <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
-                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor</div>
-                            <div style="font-size: 11px; font-weight: 800; color: #ef4444;">${fmtBRL(item.value)}</div>
+                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 68px; padding: 20px 4px 10px 4px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                            <div style="background: #10b981; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); border: 3px solid white;">${item.prefix}</div>
+                            <div style="color: #64748b; font-size: 9px; text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Títulos</div>
+                            <div style="font-size: 16px; font-weight: 900; color: #0f172a;">${item.count}</div>
+                            <div style="height: 1px; background: #e2e8f0; margin: 8px 0;"></div>
+                            <div style="color: #64748b; font-size: 9px; text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Valor</div>
+                            <div style="font-size: 10px; font-weight: 800; color: #ef4444;">${fmtBRL(item.value)}</div>
                         </div>`
-                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 42px; padding: 18px 2px 10px 2px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
-                            <div style="background: #94a3b8; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; position: absolute; top: -13px; left: 50%; transform: translateX(-50%); border: 2px solid #f8fafc;">${item.prefix}</div>
-                            <div style="font-size: 16px; font-weight: 900; color: #94a3b8;">0</div>
+                        : `<div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; width: 30px; padding: 14px 2px 6px 2px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.6;">
+                            <div style="background: #94a3b8; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 9px; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); border: 2px solid white;">${item.prefix}</div>
+                            <div style="font-size: 12px; font-weight: 900; color: #94a3b8;">0</div>
                         </div>`;
                     const arrowHtml = idx < sortedAgg.length - 1
-                        ? `<div style="display: flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0;">
+                        ? `<div style="display: flex; align-items: center; justify-content: center; width: 8px; flex-shrink: 0;">
                             <div style="width: 100%; height: 2px; background: #cbd5e1; position: relative;">
-                                <div style="position: absolute; right: -4px; top: -4px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 6px solid #cbd5e1;"></div>
+                                <div style="position: absolute; right: -2px; top: -3px; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid #cbd5e1;"></div>
                             </div>
                         </div>`
                         : '';
@@ -24452,7 +24423,7 @@ window.gerarMapaJuridicoPDF = function() {
         html2canvas(container, { 
             scale: 2, 
             useCORS: true, 
-            backgroundColor: "#f8fafc" 
+            backgroundColor: "#ffffff" 
         }).then(canvas => {
             const imgData = canvas.toDataURL("image/png");
             const { jsPDF } = window.jspdf;
