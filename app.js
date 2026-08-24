@@ -13657,36 +13657,38 @@ async function _loadZeroPaidTab_Impl() {
     row.className = rowClass.trim();
 
     let delayBadge = getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
+    let ccConfig = {};
     try {
       const customConfigStr = localStorage.getItem('crm_centros_custo_custom');
       if (customConfigStr) {
         const configMap = JSON.parse(customConfigStr);
-        let ccConfig = configMap[client.costCenterId] || {};
+        ccConfig = configMap[client.costCenterId] || {};
         if (!ccConfig.clausula_suspensiva_ativa && client.unitName) {
             const match = client.unitName.match(/^(\d{4,5})/);
             if (match && configMap[match[1]]) {
                 ccConfig = configMap[match[1]];
             }
         }
-        if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
-          delayBadge = `
-            <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
-              <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
-            </button>
-          `;
-        } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= 31) {
-          const statusKey = `crm_wesend_status_${client.saleId}`;
-          const currentStatus = localStorage.getItem(statusKey) || "Pendente";
-          if (currentStatus === "Pendente") {
-            delayBadge = `
-              <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
-                <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
-              </button>
-            `;
-          }
-        }
       }
     } catch (e) {}
+
+    if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
+      delayBadge = `
+        <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
+          <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
+        </button>
+      `;
+    } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= 31) {
+      const statusKey = `crm_wesend_status_${client.saleId}`;
+      const currentStatus = localStorage.getItem(statusKey) || "Pendente";
+      if (currentStatus === "Pendente") {
+        delayBadge = `
+          <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
+            <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
+          </button>
+        `;
+      }
+    }
     
     row.innerHTML = `
       <td style="text-align: center;"><span>${client.companyId}</span></td>

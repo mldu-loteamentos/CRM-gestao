@@ -142,14 +142,43 @@ window.loadConstrucoes = async function() {
         const { collection, query, where, getDocs } = window.firebaseCollections;
         const q = query(
             collection(window.firebaseDb, "construction_checks"),
-            where("customerId", "==", String(customerId)),
-            where("contractId", "in", Array.from(new Set([String(contractNumber), String(saleId)])))
+            where("customerId", "==", String(customerId))
         );
         
         const snapshot = await getDocs(q);
         const results = [];
+        
+        const validIds = new Set([String(contractNumber), String(saleId)]);
+        if (window.AnexosState && window.AnexosState.activeContract) {
+            if (window.AnexosState.activeContract.receivableBillId) validIds.add(String(window.AnexosState.activeContract.receivableBillId));
+            if (window.AnexosState.activeContract.id) validIds.add(String(window.AnexosState.activeContract.id));
+            if (window.AnexosState.activeContract.contractNumber) validIds.add(String(window.AnexosState.activeContract.contractNumber));
+            if (window.AnexosState.activeContract.saleCode) validIds.add(String(window.AnexosState.activeContract.saleCode));
+        }
+        
         snapshot.forEach(doc => {
-            results.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            let matches = false;
+            
+            if (validIds.has(String(data.contractId))) matches = true;
+            
+            if (!matches && data.contractKeys && Array.isArray(data.contractKeys)) {
+                for (let k of data.contractKeys) {
+                    if (validIds.has(String(k))) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Se a vistoria foi salva sem contractId válido (ex: erro no webhook ou form), exibe para o cliente.
+            if (!matches && (!data.contractId || data.contractId === "null" || data.contractId === "undefined" || String(data.contractId).trim() === "")) {
+                matches = true;
+            }
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
         });
         
         results.sort((a, b) => new Date(b.date) - new Date(a.date));
