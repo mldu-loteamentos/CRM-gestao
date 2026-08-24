@@ -1,4 +1,4 @@
-﻿// Lógica para a aba de Construção e Histórico de Vistorias
+// Lógica para a aba de Construção e Histórico de Vistorias
 
 window.ConstrucaoApp = {
     stages: ['Sem construção', 'Terraplanagem', 'Alicerce', 'Apenas muro', 'Altura de laje', 'Telhado', 'Casa pronta sem acabamento', 'Casa pronta'],
@@ -140,6 +140,8 @@ window.loadConstrucoes = async function() {
 
     try {
         const { collection, query, where, getDocs } = window.firebaseCollections;
+
+        // Busca em construction_checks (inspeções manuais do CRM)
         const qStr = query(
             collection(window.firebaseDb, "construction_checks"),
             where("customerId", "==", String(customerId))
@@ -148,13 +150,28 @@ window.loadConstrucoes = async function() {
             collection(window.firebaseDb, "construction_checks"),
             where("customerId", "==", Number(customerId))
         );
+
+        // Busca em vistorias (vistoriador via link externo)
+        const qVistStr = query(
+            collection(window.firebaseDb, "vistorias"),
+            where("customerId", "==", String(customerId))
+        );
+        const qVistNum = query(
+            collection(window.firebaseDb, "vistorias"),
+            where("customerId", "==", Number(customerId))
+        );
         
-        const [snapStr, snapNum] = await Promise.all([getDocs(qStr), getDocs(qNum)]);
+        const [snapStr, snapNum, snapVistStr, snapVistNum] = await Promise.all([
+            getDocs(qStr), getDocs(qNum), getDocs(qVistStr), getDocs(qVistNum)
+        ]);
+
         const snapshot = [];
-        snapStr.forEach(d => snapshot.push(d));
-        snapNum.forEach(d => {
-            if (!snapshot.find(existing => existing.id === d.id)) snapshot.push(d);
-        });
+        const seenIds = new Set();
+        const addUnique = (d) => { if (!seenIds.has(d.id)) { seenIds.add(d.id); snapshot.push(d); } };
+        snapStr.forEach(addUnique);
+        snapNum.forEach(addUnique);
+        snapVistStr.forEach(addUnique);
+        snapVistNum.forEach(addUnique);
         
         const results = [];
         
@@ -165,7 +182,18 @@ window.loadConstrucoes = async function() {
             if (window.AnexosState.activeContract.contractNumber) validIds.add(String(window.AnexosState.activeContract.contractNumber));
             if (window.AnexosState.activeContract.saleCode) validIds.add(String(window.AnexosState.activeContract.saleCode));
         }
+        // Adicionar também o titulo a receber via AppState.sales
+        if (typeof AppState !== 'undefined' && AppState.sales) {
+            const saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+            if (saleObj) {
+                if (saleObj.receivableBillId) validIds.add(String(saleObj.receivableBillId));
+                if (saleObj.contractNumber) validIds.add(String(saleObj.contractNumber));
+                if (saleObj.saleCode) validIds.add(String(saleObj.saleCode));
+            }
+        }
         
+        console.log('[Construção] IDs válidos para matching:', Array.from(validIds));
+
         snapshot.forEach(doc => {
             const data = doc.data();
             let matches = false;
@@ -187,11 +215,11 @@ window.loadConstrucoes = async function() {
             }
             
             if (matches) {
-                results.push({ id: doc.id, ...data });
+                results.push({ id: doc.id, _source: data.estagioObra ? 'vistoria' : 'check', ...data });
             }
         });
         
-        results.sort((a, b) => new Date(b.date) - new Date(a.date));
+        results.sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
         window.ConstrucaoApp.currentChecks = results;
         
         renderConstrucaoHistory(results);

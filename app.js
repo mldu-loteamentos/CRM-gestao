@@ -3844,7 +3844,7 @@ document.addEventListener("click", function(e) {
       <div class="kpi-card clients-crit">
         <div class="kpi-info">
           <h3>Clientes em Atraso</h3>
-          <div class="kpi-value">${subjudiceList.length}</div>
+          <div class="kpi-value">${subTotalClients.size}</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
       </div>
@@ -17124,11 +17124,18 @@ window.updateJudFaseDropdown = function() {
     const rootItems = sorted.filter(e => !e.parentId);
     
     const buildOptions = (node, prefix) => {
-        let optHtml = `<option value="${node.nome}" data-dias="${node.dias}">${prefix}${node.nome}</option>`;
         const children = sorted.filter(e => e.parentId === node.id);
-        children.forEach(c => {
-            optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;â†³ ");
-        });
+        const hasChildren = children.length > 0;
+        
+        let optHtml;
+        if (hasChildren) {
+            optHtml = `<option value="" disabled style="font-weight:700; color:#374151; background:#f3f4f6;">${prefix}${node.nome}</option>`;
+            children.forEach(c => {
+                optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;â†³ ");
+            });
+        } else {
+            optHtml = `<option value="${node.nome}" data-dias="${node.dias || 0}">${prefix}${node.nome}</option>`;
+        }
         return optHtml;
     };
     
@@ -24354,7 +24361,7 @@ window.gerarMapaJuridicoPDF = function() {
                     </div>
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                         <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes em Atraso</div>
-                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${totalClients}</div>
+                        <div style="color: #0f172a; font-size: 20px; font-weight: 800;">${new Set(window._subjudiceList.map(c => c.customerId)).size}</div>
                     </div>
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 15px 20px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                         <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Títulos Vencidos</div>
@@ -24366,28 +24373,31 @@ window.gerarMapaJuridicoPDF = function() {
                     </div>
                 </div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px;">
-                ${sortedAgg.map((item, idx) => `
-                    <div style="background: white; border: 2px solid ${item.count > 0 ? '#10b981' : '#e2e8f0'}; border-radius: 8px; width: 125px; padding: 25px 10px 15px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative;">
-                        <div style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">
-                            ${item.prefix}
-                        </div>
-                        <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes</div>
-                        <div style="font-size: 22px; font-weight: 900; color: #0f172a;">${item.count}</div>
-                        
-                        <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
-                        
-                        <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor (R$)</div>
-                        <div style="font-size: 13px; font-weight: 800; color: ${item.value > 0 ? '#ef4444' : '#64748b'};">${fmtBRL(item.value)}</div>
-                    </div>
-                    ${idx < sortedAgg.length - 1 ? `
-                    <div style="display: flex; align-items: center; justify-content: center; width: 20px;">
-                        <div style="width: 100%; height: 2px; background: #cbd5e1; position: relative;">
-                            <div style="position: absolute; right: -4px; top: -4px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 6px solid #cbd5e1;"></div>
-                        </div>
-                    </div>
-                    ` : ''}
-                `).join('')}
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; margin-bottom: 40px; justify-content: flex-start; padding-top: 20px; align-items: center;">
+                ${sortedAgg.map((item, idx) => {
+                    const isActive = item.count > 0;
+                    const cardHtml = isActive
+                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 120px; padding: 25px 10px 15px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                            <div style="background: #10b981; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">${item.prefix}</div>
+                            <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes</div>
+                            <div style="font-size: 22px; font-weight: 900; color: #0f172a;">${item.count}</div>
+                            <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
+                            <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor (R$)</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #ef4444;">${fmtBRL(item.value)}</div>
+                        </div>`
+                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 52px; padding: 18px 4px 10px 4px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
+                            <div style="background: #94a3b8; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; position: absolute; top: -13px; left: 50%; transform: translateX(-50%); border: 2px solid #f8fafc;">${item.prefix}</div>
+                            <div style="font-size: 16px; font-weight: 900; color: #94a3b8;">0</div>
+                        </div>`;
+                    const arrowHtml = idx < sortedAgg.length - 1
+                        ? `<div style="display: flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0;">
+                            <div style="width: 100%; height: 2px; background: #cbd5e1; position: relative;">
+                                <div style="position: absolute; right: -4px; top: -4px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 6px solid #cbd5e1;"></div>
+                            </div>
+                        </div>`
+                        : '';
+                    return cardHtml + arrowHtml;
+                }).join('')}
             </div>
             <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 <h3 style="margin: 0 0 15px 0; color: #0f172a; font-size: 16px; font-weight: 700;">Legenda das Etapas</h3>
