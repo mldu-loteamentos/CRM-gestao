@@ -24253,7 +24253,7 @@ window.testarZerarFila = function() {
 };
 
 window.gerarMapaJuridicoPDF = function() {
-    if (!window.subjudiceClients || window.subjudiceClients.length === 0) {
+    if (!window._subjudiceList || window._subjudiceList.length === 0) {
         alert("NÃ£o hÃ¡ clientes no Sub Judice para gerar o mapa.");
         return;
     }
@@ -24299,7 +24299,7 @@ window.gerarMapaJuridicoPDF = function() {
         let totalDaysDelay = 0;
         let clientsWithDelay = 0;
 
-        window.subjudiceClients.forEach(client => {
+        window._subjudiceList.forEach(client => {
             const cid = String(client.customerId);
             const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
             const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");

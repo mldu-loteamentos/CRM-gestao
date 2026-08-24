@@ -1,4 +1,4 @@
-// Lógica para a aba de Construção e Histórico de Vistorias
+﻿// Lógica para a aba de Construção e Histórico de Vistorias
 
 window.ConstrucaoApp = {
     stages: ['Sem construção', 'Terraplanagem', 'Alicerce', 'Apenas muro', 'Altura de laje', 'Telhado', 'Casa pronta sem acabamento', 'Casa pronta'],
@@ -859,3 +859,40 @@ window.deleteNovaVistoria = async function(id) {
 setTimeout(() => {
     window.ConstrucaoApp.init();
 }, 500);
+
+window.debugConstrucaoData = async function() {
+    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
+    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
+    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+    if (!saleId && window.AnexosState && window.AnexosState.activeContract) saleId = window.AnexosState.activeContract.id;
+    if (!saleId && typeof AppState !== 'undefined' && AppState.sales && AppState.sales.length > 0) saleId = AppState.sales[0].id;
+    
+    if (!customerId) return alert('Cliente não selecionado!');
+    
+    let contractNumber = saleId;
+    if (window.AnexosState && window.AnexosState.activeContract) {
+        contractNumber = window.AnexosState.activeContract.contractNumber || window.AnexosState.activeContract.id || saleId;
+    }
+
+    try {
+        const { collection, query, where, getDocs } = window.firebaseCollections;
+        const qStr = query(collection(window.firebaseDb, 'construction_checks'), where('customerId', '==', String(customerId)));
+        const qNum = query(collection(window.firebaseDb, 'construction_checks'), where('customerId', '==', Number(customerId)));
+        const [snapStr, snapNum] = await Promise.all([getDocs(qStr), getDocs(qNum)]);
+        
+        const snapshot = [];
+        snapStr.forEach(d => snapshot.push({ id: d.id, ...d.data() }));
+        snapNum.forEach(d => { if (!snapshot.find(existing => existing.id === d.id)) snapshot.push({ id: d.id, ...d.data() }); });
+        
+        let validIdsStr = Array.from(new Set([String(contractNumber), String(saleId)])).join(', ');
+        if (window.AnexosState && window.AnexosState.activeContract) {
+            validIdsStr += ' (billId: ' + window.AnexosState.activeContract.receivableBillId + ')';
+        }
+
+        const debugInfo = snapshot.map(s => ID_VISTORIA:  | CONTRACT_ID_DB: ).join('\\n');
+        alert(DEBUG VISTORIAS:\\n\\nCustomerId: \\nSaleId esperado: \\nValidIds na Busca: \\n\\nVistorias no Banco para este cliente:\\n);
+    } catch(e) {
+        alert('Erro ao depurar: ' + e.message);
+    }
+};
