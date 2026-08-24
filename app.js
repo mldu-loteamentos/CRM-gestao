@@ -3816,19 +3816,20 @@ document.addEventListener("click", function(e) {
   // --- SUB JUDICE KPIs ---
   let subTotalOverdue = 0;
   let subTotalClients = new Set();
-  let subTotalBills = 0;
+  let subBillIds = new Set();
   let subMaxDelay = 0;
   let subSumDelay = 0;
 
   subjudiceList.forEach(c => {
     subTotalOverdue += (c.overdueValue + c.overdueCharges);
     subTotalClients.add(c.customerId);
-    subTotalBills += (c.billCount || 0);
+    if (c.billIds) c.billIds.forEach(id => subBillIds.add(id));
     if (c.maxDaysDelay > subMaxDelay) subMaxDelay = c.maxDaysDelay;
     subSumDelay += c.maxDaysDelay;
   });
 
-  const subAvgDelay = subTotalClients.size > 0 ? Math.round(subSumDelay / subjudiceList.length) : 0;
+  const subTotalBills = subBillIds.size;
+  const subAvgDelay = subjudiceList.length > 0 ? Math.round(subSumDelay / subjudiceList.length) : 0;
 
   const kpiContainer = document.getElementById("subjudice-kpi-grid");
   if (kpiContainer) {
@@ -3843,7 +3844,7 @@ document.addEventListener("click", function(e) {
       <div class="kpi-card clients-crit">
         <div class="kpi-info">
           <h3>Clientes em Atraso</h3>
-          <div class="kpi-value">${subTotalClients.size}</div>
+          <div class="kpi-value">${subjudiceList.length}</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
       </div>
@@ -24266,14 +24267,18 @@ window.gerarMapaJuridicoPDF = function() {
         
         let topIndex = 1;
         allStages.filter(s => !s.parentId).forEach(s => {
+            const stageName = s.nome || s.name || '';
+            if (!stageName) return;
             prefixMap[s.id] = String(topIndex);
-            nameMap[s.name] = { prefix: String(topIndex), name: s.name, id: s.id, days: s.days || 0, order: topIndex };
+            nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex };
             
             let childIndex = 1;
             allStages.filter(child => child.parentId === s.id).forEach(child => {
+                const childName = child.nome || child.name || '';
+                if (!childName) return;
                 const childPrefix = `${topIndex}.${childIndex}`;
                 prefixMap[child.id] = childPrefix;
-                nameMap[child.name] = { prefix: childPrefix, name: child.name, id: child.id, days: child.days || 0, order: topIndex + (childIndex/100) };
+                nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100) };
                 childIndex++;
             });
             topIndex++;
