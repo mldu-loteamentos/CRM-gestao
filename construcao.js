@@ -1,4 +1,4 @@
-// Lógica para a aba de Construção e Histórico de Vistorias
+﻿// Lógica para a aba de Construção e Histórico de Vistorias
 
 window.ConstrucaoApp = {
     stages: ['Sem construção', 'Terraplanagem', 'Alicerce', 'Apenas muro', 'Altura de laje', 'Telhado', 'Casa pronta sem acabamento', 'Casa pronta'],
@@ -822,7 +822,7 @@ window.saveNovaVistoria = async function() {
         };
 
         if (editId) {
-            await updateDoc(doc(window.firebaseDb, "construction_checks", editId), checkData);
+            const editCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === editId); const collName = (editCheck && editCheck._source === 'vistoria') ? 'vistorias' : 'construction_checks'; await updateDoc(doc(window.firebaseDb, collName, editId), checkData);
         } else {
             checkData.createdAt = new Date().toISOString();
             await addDoc(collection(window.firebaseDb, "construction_checks"), checkData);
@@ -888,7 +888,7 @@ window.deleteNovaVistoria = async function(id) {
                 return;
             }
             
-            await deleteDoc(doc(window.firebaseDb, "construction_checks", id));
+            const collName = check._source === 'vistoria' ? 'vistorias' : 'construction_checks'; await deleteDoc(doc(window.firebaseDb, collName, id));
             window.loadConstrucoes();
         } catch(err) {
             console.error("Erro ao excluir vistoria:", err);
