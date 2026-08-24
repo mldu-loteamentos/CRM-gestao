@@ -24276,18 +24276,22 @@ window.gerarMapaJuridicoPDF = function() {
         allStages.filter(s => !s.parentId).forEach(s => {
             const stageName = s.nome || s.name || '';
             if (!stageName) return;
-            prefixMap[s.id] = String(topIndex);
-            nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex };
             
             let childIndex = 1;
-            allStages.filter(child => child.parentId === s.id).forEach(child => {
-                const childName = child.nome || child.name || '';
-                if (!childName) return;
-                const childPrefix = `${topIndex}.${childIndex}`;
-                prefixMap[child.id] = childPrefix;
-                nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100) };
-                childIndex++;
-            });
+            const children = allStages.filter(child => child.parentId === s.id);
+            if (children.length > 0) {
+                children.forEach(child => {
+                    const childName = child.nome || child.name || '';
+                    if (!childName) return;
+                    const childPrefix = `${topIndex}.${childIndex}`;
+                    prefixMap[child.id] = childPrefix;
+                    nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100) };
+                    childIndex++;
+                });
+            } else {
+                prefixMap[s.id] = String(topIndex);
+                nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex };
+            }
             topIndex++;
         });
 
@@ -24377,15 +24381,15 @@ window.gerarMapaJuridicoPDF = function() {
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
-                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 120px; padding: 25px 10px 15px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                        ? `<div style="background: white; border: 2px solid #10b981; border-radius: 8px; width: 96px; padding: 25px 6px 15px 6px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
                             <div style="background: #10b981; color: white; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; position: absolute; top: -17px; left: 50%; transform: translateX(-50%); border: 3px solid #f8fafc;">${item.prefix}</div>
                             <div style="color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Clientes</div>
-                            <div style="font-size: 22px; font-weight: 900; color: #0f172a;">${item.count}</div>
+                            <div style="font-size: 20px; font-weight: 900; color: #0f172a;">${item.count}</div>
                             <div style="height: 1px; background: #e2e8f0; margin: 12px 0;"></div>
                             <div style="color: #64748b; font-size: 10px; text-transform: uppercase; font-weight: 700; margin-bottom: 5px;">Valor (R$)</div>
                             <div style="font-size: 11px; font-weight: 800; color: #ef4444;">${fmtBRL(item.value)}</div>
                         </div>`
-                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 52px; padding: 18px 4px 10px 4px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
+                        : `<div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 6px; width: 47px; padding: 18px 2px 10px 2px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.7;">
                             <div style="background: #94a3b8; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; position: absolute; top: -13px; left: 50%; transform: translateX(-50%); border: 2px solid #f8fafc;">${item.prefix}</div>
                             <div style="font-size: 16px; font-weight: 900; color: #94a3b8;">0</div>
                         </div>`;
