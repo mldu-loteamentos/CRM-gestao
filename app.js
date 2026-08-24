@@ -1482,6 +1482,28 @@ window.applyPermissions = function(profileName) {
       item.style.display = 'none';
     });
   }
+
+  // --- SOBREPOSIÇÕES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
+  const opType = AppState.currentUser ? AppState.currentUser.operator_type : '';
+  
+  // 1. Externo (Terceirizado) não vê menu Sub Judice
+  if (opType === 'externo') {
+    const subJudiceMenu = document.querySelector('li[data-module="sub_fin_cr_sub_judice_acessar"]');
+    if (subJudiceMenu) subJudiceMenu.style.display = 'none';
+  }
+  
+  // 2. Advogado vê APENAS Financeiro -> Contas a Receber -> Sub Judice
+  if (opType === 'advogado') {
+    const allModules = document.querySelectorAll('li[data-module]');
+    allModules.forEach(item => {
+      const modKey = item.getAttribute('data-module');
+      if (modKey === 'mod_fin' || modKey === 'sub_fin_cr' || modKey === 'sub_fin_cr_sub_judice_acessar') {
+        item.style.display = '';
+      } else {
+        item.style.display = 'none';
+      }
+    });
+  }
 }
 
 // ----------------------------------------------------
@@ -4564,51 +4586,87 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       updateWhatsappAlertButtonState();
   }
   switchFichaTab('ficha-cadastro');
-  // Conditionally hide tabs if coming from Sub Judice
+  // Conditionally hide tabs if coming from Sub Judice or based on Role
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
   const isSubjudice = currentOriginTab === 'subjudice';
   
-  // Abas superiores
-  const fichaAnexosBtn = document.querySelector('button[data-target="ficha-anexos"]');
-  if (fichaAnexosBtn) fichaAnexosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
-  
-  const fichaScoreBtn = document.querySelector('button[data-target="ficha-score"]');
-  if (fichaScoreBtn) fichaScoreBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+  const opType = AppState.currentUser ? AppState.currentUser.operator_type : '';
+  const isAdvogado = (opType === 'advogado');
+  const isInternoOuApoio = (opType === 'interno' || opType === 'apoio_juridico');
 
-  // Ocultar algumas abas específicas no Sub Judice
-  const ocorrenciasBtn = document.querySelector('button[data-target="tab-ocorrencias"]');
-  if (ocorrenciasBtn) ocorrenciasBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+  // --- Abas Superiores ---
+  const fichaAnexosBtn = document.querySelector('button[data-target="ficha-anexos"]');
+  const fichaScoreBtn = document.querySelector('button[data-target="ficha-score"]');
+  const fichaConjugeBtn = document.querySelector('button[data-target="ficha-conjuge"]');
+  const fichaComplementoBtn = document.querySelector('button[data-target="ficha-complemento"]');
+  const fichaProcuradoresBtn = document.querySelector('button[data-target="ficha-procuradores"]');
   
-  const boletosBtn = document.querySelector('button[data-target="tab-boletos"]');
-  if (boletosBtn) boletosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+  if (isAdvogado) {
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'none';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'none';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'none';
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = 'none';
+      if (fichaScoreBtn) fichaScoreBtn.style.display = 'none';
+  } else if (isInternoOuApoio) {
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = 'inline-block';
+      if (fichaScoreBtn) fichaScoreBtn.style.display = 'inline-block';
+  } else {
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+      if (fichaScoreBtn) fichaScoreBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+  }
+
+  // --- Abas Inferiores ---
+  const bottomTabsIds = [
+      'tab-contrato', 'tab-outros', 'tab-valor-quitacao', 'tab-simulacao-vencidas',
+      'tab-ocorrencias', 'tab-boletos', 'tab-renegociacoes', 'tab-vizinhos',
+      'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
+  ];
   
-  const vizinhosBtn = document.querySelector('button[data-target="tab-vizinhos"]');
-  if (vizinhosBtn) vizinhosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+  // Abas permitidas para o advogado: Contrato de Venda | Valor quitação | Simulação vencidas | Construção
+  const allowedAdvogadoTabs = ['tab-contrato', 'tab-valor-quitacao', 'tab-simulacao-vencidas', 'tab-construcao'];
   
-  const outrosBtn = document.querySelector('button[data-target="tab-outros"]');
-  if (outrosBtn) outrosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
-  
-  const comportamentoBtn = document.querySelector('button[data-target="tab-comportamento"]');
-  if (comportamentoBtn) comportamentoBtn.style.display = isSubjudice ? 'none' : 'inline-block';
-  
+  bottomTabsIds.forEach(tabId => {
+      const btn = document.querySelector(`button[data-target="${tabId}"]`);
+      if (!btn) return;
+      if (isAdvogado) {
+          btn.style.display = allowedAdvogadoTabs.includes(tabId) ? 'inline-block' : 'none';
+      } else if (isInternoOuApoio) {
+          btn.style.display = 'inline-block';
+      } else {
+          // Logica padrao antiga de Sub Judice
+          const hideInSub = ['tab-ocorrencias', 'tab-boletos', 'tab-vizinhos', 'tab-outros', 'tab-comportamento'];
+          btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : 'inline-block';
+      }
+  });
+
+  // Botões do Rodapé de Abas
   const irBtn = document.getElementById('btn-informe-rendimentos');
   if (irBtn) {
-    irBtn.style.display = isSubjudice ? 'none' : 'inline-flex';
+    if (isAdvogado) irBtn.style.display = 'none';
+    else if (isInternoOuApoio) irBtn.style.display = 'inline-flex';
+    else irBtn.style.display = isSubjudice ? 'none' : 'inline-flex';
   }
   
   const extratoBtn = document.getElementById('btn-visualizar-extrato-ativo');
   if (extratoBtn) {
-    extratoBtn.style.display = 'flex'; // Sempre mostra
+    extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluído pelo requisito)
   }
   
+  // Abas exclusivas do Judiciário
   const cobrancaJudicialBtn = document.getElementById('btn-tab-cobranca-judicial');
   if (cobrancaJudicialBtn) {
-    cobrancaJudicialBtn.style.display = isSubjudice ? 'inline-flex' : 'none';
+    cobrancaJudicialBtn.style.display = (isSubjudice || isAdvogado) ? 'inline-flex' : 'none';
   }
   
   const anexosJuridicoBtn = document.getElementById('btn-anexos-juridico');
   if (anexosJuridicoBtn) {
-    anexosJuridicoBtn.style.display = isSubjudice ? 'flex' : 'none';
+    anexosJuridicoBtn.style.display = (isSubjudice || isAdvogado) ? 'flex' : 'none';
   }
 
   if (isSubjudice) {

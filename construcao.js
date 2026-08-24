@@ -849,3 +849,26 @@ window.deleteNovaVistoria = async function(id) {
 setTimeout(() => {
     window.ConstrucaoApp.init();
 }, 500);
+
+// SCRIPT TEMPORÁRIO DE CORREÇÃO (ID: gpT9ymb3dxxzlBA2Vuya)
+setTimeout(async () => {
+    try {
+        const { collection, doc, getDoc, setDoc, deleteDoc } = window.firebaseCollections || {};
+        if (!getDoc) return;
+        const docRef = doc(window.firebaseDb, 'vistorias', 'gpT9ymb3dxxzlBA2Vuya');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            const tituloKey = data.B || '12781';
+            data.tituloKey = tituloKey;
+            data.contractId = tituloKey;
+            data.contractKeys = [tituloKey];
+            if (data.enviadoEm) data.date = data.enviadoEm;
+            
+            await setDoc(doc(window.firebaseDb, 'construction_checks', 'gpT9ymb3dxxzlBA2Vuya'), data);
+            await deleteDoc(docRef);
+            console.log('[Fix Vistoria] Documento 12781 corrigido e movido para construction_checks com sucesso!');
+        }
+    } catch(e) {
+        console.error('[Fix Vistoria] Erro ao corrigir doc:', e);
+}, 5000);

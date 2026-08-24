@@ -152,7 +152,7 @@ window.VerificarConstrucaoApp = {
                             <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">Incluir Sub Judice</span>
                         </label>
                         <style>
-                            #vc-include-subjudice:checked + span { background-color: #0f766e; }
+                            #vc-include-subjudice:checked + span { background-color: #0f766e !important; }
                             #vc-include-subjudice:checked + span .vc-toggle-knob { transform: translateX(14px); }
                         </style>
                     </div>
