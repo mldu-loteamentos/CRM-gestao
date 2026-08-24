@@ -1,4 +1,4 @@
-// LÃ³gica Central do CRM de CobranÃ§a Moura Leite
+// LÃƒÂ³gica Central do CRM de CobranÃƒÂ§a Moura Leite
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
@@ -37,7 +37,7 @@
     return _origFetch.apply(this, args);
   };
 })();
-// Override lucide.createIcons para evitar que Ã­cones invÃ¡lidos travem o app
+// Override lucide.createIcons para evitar que ÃƒÂ­cones invÃƒÂ¡lidos travem o app
 if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
   const originalCreateIcons = lucide.createIcons;
   lucide.createIcons = function(options) {
@@ -56,16 +56,16 @@ window.updateOperatorTabsUI = function() {
   
   const filaTabs = document.getElementById("operator-tabs-container");
   if (filaTabs) {
-     // Remover botÃµes de operador existentes
+     // Remover botÃƒÂµes de operador existentes
      const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
      existingOpBtns.forEach(btn => btn.remove());
      
-     // Criar e inserir novos botÃµes no inÃ­cio
+     // Criar e inserir novos botÃƒÂµes no inÃƒÂ­cio
      let opBtnsHtml = `<button class="operator-tab-btn active" data-operator="TODOS">TODOS</button>`;
      dynOps.forEach(op => {
          opBtnsHtml += `<button class="operator-tab-btn" data-operator="${op}">${op}</button>`;
      });
-     opBtnsHtml += `<button class="operator-tab-btn" data-operator="NÃƒO ATRIBUÃDO">NÃƒO ATRIBUÃDO</button>`;
+     opBtnsHtml += `<button class="operator-tab-btn" data-operator="NÃƒÆ’O ATRIBUÃƒÂDO">NÃƒÆ’O ATRIBUÃƒÂDO</button>`;
      
      filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
@@ -107,7 +107,7 @@ window.updateOperatorTabsUI = function() {
      dynOps.forEach(op => {
          agendaSelect.innerHTML += `<option value="${op}">${op}</option>`;
      });
-     agendaSelect.innerHTML += `<option value="NÃƒO ATRIBUÃDO">NÃƒO ATRIBUÃDO</option>`;
+     agendaSelect.innerHTML += `<option value="NÃƒÆ’O ATRIBUÃƒÂDO">NÃƒÆ’O ATRIBUÃƒÂDO</option>`;
   }
 };
 
@@ -115,7 +115,7 @@ document.addEventListener("DOMContentLoaded", () => {
     window.updateOperatorTabsUI();
 });
 
-// Estado Geral da AplicaÃ§Ã£o
+// Estado Geral da AplicaÃƒÂ§ÃƒÂ£o
 const AppState = {
   currentUser: null,
   defaultersList: [],
@@ -131,10 +131,10 @@ const AppState = {
   judNotes: JSON.parse(localStorage.getItem("crm_moura_jud_notes") || "{}"),
   weSendStatus: {}, // id_titulo -> status
   rules: JSON.parse(localStorage.getItem("crm_moura_rules") || "{}"), // regras cadastradas
-  selectedCompanies: [], // Multi-seleÃ§Ã£o empresa
-  selectedCostCenters: [], // Multi-seleÃ§Ã£o empreendimento
-  currentSortCol: 'maxDaysDelay', // Coluna de ordenaÃ§Ã£o padrÃ£o
-  currentSortDir: 'desc' // DireÃ§Ã£o de ordenaÃ§Ã£o padrÃ£o
+  selectedCompanies: [], // Multi-seleÃƒÂ§ÃƒÂ£o empresa
+  selectedCostCenters: [], // Multi-seleÃƒÂ§ÃƒÂ£o empreendimento
+  currentSortCol: 'maxDaysDelay', // Coluna de ordenaÃƒÂ§ÃƒÂ£o padrÃƒÂ£o
+  currentSortDir: 'desc' // DireÃƒÂ§ÃƒÂ£o de ordenaÃƒÂ§ÃƒÂ£o padrÃƒÂ£o
 };
 window.AppState = AppState;
 
@@ -246,7 +246,7 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
             progEl.style.width = `10%`;
         }
 
-        // Se for force manual (clicou no botÃ£o), primeiro chama o worker para buscar Sienge -> Firebase
+        // Se for force manual (clicou no botÃƒÂ£o), primeiro chama o worker para buscar Sienge -> Firebase
         if (force && !quiet) {
             if (textEl && progEl) {
                 textEl.innerText = `Sincronizando Sienge -> Firebase...`;
@@ -260,7 +260,7 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
         }
         
         if (!window.firebaseDb || !window.firebaseCollections) {
-            throw new Error("Firebase SDK nÃ£o inicializado.");
+            throw new Error("Firebase SDK nÃƒÂ£o inicializado.");
         }
 
         if (textEl && progEl) {
@@ -268,7 +268,7 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
             progEl.style.width = `60%`;
         }
 
-        // Baixa a base completa do Firebase (rÃ¡pido e nÃ£o depende da lentidÃ£o do Sienge)
+        // Baixa a base completa do Firebase (rÃƒÂ¡pido e nÃƒÂ£o depende da lentidÃƒÂ£o do Sienge)
         const colRef = window.firebaseCollections.collection(window.firebaseDb, 'sienge_customers');
         const snapshot = await window.firebaseCollections.getDocs(colRef);
         
@@ -315,7 +315,7 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
                 totalCount: tempData.length
             });
         } catch(e) {
-            console.warn("NÃ£o foi possÃ­vel salvar cache no IndexedDB.", e);
+            console.warn("NÃƒÂ£o foi possÃƒÂ­vel salvar cache no IndexedDB.", e);
         }
         
     } catch(e) {
@@ -420,7 +420,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
     
     if (!window.GlobalCustomerCache || !window.GlobalCustomerCache.data) return;
     
-    // MÃ¡scara para Telefone
+    // MÃƒÂ¡scara para Telefone
     if (type === 'telefone') {
         const inputEl = document.getElementById('relacionamento-filter-telefone');
         if (inputEl && query && !window._maskingPhone) {
@@ -506,7 +506,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
         
         dropdown.innerHTML = '';
         matches.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        const topMatches = matches.slice(0, 500); // Exibe atÃ© 500 resultados para permitir busca completa
+        const topMatches = matches.slice(0, 500); // Exibe atÃƒÂ© 500 resultados para permitir busca completa
         
         if (topMatches.length === 0) {
             if (window.GlobalCustomerCache.status === 'loading') {
@@ -521,7 +521,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
                 item.style.color = '#64748b';
                 item.style.fontStyle = 'italic';
                 const perc = Math.min(100, Math.round(((window.GlobalCustomerCache.loadedCount || 0) / (window.GlobalCustomerCache.totalCount || 1)) * 100));
-                item.innerHTML = `<i data-lucide="loader-2" class="spin" style="width:14px; height:14px; vertical-align:middle; margin-right:6px;"></i> Cliente nÃ£o encontrado nos ${perc}% carregados. Aguarde o fim do download...`;
+                item.innerHTML = `<i data-lucide="loader-2" class="spin" style="width:14px; height:14px; vertical-align:middle; margin-right:6px;"></i> Cliente nÃƒÂ£o encontrado nos ${perc}% carregados. Aguarde o fim do download...`;
                 dropdown.appendChild(item);
                 if (typeof lucide !== 'undefined') lucide.createIcons();
             } else {
@@ -556,7 +556,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
                 } else if (type === 'email') {
                     inputEl.value = c.email || '';
                 }
-                // Se for telefone, nÃ£o substituÃ­mos o campo com o nome do cliente. Mantemos o que foi digitado.
+                // Se for telefone, nÃƒÂ£o substituÃƒÂ­mos o campo com o nome do cliente. Mantemos o que foi digitado.
                 dropdown.style.display = 'none';
                 
                 // Grava na memoria o ID do cliente em vez do CPF
@@ -568,19 +568,19 @@ window.handleDynamicCustomerSearch = function(query, type) {
         });
     }, 400);
 };
-// LÃ³gica das Abas do Cliente
+// LÃƒÂ³gica das Abas do Cliente
 function switchCustomerTab(tabId) {
   if (tabId === 'tab-quitacao' && AppState.isCurrentContractPaid) {
     alert(AppState.currentPayoffMsg);
     return;
   }
-  // Ocultar todos os painÃ©is
+  // Ocultar todos os painÃƒÂ©is
   document.querySelectorAll('.customer-tab-pane').forEach(pane => {
     pane.style.display = 'none';
     pane.classList.remove('active');
   });
   
-  // Remover active de todos os botÃµes
+  // Remover active de todos os botÃƒÂµes
   document.querySelectorAll('.customer-tab-btn').forEach(btn => {
     btn.classList.remove('active');
   });
@@ -624,7 +624,7 @@ function switchCustomerTab(tabId) {
             window.validateOccurrenceForm();
         }
         
-        // Limpar clone para nÃ£o preencher indevidamente em outras aberturas
+        // Limpar clone para nÃƒÂ£o preencher indevidamente em outras aberturas
         window.pendingOccurrenceClone = null;
     }
   }
@@ -650,7 +650,7 @@ function switchCustomerTab(tabId) {
   }
 }
 
-// LÃ³gica das Abas da Ficha Cadastral
+// LÃƒÂ³gica das Abas da Ficha Cadastral
 window.switchFichaTab = function(tabId) {
   document.querySelectorAll('.ficha-tab-pane').forEach(pane => {
     pane.style.display = 'none';
@@ -750,7 +750,7 @@ window.applyDynamicCityRules = function() {
 
   const cities = new Set();
   AppState.cachedCostCenters.forEach(cc => {
-    // Apenas centros de custo que comeÃ§am com "1", "2" ou "3" (Empreendimentos)
+    // Apenas centros de custo que comeÃƒÂ§am com "1", "2" ou "3" (Empreendimentos)
     if (cc && cc.name) {
       const codeStr = cc.code ? String(cc.code) : "";
       const nameStr = cc.name ? String(cc.name) : "";
@@ -767,11 +767,11 @@ window.applyDynamicCityRules = function() {
         city = cleanName.trim().toUpperCase();
       }
       
-      // Remover acentos para padronizar (ex: CERQUEIRA CÃ‰SAR -> CERQUEIRA CESAR)
+      // Remover acentos para padronizar (ex: CERQUEIRA CÃƒâ€°SAR -> CERQUEIRA CESAR)
       city = city.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
       
-      // Tratamento especial para Empreendimento 14201 (Terra do AraÃ§ari / AraÃ§ariguama)
-      if (String(cc.id) === "14201" || cleanName.toUpperCase().includes("ARAÃ‡ARI")) {
+      // Tratamento especial para Empreendimento 14201 (Terra do AraÃƒÂ§ari / AraÃƒÂ§ariguama)
+      if (String(cc.id) === "14201" || cleanName.toUpperCase().includes("ARAÃƒâ€¡ARI")) {
          city = "ARACARIGUAMA";
       }
       
@@ -795,19 +795,19 @@ window.applyDynamicCityRules = function() {
         operator: "OUTROS"
       };
     } else {
-      // Atualizar descricao sem o prefixo "Cidade: " caso jÃ¡ exista
+      // Atualizar descricao sem o prefixo "Cidade: " caso jÃƒÂ¡ exista
       AppState.rules[ruleId].desc = city;
     }
   });
 
-  // Remover regras antigas que nÃ£o sÃ£o de cidades ou que nÃ£o existem mais (ex: RESIDENCIAL AVARÃ‰ I sem hÃ­fen)
+  // Remover regras antigas que nÃƒÂ£o sÃƒÂ£o de cidades ou que nÃƒÂ£o existem mais (ex: RESIDENCIAL AVARÃƒâ€° I sem hÃƒÂ­fen)
   if (AppState.rules) {
     Object.keys(AppState.rules).forEach(key => {
       if (!key.startsWith("CID_") && key !== "filaConfig") {
         delete AppState.rules[key];
       } else if (!activeRuleIds.has(key)) {
         if (AppState.rules[key].operator === "OUTROS") {
-           delete AppState.rules[key]; // Remove cidades obsoletas que ficaram salvas no cache e nÃ£o tÃªm operador
+           delete AppState.rules[key]; // Remove cidades obsoletas que ficaram salvas no cache e nÃƒÂ£o tÃƒÂªm operador
         }
       }
     });
@@ -818,18 +818,18 @@ window.applyDynamicCityRules = function() {
 };
 
 window.extractCityFromCostCenter = function(idCCusto, ccName) {
-    if (!idCCusto && !ccName) return "NÃƒO INFORMADA";
+    if (!idCCusto && !ccName) return "NÃƒÆ’O INFORMADA";
     
     let city = "";
     if (ccName && ccName.includes('-')) {
         city = ccName.split('-')[0].trim().toUpperCase();
     }
     
-    if (String(idCCusto) === "14201" || (ccName && ccName.toUpperCase().includes("ARAÃ‡ARI"))) {
-       city = "ARAÃ‡ARIGUAMA";
+    if (String(idCCusto) === "14201" || (ccName && ccName.toUpperCase().includes("ARAÃƒâ€¡ARI"))) {
+       city = "ARAÃƒâ€¡ARIGUAMA";
     }
     
-    return city || "NÃƒO INFORMADA";
+    return city || "NÃƒÆ’O INFORMADA";
 };
 
 function getRuleOperator(ruleId, defaultOp, customerId = null) {
@@ -846,7 +846,7 @@ function getRuleOperator(ruleId, defaultOp, customerId = null) {
         }
         hash = Math.abs(hash);
         // Exclude dummy values from distribution
-        const validOps = op.filter(o => o !== "NÃƒO ATRIBUÃDO" && o !== "SEM CARTEIRA INADIMPLENTE");
+        const validOps = op.filter(o => o !== "NÃƒÆ’O ATRIBUÃƒÂDO" && o !== "SEM CARTEIRA INADIMPLENTE");
         if (validOps.length === 0) return defaultOp;
         return validOps[hash % validOps.length];
       }
@@ -882,7 +882,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     let cityOps = Array.isArray(op) ? op : [op];
     
     let candidateOps = cityOps.filter(o => {
-       if (o === "NÃƒO ATRIBUÃDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃƒO COBRAR" || o === "OUTROS") return false;
+       if (o === "NÃƒÆ’O ATRIBUÃƒÂDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃƒÆ’O COBRAR" || o === "OUTROS") return false;
        const normalizedO = o.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
        const u = users.find(user => {
            const sName = user.sienge_user ? user.sienge_user.toUpperCase().replace(/\./g, ' ').trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
@@ -898,7 +898,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     if (candidateOps.length === 0) {
         if (requiredType === 'interno_absoluto' || requiredType === 'interno') {
             const internalNames = users
-              .filter(u => u && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÃ‡A' && u.operator_type === 'interno' && u.status !== 'INATIVO')
+              .filter(u => u && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÃƒâ€¡A' && u.operator_type === 'interno' && u.status !== 'INATIVO')
               .map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : (u.name ? u.name.toUpperCase() : ''))
               .filter(Boolean);
             if (internalNames.length > 0) {
@@ -915,18 +915,18 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
         }
         
         if (requiredType === 'apoio_juridico') {
-            // Se nÃ£o encontrou Apoio JurÃ­dico na regra da cidade, pega o primeiro global como fallback
+            // Se nÃƒÂ£o encontrou Apoio JurÃƒÂ­dico na regra da cidade, pega o primeiro global como fallback
             const apoioGlobal = users.find(u => u.operator_type === 'apoio_juridico' && u.status !== 'INATIVO');
             if (apoioGlobal) {
                 return apoioGlobal.sienge_user ? apoioGlobal.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : apoioGlobal.name.toUpperCase();
             }
-            return defaultOp; // Se nÃ£o tem Apoio JurÃ­dico no sistema, fica nÃ£o atribuÃ­do
+            return defaultOp; // Se nÃƒÂ£o tem Apoio JurÃƒÂ­dico no sistema, fica nÃƒÂ£o atribuÃƒÂ­do
         }
         
-        candidateOps = cityOps.filter(o => o !== "NÃƒO ATRIBUÃDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃƒO COBRAR" && o !== "OUTROS");
+        candidateOps = cityOps.filter(o => o !== "NÃƒÆ’O ATRIBUÃƒÂDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃƒÆ’O COBRAR" && o !== "OUTROS");
         
-        // Se estamos buscando um interno (<30 dias) e nÃ£o achou na primeira passada, 
-        // filtramos para NÃƒO retornar a terceirizada de forma alguma
+        // Se estamos buscando um interno (<30 dias) e nÃƒÂ£o achou na primeira passada, 
+        // filtramos para NÃƒÆ’O retornar a terceirizada de forma alguma
         if (requiredType === 'interno') {
             const onlyInternals = candidateOps.filter(o => {
                const normalizedO = o.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -964,7 +964,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
 }
 
 // ----------------------------------------------------
-// 1. MOTOR DE REGRAS DE ATRIBUIÃ‡ÃƒO (Power Pivot SWITCH)
+// 1. MOTOR DE REGRAS DE ATRIBUIÃƒâ€¡ÃƒÆ’O (Power Pivot SWITCH)
 // ----------------------------------------------------
 function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
   const custId = client ? (client.id || client.customerId) : null;
@@ -981,7 +981,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
     else if (bill.unitId) idCCusto = bill.unitId.split('-')[1] || bill.unitId.split('-')[0].trim();
   }
   
-  // Regra DinÃ¢mica por Cidade do Empreendimento (prioridade Ãºnica agora)
+  // Regra DinÃƒÂ¢mica por Cidade do Empreendimento (prioridade ÃƒÂºnica agora)
   if (idCCusto) {
     let ccName = "";
     if (AppState.cachedCostCenters) {
@@ -993,9 +993,9 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
         city = ccName.split('-')[0].trim().toUpperCase();
     }
     
-    // Tratamento especial para Empreendimento 14201 (Terra do AraÃ§ari / AraÃ§ariguama)
-    if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃ‡ARI") || (sale && sale.unitId && String(sale.unitId).includes("14201"))) {
-       city = "ARAÃ‡ARIGUAMA";
+    // Tratamento especial para Empreendimento 14201 (Terra do AraÃƒÂ§ari / AraÃƒÂ§ariguama)
+    if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃƒâ€¡ARI") || (sale && sale.unitId && String(sale.unitId).includes("14201"))) {
+       city = "ARAÃƒâ€¡ARIGUAMA";
     }
     
     if (city) {
@@ -1025,26 +1025,26 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
     }
   }
 
-  return { operator: getRuleOperator("999", "OUTROS", custId), rule: "REGRA PADRÃƒO - Sem correspondÃªncia" };
+  return { operator: getRuleOperator("999", "OUTROS", custId), rule: "REGRA PADRÃƒÆ’O - Sem correspondÃƒÂªncia" };
 }
 
 // ----------------------------------------------------
-// 2. CONTROLE DO FLUXO SPA (ABAS E CONTEÃšDO)
+// 2. CONTROLE DO FLUXO SPA (ABAS E CONTEÃƒÅ¡DO)
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
-  // Guardar aba ativa para o voltar (sem session storage para nÃ£o persistir no F5)
+  // Guardar aba ativa para o voltar (sem session storage para nÃƒÂ£o persistir no F5)
   window.activeAppTab = tabId;
 
   if (tabId !== 'relacionamento_gestao' && typeof window.clearRelacionamento === 'function') {
       window.clearRelacionamento();
   }
 
-  // Esconder todas as seÃ§Ãµes e abas
+  // Esconder todas as seÃƒÂ§ÃƒÂµes e abas
   document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
   document.querySelectorAll("#view-customer-details, #view-renegotiation, #view-distrato").forEach(view => view.style.display = "none");
   document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
   
-  // Fechar dropdowns de multi-seleÃ§Ã£o
+  // Fechar dropdowns de multi-seleÃƒÂ§ÃƒÂ£o
   document.querySelectorAll(".multi-select-content").forEach(el => el.classList.remove("show"));
 
   // Mostrar aba solicitada
@@ -1079,33 +1079,33 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 
   // Ajustar Topbar Title
   const titleMap = {
-    dashboard: "Fila de CobranÃ§a",
+    dashboard: "Fila de CobranÃƒÂ§a",
     "dashboard-comercial": "Dashboard Comercial",
     agenda: "Agenda do Operador",
     zeropaid: "Clientes 0% Pago (Sem Receita)",
-    wesend: "NotificaÃ§Ãµes",
-    preambles: "PreÃ¢mbulos & ConfiguraÃ§Ãµes",
+    wesend: "NotificaÃƒÂ§ÃƒÂµes",
+    preambles: "PreÃƒÂ¢mbulos & ConfiguraÃƒÂ§ÃƒÂµes",
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
-    "config-tags": "ConfiguraÃ§Ã£o de TAGs",
-    "config-users": "ConfiguraÃ§Ã£o de UsuÃ¡rios",
-    "doc-padrao": "Documentos PadrÃµes",
+    "config-tags": "ConfiguraÃƒÂ§ÃƒÂ£o de TAGs",
+    "config-users": "ConfiguraÃƒÂ§ÃƒÂ£o de UsuÃƒÂ¡rios",
+    "doc-padrao": "Documentos PadrÃƒÂµes",
     subjudice: "Sub Judice",
-    "regras-negociacao": "Regras de NegociaÃ§Ã£o",
-    "regras-cobranca": "Regras de CobranÃ§a",
-    "prestacao-contas": "PrestaÃ§Ã£o de Contas",
-    "parametrizacoes": "GestÃ£o de Empresas",
-    "centros-custo": "GestÃ£o de Centros de Custo",
+    "regras-negociacao": "Regras de NegociaÃƒÂ§ÃƒÂ£o",
+    "regras-cobranca": "Regras de CobranÃƒÂ§a",
+    "prestacao-contas": "PrestaÃƒÂ§ÃƒÂ£o de Contas",
+    "parametrizacoes": "GestÃƒÂ£o de Empresas",
+    "centros-custo": "GestÃƒÂ£o de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",
     "upload-kmz": "Upload de KMZ",
-    "upload-mapa": "Upload de Projeto UrbanÃ­stico",
-    "construcao-fiscal": "RetenÃ§Ãµes Fiscais (PIS / COFINS)",
-    "plano-financeiro": "Plano Financeiro e VisÃµes",
+    "upload-mapa": "Upload de Projeto UrbanÃƒÂ­stico",
+    "construcao-fiscal": "RetenÃƒÂ§ÃƒÂµes Fiscais (PIS / COFINS)",
+    "plano-financeiro": "Plano Financeiro e VisÃƒÂµes",
     "indexadores": "Indexadores Financeiros",
-    "compromissario_prefeitura": "CompromissÃ¡rio (Prefeituras)",
-    "compromissario_associacoes": "CompromissÃ¡rio (AssociaÃ§Ãµes)",
+    "compromissario_prefeitura": "CompromissÃƒÂ¡rio (Prefeituras)",
+    "compromissario_associacoes": "CompromissÃƒÂ¡rio (AssociaÃƒÂ§ÃƒÂµes)",
     "relacionamento_gestao": "Relacionamento com Cliente",
-    "condicoes-pagamento": "CondiÃ§Ãµes de Pagamento"
+    "condicoes-pagamento": "CondiÃƒÂ§ÃƒÂµes de Pagamento"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
   
@@ -1159,7 +1159,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     group.classList.remove("active");
   });
 
-  // Carregar dados especÃ­ficos da aba
+  // Carregar dados especÃƒÂ­ficos da aba
   if (tabId === "construcao-home") {
     if (typeof renderOperadorHomeDashboard === 'function') {
       renderOperadorHomeDashboard();
@@ -1203,7 +1203,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       if (typeof ContasPagarApp !== "undefined") {
         ContasPagarApp.init();
       } else {
-        alert("Erro CrÃ­tico: ContasPagarApp nÃ£o foi carregado pelo navegador. Por favor, pressione Ctrl+F5 para limpar o cache.");
+        alert("Erro CrÃƒÂ­tico: ContasPagarApp nÃƒÂ£o foi carregado pelo navegador. Por favor, pressione Ctrl+F5 para limpar o cache.");
       }
     } catch(err) {
       alert("Erro ao iniciar Contas a Pagar: " + err.message);
@@ -1226,10 +1226,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 }
 
 // ----------------------------------------------------
-// 3. FLUXO DE LOGIN E RENDER DO USUÃƒÂRIO
+// 3. FLUXO DE LOGIN E RENDER DO USUÃƒÆ’Ã‚ÂRIO
 window.showMockLoginModal = function(resolve, reject) {
-  // O modal jÃ¡ estÃ¡ visÃ­vel por causa do checkAuthentication.
-  // Apenas configuramos o evento do botÃ£o para a lÃ³gica do simulador.
+  // O modal jÃƒÂ¡ estÃƒÂ¡ visÃƒÂ­vel por causa do checkAuthentication.
+  // Apenas configuramos o evento do botÃƒÂ£o para a lÃƒÂ³gica do simulador.
   const btn = document.getElementById("btn-submit-login");
   const emailInput = document.getElementById("login-email");
   const errorMsg = document.getElementById("login-error-msg");
@@ -1239,10 +1239,10 @@ window.showMockLoginModal = function(resolve, reject) {
   
   btn.onclick = () => {
     const email = emailInput.value.trim();
-    const name = email.split("@")[0].toUpperCase(); // Usa o comeÃ§o do e-mail como nome fallback
+    const name = email.split("@")[0].toUpperCase(); // Usa o comeÃƒÂ§o do e-mail como nome fallback
     
     if (!MouraAuth.validateDomain(email)) {
-      errorMsg.textContent = "Erro: O e-mail deve pertencer ao domÃ­nio @mouraleite.com.br";
+      errorMsg.textContent = "Erro: O e-mail deve pertencer ao domÃƒÂ­nio @mouraleite.com.br";
       errorMsg.style.display = "block";
       return;
     }
@@ -1269,9 +1269,9 @@ function validateAndLoadCrmUser(user) {
   
   let matchedUser = crmUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
   
-  // Se o usuÃ¡rio nÃ£o existir na base, vamos auto-registrar
+  // Se o usuÃƒÂ¡rio nÃƒÂ£o existir na base, vamos auto-registrar
   if (!matchedUser) {
-    // israel@mouraleite.com.br Ã© o super-admin padrÃ£o
+    // israel@mouraleite.com.br ÃƒÂ© o super-admin padrÃƒÂ£o
     if (user.email.toLowerCase() === "israel@mouraleite.com.br") {
       matchedUser = {
         id: "usr_" + Date.now(),
@@ -1282,7 +1282,7 @@ function validateAndLoadCrmUser(user) {
         createdAt: new Date().toISOString()
       };
     } else {
-      // Outros usuÃ¡rios entram como ATIVO automaticamente (OPERADOR)
+      // Outros usuÃƒÂ¡rios entram como ATIVO automaticamente (OPERADOR)
       matchedUser = {
         id: "usr_" + Date.now(),
         name: user.name,
@@ -1301,12 +1301,12 @@ function validateAndLoadCrmUser(user) {
   }
   
   if (matchedUser.status === "PENDENTE") {
-    // Se eles ficaram pendentes no passado, nÃ³s vamos auto-aprovar agora!
+    // Se eles ficaram pendentes no passado, nÃƒÂ³s vamos auto-aprovar agora!
     matchedUser.status = "ATIVO";
     localStorage.setItem('crm_users', JSON.stringify(crmUsers));
   }
   
-  // Mescla o perfil do CRM com o usuÃ¡rio logado
+  // Mescla o perfil do CRM com o usuÃƒÂ¡rio logado
   return { ...user, ...matchedUser };
 }
 
@@ -1366,7 +1366,7 @@ async function checkAuthentication() {
     const btn = document.getElementById("btn-submit-login");
     
     if (authConfig.enabled) {
-      // Azure AD habilitado: botÃ£o aciona MSAL Popup
+      // Azure AD habilitado: botÃƒÂ£o aciona MSAL Popup
       const emailInput = document.getElementById("login-email");
       const labelEl = document.querySelector(".login-label");
       if (emailInput) emailInput.style.display = "none";
@@ -1374,7 +1374,7 @@ async function checkAuthentication() {
       
       btn.textContent = "Entrar com Microsoft";
       
-      // Mostrar botÃ£o de forma isolada
+      // Mostrar botÃƒÂ£o de forma isolada
       btn.style.display = "block";
       btn.style.marginTop = "20px";
       
@@ -1390,7 +1390,7 @@ async function checkAuthentication() {
         });
       };
     } else {
-      // Simulado: botÃ£o aciona a promessa de mock
+      // Simulado: botÃƒÂ£o aciona a promessa de mock
       MouraAuth.login().then(async loggedUser => {
         await processSuccessfulLogin(loggedUser);
       }).catch(err => {
@@ -1462,7 +1462,7 @@ window.applyPermissions = function(profileName) {
       
       moduleItems.forEach(item => {
         const modKey = item.getAttribute('data-module');
-        // Se o mÃ³dulo nÃ£o estiver marcado (true) nas permissÃµes, ocultamos
+        // Se o mÃƒÂ³dulo nÃƒÂ£o estiver marcado (true) nas permissÃƒÂµes, ocultamos
         if (perms[modKey] === true) {
           item.style.display = '';
         } else {
@@ -1470,26 +1470,26 @@ window.applyPermissions = function(profileName) {
         }
       });
     } catch (e) {
-      console.error("Erro ao aplicar permissÃµes do menu", e);
+      console.error("Erro ao aplicar permissÃƒÂµes do menu", e);
     }
   } else {
-    // Se nÃ£o tiver permissÃµes salvas para o perfil (novo perfil sem salvar), oculta os restritos
+    // Se nÃƒÂ£o tiver permissÃƒÂµes salvas para o perfil (novo perfil sem salvar), oculta os restritos
     const moduleItems = document.querySelectorAll('li[data-module]');
     moduleItems.forEach(item => {
       item.style.display = 'none';
     });
   }
 
-  // --- SOBREPOSIÃ‡Ãƒâ€¢ES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
+  // --- SOBREPOSIÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
   const opType = AppState.currentUser ? AppState.currentUser.operator_type : '';
   
-  // 1. Externo (Terceirizado) nÃ£o vÃª menu Sub Judice
+  // 1. Externo (Terceirizado) nÃƒÂ£o vÃƒÂª menu Sub Judice
   if (opType === 'externo') {
     const subJudiceMenu = document.querySelector('li[data-module="sub_fin_cr_sub_judice_acessar"]');
     if (subJudiceMenu) subJudiceMenu.style.display = 'none';
   }
   
-  // 2. Advogado vÃª APENAS Financeiro -> Contas a Receber -> Sub Judice
+  // 2. Advogado vÃƒÂª APENAS Financeiro -> Contas a Receber -> Sub Judice
   if (opType === 'advogado') {
     const allModules = document.querySelectorAll('li[data-module]');
     allModules.forEach(item => {
@@ -1504,10 +1504,10 @@ window.applyPermissions = function(profileName) {
 }
 
 // ----------------------------------------------------
-// 4. INICIALIZAÃ‡ÃƒO DA APLICAÃ‡ÃƒO E DADOS
+// 4. INICIALIZAÃƒâ€¡ÃƒÆ’O DA APLICAÃƒâ€¡ÃƒÆ’O E DADOS
 // ----------------------------------------------------
 async function initializeApplication() {
-  // Sincronizar configuraÃ§Ãµes globais do Firebase para a memÃ³ria local (Recarrega se precisar)
+  // Sincronizar configuraÃƒÂ§ÃƒÂµes globais do Firebase para a memÃƒÂ³ria local (Recarrega se precisar)
   if (window.syncGlobalConfigFromFirebase) {
       await window.syncGlobalConfigFromFirebase();
   }
@@ -1531,8 +1531,8 @@ async function initializeApplication() {
   try {
      const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
     if (false && window.firebaseDb && window.firebaseCollections) {
-         // 1) Carga inicial + listener em tempo real para TODA a coleÃ§Ã£o customer_notes
-         //    Isso garante que gravaÃ§Ãµes de QUALQUER operadora cheguem para TODAS em tempo real
+         // 1) Carga inicial + listener em tempo real para TODA a coleÃƒÂ§ÃƒÂ£o customer_notes
+         //    Isso garante que gravaÃƒÂ§ÃƒÂµes de QUALQUER operadora cheguem para TODAS em tempo real
          if (window.globalCustomerNotesUnsubscribe) {
              window.globalCustomerNotesUnsubscribe();
          }
@@ -1562,7 +1562,7 @@ async function initializeApplication() {
                      const affectedIds = snapshot.docChanges().map(c => c.doc.id);
                      if (openCustomerId && affectedIds.includes(openCustomerId)) {
                          if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
-                         console.log(`[Firebase RT] OcorrÃªncias do cliente ${openCustomerId} atualizadas em tempo real.`);
+                         console.log(`[Firebase RT] OcorrÃƒÂªncias do cliente ${openCustomerId} atualizadas em tempo real.`);
                      }
                      if (!snapshot.metadata.hasPendingWrites) {
                          console.log(`[Firebase RT] customer_notes sincronizado: ${affectedIds.length} cliente(s) atualizado(s).`);
@@ -1574,7 +1574,7 @@ async function initializeApplication() {
              }
          );
 
-         // Merge inicial: local como base, Firebase sobrescreve (jÃ¡ virÃ¡ via onSnapshot acima)
+         // Merge inicial: local como base, Firebase sobrescreve (jÃƒÂ¡ virÃƒÂ¡ via onSnapshot acima)
          AppState.notes = { ...localNotes };
          if (Object.keys(AppState.notes).length === 0) {
              AppState.notes = window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
@@ -1601,13 +1601,13 @@ async function initializeApplication() {
            const customerKey = String(customerId);
            const payload = JSON.stringify(AppState.notes[customerKey] || AppState.notes[customerId] || []);
                if (window._fbNotesLastSavedPayload && window._fbNotesLastSavedPayload[customerKey] === payload) return;
-                 console.log("[Firebase RT] Iniciando salvamento da ocorrÃªncia do cliente", customerId);
+                 console.log("[Firebase RT] Iniciando salvamento da ocorrÃƒÂªncia do cliente", customerId);
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
            await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
                  window._fbNotesLastSavedPayload = window._fbNotesLastSavedPayload || {};
                  window._fbNotesLastSavedPayload[customerKey] = payload;
-                 console.log("[Firebase RT] OcorrÃªncia salva com SUCESSO no Firebase!");
+                 console.log("[Firebase RT] OcorrÃƒÂªncia salva com SUCESSO no Firebase!");
               } else {
                  console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
                  const chunks = {};
@@ -1620,12 +1620,12 @@ async function initializeApplication() {
                      const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
                      await window.firebaseCollections.setDoc(docRef, data, { merge: true });
                  }
-                 console.log("[Firebase RT] Salvamento em massa (sharded) concluÃ­do!");
+                 console.log("[Firebase RT] Salvamento em massa (sharded) concluÃƒÂ­do!");
               }
           } catch(e) {
               if (customerId && window._fbNotesLastSavedPayload) delete window._fbNotesLastSavedPayload[String(customerId)];
               console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
-              alert("Erro ao salvar ocorrÃªncia na nuvem (Firebase): " + e.message + ". A ocorrÃªncia pode desaparecer da tela. Contate o suporte.");
+              alert("Erro ao salvar ocorrÃƒÂªncia na nuvem (Firebase): " + e.message + ". A ocorrÃƒÂªncia pode desaparecer da tela. Contate o suporte.");
           }
       }
   };
@@ -1659,7 +1659,7 @@ async function initializeApplication() {
   // --- INICIO MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
   try {
     if (false && window.firebaseDb && window.firebaseCollections) {
-         // Jud Notes â€” listener em tempo real (ocorrÃªncias judiciais)
+         // Jud Notes Ã¢â‚¬â€ listener em tempo real (ocorrÃƒÂªncias judiciais)
          if (window.globalJudNotesUnsubscribe) window.globalJudNotesUnsubscribe();
          AppState.judNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
          window.globalJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(
@@ -1830,18 +1830,18 @@ async function initializeApplication() {
   };
   // --- FIM MIGRACAO FIREBASE JUD NOTES & AGENDA NOTES ---
 
-  // --- INICIALIZAÃ‡ÃƒO DE ESTADOS GLOBAIS (Timeline e Judiciais) ---
+  // --- INICIALIZAÃƒâ€¡ÃƒÆ’O DE ESTADOS GLOBAIS (Timeline e Judiciais) ---
   const timelineStr = localStorage.getItem("crm_moura_timeline_nodes");
   window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [
-    { id: 'n1', dias: 15, acao: 'cob_interna', label: 'InÃ­cio CobranÃ§a Interna' },
-    { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'InÃ­cio Terceirizada' },
-    { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio JurÃ­dico' }
+    { id: 'n1', dias: 15, acao: 'cob_interna', label: 'InÃƒÂ­cio CobranÃƒÂ§a Interna' },
+    { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'InÃƒÂ­cio Terceirizada' },
+    { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio JurÃƒÂ­dico' }
   ];
   if (!timelineStr) {
       window.TimelineState = [
-        { id: 'n1', dias: 15, acao: 'cob_interna', label: 'InÃ­cio CobranÃ§a Interna' },
-        { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'InÃ­cio Terceirizada' },
-        { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio JurÃ­dico' }
+        { id: 'n1', dias: 15, acao: 'cob_interna', label: 'InÃƒÂ­cio CobranÃƒÂ§a Interna' },
+        { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'InÃƒÂ­cio Terceirizada' },
+        { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio JurÃƒÂ­dico' }
       ];
       localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
       localStorage.setItem("crm_moura_timeline_v2", "true");
@@ -1853,19 +1853,19 @@ async function initializeApplication() {
 
   const judStr = localStorage.getItem("crm_moura_judiciais");
   window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [
-    { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "NotificaÃ§Ã£o Judicial: ComunicaÃ§Ã£o oficial da JustiÃ§a para informar alguÃ©m sobre um fato ou intenÃ§Ã£o jurÃ­dica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-    { id: 'j2', nome: 'Not. Jud. via Ofic. de JustiÃ§a', dias: 60, explicacao: "ComunicaÃ§Ã£o oficial entregue pessoalmente por um servidor pÃºblico da JustiÃ§a, garantindo fÃ© pÃºblica e comprovaÃ§Ã£o legal imediata de que o destinatÃ¡rio tomou ciÃªncia do fato." },
-    { id: 'j3', nome: 'CitaÃ§Ã£o por Edital', dias: 120, explicacao: "Modalidade de citaÃ§Ã£o utilizada quando o destinatÃ¡rio nÃ£o Ã© localizado, garantindo a comunicaÃ§Ã£o oficial por meio de publicaÃ§Ã£o pÃºblica." },
-    { id: 'j4', nome: 'HomologaÃ§Ã£o Acordo', dias: 15, explicacao: "DecisÃ£o judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-    { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informaÃ§Ãµes e verificar a existÃªncia de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
+    { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "NotificaÃƒÂ§ÃƒÂ£o Judicial: ComunicaÃƒÂ§ÃƒÂ£o oficial da JustiÃƒÂ§a para informar alguÃƒÂ©m sobre um fato ou intenÃƒÂ§ÃƒÂ£o jurÃƒÂ­dica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
+    { id: 'j2', nome: 'Not. Jud. via Ofic. de JustiÃƒÂ§a', dias: 60, explicacao: "ComunicaÃƒÂ§ÃƒÂ£o oficial entregue pessoalmente por um servidor pÃƒÂºblico da JustiÃƒÂ§a, garantindo fÃƒÂ© pÃƒÂºblica e comprovaÃƒÂ§ÃƒÂ£o legal imediata de que o destinatÃƒÂ¡rio tomou ciÃƒÂªncia do fato." },
+    { id: 'j3', nome: 'CitaÃƒÂ§ÃƒÂ£o por Edital', dias: 120, explicacao: "Modalidade de citaÃƒÂ§ÃƒÂ£o utilizada quando o destinatÃƒÂ¡rio nÃƒÂ£o ÃƒÂ© localizado, garantindo a comunicaÃƒÂ§ÃƒÂ£o oficial por meio de publicaÃƒÂ§ÃƒÂ£o pÃƒÂºblica." },
+    { id: 'j4', nome: 'HomologaÃƒÂ§ÃƒÂ£o Acordo', dias: 15, explicacao: "DecisÃƒÂ£o judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
+    { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informaÃƒÂ§ÃƒÂµes e verificar a existÃƒÂªncia de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
   ];
   if (!localStorage.getItem("crm_moura_judiciais_v2")) {
       window.EtapasJudiciaisState = [
-        { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "NotificaÃ§Ã£o Judicial: ComunicaÃ§Ã£o oficial da JustiÃ§a para informar alguÃ©m sobre um fato ou intenÃ§Ã£o jurÃ­dica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-        { id: 'j2', nome: 'Not. Jud. via Ofic. de JustiÃ§a', dias: 60, explicacao: "ComunicaÃ§Ã£o oficial entregue pessoalmente por um servidor pÃºblico da JustiÃ§a, garantindo fÃ© pÃºblica e comprovaÃ§Ã£o legal imediata de que o destinatÃ¡rio tomou ciÃªncia do fato." },
-        { id: 'j3', nome: 'CitaÃ§Ã£o por Edital', dias: 120, explicacao: "Modalidade de citaÃ§Ã£o utilizada quando o destinatÃ¡rio nÃ£o Ã© localizado, garantindo a comunicaÃ§Ã£o oficial por meio de publicaÃ§Ã£o pÃºblica." },
-        { id: 'j4', nome: 'HomologaÃ§Ã£o Acordo', dias: 15, explicacao: "DecisÃ£o judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-        { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informaÃ§Ãµes e verificar a existÃªncia de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
+        { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "NotificaÃƒÂ§ÃƒÂ£o Judicial: ComunicaÃƒÂ§ÃƒÂ£o oficial da JustiÃƒÂ§a para informar alguÃƒÂ©m sobre um fato ou intenÃƒÂ§ÃƒÂ£o jurÃƒÂ­dica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
+        { id: 'j2', nome: 'Not. Jud. via Ofic. de JustiÃƒÂ§a', dias: 60, explicacao: "ComunicaÃƒÂ§ÃƒÂ£o oficial entregue pessoalmente por um servidor pÃƒÂºblico da JustiÃƒÂ§a, garantindo fÃƒÂ© pÃƒÂºblica e comprovaÃƒÂ§ÃƒÂ£o legal imediata de que o destinatÃƒÂ¡rio tomou ciÃƒÂªncia do fato." },
+        { id: 'j3', nome: 'CitaÃƒÂ§ÃƒÂ£o por Edital', dias: 120, explicacao: "Modalidade de citaÃƒÂ§ÃƒÂ£o utilizada quando o destinatÃƒÂ¡rio nÃƒÂ£o ÃƒÂ© localizado, garantindo a comunicaÃƒÂ§ÃƒÂ£o oficial por meio de publicaÃƒÂ§ÃƒÂ£o pÃƒÂºblica." },
+        { id: 'j4', nome: 'HomologaÃƒÂ§ÃƒÂ£o Acordo', dias: 15, explicacao: "DecisÃƒÂ£o judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
+        { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informaÃƒÂ§ÃƒÂµes e verificar a existÃƒÂªncia de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
       ];
       localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
       localStorage.setItem("crm_moura_judiciais_v2", "true");
@@ -1928,7 +1928,7 @@ async function initializeApplication() {
     try {
       AppState.cachedCostCenters = await SiengeApiService.getCostCenters();
     } catch(e) {
-      console.warn("Erro ao buscar cost centers na inicializaÃ§Ã£o, usando mock:", e);
+      console.warn("Erro ao buscar cost centers na inicializaÃƒÂ§ÃƒÂ£o, usando mock:", e);
       AppState.cachedCostCenters = window.MOCK_DATA ? window.MOCK_DATA.COST_CENTERS : [];
     }
     if (typeof window.applyDynamicCityRules === 'function') {
@@ -1946,7 +1946,7 @@ async function initializeApplication() {
     
     // Auto-filtrar a Agenda se for Operador
     const u = AppState.currentUser;
-    if (u && ((u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÃ‡A" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA")) || u.role === "OPERADOR")) {
+    if (u && ((u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÃƒâ€¡A" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA")) || u.role === "OPERADOR")) {
       const safeNameForOp = u.name || "";
       const opName = u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : safeNameForOp.toUpperCase();
       if (typeof window.setAgendaOperator === 'function') {
@@ -1954,16 +1954,16 @@ async function initializeApplication() {
       }
     }
     
-    // Iniciar na aba padrÃ£o
+    // Iniciar na aba padrÃƒÂ£o
     switchTab("dashboard");
   } catch (err) {
     console.error(err);
-    alert("Falha na conexÃ£o com as APIs Sienge: " + err.message);
+    alert("Falha na conexÃƒÂ£o com as APIs Sienge: " + err.message);
   }
 }
 
 async function loadAndApplyPermissions() {
-  // Buscar permissÃµes do usuÃ¡rio se estiver no modo real e logado
+  // Buscar permissÃƒÂµes do usuÃƒÂ¡rio se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
       let profileName = AppState.currentUser.profile_name || '';
@@ -1982,16 +1982,16 @@ async function loadAndApplyPermissions() {
          let permsObj = JSON.parse(permsStr);
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
          
-         // ForÃ§ar permissÃµes de ADMIN para o Israel e Admin (fallback de seguranÃ§a)
+         // ForÃƒÂ§ar permissÃƒÂµes de ADMIN para o Israel e Admin (fallback de seguranÃƒÂ§a)
          if (AppState.currentUser.email && (AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br')) {
              AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
          }
       } else {
-         console.warn("PermissÃµes nÃ£o encontradas no localStorage para o perfil:", profileId, "Aplicando padrÃ£o.");
+         console.warn("PermissÃƒÂµes nÃƒÂ£o encontradas no localStorage para o perfil:", profileId, "Aplicando padrÃƒÂ£o.");
          AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
       }
     } catch (e) {
-      console.error("Erro ao carregar permissÃµes:", e);
+      console.error("Erro ao carregar permissÃƒÂµes:", e);
       AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
     }
   } else {
@@ -2000,7 +2000,7 @@ async function loadAndApplyPermissions() {
     AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
   }
 
-  // Aplicar permissÃµes no Menu
+  // Aplicar permissÃƒÂµes no Menu
   document.querySelectorAll('[data-permission]').forEach(el => {
     const reqPerm = el.getAttribute('data-permission');
     const isSuperAdmin = AppState.currentUser && (
@@ -2077,7 +2077,7 @@ window.getFilaQueueGroupMeta = function(group) {
   const map = {
     0: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     1: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
-    2: { label: 'Enviar para JurÃ­dico', bg: '#ffedd5', color: '#9a3412' },
+    2: { label: 'Enviar para JurÃƒÂ­dico', bg: '#ffedd5', color: '#9a3412' },
     3: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
   };
   return map[group] || map[3];
@@ -2184,8 +2184,8 @@ function getCompanyName(companyId) {
     .replace(/\bPRINCIPAL\b/gi, "")
     .replace(/\bLOTEAMENTOS\b/gi, "")
     .replace(/\bDESENVOLVIMENTO URBANO\b/gi, "")
-    .replace(/\bDESENVOLVIMENTO IMOBILIÃƒÂRIO SPE\b/gi, "")
-    .replace(/\bDESENVOLVIMENTO IMOBILIÃƒÂRIO\b/gi, "")
+    .replace(/\bDESENVOLVIMENTO IMOBILIÃƒÆ’Ã‚ÂRIO SPE\b/gi, "")
+    .replace(/\bDESENVOLVIMENTO IMOBILIÃƒÆ’Ã‚ÂRIO\b/gi, "")
     .replace(/\bSPE\b/gi, "")
     .replace(/\bLOTEADORA\b/gi, "")
     .replace(/\bPARCERIA\b/gi, "")
@@ -2197,7 +2197,7 @@ const operatorColors = {};
 let operatorColorIndex = 0;
 let _cachedCrmUsersBadge = null;
 function getOperatorBadgeStyle(opName) {
-  if (opName === "OUTROS" || opName === "NÃƒO ATRIBUÃDO" || opName === "SEM CARTEIRA INADIMPLENTE") {
+  if (opName === "OUTROS" || opName === "NÃƒÆ’O ATRIBUÃƒÂDO" || opName === "SEM CARTEIRA INADIMPLENTE") {
     return "background-color: #e2e8f0; color: #475569;";
   }
   
@@ -2265,7 +2265,7 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
     }
     const cityMatch = cleanName.split('-')[0].trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     
-    if (ccIdStr === "14201" || cleanName.toUpperCase().includes("ARAÃ‡ARI") || cleanName.toUpperCase().includes("ARACARI")) {
+    if (ccIdStr === "14201" || cleanName.toUpperCase().includes("ARAÃƒâ€¡ARI") || cleanName.toUpperCase().includes("ARACARI")) {
         return "ARACARIGUAMA";
     }
     if (["137", "138", "139", "140"].some(p => ccIdStr.startsWith(p)) || cleanName.toUpperCase().includes("AVARE")) {
@@ -2305,12 +2305,12 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
 
   let badgeClass = "delay-badge-light";
   let iconName = "";
-  let titleText = "Leve: atÃ© 30 dias";
+  let titleText = "Leve: atÃƒÂ© 30 dias";
 
   if (days > 120) {
     badgeClass = "delay-badge-critical";
     iconName = "octagon-alert";
-    titleText = "CrÃ­tico: acima de 120 dias";
+    titleText = "CrÃƒÂ­tico: acima de 120 dias";
   } else if (days > 90) {
     badgeClass = "delay-badge-severe";
     iconName = "shield-alert";
@@ -2440,7 +2440,7 @@ window.applyAdvFiltersTo = (sourceList) => {
                 });
             }
 
-            // 2. Extrair cidades a partir dos Centros de Custo (correspondÃªncia exata de CC ou prefixo fixo)
+            // 2. Extrair cidades a partir dos Centros de Custo (correspondÃƒÂªncia exata de CC ou prefixo fixo)
             const validCostCenters = new Set();
             if (window.AppState && window.AppState.cachedCostCenters) {
                 window.AppState.cachedCostCenters.forEach(cc => {
@@ -2465,14 +2465,14 @@ window.applyAdvFiltersTo = (sourceList) => {
                 const city = window.extractCityFromCostCenter(primaryId, ccName);
                 if (city && window.advFilters.cidade.includes(city)) return true;
                 
-                // Checar se o primaryId bate com a lista de CCs vÃ¡lidos extraÃ­da
+                // Checar se o primaryId bate com a lista de CCs vÃƒÂ¡lidos extraÃƒÂ­da
                 if (validCostCenters.has(primaryId)) return true;
 
-                // Casos especiais Sienge: prefixo conhecido (137 a 140 para AvarÃ©)
+                // Casos especiais Sienge: prefixo conhecido (137 a 140 para AvarÃƒÂ©)
                 if (window.advFilters.cidade.includes("AVARE") && ["137", "138", "139", "140"].some(p => primaryId.startsWith(p))) {
                     return true;
                 }
-                // Reserva do AraÃ§ari (142) e Jd SÃ£o Paulo (149)
+                // Reserva do AraÃƒÂ§ari (142) e Jd SÃƒÂ£o Paulo (149)
                 if (window.advFilters.cidade.includes("ARACARIGUAMA") && (primaryId.startsWith("142") || primaryId.startsWith("149"))) {
                     return true;
                 }
@@ -2494,10 +2494,10 @@ window.applyAdvFiltersTo = (sourceList) => {
                 limitDate.setDate(limitDate.getDate() - daysAgo);
 
                 filteredList = filteredList.filter(c => {
-                    // Exclui clientes que jÃ¡ estÃ£o Sub judice
+                    // Exclui clientes que jÃƒÂ¡ estÃƒÂ£o Sub judice
                     if (c.subjudice === "S") return false;
                     
-                    // Exclui clientes com marcador 'Recente JurÃ­dico'
+                    // Exclui clientes com marcador 'Recente JurÃƒÂ­dico'
                     const mem = subjudiceHistory[c.customerId];
                     if (mem && mem.exitDate) {
                         const exitD = parseSafeDate(mem.exitDate);
@@ -2507,7 +2507,7 @@ window.applyAdvFiltersTo = (sourceList) => {
                     // Exclui clientes com marcador '0% Pago'
                     if (c.isZeroPaid) return false;
                     
-                    // Verifica se atingiu os dias de atraso para enviar ao jurÃ­dico
+                    // Verifica se atingiu os dias de atraso para enviar ao jurÃƒÂ­dico
                     const threshold = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
                     return c.maxDaysDelay >= threshold;
                 });
@@ -2729,7 +2729,7 @@ document.addEventListener("click", function(e) {
             if (!input.placeholder.includes("Pesquisando")) {
                 input.dataset.originalPlaceholder = input.placeholder;
             } else if (!input.dataset.originalPlaceholder) {
-                input.dataset.originalPlaceholder = "Pesquise pelo tÃ­tulo ou nome do cliente...";
+                input.dataset.originalPlaceholder = "Pesquise pelo tÃƒÂ­tulo ou nome do cliente...";
             }
             input.placeholder = placeholder;
             input.disabled = true;
@@ -2740,7 +2740,7 @@ document.addEventListener("click", function(e) {
 
     const setInputDone = (input, icon) => {
         if (input && icon) {
-            input.placeholder = input.dataset.originalPlaceholder || "Pesquise pelo tÃ­tulo ou nome do cliente...";
+            input.placeholder = input.dataset.originalPlaceholder || "Pesquise pelo tÃƒÂ­tulo ou nome do cliente...";
             input.disabled = false;
             input.style.fontStyle = 'italic';
             icon.setAttribute("data-lucide", "search");
@@ -2766,7 +2766,7 @@ document.addEventListener("click", function(e) {
           const _avg = _cTotal * 9; // ~9s por empresa
           
           const statusText = `Buscando clientes inadimplentes da empresa ${_cName}`;
-          const timeText = `Tempo decorrido: ${el}s (MÃ©dia esperada: ~${_avg}s)`;
+          const timeText = `Tempo decorrido: ${el}s (MÃƒÂ©dia esperada: ~${_avg}s)`;
           
           const s1 = document.querySelector("#defaulters-table-body .loading-status-text");
           const t1 = document.querySelector("#defaulters-table-body .loading-time-text");
@@ -2832,9 +2832,9 @@ document.addEventListener("click", function(e) {
         const s1 = document.querySelector("#defaulters-table-body .loading-status-text");
         const s2 = document.querySelector("#subjudice-table-body .loading-status-text");
         const s3 = document.querySelector("#zeropaid-table-body .loading-status-text");
-        if(s1) s1.textContent = "Busca concluÃ­da! Montando tabela...";
-        if(s2) s2.textContent = "Busca concluÃ­da! Montando tabela...";
-        if(s3) s3.textContent = "Busca concluÃ­da! Montando tabela...";
+        if(s1) s1.textContent = "Busca concluÃƒÂ­da! Montando tabela...";
+        if(s2) s2.textContent = "Busca concluÃƒÂ­da! Montando tabela...";
+        if(s3) s3.textContent = "Busca concluÃƒÂ­da! Montando tabela...";
         
         if (window._siengeDefaultersIv) clearInterval(window._siengeDefaultersIv);
         await new Promise(resolve => setTimeout(resolve, 1200));
@@ -2846,10 +2846,10 @@ document.addEventListener("click", function(e) {
           if (cacheInd && window._siengeLastFetchTime) {
               cacheInd.style.display = 'block';
               if (window._siengeLastFetchTime.cached) {
-                 cacheInd.textContent = `Base histÃ³rica carregada (Atualizada hoje Ã s ${window._siengeLastFetchTime.at})`;
+                 cacheInd.textContent = `Base histÃƒÂ³rica carregada (Atualizada hoje ÃƒÂ s ${window._siengeLastFetchTime.at})`;
                  cacheInd.style.color = '#10b981';
               } else {
-                 cacheInd.textContent = `Nova atualizaÃ§Ã£o salva hoje Ã s ${window._siengeLastFetchTime.at}`;
+                 cacheInd.textContent = `Nova atualizaÃƒÂ§ÃƒÂ£o salva hoje ÃƒÂ s ${window._siengeLastFetchTime.at}`;
                  cacheInd.style.color = '#f59e0b';
               }
           }
@@ -2882,7 +2882,7 @@ document.addEventListener("click", function(e) {
 
 
   // -----------------------------------------------
-  // PASSO 3: Consolidar devedores Ãºnicos por cliente+contrato
+  // PASSO 3: Consolidar devedores ÃƒÂºnicos por cliente+contrato
   // -----------------------------------------------
   const consolidated = {};
   let subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
@@ -2962,8 +2962,8 @@ document.addEventListener("click", function(e) {
         unitId: `U-${bill.companyId || 2}-${billUnity.replace(/\s+/g, '')}`,
         subjudice: isSubjudiceStr,
         percPaid: 0,
-        assignedOperator: "LETÃCIA",
-        appliedRule: "AtribuiÃ§Ã£o Direta (Empresa 2)",
+        assignedOperator: "LETÃƒÂCIA",
+        appliedRule: "AtribuiÃƒÂ§ÃƒÂ£o Direta (Empresa 2)",
         overdueValue: 0,
         overdueCharges: 0,
         maxDaysDelay: 0,
@@ -2992,14 +2992,14 @@ document.addEventListener("click", function(e) {
         consolidated[key].assignedOperator = ruleVal.operator;
         consolidated[key].appliedRule = ruleVal.rule;
       } else {
-        // Modo real â€” Regras por Cidade
+        // Modo real Ã¢â‚¬â€ Regras por Cidade
         if (isSubjudiceStr === "S") {
-          consolidated[key].assignedOperator = "NÃƒO ATRIBUÃDO";
+          consolidated[key].assignedOperator = "NÃƒÆ’O ATRIBUÃƒÂDO";
           consolidated[key].appliedRule = "Contrato em Regime Sub Judice";
         } else {
           const idCCusto = consolidated[key].costCenterId;
-          let op = "NÃƒO ATRIBUÃDO";
-          let rule = "REGRA PADRÃƒO";
+          let op = "NÃƒÆ’O ATRIBUÃƒÂDO";
+          let rule = "REGRA PADRÃƒÆ’O";
           if (idCCusto) {
             let ccName = "";
             if (AppState.cachedCostCenters) {
@@ -3012,12 +3012,12 @@ document.addEventListener("click", function(e) {
             } else {
                 city = ccName.trim().toUpperCase();
             }
-            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃ‡ARI")) {
-               city = "ARAÃ‡ARIGUAMA";
+            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃƒâ€¡ARI")) {
+               city = "ARAÃƒâ€¡ARIGUAMA";
             }
             if (city) {
               const ruleId = "CID_" + city.replace(/\s+/g, '_');
-              op = getRuleOperator(ruleId, "NÃƒO ATRIBUÃDO", customerId);
+              op = getRuleOperator(ruleId, "NÃƒÆ’O ATRIBUÃƒÂDO", customerId);
               rule = "REGRA CIDADE - " + city;
             }
           }
@@ -3030,7 +3030,7 @@ document.addEventListener("click", function(e) {
     if (isSubjudiceStr === "S" && consolidated[key].subjudice !== "S") {
       consolidated[key].subjudice = "S";
       if (getSiengeApiMode() !== "simulado") {
-        consolidated[key].assignedOperator = "NÃƒO ATRIBUÃDO";
+        consolidated[key].assignedOperator = "NÃƒÆ’O ATRIBUÃƒÂDO";
         consolidated[key].appliedRule = "Contrato em Regime Sub Judice";
       }
     }
@@ -3055,7 +3055,7 @@ document.addEventListener("click", function(e) {
   });
 
   // ---------------------------------------------------------
-  // Nova Passagem: AtribuiÃ§Ã£o Final de Operador Baseada na RÃ©gua
+  // Nova Passagem: AtribuiÃƒÂ§ÃƒÂ£o Final de Operador Baseada na RÃƒÂ©gua
   // ---------------------------------------------------------
   if (getSiengeApiMode() !== "simulado") {
       const timelineNodes = window.TimelineState || JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]");
@@ -3073,11 +3073,11 @@ document.addEventListener("click", function(e) {
          
          let requiredType = 'interno';
          if (c.isZeroPaid) {
-             requiredType = 'interno_absoluto'; // 0% Pago tem prioridade mÃ¡xima, sempre interno
+             requiredType = 'interno_absoluto'; // 0% Pago tem prioridade mÃƒÂ¡xima, sempre interno
          } else if (c.subjudice === "S") {
              requiredType = 'advogado';
          } else if (c.maxDaysDelay >= threshJuridico) {
-             requiredType = 'apoio_juridico'; // Corrigido para Apoio JurÃ­dico (intermÃ©dio para quem tem >151 e nÃ£o Ã© Sub Judice S)
+             requiredType = 'apoio_juridico'; // Corrigido para Apoio JurÃƒÂ­dico (intermÃƒÂ©dio para quem tem >151 e nÃƒÂ£o ÃƒÂ© Sub Judice S)
          } else if (c.maxDaysDelay >= threshTerceirizada) {
              requiredType = 'externo';
          }
@@ -3095,8 +3095,8 @@ document.addEventListener("click", function(e) {
             } else {
                 city = ccName.trim().toUpperCase();
             }
-            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃ‡ARI")) {
-               city = "ARAÃ‡ARIGUAMA";
+            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃƒâ€¡ARI")) {
+               city = "ARAÃƒâ€¡ARIGUAMA";
             }
          }
 
@@ -3122,25 +3122,25 @@ document.addEventListener("click", function(e) {
 
              if (matchedAdv) {
                  c.assignedOperator = (matchedAdv.sienge_user ? matchedAdv.sienge_user.toUpperCase().replace(/\\./g, ' ').trim() : matchedAdv.name.toUpperCase());
-                 c.appliedRule = "RÃ‰GUA - JURÃDICO";
+                 c.appliedRule = "RÃƒâ€°GUA - JURÃƒÂDICO";
              } else {
                  if (city) {
                     const ruleId = "CID_" + city.replace(/\s+/g, '_');
-                    c.assignedOperator = getRuleOperatorByType(ruleId, "NÃƒO ATRIBUÃDO", c.customerId, "fallback");
-                    c.appliedRule = "RÃ‰GUA (JURÃDICO SEM ADV) - " + city;
+                    c.assignedOperator = getRuleOperatorByType(ruleId, "NÃƒÆ’O ATRIBUÃƒÂDO", c.customerId, "fallback");
+                    c.appliedRule = "RÃƒâ€°GUA (JURÃƒÂDICO SEM ADV) - " + city;
                  } else {
-                    c.assignedOperator = "NÃƒO ATRIBUÃDO";
-                    c.appliedRule = "RÃ‰GUA (JURÃDICO SEM ADV)";
+                    c.assignedOperator = "NÃƒÆ’O ATRIBUÃƒÂDO";
+                    c.appliedRule = "RÃƒâ€°GUA (JURÃƒÂDICO SEM ADV)";
                  }
              }
          } else {
              if (city) {
                 const ruleId = "CID_" + city.replace(/\s+/g, '_');
-                c.assignedOperator = getRuleOperatorByType(ruleId, "NÃƒO ATRIBUÃDO", c.customerId, requiredType);
-                c.appliedRule = "RÃ‰GUA (" + requiredType.toUpperCase() + ") - " + city;
+                c.assignedOperator = getRuleOperatorByType(ruleId, "NÃƒÆ’O ATRIBUÃƒÂDO", c.customerId, requiredType);
+                c.appliedRule = "RÃƒâ€°GUA (" + requiredType.toUpperCase() + ") - " + city;
              } else {
-                c.assignedOperator = "NÃƒO ATRIBUÃDO";
-                c.appliedRule = "REGRA PADRÃƒO";
+                c.assignedOperator = "NÃƒÆ’O ATRIBUÃƒÂDO";
+                c.appliedRule = "REGRA PADRÃƒÆ’O";
              }
          }
       });
@@ -3160,8 +3160,8 @@ document.addEventListener("click", function(e) {
                   }
               });
               
-              // Viviane Rovere - Adicionar forÃ§adamente se ela nÃ£o estiver na memÃ³ria, 
-              // jÃ¡ que o script antigo pode tÃª-la removido por ter < 90 dias
+              // Viviane Rovere - Adicionar forÃƒÂ§adamente se ela nÃƒÂ£o estiver na memÃƒÂ³ria, 
+              // jÃƒÂ¡ que o script antigo pode tÃƒÂª-la removido por ter < 90 dias
               // Vamos procurar a Viviane nos clientes carregados
               const viviane = Object.values(consolidated).find(c => c.customerName && c.customerName.toUpperCase().includes('VIVIANE APARECIDA ROVERE'));
               if (viviane && viviane.subjudice !== "S") {
@@ -3177,7 +3177,7 @@ document.addEventListener("click", function(e) {
               if (fixed) {
                   localStorage.setItem('crm_subjudice_memory', JSON.stringify(mem));
                   
-                  // Atualiza a variÃ¡vel global subjudiceMemory do app.js tambÃ©m para refletir imediatamente
+                  // Atualiza a variÃƒÂ¡vel global subjudiceMemory do app.js tambÃƒÂ©m para refletir imediatamente
                   Object.keys(mem).forEach(k => {
                      subjudiceMemory[k] = mem[k];
                   });
@@ -3198,7 +3198,7 @@ document.addEventListener("click", function(e) {
   }
   // --- FIM HOTFIX V4 RESET ---
 
-  // Atualizar MemÃ³ria do Sub Judice baseado no status consolidado do cliente
+  // Atualizar MemÃƒÂ³ria do Sub Judice baseado no status consolidado do cliente
   const customerSubjudiceStatus = {};
   Object.values(consolidated).forEach(c => {
     if (c.subjudice === "S") {
@@ -3246,8 +3246,8 @@ document.addEventListener("click", function(e) {
           const relatedConsolidated = Object.values(consolidated).filter(c => c.customerId === cId);
           if (relatedConsolidated.length > 0) {
               const maxDelay = Math.max(...relatedConsolidated.map(c => c.maxDaysDelay));
-              // Se a dÃ­vida Ã© nova (aging baixo) e nÃ£o tem lastSeen, foi corrompido
-              // O bug ocorreu em datas passadas recentes, entÃ£o limpamos tudo sem lastSeen
+              // Se a dÃƒÂ­vida ÃƒÂ© nova (aging baixo) e nÃƒÂ£o tem lastSeen, foi corrompido
+              // O bug ocorreu em datas passadas recentes, entÃƒÂ£o limpamos tudo sem lastSeen
               if (maxDelay < 90 && !mem.lastSeen) {
                   mem.exitDate = "2024-01-01";
               }
@@ -3262,10 +3262,10 @@ document.addEventListener("click", function(e) {
   window.getDynamicOperators().forEach(op => {
       workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
   });
-  workload["NÃƒO ATRIBUÃDO"] = { name: "NÃƒO ATRIBUÃDO", uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
+  workload["NÃƒÆ’O ATRIBUÃƒÂDO"] = { name: "NÃƒÆ’O ATRIBUÃƒÂDO", uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
 
   Object.values(consolidated).forEach(c => {
-    const op = c.assignedOperator || "NÃƒO ATRIBUÃDO";
+    const op = c.assignedOperator || "NÃƒÆ’O ATRIBUÃƒÂDO";
     if (!workload[op]) {
       workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
     }
@@ -3278,7 +3278,7 @@ document.addEventListener("click", function(e) {
   if (workloadContainer) {
     workloadContainer.innerHTML = "";
     Object.values(workload).forEach(wl => {
-      if (wl.titlesCount === 0 && wl.name !== "NÃƒO ATRIBUÃDO") {
+      if (wl.titlesCount === 0 && wl.name !== "NÃƒÆ’O ATRIBUÃƒÂDO") {
         return;
       }
       const cardClass = wl.name.replace(/\s+/g, '-').toUpperCase();
@@ -3287,7 +3287,7 @@ document.addEventListener("click", function(e) {
       card.innerHTML = `
         <h4>${wl.name}</h4>
         <div class="workload-detail">Clientes: <strong>${wl.uniqueClients.size}</strong></div>
-        <div class="workload-detail">TÃ­tulos: <strong>${wl.titlesCount}</strong></div>
+        <div class="workload-detail">TÃƒÂ­tulos: <strong>${wl.titlesCount}</strong></div>
         <div class="workload-detail">Vencido: <strong>${wl.overdueSum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
       `;
       workloadContainer.appendChild(card);
@@ -3308,7 +3308,7 @@ document.addEventListener("click", function(e) {
 
   // Calcular idade de cada cliente a partir do cache global
   if (window.GlobalCustomerCache && window.GlobalCustomerCache.data && window.GlobalCustomerCache.data.length > 0) {
-    // Montar mapa rÃ¡pido para busca por ID
+    // Montar mapa rÃƒÂ¡pido para busca por ID
     const customerMap = new Map();
     window.GlobalCustomerCache.data.forEach(cust => {
       const id = String(cust.customerId || cust.id || '');
@@ -3333,13 +3333,13 @@ document.addEventListener("click", function(e) {
       }
     });
   } else {
-    // Cache ainda nÃ£o carregado: marcar como NA para nÃ£o filtrar errado
+    // Cache ainda nÃƒÂ£o carregado: marcar como NA para nÃƒÂ£o filtrar errado
     window.rawClientList.forEach(c => { c.age = 'NA'; });
   }
 
   let clientList = [...rawList]; // Mostrar sub judice na fila principal
 
-// Filtro de Operador (Abas do Switch) para Fila de CobranÃ§a
+// Filtro de Operador (Abas do Switch) para Fila de CobranÃƒÂ§a
   if (activeOperatorFilter !== "TODOS") {
     clientList = clientList.filter(c => c.assignedOperator === activeOperatorFilter);
   }
@@ -3351,10 +3351,10 @@ document.addEventListener("click", function(e) {
   const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
   const thresholdJuridico = juridicoNode ? juridicoNode.dias : 151;
 
-  // Guardamos a lista base para KPIs e Resumo de Empresas, nÃ£o afetada pelo texto de busca
+  // Guardamos a lista base para KPIs e Resumo de Empresas, nÃƒÂ£o afetada pelo texto de busca
   const baseClientList = [...clientList];
 
-  // Filtro de Busca para a Fila de CobranÃ§a
+  // Filtro de Busca para a Fila de CobranÃƒÂ§a
   if (searchValue && window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
      const matches = window.GlobalCustomerCache.data.filter(c => 
         (c.name && c.name.toLowerCase().includes(searchValue)) ||
@@ -3389,12 +3389,12 @@ document.addEventListener("click", function(e) {
     });
   }
   
-  // Aplica os filtros avanÃ§ados tambÃ©m na lista de Sub Judice!
+  // Aplica os filtros avanÃƒÂ§ados tambÃƒÂ©m na lista de Sub Judice!
   window.advFilters = window.advFiltersSubjudice || {};
   filteredSubjudice = window.applyAdvFiltersTo(filteredSubjudice);
   window.advFilters = originalAdvFilters; // Restore
 
-  // 2. OrdenaÃ§Ã£o da Lista principal â€” grupos fixos, coluna sÃ³ dentro do grupo
+  // 2. OrdenaÃƒÂ§ÃƒÂ£o da Lista principal Ã¢â‚¬â€ grupos fixos, coluna sÃƒÂ³ dentro do grupo
   const sortCol = AppState.currentSortCol || 'maxDaysDelay';
   const sortDir = AppState.currentSortDir || 'desc';
   const sortFunc = (a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, true);
@@ -3404,10 +3404,10 @@ document.addEventListener("click", function(e) {
   window.clientList = clientList;
   window._subjudiceList = filteredSubjudice;
 
-  // Renderizar KPIs do topo (usando baseClientList ativa de cobranÃ§a)
+  // Renderizar KPIs do topo (usando baseClientList ativa de cobranÃƒÂ§a)
   renderDashboardKPIs(baseClientList, bills);
 
-  // Renderizar Resumo InadimplÃªncia por Empresa
+  // Renderizar Resumo InadimplÃƒÂªncia por Empresa
   const companySummary = {};
   if (AppState.companies) {
     AppState.companies.forEach(comp => {
@@ -3675,7 +3675,7 @@ document.addEventListener("click", function(e) {
     }
   }
 
-  // Renderizar Tabela da Fila de CobranÃ§a
+  // Renderizar Tabela da Fila de CobranÃƒÂ§a
   if (body) {
     body.innerHTML = "";
     if (clientList.length === 0) {
@@ -3723,7 +3723,7 @@ document.addEventListener("click", function(e) {
               Buscando
             </div>`;
         } else if (minDiff === Infinity || minDiff > 30) {
-            ultimoPagamentoStr = `<button class="btn btn-outline btn-sm" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2; border-color: #cbd5e1; color: #64748b; background-color: #f8fafc;" title="Sem pagamento nos Ãºltimos 30 dias">
+            ultimoPagamentoStr = `<button class="btn btn-outline btn-sm" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2; border-color: #cbd5e1; color: #64748b; background-color: #f8fafc;" title="Sem pagamento nos ÃƒÂºltimos 30 dias">
               Sem Pagto <i data-lucide="info" style="width: 12px; height: 12px; margin-left: 2px; vertical-align: middle;"></i>
             </button>`;
         } else if (minDiff === 0) {
@@ -3731,7 +3731,7 @@ document.addEventListener("click", function(e) {
         } else if (minDiff === 1) {
             ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">Ontem</span>`;
         } else {
-            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">HÃ¡ ${minDiff} dias</span>`;
+            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">HÃƒÂ¡ ${minDiff} dias</span>`;
         }
 
         const row = document.createElement("tr");
@@ -3772,9 +3772,9 @@ document.addEventListener("click", function(e) {
                       if (ed >= retroLimitDate) {
                           const diffTime = Math.abs(new Date() - ed);
                           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #818cf8; background-color: #e0e7ff; color: #3730a3; font-weight: 600;" title="Saiu do JurÃ­dico hÃ¡ ${diffDays} dias">
-                              <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Recente JurÃ­dico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
-                              <i data-lucide="x" style="width: 12px; height: 12px; margin-left: 4px; cursor: pointer; color: #4f46e5;" title="Remover marcaÃ§Ã£o" onclick="event.stopPropagation(); window.removerRecenteJuridico(${client.customerId})"></i>
+                          return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #818cf8; background-color: #e0e7ff; color: #3730a3; font-weight: 600;" title="Saiu do JurÃƒÂ­dico hÃƒÂ¡ ${diffDays} dias">
+                              <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Recente JurÃƒÂ­dico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
+                              <i data-lucide="x" style="width: 12px; height: 12px; margin-left: 4px; cursor: pointer; color: #4f46e5;" title="Remover marcaÃƒÂ§ÃƒÂ£o" onclick="event.stopPropagation(); window.removerRecenteJuridico(${client.customerId})"></i>
                           </span>`;
                       }
                   }
@@ -3782,8 +3782,8 @@ document.addEventListener("click", function(e) {
                       return getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
                   }
                   return client.maxDaysDelay >= thresholdJuridico ? `
-                  <button onclick="enviarParaJuridico(${client.customerId}, ${client.saleId})" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fca5a5; background-color: #fee2e2; color: #991b1b; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#fecaca'; this.style.borderColor='#f87171'" onmouseout="this.style.backgroundColor='#fee2e2'; this.style.borderColor='#fca5a5'" title="Clique para enviar ao JurÃ­dico">
-                    <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Enviar JurÃ­dico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
+                  <button onclick="enviarParaJuridico(${client.customerId}, ${client.saleId})" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fca5a5; background-color: #fee2e2; color: #991b1b; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#fecaca'; this.style.borderColor='#f87171'" onmouseout="this.style.backgroundColor='#fee2e2'; this.style.borderColor='#fca5a5'" title="Clique para enviar ao JurÃƒÂ­dico">
+                    <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Enviar JurÃƒÂ­dico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
                   </button>
                   ` : getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
               })()}
@@ -3854,14 +3854,14 @@ document.addEventListener("click", function(e) {
       </div>
       <div class="kpi-card promises">
         <div class="kpi-info">
-          <h3>TÃ­tulos Vencidos</h3>
+          <h3>TÃƒÂ­tulos Vencidos</h3>
           <div class="kpi-value">${subTotalBills}</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
       </div>
       <div class="kpi-card subjudice">
         <div class="kpi-info">
-          <h3>Atraso MÃ©dio</h3>
+          <h3>Atraso MÃƒÂ©dio</h3>
           <div class="kpi-value">${subAvgDelay} dias</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
@@ -4179,7 +4179,7 @@ document.addEventListener("click", function(e) {
   AppState.dashboardRendered = true;
   lucide.createIcons();
   
-  // Habilita o botÃ£o de Filtros AvanÃ§ados
+  // Habilita o botÃƒÂ£o de Filtros AvanÃƒÂ§ados
   const btnAdv = document.getElementById("btn-adv-filters");
   if (btnAdv) {
       btnAdv.disabled = false;
@@ -4213,13 +4213,13 @@ window.visualizarExtratoDireto = function(btn) {
       lucide.createIcons();
       if (res && res.results && res.results.length > 0 && res.results[0].urlReport) {
         const originalUrl = res.results[0].urlReport;
-        const fileName = `${customerName} - TÃ­tulo ${rawTitleNumber} (${blockLot}).pdf`;
+        const fileName = `${customerName} - TÃƒÂ­tulo ${rawTitleNumber} (${blockLot}).pdf`;
         const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
         window.open(proxyUrl, '_blank');
       } else if (res && res.fileUrl) {
         window.open(res.fileUrl, '_blank');
       } else {
-        alert("NÃ£o foi possÃ­vel gerar o extrato.");
+        alert("NÃƒÂ£o foi possÃƒÂ­vel gerar o extrato.");
       }
     })
     .catch(err => {
@@ -4239,19 +4239,19 @@ function renderDashboardKPIs(clients, bills) {
   const clientCount = new Set(clients.map(c => c.customerId)).size;
   document.getElementById("kpi-total-clients").textContent = clientCount;
   
-  // TÃ­tulos vencidos (distinct billCount)
+  // TÃƒÂ­tulos vencidos (distinct billCount)
   const billIdsSet = new Set();
   clients.forEach(c => c.billIds.forEach(id => billIdsSet.add(id)));
   document.getElementById("kpi-total-bills").textContent = billIdsSet.size;
 
-  // Atraso mÃ©dio em dias
+  // Atraso mÃƒÂ©dio em dias
   const avgDelay = clients.length ? Math.round(clients.reduce((acc, c) => acc + c.maxDaysDelay, 0) / clients.length) : 0;
   document.getElementById("kpi-average-delay").textContent = `${avgDelay} dias`;
 }
 
 // Eventos de Busca e Tabs
 document.addEventListener("DOMContentLoaded", () => {
-  // Injetar CSS para animar os Ã­cones do Lucide com a classe lucide-spin ou spin
+  // Injetar CSS para animar os ÃƒÂ­cones do Lucide com a classe lucide-spin ou spin
   (function() {
     const style = document.createElement('style');
     style.textContent = `
@@ -4288,7 +4288,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // === BACKGROUND FETCH PARA FILA DE COBRANÃ¯Â¿Â½A ===
+  // === BACKGROUND FETCH PARA FILA DE COBRANÃƒÂ¯Ã‚Â¿Ã‚Â½A ===
   setTimeout(async () => {
     if (!AppState.defaultersLoaded && getSiengeApiMode() === 'real') {
        try {
@@ -4329,14 +4329,14 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll(".operator-tab-btn:not(#btn-adv-filters):not(.quick-filter-btn)").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         
-        // Define a variÃ¡vel global (assumindo que estÃ¡ no escopo)
+        // Define a variÃƒÂ¡vel global (assumindo que estÃƒÂ¡ no escopo)
         if (typeof activeOperatorFilter !== 'undefined') {
             activeOperatorFilter = btn.getAttribute("data-operator");
         } else {
             window.activeOperatorFilter = btn.getAttribute("data-operator");
         }
         
-        // Limpar o filtro avanÃ§ado de operador para nÃ£o conflitar
+        // Limpar o filtro avanÃƒÂ§ado de operador para nÃƒÂ£o conflitar
         if (window.advFilters) {
             window.advFilters.operador = [];
             const container = document.getElementById('adv-dropdown-operador-container');
@@ -4476,7 +4476,7 @@ function drawFuturisticSpeedometer(canvas, percentage, remainingAmount) {
   const y = canvas.height - 10;
   const radius = Math.min(canvas.width / 2 - 10, canvas.height - 15);
   
-  // Clamping para evitar grÃ¡ficos distorcidos
+  // Clamping para evitar grÃƒÂ¡ficos distorcidos
   percentage = Math.min(Math.max(percentage, 0), 1);
   
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -4527,7 +4527,7 @@ window.toggleSidebar = function() {
 };
 
 window.showScoreDetailsModal = function() {
-   // Legacy - score agora Ã© integrado como tab, nao precisa de modal
+   // Legacy - score agora ÃƒÂ© integrado como tab, nao precisa de modal
 };
 
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
@@ -4626,7 +4626,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
   ];
   
-  // Abas permitidas para o advogado: Contrato de Venda | Valor quitaÃ§Ã£o | SimulaÃ§Ã£o vencidas | ConstruÃ§Ã£o
+  // Abas permitidas para o advogado: Contrato de Venda | Valor quitaÃƒÂ§ÃƒÂ£o | SimulaÃƒÂ§ÃƒÂ£o vencidas | ConstruÃƒÂ§ÃƒÂ£o
   const allowedAdvogadoTabs = ['tab-contrato', 'tab-valor-quitacao', 'tab-simulacao-vencidas', 'tab-construcao'];
   
   bottomTabsIds.forEach(tabId => {
@@ -4643,7 +4643,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       }
   });
 
-  // BotÃµes do RodapÃ© de Abas
+  // BotÃƒÂµes do RodapÃƒÂ© de Abas
   const irBtn = document.getElementById('btn-informe-rendimentos');
   if (irBtn) {
     if (isAdvogado) irBtn.style.display = 'none';
@@ -4653,10 +4653,10 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   
   const extratoBtn = document.getElementById('btn-visualizar-extrato-ativo');
   if (extratoBtn) {
-    extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluÃ­do pelo requisito)
+    extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluÃƒÂ­do pelo requisito)
   }
   
-  // Abas exclusivas do JudiciÃ¡rio
+  // Abas exclusivas do JudiciÃƒÂ¡rio
   const cobrancaJudicialBtn = document.getElementById('btn-tab-cobranca-judicial');
   if (cobrancaJudicialBtn) {
     cobrancaJudicialBtn.style.display = (isSubjudice || isAdvogado) ? 'inline-flex' : 'none';
@@ -4676,7 +4676,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
     switchCustomerTab('tab-contrato');
   }
   
-  // SimulaÃ§Ã£o de Vencidas adjustments for Sub Judice
+  // SimulaÃƒÂ§ÃƒÂ£o de Vencidas adjustments for Sub Judice
   AppState.isSubjudiceMode = isSubjudice;
   const simTaxaSelectRef = document.getElementById("simulador-taxa");
   if (simTaxaSelectRef) {
@@ -4762,7 +4762,7 @@ function formatCpfCnpj(val) {
   return val || "N/D";
 }
 
-  // Preencher dados cadastrais com formataÃ§Ãµes e Ã­cones
+  // Preencher dados cadastrais com formataÃƒÂ§ÃƒÂµes e ÃƒÂ­cones
   const nameEl = document.getElementById("det-name");
   if (nameEl) {
     const escapedName = (customer.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -4821,17 +4821,17 @@ function formatCpfCnpj(val) {
 
   if (mem) {
     if (mem.exitDate) {
-      subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">âš ï¸ JÃ PASSOU PELO SUB JUDICE</span>`;
+      subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">Ã¢Å¡Â Ã¯Â¸Â JÃƒÂ PASSOU PELO SUB JUDICE</span>`;
     } else {
       const entryTitle = mem.entryDate ? ` title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}"` : '';
-      subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;"${entryTitle}>ðŸš¨ ATIVO NO SUB JUDICE</span>`;
+      subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;"${entryTitle}>Ã°Å¸Å¡Â¨ ATIVO NO SUB JUDICE</span>`;
     }
   }
 
   document.getElementById("current-page-title").innerHTML = `<i data-lucide="user"></i> Ficha do Cliente: ${customerId} - ${customer.name}${headerSubtypesHtml}`;
   const subAlertSpan = document.getElementById("ctx-subjudice-alert");
   if (subAlertSpan) subAlertSpan.innerHTML = subjudiceAlertHtml;
-  // Reset context bar â€” dados do contrato sÃ£o populados mais tarde (apÃ³s blockLotFromName)
+  // Reset context bar Ã¢â‚¬â€ dados do contrato sÃƒÂ£o populados mais tarde (apÃƒÂ³s blockLotFromName)
   const ctxBar = document.getElementById('client-context-bar');
   if (ctxBar) { ctxBar.style.display = 'none'; }
   const ctxBadge = document.getElementById('ctx-page-badge');
@@ -4855,7 +4855,7 @@ function formatCpfCnpj(val) {
     }
   }
 
-  // Formatar GÃªnero / Tipo de Pessoa
+  // Formatar GÃƒÂªnero / Tipo de Pessoa
   const genderIconContainer = document.getElementById("customer-gender-icon");
   if (genderIconContainer) {
     genderIconContainer.innerHTML = "";
@@ -4864,7 +4864,7 @@ function formatCpfCnpj(val) {
     const isCNPJ = String(customer.cpfCnpj || "").replace(/\D/g, "").length > 11 || 
                    pType === "J" || 
                    pType === "JURIDICA" || 
-                   pType === "JURÃDICA" || 
+                   pType === "JURÃƒÂDICA" || 
                    customer.cnpj;
 
     const lblCpfCnpj = document.getElementById("lbl-cpf-cnpj");
@@ -4874,7 +4874,7 @@ function formatCpfCnpj(val) {
     
     let imgUrl = "";
     if (isCNPJ) {
-      imgUrl = "https://img.icons8.com/color/96/company.png"; // PrÃ©dio de empresa
+      imgUrl = "https://img.icons8.com/color/96/company.png"; // PrÃƒÂ©dio de empresa
     } else {
       const gender = String(customer.gender || customer.sex || "").toUpperCase();
       let isFemale = gender === "F" || gender === "FEMININO";
@@ -4954,7 +4954,7 @@ function formatCpfCnpj(val) {
       uniquePhones.forEach(p => {
         const mainBadge = p.isMain ? `<span class="badge badge-success" style="font-size:0.6rem; padding:2px 6px; text-transform:none; margin-left: 6px;">Principal</span>` : "";
         const copyBtn = `
-          <button onclick="copyToClipboard('${p.raw}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃºmero">
+          <button onclick="copyToClipboard('${p.raw}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃƒÂºmero">
             <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
           </button>
         `;
@@ -4972,7 +4972,7 @@ function formatCpfCnpj(val) {
       const pNum = customer.phone || "N/D";
       const icon = `<i data-lucide="phone" style="width:12px; height:12px; color:var(--color-primary); vertical-align:middle; margin-right:4px;"></i>`;
       const copyBtn = pNum !== "N/D" ? `
-        <button onclick="copyToClipboard('${pNum}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃºmero">
+        <button onclick="copyToClipboard('${pNum}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃƒÂºmero">
           <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
         </button>
       ` : "";
@@ -4984,7 +4984,7 @@ function formatCpfCnpj(val) {
     }
   }
 
-  // Formatar Subtypes/MarcaÃ§Ãµes Especiais
+  // Formatar Subtypes/MarcaÃƒÂ§ÃƒÂµes Especiais
   const alertContainer = document.getElementById("customer-subtypes-alert");
   const alertText = document.getElementById("customer-subtypes-alert-text");
   if (alertContainer && alertText) {
@@ -4994,18 +4994,18 @@ function formatCpfCnpj(val) {
     
     const criticalTags = [];
     if (lowerSubtypes.some(s => s.includes("falecido"))) {
-      criticalTags.push("FALECIDO / CÃƒâ€NJUGE FALECIDO");
+      criticalTags.push("FALECIDO / CÃƒÆ’Ã¢â‚¬ÂNJUGE FALECIDO");
     }
     if (lowerSubtypes.some(s => s.includes("negativar"))) {
-      criticalTags.push("PARA NÃƒO NEGATIVAR");
+      criticalTags.push("PARA NÃƒÆ’O NEGATIVAR");
     }
-    if (customer.isDeceased) criticalTags.push("FALECIDO / CÃƒâ€NJUGE FALECIDO");
-    if (customer.doNotNegative) criticalTags.push("PARA NÃƒO NEGATIVAR");
+    if (customer.isDeceased) criticalTags.push("FALECIDO / CÃƒÆ’Ã¢â‚¬ÂNJUGE FALECIDO");
+    if (customer.doNotNegative) criticalTags.push("PARA NÃƒÆ’O NEGATIVAR");
     
     const uniqueTags = [...new Set(criticalTags)];
     
     if (uniqueTags.length > 0) {
-      alertText.textContent = `AtenÃ§Ã£o Especial: Este cliente possui a(s) marcaÃ§Ã£o(Ãµes): ${uniqueTags.join(" | ")}. Proceder com cautela!`;
+      alertText.textContent = `AtenÃƒÂ§ÃƒÂ£o Especial: Este cliente possui a(s) marcaÃƒÂ§ÃƒÂ£o(ÃƒÂµes): ${uniqueTags.join(" | ")}. Proceder com cautela!`;
       alertContainer.style.display = "flex";
     }
   }
@@ -5020,7 +5020,7 @@ function formatCpfCnpj(val) {
     `;
   }
 
-  // Formatar ProfissÃ£o
+  // Formatar ProfissÃƒÂ£o
   const professionEl = document.getElementById("det-profession");
   if (professionEl) {
     const prof = customer.profession || "N/D";
@@ -5029,7 +5029,7 @@ function formatCpfCnpj(val) {
     const lowerProf = prof.toLowerCase();
     if (lowerProf.includes("engenh") || lowerProf.includes("arquit")) {
       profIcon = "hammer";
-    } else if (lowerProf.includes("mÃ©dic") || lowerProf.includes("enferm") || lowerProf.includes("dentis")) {
+    } else if (lowerProf.includes("mÃƒÂ©dic") || lowerProf.includes("enferm") || lowerProf.includes("dentis")) {
       profIcon = "stethoscope";
     } else if (lowerProf.includes("advogad") || lowerProf.includes("juiz") || lowerProf.includes("promotor")) {
       profIcon = "scale";
@@ -5040,14 +5040,14 @@ function formatCpfCnpj(val) {
     }
     
     professionEl.innerHTML = `
-      <span style="display:inline-flex; align-items:center; gap:4px;" title="ProfissÃ£o">
+      <span style="display:inline-flex; align-items:center; gap:4px;" title="ProfissÃƒÂ£o">
         <i data-lucide="${profIcon}" style="width:14px; height:14px; color:var(--color-primary);"></i>
         ${prof}
       </span>
     `;
   }
 
-  // Formatar EndereÃ§os
+  // Formatar EndereÃƒÂ§os
   const addressesContainer = document.getElementById("det-addresses");
   const addressLabel = document.getElementById("lbl-address-type");
   if (addressesContainer) {
@@ -5057,7 +5057,7 @@ function formatCpfCnpj(val) {
       const firstAddr = customer.addresses[0];
       const isFirstCommercial = firstAddr.type === 2 || String(firstAddr.typeDescription || firstAddr.type || "").toUpperCase().includes("COM");
       if (addressLabel) {
-        addressLabel.textContent = isFirstCommercial ? "EndereÃ§o Comercial" : "EndereÃ§o Residencial";
+        addressLabel.textContent = isFirstCommercial ? "EndereÃƒÂ§o Comercial" : "EndereÃƒÂ§o Residencial";
       }
       
       window._addressesToValidate = [];
@@ -5082,7 +5082,7 @@ function formatCpfCnpj(val) {
         item.style.alignItems = "flex-start";
         item.style.gap = "8px";
         item.style.marginBottom = "6px";
-        const btnText = isCommercial ? "Ver ComÃ©rcio" : "Ver ResidÃªncia";
+        const btnText = isCommercial ? "Ver ComÃƒÂ©rcio" : "Ver ResidÃƒÂªncia";
         const safeAddr = encodeURIComponent(fullStr);
         const safeName = encodeURIComponent(customer.name || "");
         item.innerHTML = `
@@ -5096,7 +5096,7 @@ function formatCpfCnpj(val) {
               <span id="spatial-badge-${i}"></span>
             </div>
             <div id="lot-address-${i}" style="display:none; margin-left: 24px; font-size:0.85rem; color:#444; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #105436; width: fit-content;">
-              Ã°Å¸â€œÂ <span id="lot-address-text-${i}"></span>
+              ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â <span id="lot-address-text-${i}"></span>
             </div>
           </div>
         `;
@@ -5108,7 +5108,7 @@ function formatCpfCnpj(val) {
       });
     } else {
       if (addressLabel) {
-        addressLabel.textContent = "EndereÃ§o";
+        addressLabel.textContent = "EndereÃƒÂ§o";
       }
       const addrStr = customer.address || "N/D";
       const iconName = "home";
@@ -5124,13 +5124,13 @@ function formatCpfCnpj(val) {
     }
   }
   
-  let age = "NÃ£o informado";
+  let age = "NÃƒÂ£o informado";
   if (customer.birthDate) {
     const isCNPJ = String(customer.cpfCnpj || "").replace(/\D/g, "").length > 11;
     if (isCNPJ) {
-      age = "NÃ£o se aplica";
+      age = "NÃƒÂ£o se aplica";
     } else if (customer.birthDate === "1980-01-01" || !customer.birthDate) {
-      age = "NÃ£o informado";
+      age = "NÃƒÂ£o informado";
     } else {
       const birth = new Date(customer.birthDate + 'T12:00:00');
       const today = new Date();
@@ -5146,12 +5146,12 @@ function formatCpfCnpj(val) {
   if (ageEl) ageEl.textContent = age;
 
   // ----------------------------------------------------------------------
-  // Preencher aba: CÃ´njuge
+  // Preencher aba: CÃƒÂ´njuge
   const detConjugeEl = document.getElementById("det-conjuge-content");
   if (detConjugeEl) {
     if (customer.spouse && customer.spouse.name) {
       const sp = customer.spouse;
-      let spouseAge = "NÃ£o informado";
+      let spouseAge = "NÃƒÂ£o informado";
       if (sp.birthDate && sp.birthDate !== "1980-01-01") {
         const birth = new Date(sp.birthDate + 'T12:00:00');
         const today = new Date();
@@ -5169,16 +5169,16 @@ function formatCpfCnpj(val) {
           <div class="detail-item"><span class="label">E-mail</span><span class="val">${sp.email || 'N/D'}</span></div>
           <div class="detail-item"><span class="label">Celular</span><span class="val">${sp.cellphoneNumber || 'N/D'}</span></div>
           <div class="detail-item"><span class="label">Telefone</span><span class="val">${sp.businessPhone || 'N/D'}</span></div>
-          <div class="detail-item"><span class="label">ProfissÃ£o</span><span class="val">${sp.profession || 'N/D'}</span></div>
+          <div class="detail-item"><span class="label">ProfissÃƒÂ£o</span><span class="val">${sp.profession || 'N/D'}</span></div>
         </div>
         <div id="spouse-contracts-container">
            <div style="font-size: 0.85rem; color: var(--color-text-muted);">
              <div class="loading-spinner" style="width: 14px; height: 14px; border: 2px solid rgba(16,84,54,0.15); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px;"></div>
-             Buscando outros contratos do cÃ´njuge...
+             Buscando outros contratos do cÃƒÂ´njuge...
            </div>
         </div>
       `;
-      // Buscar contratos do cÃ´njuge
+      // Buscar contratos do cÃƒÂ´njuge
       if (sp.cpf) {
         SiengeApiService.getCurrentDebitBalance(sp.cpf).then(debitRes => {
            const container = document.getElementById("spouse-contracts-container");
@@ -5193,11 +5193,11 @@ function formatCpfCnpj(val) {
                 </tr>
               `).join('');
               container.innerHTML = `
-                <h4 style="margin-bottom: 10px; font-size: 0.95rem; color: var(--color-primary); border-bottom: 1px solid var(--color-border); padding-bottom: 5px;">Contratos Vinculados ao CÃ´njuge (Extrato de DÃ©bitos)</h4>
+                <h4 style="margin-bottom: 10px; font-size: 0.95rem; color: var(--color-primary); border-bottom: 1px solid var(--color-border); padding-bottom: 5px;">Contratos Vinculados ao CÃƒÂ´njuge (Extrato de DÃƒÂ©bitos)</h4>
                 <table class="custom-table" style="font-size: 0.85rem; width: 100%;">
                   <thead style="background: rgba(0,0,0,0.02);">
                     <tr>
-                      <th style="padding: 8px;">TÃ­tulo/Documento</th>
+                      <th style="padding: 8px;">TÃƒÂ­tulo/Documento</th>
                       <th style="padding: 8px; text-align: center;">Parc. Pagas</th>
                       <th style="padding: 8px; text-align: center;">Parc. Vencidas</th>
                       <th style="padding: 8px; text-align: center;">Parc. A Vencer</th>
@@ -5207,7 +5207,7 @@ function formatCpfCnpj(val) {
                 </table>
               `;
            } else {
-              container.innerHTML = `<span style="font-size: 0.85rem; color: var(--color-text-muted);">NÃ£o foram encontrados outros contratos vinculados a este CPF no momento.</span>`;
+              container.innerHTML = `<span style="font-size: 0.85rem; color: var(--color-text-muted);">NÃƒÂ£o foram encontrados outros contratos vinculados a este CPF no momento.</span>`;
            }
         });
       } else {
@@ -5215,7 +5215,7 @@ function formatCpfCnpj(val) {
          if (container) container.innerHTML = '';
       }
     } else {
-      detConjugeEl.innerHTML = `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Este cliente nÃ£o possui cÃ´njuge cadastrado.</span>`;
+      detConjugeEl.innerHTML = `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Este cliente nÃƒÂ£o possui cÃƒÂ´njuge cadastrado.</span>`;
     }
   }
 
@@ -5231,10 +5231,10 @@ function formatCpfCnpj(val) {
       <div class="customer-detail-grid">
         <div class="detail-item"><span class="label">Nacionalidade</span><span class="val">${customer.nationality || 'N/D'}</span></div>
         <div class="detail-item"><span class="label">RG</span><span class="val">${customer.numberIdentityCard || 'N/D'}</span></div>
-        <div class="detail-item"><span class="label">Nome da MÃ£e</span><span class="val">${customer.motherName || 'N/D'}</span></div>
+        <div class="detail-item"><span class="label">Nome da MÃƒÂ£e</span><span class="val">${customer.motherName || 'N/D'}</span></div>
         <div class="detail-item"><span class="label">Nome do Pai</span><span class="val">${customer.fatherName || 'N/D'}</span></div>
-        <div class="detail-item"><span class="label">Data de CriaÃ§Ã£o</span><span class="val">${formatDateObj(customer.createdAt)}</span></div>
-        <div class="detail-item"><span class="label">Ãšltima AlteraÃ§Ã£o</span><span class="val">${formatDateObj(customer.modifiedAt)}</span></div>
+        <div class="detail-item"><span class="label">Data de CriaÃƒÂ§ÃƒÂ£o</span><span class="val">${formatDateObj(customer.createdAt)}</span></div>
+        <div class="detail-item"><span class="label">ÃƒÅ¡ltima AlteraÃƒÂ§ÃƒÂ£o</span><span class="val">${formatDateObj(customer.modifiedAt)}</span></div>
       </div>
     `;
   }
@@ -5249,12 +5249,12 @@ function formatCpfCnpj(val) {
           <div class="detail-item"><span class="label">Nome</span><span class="val">${att.name || 'N/D'}</span></div>
           <div class="detail-item"><span class="label">CPF</span><span class="val">${formatCpfCnpj(att.cpf)}</span></div>
           <div class="detail-item"><span class="label">E-mail</span><span class="val">${att.email || 'N/D'}</span></div>
-          <div class="detail-item"><span class="label">ProfissÃ£o</span><span class="val">${att.profession || 'N/D'}</span></div>
+          <div class="detail-item"><span class="label">ProfissÃƒÂ£o</span><span class="val">${att.profession || 'N/D'}</span></div>
         </div>
       `).join('');
       detProcuradoresEl.innerHTML = `<div style="display: flex; flex-direction: column; gap: 10px;">${attorneyRows}</div>`;
     } else {
-      detProcuradoresEl.innerHTML = `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Este cliente nÃ£o possui procuradores cadastrados.</span>`;
+      detProcuradoresEl.innerHTML = `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Este cliente nÃƒÂ£o possui procuradores cadastrados.</span>`;
     }
   }
 
@@ -5309,7 +5309,7 @@ function formatCpfCnpj(val) {
              btn.innerHTML = oldHtml;
            } catch(e) {
              console.error('Erro no download', e);
-             alert('NÃ£o foi possÃ­vel baixar o documento. Verifique as credenciais da API.');
+             alert('NÃƒÂ£o foi possÃƒÂ­vel baixar o documento. Verifique as credenciais da API.');
              if(event && event.currentTarget) event.currentTarget.innerHTML = `<i data-lucide="download" style="width: 14px;"></i> Baixar`;
            }
          };
@@ -5327,7 +5327,7 @@ function formatCpfCnpj(val) {
                  <i data-lucide="file" style="width: 20px; height: 20px; color: var(--color-secondary);"></i>
                  <div>
                    <div style="font-weight: 600; color: var(--color-primary); font-size: 0.9rem;">${att.name || 'Arquivo'}</div>
-                   <div style="font-size: 0.8rem; color: var(--color-text-muted);">${att.description || 'Documento do cliente'} â€¢ ${sizeKb}</div>
+                   <div style="font-size: 0.8rem; color: var(--color-text-muted);">${att.description || 'Documento do cliente'} Ã¢â‚¬Â¢ ${sizeKb}</div>
                  </div>
                </div>
                <button type="button" onclick="downloadSiengeDocument('${dlLink}', '${att.name || 'Arquivo'}', event)" class="btn btn-outline btn-sm" style="padding: 6px 12px; font-size: 0.8rem; cursor: pointer;">
@@ -5339,7 +5339,7 @@ function formatCpfCnpj(val) {
          detAnexosEl.innerHTML = assistenteBtnHtml + attRows;
          lucide.createIcons();
        } else {
-         detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Foi encontrado apenas o cadastro do cliente, porÃ©m sem anexos.</span>`;
+         detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Foi encontrado apenas o cadastro do cliente, porÃƒÂ©m sem anexos.</span>`;
          lucide.createIcons();
        }
     }).catch(err => {
@@ -5385,7 +5385,7 @@ function formatCpfCnpj(val) {
     };
   }
 
-  // Carregar renegociaÃ§Ãµes/acordos anteriores e detalhes da unidade concorrentemente para otimizar velocidade
+  // Carregar renegociaÃƒÂ§ÃƒÂµes/acordos anteriores e detalhes da unidade concorrentemente para otimizar velocidade
   let remadeProm = Promise.resolve([]);
   if (getSiengeApiMode() === "real" && AppState.remadeInstallments && AppState.remadeInstallments[saleId] === undefined) {
     remadeProm = SiengeApiService.getRemadeInstallments(saleId).catch(() => []);
@@ -5447,7 +5447,7 @@ function formatCpfCnpj(val) {
     }
   }
   
-  // A pedido do usuÃ¡rio, a unidade deve ser "ID EMPREENDIMENTO - NOME UNIDADE" (ex: 10100 - 05-16)
+  // A pedido do usuÃƒÂ¡rio, a unidade deve ser "ID EMPREENDIMENTO - NOME UNIDADE" (ex: 10100 - 05-16)
   const unitDisplayStr = unitName && unitName !== "N/D" ? unitName : "N/D";
   blockLotFromName = empIdToUse !== "N/D" ? `${empIdToUse} - ${unitDisplayStr}` : unitDisplayStr;
   
@@ -5458,7 +5458,7 @@ function formatCpfCnpj(val) {
   const ctxEmpreendValEl = document.getElementById('ctx-empreend-val');
   if (ctxBarEl) {
     if (ctxTituloValEl) ctxTituloValEl.textContent = billIdValForCtx;
-    if (ctxEmpreendValEl) ctxEmpreendValEl.textContent = blockLotFromName !== 'N/D' ? blockLotFromName : (projectFromName !== 'N/D' ? projectFromName : 'â€”');
+    if (ctxEmpreendValEl) ctxEmpreendValEl.textContent = blockLotFromName !== 'N/D' ? blockLotFromName : (projectFromName !== 'N/D' ? projectFromName : 'Ã¢â‚¬â€');
     ctxBarEl.style.display = 'inline-flex';
   }
 
@@ -5469,7 +5469,7 @@ function formatCpfCnpj(val) {
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
     </button></span>`;
     
-    // Buscar coordenadas do KMZ para exibir o botÃ£o do Google Earth
+    // Buscar coordenadas do KMZ para exibir o botÃƒÂ£o do Google Earth
     if (empIdToUse !== "N/D") {
       const { doc, getDoc } = window.firebaseCollections;
       const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empIdToUse);
@@ -5488,7 +5488,7 @@ function formatCpfCnpj(val) {
             const btnGe = document.createElement("button");
             btnGe.className = "btn-icon-ge disabled";
             btnGe.style.cssText = "background: #ccc; border: none; color: #666; padding: 4px 8px; cursor: not-allowed; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; white-space: nowrap;";
-            btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote IndisponÃ­vel`;
+            btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote IndisponÃƒÂ­vel`;
             btnGe.title = "Nenhum KMZ carregado para este Centro de Custo.";
             span.appendChild(btnGe);
             if (window.lucide) lucide.createIcons();
@@ -5517,14 +5517,14 @@ function formatCpfCnpj(val) {
               };
             } else {
               btnGe.style.cssText = "background: #ccc; border: none; color: #666; padding: 4px 8px; cursor: not-allowed; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; white-space: nowrap;";
-              btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote IndisponÃ­vel`;
-              btnGe.title = "Lote nÃ£o encontrado no arquivo KMZ carregado.";
+              btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote IndisponÃƒÂ­vel`;
+              btnGe.title = "Lote nÃƒÂ£o encontrado no arquivo KMZ carregado.";
             }
             span.appendChild(btnGe);
             if (window.lucide) lucide.createIcons();
           }
 
-          // ValidaÃ§Ã£o Espacial Turf.js
+          // ValidaÃƒÂ§ÃƒÂ£o Espacial Turf.js
           if (window._addressesToValidate && window._addressesToValidate.length > 0) {
             for (const addr of window._addressesToValidate) {
               const badge = document.getElementById(addr.id);
@@ -5537,15 +5537,15 @@ function formatCpfCnpj(val) {
               if (kmzMissing) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ NecessÃ¡rio Upload do KMZ`;
-                badge.title = "FaÃ§a o upload do arquivo KMZ deste empreendimento para validar a distÃ¢ncia.";
+                badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â NecessÃƒÂ¡rio Upload do KMZ`;
+                badge.title = "FaÃƒÂ§a o upload do arquivo KMZ deste empreendimento para validar a distÃƒÂ¢ncia.";
                 continue;
               }
 
               if (!match || !match.coordinates) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Lote nÃ£o encontrado no KMZ`;
+                badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â Lote nÃƒÂ£o encontrado no KMZ`;
                 continue;
               }
 
@@ -5613,9 +5613,9 @@ function formatCpfCnpj(val) {
                 if (clientLat === null || clientLon === null) {
                   badge.style.background = "#e0e0e0";
                   badge.style.color = "#555";
-                  badge.innerHTML = `âš ï¸ GeocodificaÃ§Ã£o falhou`;
-                  badge.title = `O Nominatim, Google Maps e a BrasilAPI nÃ£o encontraram as coordenadas para: "${queryAddr}".`;
-                  console.warn("GeocodificaÃ§Ã£o falhou para:", queryAddr);
+                  badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â GeocodificaÃƒÂ§ÃƒÂ£o falhou`;
+                  badge.title = `O Nominatim, Google Maps e a BrasilAPI nÃƒÂ£o encontraram as coordenadas para: "${queryAddr}".`;
+                  console.warn("GeocodificaÃƒÂ§ÃƒÂ£o falhou para:", queryAddr);
                   continue;
                 }
                 
@@ -5645,7 +5645,7 @@ function formatCpfCnpj(val) {
                   console.error("Failed to parse geometry", e);
                   badge.style.background = "#ffebee";
                   badge.style.color = "#c62828";
-                  badge.innerHTML = `âš ï¸ KMZ InvÃ¡lido`;
+                  badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â KMZ InvÃƒÂ¡lido`;
                   continue;
                 }
 
@@ -5676,21 +5676,21 @@ function formatCpfCnpj(val) {
                 if (isInside || distanceMeters <= 30) {
                   badge.style.background = "#e8f5e9";
                   badge.style.color = "#2e7d32";
-                  badge.innerHTML = `Ã°Å¸Å¸Â¢ Reside no Lote${fallbackText}`;
+                  badge.innerHTML = `ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ Reside no Lote${fallbackText}`;
                 } else {
                   badge.style.background = "#ffebee";
                   badge.style.color = "#c62828";
-                  badge.innerHTML = `Ã°Å¸â€Â´ NÃ£o reside no lote - DistÃ¢ncia: ${distFormatted}${fallbackText}`;
+                  badge.innerHTML = `ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´ NÃƒÂ£o reside no lote - DistÃƒÂ¢ncia: ${distFormatted}${fallbackText}`;
                 }
                 
                 badge.title = `Lat: ${clientLat.toFixed(5)}, Lng: ${clientLon.toFixed(5)}${fallbackText ? " - " + fallbackText.trim() : ""}`;
 
 
               } catch(err) {
-                console.error("Erro na validaÃ§Ã£o espacial:", err);
+                console.error("Erro na validaÃƒÂ§ÃƒÂ£o espacial:", err);
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Erro`;
+                badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â Erro`;
               }
               
               // Rate limit Nominatim (max 1 req/sec)
@@ -5706,7 +5706,7 @@ function formatCpfCnpj(val) {
               if (badge) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
-                badge.innerHTML = `âš ï¸ Erro ao buscar KMZ`;
+                badge.innerHTML = `Ã¢Å¡Â Ã¯Â¸Â Erro ao buscar KMZ`;
               }
             }
           }
@@ -5717,7 +5717,7 @@ function formatCpfCnpj(val) {
   }
 
   if (municipalReg !== "N/D" && municipalReg !== "") {
-    document.getElementById("det-municipal-reg").innerHTML = `<span style="display:flex; align-items:center;">${municipalReg} <button onclick="copyToClipboard('${municipalReg}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar InscriÃ§Ã£o Municipal">
+    document.getElementById("det-municipal-reg").innerHTML = `<span style="display:flex; align-items:center;">${municipalReg} <button onclick="copyToClipboard('${municipalReg}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar InscriÃƒÂ§ÃƒÂ£o Municipal">
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
     </button></span>`;
   } else {
@@ -5725,14 +5725,14 @@ function formatCpfCnpj(val) {
   }
 
   if (matricula !== "N/D" && matricula !== "") {
-    document.getElementById("det-matricula").innerHTML = `<span style="display:flex; align-items:center;">${matricula} <button onclick="copyToClipboard('${matricula}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar MatrÃ­cula">
+    document.getElementById("det-matricula").innerHTML = `<span style="display:flex; align-items:center;">${matricula} <button onclick="copyToClipboard('${matricula}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar MatrÃƒÂ­cula">
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
     </button></span>`;
   } else {
     document.getElementById("det-matricula").textContent = matricula;
   }
 
-  document.getElementById("det-area").textContent = typeof privateArea === "number" ? `${privateArea} mÃ‚Â²` : privateArea;
+  document.getElementById("det-area").textContent = typeof privateArea === "number" ? `${privateArea} mÃƒâ€šÃ‚Â²` : privateArea;
   
   const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate;
   const detSaleDateEl = document.getElementById("det-sale-date");
@@ -5764,7 +5764,7 @@ function formatCpfCnpj(val) {
   
   const billIdVal = sale.receivableBillId || saleId || "N/D";
   if (billIdVal !== "N/D" && billIdVal !== "") {
-    document.getElementById("det-bill-id").innerHTML = `<span style="display:flex; align-items:center;">${billIdVal} <button onclick="copyToClipboard('${billIdVal}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar TÃ­tulo">
+    document.getElementById("det-bill-id").innerHTML = `<span style="display:flex; align-items:center;">${billIdVal} <button onclick="copyToClipboard('${billIdVal}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar TÃƒÂ­tulo">
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
     </button></span>`;
   } else {
@@ -5773,14 +5773,14 @@ function formatCpfCnpj(val) {
   
   lucide.createIcons();
   
-  // Atualizar link de e-mail com assunto dinÃ¢mico (com o nome do cliente e unidade)
+  // Atualizar link de e-mail com assunto dinÃƒÂ¢mico (com o nome do cliente e unidade)
   const mailEl = document.getElementById("det-email");
   if (mailEl) {
     const emailVal = customer.email || "N/D";
     if (emailVal !== "N/D") {
       const projName = projectFromName || "N/D";
       const blockLot = blockLotFromName || "N/D";
-      const subjectText = `Lembrete de CobranÃ§a - ${customer.name} - ${projName} (${blockLot})`;
+      const subjectText = `Lembrete de CobranÃƒÂ§a - ${customer.name} - ${projName} (${blockLot})`;
       const mailtoUrl = `mailto:${emailVal}?subject=${encodeURIComponent(subjectText)}`;
       const emailCopyBtn = `
         <button onclick="copyToClipboard('${emailVal}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar e-mail">
@@ -5801,7 +5801,7 @@ function formatCpfCnpj(val) {
   }
 
   let monthsOfContract = 0;
-  let contractTimeGroup = "NÃ£o se aplica";
+  let contractTimeGroup = "NÃƒÂ£o se aplica";
   if (sale && sale.saleDate) {
     const saleDateObj = new Date(sale.saleDate + 'T12:00:00');
     const today = new Date();
@@ -5810,12 +5810,12 @@ function formatCpfCnpj(val) {
     monthsOfContract = Math.round(diffDays / 30);
     
     if (monthsOfContract >= 61) contractTimeGroup = "Acima 5 anos";
-    else if (monthsOfContract >= 49) contractTimeGroup = "AtÃ© 5 anos";
-    else if (monthsOfContract >= 37) contractTimeGroup = "AtÃ© 4 anos";
-    else if (monthsOfContract >= 25) contractTimeGroup = "AtÃ© 3 anos";
-    else if (monthsOfContract >= 13) contractTimeGroup = "AtÃ© 2 anos";
-    else if (monthsOfContract >= 7) contractTimeGroup = "AtÃ© 1 ano";
-    else if (monthsOfContract >= 0) contractTimeGroup = "AtÃ© 6 meses";
+    else if (monthsOfContract >= 49) contractTimeGroup = "AtÃƒÂ© 5 anos";
+    else if (monthsOfContract >= 37) contractTimeGroup = "AtÃƒÂ© 4 anos";
+    else if (monthsOfContract >= 25) contractTimeGroup = "AtÃƒÂ© 3 anos";
+    else if (monthsOfContract >= 13) contractTimeGroup = "AtÃƒÂ© 2 anos";
+    else if (monthsOfContract >= 7) contractTimeGroup = "AtÃƒÂ© 1 ano";
+    else if (monthsOfContract >= 0) contractTimeGroup = "AtÃƒÂ© 6 meses";
   }
   const contractTimeStr = sale && sale.saleDate 
     ? `${monthsOfContract} meses (${contractTimeGroup})`
@@ -5823,12 +5823,12 @@ function formatCpfCnpj(val) {
   const contractTimeEl = document.getElementById("det-contract-time");
   if (contractTimeEl) contractTimeEl.textContent = contractTimeStr;
 
-  // Configurar Link KMZ (oculto/dummy conforme preferÃªncias do usuÃ¡rio)
+  // Configurar Link KMZ (oculto/dummy conforme preferÃƒÂªncias do usuÃƒÂ¡rio)
   const kmzLink = document.getElementById("google-earth-kmz-link");
   if (kmzLink) {
     kmzLink.onclick = (e) => {
       e.preventDefault();
-      alert(`VisualizaÃ§Ã£o do KMZ indisponÃ­vel.`);
+      alert(`VisualizaÃƒÂ§ÃƒÂ£o do KMZ indisponÃƒÂ­vel.`);
     };
   }
 
@@ -5848,7 +5848,7 @@ function formatCpfCnpj(val) {
     let debitBalance = [];
     
     try {
-      // Como ambas as APIs agora usam o ID do cliente direto, elas sÃ£o extremamente rÃ¡pidas, entÃ£o podemos aguardar ambas.
+      // Como ambas as APIs agora usam o ID do cliente direto, elas sÃƒÂ£o extremamente rÃƒÂ¡pidas, entÃƒÂ£o podemos aguardar ambas.
       const [billsRes, balRes] = await Promise.all([
         SiengeApiService.getReceivableBills(customerId).catch(e => {
           console.error("Erro ao obter receivable-bills:", e);
@@ -5875,7 +5875,7 @@ function formatCpfCnpj(val) {
       const ctContracts = receivableBills.filter(c => (c.documentId || "").trim() === "CT");
       
       if (ctContracts.length === 0) {
-        otherContractsContainer.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted);">NÃ£o hÃ¡ outros contratos vinculados ao cliente.</div>`;
+        otherContractsContainer.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted);">NÃƒÂ£o hÃƒÂ¡ outros contratos vinculados ao cliente.</div>`;
       } else {
         const empNameMap = {};
         for (const contract of ctContracts) {
@@ -5910,7 +5910,7 @@ function formatCpfCnpj(val) {
               badgeClass = "badge-secondary";
             }
           } else if (contract.subjudice) {
-            status = "Sub JÃºdice";
+            status = "Sub JÃƒÂºdice";
             badgeClass = "badge-warning";
           } else if (contract.defaulting) {
             status = "Inadimplente";
@@ -5961,10 +5961,10 @@ function formatCpfCnpj(val) {
                    }
                  }
                  
-                 // Receipts (estÃ£o dentro de cada installment)
+                 // Receipts (estÃƒÂ£o dentro de cada installment)
                  if (inst.receipts && Array.isArray(inst.receipts)) {
                    inst.receipts.forEach(rec => {
-                     // NÃ£o contabilizar Baixas ContÃ¡beis (Distrato/Cancelamento) como valor pago pelo cliente
+                     // NÃƒÂ£o contabilizar Baixas ContÃƒÂ¡beis (Distrato/Cancelamento) como valor pago pelo cliente
                      const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
                      if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") {
                         hasDistratoReceipt = true;
@@ -5991,7 +5991,7 @@ function formatCpfCnpj(val) {
             }
           }
           
-          // FORÃ‡AR STATUS DE QUITADO SE OS VALORES BATEREM, CASO O SIENGE RETORNE INADIMPLENTE POR BUG
+          // FORÃƒâ€¡AR STATUS DE QUITADO SE OS VALORES BATEREM, CASO O SIENGE RETORNE INADIMPLENTE POR BUG
           let lastPaymentDate = null;
           if (dbContract && dbContract.installments) {
             dbContract.installments.forEach(inst => {
@@ -6040,7 +6040,7 @@ function formatCpfCnpj(val) {
                   <span style="font-size: 1.05rem; font-weight: 800; color: var(--color-success);">${fmt(valorLiquido)}</span>
                 </div>
                 <span style="font-size: 0.65rem; color: var(--color-text-muted); display: block; margin-top: 2px;">
-                  Orig. ${fmt(valorPago)} + AcrÃ©sc. ${fmt(valorAcrescimo)} - Desc. ${fmt(valorDesconto)}
+                  Orig. ${fmt(valorPago)} + AcrÃƒÂ©sc. ${fmt(valorAcrescimo)} - Desc. ${fmt(valorDesconto)}
                 </span>
               </div>
               
@@ -6052,7 +6052,7 @@ function formatCpfCnpj(val) {
                   <span style="font-size: 1.05rem; font-weight: 800; color: #e65100;">${fmt(valorVencidas)}</span>
                 </div>
                 <span style="font-size: 0.65rem; color: #e65100; opacity: 0.8; font-weight: 600; display: block; margin-top: 2px;">
-                  Orig. ${fmt(valorVencidasOriginal)} + AcrÃ©sc. ${fmt(Math.max(0, valorVencidas - valorVencidasOriginal))}
+                  Orig. ${fmt(valorVencidasOriginal)} + AcrÃƒÂ©sc. ${fmt(Math.max(0, valorVencidas - valorVencidasOriginal))}
                 </span>
               </div>
 
@@ -6073,7 +6073,7 @@ function formatCpfCnpj(val) {
                   <span style="font-size: 1.05rem; font-weight: 800; color: var(--color-primary);">${fmt(kpiTotalTotal)}</span>
                 </div>
                 <span style="font-size: 0.65rem; color: var(--color-text-muted); display: block; margin-top: 2px;">
-                  LÃ­q. receb. ${fmt(valorPago - valorDesconto)} + venc. orig. ${fmt(valorVencidasOriginal)} + a vencer ${fmt(valorAVencer)}
+                  LÃƒÂ­q. receb. ${fmt(valorPago - valorDesconto)} + venc. orig. ${fmt(valorVencidasOriginal)} + a vencer ${fmt(valorAVencer)}
                 </span>
               </div>
             </div>
@@ -6109,7 +6109,7 @@ function formatCpfCnpj(val) {
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <h4 style="margin: 0; color: var(--color-primary); font-size: 0.95rem; display: flex; align-items: center;">
                   <strong>Contrato:</strong> <span style="margin-left: 4px;">${docNumFull}</span> ${copyBtn(docNumFull)}
-                  <strong style="margin-left: 15px;">TÃ­tulo:</strong> <span style="margin-left: 4px;">${contract.receivableBillId}</span> ${copyBtn(contract.receivableBillId)}
+                  <strong style="margin-left: 15px;">TÃƒÂ­tulo:</strong> <span style="margin-left: 4px;">${contract.receivableBillId}</span> ${copyBtn(contract.receivableBillId)}
                 </h4>
                 <span class="badge ${badgeClass}">${status}</span>
                 ${currentLabelHtml}
@@ -6118,8 +6118,8 @@ function formatCpfCnpj(val) {
                 <div style="font-size: 0.8rem; color: var(--color-text-muted); display: flex; gap: 20px; flex-wrap: wrap;">
                   <div><strong>Empreendimento:</strong> ${empName}</div>
                   <div><strong>Unidade:</strong> ${empId} - ${contract.unityName || 'N/D'}</div>
-                  <div><strong>Data EmissÃ£o:</strong> ${issueDateStr}</div>
-                  <div><strong>Data QuitaÃ§Ã£o:</strong> ${payoffStr}</div>
+                  <div><strong>Data EmissÃƒÂ£o:</strong> ${issueDateStr}</div>
+                  <div><strong>Data QuitaÃƒÂ§ÃƒÂ£o:</strong> ${payoffStr}</div>
                 </div>
                 <div style="font-size: 0.8rem; color: var(--color-text-muted); grid-column: 1 / -1; margin-top: 4px; padding: 10px 6px; background: rgba(0,0,0,0.03); border-radius: 4px; width: 100%;">
                   ${valoresHtml}
@@ -6145,7 +6145,7 @@ function formatCpfCnpj(val) {
       }
     }
     
-    // A variÃ¡vel debitBalance jÃ¡ foi resolvida no Promise.all do topo
+    // A variÃƒÂ¡vel debitBalance jÃƒÂ¡ foi resolvida no Promise.all do topo
 
     // --- 2. RENDERIZAR EXTRATO FINANCEIRO COMPLETO ---
     let currentContractInstallments = [];
@@ -6288,7 +6288,7 @@ function formatCpfCnpj(val) {
                }
             }
             
-            if (!isRecebimento) return; // SÃ³ conta atraso se for Recebimento genuÃ­no
+            if (!isRecebimento) return; // SÃƒÂ³ conta atraso se for Recebimento genuÃƒÂ­no
             
             // Corrige problema de Data Invalida (caso rDateStr ja contenha T ou Z)
             const parseDateSafe = (ds) => (!ds ? new Date() : (ds.includes('T') ? new Date(ds) : new Date(ds + 'T12:00:00')));
@@ -6298,12 +6298,12 @@ function formatCpfCnpj(val) {
             
             let diffDays = Math.round((receiptDateSafe - dueSafe) / (1000 * 60 * 60 * 24));
             
-            // Regra Polaris: Ignorar parcelas baixadas atÃ© 31/12/2016 (nÃ£o devem entrar na conta do PMP)
+            // Regra Polaris: Ignorar parcelas baixadas atÃƒÂ© 31/12/2016 (nÃƒÂ£o devem entrar na conta do PMP)
             if (receiptDateSafe <= new Date('2016-12-31T23:59:59')) {
-               return; // Pula para a prÃ³xima parcela (forEach)
+               return; // Pula para a prÃƒÂ³xima parcela (forEach)
             }
             
-            // Regra D+1: Para pagamentos atÃ© 31/12/2025, subtrair 1 dia do atraso para compensar tempo bancÃ¡rio
+            // Regra D+1: Para pagamentos atÃƒÂ© 31/12/2025, subtrair 1 dia do atraso para compensar tempo bancÃƒÂ¡rio
             if (receiptDateSafe <= new Date('2025-12-31T23:59:59')) {
                if (diffDays > 0) {
                   diffDays = diffDays - 1;
@@ -6326,7 +6326,7 @@ function formatCpfCnpj(val) {
                else if (diffDays <= 90) dist90++;
                else distOver90++;
                
-               // Monitorar Ãºltimos 6 meses
+               // Monitorar ÃƒÂºltimos 6 meses
                if (dueSafe >= sixMonthsAgo) {
                   recentPMPDays += diffDays;
                   recentPaidCount++;
@@ -6342,11 +6342,11 @@ function formatCpfCnpj(val) {
     const pct = (val) => totalPaidInstCount > 0 ? Math.round((val / totalPaidInstCount) * 100) + "%" : "0%";
     const distRow = document.getElementById("comportamento-dashboard-root");
     if (distRow) {
-       // CÃ¡lculo do PMP Global
+       // CÃƒÂ¡lculo do PMP Global
        let globalPMPDays = 0;
        let globalPaidInstCount = 0;
        
-       // Tenta calcular o PMP Global buscando todos os recebimentos deste cliente na MOCK_DATA.SALES ou na memÃ³ria
+       // Tenta calcular o PMP Global buscando todos os recebimentos deste cliente na MOCK_DATA.SALES ou na memÃƒÂ³ria
        const salesToScan = (window.MOCK_DATA && window.MOCK_DATA.SALES) ? window.MOCK_DATA.SALES : (AppState && AppState.sales ? AppState.sales : []);
        salesToScan.forEach(saleItem => {
           if (String(saleItem.customerId) === String(customerId) && saleItem.installments) {
@@ -6377,7 +6377,7 @@ function formatCpfCnpj(val) {
            }
         });
        
-       // Se o cÃ¡lculo global falhar ou for vazio, fallback para o mediaPMP
+       // Se o cÃƒÂ¡lculo global falhar ou for vazio, fallback para o mediaPMP
        const mediaPMPGlobal = globalPaidInstCount > 0 ? Math.round(globalPMPDays / globalPaidInstCount) : mediaPMP;
 
        const recentPMP = recentPaidCount > 0 ? Math.round(recentPMPDays / recentPaidCount) : 0;
@@ -6430,66 +6430,66 @@ function formatCpfCnpj(val) {
        score -= (globalInadimplentesCount * inadiPenalty);
        
        if (mediaPMPGlobal <= 5 && globalOverdueCount >= 3 && totalPaidInstCount >= 1) {
-           profileTitle = "Anomalia Financeira (Quebra de PadrÃ£o)";
-           profileDesc = `AtenÃ§Ã£o: Quebra de padrÃ£o identificada! O cliente possui um excelente histÃ³rico de pagamentos (PMP Global: ${mediaPMPGlobal} dias e ${totalPaidInstCount} parcelas jÃ¡ pagas), porÃ©m apresenta ${globalOverdueCount} vencimentos recentes. Isso Ã© um forte indÃ­cio de um problema ou imprevisto externo (perda de renda, saÃºde, etc), nÃ£o caracterizando mÃ¡ fÃ©.`;
+           profileTitle = "Anomalia Financeira (Quebra de PadrÃƒÂ£o)";
+           profileDesc = `AtenÃƒÂ§ÃƒÂ£o: Quebra de padrÃƒÂ£o identificada! O cliente possui um excelente histÃƒÂ³rico de pagamentos (PMP Global: ${mediaPMPGlobal} dias e ${totalPaidInstCount} parcelas jÃƒÂ¡ pagas), porÃƒÂ©m apresenta ${globalOverdueCount} vencimentos recentes. Isso ÃƒÂ© um forte indÃƒÂ­cio de um problema ou imprevisto externo (perda de renda, saÃƒÂºde, etc), nÃƒÂ£o caracterizando mÃƒÂ¡ fÃƒÂ©.`;
            negotiationTips = [
                "Aborde de forma estritamente consultiva e acolhedora: 'Notamos que sempre foi um excelente cliente e houve um atraso recente. Aconteceu algum imprevisto em que possamos ajudar?'.",
-               "OfereÃ§a soluÃ§Ãµes de flexibilizaÃ§Ã£o como repactuaÃ§Ã£o sem juros abusivos, ou carÃªncia temporÃ¡ria.",
-               "NÃƒO utilize rÃ©guas de cobranÃ§a agressivas ou ameaÃ§a de negativaÃ§Ã£o precipitada para este perfil."
+               "OfereÃƒÂ§a soluÃƒÂ§ÃƒÂµes de flexibilizaÃƒÂ§ÃƒÂ£o como repactuaÃƒÂ§ÃƒÂ£o sem juros abusivos, ou carÃƒÂªncia temporÃƒÂ¡ria.",
+               "NÃƒÆ’O utilize rÃƒÂ©guas de cobranÃƒÂ§a agressivas ou ameaÃƒÂ§a de negativaÃƒÂ§ÃƒÂ£o precipitada para este perfil."
            ];
-           newSaleRisk = `<span style="color: #f59e0b; font-weight: 800;">RISCO TEMPORÃƒÂRIO (ANOMALIA)</span>: O cliente tem excelente potencial futuro, mas o momento atual exige cuidado. Aguarde a resoluÃ§Ã£o do problema pontual antes de propor novas vendas.`;
+           newSaleRisk = `<span style="color: #f59e0b; font-weight: 800;">RISCO TEMPORÃƒÆ’Ã‚ÂRIO (ANOMALIA)</span>: O cliente tem excelente potencial futuro, mas o momento atual exige cuidado. Aguarde a resoluÃƒÂ§ÃƒÂ£o do problema pontual antes de propor novas vendas.`;
        } else if (score <= -15) {
-           profileTitle = "Risco Alto (Contumaz / Distratos / InadimplÃªncia CrÃ´nica)";
-           profileDesc = `O comportamento financeiro deste cliente sinaliza um padrÃ£o crÃ­tico. Com um score comercial de ${score} pontos, o histÃ³rico apresenta distratos ou inadimplÃªncia crÃ´nica. A ausÃªncia de pontualidade e o alto nÃºmero de dias em atraso (PMP Global: ${mediaPMPGlobal} dias) refletem severa dificuldade em honrar compromissos no curto e mÃ©dio prazo.`;
+           profileTitle = "Risco Alto (Contumaz / Distratos / InadimplÃƒÂªncia CrÃƒÂ´nica)";
+           profileDesc = `O comportamento financeiro deste cliente sinaliza um padrÃƒÂ£o crÃƒÂ­tico. Com um score comercial de ${score} pontos, o histÃƒÂ³rico apresenta distratos ou inadimplÃƒÂªncia crÃƒÂ´nica. A ausÃƒÂªncia de pontualidade e o alto nÃƒÂºmero de dias em atraso (PMP Global: ${mediaPMPGlobal} dias) refletem severa dificuldade em honrar compromissos no curto e mÃƒÂ©dio prazo.`;
            negotiationTips = [
-               "Aja com celeridade e rigor. Cumpra os prazos contratuais estritamente para acionamento de assessorias de cobranÃ§a e negativaÃ§Ã£o.",
-               "NÃ£o conceda descontos de juros/multa sem um pagamento Ã  vista real e compensado. Promessas verbais tÃªm altÃ­ssimo risco de quebra.",
-               "Inicie internamente a avaliaÃ§Ã£o de viabilidade de distrato/retomada do bem atual antes que a dÃ­vida acumule mais."
+               "Aja com celeridade e rigor. Cumpra os prazos contratuais estritamente para acionamento de assessorias de cobranÃƒÂ§a e negativaÃƒÂ§ÃƒÂ£o.",
+               "NÃƒÂ£o conceda descontos de juros/multa sem um pagamento ÃƒÂ  vista real e compensado. Promessas verbais tÃƒÂªm altÃƒÂ­ssimo risco de quebra.",
+               "Inicie internamente a avaliaÃƒÂ§ÃƒÂ£o de viabilidade de distrato/retomada do bem atual antes que a dÃƒÂ­vida acumule mais."
            ];
-           newSaleRisk = `<span style="color: var(--color-danger); font-weight: 800;">RISCO ALTO (NÃƒO RECOMENDADO)</span>: A venda de um novo lote para este cliente Ã© fortemente desaconselhada. O histÃ³rico reflÃ©te falta de compromisso ou severa incapacidade financeira, o que pode gerar passivo imobiliÃ¡rio e altos custos jurÃ­dicos no futuro.`;
+           newSaleRisk = `<span style="color: var(--color-danger); font-weight: 800;">RISCO ALTO (NÃƒÆ’O RECOMENDADO)</span>: A venda de um novo lote para este cliente ÃƒÂ© fortemente desaconselhada. O histÃƒÂ³rico reflÃƒÂ©te falta de compromisso ou severa incapacidade financeira, o que pode gerar passivo imobiliÃƒÂ¡rio e altos custos jurÃƒÂ­dicos no futuro.`;
        } else if (score >= -14 && score < 0) {
            profileTitle = "Risco Moderado (Atrasos Frequentes / Renegociador)";
-           profileDesc = `O cliente apresenta instabilidade no fluxo de pagamento. O score comercial Ã© ${score} pontos. Embora haja esforÃ§o para quitaÃ§Ã£o (PMP Global: ${mediaPMPGlobal} dias), o perfil indica desorganizaÃ§Ã£o financeira crÃ´nica ou priorizaÃ§Ã£o de outras despesas em detrimento das parcelas do lote.`;
+           profileDesc = `O cliente apresenta instabilidade no fluxo de pagamento. O score comercial ÃƒÂ© ${score} pontos. Embora haja esforÃƒÂ§o para quitaÃƒÂ§ÃƒÂ£o (PMP Global: ${mediaPMPGlobal} dias), o perfil indica desorganizaÃƒÂ§ÃƒÂ£o financeira crÃƒÂ´nica ou priorizaÃƒÂ§ÃƒÂ£o de outras despesas em detrimento das parcelas do lote.`;
            negotiationTips = [
-               "Inicie a rÃ©gua de cobranÃ§a de forma firme logo nos primeiros dias de atraso, nÃ£o deixando a dÃ­vida 'esfriar'.",
-               "Ao renegociar, exija uma entrada (sinal) significativa. A probabilidade de quebra de promessa Ã© considerÃ¡vel.",
-               "Investigue a raiz do problema para sugerir repactuaÃ§Ãµes reais que caibam no fluxo de caixa atual do cliente."
+               "Inicie a rÃƒÂ©gua de cobranÃƒÂ§a de forma firme logo nos primeiros dias de atraso, nÃƒÂ£o deixando a dÃƒÂ­vida 'esfriar'.",
+               "Ao renegociar, exija uma entrada (sinal) significativa. A probabilidade de quebra de promessa ÃƒÂ© considerÃƒÂ¡vel.",
+               "Investigue a raiz do problema para sugerir repactuaÃƒÂ§ÃƒÂµes reais que caibam no fluxo de caixa atual do cliente."
            ];
-           newSaleRisk = `<span style="color: #f59e0b; font-weight: 800;">RISCO MODERADO (EXIGE CAUTELA)</span>: A venda de um novo lote Ã© possÃ­vel, mas exige anÃ¡lise de crÃ©dito rigorosa (comprovaÃ§Ã£o de renda recente) e a cobranÃ§a de um valor de entrada muito maior para mitigar riscos de inadimplÃªncia.`;
+           newSaleRisk = `<span style="color: #f59e0b; font-weight: 800;">RISCO MODERADO (EXIGE CAUTELA)</span>: A venda de um novo lote ÃƒÂ© possÃƒÂ­vel, mas exige anÃƒÂ¡lise de crÃƒÂ©dito rigorosa (comprovaÃƒÂ§ÃƒÂ£o de renda recente) e a cobranÃƒÂ§a de um valor de entrada muito maior para mitigar riscos de inadimplÃƒÂªncia.`;
        } else if (score >= 0 && score <= 9) {
            profileTitle = "Pagador Regular (Ativo / Atrasos Curtos)";
-           profileDesc = `Cliente com perfil ativo e positivo (Score: ${score} pontos). Os pequenos atrasos identificados no histÃ³rico (PMP Global: ${mediaPMPGlobal} dias) geralmente sÃ£o fruto de leves desencontros no fluxo de caixa (ex: desalinhamento entre o dia do salÃ¡rio e o vencimento do boleto) ou meros esquecimentos.`;
+           profileDesc = `Cliente com perfil ativo e positivo (Score: ${score} pontos). Os pequenos atrasos identificados no histÃƒÂ³rico (PMP Global: ${mediaPMPGlobal} dias) geralmente sÃƒÂ£o fruto de leves desencontros no fluxo de caixa (ex: desalinhamento entre o dia do salÃƒÂ¡rio e o vencimento do boleto) ou meros esquecimentos.`;
            negotiationTips = [
-               "Programe lembretes preventivos (SMS/WhatsApp) dias antes e no prÃ³prio dia do vencimento para educar o cliente.",
-               "Aborde de forma prestativa nos primeiros dias de atraso: 'Podemos ajudar com a 2Âª via?'. Evite notificaÃ§Ãµes agressivas.",
-               "Se os atrasos acontecem num perÃ­odo fixo, sugira a mudanÃ§a do dia de vencimento."
+               "Programe lembretes preventivos (SMS/WhatsApp) dias antes e no prÃƒÂ³prio dia do vencimento para educar o cliente.",
+               "Aborde de forma prestativa nos primeiros dias de atraso: 'Podemos ajudar com a 2Ã‚Âª via?'. Evite notificaÃƒÂ§ÃƒÂµes agressivas.",
+               "Se os atrasos acontecem num perÃƒÂ­odo fixo, sugira a mudanÃƒÂ§a do dia de vencimento."
            ];
-           newSaleRisk = `<span style="color: var(--color-primary); font-weight: 800;">RISCO BAIXO / CONTROLADO</span>: Cliente perfeitamente apto para aquisiÃ§Ã£o de novo lote. Recomenda-se apenas mapear a data exata de recebimento de renda do cliente e alinhar o vencimento do novo contrato com essa data.`;
+           newSaleRisk = `<span style="color: var(--color-primary); font-weight: 800;">RISCO BAIXO / CONTROLADO</span>: Cliente perfeitamente apto para aquisiÃƒÂ§ÃƒÂ£o de novo lote. Recomenda-se apenas mapear a data exata de recebimento de renda do cliente e alinhar o vencimento do novo contrato com essa data.`;
        } else {
-           profileTitle = "Pagador Excelente (TÃ­tulos Quitados / Alto Compromisso)";
-           profileDesc = `Perfil exemplar e de altÃ­ssima confiabilidade! Com excelente score comercial de ${score} pontos, o cliente liquida suas obrigaÃ§Ãµes sistematicamente em dia ou tem histÃ³rico de lotes quitados (PMP Global: ${mediaPMPGlobal} dias), demonstrando extrema organizaÃ§Ã£o pessoal e capacidade financeira. O risco de inadimplÃªncia Ã© virtualmente nulo.`;
+           profileTitle = "Pagador Excelente (TÃƒÂ­tulos Quitados / Alto Compromisso)";
+           profileDesc = `Perfil exemplar e de altÃƒÂ­ssima confiabilidade! Com excelente score comercial de ${score} pontos, o cliente liquida suas obrigaÃƒÂ§ÃƒÂµes sistematicamente em dia ou tem histÃƒÂ³rico de lotes quitados (PMP Global: ${mediaPMPGlobal} dias), demonstrando extrema organizaÃƒÂ§ÃƒÂ£o pessoal e capacidade financeira. O risco de inadimplÃƒÂªncia ÃƒÂ© virtualmente nulo.`;
            negotiationTips = [
-               "OfereÃ§a condiÃ§Ãµes exclusivas ou descontos para antecipaÃ§Ã£o de novas parcelas. HÃ¡ alta chance de aceite.",
-               "Em caso de atraso esporÃ¡dico (raro), nÃ£o envie cobranÃ§as padrÃ£o. Envie uma mensagem pessoal amigÃ¡vel verificando se houve esquecimento.",
-               "Foque no bom relacionamento para tornÃ¡-lo um promotor da marca."
+               "OfereÃƒÂ§a condiÃƒÂ§ÃƒÂµes exclusivas ou descontos para antecipaÃƒÂ§ÃƒÂ£o de novas parcelas. HÃƒÂ¡ alta chance de aceite.",
+               "Em caso de atraso esporÃƒÂ¡dico (raro), nÃƒÂ£o envie cobranÃƒÂ§as padrÃƒÂ£o. Envie uma mensagem pessoal amigÃƒÂ¡vel verificando se houve esquecimento.",
+               "Foque no bom relacionamento para tornÃƒÂ¡-lo um promotor da marca."
            ];
-           newSaleRisk = `<span style="color: var(--color-success); font-weight: 800;">RISCO MÃNIMO (ALTAMENTE RECOMENDADO)</span>: Excelente candidato para aquisiÃ§Ã£o de novos lotes, upgrades de empreendimento ou campanhas de indicaÃ§Ã£o. O histÃ³rico comprova sÃ³lida capacidade financeira. CondiÃ§Ãµes de financiamento facilitadas e sem burocracia podem ser oferecidas sem receio.`;
+           newSaleRisk = `<span style="color: var(--color-success); font-weight: 800;">RISCO MÃƒÂNIMO (ALTAMENTE RECOMENDADO)</span>: Excelente candidato para aquisiÃƒÂ§ÃƒÂ£o de novos lotes, upgrades de empreendimento ou campanhas de indicaÃƒÂ§ÃƒÂ£o. O histÃƒÂ³rico comprova sÃƒÂ³lida capacidade financeira. CondiÃƒÂ§ÃƒÂµes de financiamento facilitadas e sem burocracia podem ser oferecidas sem receio.`;
        }
 
        let dateAlignmentTip = "";
        if (mediaPMPGlobal > 0 && mediaPMPGlobal <= 10) {
-           dateAlignmentTip = `<strong>Alinhamento de Vencimento:</strong> PadrÃ£o de atraso curto e constante identificado (mÃ©dia de ${mediaPMPGlobal} dias). O cliente possivelmente recebe sua renda dias apÃ³s o vencimento atual. <strong>AÃ§Ã£o recomendada:</strong> Entre em contato sugerindo a alteraÃ§Ã£o da data de vencimento do boleto para alinhar com o real fluxo de caixa dele, reduzindo a rÃ©gua de cobranÃ§a padrÃ£o.`;
+           dateAlignmentTip = `<strong>Alinhamento de Vencimento:</strong> PadrÃƒÂ£o de atraso curto e constante identificado (mÃƒÂ©dia de ${mediaPMPGlobal} dias). O cliente possivelmente recebe sua renda dias apÃƒÂ³s o vencimento atual. <strong>AÃƒÂ§ÃƒÂ£o recomendada:</strong> Entre em contato sugerindo a alteraÃƒÂ§ÃƒÂ£o da data de vencimento do boleto para alinhar com o real fluxo de caixa dele, reduzindo a rÃƒÂ©gua de cobranÃƒÂ§a padrÃƒÂ£o.`;
        } else if (mediaPMPGlobal < 0) {
-           dateAlignmentTip = `<strong>Potencial de AntecipaÃ§Ã£o:</strong> Cliente possui o hÃ¡bito de pagar com antecedÃªncia (mÃ©dia de ${Math.abs(mediaPMPGlobal)} dias antes). O vencimento atual Ã© posterior ao recebimento de renda. <strong>AÃ§Ã£o recomendada:</strong> Como o cliente tem fluxo antes do vencimento, ofereÃ§a campanhas para adiantamento de parcelas futuras com desconto, ou bÃ´nus de pontualidade.`;
+           dateAlignmentTip = `<strong>Potencial de AntecipaÃƒÂ§ÃƒÂ£o:</strong> Cliente possui o hÃƒÂ¡bito de pagar com antecedÃƒÂªncia (mÃƒÂ©dia de ${Math.abs(mediaPMPGlobal)} dias antes). O vencimento atual ÃƒÂ© posterior ao recebimento de renda. <strong>AÃƒÂ§ÃƒÂ£o recomendada:</strong> Como o cliente tem fluxo antes do vencimento, ofereÃƒÂ§a campanhas para adiantamento de parcelas futuras com desconto, ou bÃƒÂ´nus de pontualidade.`;
        } else if (mediaPMPGlobal === 0) {
-           dateAlignmentTip = `<strong>Fluxo Perfeito:</strong> O cliente tem o hÃ¡bito de pagar no dia exato do vencimento, indicando que a data atual estÃ¡ perfeitamente alinhada com o recebimento de seus rendimentos.`;
+           dateAlignmentTip = `<strong>Fluxo Perfeito:</strong> O cliente tem o hÃƒÂ¡bito de pagar no dia exato do vencimento, indicando que a data atual estÃƒÂ¡ perfeitamente alinhada com o recebimento de seus rendimentos.`;
        }
        
        if (dateAlignmentTip) {
            negotiationTips.unshift(dateAlignmentTip);
        }
        
-       // Atualiza o GrÃ¡fico Superior de Score com a mesma lÃ³gica unificada
+       // Atualiza o GrÃƒÂ¡fico Superior de Score com a mesma lÃƒÂ³gica unificada
        const scorePointsEl = document.getElementById("score-points");
        const scoreLabelEl = document.getElementById("score-label");
        const scoreCardContainer = document.getElementById("customer-score-card");
@@ -6515,29 +6515,29 @@ function formatCpfCnpj(val) {
        }
 
        distRow.innerHTML = `
-         <!-- 1. AnÃ¡lise de Perfil (Top) -->
+         <!-- 1. AnÃƒÂ¡lise de Perfil (Top) -->
          <div style="margin-bottom: 25px; display: flex; flex-direction: column; gap: 15px;">
            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
              <i data-lucide="brain-circuit" style="width:24px; height:24px; color: var(--color-primary);"></i>
-             <h4 style="margin: 0; font-size: 1.15rem; color: #0f172a;">InteligÃªncia de Comportamento e Abordagem</h4>
+             <h4 style="margin: 0; font-size: 1.15rem; color: #0f172a;">InteligÃƒÂªncia de Comportamento e Abordagem</h4>
            </div>
 
            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-               <!-- AnÃ¡lise Financeira -->
+               <!-- AnÃƒÂ¡lise Financeira -->
                <div style="flex: 1; min-width: 300px; padding: 20px; background: #fff; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid var(--color-primary); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                     <i data-lucide="trending-up" style="width:18px; color: #64748b;"></i>
-                    <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">AnÃ¡lise Financeira</span>
+                    <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">AnÃƒÂ¡lise Financeira</span>
                  </div>
                  <h3 style="margin: 0 0 10px 0; font-size: 1.2rem; color: #1e293b;">${profileTitle}</h3>
                  <p style="margin: 0; font-size: 0.9rem; color: #475569; line-height: 1.6;">${profileDesc}</p>
                </div>
 
-               <!-- AnÃ¡lise Comercial -->
+               <!-- AnÃƒÂ¡lise Comercial -->
                <div style="flex: 1; min-width: 300px; padding: 20px; background: #fff; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f59e0b; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                     <i data-lucide="shopping-bag" style="width:18px; color: #64748b;"></i>
-                    <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">AnÃ¡lise Comercial (Novas Vendas)</span>
+                    <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">AnÃƒÂ¡lise Comercial (Novas Vendas)</span>
                  </div>
                  <div style="font-size: 0.9rem; color: #334155; line-height: 1.6;">
                    ${newSaleRisk}
@@ -6545,11 +6545,11 @@ function formatCpfCnpj(val) {
                </div>
            </div>
 
-           <!-- OrientaÃ§Ãµes de NegociaÃ§Ã£o -->
+           <!-- OrientaÃƒÂ§ÃƒÂµes de NegociaÃƒÂ§ÃƒÂ£o -->
            <div style="padding: 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
                 <i data-lucide="messages-square" style="width:18px; color: #64748b;"></i>
-                <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">OrientaÃ§Ãµes de NegociaÃ§Ã£o e Abordagem</span>
+                <span style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase;">OrientaÃƒÂ§ÃƒÂµes de NegociaÃƒÂ§ÃƒÂ£o e Abordagem</span>
              </div>
              <ul style="margin: 0; padding-left: 20px; font-size: 0.95rem; color: #334155; line-height: 1.7;">
                ${negotiationTips.map(t => `<li style="margin-bottom: 8px;">${t}</li>`).join('')}
@@ -6557,7 +6557,7 @@ function formatCpfCnpj(val) {
            </div>
          </div>
 
-         <!-- 2. Grid de 40% Esquerda (Tabela) / 60% Direita (KPIs e GrÃ¡fico) -->
+         <!-- 2. Grid de 40% Esquerda (Tabela) / 60% Direita (KPIs e GrÃƒÂ¡fico) -->
          <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;">
            
            <!-- Esquerda: Tabela (40%) -->
@@ -6571,7 +6571,7 @@ function formatCpfCnpj(val) {
                    <th style="padding: 10px 4px; font-weight: 600; text-align: center;">Percentual</th>
                  </tr>
                  <tr style="border-bottom: 1px solid #f1f5f9;">
-                   <td style="padding: 10px 4px; display:flex; align-items:center; gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#0ea5e9;"></span> AntecipaÃ§Ã£o</td>
+                   <td style="padding: 10px 4px; display:flex; align-items:center; gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#0ea5e9;"></span> AntecipaÃƒÂ§ÃƒÂ£o</td>
                    <td style="padding: 10px 4px; font-weight: 700; color: #1e293b; text-align: center;">${distAntecipado}</td>
                    <td style="padding: 10px 4px; color: #64748b; font-weight:600; text-align: center;">${pct(distAntecipado)}</td>
                  </tr>
@@ -6581,7 +6581,7 @@ function formatCpfCnpj(val) {
                    <td style="padding: 10px 4px; color: #64748b; font-weight:600; text-align: center;">${pct(distOnTime)}</td>
                  </tr>
                  <tr style="border-bottom: 1px solid #f1f5f9;">
-                   <td style="padding: 10px 4px; display:flex; align-items:center; gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#84cc16;"></span> AtÃ© 7 dias</td>
+                   <td style="padding: 10px 4px; display:flex; align-items:center; gap:8px;"><span style="width:12px;height:12px;border-radius:3px;background:#84cc16;"></span> AtÃƒÂ© 7 dias</td>
                    <td style="padding: 10px 4px; font-weight: 700; color: #1e293b; text-align: center;">${dist7}</td>
                    <td style="padding: 10px 4px; color: #64748b; font-weight:600; text-align: center;">${pct(dist7)}</td>
                  </tr>
@@ -6614,42 +6614,42 @@ function formatCpfCnpj(val) {
              </div>
            </div>
 
-           <!-- Direita: KPIs e GrÃ¡fico (60%) -->
+           <!-- Direita: KPIs e GrÃƒÂ¡fico (60%) -->
            <div style="flex: 1; min-width: 400px; display: flex; flex-direction: column; gap: 20px;">
              
              <!-- KPIs -->
              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                 <div class="kpi-card mini-kpi" style="border-left: 3px solid ${pmpColor}; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: white; border-radius: 6px;">
                   <div class="kpi-info">
-                    <span style="font-size: 0.65rem; color: #64748b; font-weight: 700; text-transform: uppercase;">PMP do TÃ­tulo Atual</span>
+                    <span style="font-size: 0.65rem; color: #64748b; font-weight: 700; text-transform: uppercase;">PMP do TÃƒÂ­tulo Atual</span>
                     <h4 style="margin: 4px 0; font-size: 1.4rem; color: #1e293b;">${mediaPMP} <span style="font-size:0.9rem;font-weight:400;color:#64748b;">dias</span></h4>
-                    <div style="font-size: 0.8rem; font-weight: 500; color: #64748b; margin-top: 4px;">* PMP = Prazo MÃ©dio de Pagamento</div>
+                    <div style="font-size: 0.8rem; font-weight: 500; color: #64748b; margin-top: 4px;">* PMP = Prazo MÃƒÂ©dio de Pagamento</div>
                   </div>
                 </div>
                 <div class="kpi-card mini-kpi" style="border-left: 3px solid ${globalPmpColor}; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: white; border-radius: 6px;">
                   <div class="kpi-info">
                     <span style="font-size: 0.65rem; color: #64748b; font-weight: 700; text-transform: uppercase;">PMP Global (Cliente)</span>
                     <h4 style="margin: 4px 0; font-size: 1.4rem; color: #1e293b;">${mediaPMPGlobal} <span style="font-size:0.9rem;font-weight:400;color:#64748b;">dias</span></h4>
-                    <div style="font-size: 0.8rem; font-weight: 500; color: #64748b; margin-top: 4px;">* MÃ©dia de todos os contratos do cliente</div>
+                    <div style="font-size: 0.8rem; font-weight: 500; color: #64748b; margin-top: 4px;">* MÃƒÂ©dia de todos os contratos do cliente</div>
                   </div>
                 </div>
                 <div class="kpi-card mini-kpi" style="border-left: 3px solid var(--color-success); padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: white; border-radius: 6px;">
                   <div class="kpi-info">
-                    <span style="font-size: 0.65rem; color: #64748b; font-weight: 700; text-transform: uppercase;">No Prazo / AntecipaÃ§Ã£o</span>
+                    <span style="font-size: 0.65rem; color: #64748b; font-weight: 700; text-transform: uppercase;">No Prazo / AntecipaÃƒÂ§ÃƒÂ£o</span>
                     <h4 style="margin: 4px 0; font-size: 1.4rem; color: var(--color-success);">${pct(distOnTime + distAntecipado)}</h4>
                     <div style="font-size: 0.8rem; font-weight: 500; color: #64748b; margin-top: 4px;">Percentual de parcelas pagas sem atraso</div>
                   </div>
                 </div>
              </div>
 
-             <!-- GrÃ¡fico -->
+             <!-- GrÃƒÂ¡fico -->
              <div style="padding: 25px; background: white; border-radius: 8px; flex: 1; display: flex; flex-direction: column; justify-content: center; box-shadow: none; border: none;">
-               <h4 style="margin: 0 0 45px 0; font-size: 1rem; color: #1e293b;">DistribuiÃ§Ã£o na RÃ©gua de PMP</h4>
+               <h4 style="margin: 0 0 45px 0; font-size: 1rem; color: #1e293b;">DistribuiÃƒÂ§ÃƒÂ£o na RÃƒÂ©gua de PMP</h4>
                
                <div style="position: relative; margin-bottom: 20px;">
                  <!-- Markers -->
                  <div style="position: absolute; top: -32px; left: ${posAtual}%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; z-index: 10;">
-                   <div style="background: #1e293b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.6rem; font-weight: 700; white-space: nowrap;">TÃTULO: ${mediaPMP}d</div>
+                   <div style="background: #1e293b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.6rem; font-weight: 700; white-space: nowrap;">TÃƒÂTULO: ${mediaPMP}d</div>
                    <div style="width: 2px; height: 10px; background: #1e293b; margin-top: 2px;"></div>
                  </div>
                  
@@ -6660,19 +6660,19 @@ function formatCpfCnpj(val) {
 
                  <!-- Bar -->
                  <div style="display: flex; height: 28px; border-radius: 6px; overflow: hidden; background: #f1f5f9; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);">
-                   <div style="width: ${pct(distAntecipado)}; background: #0ea5e9;" title="AntecipaÃ§Ã£o: ${distAntecipado} parcelas"></div>
+                   <div style="width: ${pct(distAntecipado)}; background: #0ea5e9;" title="AntecipaÃƒÂ§ÃƒÂ£o: ${distAntecipado} parcelas"></div>
                    <div style="width: ${pct(distOnTime)}; background: var(--color-success);" title="No Prazo: ${distOnTime} parcelas"></div>
-                   <div style="width: ${pct(dist7)}; background: #84cc16;" title="AtÃ© 7 dias: ${dist7} parcelas"></div>
-                   <div style="width: ${pct(dist15)}; background: #eab308;" title="AtÃ© 15 dias: ${dist15} parcelas"></div>
-                   <div style="width: ${pct(dist30)}; background: #f59e0b;" title="AtÃ© 30 dias: ${dist30} parcelas"></div>
-                   <div style="width: ${pct(dist60)}; background: #f97316;" title="AtÃ© 60 dias: ${dist60} parcelas"></div>
-                   <div style="width: ${pct(dist90)}; background: #ef4444;" title="AtÃ© 90 dias: ${dist90} parcelas"></div>
+                   <div style="width: ${pct(dist7)}; background: #84cc16;" title="AtÃƒÂ© 7 dias: ${dist7} parcelas"></div>
+                   <div style="width: ${pct(dist15)}; background: #eab308;" title="AtÃƒÂ© 15 dias: ${dist15} parcelas"></div>
+                   <div style="width: ${pct(dist30)}; background: #f59e0b;" title="AtÃƒÂ© 30 dias: ${dist30} parcelas"></div>
+                   <div style="width: ${pct(dist60)}; background: #f97316;" title="AtÃƒÂ© 60 dias: ${dist60} parcelas"></div>
+                   <div style="width: ${pct(dist90)}; background: #ef4444;" title="AtÃƒÂ© 90 dias: ${dist90} parcelas"></div>
                    <div style="width: ${pct(distOver90)}; background: #b91c1c;" title="Acima 90 dias: ${distOver90} parcelas"></div>
                  </div>
                </div>
                
                <div style="text-align: center; font-size: 0.85rem; font-weight: 500; color: #475569; margin-top: 20px;">
-                 Os marcadores indicam onde o PMP Atual e Global se posicionam em relaÃ§Ã£o ao volume de parcelas.
+                 Os marcadores indicam onde o PMP Atual e Global se posicionam em relaÃƒÂ§ÃƒÂ£o ao volume de parcelas.
                </div>
              </div>
 
@@ -6707,7 +6707,7 @@ function formatCpfCnpj(val) {
             });
             const firstReceipt = receipts[0];
             receiptDate = firstReceipt.receiptDate || inst.dueDate;
-            // No rId from receipts schema â€” default to Recebimento for paid installments
+            // No rId from receipts schema Ã¢â‚¬â€ default to Recebimento for paid installments
             rId = "2";
             rType = "Recebimento";
             const diff = net - orig;
@@ -6719,7 +6719,7 @@ function formatCpfCnpj(val) {
             if (rId === "2") rType = "Recebimento";
             else if (rId === "3") rType = "Cancelamento";
             else if (rId === "7") rType = "Distrato";
-            else if (rId === "14") rType = "PromoÃ§Ã£o";
+            else if (rId === "14") rType = "PromoÃƒÂ§ÃƒÂ£o";
             net = inst.receiptValue || 0;
             receiptDate = inst.receiptDate || inst.dueDate;
             const diff = net - orig;
@@ -6911,7 +6911,7 @@ function formatCpfCnpj(val) {
     if(elNetSum) elNetSum.textContent = kpiFmt(kpiLiquido);
     
     const elPaidOrig = document.getElementById("ext-kpi-paid-orig");
-    if(elPaidOrig) elPaidOrig.textContent = kpiFmt(kpiPago); // kpiPago Ã© a soma do receiptValue original
+    if(elPaidOrig) elPaidOrig.textContent = kpiFmt(kpiPago); // kpiPago ÃƒÂ© a soma do receiptValue original
     const elPaidAdd = document.getElementById("ext-kpi-paid-add");
     if(elPaidAdd) elPaidAdd.textContent = kpiFmt(kpiAcrescimo);
     const elPaidDisc = document.getElementById("ext-kpi-paid-disc");
@@ -6953,7 +6953,7 @@ function formatCpfCnpj(val) {
     const elTotalSum = document.getElementById("ext-kpi-total-sum");
     if(elTotalSum) elTotalSum.textContent = kpiFmt(kpiTotalContrato);
     
-    // Atualiza a legenda para mostrar a conta exata (Recebido s/ AcrÃ©scimos + Vencido Orig. + A Vencer)
+    // Atualiza a legenda para mostrar a conta exata (Recebido s/ AcrÃƒÂ©scimos + Vencido Orig. + A Vencer)
     const elTotalLiq = document.getElementById("ext-kpi-total-liq");
     if(elTotalLiq) elTotalLiq.textContent = kpiFmt(recebidoOriginalMenosDesc);
     const elTotalVenc = document.getElementById("ext-kpi-total-venc");
@@ -6961,7 +6961,7 @@ function formatCpfCnpj(val) {
     const elTotalFut = document.getElementById("ext-kpi-total-fut");
     if(elTotalFut) elTotalFut.textContent = kpiFmt(kpiAVencer);
 
-    // LÃ³gica do botÃ£o Enviar para JurÃ­dico
+    // LÃƒÂ³gica do botÃƒÂ£o Enviar para JurÃƒÂ­dico
     AppState.currentCustomerMaxDelay = maxDelayDays;
     const btnJur = document.getElementById("btn-enviar-juridico-top");
     if (btnJur) {
@@ -7001,10 +7001,10 @@ function formatCpfCnpj(val) {
         const billIdForPdf = domBillId || billIdToMatch || (dbContract && dbContract.billReceivableId ? dbContract.billReceivableId : (sale.receivableBillId || sale.id));
         
         console.log("Enviando request de PDF com ID:", billIdForPdf, "para contrato:", billIdToMatch);
-        // Exibir um toast ou alert rÃ¡pido para debug
+        // Exibir um toast ou alert rÃƒÂ¡pido para debug
         const toast = document.createElement('div');
         toast.style = "position:fixed; bottom:20px; right:20px; background:#333; color:#fff; padding:10px 20px; border-radius:5px; z-index:9999;";
-        toast.innerText = "Gerando Extrato PDF para o TÃ­tulo ID: " + billIdForPdf;
+        toast.innerText = "Gerando Extrato PDF para o TÃƒÂ­tulo ID: " + billIdForPdf;
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 4000);
 
@@ -7044,15 +7044,15 @@ function formatCpfCnpj(val) {
                  blockLot = getDomText("det-block-lot") || "";
              }
              
-             // FABIO INOUYE - TÃ­tulo 14262 (10100 - 05-16).pdf
-             const fileName = `${customerName} - TÃ­tulo ${titulo} (${blockLot}).pdf`;
+             // FABIO INOUYE - TÃƒÂ­tulo 14262 (10100 - 05-16).pdf
+             const fileName = `${customerName} - TÃƒÂ­tulo ${titulo} (${blockLot}).pdf`;
              
-             // Usa o proxy local para forÃ§ar o nome do arquivo
+             // Usa o proxy local para forÃƒÂ§ar o nome do arquivo
              const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
              
              window.open(proxyUrl, '_blank');
           } else {
-             alert('Extrato em PDF nÃ£o disponÃ­vel para este contrato.');
+             alert('Extrato em PDF nÃƒÂ£o disponÃƒÂ­vel para este contrato.');
           }
         })
         .catch(err => {
@@ -7080,7 +7080,7 @@ function formatCpfCnpj(val) {
             });
             if(lastDate) payoffDateMsg = new Date(lastDate + 'T12:00:00').toLocaleDateString('pt-BR');
         }
-        AppState.currentPayoffMsg = payoffDateMsg ? `O contrato jÃ¡ estÃ¡ quitado na data ${payoffDateMsg}. A aba Valor QuitaÃ§Ã£o nÃ£o estÃ¡ disponÃ­vel.` : "O contrato jÃ¡ estÃ¡ quitado. A aba Valor QuitaÃ§Ã£o nÃ£o estÃ¡ disponÃ­vel.";
+        AppState.currentPayoffMsg = payoffDateMsg ? `O contrato jÃƒÂ¡ estÃƒÂ¡ quitado na data ${payoffDateMsg}. A aba Valor QuitaÃƒÂ§ÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ disponÃƒÂ­vel.` : "O contrato jÃƒÂ¡ estÃƒÂ¡ quitado. A aba Valor QuitaÃƒÂ§ÃƒÂ£o nÃƒÂ£o estÃƒÂ¡ disponÃƒÂ­vel.";
     }
 
     setTimeout(() => {
@@ -7091,9 +7091,9 @@ function formatCpfCnpj(val) {
     let presentValue = kpiVencidas + (kpiAVencer * 0.85); 
     const payoffValueEl = document.getElementById("ext-present-payoff-value");
     if (payoffValueEl) payoffValueEl.textContent = presentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    // === INÃCIO NOVA LÃ“GICA QUITAÃ‡ÃƒO E SIMULADOR ===
+    // === INÃƒÂCIO NOVA LÃƒâ€œGICA QUITAÃƒâ€¡ÃƒÆ’O E SIMULADOR ===
     
-    // FunÃ§Ãµes Globais do Funil para reatividade
+    // FunÃƒÂ§ÃƒÂµes Globais do Funil para reatividade
     window.funnelCurrentVF = 0;
     window.funnelCurrentVP = 0;
     window.updateFunnelChart = () => {
@@ -7188,7 +7188,7 @@ function formatCpfCnpj(val) {
        funnelContainer.style.display = "block";
     }
 
-    // 1. QuitaÃ§Ã£o API
+    // 1. QuitaÃƒÂ§ÃƒÂ£o API
     const quitacaoEl = document.getElementById("quitacao-right-val-quitacao");
     if (quitacaoEl && customer && customer.cpfCnpj) {
       if (sale.status === "Quitado") {
@@ -7226,15 +7226,15 @@ function formatCpfCnpj(val) {
             window.funnelCurrentVP = val;
             window.updateFunnelChart();
           } else {
-            quitacaoEl.textContent = "IndisponÃ­vel";
+            quitacaoEl.textContent = "IndisponÃƒÂ­vel";
             const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
-            if (qVpRightEl) qVpRightEl.textContent = "IndisponÃ­vel";
+            if (qVpRightEl) qVpRightEl.textContent = "IndisponÃƒÂ­vel";
             const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
             if (qVpRightCountEl) qVpRightCountEl.textContent = "- parcelas";
           }
         })
         .catch(err => {
-          console.error("Erro QuitaÃ§Ã£o:", err);
+          console.error("Erro QuitaÃƒÂ§ÃƒÂ£o:", err);
           quitacaoEl.textContent = "Erro na API";
           const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
           if (qVpRightEl) qVpRightEl.textContent = "Erro na API";
@@ -7270,7 +7270,7 @@ function formatCpfCnpj(val) {
          
          let vencidasSimulador = [];
          
-         // Utiliza as parcelas jÃ¡ processadas no AppState
+         // Utiliza as parcelas jÃƒÂ¡ processadas no AppState
          if (AppState.currentContractInstallments) {
             AppState.currentContractInstallments.forEach(inst => {
                const cb = inst.currentBalance || 0;
@@ -7279,7 +7279,7 @@ function formatCpfCnpj(val) {
                      ...inst,
                      cb: cb,
                      due: new Date(inst.dueDate + 'T12:00:00'),
-                     selected: true,   // Ã¢â€ Â comeÃ§a marcada: inclui no cÃ¡lculo imediatamente
+                     selected: true,   // ÃƒÂ¢Ã¢â‚¬Â Ã‚Â comeÃƒÂ§a marcada: inclui no cÃƒÂ¡lculo imediatamente
                      isActiveBoleto: false,
                      isFetchingBoleto: true
                   });
@@ -7314,7 +7314,7 @@ function formatCpfCnpj(val) {
                        simInst.dtFebraban = dtFebraban;
                        const diffDaysFebraban = Math.round((new Date() - dtFebraban) / (1000 * 60 * 60 * 24));
                        if (diffDaysFebraban > 28) {
-                          simInst.isActiveBoleto = false; // Vencido hÃ¡ mais de 28 dias do Febraban
+                          simInst.isActiveBoleto = false; // Vencido hÃƒÂ¡ mais de 28 dias do Febraban
                        }
                      }
                   } else {
@@ -7325,7 +7325,7 @@ function formatCpfCnpj(val) {
                }
                simInst.isFetchingBoleto = false;
                // Parcelas com boleto ativo ficam selecionadas mas destacadas visualmente
-               // NÃ£o desmarcamos: o operador pode decidir desmarcar se quiser
+               // NÃƒÂ£o desmarcamos: o operador pode decidir desmarcar se quiser
                recalcularSimulador(); 
             }
          });
@@ -7376,9 +7376,9 @@ function formatCpfCnpj(val) {
                let juros = 0;
                
                if (diasAtraso >= 1) {
-                  // A multa contratual Ã© fixa (2% do valor original)
+                  // A multa contratual ÃƒÂ© fixa (2% do valor original)
                   multa = (inst.cb * 0.02) * taxaMultiplier;
-                  // Os juros sÃ£o proporcionais aos dias de atraso (1% a.m)
+                  // Os juros sÃƒÂ£o proporcionais aos dias de atraso (1% a.m)
                   juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
                }
                
@@ -7443,7 +7443,7 @@ function formatCpfCnpj(val) {
             const countVencidas = vencidasSimulador.length;
             const countAVencer = (dbContract && dbContract.installments) ? dbContract.installments.filter(i => new Date(i.dueDate) > new Date() && i.status !== 'Quitado' && i.currentBalance > 0).length : 0;
             
-            // Popula a nova interface da aba Valor QuitaÃ§Ã£o
+            // Popula a nova interface da aba Valor QuitaÃƒÂ§ÃƒÂ£o
             const doughnutCenterSum = document.getElementById("quitacao-donut-total-sum");
             const doughnutCenterCount = document.getElementById("quitacao-donut-total-count");
             const barVf = document.getElementById("quitacao-bar-vf");
@@ -7463,7 +7463,7 @@ function formatCpfCnpj(val) {
             if (doughnutCenterCount) doughnutCenterCount.textContent = totalCount === 1 ? '1 parcela' : `${totalCount} parcelas`;
             if (barVf) barVf.textContent = kpiFmt(window.funnelCurrentVF);
             
-            // KPI cards: valor = soma de TODAS as vencidas (independente de seleÃ§Ã£o)
+            // KPI cards: valor = soma de TODAS as vencidas (independente de seleÃƒÂ§ÃƒÂ£o)
             const totalAtualizadoKPI = vencidasSimulador.reduce((acc, inst) => {
               const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
               const multaK = diasAtraso2 >= 1
@@ -7499,7 +7499,7 @@ function formatCpfCnpj(val) {
                chk.addEventListener('change', (e) => {
                   const idx = parseInt(e.target.getAttribute('data-index'));
                   
-                  // Validar se a seleÃ§Ã£o continua sequencial
+                  // Validar se a seleÃƒÂ§ÃƒÂ£o continua sequencial
                   const allCheckedIndices = Array.from(checkboxes).map((c, i) => c.checked ? i : -1).filter(i => i !== -1);
                   if (allCheckedIndices.length > 1) {
                     let isSequential = true;
@@ -7510,8 +7510,8 @@ function formatCpfCnpj(val) {
                       }
                     }
                     if (!isSequential) {
-                      alert("As parcelas nÃ£o podem ser marcadas aleatoriamente. Selecione parcelas sequenciais (sem pular nenhuma).");
-                      e.target.checked = !e.target.checked; // Reverte a aÃ§Ã£o
+                      alert("As parcelas nÃƒÂ£o podem ser marcadas aleatoriamente. Selecione parcelas sequenciais (sem pular nenhuma).");
+                      e.target.checked = !e.target.checked; // Reverte a aÃƒÂ§ÃƒÂ£o
                       return;
                     }
                   }
@@ -7544,14 +7544,14 @@ function formatCpfCnpj(val) {
          recalcularSimulador(); // calcula inicial
       }
     }
-    // === FIM NOVA LÃ“GICA ===
+    // === FIM NOVA LÃƒâ€œGICA ===
     
     // Perfil de Risco (Varredura Completa do Cliente)
     const chronicBanner = document.getElementById("chronic-debtor-analysis-banner");
     if (chronicBanner) {
       let riskLevel = "low";
       let profileName = "Bom Pagador";
-      let descText = "O cliente apresenta excelente histÃ³rico de pagamento.";
+      let descText = "O cliente apresenta excelente histÃƒÂ³rico de pagamento.";
       let iconName = "check-circle";
       
       const totalPagamentos = paidOnTimeCount + paidInDelayCount;
@@ -7559,21 +7559,21 @@ function formatCpfCnpj(val) {
       
       if (mediaPMP <= 5 && globalOverdueCount >= 3 && totalPagamentos >= 1) {
         riskLevel = "medium";
-        profileName = "Anomalia Financeira (Quebra de PadrÃ£o)";
-        descText = `AtenÃ§Ã£o: Cliente excelente apresentando anomalia recente. Possui histÃ³rico muito positivo (PMP Global de ${mediaPMP} dias e ${totalPagamentos} parcelas pagas), porÃ©m estÃ¡ com ${globalOverdueCount} vencimentos atuais. Abordagem deve ser consultiva para entender o imprevisto.`;
+        profileName = "Anomalia Financeira (Quebra de PadrÃƒÂ£o)";
+        descText = `AtenÃƒÂ§ÃƒÂ£o: Cliente excelente apresentando anomalia recente. Possui histÃƒÂ³rico muito positivo (PMP Global de ${mediaPMP} dias e ${totalPagamentos} parcelas pagas), porÃƒÂ©m estÃƒÂ¡ com ${globalOverdueCount} vencimentos atuais. Abordagem deve ser consultiva para entender o imprevisto.`;
         iconName = "info";
       } else if (distratosCount > 0 || globalOverdueCount >= 5 || mediaPMP > 45 || reparcelamentosCount > 1) {
         riskLevel = "high";
         profileName = "Risco Alto (Contumaz / Distratos)";
         const distratoStr = distratosCount > 0 ? `Possui ${distratosCount} contrato(s) cancelado/distrato, ` : 'Possui ';
-        descText = `AtenÃ§Ã£o: Cliente problemÃ¡tico. ${distratoStr}${globalOverdueCount} parcelas vencidas e ${reparcelamentosCount} renegociaÃ§Ã£o(Ãµes). Pagou em dia ${pctEmDia}% das vezes. PMP Global: ${mediaPMP} dias.`;
+        descText = `AtenÃƒÂ§ÃƒÂ£o: Cliente problemÃƒÂ¡tico. ${distratoStr}${globalOverdueCount} parcelas vencidas e ${reparcelamentosCount} renegociaÃƒÂ§ÃƒÂ£o(ÃƒÂµes). Pagou em dia ${pctEmDia}% das vezes. PMP Global: ${mediaPMP} dias.`;
         iconName = "octagon-alert";
       } else if (reparcelamentosCount > 0 || globalOverdueCount > 0 || mediaPMP > 10) {
         riskLevel = "medium";
         const perfilTitle = reparcelamentosCount > 0 ? "Renegociador Frequente" : "Atraso Pontual";
         profileName = perfilTitle;
         const emDiaStr = totalPagamentos > 0 ? `. Pagou em dia: ${pctEmDia}% (${paidOnTimeCount} de ${totalPagamentos})` : '';
-        descText = `Perfil de ${perfilTitle.toLowerCase()}. Fez ${reparcelamentosCount} renegociaÃ§Ã£o(Ãµes). Possui ${globalOverdueCount} atrasos no momento. PMP Global: ${mediaPMP} dias${emDiaStr}.`;
+        descText = `Perfil de ${perfilTitle.toLowerCase()}. Fez ${reparcelamentosCount} renegociaÃƒÂ§ÃƒÂ£o(ÃƒÂµes). Possui ${globalOverdueCount} atrasos no momento. PMP Global: ${mediaPMP} dias${emDiaStr}.`;
         iconName = "alert-triangle";
       } else if (globalQuitadoCount > 0) {
         profileName = "Bom Pagador VIP (Contratos Quitados)";
@@ -7581,8 +7581,8 @@ function formatCpfCnpj(val) {
         descText = `Excelente! O cliente possui ${globalQuitadoCount} contrato(s) totalmente quitado(s)${emDiaStrVip}. PMP Global: ${mediaPMP} dias.`;
         iconName = "shield-check";
       } else {
-        const emDiaStrOk = totalPagamentos > 0 ? `JÃ¡ pagou ${paidOnTimeCount} parcelas em dia (${pctEmDia}% de pontualidade). ` : '';
-        descText = `Cliente com histÃ³rico positivo. ${emDiaStrOk}PMP Global: ${mediaPMP} dias.`;
+        const emDiaStrOk = totalPagamentos > 0 ? `JÃƒÂ¡ pagou ${paidOnTimeCount} parcelas em dia (${pctEmDia}% de pontualidade). ` : '';
+        descText = `Cliente com histÃƒÂ³rico positivo. ${emDiaStrOk}PMP Global: ${mediaPMP} dias.`;
       }
       
       const badgeClass = riskLevel === "high" ? "risk-high" : riskLevel === "medium" ? "risk-medium" : "risk-low";
@@ -7591,7 +7591,7 @@ function formatCpfCnpj(val) {
         <div style="padding: 15px; border-radius: 6px; display: flex; align-items: flex-start; gap: 12px; border: 1.5px solid; margin-bottom: 20px;" class="${badgeClass}">
           <i data-lucide="${iconName}" style="width: 24px; height: 24px; flex-shrink: 0; margin-top: 2px;"></i>
           <div>
-            <h4 style="margin: 0 0 5px 0; font-weight: 700; font-size: 0.95rem;">Perfil AnalÃ­tico do Cliente: ${profileName}</h4>
+            <h4 style="margin: 0 0 5px 0; font-weight: 700; font-size: 0.95rem;">Perfil AnalÃƒÂ­tico do Cliente: ${profileName}</h4>
             <p style="margin: 0; font-size: 0.82rem; line-height: 1.4;">${descText}</p>
           </div>
         </div>
@@ -7634,7 +7634,7 @@ function formatCpfCnpj(val) {
             originalValue = inst.value || originalValue;
             correctedValue = originalValue;
           } else if (isPaid && !inst.isValidReceipt) {
-            // Caso esteja marcado como pago mas nÃ£o tem um dos cÃ³digos vÃ¡lidos (fallback)
+            // Caso esteja marcado como pago mas nÃƒÂ£o tem um dos cÃƒÂ³digos vÃƒÂ¡lidos (fallback)
             netReceived = inst.value || 0;
             type = "Baixa Outros";
           } else if (!isPaid) {
@@ -7678,7 +7678,7 @@ function formatCpfCnpj(val) {
     
   // --- Build clientUnpaid from dbContract.installments (financial-statements source) ---
   // currentContractInstallments is built from allBillsInstsArrays which was removed as redundant.
-  // Use dbContract.installments directly â€” it contains all installments with currentBalance.
+  // Use dbContract.installments directly Ã¢â‚¬â€ it contains all installments with currentBalance.
   let clientUnpaid = [];
   if (dbContract && dbContract.installments && Array.isArray(dbContract.installments)) {
     clientUnpaid = dbContract.installments
@@ -7701,7 +7701,7 @@ function formatCpfCnpj(val) {
     });
   }
 
-  // BotÃµes de AÃ§Ã£o
+  // BotÃƒÂµes de AÃƒÂ§ÃƒÂ£o
   const btnRenegotiate = document.getElementById("btn-renegotiate-page");
   if (btnRenegotiate) {
     btnRenegotiate.disabled = false;
@@ -7727,7 +7727,7 @@ function formatCpfCnpj(val) {
     showDistratoView(customer, sale, clientUnpaid);
   }
 
-  // OcorrÃªncias e notificaÃ§Ãµes
+  // OcorrÃƒÂªncias e notificaÃƒÂ§ÃƒÂµes
   renderCustomerOccurrences();
   renderSiengeNotifications(saleId);
   loadCustomerBoletos(customerId, saleId);
@@ -7775,7 +7775,7 @@ function formatCpfCnpj(val) {
       
       const hasActiveBoleto = Array.from(checkboxes).some(c => c.getAttribute('data-has-active-boleto') === 'true');
       if (hasActiveBoleto) {
-          const confirmBaixa = confirm("AtenÃ§Ã£o! Uma ou mais parcelas selecionadas jÃ¡ possuem um boleto gerado e vÃ¡lido nos Ãºltimos 28 dias.\n\nVocÃª realizou a baixa manual do boleto anterior?\nSe isso nÃ£o foi feito, o cliente poderÃ¡ pagar em duplicidade.\n\nClique em OK se jÃ¡ fez a baixa e deseja continuar, ou Cancelar para abortar.");
+          const confirmBaixa = confirm("AtenÃƒÂ§ÃƒÂ£o! Uma ou mais parcelas selecionadas jÃƒÂ¡ possuem um boleto gerado e vÃƒÂ¡lido nos ÃƒÂºltimos 28 dias.\n\nVocÃƒÂª realizou a baixa manual do boleto anterior?\nSe isso nÃƒÂ£o foi feito, o cliente poderÃƒÂ¡ pagar em duplicidade.\n\nClique em OK se jÃƒÂ¡ fez a baixa e deseja continuar, ou Cancelar para abortar.");
           if (!confirmBaixa) return;
       }
 
@@ -7791,9 +7791,9 @@ function formatCpfCnpj(val) {
     }
     const reminderSelect = document.getElementById("note-reminder-select");
     if (reminderSelect && reminderSelect.value !== "Boleto gerado" && reminderSelect.value !== "Boleto Gerado") {
-      alert("O lembrete serÃ¡ alterado para 'Boleto gerado' para acompanhar o pagamento.");
+      alert("O lembrete serÃƒÂ¡ alterado para 'Boleto gerado' para acompanhar o pagamento.");
       
-      // Adiciona a opÃ§Ã£o se nÃ£o existir
+      // Adiciona a opÃƒÂ§ÃƒÂ£o se nÃƒÂ£o existir
       let optionExists = false;
       for (let i = 0; i < reminderSelect.options.length; i++) {
         if (reminderSelect.options[i].value.toLowerCase() === "boleto gerado") {
@@ -7840,7 +7840,7 @@ function formatCpfCnpj(val) {
       }
     }
     
-    // Atualizar botÃµes visualmente
+    // Atualizar botÃƒÂµes visualmente
     if (btn) {
       const parent = btn.parentElement;
       const buttons = parent.querySelectorAll('button');
@@ -7865,7 +7865,7 @@ function formatCpfCnpj(val) {
 
   lucide.createIcons();
   
-  // PrÃ©-carrega a aba de repactuaÃ§Ãµes silenciosamente
+  // PrÃƒÂ©-carrega a aba de repactuaÃƒÂ§ÃƒÂµes silenciosamente
   if (typeof loadRepactuacoes === 'function') {
       loadRepactuacoes(true);
   }
@@ -7889,14 +7889,14 @@ function goBackToDashboard() {
   let prevTab = window.activeAppTab || "dashboard";
   if (prevTab === "dashboard") {
       const activeOperatorTab = document.querySelector("#operator-tabs-container .operator-tab-btn.active");
-      if (activeOperatorTab && activeOperatorTab.dataset.operator === "NÃƒO COBRAR") {
+      if (activeOperatorTab && activeOperatorTab.dataset.operator === "NÃƒÆ’O COBRAR") {
           prevTab = "subjudice";
       }
   }
   switchTab(prevTab);
 }
 
-// OcorrÃªncias do LocalStorage
+// OcorrÃƒÂªncias do LocalStorage
 function renderCustomerOccurrences() {
   const timeline = document.getElementById("crm-occurrences-timeline");
   if (!timeline) return;
@@ -7906,7 +7906,7 @@ function renderCustomerOccurrences() {
   
   let list = AppState.notes[AppState.selectedCustomerId] || [];
   
-  // Restringir a exibiÃ§Ã£o apenas para o contrato selecionado ou legados (sem contrato definido)
+  // Restringir a exibiÃƒÂ§ÃƒÂ£o apenas para o contrato selecionado ou legados (sem contrato definido)
   list = list.filter(occ => !occ.saleId || String(occ.saleId) === String(AppState.selectedSaleId));
   
   if (!window.currentHistoryFilters.includes('Todos')) {
@@ -7920,11 +7920,11 @@ function renderCustomerOccurrences() {
   }
   
   if (list.length === 0) {
-    timeline.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted); font-size:0.85rem;">Nenhuma ocorrÃªncia registrada no CRM.</div>`;
+    timeline.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted); font-size:0.85rem;">Nenhuma ocorrÃƒÂªncia registrada no CRM.</div>`;
     return;
   }
   
-  // OrdenaÃ§Ã£o descendente de data, mas fixados primeiro
+  // OrdenaÃƒÂ§ÃƒÂ£o descendente de data, mas fixados primeiro
   const sorted = [...list].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
@@ -7964,7 +7964,7 @@ function renderCustomerOccurrences() {
       tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${color}; font-weight: 600;"><i data-lucide="${icon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.iniciativa}</span>`;
     }
     // if (occ.saleId) {
-    //   tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: #475569; font-weight: 600;"><i data-lucide="tag" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>TÃ­t: ${occ.saleId}</span>`;
+    //   tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: #475569; font-weight: 600;"><i data-lucide="tag" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>TÃƒÂ­t: ${occ.saleId}</span>`;
     // }
     if (occ.promisedInstallments && occ.promisedInstallments.length > 0) {
       let parcelasText = "";
@@ -7988,7 +7988,7 @@ function renderCustomerOccurrences() {
         const color = occ.promiseStatus === "Cumprido" ? "var(--color-success)" : "var(--color-danger)";
         statusHtml = `
           <span style="font-size: 0.75rem; font-weight: 700; color: ${color}; background: ${color}15; padding: 2px 8px; border-radius: 4px; border: 1px solid ${color}30;">
-            ${occ.promiseStatus === "Cumprido" ? "Ã¢Å“â€¦ Cumprido" : "Ã¢ÂÅ’ Quebrado"}
+            ${occ.promiseStatus === "Cumprido" ? "ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Cumprido" : "ÃƒÂ¢Ã‚ÂÃ…â€™ Quebrado"}
           </span>
           <span style="font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-left: 6px;">
             (Alterado automaticamente pelo sistema)
@@ -7997,9 +7997,9 @@ function renderCustomerOccurrences() {
       } else {
         statusHtml = `
           <select class="filter-select" style="padding:2px 6px; font-size:0.7rem; height: 22px; border-radius: 4px; border: 1px solid #ccc; background: white;" onchange="updatePromiseStatus('${occ.date}', this.value)">
-            <option value="Pendente" ${occ.promiseStatus === 'Pendente' ? 'selected' : ''}>Ã°Å¸Å¸Â¡ Pendente</option>
-            <option value="Cumprido" ${occ.promiseStatus === 'Cumprido' ? 'selected' : ''}>Ã°Å¸Å¸Â¢ Cumprido</option>
-            <option value="Quebrado" ${occ.promiseStatus === 'Quebrado' ? 'selected' : ''}>Ã°Å¸â€Â´ Quebrado</option>
+            <option value="Pendente" ${occ.promiseStatus === 'Pendente' ? 'selected' : ''}>ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¡ Pendente</option>
+            <option value="Cumprido" ${occ.promiseStatus === 'Cumprido' ? 'selected' : ''}>ÃƒÂ°Ã…Â¸Ã…Â¸Ã‚Â¢ Cumprido</option>
+            <option value="Quebrado" ${occ.promiseStatus === 'Quebrado' ? 'selected' : ''}>ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â´ Quebrado</option>
           </select>
         `;
       }
@@ -8014,7 +8014,7 @@ function renderCustomerOccurrences() {
 
     const isCancelled = occ.status === "Cancelada";
     
-    // AÃ§Ãµes e Cancelamento
+    // AÃƒÂ§ÃƒÂµes e Cancelamento
     let actionsHtml = "";
     let cancelInfoHtml = "";
     if (isCancelled) {
@@ -8353,7 +8353,7 @@ window.openPromisedInstallmentsModal = function() {
         </td>
         <td style="padding: 10px;">
           <div style="font-weight: 500;">${datePart}</div>
-          <div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">âš ï¸ Parcela com boleto gerado</div>
+          <div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">Ã¢Å¡Â Ã¯Â¸Â Parcela com boleto gerado</div>
         </td>
         <td style="padding: 10px;">${diasAtraso > 0 ? diasAtraso : '-'}</td>
         <td style="padding: 10px;">${baseVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"})}</td>
@@ -8402,7 +8402,7 @@ window.confirmPromiseModalSelection = function() {
       }
     }
     if (!isSequential) {
-      alert("As parcelas nÃ£o podem ser marcadas aleatoriamente. Selecione parcelas sequenciais (sem pular nenhuma).");
+      alert("As parcelas nÃƒÂ£o podem ser marcadas aleatoriamente. Selecione parcelas sequenciais (sem pular nenhuma).");
       return;
     }
   }
@@ -8428,7 +8428,7 @@ window.addPromisedInstallment = function() {
   const val = selectEl.value;
   if (!AppState.selectedPromisedInstallments) AppState.selectedPromisedInstallments = [];
   if (AppState.selectedPromisedInstallments.includes(val)) {
-    alert("Parcela jÃ¡ selecionada.");
+    alert("Parcela jÃƒÂ¡ selecionada.");
     return;
   }
   AppState.selectedPromisedInstallments.push(val);
@@ -8480,7 +8480,7 @@ async function saveCustomerOccurrence() {
   
   const canal = canalEl ? canalEl.value : "";
   
-  if (canal === "Proposta de renegociaÃ§Ã£o") {
+  if (canal === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") {
       if (typeof window.applyRenegotiationText === 'function') {
           if (window.applyRenegotiationText() === false) {
               return;
@@ -8503,21 +8503,21 @@ async function saveCustomerOccurrence() {
     return;
   }
   if (!canalEl || !canalEl.value) {
-    alert("O campo Canal Ã© obrigatÃ³rio.");
+    alert("O campo Canal ÃƒÂ© obrigatÃƒÂ³rio.");
     return;
   }
   
   if (canal !== "Nota interna") {
     if (!promiseDate) {
-      alert(canal === "Retorno Agendado" ? "A data de retorno Ã© obrigatÃ³ria." : "A data de promessa Ã© obrigatÃ³ria.");
+      alert(canal === "Retorno Agendado" ? "A data de retorno ÃƒÂ© obrigatÃƒÂ³ria." : "A data de promessa ÃƒÂ© obrigatÃƒÂ³ria.");
       return;
     }
     if (canal !== "Retorno Agendado" && !reminder) {
-      alert("O campo Lembrete Ã© obrigatÃ³rio.");
+      alert("O campo Lembrete ÃƒÂ© obrigatÃƒÂ³rio.");
       return;
     }
     if (canal !== "Retorno Agendado" && !iniciativaEl) {
-      alert("O campo Iniciativa Ã© obrigatÃ³rio.");
+      alert("O campo Iniciativa ÃƒÂ© obrigatÃƒÂ³rio.");
       return;
     }
   
@@ -8525,7 +8525,7 @@ async function saveCustomerOccurrence() {
     today.setHours(0,0,0,0);
     const pDate = new Date(promiseDate + "T00:00:00");
     if (pDate < today) {
-      alert("A data de promessa nÃ£o pode ser no passado.");
+      alert("A data de promessa nÃƒÂ£o pode ser no passado.");
       return;
     }
   }
@@ -8587,7 +8587,7 @@ async function saveCustomerOccurrence() {
               const modal = document.getElementById("cross-contract-modal");
               const textEl = document.getElementById("cross-contract-modal-text");
               if (modal && textEl) {
-                  textEl.innerHTML = `O cliente possui outros contratos pendentes (ex: <b>TÃ­tulo ${otherContracts[0].saleId}</b>). O sistema pode replicar este mesmo registro para ele.`;
+                  textEl.innerHTML = `O cliente possui outros contratos pendentes (ex: <b>TÃƒÂ­tulo ${otherContracts[0].saleId}</b>). O sistema pode replicar este mesmo registro para ele.`;
                   window.pendingReplicationData = {
                       occurrence: occurrence,
                       otherContracts: otherContracts
@@ -8604,7 +8604,7 @@ async function saveCustomerOccurrence() {
   // If we reach here, it means no other contracts OR it's Nota interna
   window.finalizeOccurrenceSave(occurrence, null, false);
   } catch (err) {
-      console.error("Erro ao salvar ocorrÃªncia:", err);
+      console.error("Erro ao salvar ocorrÃƒÂªncia:", err);
       alert("Erro ao gravar: " + err.message);
   }
 }
@@ -8672,8 +8672,8 @@ window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skip
   } catch (e) {}
 
   try {
-    if (occurrence.reminder === 'AprovaÃ§Ã£o Gestor') {
-      console.log('Iniciando AprovaÃ§Ã£o Gestor. Email destino: israel@mouraleite.com.br');
+    if (occurrence.reminder === 'AprovaÃƒÂ§ÃƒÂ£o Gestor') {
+      console.log('Iniciando AprovaÃƒÂ§ÃƒÂ£o Gestor. Email destino: israel@mouraleite.com.br');
       const managerEmail = 'israel@mouraleite.com.br';
       
       let customerName = 'N/A';
@@ -8695,16 +8695,16 @@ window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skip
       const reqInfoLink = `${baseUrl}?action=request_info_occurrence&customerId=${AppState.selectedCustomerId}&occDate=${encodeURIComponent(occurrence.date)}`;
 
       const body = encodeURIComponent(
-`OlÃ¡, solicito aprovaÃ§Ã£o referente ao cliente ${customerName}.
+`OlÃƒÂ¡, solicito aprovaÃƒÂ§ÃƒÂ£o referente ao cliente ${customerName}.
 
-Detalhes da ocorrÃªncia:
+Detalhes da ocorrÃƒÂªncia:
 ${occurrence.text}
 
-Para responder, clique em uma das opÃ§Ãµes abaixo:
-Ã¢Å“â€¦ De Acordo: 
+Para responder, clique em uma das opÃƒÂ§ÃƒÂµes abaixo:
+ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ De Acordo: 
 ${approveLink}
 
-Ã°Å¸â€™Â¬ Solicitar mais informaÃ§Ãµes: 
+ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¬ Solicitar mais informaÃƒÂ§ÃƒÂµes: 
 ${reqInfoLink}`
       );
       const teamsLink = `https://teams.microsoft.com/l/chat/0/0?users=${managerEmail}&message=${body}`;
@@ -8784,17 +8784,17 @@ window.validateOccurrenceForm = function() {
   const renegContainer = document.getElementById("reneg-proposal-container");
   
   if (renegContainer) {
-      renegContainer.style.display = (canal === "Proposta de renegociaÃ§Ã£o") ? "block" : "none";
+      renegContainer.style.display = (canal === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") ? "block" : "none";
   }
 
-  if (canal === "Nota interna" || canal === "Proposta de renegociaÃ§Ã£o") {
+  if (canal === "Nota interna" || canal === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") {
     if (iniciativaGroup) iniciativaGroup.style.display = "none";
     if (promiseRow) promiseRow.style.display = "none";
     if (installmentsGroup) installmentsGroup.style.display = "none";
     if (pinGroup) pinGroup.style.display = (canal === "Nota interna") ? "block" : "none";
     
-    if (labelNoteText) labelNoteText.innerHTML = (canal === "Proposta de renegociaÃ§Ã£o") ? 'Proposta <span style="color: var(--color-danger);">*</span>' : 'Nota interna <span style="color: var(--color-danger);">*</span>';
-    if (saveBtn) saveBtn.innerHTML = (canal === "Proposta de renegociaÃ§Ã£o") ? '<i data-lucide="save" style="width: 16px;"></i> Gravar Proposta' : '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
+    if (labelNoteText) labelNoteText.innerHTML = (canal === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") ? 'Proposta <span style="color: var(--color-danger);">*</span>' : 'Nota interna <span style="color: var(--color-danger);">*</span>';
+    if (saveBtn) saveBtn.innerHTML = (canal === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") ? '<i data-lucide="save" style="width: 16px;"></i> Gravar Proposta' : '<i data-lucide="save" style="width: 16px;"></i> Gravar Nota interna';
     
     isValid = text.length > 0;
   } else if (canal === "Retorno Agendado") {
@@ -8804,7 +8804,7 @@ window.validateOccurrenceForm = function() {
     if (pinGroup) pinGroup.style.display = "none";
     if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
     
-    if (labelNoteText) labelNoteText.innerHTML = 'ObservaÃ§Ã£o <span style="color: var(--color-danger);">*</span>';
+    if (labelNoteText) labelNoteText.innerHTML = 'ObservaÃƒÂ§ÃƒÂ£o <span style="color: var(--color-danger);">*</span>';
     if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Agendamento';
     
     const pDateLabel = document.getElementById('label-promise-date');
@@ -8821,7 +8821,7 @@ window.validateOccurrenceForm = function() {
     if (reminderEl) reminderEl.closest('.form-group').style.display = "block";
     
     if (labelNoteText) labelNoteText.innerHTML = 'Conversa com o Cliente <span style="color: var(--color-danger);">*</span>';
-    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar OcorrÃªncia';
+    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar OcorrÃƒÂªncia';
     
     const pDateLabel = document.getElementById('label-promise-date');
     if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
@@ -8862,14 +8862,14 @@ window.errataOccurrence = function(customerId, occDate) {
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode inserir uma errata.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode inserir uma errata.");
     return;
   }
   
-  const newText = prompt("Insira a Errata (o texto anterior ficarÃ¡ tachado):");
+  const newText = prompt("Insira a Errata (o texto anterior ficarÃƒÂ¡ tachado):");
   if (newText === null) return;
   if (!newText.trim()) {
-    alert("O texto nÃ£o pode ser vazio.");
+    alert("O texto nÃƒÂ£o pode ser vazio.");
     return;
   }
   
@@ -8891,20 +8891,20 @@ window.editOccurrenceReal = function(customerId, occDate) {
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
-      alert("O prazo de 24 horas para ediÃ§Ã£o expirou. Utilize a Errata.");
+      alert("O prazo de 24 horas para ediÃƒÂ§ÃƒÂ£o expirou. Utilize a Errata.");
       return;
   }
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode editÃ¡-la.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode editÃƒÂ¡-la.");
     return;
   }
   
-  const newText = prompt("Edite o texto da ocorrÃªncia:", occ.text);
+  const newText = prompt("Edite o texto da ocorrÃƒÂªncia:", occ.text);
   if (newText === null) return;
   if (!newText.trim()) {
-    alert("O texto da ocorrÃªncia nÃ£o pode ser vazio.");
+    alert("O texto da ocorrÃƒÂªncia nÃƒÂ£o pode ser vazio.");
     return;
   }
   
@@ -8924,22 +8924,22 @@ window.cancelOccurrence = function(customerId, occDate) {
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
-      alert("O prazo de 24 horas expirou. NÃ£o Ã© mais possÃ­vel apagar ou excluir esta ocorrÃªncia.");
+      alert("O prazo de 24 horas expirou. NÃƒÂ£o ÃƒÂ© mais possÃƒÂ­vel apagar ou excluir esta ocorrÃƒÂªncia.");
       return;
   }
   
   if (occ.reminder && occ.reminder.toLowerCase() === "boleto gerado") {
-      alert("NÃ£o Ã© possÃ­vel excluir uma ocorrÃªncia que possui um boleto gerado.");
+      alert("NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir uma ocorrÃƒÂªncia que possui um boleto gerado.");
       return;
   }
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode excluÃ­-la.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode excluÃƒÂ­-la.");
     return;
   }
   
-  const confirmDelete = confirm("Tem certeza que deseja apagar/excluir esta ocorrÃªncia?");
+  const confirmDelete = confirm("Tem certeza que deseja apagar/excluir esta ocorrÃƒÂªncia?");
   if (!confirmDelete) return;
   
   const localNotes = localStorage.getItem("crm_moura_notes");
@@ -8989,7 +8989,7 @@ async function renderSiengeNotifications(saleId) {
   const list = await SiengeApiService.getNotificationHistory(saleId);
   
   if (list.length === 0) {
-    timeline.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted); font-size:0.85rem;">Nenhuma notificaÃ§Ã£o automÃ¡tica enviada pelo Sienge.</div>`;
+    timeline.innerHTML = `<div style="text-align:center; padding:15px; color:var(--color-text-muted); font-size:0.85rem;">Nenhuma notificaÃƒÂ§ÃƒÂ£o automÃƒÂ¡tica enviada pelo Sienge.</div>`;
     return;
   }
   
@@ -9011,7 +9011,7 @@ async function renderSiengeNotifications(saleId) {
 }
 
 async function simulatePrepaymentSingle(billId) {
-  // Usar cache do AppState se disponÃ­vel para evitar nova chamada Ã  API
+  // Usar cache do AppState se disponÃƒÂ­vel para evitar nova chamada ÃƒÂ  API
   const bills = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS
     : (AppState.defaultersBills && AppState.defaultersBills.length > 0
@@ -9022,15 +9022,15 @@ async function simulatePrepaymentSingle(billId) {
 
   const result = await SiengeApiService.simulatePrepayment(bill.saleId, [bill]);
   
-  alert(`SimulaÃ§Ã£o de Boleto de AntecipaÃ§Ã£o (/prepayment-slip-register/simulate):\n\n` + 
+  alert(`SimulaÃƒÂ§ÃƒÂ£o de Boleto de AntecipaÃƒÂ§ÃƒÂ£o (/prepayment-slip-register/simulate):\n\n` + 
         `Valor Original: R$ ${result.originalValue.toFixed(2)}\n` +
         `Desconto de Pontualidade Aplicado: R$ ${result.discountApplied.toFixed(2)}\n` +
-        `Valor Final para EmissÃ£o: R$ ${result.finalValue.toFixed(2)}\n` +
+        `Valor Final para EmissÃƒÂ£o: R$ ${result.finalValue.toFixed(2)}\n` +
         `Nova data de vencimento: ${new Date(result.dueDateSimulated).toLocaleDateString('pt-BR')}`);
 }
 
 // ----------------------------------------------------
-// 7. RENEGOCIAÃ‡ÃƒO DE DÃVIDAS: CALCULADORA E PDF
+// 7. RENEGOCIAÃƒâ€¡ÃƒÆ’O DE DÃƒÂVIDAS: CALCULADORA E PDF
 // ----------------------------------------------------
 let g_renegCustomer = null;
 let g_renegSale = null;
@@ -9069,22 +9069,22 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
   document.getElementById("view-renegotiation").style.display = "block";
   sessionStorage.setItem('currentSubView', 'renegotiation');
   const custId = customer.id || customer.customerId || "";
-  document.getElementById("current-page-title").innerHTML = `<i data-lucide="handshake"></i> RenegociaÃ§Ã£o: ${custId} - ${customer.name}`;
-  // Manter barra de contexto do cliente visÃ­vel, exibindo badge de pÃ¡gina
+  document.getElementById("current-page-title").innerHTML = `<i data-lucide="handshake"></i> RenegociaÃƒÂ§ÃƒÂ£o: ${custId} - ${customer.name}`;
+  // Manter barra de contexto do cliente visÃƒÂ­vel, exibindo badge de pÃƒÂ¡gina
   const ctxBarReneg = document.getElementById('client-context-bar');
   if (ctxBarReneg) ctxBarReneg.style.display = 'inline-flex';
   const ctxBadgeReneg = document.getElementById('ctx-page-badge');
   if (ctxBadgeReneg) { ctxBadgeReneg.style.display = 'none'; }
   lucide.createIcons();
 
-  // Resumo da SituaÃ§Ã£o do Contrato
+  // Resumo da SituaÃƒÂ§ÃƒÂ£o do Contrato
   const overdueBills = g_renegBills.filter(b => b.isOverdue);
   const qtdVencidas = overdueBills.length;
   const valorOriginalVencidas = overdueBills.reduce((acc, b) => acc + (b.value || 0), 0);
   const multaJurosVencidas = overdueBills.reduce((acc, b) => acc + (b.multa || 0) + (b.juros || 0), 0);
   const valorCorrigidoVencidas = overdueBills.reduce((acc, b) => acc + b.computedCorrected, 0);
   
-  // VP das parcelas a vencer = soma dos saldos originais das parcelas NÃƒO vencidas (valor original, sem correÃ§Ã£o)
+  // VP das parcelas a vencer = soma dos saldos originais das parcelas NÃƒÆ’O vencidas (valor original, sem correÃƒÂ§ÃƒÂ£o)
   const aVencerBills = g_renegBills.filter(b => !b.isOverdue);
   const aVencerOriginal = aVencerBills.reduce((acc, b) => acc + (b.value || 0), 0);
   
@@ -9122,7 +9122,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
       <div style="display:inline-flex; align-items:center; gap:6px; background: rgba(16,84,54,0.07); border:1px solid rgba(16,84,54,0.18); border-radius:20px; padding:4px 12px; font-size:0.78rem; font-weight:600;">
         <span style="color:var(--color-primary);">${type}:</span>
         <span>${data.count} parcela${data.count !== 1 ? 's' : ''}</span>
-        <span style="color:var(--color-text-muted);">â€¢</span>
+        <span style="color:var(--color-text-muted);">Ã¢â‚¬Â¢</span>
         <span>${data.total.toLocaleString('pt-BR', {style:'currency', currency:'BRL'})} (Orig.)</span>
       </div>
     `).join('');
@@ -9131,11 +9131,11 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
     summaryDiv.style.display = 'none';
   }
 
-  // Popular tabela de parcelas â€” elegÃ­veis primeiro, depois nÃ£o elegÃ­veis (bloqueadas)
+  // Popular tabela de parcelas Ã¢â‚¬â€ elegÃƒÂ­veis primeiro, depois nÃƒÂ£o elegÃƒÂ­veis (bloqueadas)
   const body = document.getElementById("reneg-selected-bills-body");
   body.innerHTML = "";
 
-  // Separar em elegÃ­veis e nÃ£o elegÃ­veis
+  // Separar em elegÃƒÂ­veis e nÃƒÂ£o elegÃƒÂ­veis
   const eligibleBills = [];
   const blockedBills = [];
   g_renegBills.forEach(bill => {
@@ -9191,7 +9191,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
         <input type="checkbox" class="reneg-bill-check" value="${instId}" ${checkedAttr} ${disabledAttr} onclick="return false;" style="width: 15px; height: 15px; margin: 0; cursor: not-allowed;">
       </td>
       <td style="padding:6px;"><strong>${instId}</strong></td>
-      <td style="padding:6px;">${bill.dueDate ? new Date(bill.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : "N/D"} ${bill.isOverdue ? '<span style="color:#bf360c;font-size:0.68rem;font-weight:700;">Ã¢ÂÂ° Vencida</span>' : ''}</td>
+      <td style="padding:6px;">${bill.dueDate ? new Date(bill.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : "N/D"} ${bill.isOverdue ? '<span style="color:#bf360c;font-size:0.68rem;font-weight:700;">ÃƒÂ¢Ã‚ÂÃ‚Â° Vencida</span>' : ''}</td>
       <td style="padding:6px; font-size:0.75rem;">${indexerDisplay}</td>
       <td style="padding:6px; font-size:0.75rem; color:var(--color-text-muted);">${indexerNameDisplay}</td>
       <td style="padding:6px; text-align:right;">${(bill.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
@@ -9201,13 +9201,13 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
     return row;
   };
 
-  // Renderizar elegÃ­veis primeiro
+  // Renderizar elegÃƒÂ­veis primeiro
   eligibleBills.forEach(bill => body.appendChild(renderRow(bill)));
 
   // Renderizar bloqueadas abaixo (sem separador)
   blockedBills.forEach(bill => body.appendChild(renderRow(bill)));
 
-  // ConfiguraÃ§Ãµes PadrÃ£o de datas
+  // ConfiguraÃƒÂ§ÃƒÂµes PadrÃƒÂ£o de datas
   const regras = JSON.parse(localStorage.getItem('crm_moura_regras_negociacao')) || {};
   let diasSinal = regras.dias_pagamento_sinal !== undefined ? regras.dias_pagamento_sinal : 7;
   
@@ -9264,8 +9264,8 @@ function calculateRenegotiation() {
     chargesEl.textContent = 'R$ 0,00';
     discountEl.textContent = '- R$ 0,00';
     totalEl.textContent = 'R$ 0,00';
-    calcValEl.textContent = 'Ã¢â‚¬â€œ';
-    if (sinalSummaryEl) sinalSummaryEl.textContent = 'Ã¢â‚¬â€œ';
+    calcValEl.textContent = 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“';
+    if (sinalSummaryEl) sinalSummaryEl.textContent = 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“';
     if (scheduleBody) scheduleBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--color-text-muted); padding:12px; font-size:0.78rem;">Selecione ao menos uma parcela.</td></tr>';
     return;
   }
@@ -9288,7 +9288,7 @@ function calculateRenegotiation() {
   // 2. Obter PMP
   const pmp = window.currentCustomerStats ? (window.currentCustomerStats.pmp || 0) : 0;
   
-  // 3. Encontrar regra compatÃ­vel
+  // 3. Encontrar regra compatÃƒÂ­vel
   let matchedRule = null;
   const profileRules = regras[activeProfile] || [];
   for (let rule of profileRules) {
@@ -9301,7 +9301,7 @@ function calculateRenegotiation() {
       }
   }
   
-  // Valores default de seguranÃ§a caso nÃ£o ache regra
+  // Valores default de seguranÃƒÂ§a caso nÃƒÂ£o ache regra
   let ruleSinalMin = matchedRule && matchedRule.sinalMin !== null ? matchedRule.sinalMin : 0;
   let ruleSinalMax = matchedRule && matchedRule.sinalMax !== null ? matchedRule.sinalMax : 100;
   let ruleMaxParcelas = matchedRule && matchedRule.maxParcelas !== null ? matchedRule.maxParcelas : 360;
@@ -9335,7 +9335,7 @@ function calculateRenegotiation() {
   for (let i = 1; i <= Math.max(1, maxInstallments); i++) {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `${i}Ãƒâ€”${i === 1 ? ' (Ã€ vista)' : ''}`;
+    opt.textContent = `${i}ÃƒÆ’Ã¢â‚¬â€${i === 1 ? ' (Ãƒâ‚¬ vista)' : ''}`;
     if (i === currentSelectedQty || (i === maxInstallments && currentSelectedQty > maxInstallments)) {
       opt.selected = true;
     }
@@ -9343,7 +9343,7 @@ function calculateRenegotiation() {
   }
   const instQty = Number(qtySelect.value) || 1;
 
-  // SomatÃ³rios SOMENTE das selecionadas
+  // SomatÃƒÂ³rios SOMENTE das selecionadas
   const principal = selectedBills.reduce((acc, b) => acc + (b.value || 0), 0);
   const updatedTotal = selectedBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
   const charges = updatedTotal - principal;
@@ -9357,7 +9357,7 @@ function calculateRenegotiation() {
   const sinalValue = grossDebt * (sinalPct / 100);
   const remainingAfterSinal = grossDebt - sinalValue;
   
-  // CÃ¡lculo das parcelas (Price)
+  // CÃƒÂ¡lculo das parcelas (Price)
   let installmentValue = remainingAfterSinal / instQty;
   if (interestRate > 0 && instQty > 1) {
     installmentValue = remainingAfterSinal * (interestRate * Math.pow(1 + interestRate, instQty)) / (Math.pow(1 + interestRate, instQty) - 1);
@@ -9365,7 +9365,7 @@ function calculateRenegotiation() {
 
   // Preencher resumo
   if (chargesEl) chargesEl.textContent = fmt(charges);
-  if (calcValEl) calcValEl.textContent = instQty > 0 ? `${instQty}Ãƒâ€” de ${fmt(installmentValue)}` : 'Ã¢â‚¬â€œ';
+  if (calcValEl) calcValEl.textContent = instQty > 0 ? `${instQty}ÃƒÆ’Ã¢â‚¬â€ de ${fmt(installmentValue)}` : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“';
   
   const interestLabelEl = document.getElementById("reneg-interest-label");
   if (interestLabelEl) {
@@ -9387,14 +9387,14 @@ function calculateRenegotiation() {
   if (mathSinalValEl) mathSinalValEl.textContent = fmt(sinalValue);
   if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = `${(interestRate * 100).toFixed(1)}%`;
   
-  // Total das parcelas do acordo = N Ãƒâ€” valor_parcela com juros
+  // Total das parcelas do acordo = N ÃƒÆ’Ã¢â‚¬â€ valor_parcela com juros
   const totalAcordo = instQty * installmentValue;
   const financingCost = totalAcordo - remainingAfterSinal;
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
   if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
   if (headerParcelasEl) {
-    headerParcelasEl.textContent = instQty > 0 ? `${instQty}Ãƒâ€” de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
+    headerParcelasEl.textContent = instQty > 0 ? `${instQty}ÃƒÆ’Ã¢â‚¬â€ de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
   }
 
   if (mathNoInterestEl && mathWithInterestEl) {
@@ -9402,7 +9402,7 @@ function calculateRenegotiation() {
       mathNoInterestEl.textContent = `${fmt(grossDebt)} - ${fmt(sinalValue)} = ${instQty} parcelas de ${fmt(remainingAfterSinal / instQty)} (sem encargo)`;
       mathWithInterestEl.textContent = `${fmt(grossDebt)} - ${fmt(sinalValue)} = ${instQty} parcelas de ${fmt(installmentValue)} (com encargo de ${(interestRate * 100).toFixed(1)}% a.m.)`;
     } else {
-      mathNoInterestEl.textContent = 'Selecione as condiÃ§Ãµes para simular.';
+      mathNoInterestEl.textContent = 'Selecione as condiÃƒÂ§ÃƒÂµes para simular.';
       mathWithInterestEl.textContent = '';
     }
   }
@@ -9450,8 +9450,8 @@ function calculateRenegotiation() {
 
   if (orangeVencidasEl) orangeVencidasEl.textContent = `${vencidasCount} parcela${vencidasCount !== 1 ? 's' : ''} vencida${vencidasCount !== 1 ? 's' : ''}`;
   if (orangeVencidasValEl) orangeVencidasValEl.textContent = fmt(vencidasVal);
-  if (orangeAVencerEl) orangeAVencerEl.textContent = `${aVencerCount} parcela${aVencerCount !== 1 ? 's' : ''} nÃ£o vencida${aVencerCount !== 1 ? 's' : ''}`;
-  // Mostra o valor unitÃ¡rio da parcela (nÃ£o o total)
+  if (orangeAVencerEl) orangeAVencerEl.textContent = `${aVencerCount} parcela${aVencerCount !== 1 ? 's' : ''} nÃƒÂ£o vencida${aVencerCount !== 1 ? 's' : ''}`;
+  // Mostra o valor unitÃƒÂ¡rio da parcela (nÃƒÂ£o o total)
   const aVencerUnitVal = aVencerCount > 0 ? aVencerVal / aVencerCount : 0;
   if (orangeAVencerValEl) orangeAVencerValEl.textContent = fmt(aVencerUnitVal);
   if (orangeTotalCountEl) orangeTotalCountEl.textContent = (vencidasCount + aVencerCount);
@@ -9464,7 +9464,7 @@ function calculateRenegotiation() {
   }
   if (sinalDateEl) {
     if (sinalPct > 0 && sinalDueStr) {
-      sinalDateEl.textContent = `atÃ© ${new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR')}`;
+      sinalDateEl.textContent = `atÃƒÂ© ${new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR')}`;
     } else {
       sinalDateEl.textContent = '';
     }
@@ -9483,7 +9483,7 @@ function calculateRenegotiation() {
     // 1. Sinal (Ato)
     if (sinalPct > 0 && sinalValue > 0) {
       rowNum++;
-      const sinalDateDisplay = sinalDueStr ? new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR') : 'Ã¢â‚¬â€œ';
+      const sinalDateDisplay = sinalDueStr ? new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR') : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“';
       greenTotalParcelas++;
       greenTotalPagar += sinalValue;
       greenLastDate = sinalDateDisplay;
@@ -9498,7 +9498,7 @@ function calculateRenegotiation() {
       scheduleBody.appendChild(tr);
     }
     
-    // 2. Parcelas do Acordo (NÃƒâ€”)
+    // 2. Parcelas do Acordo (NÃƒÆ’Ã¢â‚¬â€)
     if (instQty > 0 && remainingAfterSinal > 0) {
       let firstDate = firstDueDateStr ? new Date(firstDueDateStr + 'T12:00:00') : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         for (let i = 0; i < instQty; i++) {
@@ -9520,9 +9520,9 @@ function calculateRenegotiation() {
         }
     }
     
-    // 3. Parcelas NÃƒO selecionadas â€” sÃ³ exibir as que vencem APÃ“S a Ãºltima parcela do ACORDO
+    // 3. Parcelas NÃƒÆ’O selecionadas Ã¢â‚¬â€ sÃƒÂ³ exibir as que vencem APÃƒâ€œS a ÃƒÂºltima parcela do ACORDO
     if (unselectedBills.length > 0) {
-      // Calcular a data da Ãºltima parcela do ACORDO
+      // Calcular a data da ÃƒÂºltima parcela do ACORDO
       let lastAcordoDate = null;
       if (instQty > 0 && firstDueDateStr) {
         const firstAcordoDate = new Date(firstDueDateStr + 'T12:00:00');
@@ -9530,7 +9530,7 @@ function calculateRenegotiation() {
         lastAcordoDate.setMonth(lastAcordoDate.getMonth() + (instQty - 1));
       }
       
-      // Filtrar apenas parcelas com vencimento DEPOIS da Ãºltima do ACORDO
+      // Filtrar apenas parcelas com vencimento DEPOIS da ÃƒÂºltima do ACORDO
       const mantidas = unselectedBills;
       
       if (mantidas.length > 0) {
@@ -9543,7 +9543,7 @@ function calculateRenegotiation() {
           rowNum++;
           const instId = bill.installmentId || bill.installmentNum || '';
           
-          let dueDateStr = 'Ã¢â‚¬â€œ';
+          let dueDateStr = 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“';
           if (lastAcordoDate) {
             const newDate = new Date(lastAcordoDate);
             newDate.setMonth(newDate.getMonth() + monthOffset);
@@ -9595,7 +9595,7 @@ function calculateRenegotiation() {
   if (greenTotalPagarEl) greenTotalPagarEl.textContent = fmt(greenTotalPagar);
   if (greenUltimaEl) greenUltimaEl.textContent = greenLastDate;
   
-  // Salvar no estado global de simulaÃ§Ã£o
+  // Salvar no estado global de simulaÃƒÂ§ÃƒÂ£o
   AppState.currentRenegResult = {
     grossDebt,
     sinalValue,
@@ -9615,14 +9615,14 @@ function generateAgreementPDF() {
   const results = AppState.currentRenegResult;
   if (!results) return;
   
-  // Obter PreÃ¢mbulo dos SÃ³cios baseado na unidade
+  // Obter PreÃƒÂ¢mbulo dos SÃƒÂ³cios baseado na unidade
   const unit = AppState.units[g_renegSale.unitId] || {};
-  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃƒâ€šMBULO NÃƒO CADASTRADO NO SHAREPOINT.";
+  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃƒÆ’Ã¢â‚¬Å¡MBULO NÃƒÆ’O CADASTRADO NO SHAREPOINT.";
   
-  // Obter ClÃ¡usulas Editadas
+  // Obter ClÃƒÂ¡usulas Editadas
   let textTemplate = document.getElementById("reneg-clauses-editor").value;
   
-  // Substituir variÃ¡veis
+  // Substituir variÃƒÂ¡veis
   textTemplate = textTemplate
     .replace(/{{PARCELAS_ACORDO}}/g, `<strong>${results.instQty}</strong>`)
     .replace(/{{DATA_PRIMEIRA_PARCELA}}/g, `<strong>${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</strong>`);
@@ -9630,35 +9630,35 @@ function generateAgreementPDF() {
   // Montar Documento
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">INSTRUMENTO PARTICULAR DE ACORDO E CONFISSÃƒO DE DÃVIDA</h2>
+      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">INSTRUMENTO PARTICULAR DE ACORDO E CONFISSÃƒÆ’O DE DÃƒÂVIDA</h2>
       <h3 style="font-size: 12pt; color: #666; margin: 0;">Moura Leite Loteamentos</h3>
     </div>
     
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      De um lado, a credora qualificada no seguinte preÃ¢mbulo:<br>
+      De um lado, a credora qualificada no seguinte preÃƒÂ¢mbulo:<br>
       <strong>${preambleText}</strong>
     </p>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
       De outro lado, o devedor adquirente:<br>
-      <strong>DEVEDOR:</strong> ${g_renegCustomer.name}, portador do CPF/CNPJ nÂº ${g_renegCustomer.cpfCnpj}, residente no endereÃ§o ${g_renegCustomer.address}.
+      <strong>DEVEDOR:</strong> ${g_renegCustomer.name}, portador do CPF/CNPJ nÃ‚Âº ${g_renegCustomer.cpfCnpj}, residente no endereÃƒÂ§o ${g_renegCustomer.address}.
     </p>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      <strong>OBJETO DO ACORDO:</strong> Referente Ã  Unidade/Lote <strong>${g_renegSale.unitId}</strong> do Empreendimento/Cidade <strong>${unit.city || unit.enterpriseName || '___'}</strong>, com Ã¡rea aproximada de <strong>${unit.area || '___'} mÃ‚Â²</strong>, comercializada originalmente na data de <strong>${g_renegSale.saleDate ? new Date(g_renegSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '___'}</strong>.
+      <strong>OBJETO DO ACORDO:</strong> Referente ÃƒÂ  Unidade/Lote <strong>${g_renegSale.unitId}</strong> do Empreendimento/Cidade <strong>${unit.city || unit.enterpriseName || '___'}</strong>, com ÃƒÂ¡rea aproximada de <strong>${unit.area || '___'} mÃƒâ€šÃ‚Â²</strong>, comercializada originalmente na data de <strong>${g_renegSale.saleDate ? new Date(g_renegSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '___'}</strong>.
     </p>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      Resolvem de comum acordo lavrar o presente instrumento, confessando a dÃ­vida lÃ­quida e certa de 
+      Resolvem de comum acordo lavrar o presente instrumento, confessando a dÃƒÂ­vida lÃƒÂ­quida e certa de 
       <strong>${results.newDebtBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>, 
-      a ser liquidada sob as condiÃ§Ãµes e termos a seguir expostos:
+      a ser liquidada sob as condiÃƒÂ§ÃƒÂµes e termos a seguir expostos:
     </p>
 
     <div style="margin: 1.5rem 0; padding: 15px; border: 1.5px solid #105436; border-radius: 6px;">
       <h4 style="color: #105436; margin-top: 0; font-weight: bold;">DEMONSTRATIVO DE PARCELAMENTO</h4>
       <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10pt;">
         <tr>
-          <td style="padding: 5px; font-weight: bold;">NÃºmero de Parcelas acordadas:</td>
+          <td style="padding: 5px; font-weight: bold;">NÃƒÂºmero de Parcelas acordadas:</td>
           <td style="padding: 5px; text-align: right;">${results.instQty} parcela(s)</td>
         </tr>
         <tr>
@@ -9666,7 +9666,7 @@ function generateAgreementPDF() {
           <td style="padding: 5px; text-align: right;">${results.installmentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px; font-weight: bold;">Vencimento da 1Âª Parcela:</td>
+          <td style="padding: 5px; font-weight: bold;">Vencimento da 1Ã‚Âª Parcela:</td>
           <td style="padding: 5px; text-align: right;">${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</td>
         </tr>
         <tr>
@@ -9682,12 +9682,12 @@ function generateAgreementPDF() {
 
     <div style="text-align: center; margin-top: 1.5rem; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 4px;">
       <p style="margin: 0; font-size: 9pt; color: #555; font-weight: bold;">
-        A presente proposta de acordo tem validade de 2 dias Ãºteis a partir da data de sua emissÃ£o.
+        A presente proposta de acordo tem validade de 2 dias ÃƒÂºteis a partir da data de sua emissÃƒÂ£o.
       </p>
     </div>
 
     <p style="text-align: right; margin-top: 3rem; margin-bottom: 3rem;">
-      AvarÃ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
+      AvarÃƒÂ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
     </p>
 
     <div style="display: flex; justify-content: space-between; margin-top: 4rem;">
@@ -9700,7 +9700,7 @@ function generateAgreementPDF() {
     </div>
   `;
 
-  document.getElementById("pdf-modal-title").textContent = "Termo de Acordo JurÃ­dico - PDF";
+  document.getElementById("pdf-modal-title").textContent = "Termo de Acordo JurÃƒÂ­dico - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
   lucide.createIcons();
@@ -9711,7 +9711,7 @@ function closePdfModal() {
 }
 
 // ----------------------------------------------------
-// 8. SIMULADOR DE DISTRATO (RESCISÃƒO E DEVOLUÃ‡ÃƒO)
+// 8. SIMULADOR DE DISTRATO (RESCISÃƒÆ’O E DEVOLUÃƒâ€¡ÃƒÆ’O)
 // ----------------------------------------------------
 let g_distCustomer = null;
 let g_distSale = null;
@@ -9731,12 +9731,12 @@ async function showDistratoView(customer, sale, bills) {
   document.getElementById("view-customer-details").style.display = "none";
   document.getElementById("view-distrato").style.display = "block";
   
-  // Manter barra de contexto do cliente visÃ­vel
+  // Manter barra de contexto do cliente visÃƒÂ­vel
   const ctxBarDist = document.getElementById('client-context-bar');
   if (ctxBarDist) ctxBarDist.style.display = 'inline-flex';
   if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 
-  // CabeÃ§alho
+  // CabeÃƒÂ§alho
   // (Removido dist-method-badge conforme solicitado)
   
   // Total pago simulado e Valor do Contrato (sem juros de mora)
@@ -9793,17 +9793,17 @@ async function showDistratoView(customer, sale, bills) {
       breakdownEl.textContent = `Orig. ${totalPaidOrig.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} - Desc. ${totalPaidDesc.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
   }
 
-  // Valores padrÃ£o de despesas
+  // Valores padrÃƒÂ£o de despesas
   const isSubjudice = sale.subjudice === "S";
   const fruitionInput = document.getElementById("dist-fruition-months");
-  fruitionInput.value = 1; // PadrÃ£o
+  fruitionInput.value = 1; // PadrÃƒÂ£o
   fruitionInput.readOnly = !isSubjudice;
   const fruitionContainer = document.getElementById("dist-fruition-container");
   if (fruitionContainer) {
       fruitionContainer.style.display = isSubjudice ? "block" : "none";
   }
 
-  // Inicializar campos editÃ¡veis com formato de moeda
+  // Inicializar campos editÃƒÂ¡veis com formato de moeda
   const initCurrencyField = (id, val) => {
     const el = document.getElementById(id);
     if (el) el.value = Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -9820,7 +9820,7 @@ async function showDistratoView(customer, sale, bills) {
   const saleDate = sale.saleDate ? new Date(sale.saleDate) : new Date();
   const isPre2019 = saleDate < saleDateLimit;
   
-  // ComissÃ£o: habilitado apenas para vendas antes da lei (prÃ©-2019)
+  // ComissÃƒÂ£o: habilitado apenas para vendas antes da lei (prÃƒÂ©-2019)
   initCurrencyField("dist-comissao", isPre2019 ? 5000 : 0);
   const comissaoEl = document.getElementById("dist-comissao");
   const comissaoGroup = document.getElementById("dist-comissao-group");
@@ -9830,8 +9830,8 @@ async function showDistratoView(customer, sale, bills) {
     comissaoEl.style.opacity = isPre2019 ? "1" : "0.5";
     comissaoEl.style.cursor = isPre2019 ? "text" : "not-allowed";
     comissaoEl.title = isPre2019 
-      ? "Contrato prÃ©-2019: comissÃ£o aplicÃ¡vel" 
-      : "ComissÃ£o nÃ£o se aplica a contratos apÃ³s a Lei do Distrato (2019)";
+      ? "Contrato prÃƒÂ©-2019: comissÃƒÂ£o aplicÃƒÂ¡vel" 
+      : "ComissÃƒÂ£o nÃƒÂ£o se aplica a contratos apÃƒÂ³s a Lei do Distrato (2019)";
   }
   if (comissaoGroup) {
     // Adicionar badge indicando status
@@ -9843,21 +9843,21 @@ async function showDistratoView(customer, sale, bills) {
       const label = comissaoGroup.querySelector('span');
       if (label) label.appendChild(badge);
     }
-    badge.textContent = isPre2019 ? '(PrÃ©-Lei)' : '(N/A pÃ³s 2019)';
+    badge.textContent = isPre2019 ? '(PrÃƒÂ©-Lei)' : '(N/A pÃƒÂ³s 2019)';
     badge.style.background = isPre2019 ? '#fff3cd' : '#f1f5f9';
     badge.style.color = isPre2019 ? '#856404' : '#94a3b8';
   }
 
   const restPctEl = document.getElementById("dist-restitution-pct");
-  if(restPctEl) restPctEl.value = 60; // PadrÃ£o
+  if(restPctEl) restPctEl.value = 60; // PadrÃƒÂ£o
   
   const restInstEl = document.getElementById("dist-restitution-installments");
   if(restInstEl) restInstEl.value = 12;
 
-  // Aplicar mÃ¡scara de moeda nos campos de texto
+  // Aplicar mÃƒÂ¡scara de moeda nos campos de texto
   if (typeof window.applyDistratoCurrencyMask === 'function') {
     window.applyDistratoCurrencyMask();
-    // Re-desabilitar o campo comissÃ£o apÃ³s a mÃ¡scara ser aplicada
+    // Re-desabilitar o campo comissÃƒÂ£o apÃƒÂ³s a mÃƒÂ¡scara ser aplicada
     const comissaoElAfter = document.getElementById("dist-comissao");
     if (comissaoElAfter && !isPre2019) {
       comissaoElAfter.disabled = true;
@@ -9879,14 +9879,14 @@ function calculateDistrato() {
     elTotalPagoCalc.textContent = totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   
-  // 1. Multas (Penalty, FruiÃ§Ã£o, ComissÃ£o)
+  // 1. Multas (Penalty, FruiÃƒÂ§ÃƒÂ£o, ComissÃƒÂ£o)
   const penalty = contractVal * 0.10; // 10% do valor do contrato
   
-  // Converte string formatada pt-BR (ex: "1.500,75") para nÃºmero
+  // Converte string formatada pt-BR (ex: "1.500,75") para nÃƒÂºmero
   const parseCurrencyInput = (id) => {
     const el = document.getElementById(id);
     if (!el) return 0;
-    // Remove pontos de milhar e troca vÃ­rgula por ponto
+    // Remove pontos de milhar e troca vÃƒÂ­rgula por ponto
     const raw = el.value.replace(/\./g, '').replace(',', '.');
     const val = parseFloat(raw) || 0;
     return val < 0 ? 0 : val;
@@ -9901,7 +9901,7 @@ function calculateDistrato() {
   
   const totalMulta = penalty + fruition + comissao + homolog;
   
-  // RestituiÃ§Ã£o Total (pela lei do distrato: Recebido - Total Multa)
+  // RestituiÃƒÂ§ÃƒÂ£o Total (pela lei do distrato: Recebido - Total Multa)
   const restituicaoTotal = Math.max(0, totalPaid - totalMulta);
   
   // 2. Despesas
@@ -9913,7 +9913,7 @@ function calculateDistrato() {
 
   const outrasDeducoes = taxaAssoc + iptu + agua + luz + outros;
   
-  // RestituiÃ§Ã£o LÃ­quida (pela lei do distrato)
+  // RestituiÃƒÂ§ÃƒÂ£o LÃƒÂ­quida (pela lei do distrato)
   const restituicaoLiquida = Math.max(0, restituicaoTotal - outrasDeducoes);
 
 window.handleCustomPctInput = function() {
@@ -9970,7 +9970,7 @@ window.handleDistratoChoiceChange = function() {
   calculateDistrato();
 };
 
-  // 3. NegociaÃ§Ã£o de DevoluÃ§Ã£o
+  // 3. NegociaÃƒÂ§ÃƒÂ£o de DevoluÃƒÂ§ÃƒÂ£o
   const minRefund = totalPaid * 0.55;
   const maxRefund = totalPaid * 0.65;
   const leiRefund = restituicaoLiquida;
@@ -9981,8 +9981,8 @@ window.handleDistratoChoiceChange = function() {
 
   // Sort and render options
   const options = [
-    { id: "min", label: "DevoluÃ§Ã£o MÃ­nima (55%)", value: minRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
-    { id: "max", label: "DevoluÃ§Ã£o MÃ¡xima (65%)", value: maxRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
+    { id: "min", label: "DevoluÃƒÂ§ÃƒÂ£o MÃƒÂ­nima (55%)", value: minRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
+    { id: "max", label: "DevoluÃƒÂ§ÃƒÂ£o MÃƒÂ¡xima (65%)", value: maxRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
     { id: "lei", label: `Lei do Distrato (${leiRefundPct}%)`, value: leiRefund, color: "#f97316", titleColor: "#ea580c", highlight: true, disabled: false }
   ];
   options.sort((a, b) => a.value - b.value);
@@ -10095,7 +10095,7 @@ window.handleDistratoChoiceChange = function() {
   const distSumInstEl = document.getElementById("dist-sum-installments-refund");
   if (distSumInstEl) distSumInstEl.textContent = refundInstallment.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // VerificaÃ§Ã£o de alÃ§ada
+  // VerificaÃƒÂ§ÃƒÂ£o de alÃƒÂ§ada
   const approvalAlert = document.getElementById("dist-approval-alert");
   if (approvalAlert) {
     const isExactlyLei = Math.abs(negotiatedRefund - leiRefund) < 0.01;
@@ -10106,7 +10106,7 @@ window.handleDistratoChoiceChange = function() {
     }
   }
 
-  // Guardar cÃ¡lculo de simulaÃ§Ã£o no estado
+  // Guardar cÃƒÂ¡lculo de simulaÃƒÂ§ÃƒÂ£o no estado
   AppState.currentDistratoResult = {
     penalty,
     fruition,
@@ -10135,20 +10135,20 @@ function generateDistratoPDF() {
   const results = AppState.currentDistratoResult;
   if (!results) return;
 
-  // ValidaÃ§Ã£o: Contratos emitidos atÃ© 31/12/2018 precisam de comissÃ£o informada (maior que 0)
+  // ValidaÃƒÂ§ÃƒÂ£o: Contratos emitidos atÃƒÂ© 31/12/2018 precisam de comissÃƒÂ£o informada (maior que 0)
   const saleDate = new Date(g_distSale.saleDate + 'T12:00:00'); // Evitar problemas de fuso
   const dataLimite = new Date("2018-12-31T23:59:59");
   const comissaoInfo = results.extraDebits.comissao || 0;
   
   if (saleDate <= dataLimite && comissaoInfo <= 0) {
-    alert("Preencha a comissÃ£o deste contrato.");
+    alert("Preencha a comissÃƒÂ£o deste contrato.");
     return;
   }
 
   const unit = AppState.units[g_distSale.unitId] || {};
-  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃƒâ€šMBULO DO EMPREENDIMENTO IMOBILIÃƒÂRIO.";
+  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃƒÆ’Ã¢â‚¬Å¡MBULO DO EMPREENDIMENTO IMOBILIÃƒÆ’Ã‚ÂRIO.";
 
-  // Dados BancÃ¡rios
+  // Dados BancÃƒÂ¡rios
   const payType = document.getElementById("dist-bank-transfer-type").value;
   const beneficiaryName = document.getElementById("dist-bank-beneficiary-name").value || g_distCustomer.name;
   const beneficiaryCpf = document.getElementById("dist-bank-cpf").value || g_distCustomer.cpfCnpj;
@@ -10159,7 +10159,7 @@ function generateDistratoPDF() {
     const agency = document.getElementById("dist-bank-agency").value || "N/D";
     const account = document.getElementById("dist-bank-account").value || "N/D";
     const digit = document.getElementById("dist-bank-digit").value || "";
-    payInfoHtml = `TED BancÃ¡rio: Banco ${bank} | AgÃªncia: ${agency} | Conta: ${account}-${digit}`;
+    payInfoHtml = `TED BancÃƒÂ¡rio: Banco ${bank} | AgÃƒÂªncia: ${agency} | Conta: ${account}-${digit}`;
   } else {
     const pixType = document.getElementById("dist-bank-pix-type").value;
     const pixKey = document.getElementById("dist-bank-pix-key").value || "N/D";
@@ -10168,23 +10168,23 @@ function generateDistratoPDF() {
 
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">TERMO DE DISTRATO E RESCISÃƒO DE CONTRATO IMOBILIÃƒÂRIO</h2>
+      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">TERMO DE DISTRATO E RESCISÃƒÆ’O DE CONTRATO IMOBILIÃƒÆ’Ã‚ÂRIO</h2>
       <h3 style="font-size: 12pt; color: #666; margin: 0;">Moura Leite Loteamentos</h3>
     </div>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      Pelo presente instrumento, a loteadora proprietÃ¡ria da unidade:<br>
+      Pelo presente instrumento, a loteadora proprietÃƒÂ¡ria da unidade:<br>
       <strong>${preambleText}</strong>
     </p>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
       E o cliente adquirente:<br>
-      <strong>CLIENTE:</strong> ${g_distCustomer.name}, portador do CPF/CNPJ nÂº ${g_distCustomer.cpfCnpj}, resolvem rescindir o contrato de promessa de compra e venda referente Ã  
+      <strong>CLIENTE:</strong> ${g_distCustomer.name}, portador do CPF/CNPJ nÃ‚Âº ${g_distCustomer.cpfCnpj}, resolvem rescindir o contrato de promessa de compra e venda referente ÃƒÂ  
       <strong>Unidade: ${unit.id} (Quadra ${unit.block}, Lote ${unit.lot})</strong> do empreendimento correspondente.
     </p>
 
     <div style="margin: 1.5rem 0; padding: 15px; border: 1.5px solid #105436; border-radius: 6px;">
-      <h4 style="color: #105436; margin-top: 0; font-weight: bold;">DEMONSTRATIVO FINANCEIRO DE DEVOLUÃ‡ÃƒO</h4>
+      <h4 style="color: #105436; margin-top: 0; font-weight: bold;">DEMONSTRATIVO FINANCEIRO DE DEVOLUÃƒâ€¡ÃƒÆ’O</h4>
       
       <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10pt;">
         <tr>
@@ -10192,15 +10192,15 @@ function generateDistratoPDF() {
           <td style="padding: 5px; text-align: right;">R$ ${results.totalPaid.toFixed(2)}</td>
         </tr>
         <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 5px; font-weight: bold; color: green;">Percentual acordado de restituiÃ§Ã£o (${results.restitutionPct}%):</td>
+          <td style="padding: 5px; font-weight: bold; color: green;">Percentual acordado de restituiÃƒÂ§ÃƒÂ£o (${results.restitutionPct}%):</td>
           <td style="padding: 5px; text-align: right; color: green;">R$ ${results.baseRefund.toFixed(2)}</td>
         </tr>
         <tr>
-          <td style="padding: 5px; font-weight: bold; color: red;">DeduÃ§Ã£o - Multa Contratual (10% contrato):</td>
+          <td style="padding: 5px; font-weight: bold; color: red;">DeduÃƒÂ§ÃƒÂ£o - Multa Contratual (10% contrato):</td>
           <td style="padding: 5px; text-align: right; color: red;">- R$ ${results.penalty.toFixed(2)}</td>
         </tr>
         <tr>
-          <td style="padding: 5px; font-weight: bold; color: red;">DeduÃ§Ã£o - Taxa de FruiÃ§Ã£o (${results.fruitionMonths} meses):</td>
+          <td style="padding: 5px; font-weight: bold; color: red;">DeduÃƒÂ§ÃƒÂ£o - Taxa de FruiÃƒÂ§ÃƒÂ£o (${results.fruitionMonths} meses):</td>
           <td style="padding: 5px; text-align: right; color: red;">- R$ ${results.fruition.toFixed(2)}</td>
         </tr>
         
@@ -10209,40 +10209,40 @@ function generateDistratoPDF() {
           const nameMap = {
             taxaAssoc: "Taxa Associativa",
             iptu: "IPTU Vencido",
-            agua: "Conta de ÃƒÂgua",
+            agua: "Conta de ÃƒÆ’Ã‚Âgua",
             luz: "Conta de Luz",
-            homolog: "HomologaÃ§Ã£o do Acordo",
+            homolog: "HomologaÃƒÂ§ÃƒÂ£o do Acordo",
             outros: "Outras despesas",
-            comissao: "ComissÃ£o"
+            comissao: "ComissÃƒÂ£o"
           };
           return `
             <tr>
-              <td style="padding: 5px; color: red;">DeduÃ§Ã£o - ${nameMap[key] || key}:</td>
+              <td style="padding: 5px; color: red;">DeduÃƒÂ§ÃƒÂ£o - ${nameMap[key] || key}:</td>
               <td style="padding: 5px; text-align: right; color: red;">- R$ ${val.toFixed(2)}</td>
             </tr>
           `;
         }).join('')}
         
         <tr style="border-top: 2px solid #105436; font-size: 11pt; font-weight: bold;">
-          <td style="padding: 10px 5px;">VALOR LÃQUIDO A RESTITUIR:</td>
+          <td style="padding: 10px 5px;">VALOR LÃƒÂQUIDO A RESTITUIR:</td>
           <td style="padding: 10px 5px; text-align: right; color: #105436;">R$ ${results.refundNet.toFixed(2)}</td>
         </tr>
       </table>
     </div>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      O valor lÃ­quido de restituiÃ§Ã£o serÃ¡ pago em <strong>${results.instQty}</strong> parcelas mensais de 
-      <strong>R$ ${results.refundInstallment.toFixed(2)}</strong>, sendo creditadas atravÃ©s da seguinte forma de pagamento:<br>
-      <strong>BeneficiÃ¡rio:</strong> ${beneficiaryName} | <strong>CPF/CNPJ:</strong> ${beneficiaryCpf}<br>
-      <strong>Dados de CrÃ©dito:</strong> ${payInfoHtml}
+      O valor lÃƒÂ­quido de restituiÃƒÂ§ÃƒÂ£o serÃƒÂ¡ pago em <strong>${results.instQty}</strong> parcelas mensais de 
+      <strong>R$ ${results.refundInstallment.toFixed(2)}</strong>, sendo creditadas atravÃƒÂ©s da seguinte forma de pagamento:<br>
+      <strong>BeneficiÃƒÂ¡rio:</strong> ${beneficiaryName} | <strong>CPF/CNPJ:</strong> ${beneficiaryCpf}<br>
+      <strong>Dados de CrÃƒÂ©dito:</strong> ${payInfoHtml}
     </p>
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
-      Com a assinatura deste termo, o cliente concede a mais plena, rasa e irrevogÃ¡vel quitaÃ§Ã£o do contrato mencionado, liberando a credora de quaisquer obrigaÃ§Ãµes futuras, autorizando a imediata comercializaÃ§Ã£o do lote pela Moura Leite Loteamentos.
+      Com a assinatura deste termo, o cliente concede a mais plena, rasa e irrevogÃƒÂ¡vel quitaÃƒÂ§ÃƒÂ£o do contrato mencionado, liberando a credora de quaisquer obrigaÃƒÂ§ÃƒÂµes futuras, autorizando a imediata comercializaÃƒÂ§ÃƒÂ£o do lote pela Moura Leite Loteamentos.
     </p>
 
     <p style="text-align: right; margin-top: 3rem; margin-bottom: 3rem;">
-      AvarÃ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
+      AvarÃƒÂ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
     </p>
 
     <div style="display: flex; justify-content: space-between; margin-top: 4rem;">
@@ -10255,7 +10255,7 @@ function generateDistratoPDF() {
     </div>
   `;
 
-  document.getElementById("pdf-modal-title").textContent = "Termo de RescisÃ£o e Distrato - PDF";
+  document.getElementById("pdf-modal-title").textContent = "Termo de RescisÃƒÂ£o e Distrato - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
   lucide.createIcons();
@@ -10279,7 +10279,7 @@ window.generateDemonstrativoDistratoPDF = function() {
   const company = window.MOCK_DATA && window.MOCK_DATA.COMPANIES ? window.MOCK_DATA.COMPANIES.find(c => c.id == companyId) : null;
   const companyName = company ? company.name : "Moura Leite Loteamentos";
   
-  let enterpriseName = "CERQUEIRA CÃ‰SAR - CHÃƒÂCARA MOURA LEITE";
+  let enterpriseName = "CERQUEIRA CÃƒâ€°SAR - CHÃƒÆ’Ã‚ÂCARA MOURA LEITE";
   if (costCenter) {
     enterpriseName = costCenter.city ? costCenter.city.toUpperCase() + " - " + costCenter.name.toUpperCase() : costCenter.name.toUpperCase();
   }
@@ -10290,11 +10290,11 @@ window.generateDemonstrativoDistratoPDF = function() {
 
   const cleanUnitId = (unit.id || "").replace('U-', '');
   const titleUnitId = cleanUnitId.replace('-', ' - ');
-  const pageTitle = `CÃ¡lculo Distrato - ${g_distCustomer.name} - TÃ­tulo ${g_distSale.id} (${titleUnitId})`;
+  const pageTitle = `CÃƒÂ¡lculo Distrato - ${g_distCustomer.name} - TÃƒÂ­tulo ${g_distSale.id} (${titleUnitId})`;
   
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #000; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">DEMONSTRATIVO DE CÃƒÂLCULO DE DISTRATO</h2>
+      <h2 style="color: #000; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">DEMONSTRATIVO DE CÃƒÆ’Ã‚ÂLCULO DE DISTRATO</h2>
       <h3 style="font-size: 12pt; color: #333; margin: 0;">${companyName}</h3>
       <div style="font-size: 11pt; color: #333; font-weight: bold; margin-top: 5px;">${enterpriseName}</div>
       <div style="font-size: 10pt; color: #666; margin-top: 5px;">Gerado em: ${dataGeracao}</div>
@@ -10324,26 +10324,26 @@ window.generateDemonstrativoDistratoPDF = function() {
     </div>
 
     <div style="margin-bottom: 2rem;">
-      <h4 style="color: #000; margin: 0 0 10px 0; font-weight: bold; font-size: 12pt;">CÃƒÂLCULO DE DISTRATO</h4>
+      <h4 style="color: #000; margin: 0 0 10px 0; font-weight: bold; font-size: 12pt;">CÃƒÆ’Ã‚ÂLCULO DE DISTRATO</h4>
       <table style="width: 100%; border-collapse: collapse; font-size: 11pt;">
         <tr style="background-color: #f1f5f9;">
           <td style="padding: 8px 5px; font-weight: bold; border-bottom: 1px solid #000; border-top: 1px solid #000;">Valor Total Pago (Recebido):</td>
           <td style="padding: 8px 5px; text-align: right; border-bottom: 1px solid #000; border-top: 1px solid #000; font-weight: bold;">R$ ${results.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Multa por RescisÃ£o (10%):</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Multa por RescisÃƒÂ£o (10%):</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${results.penalty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">FruiÃ§Ã£o (0,75%):</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">FruiÃƒÂ§ÃƒÂ£o (0,75%):</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${results.fruition.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">HomologaÃ§Ã£o do Acordo:</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">HomologaÃƒÂ§ÃƒÂ£o do Acordo:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.homolog || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">ComissÃ£o:</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">ComissÃƒÂ£o:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
@@ -10351,7 +10351,7 @@ window.generateDemonstrativoDistratoPDF = function() {
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.iptu || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">ÃƒÂgua:</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">ÃƒÆ’Ã‚Âgua:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.agua || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
@@ -10367,23 +10367,23 @@ window.generateDemonstrativoDistratoPDF = function() {
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #000; color: #b91c1c;">- R$ ${(results.extraDebits.outros || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr style="font-weight: bold; font-size: 12pt; background-color: #f1f5f9;">
-          <td style="padding: 12px 5px; border-bottom: 1px solid #000;">RestituiÃ§Ã£o LÃ­quida (Lei do Distrato)</td>
+          <td style="padding: 12px 5px; border-bottom: 1px solid #000;">RestituiÃƒÂ§ÃƒÂ£o LÃƒÂ­quida (Lei do Distrato)</td>
           <td style="padding: 12px 5px; text-align: right; color: #000; border-bottom: 1px solid #000;">${refundText}</td>
         </tr>
       </table>
     </div>
     
     <div style="margin-top: 2rem; font-size: 10pt; text-align: justify; line-height: 1.5;">
-      <h5 style="margin: 0 0 10px 0; font-size: 11pt; font-weight: bold;">Amparo Legal - Lei nÂº 13.786/2018 (Lei do Distrato) e Lei nÂº 6.766/79</h5>
-      <p style="margin-top: 0;"><strong>Multa por RescisÃ£o (10%):</strong> Aplicada sobre o valor atualizado do contrato (Art. 32-A, inciso II).</p>
-      <p><strong>Taxa de FruiÃ§Ã£o (0,75% a.m.):</strong> Aplicada sobre o valor atualizado do contrato, exigÃ­vel a partir da transmissÃ£o da posse (Art. 32-A, inciso I).</p>
-      <p><strong>DÃ©bitos de IPTU, Taxas Associativas e Consumo:</strong> SerÃ£o descontados os valores devidos e nÃ£o pagos pelo comprador (Art. 32-A, inciso IV).</p>
-      <p><strong>ComissÃ£o de Corretagem:</strong> Desconto de valores referentes Ã  corretagem, se houver (Art. 32-A, inciso V).</p>
-      <p><strong>Prazo de Pagamento:</strong> A restituiÃ§Ã£o ocorrerÃ¡ em atÃ© 12 (doze) parcelas mensais, respeitando os prazos de carÃªncia definidos em lei, como 180 dias apÃ³s o prazo previsto para conclusÃ£o das obras ou 12 meses apÃ³s formalizaÃ§Ã£o para obras concluÃ­das (Art. 32-A, Ã‚Â§ 1Âº).</p>
+      <h5 style="margin: 0 0 10px 0; font-size: 11pt; font-weight: bold;">Amparo Legal - Lei nÃ‚Âº 13.786/2018 (Lei do Distrato) e Lei nÃ‚Âº 6.766/79</h5>
+      <p style="margin-top: 0;"><strong>Multa por RescisÃƒÂ£o (10%):</strong> Aplicada sobre o valor atualizado do contrato (Art. 32-A, inciso II).</p>
+      <p><strong>Taxa de FruiÃƒÂ§ÃƒÂ£o (0,75% a.m.):</strong> Aplicada sobre o valor atualizado do contrato, exigÃƒÂ­vel a partir da transmissÃƒÂ£o da posse (Art. 32-A, inciso I).</p>
+      <p><strong>DÃƒÂ©bitos de IPTU, Taxas Associativas e Consumo:</strong> SerÃƒÂ£o descontados os valores devidos e nÃƒÂ£o pagos pelo comprador (Art. 32-A, inciso IV).</p>
+      <p><strong>ComissÃƒÂ£o de Corretagem:</strong> Desconto de valores referentes ÃƒÂ  corretagem, se houver (Art. 32-A, inciso V).</p>
+      <p><strong>Prazo de Pagamento:</strong> A restituiÃƒÂ§ÃƒÂ£o ocorrerÃƒÂ¡ em atÃƒÂ© 12 (doze) parcelas mensais, respeitando os prazos de carÃƒÂªncia definidos em lei, como 180 dias apÃƒÂ³s o prazo previsto para conclusÃƒÂ£o das obras ou 12 meses apÃƒÂ³s formalizaÃƒÂ§ÃƒÂ£o para obras concluÃƒÂ­das (Art. 32-A, Ãƒâ€šÃ‚Â§ 1Ã‚Âº).</p>
     </div>
     
     <p style="text-align: center; margin-top: 3rem; font-size: 9pt; color: #666; font-style: italic;">
-      * Este Ã© apenas um demonstrativo de cÃ¡lculo dos valores previstos na Lei do Distrato.<br>NÃ£o possui validade como Termo de RescisÃ£o.
+      * Este ÃƒÂ© apenas um demonstrativo de cÃƒÂ¡lculo dos valores previstos na Lei do Distrato.<br>NÃƒÂ£o possui validade como Termo de RescisÃƒÂ£o.
     </p>
   `;
 
@@ -10435,7 +10435,7 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
     btnElement.disabled = true;
   }
 
-  // Copia o CPF/CNPJ imediatamente antes de qualquer requisiÃ§Ã£o async para evitar bloqueios do navegador
+  // Copia o CPF/CNPJ imediatamente antes de qualquer requisiÃƒÂ§ÃƒÂ£o async para evitar bloqueios do navegador
   const customer = AppState.customers[AppState.selectedCustomerId];
   const cleanDoc = customer && customer.cpfCnpj ? customer.cpfCnpj.replace(/\D/g, "") : "";
   if (cleanDoc) {
@@ -10463,7 +10463,7 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
       const urlReport = boletoInfo.urlReport;
       const digitableNumber = boletoInfo.digitableNumber;
 
-      alert(`BOLETO ENCONTRADO!\n\nO boleto serÃ¡ aberto em uma nova guia. Para a senha do PDF, Ã© sÃ³ dar Ctrl+V (o CPF/CNPJ jÃ¡ foi copiado).`);
+      alert(`BOLETO ENCONTRADO!\n\nO boleto serÃƒÂ¡ aberto em uma nova guia. Para a senha do PDF, ÃƒÂ© sÃƒÂ³ dar Ctrl+V (o CPF/CNPJ jÃƒÂ¡ foi copiado).`);
 
       if (urlReport) {
         const getDomText = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ""; };
@@ -10483,11 +10483,11 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
         window.open(proxyUrl, '_blank');
       }
     } else {
-      alert("NÃ£o foi possÃ­vel localizar o link deste boleto no Sienge.");
+      alert("NÃƒÂ£o foi possÃƒÂ­vel localizar o link deste boleto no Sienge.");
     }
   } catch (err) {
     console.error(err);
-    alert("Erro ao buscar informaÃ§Ãµes do boleto no Sienge.");
+    alert("Erro ao buscar informaÃƒÂ§ÃƒÂµes do boleto no Sienge.");
   } finally {
     if (btnElement) {
       btnElement.innerHTML = originalHtml;
@@ -10530,10 +10530,10 @@ window.downloadBoletoPdf = async function(billId, instId, btnElement) {
     if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
        const url = data.results[0].urlReport;
        
-       alert("Devido a restriÃ§Ãµes de seguranÃ§a (CORS) da Sienge, o arquivo serÃ¡ aberto em uma nova aba para vocÃª realizar o download. O PDF requer senha (o CPF/CNPJ jÃ¡ foi copiado, basta usar Ctrl+V).");
+       alert("Devido a restriÃƒÂ§ÃƒÂµes de seguranÃƒÂ§a (CORS) da Sienge, o arquivo serÃƒÂ¡ aberto em uma nova aba para vocÃƒÂª realizar o download. O PDF requer senha (o CPF/CNPJ jÃƒÂ¡ foi copiado, basta usar Ctrl+V).");
        window.open(url, '_blank');
     } else {
-       alert("Link do boleto indisponÃ­vel no Sienge.");
+       alert("Link do boleto indisponÃƒÂ­vel no Sienge.");
     }
   } catch(e) {
     alert("Erro ao baixar boleto.");
@@ -10584,7 +10584,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   document.getElementById('reprocess-fine').value = defaultMulta;
   document.getElementById('reprocess-interest').value = defaultJuros;
 
-  // Tenta puxar valores da aba de ocorrÃªncias se jÃ¡ estiverem preenchidos
+  // Tenta puxar valores da aba de ocorrÃƒÂªncias se jÃƒÂ¡ estiverem preenchidos
   const mainTextEl = document.getElementById('note-text');
   const mainCanalEl = document.getElementById('note-canal');
   const mainRemEl = document.getElementById('note-reminder-select');
@@ -10629,7 +10629,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
         option.textContent = `${acc.accountNumber} - ${acc.accountName}`;
         accountSelect.appendChild(option);
       });
-      accountSelect.disabled = true; // Bloqueia a seleÃ§Ã£o como solicitado
+      accountSelect.disabled = true; // Bloqueia a seleÃƒÂ§ÃƒÂ£o como solicitado
     } else {
       accountSelect.innerHTML = '<option value="">Nenhuma conta encontrada para o Centro de Custo</option>';
       accountSelect.disabled = true;
@@ -10684,7 +10684,7 @@ window.submitReprocessBoleto = async function() {
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
 
   if (!account) {
-    alert("Selecione uma conta corrente vÃ¡lida.");
+    alert("Selecione uma conta corrente vÃƒÂ¡lida.");
     return;
   }
   if (!dueDate) {
@@ -10699,10 +10699,10 @@ window.submitReprocessBoleto = async function() {
 
   try {
     // Para recriar o boleto, o Sienge precisa do companyId e da checkingAccount.
-    // O payload original pede companyId. Se nÃ£o temos ele fÃ¡cil no AppState,
-    // podemos ter que buscar ou assumir. Na Moura Leite, geralmente Ã© 2 ou 1.
-    // Vamos buscar o companyId de AppState.customers se possÃ­vel, ou passar fixo 2 se falhar.
-    let companyId = 2; // PadrÃ£o
+    // O payload original pede companyId. Se nÃƒÂ£o temos ele fÃƒÂ¡cil no AppState,
+    // podemos ter que buscar ou assumir. Na Moura Leite, geralmente ÃƒÂ© 2 ou 1.
+    // Vamos buscar o companyId de AppState.customers se possÃƒÂ­vel, ou passar fixo 2 se falhar.
+    let companyId = 2; // PadrÃƒÂ£o
     const cust = AppState.customers[AppState.selectedCustomerId];
     // Tenta encontrar em AppState.sales se houver
     const sale = AppState.sales ? AppState.sales.find(s => s.saleId == currentReprocessBillId || (s.property && s.property.costCenterId == currentReprocessCostCenterId)) : null;
@@ -10757,7 +10757,7 @@ window.submitReprocessBoleto = async function() {
     const finalPromessaText = userText ? `${userText}\n[SISTEMA]: ${boletoText}` : `[SISTEMA]: ${boletoText}`;
     const currentUser = window.LOGGED_USER_NAME || "Operador";
 
-    // Gera ocorrÃªncia com promessa preenchida pelo operador no modal
+    // Gera ocorrÃƒÂªncia com promessa preenchida pelo operador no modal
     const occurrence = {
       date: new Date().toISOString(),
       author: currentUser,
@@ -10795,7 +10795,7 @@ window.submitReprocessBoleto = async function() {
   }
 };
 // ----------------------------------------------------
-// IMPLEMENTAÃ‡ÃƒO DOS NOVOS COMPONENTES E ABAS
+// IMPLEMENTAÃƒâ€¡ÃƒÆ’O DOS NOVOS COMPONENTES E ABAS
 // ----------------------------------------------------
 
 // 1. Agenda do Operador
@@ -11064,7 +11064,7 @@ async function loadAgendaTab(showLoader = false) {
       overdueKpiEl.style.color = "var(--color-text-dark)";
     }
   }
-  // (Removido: operatorWorkload foi substituÃ­do pelo Filtro Select)
+  // (Removido: operatorWorkload foi substituÃƒÂ­do pelo Filtro Select)
 
   // Render Conversion Panel
   const pct7 = totalPromiseContacts > 0 ? Math.round((converted7Days / totalPromiseContacts) * 100) : 0;
@@ -11088,17 +11088,17 @@ async function loadAgendaTab(showLoader = false) {
   if (conversionBody) {
     conversionBody.innerHTML = "";
     if (conversionRows.length === 0) {
-      conversionBody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:15px; color:var(--color-text-muted);">Nenhum contato com promessa registrado para anÃ¡lise.</td></tr>`;
+      conversionBody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:15px; color:var(--color-text-muted);">Nenhum contato com promessa registrado para anÃƒÂ¡lise.</td></tr>`;
     } else {
       conversionRows.sort((a, b) => new Date(b.contactDate) - new Date(a.contactDate));
       conversionRows.forEach(row => {
         const dateStr = new Date(row.contactDate).toLocaleDateString('pt-BR');
         const badge7 = row.paidWithin7 
           ? `<span class="badge badge-success" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="check" style="width:12px; height:12px;"></i> Sim</span>`
-          : `<span class="badge badge-secondary" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="x" style="width:12px; height:12px;"></i> NÃ£o</span>`;
+          : `<span class="badge badge-secondary" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="x" style="width:12px; height:12px;"></i> NÃƒÂ£o</span>`;
         const badge15 = row.paidWithin15 
           ? `<span class="badge badge-success" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="check" style="width:12px; height:12px;"></i> Sim</span>`
-          : `<span class="badge badge-secondary" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="x" style="width:12px; height:12px;"></i> NÃ£o</span>`;
+          : `<span class="badge badge-secondary" style="display:inline-flex; align-items:center; gap:2px; text-transform:none;"><i data-lucide="x" style="width:12px; height:12px;"></i> NÃƒÂ£o</span>`;
         
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -11129,7 +11129,7 @@ async function renderAgendaCalendar() {
   
   grid.innerHTML = "";
   
-  const monthNames = ["Janeiro", "Fevereiro", "MarÃ§o", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const monthNames = ["Janeiro", "Fevereiro", "MarÃƒÂ§o", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const year = currentAgendaDate.getFullYear();
   const month = currentAgendaDate.getMonth();
   
@@ -11153,17 +11153,17 @@ async function renderAgendaCalendar() {
   
   // Feriados Nacionais e de SP (Exemplo para 2026)
   const holidays = {
-    "2026-01-01": "ConfraternizaÃ§Ã£o Universal",
+    "2026-01-01": "ConfraternizaÃƒÂ§ÃƒÂ£o Universal",
     "2026-02-17": "Carnaval",
-    "2026-04-03": "PaixÃ£o de Cristo",
+    "2026-04-03": "PaixÃƒÂ£o de Cristo",
     "2026-04-21": "Tiradentes",
     "2026-05-01": "Dia do Trabalho",
     "2026-06-04": "Corpus Christi",
-    "2026-07-09": "RevoluÃ§Ã£o Constitucionalista",
-    "2026-09-07": "IndependÃªncia do Brasil",
+    "2026-07-09": "RevoluÃƒÂ§ÃƒÂ£o Constitucionalista",
+    "2026-09-07": "IndependÃƒÂªncia do Brasil",
     "2026-10-12": "Nossa Sra. Aparecida",
     "2026-11-02": "Finados",
-    "2026-11-15": "ProclamaÃ§Ã£o da RepÃºblica",
+    "2026-11-15": "ProclamaÃƒÂ§ÃƒÂ£o da RepÃƒÂºblica",
     "2026-12-25": "Natal"
   };
   
@@ -11346,7 +11346,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
                   exclude = true;
               }
            }
-           // Excluir se o operador tiver feito qualquer anotaÃ§Ã£o HOJE (significa que jÃ¡ tratou o cliente)
+           // Excluir se o operador tiver feito qualquer anotaÃƒÂ§ÃƒÂ£o HOJE (significa que jÃƒÂ¡ tratou o cliente)
            if (n.date && n.date.startsWith(todayStr) && n.author && n.author.toLowerCase().includes(selectedOperator.toLowerCase())) {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) {
                   exclude = true;
@@ -11362,7 +11362,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       return applyTouchedFilter(window._dailyQueueCache[cacheKey]);
   }
 
-  // Permitir visualizaÃ§Ã£o da fila para hoje e dias futuros
+  // Permitir visualizaÃƒÂ§ÃƒÂ£o da fila para hoje e dias futuros
   if (dateStr < todayStr) return [];
   if (selectedOperator === "Todos") return []; 
 
@@ -11468,7 +11468,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
     if (p.billCount > maxBills) maxBills = p.billCount;
   });
 
-  // Checar Parcela Pulada (OpÃ§Ã£o A: checar parcelas futuras para atraso >= 31 e 1 parcela vencida)
+  // Checar Parcela Pulada (OpÃƒÂ§ÃƒÂ£o A: checar parcelas futuras para atraso >= 31 e 1 parcela vencida)
   const skippedIds = new Set();
   const candidates = pool.filter(p => p.maxDaysDelay >= 31 && p.billCount === 1);
   
@@ -11553,7 +11553,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
         if (scoreNovo * r4_pct > 10) reasons.push("Contrato Novo");
         if (scoreParcelas * r5_pct > 10) reasons.push("Muitas Parcelas");
         if (isSkipped && r6_pct > 0) reasons.push("Parcela Pulada");
-        if (isJuridicoRecente && r7_pct > 0) reasons.push("Retorno do JurÃ­dico");
+        if (isJuridicoRecente && r7_pct > 0) reasons.push("Retorno do JurÃƒÂ­dico");
         if (reasons.length === 0) reasons.push("Mix Geral");
     }
 
@@ -11589,7 +11589,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       const validationResults = await Promise.all(batch.map(async (item) => {
           let temBoletoValido = false;
           
-          // OTIMIZAÃ‡ÃƒO: Checar o cache de pagamentos recentes (Bulk Data) ANTES de chamar a API lenta
+          // OTIMIZAÃƒâ€¡ÃƒÆ’O: Checar o cache de pagamentos recentes (Bulk Data) ANTES de chamar a API lenta
           if (window.advFilters && window.advFilters.paidMap && item.billIds && paymentDays > 0) {
               item.billIds.forEach(bid => {
                   if (window.advFilters.paidMap.has(String(bid))) {
@@ -11662,7 +11662,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
      let scoreMulti = isMulti ? 100 : 0;
      let scoreNovo = ((365 - Math.min(item.maxDaysDelay, 365)) / 365) * 100;
      
-     const details = `ComposiÃ§Ã£o do Score (${item.filaScore} pts):\n` +
+     const details = `ComposiÃƒÂ§ÃƒÂ£o do Score (${item.filaScore} pts):\n` +
                      `- Valores: ${Math.round(scoreValor * r1_pct)} pts\n` +
                      `- Dias em Atraso: ${Math.round(scoreDias * r2_pct)} pts\n` +
                      `- Multi-contrato: ${Math.round(scoreMulti * r3_pct)} pts\n` +
@@ -11858,7 +11858,7 @@ window.fireConfetti = function() {
         occList.forEach((occ, index) => {
           if (occ.promiseDate === dateStr && occ.status !== "Cancelada") {
             
-            // AplicaÃ§Ã£o dos Filtros
+            // AplicaÃƒÂ§ÃƒÂ£o dos Filtros
             const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
             const occAuthor = normalizeStr(occ.author);
             const selOp = normalizeStr(selectedOperator);
@@ -11929,7 +11929,7 @@ window.fireConfetti = function() {
               unitId: displayUnit,
               promiseDate: occ.promiseDate,
               promiseStatus: occ.promiseStatus,
-              reminder: occ.reminder || "Retorno de CobranÃ§a",
+              reminder: occ.reminder || "Retorno de CobranÃƒÂ§a",
               text: occ.text,
               date: occ.date,
               daysAgo: daysAgo,
@@ -12001,7 +12001,7 @@ window.fireConfetti = function() {
             <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
-                    <span style="font-size: 1.15rem;">ParabÃ©ns! VocÃª finalizou sua fila de cobranÃ§a de hoje! ðŸŽ‰</span>
+                    <span style="font-size: 1.15rem;">ParabÃƒÂ©ns! VocÃƒÂª finalizou sua fila de cobranÃƒÂ§a de hoje! Ã°Å¸Å½â€°</span>
                 </div>
                 <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
             </div>
@@ -12067,7 +12067,7 @@ window.fireConfetti = function() {
       actionHtml = `
         <div style="margin-top: 6px;">
           <button class="btn btn-sm" style="background: var(--color-success); color: white; padding: 2px 8px; font-size: 0.65rem; border: none; border-radius: 4px;" onclick="if(window.dismissAgendaAlert) window.dismissAgendaAlert(${item.customerId}, ${item.occIndex}); this.style.display='none';">
-            Dar CiÃªncia
+            Dar CiÃƒÂªncia
           </button>
         </div>
       `;
@@ -12088,7 +12088,7 @@ window.fireConfetti = function() {
           ${item.customerName}
         </a>
         <div style="color:var(--color-text-muted); font-size: 0.75rem;">
-          TÃ­tulo: ${item.saleId} | Unidade: ${item.unitId}
+          TÃƒÂ­tulo: ${item.saleId} | Unidade: ${item.unitId}
         </div>
       </td>
       <td style="font-size: 0.8rem; vertical-align: middle; padding-top: 8px; padding-bottom: 8px;">
@@ -12110,7 +12110,7 @@ window.fireConfetti = function() {
         ${lastContactStr}
       </td>
       <td style="font-size: 0.75rem; vertical-align: middle; text-align: right; color: var(--color-text-muted);">
-        ${item.isFila ? 'Na fila hÃ¡' : 'Registrada hÃ¡'}<br><strong style="color: var(--color-primary); font-size: 0.8rem;">${item.daysAgo} dia(s)</strong>
+        ${item.isFila ? 'Na fila hÃƒÂ¡' : 'Registrada hÃƒÂ¡'}<br><strong style="color: var(--color-primary); font-size: 0.8rem;">${item.daysAgo} dia(s)</strong>
       </td>
     `;
     body.appendChild(row);
@@ -12310,7 +12310,7 @@ window.renderAgendaPersonalNotes = function() {
                 needsSave = true;
             }
             const isOwner = (owner === currentUser);
-            // Mostrar notas 'TODOS' apenas se o dono real foi apagado ou em caso de migraÃ§Ã£o
+            // Mostrar notas 'TODOS' apenas se o dono real foi apagado ou em caso de migraÃƒÂ§ÃƒÂ£o
             const isLegacyTodos = (owner === "TODOS" || owner === "Todos");
             const isShared = (note.sharedWith && note.sharedWith.includes(currentUserEmail));
             
@@ -12449,7 +12449,7 @@ window.renderAgendaPersonalNotes = function() {
             </div>
             <div style="display: flex; gap: 2px; align-items: center; padding-right: 8px; flex-shrink:0; position:relative;">
                 ${shareBtnHTML}
-                <button class="btn btn-sm" style="padding: 0; background: none; color: ${gearColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: ${gearOpacity}; transition: opacity 0.2s; border-radius:4px;" onclick="toggleNoteGearMenu(this, '${menuId}', '${dateStr}', ${noteObj.originalIndex}, '${srcKey}')" onmouseenter="this.style.opacity='1'; this.style.background='#f1f5f9'" onmouseleave="this.style.opacity='${gearOpacity}'; this.style.background='none'" title="OpÃ§Ãµes">
+                <button class="btn btn-sm" style="padding: 0; background: none; color: ${gearColor}; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: ${gearOpacity}; transition: opacity 0.2s; border-radius:4px;" onclick="toggleNoteGearMenu(this, '${menuId}', '${dateStr}', ${noteObj.originalIndex}, '${srcKey}')" onmouseenter="this.style.opacity='1'; this.style.background='#f1f5f9'" onmouseleave="this.style.opacity='${gearOpacity}'; this.style.background='none'" title="OpÃƒÂ§ÃƒÂµes">
                     <i data-lucide="settings" style="width: 13px; margin: 0;"></i>
                 </button>
                 <div id="${menuId}" style="display:none; position:absolute; right:28px; top:0; background:white; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.12); z-index:9999; min-width:165px; overflow:hidden;">
@@ -12459,11 +12459,11 @@ window.renderAgendaPersonalNotes = function() {
                     </button>
                     <button style="width:100%; padding:7px 12px; text-align:left; background:none; border:none; font-size:0.8rem; color:#1e293b; cursor:pointer; display:flex; align-items:center; gap:7px; transition:background 0.15s;" onmouseenter="this.style.background='#eff6ff'" onmouseleave="this.style.background='none'" onclick="closeAllNoteMenus(); openAgendaAlarmModal('${dateStr}', ${noteObj.originalIndex}, '${srcKey}', 'recorrencia')">
                         <i data-lucide="repeat" style="width:13px; color:${hasRec ? '#3b82f6' : '#94a3b8'};"></i>
-                        <span>RecorrÃªncia${hasRec ? ' Ã¢Å“â€œ' : ''}</span>
+                        <span>RecorrÃƒÂªncia${hasRec ? ' ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“' : ''}</span>
                     </button>
                     <button style="width:100%; padding:7px 12px; text-align:left; background:none; border:none; font-size:0.8rem; color:#1e293b; cursor:pointer; display:flex; align-items:center; gap:7px; transition:background 0.15s;" onmouseenter="this.style.background='#fffbeb'" onmouseleave="this.style.background='none'" onclick="closeAllNoteMenus(); openAgendaAlarmModal('${dateStr}', ${noteObj.originalIndex}, '${srcKey}', 'nota')">
                         <i data-lucide="file-text" style="width:13px; color:${hasNote ? '#f59e0b' : '#94a3b8'};"></i>
-                        <span>Nota${hasNote ? ' Ã¢Å“â€œ' : ''}</span>
+                        <span>Nota${hasNote ? ' ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“' : ''}</span>
                     </button>
                 </div>
                 <button class="btn btn-sm" style="padding: 0; background: none; color: #ef4444; height: 24px; width: 24px; display: flex; align-items: center; justify-content: center; opacity: 0.5; transition: opacity 0.2s; border-radius:4px;" onclick="deleteAgendaPersonalNote(${noteObj.originalIndex}, '${srcKey}')" onmouseenter="this.style.opacity='1'; this.style.background='#fef2f2'" onmouseleave="this.style.opacity='0.5'; this.style.background='none'" title="Excluir">
@@ -12513,7 +12513,7 @@ window.addAgendaPersonalNote = function() {
     }
     
     if (currentUser === "TODOS") {
-        alert("UsuÃ¡rio nÃ£o identificado. Por favor, atualize a pÃ¡gina antes de salvar notas.");
+        alert("UsuÃƒÂ¡rio nÃƒÂ£o identificado. Por favor, atualize a pÃƒÂ¡gina antes de salvar notas.");
         return;
     }
     
@@ -12552,14 +12552,14 @@ window.deleteAgendaPersonalNote = function(index, sourceKey) {
     const owner = sourceKey.split("_")[0];
     
     if (owner !== currentUser && owner !== "TODOS" && owner !== "Todos") {
-        alert("VocÃª nÃ£o pode excluir um lembrete compartilhado por outra pessoa.");
+        alert("VocÃƒÂª nÃƒÂ£o pode excluir um lembrete compartilhado por outra pessoa.");
         return;
     }
 
     const noteDateStr = sourceKey.split("_").slice(1).join("_");
 
     if (noteDateStr !== dateStr) {
-        // Ã‰ uma instÃ¢ncia recorrente vinda de outra data: mostrar opÃ§Ãµes
+        // Ãƒâ€° uma instÃƒÂ¢ncia recorrente vinda de outra data: mostrar opÃƒÂ§ÃƒÂµes
         const notes = allNotes[sourceKey];
         const noteText = (notes && notes[index]) ? notes[index].text : '?';
         showDeleteRecurrenceChoice(index, sourceKey, noteText, dateStr);
@@ -12567,7 +12567,7 @@ window.deleteAgendaPersonalNote = function(index, sourceKey) {
     }
 
     // Nota normal da data atual
-    if (!confirm('Excluir esta anotaÃ§Ã£o?')) return;
+    if (!confirm('Excluir esta anotaÃƒÂ§ÃƒÂ£o?')) return;
 
     if (allNotes[sourceKey]) {
         allNotes[sourceKey].splice(index, 1);
@@ -12599,16 +12599,16 @@ window.showDeleteRecurrenceChoice = function(index, sourceKey, noteText, dateStr
                 </div>
                 <div>
                     <h4 style="margin:0; font-size:0.95rem; color:#1e293b;">Lembrete Recorrente</h4>
-                    <p style="margin:2px 0 0; font-size:0.75rem; color:#64748b; font-family:'Comic Sans MS',cursive; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:270px;">Ã¢â‚¬Å“${noteText}Ã¢â‚¬Â</p>
+                    <p style="margin:2px 0 0; font-size:0.75rem; color:#64748b; font-family:'Comic Sans MS',cursive; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:270px;">ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ${noteText}ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â</p>
                 </div>
             </div>
-            <p style="font-size:0.82rem; color:#475569; margin-bottom:14px;">O que vocÃª deseja fazer com este lembrete?</p>
+            <p style="font-size:0.82rem; color:#475569; margin-bottom:14px;">O que vocÃƒÂª deseja fazer com este lembrete?</p>
             <div style="display:flex; flex-direction:column; gap:8px;">
                 <button onclick="deleteRecurrenceToday('${sourceKey}', ${index}, '${dateStr}')" style="padding:10px 14px; border-radius:7px; border:1px solid #fde68a; background:#fffbeb; color:#92400e; font-size:0.82rem; cursor:pointer; font-weight:600; text-align:left; transition:background 0.15s;" onmouseover="this.style.background='#fef9c3'" onmouseout="this.style.background='#fffbeb'">
-                    <strong>Ã°Å¸â€œâ€¦ Excluir sÃ³ hoje</strong><br><span style="font-weight:400; font-size:0.75rem; color:#78350f;">Continua aparecendo nos outros dias normalmente</span>
+                    <strong>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦ Excluir sÃƒÂ³ hoje</strong><br><span style="font-weight:400; font-size:0.75rem; color:#78350f;">Continua aparecendo nos outros dias normalmente</span>
                 </button>
                 <button onclick="deleteRecurrenceAll('${sourceKey}', ${index})" style="padding:10px 14px; border-radius:7px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-size:0.82rem; cursor:pointer; font-weight:600; text-align:left; transition:background 0.15s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'">
-                    <strong>Ã°Å¸â€”â€˜Ã¯Â¸Â Excluir toda a recorrÃªncia</strong><br><span style="font-weight:400; font-size:0.75rem; color:#7f1d1d;">Remove o lembrete de todos os dias futuros</span>
+                    <strong>ÃƒÂ°Ã…Â¸Ã¢â‚¬â€Ã¢â‚¬ËœÃƒÂ¯Ã‚Â¸Ã‚Â Excluir toda a recorrÃƒÂªncia</strong><br><span style="font-weight:400; font-size:0.75rem; color:#7f1d1d;">Remove o lembrete de todos os dias futuros</span>
                 </button>
                 <button onclick="document.getElementById('delete-rec-overlay').style.display='none'" style="padding:8px 14px; border-radius:7px; border:1px solid #e2e8f0; background:white; color:#64748b; font-size:0.82rem; cursor:pointer;">Cancelar</button>
             </div>
@@ -12658,7 +12658,7 @@ window.toggleNoteGearMenu = function(btn, menuId, dateStr, index, srcKey) {
     if (!isOpen) {
         const parentItem = btn.closest('div[style*="border-bottom"]');
         if (parentItem) parentItem.style.zIndex = '100';
-        // Usar position:fixed com coordenadas calculadas â€” evita corte pelo overflow do container
+        // Usar position:fixed com coordenadas calculadas Ã¢â‚¬â€ evita corte pelo overflow do container
         const rect = btn.getBoundingClientRect();
         menu.style.position = 'fixed';
         menu.style.top = (rect.bottom + 4) + 'px';
@@ -12690,7 +12690,7 @@ window.openAgendaAlarmModal = function(dateStr, index, sourceKey = '', focusSect
 
     let noteObj;
     if (sourceKey) {
-        // InstÃ¢ncia recorrente vinda de outra data
+        // InstÃƒÂ¢ncia recorrente vinda de outra data
         noteObj = (allNotes[sourceKey] || [])[index];
     } else {
         // Nota da data atual
@@ -12716,53 +12716,53 @@ window.openAgendaAlarmModal = function(dateStr, index, sourceKey = '', focusSect
                 <i data-lucide="settings" style="width:16px; color:var(--color-primary);"></i>
               </div>
               <div>
-                <h4 style="margin:0; font-size:1rem; color:var(--color-primary);">OpÃ§Ãµes do Lembrete</h4>
+                <h4 style="margin:0; font-size:1rem; color:var(--color-primary);">OpÃƒÂ§ÃƒÂµes do Lembrete</h4>
                 <p style="margin:2px 0 0; font-size:0.78rem; color:#64748b; font-family:'Comic Sans MS','Chalkboard SE',cursive; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:380px;">"${noteObj.text}"</p>
               </div>
             </div>
 
-            <!-- SEÃ‡ÃƒO: NOTA EXPLICATIVA -->
+            <!-- SEÃƒâ€¡ÃƒÆ’O: NOTA EXPLICATIVA -->
             <div id="section-nota" style="margin-bottom:14px; border:1px solid ${focusSection==='nota' ? '#f59e0b' : '#e2e8f0'}; border-radius:8px; padding:12px; background:${focusSection==='nota' ? '#fffbeb' : '#fafafa'};">
               <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700; color:#92400e; margin-bottom:6px;">
                 <i data-lucide="file-text" style="width:13px;"></i> Nota Explicativa
               </label>
-              <textarea id="agenda-alarm-nota" class="form-control" placeholder="AnotaÃ§Ã£o mais completa, contexto, detalhes..." style="width:100%; padding:8px; border-radius:6px; border:1px solid #fde68a; font-size:0.85rem; resize:vertical; min-height:55px; background:white;">${noteObj.notaExplicativa || ''}</textarea>
+              <textarea id="agenda-alarm-nota" class="form-control" placeholder="AnotaÃƒÂ§ÃƒÂ£o mais completa, contexto, detalhes..." style="width:100%; padding:8px; border-radius:6px; border:1px solid #fde68a; font-size:0.85rem; resize:vertical; min-height:55px; background:white;">${noteObj.notaExplicativa || ''}</textarea>
             </div>
 
-            <!-- SEÃ‡ÃƒO: ALARME -->
+            <!-- SEÃƒâ€¡ÃƒÆ’O: ALARME -->
             <div id="section-alarm" style="margin-bottom:14px; border:1px solid ${focusSection==='alarm' ? '#10b981' : '#e2e8f0'}; border-radius:8px; padding:12px; background:${focusSection==='alarm' ? '#f0fdf4' : '#fafafa'};">
               <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700; color:#065f46; margin-bottom:6px;">
                 <i data-lucide="clock" style="width:13px;"></i> Alarme
               </label>
               <input type="datetime-local" id="agenda-alarm-datetime" class="form-control" style="width:100%; padding:8px; border-radius:6px; border:1px solid #a7f3d0; font-size:0.9rem; background:white;" value="${noteObj.alarm || ''}">
-              ${noteObj.alarm ? `<p style="margin:4px 0 0; font-size:0.75rem; color:${noteObj.triggered ? '#94a3b8':'#10b981'};">&#128276; ${noteObj.triggered ? 'JÃ¡ disparado' : 'Agendado para'}: ${new Date(noteObj.alarm).toLocaleString('pt-BR')}</p>` : ''}
+              ${noteObj.alarm ? `<p style="margin:4px 0 0; font-size:0.75rem; color:${noteObj.triggered ? '#94a3b8':'#10b981'};">&#128276; ${noteObj.triggered ? 'JÃƒÂ¡ disparado' : 'Agendado para'}: ${new Date(noteObj.alarm).toLocaleString('pt-BR')}</p>` : ''}
             </div>
 
-            <!-- SEÃ‡ÃƒO: RECORRÃŠNCIA -->
+            <!-- SEÃƒâ€¡ÃƒÆ’O: RECORRÃƒÅ NCIA -->
             <div id="section-recorrencia" style="margin-bottom:18px; border:1px solid ${focusSection==='recorrencia' ? '#3b82f6' : '#e2e8f0'}; border-radius:8px; padding:12px; background:${focusSection==='recorrencia' ? '#eff6ff' : '#fafafa'};">
               <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700; color:#1d4ed8; margin-bottom:6px;">
-                <i data-lucide="repeat" style="width:13px;"></i> RecorrÃªncia
+                <i data-lucide="repeat" style="width:13px;"></i> RecorrÃƒÂªncia
                 <span style="font-size:0.7rem; font-weight:400; color:#64748b; margin-left:4px;">(usa a data/hora do alarme como ponto de partida)</span>
               </label>
               <select id="agenda-alarm-rec-tipo" class="form-select form-control" style="width:100%; margin-bottom:10px; font-size:0.9rem; border-radius:6px; border:1px solid #bfdbfe; background:white;" onchange="toggleRecurrenceOptions(this.value)">
                 <option value="nenhuma" ${rec.tipo==='nenhuma'?'selected':''}>Nenhuma</option>
-                <option value="diaria" ${rec.tipo==='diaria'?'selected':''}>DiÃ¡ria</option>
+                <option value="diaria" ${rec.tipo==='diaria'?'selected':''}>DiÃƒÂ¡ria</option>
                 <option value="semanal" ${rec.tipo==='semanal'?'selected':''}>Semanal</option>
-                <option value="mensal_dia" ${rec.tipo==='mensal_dia'?'selected':''}>Mensal (Dia EspecÃ­fico)</option>
-                <option value="mensal_util" ${rec.tipo==='mensal_util'?'selected':''}>Mensal (Dia Ãštil)</option>
+                <option value="mensal_dia" ${rec.tipo==='mensal_dia'?'selected':''}>Mensal (Dia EspecÃƒÂ­fico)</option>
+                <option value="mensal_util" ${rec.tipo==='mensal_util'?'selected':''}>Mensal (Dia ÃƒÅ¡til)</option>
               </select>
               <div id="agenda-rec-semanal" style="display:${rec.tipo==='semanal'?'block':'none'}; font-size:0.83rem; margin-bottom:8px;">
                 <label style="margin-bottom:5px; display:block; font-weight:600;">Dias da Semana:</label>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  ${[1,2,3,4,5,6,0].map(d=>`<label style="display:flex; align-items:center; gap:4px; background:white; border:1px solid #bfdbfe; border-radius:4px; padding:3px 7px;"><input type="checkbox" name="rec-dia-semana" value="${d}" ${(rec.diasSemana||[]).includes(d.toString())?'checked':''}> ${['Dom','Seg','Ter','Qua','Qui','Sex','SÃ¡b'][d]}</label>`).join('')}
+                  ${[1,2,3,4,5,6,0].map(d=>`<label style="display:flex; align-items:center; gap:4px; background:white; border:1px solid #bfdbfe; border-radius:4px; padding:3px 7px;"><input type="checkbox" name="rec-dia-semana" value="${d}" ${(rec.diasSemana||[]).includes(d.toString())?'checked':''}> ${['Dom','Seg','Ter','Qua','Qui','Sex','SÃƒÂ¡b'][d]}</label>`).join('')}
                 </div>
               </div>
               <div id="agenda-rec-mensal-dia" style="display:${rec.tipo==='mensal_dia'?'block':'none'}; font-size:0.83rem; margin-bottom:8px;">
-                <label style="margin-right:5px; font-weight:600;">Dia do mÃªs (1-31):</label>
+                <label style="margin-right:5px; font-weight:600;">Dia do mÃƒÂªs (1-31):</label>
                 <input type="number" id="rec-dia-mes" class="form-control" style="width:80px; display:inline-block;" min="1" max="31" value="${rec.diaMes||'1'}">
               </div>
               <div id="agenda-rec-mensal-util" style="display:${rec.tipo==='mensal_util'?'block':'none'}; font-size:0.83rem; margin-bottom:8px;">
-                <label style="margin-right:5px; font-weight:600;">Qual dia Ãºtil (ex: 2 = 2Âº dia Ãºtil):</label>
+                <label style="margin-right:5px; font-weight:600;">Qual dia ÃƒÂºtil (ex: 2 = 2Ã‚Âº dia ÃƒÂºtil):</label>
                 <input type="number" id="rec-dia-util" class="form-control" style="width:80px; display:inline-block;" min="1" max="23" value="${rec.diaUtil||'1'}">
               </div>
               <div id="agenda-rec-fim" style="display:${rec.tipo!=='nenhuma'?'block':'none'}; margin-top:8px;">
@@ -12791,7 +12791,7 @@ window.openAgendaAlarmModal = function(dateStr, index, sourceKey = '', focusSect
     overlay.style.display = 'flex';
     if (window.lucide) lucide.createIcons();
     
-    // Scroll para a seÃ§Ã£o relevante
+    // Scroll para a seÃƒÂ§ÃƒÂ£o relevante
     if (focusSection) {
         setTimeout(() => {
             const sectionEl = document.getElementById('section-' + focusSection);
@@ -12829,7 +12829,7 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
 
     const notesList = allNotes[currentStorageKey];
     if (!notesList || !notesList[index]) {
-        console.warn('saveAgendaAlarm: nota nÃ£o encontrada em', currentStorageKey, index);
+        console.warn('saveAgendaAlarm: nota nÃƒÂ£o encontrada em', currentStorageKey, index);
         const overlay = document.getElementById('agenda-alarm-overlay');
         if (overlay) overlay.style.display = 'none';
         return;
@@ -12843,7 +12843,7 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
     targetNote.notaExplicativa = notaExplicativa;
     targetNote.recorrencia = recorrencia;
 
-    // Calcular data do alarme (base para recorrÃªncia e para mover nota)
+    // Calcular data do alarme (base para recorrÃƒÂªncia e para mover nota)
     let alarmDateStr = null; // data do alarme no formato YYYY-MM-DD
     let displayDateStr = null;
     if (datetimeValue && !removeAlarm) {
@@ -12859,10 +12859,10 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
     }
 
     if (recTipo !== 'nenhuma') {
-        // Com recorrÃªncia: marcar a data de inÃ­cio como a data do alarme
+        // Com recorrÃƒÂªncia: marcar a data de inÃƒÂ­cio como a data do alarme
         targetNote.originalDateStr = alarmDateStr || (sourceKey ? sourceKey.replace(op + '_', '') : dateStr);
     } else if (!removeAlarm && alarmDateStr) {
-        // Sem recorrÃªncia e alarme em OUTRO dia: MOVER a nota para o dia do alarme
+        // Sem recorrÃƒÂªncia e alarme em OUTRO dia: MOVER a nota para o dia do alarme
         const alarmStorageKey = op + "_" + alarmDateStr;
         if (alarmStorageKey !== currentStorageKey) {
             // Remove da chave atual
@@ -12932,7 +12932,7 @@ window.checkAgendaAlarms = function() {
             const isLegacyTodos = (owner === "TODOS" || owner === "Todos");
             const isShared = (noteObj.sharedWith && noteObj.sharedWith.includes(currentUserEmail));
             
-            // SÃ³ dispara o alerta se o usuÃ¡rio atual for o criador, se for um alerta pÃºblico legado, ou se foi compartilhado com ele.
+            // SÃƒÂ³ dispara o alerta se o usuÃƒÂ¡rio atual for o criador, se for um alerta pÃƒÂºblico legado, ou se foi compartilhado com ele.
             if (!isOwner && !isShared && !isLegacyTodos) return;
             
             let shouldTrigger = false;
@@ -12992,7 +12992,7 @@ window.checkAgendaAlarms = function() {
                             <option value="15">Daqui a 15 min</option>
                             <option value="30">Daqui a 30 min</option>
                             <option value="60">Daqui a 1 hora</option>
-                            <option value="amanha">AmanhÃ£</option>
+                            <option value="amanha">AmanhÃƒÂ£</option>
                             <option value="custom">Outra data...</option>
                         </select>
                     </div>
@@ -13070,7 +13070,7 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
         if (window.showToast) {
-            if (isTomorrow) window.showToast(`Lembrete adiado para amanhÃ£.`, "info");
+            if (isTomorrow) window.showToast(`Lembrete adiado para amanhÃƒÂ£.`, "info");
             else window.showToast(`Lembrete adiado em ${mins} minutos.`, "info");
         }
     }
@@ -13253,7 +13253,7 @@ async function _loadZeroPaidTab_Impl() {
         if (!searchInput.placeholder.includes("Pesquisando")) {
             searchInput.dataset.originalPlaceholder = searchInput.placeholder;
         } else if (!searchInput.dataset.originalPlaceholder) {
-            searchInput.dataset.originalPlaceholder = "Pesquise pelo tÃ­tulo ou nome do cliente...";
+            searchInput.dataset.originalPlaceholder = "Pesquise pelo tÃƒÂ­tulo ou nome do cliente...";
         }
         searchInput.placeholder = "Pesquisando...";
         searchInput.disabled = true;
@@ -13284,7 +13284,7 @@ async function _loadZeroPaidTab_Impl() {
          pct = Math.min(Math.round(pct), 99);
          
          const statusText = `Buscando clientes inadimplentes da empresa ${_cName}`;
-         const timeText = `Tempo decorrido: ${el}s (MÃ©dia esperada: ~${_avg}s)`;
+         const timeText = `Tempo decorrido: ${el}s (MÃƒÂ©dia esperada: ~${_avg}s)`;
          
          const span = document.querySelector("#zeropaid-table-body .loading-status-text");
          const timeSpan = document.querySelector("#zeropaid-table-body .loading-time-text");
@@ -13316,7 +13316,7 @@ async function _loadZeroPaidTab_Impl() {
       const bar = document.querySelector("#zeropaid-table-body .loading-progress-bar");
       if(bar) { void bar.offsetWidth; bar.style.transition = 'width 1s cubic-bezier(0.4, 0, 0.2, 1)'; bar.style.width = '100%'; }
       const span = document.querySelector("#zeropaid-table-body .loading-status-text");
-      if(span) span.textContent = "Busca concluÃ­da! Montando tabela...";
+      if(span) span.textContent = "Busca concluÃƒÂ­da! Montando tabela...";
       
       if (window._siengeZeropaidIv) clearInterval(window._siengeZeropaidIv);
       await new Promise(resolve => setTimeout(resolve, 1200));
@@ -13324,7 +13324,7 @@ async function _loadZeroPaidTab_Impl() {
       AppState.defaultersLoaded = true;
       
       if (searchInput && searchIcon) {
-        searchInput.placeholder = searchInput.dataset.originalPlaceholder || "Pesquise pelo tÃ­tulo ou nome do cliente...";
+        searchInput.placeholder = searchInput.dataset.originalPlaceholder || "Pesquise pelo tÃƒÂ­tulo ou nome do cliente...";
         searchInput.disabled = false;
         searchInput.style.fontStyle = 'italic';
         searchIcon.classList.remove("lucide-pulse");
@@ -13358,7 +13358,7 @@ async function _loadZeroPaidTab_Impl() {
     let isTarget = false;
     
     if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
-        // Verifica se existe alguma parcela atrasada com o tipo de condiÃ§Ã£o "SI" (Sinal) ou "PU" (Parcela Ãšnica)
+        // Verifica se existe alguma parcela atrasada com o tipo de condiÃƒÂ§ÃƒÂ£o "SI" (Sinal) ou "PU" (Parcela ÃƒÅ¡nica)
         const hasUnpaidSinal = bill.defaulterInstallments.some(inst => {
             const condition = (inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || '').trim().toUpperCase();
             return condition === 'SI' || condition === 'SINAL' || condition === 'PU';
@@ -13376,7 +13376,7 @@ async function _loadZeroPaidTab_Impl() {
     if (!consolidated[key]) {
       const allClientSales = sales.filter(s => s.customerId === bill.customerId);
       
-      let assignedOp = "NÃƒO ATRIBUÃDO";
+      let assignedOp = "NÃƒÆ’O ATRIBUÃƒÂDO";
       const idCCusto = (bill.costCentersId && bill.costCentersId.length > 0) ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId) : (bill.costCenterId || (bill.unitId ? bill.unitId.split('-')[1] : '20100'));
       if (idCCusto) {
           let ccName = "";
@@ -13390,18 +13390,18 @@ async function _loadZeroPaidTab_Impl() {
           } else {
               city = ccName.trim().toUpperCase();
           }
-          if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃ‡ARI")) {
-             city = "ARAÃ‡ARIGUAMA";
+          if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÃƒâ€¡ARI")) {
+             city = "ARAÃƒâ€¡ARIGUAMA";
           }
           
           if (city) {
               const ruleId = "CID_" + city.replace(/\s+/g, '_');
-              let requiredType = "interno_absoluto"; // 0% Pago tem prioridade mÃ¡xima
+              let requiredType = "interno_absoluto"; // 0% Pago tem prioridade mÃƒÂ¡xima
               const isSubj = sale.subjudice === "S" || sale.subjudice === true;
               if (isSubj) { 
                   requiredType = "advogado"; 
               }
-              assignedOp = getRuleOperatorByType(ruleId, "NÃƒO ATRIBUÃDO", bill.customerId, requiredType);
+              assignedOp = getRuleOperatorByType(ruleId, "NÃƒÆ’O ATRIBUÃƒÂDO", bill.customerId, requiredType);
           }
       }
 
@@ -13426,7 +13426,7 @@ async function _loadZeroPaidTab_Impl() {
         billIds: []
       };
       
-      // Obter Ãºltimo contato
+      // Obter ÃƒÂºltimo contato
       if (AppState.notes && AppState.notes[bill.customerId]) {
         const notes = AppState.notes[bill.customerId];
         if (notes.length > 0) {
@@ -13466,7 +13466,7 @@ async function _loadZeroPaidTab_Impl() {
   
   let zeroPaidList = Object.values(consolidated);
   
-  // Aplica os filtros avanÃ§ados tambÃ©m na lista de 0% Pago!
+  // Aplica os filtros avanÃƒÂ§ados tambÃƒÂ©m na lista de 0% Pago!
   if (typeof window.applyAdvFiltersTo === 'function') {
       const originalAdvFilters = window.advFilters;
       window.advFilters = window.advFiltersZeroPaid || {};
@@ -13475,7 +13475,7 @@ async function _loadZeroPaidTab_Impl() {
   }
   
   // ========================================================
-  // CALCULO E RENDERIZAÃ‡ÃƒO DE KPIs 0% PAGO
+  // CALCULO E RENDERIZAÃƒâ€¡ÃƒÆ’O DE KPIs 0% PAGO
   // ========================================================
   let zeroTotalOverdue = 0;
   let zeroTotalClients = new Set();
@@ -13512,14 +13512,14 @@ async function _loadZeroPaidTab_Impl() {
       </div>
       <div class="kpi-card promises">
         <div class="kpi-info">
-          <h3>TÃ­tulos Vencidos</h3>
+          <h3>TÃƒÂ­tulos Vencidos</h3>
           <div class="kpi-value">${zeroTotalBills}</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
       </div>
       <div class="kpi-card subjudice">
         <div class="kpi-info">
-          <h3>Atraso MÃ©dio</h3>
+          <h3>Atraso MÃƒÂ©dio</h3>
           <div class="kpi-value">${zeroAvgDelay} dias</div>
         </div>
         <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
@@ -13747,7 +13747,7 @@ async function _loadZeroPaidTab_Impl() {
     const dir = window._currentSortZeroDir || 'desc';
     zeroPaidList.sort((a, b) => window.compareFilaClients(a, b, col, dir, 151, false));
   } else {
-    // Ordenar por aging (maxDaysDelay) descrente como padrÃ£o
+    // Ordenar por aging (maxDaysDelay) descrente como padrÃƒÂ£o
     zeroPaidList.sort((a, b) => b.maxDaysDelay - a.maxDaysDelay);
   }
 
@@ -13803,7 +13803,7 @@ async function _loadZeroPaidTab_Impl() {
 
     if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
       delayBadge = `
-        <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensÃ£o (PDF)">
+        <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensÃƒÂ£o (PDF)">
           <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
         </button>
       `;
@@ -13812,7 +13812,7 @@ async function _loadZeroPaidTab_Impl() {
       const currentStatus = localStorage.getItem(statusKey) || "Pendente";
       if (currentStatus === "Pendente") {
         delayBadge = `
-          <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar NotificaÃ§Ã£o Extrajudicial (NEX)">
+          <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar NotificaÃƒÂ§ÃƒÂ£o Extrajudicial (NEX)">
             <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
           </button>
         `;
@@ -13946,7 +13946,7 @@ window.enviarLoteJuridico = async function() {
     name: cb.dataset.customerName || cb.dataset.customerId
   }));
 
-  // Modal de confirmaÃ§Ã£o
+  // Modal de confirmaÃƒÂ§ÃƒÂ£o
   let existing = document.getElementById('juridico-lote-overlay');
   if (!existing) {
     existing = document.createElement('div');
@@ -13969,12 +13969,12 @@ window.enviarLoteJuridico = async function() {
           <i data-lucide="scale" style="width:18px; color:#dc2626;"></i>
         </div>
         <div>
-          <h4 style="margin:0; font-size:1.05rem; color:#1e293b;">Envio ao JurÃ­dico</h4>
-          <p style="margin:2px 0 0; font-size:0.8rem; color:#64748b;">Confirme os clientes que serÃ£o encaminhados</p>
+          <h4 style="margin:0; font-size:1.05rem; color:#1e293b;">Envio ao JurÃƒÂ­dico</h4>
+          <p style="margin:2px 0 0; font-size:0.8rem; color:#64748b;">Confirme os clientes que serÃƒÂ£o encaminhados</p>
         </div>
       </div>
       <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:12px 16px; margin-bottom:16px;">
-        <p style="margin:0 0 8px; font-size:0.85rem; font-weight:600; color:#991b1b;">âš ï¸ ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} ser${clientes.length > 1 ? 'Ã£o' : 'Ã¡'} encaminhado${clientes.length > 1 ? 's' : ''} ao JurÃ­dico:</p>
+        <p style="margin:0 0 8px; font-size:0.85rem; font-weight:600; color:#991b1b;">Ã¢Å¡Â Ã¯Â¸Â ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} ser${clientes.length > 1 ? 'ÃƒÂ£o' : 'ÃƒÂ¡'} encaminhado${clientes.length > 1 ? 's' : ''} ao JurÃƒÂ­dico:</p>
         <ul style="margin:0; padding-left:0; list-style:none; font-size:0.82rem; color:#1e293b; max-height:200px; overflow-y:auto;">${listHtml}</ul>
       </div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -14009,7 +14009,7 @@ window.confirmarEnvioLoteJuridico = async function() {
       await enviarParaJuridico(Number(c.customerId), Number(c.saleId));
       sucesso++;
     } catch(e) {
-      console.error('Erro ao enviar cliente ao jurÃ­dico:', c, e);
+      console.error('Erro ao enviar cliente ao jurÃƒÂ­dico:', c, e);
       erro++;
     }
   }
@@ -14018,13 +14018,13 @@ window.confirmarEnvioLoteJuridico = async function() {
   window._juridicoLoteQueue = [];
 
   if (erro === 0) {
-    if (window.showToast) showToast(`${sucesso} cliente${sucesso > 1 ? 's' : ''} encaminhado${sucesso > 1 ? 's' : ''} ao JurÃ­dico com sucesso!`, 'success');
+    if (window.showToast) showToast(`${sucesso} cliente${sucesso > 1 ? 's' : ''} encaminhado${sucesso > 1 ? 's' : ''} ao JurÃƒÂ­dico com sucesso!`, 'success');
   } else {
     if (window.showToast) showToast(`${sucesso} enviado${sucesso > 1 ? 's' : ''} com sucesso, ${erro} com falha.`, 'warning');
   }
 };
 
-// 4. Simulador Financeiro de Parcelas e AntecipaÃ§Ã£o
+// 4. Simulador Financeiro de Parcelas e AntecipaÃƒÂ§ÃƒÂ£o
 window.runSimulationCalculation = async function() {
   const simDateVal = document.getElementById("simulation-date").value;
   if (!simDateVal) return;
@@ -14034,7 +14034,7 @@ window.runSimulationCalculation = async function() {
   
   const simDate = new Date(simDateVal + "T00:00:00");
   if (simDate < today) {
-    alert("A data de simulaÃ§Ã£o de pagamento nÃ£o pode ser no passado.");
+    alert("A data de simulaÃƒÂ§ÃƒÂ£o de pagamento nÃƒÂ£o pode ser no passado.");
     document.getElementById("simulation-date").value = new Date().toISOString().split("T")[0];
     return;
   }
@@ -14106,7 +14106,7 @@ window.runSimulationCalculation = async function() {
           }
         });
       } catch (e) {
-        console.error("Erro ao obter saldo via API, usando cÃ¡lculo local:", e);
+        console.error("Erro ao obter saldo via API, usando cÃƒÂ¡lculo local:", e);
         calculateFutureLocal();
       }
     } else {
@@ -14147,10 +14147,10 @@ window.toggleSimulateAll = function(checked) {
 };
 
 // ----------------------------------------------------
-// 10. WE SEND - MÃ“DULO EXTRAJUDICIAL >= 61 DIAS
+// 10. WE SEND - MÃƒâ€œDULO EXTRAJUDICIAL >= 61 DIAS
 // ----------------------------------------------------
 async function loadWeSendTab() {
-  // Usar cache do AppState; no modo real sÃ³ faz nova chamada se necessÃ¡rio
+  // Usar cache do AppState; no modo real sÃƒÂ³ faz nova chamada se necessÃƒÂ¡rio
   const bills = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS
     : (AppState.defaultersLoaded
@@ -14172,7 +14172,7 @@ async function loadWeSendTab() {
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
 
-  // Filtrar tÃ­tulos de acordo com a rÃ©gua: 31 dias se 0% pago, 61 dias caso contrÃ¡rio
+  // Filtrar tÃƒÂ­tulos de acordo com a rÃƒÂ©gua: 31 dias se 0% pago, 61 dias caso contrÃƒÂ¡rio
   const overdueEligible = bills.filter(b => {
     if (b.slipStatus !== "Vencido") return false;
     const sale = sales.find(s => String(s.receivableBillId) === String(b.saleId) || String(s.id) === String(b.saleId));
@@ -14189,7 +14189,7 @@ async function loadWeSendTab() {
   if (chkAll) chkAll.checked = false;
 
   if (overdueEligible.length === 0) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum tÃ­tulo qualificado para notificaÃ§Ã£o.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum tÃƒÂ­tulo qualificado para notificaÃƒÂ§ÃƒÂ£o.</td></tr>`;
     return;
   }
 
@@ -14269,7 +14269,7 @@ async function loadWeSendTab() {
   });
 
   if (finalItems.length === 0) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum tÃ­tulo encontrado com os filtros informados.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum tÃƒÂ­tulo encontrado com os filtros informados.</td></tr>`;
     return;
   }
 
@@ -14312,7 +14312,7 @@ window.toggleWeSendSelectAll = function(checked) {
 window.exportWeSendToExcel = async function() {
   const chks = document.querySelectorAll(".chk-wesend-row:checked");
   if (chks.length === 0) {
-    alert("Nenhum contrato selecionado para exportaÃ§Ã£o.");
+    alert("Nenhum contrato selecionado para exportaÃƒÂ§ÃƒÂ£o.");
     return;
   }
   
@@ -14325,7 +14325,7 @@ window.exportWeSendToExcel = async function() {
         : []);
   
   const data = [
-    ["Cliente", "Empreendimento", "Lote", "Contrato ID", "Dias em Atraso", "Valor em Atraso (R$)", "Ãšltima AÃ§Ã£o"]
+    ["Cliente", "Empreendimento", "Lote", "Contrato ID", "Dias em Atraso", "Valor em Atraso (R$)", "ÃƒÅ¡ltima AÃƒÂ§ÃƒÂ£o"]
   ];
   
   chks.forEach(chk => {
@@ -14369,19 +14369,19 @@ window.exportWeSendToExcel = async function() {
   
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "NotificaÃ§Ãµes We Send");
+  XLSX.utils.book_append_sheet(workbook, worksheet, "NotificaÃƒÂ§ÃƒÂµes We Send");
   XLSX.writeFile(workbook, "Contratos_Notificados_We_Send.xlsx");
 };
 
 function triggerWeSendNotification(saleId, name) {
   const statusKey = `crm_wesend_status_${saleId}`;
   
-  alert(`Disparando NotificaÃ§Ã£o Extrajudicial Digital via We Send para ${name}...\n\n` +
+  alert(`Disparando NotificaÃƒÂ§ÃƒÂ£o Extrajudicial Digital via We Send para ${name}...\n\n` +
         `Processando assinatura digital com carimbo do tempo ICP-Brasil pelo servidor We Send RS...`);
         
   localStorage.setItem(statusKey, "Assinado Digitalmente ICP-Brasil");
   
-  // Adicionar ocorrÃªncia
+  // Adicionar ocorrÃƒÂªncia
   const sales = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
   const sale = sales.find(s => s.id === saleId);
   const customerId = sale ? sale.customerId : AppState.selectedCustomerId;
@@ -14393,7 +14393,7 @@ function triggerWeSendNotification(saleId, name) {
     AppState.notes[customerId].push({
       date: new Date().toISOString(),
       author: "SISTEMA (WE SEND)",
-      text: `DISPARADO: NotificaÃ§Ã£o Extrajudicial Digital certificada ICP-Brasil enviada via We Send. Status: Assinado Digitalmente.`,
+      text: `DISPARADO: NotificaÃƒÂ§ÃƒÂ£o Extrajudicial Digital certificada ICP-Brasil enviada via We Send. Status: Assinado Digitalmente.`,
       promiseDate: null,
       promiseStatus: null,
       reminder: null
@@ -14421,7 +14421,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     
     // Fallbacks
     if (!customer.cpfCnpj) customer.cpfCnpj = "- X -";
-    if (!customer.address) customer.address = "EndereÃ§o nÃ£o cadastrado";
+    if (!customer.address) customer.address = "EndereÃƒÂ§o nÃƒÂ£o cadastrado";
 
     const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
     const sale = salesList.find(s => String(s.id) === String(saleId)) || {};
@@ -14482,7 +14482,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
                     <th style="padding: 4px;">Id</th>
                     <th style="padding: 4px;">Sld. Corrigido</th>
                     <th style="padding: 4px;">Dias</th>
-                    <th style="padding: 4px;">AcrÃ©scimo</th>
+                    <th style="padding: 4px;">AcrÃƒÂ©scimo</th>
                     <th style="padding: 4px;">Total</th>
                 </tr>
             </thead>
@@ -14493,7 +14493,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         
         <div style="font-weight: bold; text-align: center; margin-bottom: 2rem; font-size: 10pt;">
             Total Saldo Corrigido ${totCorrigido.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
-            &nbsp;&nbsp;&nbsp;Total AcrÃ©scimos ${totAcrescimo.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
+            &nbsp;&nbsp;&nbsp;Total AcrÃƒÂ©scimos ${totAcrescimo.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
             &nbsp;&nbsp;&nbsp;Total ${totGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}
         </div>`;
 
@@ -14505,7 +14505,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         try { t = JSON.parse(templateStr); } catch(e){}
     }
     let corpo = t['doc-carta-corpo'] || (document.getElementById('doc-carta-corpo') ? document.getElementById('doc-carta-corpo').value : '');
-    let assunto = t['doc-carta-assunto'] || (document.getElementById('doc-carta-assunto') ? document.getElementById('doc-carta-assunto').value : 'NOTIFICAÃ‡ÃƒO EXTRAJUDICIAL');
+    let assunto = t['doc-carta-assunto'] || (document.getElementById('doc-carta-assunto') ? document.getElementById('doc-carta-assunto').value : 'NOTIFICAÃƒâ€¡ÃƒÆ’O EXTRAJUDICIAL');
     
     if (corpo) {
             const today = new Date();
@@ -14549,38 +14549,38 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         docHtml = `
         <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
             <p style="text-align: right; margin-bottom: 2rem;">
-                AvarÃ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                AvarÃƒÂ©/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
             </p>
 
             <p style="margin-bottom: 2rem;">
-                Ao(Ã€)(s) Ilmo(a)(s). Sr(a)(s).<br>
-                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nÂº ${customer.cpfCnpj},<br>
-                e - X - , portador(a) do C.P.F. nÂº - X -<br>
+                Ao(Ãƒâ‚¬)(s) Ilmo(a)(s). Sr(a)(s).<br>
+                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nÃ‚Âº ${customer.cpfCnpj},<br>
+                e - X - , portador(a) do C.P.F. nÃ‚Âº - X -<br>
                 ${addressStr.toUpperCase()}
             </p>
 
-            <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÃ‡ÃƒO EXTRAJUDICIAL</h3>
+            <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÃƒâ€¡ÃƒÆ’O EXTRAJUDICIAL</h3>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                <strong>${costCenter.name.toUpperCase()}</strong> (Ã¢â‚¬Å“NotificanteÃ¢â‚¬Â), inscrita no CNPJ/ME sob o nÂº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, Ã  presenÃ§a de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestaÃ§Ãµes mensais, corrigidas anualmente pelo Ã­ndice acordado em contrato.
+                <strong>${costCenter.name.toUpperCase()}</strong> (ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œNotificanteÃƒÂ¢Ã¢â€šÂ¬Ã‚Â), inscrita no CNPJ/ME sob o nÃ‚Âº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, ÃƒÂ  presenÃƒÂ§a de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestaÃƒÂ§ÃƒÂµes mensais, corrigidas anualmente pelo ÃƒÂ­ndice acordado em contrato.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                No entanto, o Notificado nÃ£o cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, atÃ© a presente data, a quantia atualizada conforme tabela abaixo:
+                No entanto, o Notificado nÃƒÂ£o cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, atÃƒÂ© a presente data, a quantia atualizada conforme tabela abaixo:
             </p>
 
             ${tableHtml}
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÃ‡ÃƒO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogÃ¡vel de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessÃ¡rias Ã  reintegraÃ§Ã£o de posse e rescisÃ£o contratual, se o caso.
+                Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÃƒâ€¡ÃƒÆ’O EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogÃƒÂ¡vel de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessÃƒÂ¡rias ÃƒÂ  reintegraÃƒÂ§ÃƒÂ£o de posse e rescisÃƒÂ£o contratual, se o caso.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                Caso V. Sa. tenha interesse na manutenÃ§Ã£o do contrato e em continuar na posse do imÃ³vel objeto desta notificaÃ§Ã£o, deverÃ¡ procurar o escritÃ³rio da empresa ou contatar a Notificante tambÃ©m pelo telefone do Setor de Recebimentos/CobranÃ§a 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendÃªncia.
+                Caso V. Sa. tenha interesse na manutenÃƒÂ§ÃƒÂ£o do contrato e em continuar na posse do imÃƒÂ³vel objeto desta notificaÃƒÂ§ÃƒÂ£o, deverÃƒÂ¡ procurar o escritÃƒÂ³rio da empresa ou contatar a Notificante tambÃƒÂ©m pelo telefone do Setor de Recebimentos/CobranÃƒÂ§a 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendÃƒÂªncia.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 3rem;">
-                Caso a pendÃªncia acima jÃ¡ tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobranÃ§a e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
+                Caso a pendÃƒÂªncia acima jÃƒÂ¡ tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobranÃƒÂ§a e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
             </p>
 
             <p style="margin-bottom: 3rem;">
@@ -14605,7 +14605,7 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
 
     const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
     
-    document.getElementById("pdf-modal-title").textContent = "NotificaÃ§Ã£o Extrajudicial";
+    document.getElementById("pdf-modal-title").textContent = "NotificaÃƒÂ§ÃƒÂ£o Extrajudicial";
     document.getElementById("pdf-document-content").innerHTML = docHtml;
     document.getElementById("pdf-view-overlay").classList.add("active");
     if (window.lucide) lucide.createIcons();
@@ -14618,7 +14618,7 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
 window.gerarDocumentosFisicosNEXEmMassa = async function() {
     const checkboxes = document.querySelectorAll(".chk-wesend-row:checked");
     if (checkboxes.length === 0) {
-        alert("Selecione pelo menos um cliente para gerar as notificaÃ§Ãµes.");
+        alert("Selecione pelo menos um cliente para gerar as notificaÃƒÂ§ÃƒÂµes.");
         return;
     }
     
@@ -14644,7 +14644,7 @@ window.gerarDocumentosFisicosNEXEmMassa = async function() {
         }
     }
     
-    document.getElementById("pdf-modal-title").textContent = "NotificaÃ§Ãµes Extrajudiciais (Lote)";
+    document.getElementById("pdf-modal-title").textContent = "NotificaÃƒÂ§ÃƒÂµes Extrajudiciais (Lote)";
     document.getElementById("pdf-document-content").innerHTML = fullHtml;
     document.getElementById("pdf-view-overlay").classList.add("active");
     if (window.lucide) lucide.createIcons();
@@ -14708,7 +14708,7 @@ window.triggerCorreiosNotification = function(customerId, saleId, value) {
 };
 
 // ----------------------------------------------------
-// 11. PREÃƒâ€šMBULOS & CONFIGURAÃ‡ÃƒO AZURE: AÃ‡Ãƒâ€¢ES REDESENHADAS
+// 11. PREÃƒÆ’Ã¢â‚¬Å¡MBULOS & CONFIGURAÃƒâ€¡ÃƒÆ’O AZURE: AÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES REDESENHADAS
 // ----------------------------------------------------
 function loadPreamblesConfigTab() {
   const body = document.getElementById("preambles-list-body");
@@ -14720,18 +14720,18 @@ function loadPreamblesConfigTab() {
     let saved = JSON.parse(localStorage.getItem('crm_moura_preambles_list'));
     if (!saved || saved.length === 0) {
       saved = [
-        { id: 1, text: "EMPREENDIMENTOS IMOBILIÃƒÂRIOS CHÃƒÂCARA MOURA LEITE, inscrita no CNPJ sob o nÂº 01.610.787/0001-76, com endereÃ§o na Rua J. J. Esteves, 172, na cidade e comarca de Cerqueira CÃ©sar, Estado de SÃ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 208, fls. 287 a 289, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÂVEL 1: EMPREENDIMENTOS IMOBILIÃƒÂRIOS CHÃƒÂCARA MOURA LEITE", status: "Ativo" },
-        { id: 2, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA, inscrita no CGC-MF sob o nÂº 01.066.134/0001-78, com endereÃ§o na Rua Campos Sales, 2175, Vila Sonia, na cidade e comarca de Botucatu, Estado de SÃ£o Paulo, neste ato representados pelo sÃ³cio PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSÃƒÂVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA", status: "Ativo" },
-        { id: 3, text: "T.L.M. PARTICIPAÃ‡Ãƒâ€¢ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.Âº 02.983.678/0001-67, com endereÃ§o na PraÃ§a da Matriz, 104 Sala 01, na cidade de AraÃ§ariguama comarca de SÃ£o Roque, Estado de SÃ£o Paulo, neste ato representados pelo seu procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 242, pag. 173 Ã  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃƒÂVEL 1: T.L.M. PARTICIPAÃ‡Ãƒâ€¢ES E EMPREENDIMENTOS", status: "Ativo" },
-        { id: 4, text: "T.L.M. PARTICIPAÃ‡Ãƒâ€¢ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.Âº 02.983.678/0001-67, com endereÃ§o na PraÃ§a da Matriz, 104 Sala 01, na cidade de AraÃ§ariguama comarca de SÃ£o Roque, Estado de SÃ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 242, pag. 173 Ã  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃƒÂVEL 1: T.L.M. PARTICIPAÃ‡Ãƒâ€¢ES E EMPREENDIMENTOS", status: "Ativo" },
-        { id: 5, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA, inscrita no CGC-MF sob o nÂº 01.066.134/0001-78, com endereÃ§o na Av. Dr. Vital Brasil, 1190, na cidade e comarca de Botucatu, Estado de SÃ£o Paulo, neste ato representados pelo seu sÃ³cio PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP e TADEU LEMOS DE MOURA LEITE, brasileiro, empresÃ¡rio, portador da cÃ©dula de identidade RG nÂº4.180.086-2 inscrito no CPF-MF nÂº386.497.728-20, casado no regime comunhÃ£o parcial de bens com CAROLINA AP. DE ALMEIDA MOURA LEITE, brasileira, advogada, portadora da cÃ©dula de identidade RG nÂº 28.177.033-5, inscrita no CPF-MF nÂº 170.324.868-60. Residentes e Domiciliados na Rua Almirante Giachetta, 180 AP 61 Pq Campolim, na cidade de Sorocaba-SP, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 242, pag. 173 Ã  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÂVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA\nRESPONSÃƒÂVEL 2: TADEU LEMOS DE MOURA LEITE\nRESPONSÃƒÂVEL 3: CAROLINA AP. DE ALMEIDA MOURA LEITE", status: "Ativo" },
-        { id: 6, text: "ALEXANDRE GHELARDI, brasileiro, administrador de empresa, portador da CÃ©dula de Identidade RG n.Âº 8.427.046 SSP-SP, inscrito no CPF-MF sob o n.Âº 850.924.368-91, casado no regime de comunhÃ£o parcial de bens na vigÃªncia da Lei n.Âº 6.515/77, com LIVIA TAVARES PADOVAN GHELARDI, brasileira, do lar, portadora da CÃ©dula de Identidade RG n.Âº 10.505.462-8 SSP-SP, inscrita no CPF-MF sob o n.Âº 198.215.568-09, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÂVEL 1: ALEXANDRE GHELARDI\nRESPONSÃƒÂVEL 2: LIVIA TAVARES PADOVAN GHELARDI", status: "Ativo" },
-        { id: 7, text: "ALEXANDRE GHELARDI, brasileiro, administrador de empresa, portador da CÃ©dula de Identidade RG n.Âº 8.427.046 SSP-SP, inscrito no CPF-MF sob o n.Âº 850.924.368-91, casado no regime de comunhÃ£o parcial de bens na vigÃªncia da Lei n.Âº 6.515/77, com LIVIA TAVARES PADOVAN GHELARDI, brasileira, do lar, portadora da CÃ©dula de Identidade RG n.Âº 10.505.462-8 SSP-SP, inscrita no CPF-MF sob o n.Âº 198.215.568-09, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP, e MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA, inscrita no CGC-MF sob o nÂº 01.066.134/0001-78, com endereÃ§o na Av. Dr. Vital Brasil, 1190, na cidade e comarca de Botucatu, Estado de SÃ£o Paulo, neste ato representados pelo seu sÃ³cio PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSÃƒÂVEL 1: ALEXANDRE GHELARDI\nRESPONSÃƒÂVEL 2: LIVIA TAVARES PADOVAN GHELARDI\nRESPONSÃƒÂVEL 3: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃ‡ÃƒO LTDA", status: "Ativo" },
-        { id: 8, text: "GAP EMPRRENDIMENTOS IMOBILIÃƒÂRIOS SPE LTDA, inscrita no CNPJ sob o nÂº 22.800.509/0001-51, com endereÃ§o na Rua Caldas Novas, 50, conjunto 125, bairro Bethaville I, na cidade e comarca de Barueri, Estado de SÃ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 208, fls. 290 a 292, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas do Distrito de RubiÃ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÂVEL 1: GAP EMPREENDIMENTOS IMOBILIÃƒÂRIOS SPE LTDA", status: "Ativo" },
-        { id: 10, text: "VERCELLINO EMPREENDIMENTOS IMOBILIÃƒÂRIOS SPE LTDA, pessoa jurÃ­dica de direito privado, inscrita no CNPJ/MF sob nÂº 23.524.776/0001-06, com sede nesta cidade de Boituva-SP, na Rua Antenor Dias da Silva, nÂº 103, Jardim Maria Paulina, com seus atos constitutivos arquivados na Junta Comercial do Estado de SÃ£o Paulo-JUCESP, sob NIRE 35229459624, representada por seu administrador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSAVEL 1: VERCELLINO EMPREENDIMENTOS IMOBILIÃƒÂRIOS SPE LTDA", status: "Ativo" },
-        { id: 11, text: "TERRA DO ARAÃ‡ARI EMPREENDIMENTOS IMOBILIÃƒÂRIOS LTDA, C.N.P.J 04.843.859/0001-13, sediada na Av. Dr. Vital Brasil, nÂº 1.190 Sala 02, Vila SÃ£o LÃºcio, na Cidade e Comarca de Botucatu, Cep nÂº 18603-193, no Estado de SÃ£o Paulo, devidamente representada neste ato por seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÂº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 226, fls. 079 a 082, em 04/06/2020, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃ£o de Notas AraÃ§ariguama SP, comarca de SÃ£o Roque-SP.", responsibles: "RESPONSAVEL 1: TERRA DO ARAÃ‡ARI EMPREENDIMENTOS IMOBILIÃƒÂRIOS LTDA", status: "Ativo" },
-        { id: 13, text: "LALIM PARTICIPAÃ‡Ãƒâ€¢ES LTDA., inscrita no CNPJ sob o n.Âº 42.361.370/0001-02, com sede e foro na cidade e comarca de AvarÃ©, estado de SÃ£o Paulo, na Rua GoiÃ¡s n.Âº 1.548, centro, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 469, pag. 031/032, em 21/09/2021, no 2Âª TabeliÃ£o de Notas e de Protesto de Letras e TÃ­tulos AvarÃ©-SP, e ÃƒÂGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃƒÂRIOS LTDA, inscrita no CNPJ sob o n.Âº 41.209.367/0001-05, com sede e foro na cidade e comarca de SÃ£o Paulo, Estado de SÃ£o Paulo, na Rua Professor AtÃ­lio Innocenti n.Âº 474, Conjunto 508, Vila Nova ConceiÃ§Ã£o, neste ato representados pelo seu bastante procurador PAULO JOSÃ‰ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃ©dula de Identidade, R.G. sob o nÂº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÂº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÂº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃ‡ÃƒO PÃšBLICA lavrada no Livro 11.281, pag. 055 Ã¢â‚¬â€œ C.L - Primeiro Traslado, em 03/09/2021, no 9Âª TabeliÃ£o de Notas SÃ£o Paulo-SP.", responsibles: "RESPONSAVEL 1: LALIM PARTICIPAÃ‡Ãƒâ€¢ES LTDA\nRESPONSAVEL 2:  ÃƒÂGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃƒÂRIOS LTDA", status: "Ativo" },
-        { id: 14, text: "RESERVA DOS RAMOS SPE LTDA., pessoa jurÃ­dica de direito privado, inscrita no CNPJ/MF sob nÂº 57.600.844/0001-90, com sede nesta cidade de TatuÃ­-SP, a Rua CapitÃ£o Lisboa, 715, 4Âº andar, conj. 44, sala 16, com seus atos constitutivos arquivados na Junta Comercial do Estado de SÃ£o Paulo-JUCESP, sob NIRE 35265136678, por seu representante legal abaixo assinado.", responsibles: "RESPONSAVEL 1: RESERVA DOS RAMOS SPE LTDA", status: "Ativo" }
+        { id: 1, text: "EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS CHÃƒÆ’Ã‚ÂCARA MOURA LEITE, inscrita no CNPJ sob o nÃ‚Âº 01.610.787/0001-76, com endereÃƒÂ§o na Rua J. J. Esteves, 172, na cidade e comarca de Cerqueira CÃƒÂ©sar, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 208, fls. 287 a 289, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS CHÃƒÆ’Ã‚ÂCARA MOURA LEITE", status: "Ativo" },
+        { id: 2, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA, inscrita no CGC-MF sob o nÃ‚Âº 01.066.134/0001-78, com endereÃƒÂ§o na Rua Campos Sales, 2175, Vila Sonia, na cidade e comarca de Botucatu, Estado de SÃƒÂ£o Paulo, neste ato representados pelo sÃƒÂ³cio PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA", status: "Ativo" },
+        { id: 3, text: "T.L.M. PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.Ã‚Âº 02.983.678/0001-67, com endereÃƒÂ§o na PraÃƒÂ§a da Matriz, 104 Sala 01, na cidade de AraÃƒÂ§ariguama comarca de SÃƒÂ£o Roque, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 242, pag. 173 ÃƒÂ  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: T.L.M. PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES E EMPREENDIMENTOS", status: "Ativo" },
+        { id: 4, text: "T.L.M. PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.Ã‚Âº 02.983.678/0001-67, com endereÃƒÂ§o na PraÃƒÂ§a da Matriz, 104 Sala 01, na cidade de AraÃƒÂ§ariguama comarca de SÃƒÂ£o Roque, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 242, pag. 173 ÃƒÂ  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: T.L.M. PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES E EMPREENDIMENTOS", status: "Ativo" },
+        { id: 5, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA, inscrita no CGC-MF sob o nÃ‚Âº 01.066.134/0001-78, com endereÃƒÂ§o na Av. Dr. Vital Brasil, 1190, na cidade e comarca de Botucatu, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu sÃƒÂ³cio PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP e TADEU LEMOS DE MOURA LEITE, brasileiro, empresÃƒÂ¡rio, portador da cÃƒÂ©dula de identidade RG nÃ‚Âº4.180.086-2 inscrito no CPF-MF nÃ‚Âº386.497.728-20, casado no regime comunhÃƒÂ£o parcial de bens com CAROLINA AP. DE ALMEIDA MOURA LEITE, brasileira, advogada, portadora da cÃƒÂ©dula de identidade RG nÃ‚Âº 28.177.033-5, inscrita no CPF-MF nÃ‚Âº 170.324.868-60. Residentes e Domiciliados na Rua Almirante Giachetta, 180 AP 61 Pq Campolim, na cidade de Sorocaba-SP, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 242, pag. 173 ÃƒÂ  175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA\nRESPONSÃƒÆ’Ã‚ÂVEL 2: TADEU LEMOS DE MOURA LEITE\nRESPONSÃƒÆ’Ã‚ÂVEL 3: CAROLINA AP. DE ALMEIDA MOURA LEITE", status: "Ativo" },
+        { id: 6, text: "ALEXANDRE GHELARDI, brasileiro, administrador de empresa, portador da CÃƒÂ©dula de Identidade RG n.Ã‚Âº 8.427.046 SSP-SP, inscrito no CPF-MF sob o n.Ã‚Âº 850.924.368-91, casado no regime de comunhÃƒÂ£o parcial de bens na vigÃƒÂªncia da Lei n.Ã‚Âº 6.515/77, com LIVIA TAVARES PADOVAN GHELARDI, brasileira, do lar, portadora da CÃƒÂ©dula de Identidade RG n.Ã‚Âº 10.505.462-8 SSP-SP, inscrita no CPF-MF sob o n.Ã‚Âº 198.215.568-09, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: ALEXANDRE GHELARDI\nRESPONSÃƒÆ’Ã‚ÂVEL 2: LIVIA TAVARES PADOVAN GHELARDI", status: "Ativo" },
+        { id: 7, text: "ALEXANDRE GHELARDI, brasileiro, administrador de empresa, portador da CÃƒÂ©dula de Identidade RG n.Ã‚Âº 8.427.046 SSP-SP, inscrito no CPF-MF sob o n.Ã‚Âº 850.924.368-91, casado no regime de comunhÃƒÂ£o parcial de bens na vigÃƒÂªncia da Lei n.Ã‚Âº 6.515/77, com LIVIA TAVARES PADOVAN GHELARDI, brasileira, do lar, portadora da CÃƒÂ©dula de Identidade RG n.Ã‚Âº 10.505.462-8 SSP-SP, inscrita no CPF-MF sob o n.Ã‚Âº 198.215.568-09, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP, e MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA, inscrita no CGC-MF sob o nÃ‚Âº 01.066.134/0001-78, com endereÃƒÂ§o na Av. Dr. Vital Brasil, 1190, na cidade e comarca de Botucatu, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu sÃƒÂ³cio PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: ALEXANDRE GHELARDI\nRESPONSÃƒÆ’Ã‚ÂVEL 2: LIVIA TAVARES PADOVAN GHELARDI\nRESPONSÃƒÆ’Ã‚ÂVEL 3: MOURA LEITE DESENVOLVIMENTO & URBANIZAÃƒâ€¡ÃƒÆ’O LTDA", status: "Ativo" },
+        { id: 8, text: "GAP EMPRRENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS SPE LTDA, inscrita no CNPJ sob o nÃ‚Âº 22.800.509/0001-51, com endereÃƒÂ§o na Rua Caldas Novas, 50, conjunto 125, bairro Bethaville I, na cidade e comarca de Barueri, Estado de SÃƒÂ£o Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 208, fls. 290 a 292, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas do Distrito de RubiÃƒÂ£o Junior, Botucatu-SP.", responsibles: "RESPONSÃƒÆ’Ã‚ÂVEL 1: GAP EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS SPE LTDA", status: "Ativo" },
+        { id: 10, text: "VERCELLINO EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS SPE LTDA, pessoa jurÃƒÂ­dica de direito privado, inscrita no CNPJ/MF sob nÃ‚Âº 23.524.776/0001-06, com sede nesta cidade de Boituva-SP, na Rua Antenor Dias da Silva, nÃ‚Âº 103, Jardim Maria Paulina, com seus atos constitutivos arquivados na Junta Comercial do Estado de SÃƒÂ£o Paulo-JUCESP, sob NIRE 35229459624, representada por seu administrador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSAVEL 1: VERCELLINO EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS SPE LTDA", status: "Ativo" },
+        { id: 11, text: "TERRA DO ARAÃƒâ€¡ARI EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS LTDA, C.N.P.J 04.843.859/0001-13, sediada na Av. Dr. Vital Brasil, nÃ‚Âº 1.190 Sala 02, Vila SÃƒÂ£o LÃƒÂºcio, na Cidade e Comarca de Botucatu, Cep nÃ‚Âº 18603-193, no Estado de SÃƒÂ£o Paulo, devidamente representada neste ato por seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nÃ‚Âº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 226, fls. 079 a 082, em 04/06/2020, no Oficial de Registro Civil das Pessoas Naturais e TabeliÃƒÂ£o de Notas AraÃƒÂ§ariguama SP, comarca de SÃƒÂ£o Roque-SP.", responsibles: "RESPONSAVEL 1: TERRA DO ARAÃƒâ€¡ARI EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS LTDA", status: "Ativo" },
+        { id: 13, text: "LALIM PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES LTDA., inscrita no CNPJ sob o n.Ã‚Âº 42.361.370/0001-02, com sede e foro na cidade e comarca de AvarÃƒÂ©, estado de SÃƒÂ£o Paulo, na Rua GoiÃƒÂ¡s n.Ã‚Âº 1.548, centro, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 469, pag. 031/032, em 21/09/2021, no 2Ã‚Âª TabeliÃƒÂ£o de Notas e de Protesto de Letras e TÃƒÂ­tulos AvarÃƒÂ©-SP, e ÃƒÆ’Ã‚ÂGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS LTDA, inscrita no CNPJ sob o n.Ã‚Âº 41.209.367/0001-05, com sede e foro na cidade e comarca de SÃƒÂ£o Paulo, Estado de SÃƒÂ£o Paulo, na Rua Professor AtÃƒÂ­lio Innocenti n.Ã‚Âº 474, Conjunto 508, Vila Nova ConceiÃƒÂ§ÃƒÂ£o, neste ato representados pelo seu bastante procurador PAULO JOSÃƒâ€° FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da CÃƒÂ©dula de Identidade, R.G. sob o nÃ‚Âº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nÃ‚Âº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nÃ‚Âº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÃƒâ€¡ÃƒÆ’O PÃƒÅ¡BLICA lavrada no Livro 11.281, pag. 055 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ C.L - Primeiro Traslado, em 03/09/2021, no 9Ã‚Âª TabeliÃƒÂ£o de Notas SÃƒÂ£o Paulo-SP.", responsibles: "RESPONSAVEL 1: LALIM PARTICIPAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES LTDA\nRESPONSAVEL 2:  ÃƒÆ’Ã‚ÂGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃƒÆ’Ã‚ÂRIOS LTDA", status: "Ativo" },
+        { id: 14, text: "RESERVA DOS RAMOS SPE LTDA., pessoa jurÃƒÂ­dica de direito privado, inscrita no CNPJ/MF sob nÃ‚Âº 57.600.844/0001-90, com sede nesta cidade de TatuÃƒÂ­-SP, a Rua CapitÃƒÂ£o Lisboa, 715, 4Ã‚Âº andar, conj. 44, sala 16, com seus atos constitutivos arquivados na Junta Comercial do Estado de SÃƒÂ£o Paulo-JUCESP, sob NIRE 35265136678, por seu representante legal abaixo assinado.", responsibles: "RESPONSAVEL 1: RESERVA DOS RAMOS SPE LTDA", status: "Ativo" }
       ];
       localStorage.setItem('crm_moura_preambles_list', JSON.stringify(saved));
     }
@@ -14759,7 +14759,7 @@ function loadPreamblesConfigTab() {
   checkAdminPermissions();
   renderRulesSettingsTable();
   
-  // ConfiguraÃ§Ãµes do Azure
+  // ConfiguraÃƒÂ§ÃƒÂµes do Azure
   const config = MouraAuth.getAuthConfig();
   document.getElementById("azure-enable-chk").checked = config.enabled;
   document.getElementById("azure-client-id").value = config.clientId;
@@ -14782,7 +14782,7 @@ function renderRulesSettingsTable() {
           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;">
             <div class="loading-spinner" style="width:32px; height:32px; border:3px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div>
             <strong style="font-size: 1.1rem; color: var(--color-primary);">Atualizando Base de Dados...</strong>
-            <p style="margin:0;">Novas cidades e tÃ­tulos inadimplentes estÃ£o sendo atualizados no momento. Por favor, aguarde.</p>
+            <p style="margin:0;">Novas cidades e tÃƒÂ­tulos inadimplentes estÃƒÂ£o sendo atualizados no momento. Por favor, aguarde.</p>
           </div>
         </td>
       </tr>
@@ -14805,7 +14805,7 @@ function renderRulesSettingsTable() {
   window.renderEtapasJudiciais();
   if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
   
-  // Computar estatÃ­sticas por cidade a partir de AppState.defaultersBills
+  // Computar estatÃƒÂ­sticas por cidade a partir de AppState.defaultersBills
   const cityStats = {};
   if (AppState.defaultersBills && Array.isArray(AppState.defaultersBills)) {
     AppState.defaultersBills.forEach(bill => {
@@ -14871,19 +14871,19 @@ function renderRulesSettingsTable() {
     });
   }
   
-  // ForÃ§ar configuraÃ§Ã£o v2 de Cidades (Operadores)
+  // ForÃƒÂ§ar configuraÃƒÂ§ÃƒÂ£o v2 de Cidades (Operadores)
   if (!localStorage.getItem("crm_moura_cidades_v2")) {
      const defaultCities = {
-         "ARAÃ‡ARIGUAMA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
-         "AVARÃ‰": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
+         "ARAÃƒâ€¡ARIGUAMA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
+         "AVARÃƒâ€°": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
          "BOITUVA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
          "BOTUCATU": ["MICHELLE PEREIRA"],
-         "CERQUEIRA CÃ‰SAR": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
+         "CERQUEIRA CÃƒâ€°SAR": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
          "FARTURA": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
          "ITATINGA": ["MICHELLE VIEIRA"],
          "PIRAJU": ["MICHELLE VIEIRA"],
          "TAGUAI": ["MICHELLE VIEIRA"],
-         "TATUÃ": ["MICHELLE VIEIRA"]
+         "TATUÃƒÂ": ["MICHELLE VIEIRA"]
      };
      Object.keys(AppState.rules).forEach(k => {
          if (String(k).startsWith("CID_")) {
@@ -14922,7 +14922,7 @@ function renderRulesSettingsTable() {
     const subjudiceCount = stats.subjudiceSales ? stats.subjudiceSales.size : 0;
     
     let selectHtml = '';
-    const unassignedText = isZero ? "SEM CARTEIRA INADIMPLENTE" : "NÃƒO ATRIBUÃDO";
+    const unassignedText = isZero ? "SEM CARTEIRA INADIMPLENTE" : "NÃƒÆ’O ATRIBUÃƒÂDO";
     let assignedOp = rule.operator;
     let assignedOpsList = [];
     if (Array.isArray(assignedOp)) {
@@ -14935,7 +14935,7 @@ function renderRulesSettingsTable() {
       selectHtml = `<span style="display:inline-block; padding:6px 10px; font-size:0.75rem; font-weight:700; background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; border-radius:4px;">SEM CARTEIRA INADIMPLENTE</span>`;
     } else {
       let ops = window.getDynamicOperators();
-      const operators = [...ops, "NÃƒO ATRIBUÃDO"];
+      const operators = [...ops, "NÃƒÆ’O ATRIBUÃƒÂDO"];
       
       let pillsHtml = assignedOpsList.map(op => {
         return `<span style="display:inline-flex; align-items:center; background-color: #115e59; color: white; padding: 4px 10px; border-radius: 16px; font-size: 0.75rem; font-weight: 600; margin: 2px;" data-op="${op}">${op} <button onclick="window.removeOperatorFromRule('${rule.id}', '${op}')" style="background:transparent; border:none; color:white; margin-left:6px; cursor:pointer; font-weight:bold; font-size:0.9rem; padding:0; display:flex; align-items:center;">&times;</button></span>`;
@@ -15030,15 +15030,15 @@ function renderRulesSettingsTable() {
 window.addOperatorToRule = function(ruleId, op) {
   if (!op || !AppState.rules || !AppState.rules[ruleId]) return;
   
-  if (op === "NÃƒO ATRIBUÃDO" || op === "SEM CARTEIRA INADIMPLENTE") {
+  if (op === "NÃƒÆ’O ATRIBUÃƒÂDO" || op === "SEM CARTEIRA INADIMPLENTE") {
     AppState.rules[ruleId].operator = [op];
   } else {
     let currentOps = AppState.rules[ruleId].operator;
     if (!Array.isArray(currentOps)) {
-      currentOps = currentOps && currentOps !== "OUTROS" && currentOps !== "NÃƒO ATRIBUÃDO" && currentOps !== "SEM CARTEIRA INADIMPLENTE" ? [currentOps] : [];
+      currentOps = currentOps && currentOps !== "OUTROS" && currentOps !== "NÃƒÆ’O ATRIBUÃƒÂDO" && currentOps !== "SEM CARTEIRA INADIMPLENTE" ? [currentOps] : [];
     }
     // Remove unassigned dummy items if exist
-    currentOps = currentOps.filter(o => o !== "NÃƒO ATRIBUÃDO" && o !== "SEM CARTEIRA INADIMPLENTE");
+    currentOps = currentOps.filter(o => o !== "NÃƒÆ’O ATRIBUÃƒÂDO" && o !== "SEM CARTEIRA INADIMPLENTE");
     if (!currentOps.includes(op)) {
       currentOps.push(op);
     }
@@ -15063,7 +15063,7 @@ window.removeOperatorFromRule = function(ruleId, op) {
   currentOps = currentOps.filter(o => o !== op);
   
   if (currentOps.length === 0) {
-    AppState.rules[ruleId].operator = ["NÃƒO ATRIBUÃDO"];
+    AppState.rules[ruleId].operator = ["NÃƒÆ’O ATRIBUÃƒÂDO"];
   } else {
     AppState.rules[ruleId].operator = currentOps;
   }
@@ -15079,13 +15079,13 @@ window.renderOperatorSummary = function(summaryObj) {
   const summaryContainer = document.getElementById("operator-assignment-summary");
   if (!summaryContainer) return;
   
-  let summaryHtml = '<div style="width: 100%; font-weight: bold; color: var(--color-primary); margin-bottom: 5px;"><i data-lucide="users" style="width: 16px; height: 16px; margin-right: 5px; vertical-align: middle;"></i> TÃ­tulos AtribuÃ­dos por Operador</div>';
+  let summaryHtml = '<div style="width: 100%; font-weight: bold; color: var(--color-primary); margin-bottom: 5px;"><i data-lucide="users" style="width: 16px; height: 16px; margin-right: 5px; vertical-align: middle;"></i> TÃƒÂ­tulos AtribuÃƒÂ­dos por Operador</div>';
   if (Object.keys(summaryObj).length === 0) {
-     summaryHtml += '<span>Nenhum tÃ­tulo atribuÃ­do</span>';
+     summaryHtml += '<span>Nenhum tÃƒÂ­tulo atribuÃƒÂ­do</span>';
   } else {
      Object.entries(summaryObj).sort((a,b) => b[1] - a[1]).forEach(([op, count]) => {
        if (count > 0) {
-         summaryHtml += `<div style="background: white; padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1;"><strong>${op}:</strong> ${count} tÃ­tulos</div>`;
+         summaryHtml += `<div style="background: white; padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1;"><strong>${op}:</strong> ${count} tÃƒÂ­tulos</div>`;
        }
      });
   }
@@ -15106,10 +15106,10 @@ window.updateOperatorSummary = function() {
       const opArray = Array.isArray(ops) ? ops : (ops ? [ops] : []);
       
       opArray.forEach(op => {
-        if (op && op !== "OUTROS" && op !== "NÃƒO ATRIBUÃDO" && op !== "SEM CARTEIRA INADIMPLENTE") {
+        if (op && op !== "OUTROS" && op !== "NÃƒÆ’O ATRIBUÃƒÂDO" && op !== "SEM CARTEIRA INADIMPLENTE") {
           if (!newSummary[op]) newSummary[op] = 0;
           // Distribution visualization: For summary, divide bills among assigned operators
-          newSummary[op] += Math.ceil(count / opArray.filter(o => o !== "NÃƒO ATRIBUÃDO").length);
+          newSummary[op] += Math.ceil(count / opArray.filter(o => o !== "NÃƒÆ’O ATRIBUÃƒÂDO").length);
         }
       });
     }
@@ -15158,7 +15158,7 @@ function checkAdminPermissions() {
   
   const preambleTextArea = document.getElementById("preamble-text-area");
   if (preambleTextArea) {
-    preambleTextArea.disabled = false; // Removido bloqueio para permitir cÃ³pia e escrita
+    preambleTextArea.disabled = false; // Removido bloqueio para permitir cÃƒÂ³pia e escrita
   }
   
   const preambleRespArea = document.getElementById("preamble-responsibles-area");
@@ -15240,7 +15240,7 @@ window.loadPreambleConfigData = async function() {
       }
       
       if (companiesToRender.length === 0) {
-        html += `<option value="">Nenhuma empresa sobrou apÃ³s filtro. targetIds: ${JSON.stringify(targetCompanyIds)}</option>`;
+        html += `<option value="">Nenhuma empresa sobrou apÃƒÂ³s filtro. targetIds: ${JSON.stringify(targetCompanyIds)}</option>`;
         html += `<option value="">Total empresas: ${AppState.cachedCompanies.length}</option>`;
         if (AppState.cachedCompanies.length > 0) {
           html += `<option value="">Primeira emp: ${JSON.stringify(AppState.cachedCompanies[0])}</option>`;
@@ -15264,7 +15264,7 @@ window.loadPreambleConfigData = async function() {
       }
     }
   } catch(e) {
-    console.error("Erro ao carregar companies/costcenters para preÃ¢mbulo", e);
+    console.error("Erro ao carregar companies/costcenters para preÃƒÂ¢mbulo", e);
     const empSelect = document.getElementById("preamble-empresa");
     if (empSelect) {
       empSelect.innerHTML = `<option value="">EXCEPTION: ${e.message}</option>`;
@@ -15292,12 +15292,12 @@ window.loadCentrosCustoForPreamble = function(selectedIds = []) {
     return;
   }
   
-  // Ordenar conforme pedido: Empresa (jÃ¡ selecionada, entÃ£o sÃ³ CC do menor para maior)
+  // Ordenar conforme pedido: Empresa (jÃƒÂ¡ selecionada, entÃƒÂ£o sÃƒÂ³ CC do menor para maior)
   filteredCCs.sort((a, b) => a.id - b.id);
   
   let html = '<div style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 250px; overflow-y: auto; padding-right: 5px;">';
   filteredCCs.forEach(cc => {
-    // Verificar se jÃ¡ estÃ¡ vinculado a OUTRO preÃ¢mbulo
+    // Verificar se jÃƒÂ¡ estÃƒÂ¡ vinculado a OUTRO preÃƒÂ¢mbulo
     const currentEditId = document.getElementById("preamble-edit-id").value;
     let vinculatedToOther = null;
     if (AppState.preamblesList) {
@@ -15307,7 +15307,7 @@ window.loadCentrosCustoForPreamble = function(selectedIds = []) {
     const isChecked = window.currentPreambleSelectedCCs && window.currentPreambleSelectedCCs.includes(cc.id);
     const disabled = vinculatedToOther ? 'disabled' : '';
     const labelStyle = vinculatedToOther ? 'color: #aaa; text-decoration: line-through; background-color: #f5f5f5;' : 'background-color: #ffffff;';
-    const title = vinculatedToOther ? `JÃ¡ vinculado ao PreÃ¢mbulo ${vinculatedToOther.id}` : '';
+    const title = vinculatedToOther ? `JÃƒÂ¡ vinculado ao PreÃƒÂ¢mbulo ${vinculatedToOther.id}` : '';
     
     html += `
       <label style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 12px; cursor: ${vinculatedToOther ? 'not-allowed' : 'pointer'}; ${labelStyle} transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" title="${title}" onmouseover="this.style.borderColor='#1b8253'" onmouseout="this.style.borderColor='#ddd'">
@@ -15387,7 +15387,7 @@ window.openNewPreambleModal = async function() {
   if (box) box.classList.add("active");
   
   const title = document.getElementById("preamble-editor-title");
-  if (title) title.innerHTML = `Novo PreÃ¢mbulo`;
+  if (title) title.innerHTML = `Novo PreÃƒÂ¢mbulo`;
   
   document.getElementById("preamble-edit-mode").value = "new";
   document.getElementById("preamble-edit-id").value = "";
@@ -15423,7 +15423,7 @@ window.selectPreambleForEdit = async function(id) {
   
   const title = document.getElementById("preamble-editor-title");
   if (title) {
-    title.innerHTML = `Editando PreÃ¢mbulo <strong>${p.id}</strong>`;
+    title.innerHTML = `Editando PreÃƒÂ¢mbulo <strong>${p.id}</strong>`;
   }
   
   document.getElementById("preamble-edit-mode").value = "edit";
@@ -15443,7 +15443,7 @@ window.selectPreambleForEdit = async function(id) {
       empSelect.value = p.empresaId;
     }
     // Sempre chamamos loadCentrosCustoForPreamble para renderizar os checkboxes, 
-    // passando os IDs que jÃ¡ estavam salvos neste preÃ¢mbulo.
+    // passando os IDs que jÃƒÂ¡ estavam salvos neste preÃƒÂ¢mbulo.
     window.loadCentrosCustoForPreamble(p.centrosCustoIds || []);
   }
   
@@ -15487,7 +15487,7 @@ window.addResponsibleField = function(value = "") {
   div.style.alignItems = "center";
   
   div.innerHTML = `
-    <input type="text" class="form-control resp-input" value="${value}" placeholder="Nome ou Empresa responsÃ¡vel" style="flex: 1;">
+    <input type="text" class="form-control resp-input" value="${value}" placeholder="Nome ou Empresa responsÃƒÂ¡vel" style="flex: 1;">
     <button class="btn btn-danger btn-sm" onclick="removeResponsibleField(this)" title="Remover" style="padding: 6px 10px;">
       <i data-lucide="trash-2" style="width: 16px;"></i>
     </button>
@@ -15516,7 +15516,7 @@ window.savePreamble = function() {
     const responsibles = responsiblesArr.join('\n');
     
     if (!text) {
-      alert("O preÃ¢mbulo nÃ£o pode estar vazio.");
+      alert("O preÃƒÂ¢mbulo nÃƒÂ£o pode estar vazio.");
       return;
     }
     
@@ -15534,7 +15534,7 @@ window.savePreamble = function() {
     for (let ccId of centrosCustoIds) {
       const duplicado = AppState.preamblesList.find(p => p.id !== currentEditId && p.centrosCustoIds && p.centrosCustoIds.includes(ccId));
       if (duplicado) {
-        alert(`O MESMO CENTRO DE CUSTO NÃƒO PODE ESTAR EM MAIS DE UM PREAMBULO.\nO Centro de Custo ${ccId} jÃ¡ pertence ao PreÃ¢mbulo ${duplicado.id}.`);
+        alert(`O MESMO CENTRO DE CUSTO NÃƒÆ’O PODE ESTAR EM MAIS DE UM PREAMBULO.\nO Centro de Custo ${ccId} jÃƒÂ¡ pertence ao PreÃƒÂ¢mbulo ${duplicado.id}.`);
         return;
       }
     }
@@ -15558,7 +15558,7 @@ window.savePreamble = function() {
         p.empresaId = empresaId;
         p.centrosCustoIds = centrosCustoIds;
       } else {
-        alert("Erro: PreÃ¢mbulo nÃ£o encontrado para ediÃ§Ã£o.");
+        alert("Erro: PreÃƒÂ¢mbulo nÃƒÂ£o encontrado para ediÃƒÂ§ÃƒÂ£o.");
         return;
       }
     }
@@ -15568,7 +15568,7 @@ window.savePreamble = function() {
     cancelPreambleEdit();
     loadPreamblesConfigTab();
   } catch (err) {
-    alert("Erro interno ao salvar preÃ¢mbulo: " + err.message);
+    alert("Erro interno ao salvar preÃƒÂ¢mbulo: " + err.message);
     console.error(err);
   }
 };
@@ -15579,12 +15579,12 @@ window.saveAdminEmailConfig = function() {
   const email = input.value.trim().toLowerCase();
   
   if (!email || !email.includes("@")) {
-    alert("Por favor, digite um e-mail vÃ¡lido.");
+    alert("Por favor, digite um e-mail vÃƒÂ¡lido.");
     return;
   }
   
   localStorage.setItem("crm_moura_admin_email", email);
-  alert(`E-mail do administrador configurado para: ${email}\nPermissÃµes atualizadas!`);
+  alert(`E-mail do administrador configurado para: ${email}\nPermissÃƒÂµes atualizadas!`);
   
   loadPreamblesConfigTab();
 };
@@ -15596,7 +15596,7 @@ window.populateFilaOperators = function() {
   // Maintain current selection if possible
   const currentVal = select.value;
   
-  select.innerHTML = '<option value="Todos">ConfiguraÃ§Ã£o PadrÃ£o (Todos)</option>';
+  select.innerHTML = '<option value="Todos">ConfiguraÃƒÂ§ÃƒÂ£o PadrÃƒÂ£o (Todos)</option>';
   
   if (AppState.configUsers) {
     const operators = AppState.configUsers.filter(u => u.perfil === "Operador" && (!u.operator_type || u.operator_type === "interno"));
@@ -15636,10 +15636,10 @@ window.loadFilaConfigForOperator = function() {
     r3: 10, // >1 contrato
     r4: 10, // <1 ano
     r5: 10, // Mais parcelas vencidas
-    paymentDays: 15 // Dias sem fila apÃ³s pagamento
+    paymentDays: 15 // Dias sem fila apÃƒÂ³s pagamento
   };
   
-  // Se nÃ£o existir, tenta carregar o 'Todos', senÃ£o usa default
+  // Se nÃƒÂ£o existir, tenta carregar o 'Todos', senÃƒÂ£o usa default
   const config = AppState.rules.filaConfig[op] || AppState.rules.filaConfig["Todos"] || defaultConfig;
   
   document.getElementById("fila-capacity").value = config.capacity || 25;
@@ -15788,7 +15788,7 @@ window.saveFilaConfig = function() {
   for(let i=1; i<=7; i++) {
     const el = document.getElementById("fila-rule-"+i);
     if(el && el.value === "") {
-      alert("Erro: Nenhum campo de peso deve ficar vazio (null). Preencha com 0 se nÃ£o for usar.");
+      alert("Erro: Nenhum campo de peso deve ficar vazio (null). Preencha com 0 se nÃƒÂ£o for usar.");
       return;
     }
   }
@@ -15826,7 +15826,7 @@ window.saveFilaConfig = function() {
   };
   
   localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
-  alert(`ConfiguraÃ§Ã£o da Fila de CobranÃ§a para o operador '${op}' salva com sucesso!`);
+  alert(`ConfiguraÃƒÂ§ÃƒÂ£o da Fila de CobranÃƒÂ§a para o operador '${op}' salva com sucesso!`);
 };
 
 window.addNegotiationRule = function(profile, rule = {}) {
@@ -15840,10 +15840,10 @@ window.addNegotiationRule = function(profile, rule = {}) {
     row.style.cssText = `display: flex; gap: 15px; align-items: flex-end; background: #ffffff; padding: 10px 15px; border-radius: 8px; border: 1px solid ${borderColor};`;
 
     row.innerHTML = `
-        <!-- CONDIÃ‡Ãƒâ€¢ES -->
+        <!-- CONDIÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES -->
         <div style="display: flex; gap: 15px; flex: 2; padding-right: 15px; border-right: 1px dashed #cbd5e1;">
             <div style="flex: 1; min-width: 110px;">
-                <label style="display: block; font-size: 0.65rem; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">CondiÃ§Ãµes</label>
+                <label style="display: block; font-size: 0.65rem; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">CondiÃƒÂ§ÃƒÂµes</label>
                 <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">Se % Pago &ge;</div>
                 <div style="display: flex; align-items: center; gap: 5px;">
                   <input type="number" class="form-control rule-pct-pago" placeholder="Ex: 10" min="0" max="100" style="padding: 6px;" value="${rule.pctPago !== undefined && rule.pctPago !== null ? rule.pctPago : ''}">
@@ -15856,7 +15856,7 @@ window.addNegotiationRule = function(profile, rule = {}) {
                   E PMP &le;
                   <div class="custom-tooltip" style="display: inline-flex; align-items: center;">
                     <i data-lucide="info" style="width:12px; height:12px; color:#94a3b8;"></i>
-                    <span class="tooltip-text" style="font-weight: 400;">Prazo MÃ©dio de Pagamento</span>
+                    <span class="tooltip-text" style="font-weight: 400;">Prazo MÃƒÂ©dio de Pagamento</span>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 5px;">
@@ -15866,25 +15866,25 @@ window.addNegotiationRule = function(profile, rule = {}) {
             </div>
         </div>
         
-        <!-- PERMISSÃƒâ€¢ES -->
+        <!-- PERMISSÃƒÆ’Ã¢â‚¬Â¢ES -->
         <div style="display: flex; gap: 15px; flex: 3; align-items: flex-end;">
             <div style="flex: 1; min-width: 130px;">
-                <label style="display: block; font-size: 0.65rem; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">PermissÃµes Liberadas</label>
-                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">Sinal (MÃ­n % a MÃ¡x %)</div>
+                <label style="display: block; font-size: 0.65rem; font-weight: 700; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">PermissÃƒÂµes Liberadas</label>
+                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">Sinal (MÃƒÂ­n % a MÃƒÂ¡x %)</div>
                 <div style="display: flex; align-items: center; gap: 5px;">
-                  <input type="number" class="form-control rule-sinal-minimo" placeholder="MÃ­n" min="0" max="100" style="padding: 6px; flex: 1;" value="${rule.sinalMin !== undefined && rule.sinalMin !== null ? rule.sinalMin : ''}">
+                  <input type="number" class="form-control rule-sinal-minimo" placeholder="MÃƒÂ­n" min="0" max="100" style="padding: 6px; flex: 1;" value="${rule.sinalMin !== undefined && rule.sinalMin !== null ? rule.sinalMin : ''}">
                   <span style="color: #94a3b8; font-weight: bold;">-</span>
-                  <input type="number" class="form-control rule-sinal-maximo" placeholder="MÃ¡x" min="0" max="100" style="padding: 6px; flex: 1;" value="${rule.sinalMax !== undefined && rule.sinalMax !== null ? rule.sinalMax : ''}">
+                  <input type="number" class="form-control rule-sinal-maximo" placeholder="MÃƒÂ¡x" min="0" max="100" style="padding: 6px; flex: 1;" value="${rule.sinalMax !== undefined && rule.sinalMax !== null ? rule.sinalMax : ''}">
                 </div>
             </div>
             <div style="flex: 1; min-width: 100px;">
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: transparent; margin-bottom: 4px;">-</label>
-                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">MÃ¡x. Parcelas</div>
+                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">MÃƒÂ¡x. Parcelas</div>
                 <input type="number" class="form-control rule-max-parcelas" placeholder="Ex: 12" min="1" style="padding: 6px;" value="${rule.maxParcelas !== undefined && rule.maxParcelas !== null ? rule.maxParcelas : ''}">
             </div>
             <div style="flex: 1; min-width: 100px;">
                 <label style="display: block; font-size: 0.7rem; font-weight: 700; color: transparent; margin-bottom: 4px;">-</label>
-                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">Taxa de OperaÃ§Ã£o</div>
+                <div style="font-size: 0.75rem; font-weight: 600; color: #475569; margin-bottom: 2px;">Taxa de OperaÃƒÂ§ÃƒÂ£o</div>
                 <div style="display: flex; align-items: center; gap: 5px;">
                   <input type="number" class="form-control rule-taxa-operacao" placeholder="Ex: 2.5" step="0.1" min="0" style="padding: 6px;" value="${rule.taxa !== undefined && rule.taxa !== null ? rule.taxa : ''}">
                   <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">% a.m.</span>
@@ -16009,14 +16009,14 @@ window.saveRulesConfig = function() {
   
   if (window.forceUploadLocalConfig) {
       window.forceUploadLocalConfig(true).then(() => {
-          alert("ConfiguraÃ§Ãµes do Motor de Regras salvas com sucesso na Nuvem!");
+          alert("ConfiguraÃƒÂ§ÃƒÂµes do Motor de Regras salvas com sucesso na Nuvem!");
           loadPreamblesConfigTab();
       }).catch(err => {
           alert("Erro ao salvar na nuvem: " + err.message);
           loadPreamblesConfigTab();
       });
   } else {
-      alert("ConfiguraÃ§Ãµes do Motor de Regras salvas apenas localmente!");
+      alert("ConfiguraÃƒÂ§ÃƒÂµes do Motor de Regras salvas apenas localmente!");
       loadPreamblesConfigTab();
   }
 };
@@ -16033,7 +16033,7 @@ window.saveVistoriaRecurrence = function() {
   const input = document.getElementById('vistoria-recurrence-days');
   const days = parseInt(input?.value || '', 10);
   if (!Number.isFinite(days) || days < 1) {
-    alert('Informe um intervalo vÃ¡lido maior que zero.');
+    alert('Informe um intervalo vÃƒÂ¡lido maior que zero.');
     return;
   }
   localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
@@ -16065,12 +16065,12 @@ window.renderTimeline = function() {
   let actualMax = Math.max(0, ...window.TimelineState.map(n => n.dias));
   let actualMin = Math.min(0, ...window.TimelineState.map(n => n.dias));
   
-  // Margem de seguranÃ§a para as bolinhas nÃ£o baterem nas bordas
+  // Margem de seguranÃƒÂ§a para as bolinhas nÃƒÂ£o baterem nas bordas
   actualMax = actualMax > 0 ? actualMax * 1.1 : 10;
   actualMin = actualMin < 0 ? actualMin * 1.1 : -10;
 
-  // ForÃ§ar o Dia 0 (Vencimento) a ficar EXATAMENTE em 20% da linha
-  // Para isso, a proporÃ§Ã£o (0 atÃ© max) deve ser 4x maior que (min atÃ© 0)
+  // ForÃƒÂ§ar o Dia 0 (Vencimento) a ficar EXATAMENTE em 20% da linha
+  // Para isso, a proporÃƒÂ§ÃƒÂ£o (0 atÃƒÂ© max) deve ser 4x maior que (min atÃƒÂ© 0)
   let renderMax = actualMax;
   let renderMin = actualMin;
   
@@ -16081,7 +16081,7 @@ window.renderTimeline = function() {
   }
   
   const range = renderMax - renderMin;
-  const zeroPct = (Math.abs(renderMin) / range) * 100; // SerÃ¡ sempre 20%
+  const zeroPct = (Math.abs(renderMin) / range) * 100; // SerÃƒÂ¡ sempre 20%
 
   // Marcador do Dia 0 (Vencimento)
   const zeroMarker = document.createElement('div');
@@ -16215,7 +16215,7 @@ window.renderTimeline = function() {
     container.appendChild(nodeEl);
   });
 
-  // Quando rÃ³tulos prÃ³ximos se sobrepÃµem, cria nÃ­veis verticais e alonga os conectores.
+  // Quando rÃƒÂ³tulos prÃƒÂ³ximos se sobrepÃƒÂµem, cria nÃƒÂ­veis verticais e alonga os conectores.
   const labelsBySide = { above: [], below: [] };
   container.querySelectorAll('.timeline-node-label').forEach(label => {
     labelsBySide[label.dataset.side].push(label);
@@ -16243,7 +16243,7 @@ window.openTimelineListModal = function() {
     const modal = document.getElementById('timeline-list-modal');
     console.log("Container encontrado:", !!container, "Modal encontrado:", !!modal);
     
-    if (!container) { console.error('Erro: timeline-list-container nÃ£o encontrado'); return; }
+    if (!container) { console.error('Erro: timeline-list-container nÃƒÂ£o encontrado'); return; }
     
     let html = '';
     const sortedNodes = [...(window.TimelineState || [])].sort((a,b) => a.dias - b.dias);
@@ -16259,7 +16259,7 @@ window.openTimelineListModal = function() {
             <div style="width: 18px; height: 18px; border-radius: 50%; background: ${color}; box-shadow: 0 0 0 2px #fff, 0 0 0 4px ${color}33;"></div>
             <div>
               <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${acaoLabel} <span style="font-weight: normal; color: #64748b; font-size: 0.85rem;">(${node.dias} dias)</span></div>
-              <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">AÃ§Ã£o: ${acaoLabel}</div>
+              <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">AÃƒÂ§ÃƒÂ£o: ${acaoLabel}</div>
             </div>
           </div>
           <div style="display: flex; gap: 8px;">
@@ -16277,11 +16277,11 @@ window.openTimelineListModal = function() {
     container.innerHTML = html;
     if(modal) {
       modal.style.display = 'flex';
-      console.log(">>> Modal deve estar visÃ­vel agora!");
+      console.log(">>> Modal deve estar visÃƒÂ­vel agora!");
       const comp = window.getComputedStyle(modal);
       console.log(">>> CSS Real:", comp.display, comp.visibility, comp.opacity, comp.zIndex, comp.position, comp.width, comp.height, comp.top, comp.left);
     } else {
-      console.error(">>> Modal timeline-list-modal Ã© NULL");
+      console.error(">>> Modal timeline-list-modal ÃƒÂ© NULL");
     }
   } catch(e) {
     console.error("Erro abrir lista: ", e);
@@ -16304,9 +16304,9 @@ window.timelineModalAcaoChanged = function() {
 };
 
 window.TimelineAcoesList = JSON.parse(localStorage.getItem('crm_moura_timeline_acoes')) || [
-  { id: 'cob_interna', label: 'InÃ­cio CobranÃ§a Interna', color: '#3b82f6' },
-  { id: 'cob_terceirizada', label: 'InÃ­cio Terceirizada', color: '#eab308' },
-  { id: 'juridico', label: 'Envio JurÃ­dico', color: '#ef4444' }
+  { id: 'cob_interna', label: 'InÃƒÂ­cio CobranÃƒÂ§a Interna', color: '#3b82f6' },
+  { id: 'cob_terceirizada', label: 'InÃƒÂ­cio Terceirizada', color: '#eab308' },
+  { id: 'juridico', label: 'Envio JurÃƒÂ­dico', color: '#ef4444' }
 ];
 
 window.renderTimelineAcoesSelect = function() {
@@ -16369,7 +16369,7 @@ window.addTimelineAcao = function() {
 };
 
 window.removeTimelineAcao = function(id) {
-  if (!confirm('Deseja realmente remover esta aÃ§Ã£o? Os pontos que usam ela ficarÃ£o sem aÃ§Ã£o definida.')) return;
+  if (!confirm('Deseja realmente remover esta aÃƒÂ§ÃƒÂ£o? Os pontos que usam ela ficarÃƒÂ£o sem aÃƒÂ§ÃƒÂ£o definida.')) return;
   window.TimelineAcoesList = window.TimelineAcoesList.filter(a => a.id !== id);
   localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
   
@@ -16382,9 +16382,9 @@ window.removeTimelineAcao = function(id) {
 
 window.TimelineGatilhosGlobais = JSON.parse(localStorage.getItem('crm_moura_timeline_gatilhos')) || [
   'Alterar Status para Terceirizada',
-  'Transferir para JurÃ­dico',
-  'Enviar NotificaÃ§Ã£o WhatsApp',
-  'Enviar E-mail de CobranÃ§a'
+  'Transferir para JurÃƒÂ­dico',
+  'Enviar NotificaÃƒÂ§ÃƒÂ£o WhatsApp',
+  'Enviar E-mail de CobranÃƒÂ§a'
 ];
 
 window.renderTimelineGatilhosSelect = function() {
@@ -16570,11 +16570,11 @@ window.adicionarTimelineNode = function() {
     
     if(modal) {
       modal.style.display = 'flex';
-      console.log(">>> Modal de add/edit deve estar visÃ­vel agora!");
+      console.log(">>> Modal de add/edit deve estar visÃƒÂ­vel agora!");
       const comp = window.getComputedStyle(modal);
       console.log(">>> CSS Real:", comp.display, comp.visibility, comp.opacity, comp.zIndex, comp.position, comp.width, comp.height, comp.top, comp.left);
     } else {
-      console.error(">>> timeline-node-modal Ã© NULL");
+      console.error(">>> timeline-node-modal ÃƒÂ© NULL");
     }
   } catch(e) {
     console.error("Erro adicionar: ", e);
@@ -16730,7 +16730,7 @@ window.onDropJudNode = function(e, targetId) {
     }
     
     if (isChild) {
-        alert("AÃ§Ã£o invÃ¡lida. VocÃª nÃ£o pode mover uma etapa para dentro de uma de suas prÃ³prias subetapas.");
+        alert("AÃƒÂ§ÃƒÂ£o invÃƒÂ¡lida. VocÃƒÂª nÃƒÂ£o pode mover uma etapa para dentro de uma de suas prÃƒÂ³prias subetapas.");
         return;
     }
     
@@ -16742,10 +16742,10 @@ window.onDropJudNode = function(e, targetId) {
         const rect = targetEl.getBoundingClientRect();
         const y = e.clientY - rect.top;
         
-        // Reordenar todos os nÃ³s irmÃ£os para evitar gaps
+        // Reordenar todos os nÃƒÂ³s irmÃƒÂ£os para evitar gaps
         let siblings = window.EtapasJudiciaisState.filter(x => x.parentId === targetNode.parentId);
         siblings.sort((a, b) => (a.order || 0) - (b.order || 0));
-        siblings.forEach((s, i) => s.order = i * 10); // EspaÃ§amento de 10
+        siblings.forEach((s, i) => s.order = i * 10); // EspaÃƒÂ§amento de 10
         
         if (y < rect.height * 0.15) {
             // Inserir ANTES
@@ -16780,7 +16780,7 @@ window.renderEtapasJudiciais = function() {
       return;
   }
 
-  // Garantir que todos tenham order se nÃ£o tiver
+  // Garantir que todos tenham order se nÃƒÂ£o tiver
   window.EtapasJudiciaisState.forEach((e, i) => {
       if (typeof e.order === 'undefined') e.order = i * 10;
   });
@@ -16810,7 +16810,7 @@ window.renderEtapasJudiciais = function() {
                 <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${prefix}</span>
                 ${node.nome}
               </div>
-              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descriÃ§Ã£o</span>'} â€¢ <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
+              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descriÃƒÂ§ÃƒÂ£o</span>'} Ã¢â‚¬Â¢ <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
             </div>
           </div>
           <div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
@@ -16857,14 +16857,14 @@ window.openEtapaModal = function(id = 'new', parentId = null) {
                     <input type="hidden" id="etapa-modal-parent-id">
                     <div>
                         <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Nome da Etapa</label>
-                        <input type="text" id="etapa-modal-nome" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: NotificaÃ§Ã£o Extrajudicial">
+                        <input type="text" id="etapa-modal-nome" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: NotificaÃƒÂ§ÃƒÂ£o Extrajudicial">
                     </div>
                     <div>
-                        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Tempo MÃ©dio (dias)</label>
+                        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Tempo MÃƒÂ©dio (dias)</label>
                         <input type="number" id="etapa-modal-dias" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: 15" min="0">
                     </div>
                     <div>
-                        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Breve ExplicaÃ§Ã£o</label>
+                        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Breve ExplicaÃƒÂ§ÃƒÂ£o</label>
                         <textarea id="etapa-modal-descricao" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; min-height: 80px;" placeholder="Detalhes sobre a etapa..."></textarea>
                     </div>
                 </div>
@@ -16906,7 +16906,7 @@ window.salvarEtapaModal = function() {
     const desc = document.getElementById('etapa-modal-descricao').value;
 
     if (!nome.trim()) {
-        alert("O nome da etapa Ã© obrigatÃ³rio.");
+        alert("O nome da etapa ÃƒÂ© obrigatÃƒÂ³rio.");
         return;
     }
 
@@ -16989,7 +16989,7 @@ window.openJudicialOptionsEditor = function() {
           
           <div style="display: flex; gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
             <button style="flex: 1; padding: 10px 18px; font-size: 0.95rem; background: #f97316; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#ea580c'" onmouseout="this.style.background='#f97316'" onclick="window.closeJudicialOptionsEditor()">Cancelar</button>
-            <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="window.saveJudicialOptionsList()">Salvar AlteraÃ§Ãµes</button>
+            <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="window.saveJudicialOptionsList()">Salvar AlteraÃƒÂ§ÃƒÂµes</button>
           </div>
           
         </div>
@@ -17039,7 +17039,7 @@ window.addJudicialToList = function() {
   
   const exists = window.tempJudicialList.find(x => x.nome.toLowerCase() === valNome.toLowerCase());
   if (exists) {
-    alert('Esta etapa jÃ¡ existe na lista.');
+    alert('Esta etapa jÃƒÂ¡ existe na lista.');
     return;
   }
   
@@ -17059,7 +17059,7 @@ window.removeJudicialFromList = function(index) {
   const opt = window.tempJudicialList[index];
   const rawOccurrences = localStorage.getItem("crm_moura_occurrences") || "[]";
   if (rawOccurrences.includes(opt.nome)) {
-      alert(`AÃ§Ã£o bloqueada: NÃ£o Ã© possÃ­vel excluir a etapa "${opt.nome}" pois ela jÃ¡ possui histÃ³rico registrado em cobranÃ§as judiciais.`);
+      alert(`AÃƒÂ§ÃƒÂ£o bloqueada: NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir a etapa "${opt.nome}" pois ela jÃƒÂ¡ possui histÃƒÂ³rico registrado em cobranÃƒÂ§as judiciais.`);
       return;
   }
   window.tempJudicialList.splice(index, 1);
@@ -17091,7 +17091,7 @@ window.updateJudFaseDropdown = function() {
       const saved = JSON.parse(localStorage.getItem("crm_moura_judiciais") || "[]");
       if (Array.isArray(saved)) window.EtapasJudiciaisState = saved;
     } catch (e) {
-      console.warn('[Judicial] NÃ£o foi possÃ­vel carregar as etapas salvas.', e);
+      console.warn('[Judicial] NÃƒÂ£o foi possÃƒÂ­vel carregar as etapas salvas.', e);
     }
   }
   let html = `<option value="">Selecione...</option>`;
@@ -17107,7 +17107,7 @@ window.updateJudFaseDropdown = function() {
         if (hasChildren) {
             optHtml = `<option value="" disabled style="font-weight:700; color:#374151; background:#f3f4f6;">${prefix}${node.nome}</option>`;
             children.forEach(c => {
-                optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;Ã¢â€ Â³ ");
+                optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;ÃƒÂ¢Ã¢â‚¬Â Ã‚Â³ ");
             });
         } else {
             optHtml = `<option value="${node.nome}" data-dias="${node.dias || 0}">${prefix}${node.nome}</option>`;
@@ -17120,7 +17120,7 @@ window.updateJudFaseDropdown = function() {
     });
   }
   html += `<option value="Nota Interna">Nota Interna</option>`;
-  html += `<option value="Proposta de renegociaÃ§Ã£o">Proposta de renegociaÃ§Ã£o</option>`;
+  html += `<option value="Proposta de renegociaÃƒÂ§ÃƒÂ£o">Proposta de renegociaÃƒÂ§ÃƒÂ£o</option>`;
   sel.innerHTML = html;
 };
 
@@ -17136,13 +17136,13 @@ window.handleJudFaseChange = function(sel) {
    const judRenegContainer = document.getElementById('jud-reneg-proposal-container');
 
    if (judRenegContainer) {
-       judRenegContainer.style.display = (sel.value === 'Proposta de renegociaÃ§Ã£o') ? 'block' : 'none';
+       judRenegContainer.style.display = (sel.value === 'Proposta de renegociaÃƒÂ§ÃƒÂ£o') ? 'block' : 'none';
    }
 
-   if (sel.value === 'Nota Interna' || sel.value === 'Proposta de renegociaÃ§Ã£o') {
+   if (sel.value === 'Nota Interna' || sel.value === 'Proposta de renegociaÃƒÂ§ÃƒÂ£o') {
        if (prazoRow) prazoRow.style.display = 'none';
        if (pinRow) pinRow.style.display = (sel.value === 'Nota Interna') ? 'block' : 'none';
-       if (btnSave) btnSave.innerHTML = `<i data-lucide="save" style="width: 16px;"></i> Gravar ${sel.value === 'Proposta de renegociaÃ§Ã£o' ? 'proposta' : 'nota interna'}`;
+       if (btnSave) btnSave.innerHTML = `<i data-lucide="save" style="width: 16px;"></i> Gravar ${sel.value === 'Proposta de renegociaÃƒÂ§ÃƒÂ£o' ? 'proposta' : 'nota interna'}`;
        if (prazoInput) {
            prazoInput.removeAttribute('readonly');
            prazoInput.value = '';
@@ -17151,7 +17151,7 @@ window.handleJudFaseChange = function(sel) {
        if (prazoRow) prazoRow.style.display = 'block';
        if (pinRow) pinRow.style.display = 'none';
        if (btnSave) btnSave.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Registrar Andamento';
-       if (prazoLabel) prazoLabel.innerHTML = 'Prazo para resoluÃ§Ã£o <span style="color: var(--color-danger);">*</span>';
+       if (prazoLabel) prazoLabel.innerHTML = 'Prazo para resoluÃƒÂ§ÃƒÂ£o <span style="color: var(--color-danger);">*</span>';
        if (prazoInput) {
            prazoInput.setAttribute('readonly', 'true');
            if(dias && !isNaN(dias)) {
@@ -17172,7 +17172,7 @@ window.removerEtapaJudicial = function(id) {
   if (etapa) {
       const rawOccurrences = localStorage.getItem("crm_moura_occurrences") || "[]";
       if (rawOccurrences.includes(etapa.nome)) {
-          alert(`AÃ§Ã£o bloqueada: NÃ£o Ã© possÃ­vel excluir a etapa "${etapa.nome}" pois ela jÃ¡ possui histÃ³rico registrado em cobranÃ§as judiciais.`);
+          alert(`AÃƒÂ§ÃƒÂ£o bloqueada: NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir a etapa "${etapa.nome}" pois ela jÃƒÂ¡ possui histÃƒÂ³rico registrado em cobranÃƒÂ§as judiciais.`);
           return;
       }
       
@@ -17196,7 +17196,7 @@ window.saveAzureConfig = function() {
   }
 
   MouraAuth.saveAuthConfig({ enabled, clientId, tenantId });
-  alert("ConfiguraÃ§Ãµes do Azure AD gravadas com sucesso! A pÃ¡gina serÃ¡ reiniciada.");
+  alert("ConfiguraÃƒÂ§ÃƒÂµes do Azure AD gravadas com sucesso! A pÃƒÂ¡gina serÃƒÂ¡ reiniciada.");
   window.location.reload();
 }
 
@@ -17206,7 +17206,7 @@ window.copyToClipboard = function(text, btn) {
     if (!btn) return;
     const originalHTML = btn.innerHTML;
     
-    // Obter as dimensÃµes do Ã­cone original para manter o tamanho
+    // Obter as dimensÃƒÂµes do ÃƒÂ­cone original para manter o tamanho
     let w = '13px', h = '13px', color = 'var(--color-primary)';
     const svg = btn.querySelector('svg') || btn.querySelector('i');
     if (svg && svg.style) {
@@ -17232,7 +17232,7 @@ window.copyToClipboard = function(text, btn) {
         btn.addEventListener('mouseenter', onMouseEnter);
     };
 
-    // SÃ³ reverte quando o mouse sai e volta (ou por timeout de seguranÃ§a)
+    // SÃƒÂ³ reverte quando o mouse sai e volta (ou por timeout de seguranÃƒÂ§a)
     btn.addEventListener('mouseleave', onMouseLeave, { once: true });
     setTimeout(revert, 4000); // fallback
   }).catch(err => {
@@ -17294,14 +17294,14 @@ async function loadCustomerBoletos(customerId, saleId) {
     let boletosHtml = `<table class="crm-table" style="width:100%; border-collapse:collapse; margin-top: 15px;">
       <thead>
         <tr style="background:#f5f5f5; text-align:left;">
-          <th style="padding:10px; border-bottom:1px solid #ddd;">TÃ­tulo</th>
+          <th style="padding:10px; border-bottom:1px solid #ddd;">TÃƒÂ­tulo</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Parcela</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Venc. Orig.</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Venc. Boleto</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Valor Original</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Valor Corrigido</th>
           <th style="padding:10px; border-bottom:1px solid #ddd;">Status</th>
-          <th style="padding:10px; border-bottom:1px solid #ddd;">AÃ§Ãµes</th>
+          <th style="padding:10px; border-bottom:1px solid #ddd;">AÃƒÂ§ÃƒÂµes</th>
         </tr>
       </thead>
       <tbody>`;
@@ -17309,7 +17309,7 @@ async function loadCustomerBoletos(customerId, saleId) {
     let count = 0;
     
     (currentBill.installments || []).forEach(inst => {
-      // Se nÃ£o tem recibos, ou tem recibos mas nenhum tem receiptType preenchido = nÃ£o estÃ¡ pago
+      // Se nÃƒÂ£o tem recibos, ou tem recibos mas nenhum tem receiptType preenchido = nÃƒÂ£o estÃƒÂ¡ pago
       const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
 
       if (inst.generatedBillet === true && !isPaid) {
@@ -17369,12 +17369,12 @@ async function loadCustomerBoletos(customerId, saleId) {
     if (count === 0) {
       container.innerHTML = `
         <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">Boletos do Contrato</h3>
-        <p style="font-size: 0.9rem; color: #666;">NÃ£o hÃ¡ boletos gerados e em aberto para este contrato no momento.</p>
+        <p style="font-size: 0.9rem; color: #666;">NÃƒÂ£o hÃƒÂ¡ boletos gerados e em aberto para este contrato no momento.</p>
       `;
     } else {
       container.innerHTML = `
         <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px; display: flex; align-items: center;">Boletos do Contrato <span style="background:var(--color-primary); color:#fff; padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${count}</span></h3>
-        <p style="font-size: 0.9rem; color: #666;">Aqui estÃ£o os boletos disponÃ­veis (nÃ£o pagos) para o contrato atual.</p>
+        <p style="font-size: 0.9rem; color: #666;">Aqui estÃƒÂ£o os boletos disponÃƒÂ­veis (nÃƒÂ£o pagos) para o contrato atual.</p>
         ${boletosHtml}
       `;
     }
@@ -17383,7 +17383,7 @@ async function loadCustomerBoletos(customerId, saleId) {
       lucide.createIcons();
     }
 
-    // Busca assÃ­ncrona das datas verdadeiras e status baseado no cÃ³digo de barras
+    // Busca assÃƒÂ­ncrona das datas verdadeiras e status baseado no cÃƒÂ³digo de barras
     setTimeout(async () => {
       for (const inst of (currentBill.installments || [])) {
         const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
@@ -17438,7 +17438,7 @@ async function loadCustomerBoletos(customerId, saleId) {
                       tdActions.innerHTML = `<button class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${saleId}, ${inst.installmentId}, ${currentBill.costCenterId})"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
                   } else if (isOverdue) {
                       const diasValidade = 28 - diasAtraso;
-                      tdBadge.innerHTML = `<span style="background:var(--color-warning); color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; color:#856404; background-color:#fff3cd; border: 1px solid #ffeeba;">Vencido (vÃ¡lido por ${diasValidade} dias)</span>`;
+                      tdBadge.innerHTML = `<span style="background:var(--color-warning); color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; color:#856404; background-color:#fff3cd; border: 1px solid #ffeeba;">Vencido (vÃƒÂ¡lido por ${diasValidade} dias)</span>`;
                       tdActions.innerHTML = `<button class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; white-space: nowrap;" onclick="openBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>
                                              <button class="btn btn-outline btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; margin-left: 5px; white-space: nowrap;" onclick="downloadBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="download" style="width:12px;height:12px;"></i> Download</button>`;
                   } else {
@@ -17450,7 +17450,7 @@ async function loadCustomerBoletos(customerId, saleId) {
                }
             } else {
                const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
-               if (tdDate) tdDate.textContent = 'NÃ£o disponivel';
+               if (tdDate) tdDate.textContent = 'NÃƒÂ£o disponivel';
             }
           } catch(e) {
              const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
@@ -17483,7 +17483,7 @@ async function gerarInformeRendimentos() {
   const salesList = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === "simulado") ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
   const currentSale = salesList.find(s => String(s.id) === String(AppState.selectedSaleId) || String(s.receivableBillId) === String(AppState.selectedSaleId));
   if (!currentSale) {
-    resultContainer.innerHTML = `<p style="color: var(--color-danger); font-size: 0.9rem; margin-top: 10px;">Contrato nÃ£o encontrado.</p>`;
+    resultContainer.innerHTML = `<p style="color: var(--color-danger); font-size: 0.9rem; margin-top: 10px;">Contrato nÃƒÂ£o encontrado.</p>`;
     return;
   }
 
@@ -17524,10 +17524,10 @@ async function gerarInformeRendimentos() {
       if (newWin) {
           console.log(`Informe aberto: INFORME DE RENDIMENTO ${year} - ${customerName}`);
       } else {
-          alert('Por favor, permita pop-ups para abrir o relatÃ³rio automaticamente.');
+          alert('Por favor, permita pop-ups para abrir o relatÃƒÂ³rio automaticamente.');
       }
     } else {
-      resultContainer.innerHTML = `<p style="color: var(--color-danger); font-size: 0.9rem; margin-top: 10px;">NÃ£o foi possÃ­vel gerar o informe para o ano ${year}. (Sem retorno da API)</p>`;
+      resultContainer.innerHTML = `<p style="color: var(--color-danger); font-size: 0.9rem; margin-top: 10px;">NÃƒÂ£o foi possÃƒÂ­vel gerar o informe para o ano ${year}. (Sem retorno da API)</p>`;
     }
   } catch (error) {
     console.error("Erro ao gerar informe de rendimentos:", error);
@@ -17536,7 +17536,7 @@ async function gerarInformeRendimentos() {
 }
 
 // ----------------------------------------------------
-// DOCUMENTOS PADRÃƒâ€¢ES: Salvar e Visualizar
+// DOCUMENTOS PADRÃƒÆ’Ã¢â‚¬Â¢ES: Salvar e Visualizar
 // ----------------------------------------------------
 window.selectDocTemplate = function(type) {
   document.querySelectorAll('.doc-menu-item').forEach(el => el.classList.remove('active'));
@@ -17579,7 +17579,7 @@ async function saveDocPadrao(tipo) {
       const ref = doc(window.firebaseDb, 'settings', 'docpadrao_' + tipo);
       await setDoc(ref, data);
     } catch (e) {
-      console.error("Erro ao salvar documento padrÃ£o no Firebase", e);
+      console.error("Erro ao salvar documento padrÃƒÂ£o no Firebase", e);
     }
   }
   
@@ -17595,7 +17595,7 @@ async function saveDocPadrao(tipo) {
     setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.style.color = ''; if (window.lucide) lucide.createIcons(); }, 2000);
   }
   
-  // Carregar templates salvos no editor de clÃ¡usulas da reneg se tipo for reneg
+  // Carregar templates salvos no editor de clÃƒÂ¡usulas da reneg se tipo for reneg
   if (tipo === 'reneg') {
     const clausesEl = document.getElementById('reneg-clauses-editor');
     if (clausesEl && data['doc-reneg-clauses']) {
@@ -17607,10 +17607,10 @@ async function saveDocPadrao(tipo) {
 function previewDocPadrao(tipo) {
   const labelMap = {
     reneg: 'Termo de Acordo',
-    boleto: 'Boleto de CobranÃ§a',
-    carta: 'Carta de CobranÃ§a',
-    suspensao: 'SuspensÃ£o de Contrato',
-    distrato: 'Distrato / RescisÃ£o',
+    boleto: 'Boleto de CobranÃƒÂ§a',
+    carta: 'Carta de CobranÃƒÂ§a',
+    suspensao: 'SuspensÃƒÂ£o de Contrato',
+    distrato: 'Distrato / RescisÃƒÂ£o',
   };
   const label = labelMap[tipo] || tipo;
   const data = JSON.parse(localStorage.getItem(`crm_docpadrao_${tipo}`) || '{}');
@@ -17624,7 +17624,7 @@ function previewDocPadrao(tipo) {
     const inst1 = document.getElementById('doc-boleto-inst1')?.value || '';
     const inst2 = document.getElementById('doc-boleto-inst2')?.value || '';
     const obs = document.getElementById('doc-boleto-obs')?.value || '';
-    content = `<h2>PrÃ©via de InstruÃ§Ãµes do Boleto</h2><p><strong>InstruÃ§Ã£o 1:</strong> ${inst1}</p><p><strong>InstruÃ§Ã£o 2:</strong> ${inst2}</p><p><strong>ObservaÃ§Ãµes:</strong> ${obs}</p>`;
+    content = `<h2>PrÃƒÂ©via de InstruÃƒÂ§ÃƒÂµes do Boleto</h2><p><strong>InstruÃƒÂ§ÃƒÂ£o 1:</strong> ${inst1}</p><p><strong>InstruÃƒÂ§ÃƒÂ£o 2:</strong> ${inst2}</p><p><strong>ObservaÃƒÂ§ÃƒÂµes:</strong> ${obs}</p>`;
   } else if (tipo === 'carta') {
     const assunto = document.getElementById('doc-carta-assunto')?.value || '';
     const corpo = document.getElementById('doc-carta-corpo')?.value || '';
@@ -17637,12 +17637,12 @@ function previewDocPadrao(tipo) {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
     const clauses = document.getElementById('doc-distrato-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de RetenÃ§Ã£o PadrÃ£o:</strong> ${pct}%</p><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${clauses}</pre>`;
+    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de RetenÃƒÂ§ÃƒÂ£o PadrÃƒÂ£o:</strong> ${pct}%</p><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${clauses}</pre>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
   if (win) {
-    win.document.write(`<!DOCTYPE html><html><head><title>PrÃ©via - ${label}</title><style>body{font-family:Georgia,serif;padding:40px;max-width:700px;margin:auto;color:#222;}h2{color:#105436;}hr{border:1px solid #ccc;}</style></head><body>${content}<hr><p style="font-size:12px;color:#999;">PrÃ©via gerada pelo CRM Moura Leite â€” Documentos PadrÃµes</p></body></html>`);
+    win.document.write(`<!DOCTYPE html><html><head><title>PrÃƒÂ©via - ${label}</title><style>body{font-family:Georgia,serif;padding:40px;max-width:700px;margin:auto;color:#222;}h2{color:#105436;}hr{border:1px solid #ccc;}</style></head><body>${content}<hr><p style="font-size:12px;color:#999;">PrÃƒÂ©via gerada pelo CRM Moura Leite Ã¢â‚¬â€ Documentos PadrÃƒÂµes</p></body></html>`);
     win.document.close();
   }
 }
@@ -17686,7 +17686,7 @@ async function loadDocPadraoTemplates() {
         }
       }
     } catch (e) {
-      console.error("Erro ao carregar documentos padrÃµes do Firebase", e);
+      console.error("Erro ao carregar documentos padrÃƒÂµes do Firebase", e);
     }
   } else {
     tipos.forEach(tipo => {
@@ -17705,7 +17705,7 @@ async function loadDocPadraoTemplates() {
 }
 
 // ----------------------------------------------------
-// GERAR PDF DE SUSPENSÃƒO (Zero Paid)
+// GERAR PDF DE SUSPENSÃƒÆ’O (Zero Paid)
 window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   // Show a loading state if called from a button
   const btn = document.activeElement;
@@ -17767,7 +17767,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
                               const viaCepData = await viaCepRes.json();
                               if (viaCepData && viaCepData.logradouro) {
                                   const firstWord = viaCepData.logradouro.split(" ")[0];
-                                  if (firstWord && ["rua", "avenida", "praÃ§a", "rodovia", "alameda", "travessa", "estrada", "viela", "loteamento"].includes(firstWord.toLowerCase())) {
+                                  if (firstWord && ["rua", "avenida", "praÃƒÂ§a", "rodovia", "alameda", "travessa", "estrada", "viela", "loteamento"].includes(firstWord.toLowerCase())) {
                                       streetType = firstWord;
                                       if (street.toLowerCase().startsWith(firstWord.toLowerCase() + " ")) {
                                           street = street.substring(firstWord.length).trim();
@@ -17859,9 +17859,9 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
                   if (secDetail.spouseName && secDetail.spouseName.trim() !== '' && secDetail.spouseName !== '- X -') {
                       let sCpf = (secDetail.spouseCpf || '').replace(/\D/g,"");
                       if (sCpf.length <= 11) sCpf = sCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
-                      secSpouse = ` e ${secDetail.spouseName}, portador(a) do C.P.F. nÂº ${sCpf}`;
+                      secSpouse = ` e ${secDetail.spouseName}, portador(a) do C.P.F. nÃ‚Âº ${sCpf}`;
                   }
-                  secondaryBuyersText += `, e ${secName}, portador(a) do C.P.F. nÂº ${formattedCpf}${secSpouse}`;
+                  secondaryBuyersText += `, e ${secName}, portador(a) do C.P.F. nÃ‚Âº ${formattedCpf}${secSpouse}`;
               }
           } catch (e) {}
       }
@@ -17892,7 +17892,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   }
   
   const templateStr = localStorage.getItem('crm_docpadrao_suspensao');
-  let ref = 'NOTIFICAÃ‡ÃƒO EXTRAJUDICIAL Ã¢â‚¬â€œ CANCELAMENTO DE CONTRATO POR IMPLEMENTO DE CONDIÃ‡ÃƒO SUSPENSIVA';
+  let ref = 'NOTIFICAÃƒâ€¡ÃƒÆ’O EXTRAJUDICIAL ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ CANCELAMENTO DE CONTRATO POR IMPLEMENTO DE CONDIÃƒâ€¡ÃƒÆ’O SUSPENSIVA';
   let corpo = '';
   
   if (templateStr) {
@@ -17915,12 +17915,12 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
               corpo = data['doc-suspensao-corpo'] || '';
           }
       } catch(e) {
-          console.error("Erro ao buscar template de suspensÃ£o no Firebase:", e);
+          console.error("Erro ao buscar template de suspensÃƒÂ£o no Firebase:", e);
       }
   }
   
   if (!corpo) {
-      alert("O corpo da 'Carta de SuspensÃ£o de Contrato' nÃ£o foi configurado em Documentos PadrÃµes.");
+      alert("O corpo da 'Carta de SuspensÃƒÂ£o de Contrato' nÃƒÂ£o foi configurado em Documentos PadrÃƒÂµes.");
       if (oldHtml && btn) btn.innerHTML = oldHtml;
       return;
   }
@@ -17965,7 +17965,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   text = text.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpj));
   
   // Also replace any legacy hardcoded text from old templates to be safe
-  text = text.replace(/Ao\(Ã€\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao Ilmo. Sr.');
+  text = text.replace(/Ao\(Ãƒâ‚¬\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao Ilmo. Sr.');
   text = text.replace(/Prezado\(a\)\(s\)\s*Senhor\(a\)\(es\),/gi, 'Prezado Senhor,');
   text = text.replace(/A MOURA LEITE LOTEAMENTOS/gi, `A ${companyName}`);
   text = text.replace(/64\.860\.139\/0001-98/g, maskCpfCnpj(companyCnpj));
@@ -17978,12 +17978,12 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       text = text.replace(/Contrato de Compromisso de Compra e Venda,/gi, `Contrato de Compromisso de Compra e Venda ${numeroContrato},`);
   }
   
-  text = text.replace(/Via\s*:\s*carta\s*com\s*Ã¢â‚¬Å“ARÃ¢â‚¬Â\s*e\s*MÃ£o\s*prÃ³pria\./gi, '');
+  text = text.replace(/Via\s*:\s*carta\s*com\s*ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œARÃƒÂ¢Ã¢â€šÂ¬Ã‚Â\s*e\s*MÃƒÂ£o\s*prÃƒÂ³pria\./gi, '');
   
   if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
-      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÂº\s*-\s*X\s*-\s*\./gi, '');
-      text = text.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÂº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
-      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÂº\s*{{CPF_CONJUGE}}\s*\./gi, '');
+      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÃ‚Âº\s*-\s*X\s*-\s*\./gi, '');
+      text = text.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÃ‚Âº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
+      text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nÃ‚Âº\s*{{CPF_CONJUGE}}\s*\./gi, '');
       text = text.replace(/{{NOME_CONJUGE}}/g, '- X -');
       text = text.replace(/{{CPF_CONJUGE}}/g, '- X -');
   } else {
@@ -18019,15 +18019,15 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       }
       
       const empNameMap = {
-          "14201": "ARAÃ‡ARIGUAMA - TERRA DO ARAÃ‡ARI",
+          "14201": "ARAÃƒâ€¡ARIGUAMA - TERRA DO ARAÃƒâ€¡ARI",
           "10100": "ITATINGA - NOVO HORIZONTE",
           "10200": "ITATINGA - NOVO HORIZONTE 2",
           "11100": "ITATINGA - PAULISTA",
-          "12100": "CERQUEIRA CÃ‰SAR - BELA VISTA",
+          "12100": "CERQUEIRA CÃƒâ€°SAR - BELA VISTA",
           "12300": "CERQUEIRA CESAR - BELA VISTA 2",
           "13100": "BOITUVA - RESERVA DNA",
-          "15200": "AVARÃ‰ - QUINTA DO LAGO",
-          "15300": "AVARÃ‰ - VILLA DO LAGO",
+          "15200": "AVARÃƒâ€° - QUINTA DO LAGO",
+          "15300": "AVARÃƒâ€° - VILLA DO LAGO",
           "16100": "PARDINHO - NONA INES",
           "16200": "PARDINHO - NONA INES 2",
           "16103": "ITATINGA - NOVO HORIZONTE",
@@ -18049,7 +18049,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   text = text.replace(/[\.,]?\s*[\r\n]+{{ENDERECO_CLIENTE}}/g, `, residente e domiciliado em {{ENDERECO_CLIENTE}}`);
   text = text.replace(/{{ENDERECO_CLIENTE}}/g, (address || '').toUpperCase());
   
-  // O endereco_cliente jÃ¡ traz tudo (incluindo CEP, Cidade e Estado), entÃ£o se a linha dupla existir no template, nÃ³s removemos inteira para evitar duplicidade.
+  // O endereco_cliente jÃƒÂ¡ traz tudo (incluindo CEP, Cidade e Estado), entÃƒÂ£o se a linha dupla existir no template, nÃƒÂ³s removemos inteira para evitar duplicidade.
   text = text.replace(/[\r\n]*{{CEP_CLIENTE}}\s*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
   text = text.replace(/[\r\n]*-\s*{{CIDADE_CLIENTE}}\s*-\s*{{ESTADO_CLIENTE}}/g, '');
   text = text.replace(/[\r\n]*-\s*Itatinga\s*-\s*SP/gi, '');
@@ -18110,14 +18110,14 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   
   const headerCidade = 'Botucatu';
   
-  // Substituir novas variÃ¡veis caso o usuÃ¡rio tenha adicionado no template
+  // Substituir novas variÃƒÂ¡veis caso o usuÃƒÂ¡rio tenha adicionado no template
   text = text.replace(/{{CIDADE_ATUAL}}/g, headerCidade);
   text = text.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
   text = text.replace(/{{TITULO}}/g, tituloAReceber);
   text = text.replace(/{{UNIDADE}}/g, uName);
   
   const hasHeaderInTemplate = text.includes(headerCidade) && text.includes(dateStr);
-  const tituloLineStr = `TÃ­tulo: ${tituloAReceber} - ${uName}`;
+  const tituloLineStr = `TÃƒÂ­tulo: ${tituloAReceber} - ${uName}`;
   const headerDateStr = `${headerCidade}, ${dateStr}<br><br>${tituloLineStr}`;
 
   const docHtml = `
@@ -18129,7 +18129,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
     </div>
   `;
   
-  document.getElementById("pdf-modal-title").textContent = "Carta de SuspensÃ£o de Contrato";
+  document.getElementById("pdf-modal-title").textContent = "Carta de SuspensÃƒÂ£o de Contrato";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   const overlay = document.getElementById("pdf-view-overlay");
   overlay.style.opacity = '0';
@@ -18137,7 +18137,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   overlay.classList.add("active");
   if (window.lucide) lucide.createIcons();
   
-  // Automagicamente abre a tela de impressÃ£o sem mostrar o modal na tela
+  // Automagicamente abre a tela de impressÃƒÂ£o sem mostrar o modal na tela
   setTimeout(() => {
       const originalTitle = document.title;
       // Tratar uName para remover nome do empreendimento se estiver longo, ou usar assim mesmo
@@ -18164,7 +18164,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
 };
 
 // ----------------------------------------------------
-// REGRAS DE NEGOCIAÃ‡ÃƒO
+// REGRAS DE NEGOCIAÃƒâ€¡ÃƒÆ’O
 // ----------------------------------------------------
 function loadRegrasNegociacao() {
   const regras = JSON.parse(localStorage.getItem('crm_moura_regras_negociacao')) || {
@@ -18196,17 +18196,17 @@ function saveRegrasNegociacao() {
   };
 
   localStorage.setItem('crm_moura_regras_negociacao', JSON.stringify(regras));
-  alert("Regras de negociaÃ§Ã£o salvas com sucesso!");
+  alert("Regras de negociaÃƒÂ§ÃƒÂ£o salvas com sucesso!");
 }
 
-// Direcionar para o menu Home apÃ³s refresh (F5)
+// Direcionar para o menu Home apÃƒÂ³s refresh (F5)
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     switchTab('construcao-home', 'Home');
   }, 150);
 });
 
-// --- IntegraÃ§Ã£o com Mapas UrbanÃ­sticos ---
+// --- IntegraÃƒÂ§ÃƒÂ£o com Mapas UrbanÃƒÂ­sticos ---
 window.uploadMapa = function() {
   const empIdInput = document.getElementById("mapa-empreendimento-id");
   const fileInput = document.getElementById("mapa-file-input");
@@ -18230,7 +18230,7 @@ window.uploadMapa = function() {
 
   if (!file.name.toLowerCase().endsWith('.pdf')) {
     statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "Selecione um arquivo PDF vÃ¡lido.";
+    statusDiv.innerHTML = "Selecione um arquivo PDF vÃƒÂ¡lido.";
     return;
   }
 
@@ -18256,12 +18256,12 @@ window.uploadMapa = function() {
         data = rawText ? JSON.parse(rawText) : {};
       } catch (parseErr) {
         const preview = rawText ? rawText.replace(/\s+/g, ' ').slice(0, 220) : 'Resposta vazia do servidor';
-        throw new Error(`Servidor respondeu com conteÃºdo invÃ¡lido para o upload do PDF. Detalhe: ${preview}`);
+        throw new Error(`Servidor respondeu com conteÃƒÂºdo invÃƒÂ¡lido para o upload do PDF. Detalhe: ${preview}`);
       }
 
       if (res.ok && data.success) {
         statusDiv.style.color = "#2e7d32";
-        statusDiv.innerHTML = "Ã¢Å“â€¦ Projeto carregado com sucesso!";
+        statusDiv.innerHTML = "ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Projeto carregado com sucesso!";
         fileInput.value = "";
         if (window.loadMapaList) window.loadMapaList();
       } else {
@@ -18269,7 +18269,7 @@ window.uploadMapa = function() {
       }
     } catch (err) {
       statusDiv.style.color = "var(--color-danger)";
-      statusDiv.innerHTML = "Ã¢ÂÅ’ Erro: " + (err && err.message ? err.message : 'NÃ£o foi possÃ­vel concluir o upload do PDF.');
+      statusDiv.innerHTML = "ÃƒÂ¢Ã‚ÂÃ…â€™ Erro: " + (err && err.message ? err.message : 'NÃƒÂ£o foi possÃƒÂ­vel concluir o upload do PDF.');
     }
   };
   reader.readAsDataURL(file);
@@ -18285,8 +18285,8 @@ window.showProjectMap = function(url) {
     modal.style.display = 'flex';
     setTimeout(() => modal.classList.add('active'), 10);
   } else {
-    console.error("ERRO: Elemento map-viewer-iframe nÃ£o encontrado! Isso indica que o HTML antigo estÃ¡ em cache.");
-    alert("A estrutura da pÃ¡gina estÃ¡ desatualizada (em cache). Por favor, feche esta aba, abra o sistema novamente ou limpe o cache do navegador para conseguir visualizar o PDF.");
+    console.error("ERRO: Elemento map-viewer-iframe nÃƒÂ£o encontrado! Isso indica que o HTML antigo estÃƒÂ¡ em cache.");
+    alert("A estrutura da pÃƒÂ¡gina estÃƒÂ¡ desatualizada (em cache). Por favor, feche esta aba, abra o sistema novamente ou limpe o cache do navegador para conseguir visualizar o PDF.");
   }
 };
 
@@ -18299,7 +18299,7 @@ window.loadMapaList = async function() {
     const maps = await res.json();
     
     if (!maps || maps.length === 0) {
-      container.innerHTML = '<div style="text-align: center; color: #666; padding: 15px;">Nenhum projeto urbanÃ­stico carregado.</div>';
+      container.innerHTML = '<div style="text-align: center; color: #666; padding: 15px;">Nenhum projeto urbanÃƒÂ­stico carregado.</div>';
       return;
     }
     
@@ -18310,7 +18310,7 @@ window.loadMapaList = async function() {
             <tr>
               <th>ID Centro de Custo</th>
               <th>Status</th>
-              <th>AÃ§Ãµes</th>
+              <th>AÃƒÂ§ÃƒÂµes</th>
             </tr>
           </thead>
           <tbody>
@@ -18359,7 +18359,7 @@ window.deleteMapa = async function(empId) {
   }
 };
 
-// --- IntegraÃ§Ã£o com KMZ (Google Earth) ---
+// --- IntegraÃƒÂ§ÃƒÂ£o com KMZ (Google Earth) ---
 
 async function uploadKMZ() {
   const empId = document.getElementById('kmz-empreendimento-id').value.trim();
@@ -18367,7 +18367,7 @@ async function uploadKMZ() {
   const statusDiv = document.getElementById('kmz-upload-status');
 
   if (!empId) {
-    statusDiv.textContent = "Erro: Preencha o CÃ³digo do Empreendimento.";
+    statusDiv.textContent = "Erro: Preencha o CÃƒÂ³digo do Empreendimento.";
     statusDiv.style.color = "var(--color-danger)";
     return;
   }
@@ -18427,7 +18427,7 @@ async function uploadKMZ() {
     }
 
     if (placemarks.length === 0) {
-      throw new Error("Nenhuma marcaÃ§Ã£o (Placemark) com coordenada encontrada.");
+      throw new Error("Nenhuma marcaÃƒÂ§ÃƒÂ£o (Placemark) com coordenada encontrada.");
     }
 
     const { doc, setDoc, ref, uploadBytes } = window.firebaseCollections;
@@ -18448,7 +18448,7 @@ async function uploadKMZ() {
     try {
       const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
       uploadBytes(storageRef, file).catch(() => {
-        console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas jÃ¡ foram salvas.");
+        console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas jÃƒÂ¡ foram salvas.");
       });
     } catch (e) {
       console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");
@@ -18501,7 +18501,7 @@ async function loadKMZList() {
 }
 
 async function deleteKMZ(empId) {
-  if (!confirm(`Tem certeza que deseja excluir o KMZ do empreendimento ${empId}? Isso removerÃ¡ a visualizaÃ§Ã£o 3D do mapa.`)) return;
+  if (!confirm(`Tem certeza que deseja excluir o KMZ do empreendimento ${empId}? Isso removerÃƒÂ¡ a visualizaÃƒÂ§ÃƒÂ£o 3D do mapa.`)) return;
   
   try {
     const { doc, deleteDoc, ref, deleteObject } = window.firebaseCollections;
@@ -18515,10 +18515,10 @@ async function deleteKMZ(empId) {
     try {
       await deleteObject(storageRef);
     } catch (e) {
-      console.warn("Arquivo KMZ nÃ£o encontrado no Storage ou erro ao excluir.", e);
+      console.warn("Arquivo KMZ nÃƒÂ£o encontrado no Storage ou erro ao excluir.", e);
     }
     
-    alert(`KMZ do empreendimento ${empId} excluÃ­do com sucesso!`);
+    alert(`KMZ do empreendimento ${empId} excluÃƒÂ­do com sucesso!`);
     loadKMZList();
   } catch (error) {
     console.error("Erro ao excluir KMZ:", error);
@@ -18530,26 +18530,26 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
   try {
     console.log("Abrindo lote:", lotName, "Coordenadas:", coordinatesStr);
     
-    // A coordenada geralmente Ã© "longitude,latitude,altitude"
+    // A coordenada geralmente ÃƒÂ© "longitude,latitude,altitude"
     const coordsList = coordinatesStr.split(' ');
     const firstCoord = coordsList[0].split(',');
     const lng = firstCoord[0];
     const lat = firstCoord[1];
 
     if (!lng || !lat) {
-      alert("Erro: Coordenadas invÃ¡lidas para este lote.");
+      alert("Erro: Coordenadas invÃƒÂ¡lidas para este lote.");
       return;
     }
 
     // Preencher o modal
     const modalTitle = document.getElementById('map-modal-title');
     if (!modalTitle) {
-      alert("Erro: Modal de mapa nÃ£o encontrado na pÃ¡gina! Tente recarregar sem cache (Ctrl+F5).");
+      alert("Erro: Modal de mapa nÃƒÂ£o encontrado na pÃƒÂ¡gina! Tente recarregar sem cache (Ctrl+F5).");
       return;
     }
-    modalTitle.textContent = `VisualizaÃ§Ã£o do Lote ${lotName}`;
+    modalTitle.textContent = `VisualizaÃƒÂ§ÃƒÂ£o do Lote ${lotName}`;
     
-    // Injetar o iframe do Google Maps focado na coordenada com satÃ©lite (t=k)
+    // Injetar o iframe do Google Maps focado na coordenada com satÃƒÂ©lite (t=k)
     const iframeContainer = document.getElementById('map-iframe-container');
     iframeContainer.innerHTML = `<div id="leaflet-map-div" style="width: 100%; height: 100%;"></div>`;
     
@@ -18562,22 +18562,22 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
       const map = L.map('leaflet-map-div').setView([lat, lng], 18);
       window.leafletMapInstance = map;
 
-      // Camada Base: Google Satellite (Fica em tudo, nÃ£o Ã© cortada)
+      // Camada Base: Google Satellite (Fica em tudo, nÃƒÂ£o ÃƒÂ© cortada)
       const googleSatBase = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
         maxZoom: 21,
         subdomains:['mt0','mt1','mt2','mt3']
       }).addTo(map);
 
-      // Camada 1 (Esquerda): Google Satellite (CÃ³pia para o slider)
+      // Camada 1 (Esquerda): Google Satellite (CÃƒÂ³pia para o slider)
       const googleSatLeft = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
         maxZoom: 21,
         subdomains:['mt0','mt1','mt2','mt3']
       }).addTo(map);
 
-      // Coordenadas SkyFi Iniciais (Bounding Box extraÃ­do do metadata.json)
+      // Coordenadas SkyFi Iniciais (Bounding Box extraÃƒÂ­do do metadata.json)
       const defaultSkyfiBounds = [[-22.921611011537024, -48.48699912428856], [-22.900898680161365, -48.464992605149746]];
       
-      // Carregar calibraÃ§Ã£o salva no navegador (se houver) para nÃ£o precisar calibrar toda vez
+      // Carregar calibraÃƒÂ§ÃƒÂ£o salva no navegador (se houver) para nÃƒÂ£o precisar calibrar toda vez
       const savedBounds = localStorage.getItem('skyfiCalibration');
       window.currentSkyfiBounds = savedBounds ? JSON.parse(savedBounds) : JSON.parse(JSON.stringify(defaultSkyfiBounds));
       
@@ -18590,7 +18590,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
         pane: 'skyfiPane'
       }).addTo(map);
 
-      // FunÃ§Ãµes globais de calibraÃ§Ã£o
+      // FunÃƒÂ§ÃƒÂµes globais de calibraÃƒÂ§ÃƒÂ£o
       window.calibrateSkyFi = function(dLng, dLat) {
          window.currentSkyfiBounds[0][0] += dLat;
          window.currentSkyfiBounds[1][0] += dLat;
@@ -18613,7 +18613,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
          localStorage.setItem('skyfiCalibration', JSON.stringify(window.currentSkyfiBounds));
       };
 
-      // Controle Visual de CalibraÃ§Ã£o
+      // Controle Visual de CalibraÃƒÂ§ÃƒÂ£o
       const CalibrationControl = L.Control.extend({
         options: { position: 'topright' },
         onAdd: function () {
@@ -18626,11 +18626,11 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
           div.style.gap = '5px';
           div.innerHTML = `
             <div style="font-size:11px; font-weight:bold; color:#333; margin-bottom:4px;">Ajuste Fino SkyFi</div>
-            <button onclick="window.calibrateSkyFi(0, 0.00003)" style="cursor:pointer; width:30px; height:30px;">Ã¢Â¬â€ Ã¯Â¸Â</button>
+            <button onclick="window.calibrateSkyFi(0, 0.00003)" style="cursor:pointer; width:30px; height:30px;">ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â ÃƒÂ¯Ã‚Â¸Ã‚Â</button>
             <div style="display:flex; gap:5px;">
-              <button onclick="window.calibrateSkyFi(-0.00003, 0)" style="cursor:pointer; width:30px; height:30px;">Ã¢Â¬â€¦Ã¯Â¸Â</button>
-              <button onclick="window.calibrateSkyFi(0, -0.00003)" style="cursor:pointer; width:30px; height:30px;">Ã¢Â¬â€¡Ã¯Â¸Â</button>
-              <button onclick="window.calibrateSkyFi(0.00003, 0)" style="cursor:pointer; width:30px; height:30px;">Ã¢Å¾Â¡Ã¯Â¸Â</button>
+              <button onclick="window.calibrateSkyFi(-0.00003, 0)" style="cursor:pointer; width:30px; height:30px;">ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â¦ÃƒÂ¯Ã‚Â¸Ã‚Â</button>
+              <button onclick="window.calibrateSkyFi(0, -0.00003)" style="cursor:pointer; width:30px; height:30px;">ÃƒÂ¢Ã‚Â¬Ã¢â‚¬Â¡ÃƒÂ¯Ã‚Â¸Ã‚Â</button>
+              <button onclick="window.calibrateSkyFi(0.00003, 0)" style="cursor:pointer; width:30px; height:30px;">ÃƒÂ¢Ã…Â¾Ã‚Â¡ÃƒÂ¯Ã‚Â¸Ã‚Â</button>
             </div>
             <div style="display:flex; gap:5px; margin-top:4px;">
                <button onclick="window.scaleSkyFi(0.999)" style="cursor:pointer; width:48px; height:25px; font-size:11px; font-weight:bold;">- Zoom</button>
@@ -18638,14 +18638,14 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
             </div>
             <button onclick="localStorage.removeItem('skyfiCalibration'); alert('Resetado. Feche e abra o mapa novamente.');" style="cursor:pointer; width:100%; height:20px; font-size:10px; margin-top:5px; background:#f44336; color:white; border:none; border-radius:3px;">Resetar</button>
           `;
-          // Prevenir que o clique no botÃ£o arraste o mapa
+          // Prevenir que o clique no botÃƒÂ£o arraste o mapa
           L.DomEvent.disableClickPropagation(div);
           return div;
         }
       });
       map.addControl(new CalibrationControl());
 
-      // Sobrescrever getContainer para retornar o painel (que tem as mesmas dimensÃµes do mapa), 
+      // Sobrescrever getContainer para retornar o painel (que tem as mesmas dimensÃƒÂµes do mapa), 
       // assim o sideBySide corta o painel corretamente, em vez de tentar cortar a tag <img> deslocada.
       skyfiLayer.getContainer = function() {
         return map.getPane('skyfiPane');
@@ -18656,7 +18656,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
          L.control.sideBySide(googleSatLeft, skyfiLayer).addTo(map);
       }
       
-      // Controle de InformaÃ§Ã£o da Imagem SkyFi
+      // Controle de InformaÃƒÂ§ÃƒÂ£o da Imagem SkyFi
       const captureDate = new Date("2026-05-04T17:33:13-03:00");
       const todayDate = new Date();
       const diffTime = Math.abs(todayDate - captureDate);
@@ -18672,7 +18672,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                       <strong style="color: #38bdf8; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">SkyFi Satellite</strong>
                   </div>
                   <div style="margin-bottom: 3px;">Captura: <strong>04/05/2026</strong></div>
-                  <div style="color: #fca5a5; font-weight: 600; font-size: 11px;">Atualizado hÃ¡ ${diffDays} dias</div>
+                  <div style="color: #fca5a5; font-weight: 600; font-size: 11px;">Atualizado hÃƒÂ¡ ${diffDays} dias</div>
               </div>
           `;
           return div;
@@ -18688,9 +18688,9 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
         radius: 8
       }).addTo(map);
 
-      // Renderizar os rÃ³tulos de TODOS os lotes se tivermos o ID do empreendimento
+      // Renderizar os rÃƒÂ³tulos de TODOS os lotes se tivermos o ID do empreendimento
       if (empId) {
-        // Injetar CSS para os rÃ³tulos se nÃ£o existir
+        // Injetar CSS para os rÃƒÂ³tulos se nÃƒÂ£o existir
         if (!document.getElementById('map-labels-style')) {
             const style = document.createElement('style');
             style.id = 'map-labels-style';
@@ -18739,11 +18739,11 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                                 labelText = labelText.split(' - ')[1].trim();
                             }
                             
-                            // Verificar status financeiro na memÃ³ria
+                            // Verificar status financeiro na memÃƒÂ³ria
                             let isDefaulter = false;
                             let defCustId = null;
                             let defSaleId = null;
-                            let statusClass = 'lot-quitado'; // Default cinza (se nÃ£o soubermos ou quitado)
+                            let statusClass = 'lot-quitado'; // Default cinza (se nÃƒÂ£o soubermos ou quitado)
                             
                             if (window.AppState && window.AppState.defaultersBills) {
                                 const bill = window.AppState.defaultersBills.find(b => 
@@ -18757,7 +18757,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                                 }
                             }
                             
-                            // Tentar descobrir se Ã© adimplente (ativo sem atraso) usando as vendas cacheadas
+                            // Tentar descobrir se ÃƒÂ© adimplente (ativo sem atraso) usando as vendas cacheadas
                             if (!isDefaulter && window.AppState && window.AppState.sales) {
                                 const unitIdStr = `U-${empId}-${labelText.replace(/\\s+/g, '')}`;
                                 const cachedSale = window.AppState.sales.find(s => 
@@ -18771,7 +18771,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                                         statusClass = 'lot-quitado';
                                     }
                                 } else {
-                                    // Se nÃ£o estÃ¡ na lista de inadimplentes, vamos supor Adimplente (Verde) como otimismo,
+                                    // Se nÃƒÂ£o estÃƒÂ¡ na lista de inadimplentes, vamos supor Adimplente (Verde) como otimismo,
                                     // ou Cinza se preferir que o desconhecido seja neutro. Vamos de Cinza.
                                     statusClass = 'lot-quitado';
                                 }
@@ -18784,7 +18784,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                                 </div>
                             `;
 
-                            // Criar o Ã­cone
+                            // Criar o ÃƒÂ­cone
                             const labelIcon = L.divIcon({
                                className: 'custom-lot-label',
                                html: iconHtml,
@@ -18794,7 +18794,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                             
                             const marker = L.marker([labelLat, labelLng], { icon: labelIcon, interactive: true }).addTo(map);
                             
-                            // AÃ§Ã£o ao Clicar
+                            // AÃƒÂ§ÃƒÂ£o ao Clicar
                             marker.on('click', async () => {
                                 const modalTitle = document.getElementById('map-modal-title');
                                 const oldTitle = modalTitle.innerHTML;
@@ -18836,18 +18836,18 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
                  });
              }
           })
-          .catch(e => console.error("Erro ao buscar rÃ³tulos dos lotes:", e));
+          .catch(e => console.error("Erro ao buscar rÃƒÂ³tulos dos lotes:", e));
       }
 
     }, 100);
 
-    // Configurar o botÃ£o de download do KML para o Google Earth Pro
+    // Configurar o botÃƒÂ£o de download do KML para o Google Earth Pro
     const btnDownload = document.getElementById('btn-download-kml');
     if (btnDownload) {
       btnDownload.onclick = () => downloadLoteKml(lotName, lat, lng);
     }
 
-    // Exibir box do Google Earth Pro (pois Ã© um lote) e ocultar Street View
+    // Exibir box do Google Earth Pro (pois ÃƒÂ© um lote) e ocultar Street View
     const geBox = document.getElementById('map-modal-ge-pro-container');
     if (geBox) geBox.style.display = 'flex';
     const svBox = document.getElementById('map-modal-street-view-container');
@@ -18867,9 +18867,9 @@ function abrirEnderecoGoogleMaps(addressString, typeLabel, customerName) {
     const modalTitle = document.getElementById('map-modal-title');
     if (!modalTitle) return;
 
-    modalTitle.textContent = `EndereÃ§o ${String(typeLabel).toLowerCase()} do cliente ${customerName}`;
+    modalTitle.textContent = `EndereÃƒÂ§o ${String(typeLabel).toLowerCase()} do cliente ${customerName}`;
     
-    // Injetar iframe buscando pelo endereÃ§o no Google Maps
+    // Injetar iframe buscando pelo endereÃƒÂ§o no Google Maps
     const iframeContainer = document.getElementById('map-iframe-container');
     iframeContainer.innerHTML = `<iframe 
       width="100%" 
@@ -18881,7 +18881,7 @@ function abrirEnderecoGoogleMaps(addressString, typeLabel, customerName) {
       src="https://maps.google.com/maps?q=${encodeURIComponent(addressString)}&t=k&z=19&output=embed">
     </iframe>`;
 
-    // Ocultar box do Google Earth Pro (pois nÃ£o Ã© lote) e Exibir Street View
+    // Ocultar box do Google Earth Pro (pois nÃƒÂ£o ÃƒÂ© lote) e Exibir Street View
     const geBox = document.getElementById('map-modal-ge-pro-container');
     if (geBox) geBox.style.display = 'none';
     const svBox = document.getElementById('map-modal-street-view-container');
@@ -18889,7 +18889,7 @@ function abrirEnderecoGoogleMaps(addressString, typeLabel, customerName) {
       svBox.style.display = 'flex';
       const svBtn = document.getElementById('btn-open-street-view');
       if (svBtn) {
-        // Link direto para forÃ§ar abertura do Google Maps com a camada Street View ativa (layer=c)
+        // Link direto para forÃƒÂ§ar abertura do Google Maps com a camada Street View ativa (layer=c)
         svBtn.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressString)}&layer=c`;
       }
     }
@@ -18898,7 +18898,7 @@ function abrirEnderecoGoogleMaps(addressString, typeLabel, customerName) {
     document.getElementById('map-modal-overlay').style.display = '';
     document.getElementById('map-modal-overlay').classList.add('active');
   } catch (e) {
-    console.error("Erro ao abrir endereÃ§o:", e);
+    console.error("Erro ao abrir endereÃƒÂ§o:", e);
   }
 }
 
@@ -18941,7 +18941,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
   const card = container.querySelector('.crm-card');
   if (!card) return;
 
-  // Injetar estilos customizados e de pulsaÃ§Ã£o
+  // Injetar estilos customizados e de pulsaÃƒÂ§ÃƒÂ£o
   if (!document.getElementById('reneg-custom-styles')) {
     const style = document.createElement('style');
     style.id = 'reneg-custom-styles';
@@ -18973,8 +18973,8 @@ async function loadRenegotiationHistory(customerId, saleId) {
   }
 
   card.innerHTML = `
-    <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">HistÃ³rico de OperaÃ§Ãµes</h3>
-    <p style="font-size: 0.9rem; color: #666;">Carregando histÃ³rico do contrato...</p>
+    <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">HistÃƒÂ³rico de OperaÃƒÂ§ÃƒÂµes</h3>
+    <p style="font-size: 0.9rem; color: #666;">Carregando histÃƒÂ³rico do contrato...</p>
     <div class="loading-spinner" style="width:28px; height:28px; border:3px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite; margin-top: 15px;"></div>
   `;
 
@@ -19001,10 +19001,10 @@ async function loadRenegotiationHistory(customerId, saleId) {
     const events = [];
     const apiEventsList = [];
     
-    // FunÃ§Ã£o para extrair nÃºmeros
+    // FunÃƒÂ§ÃƒÂ£o para extrair nÃƒÂºmeros
     function extractInstallmentsCount(desc) {
       if (!desc) return 0;
-      // Extrai o primeiro nÃºmero encontrado na descriÃ§Ã£o
+      // Extrai o primeiro nÃƒÂºmero encontrado na descriÃƒÂ§ÃƒÂ£o
       const match = desc.match(/(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
     }
@@ -19017,8 +19017,8 @@ async function loadRenegotiationHistory(customerId, saleId) {
           let generatedCount = Array.isArray(r.generatedInstallments) ? r.generatedInstallments.length : 0;
           if (generatedCount === 0) generatedCount = extractInstallmentsCount(r.generatedInstallmentsDescription);
           
-          // Todo evento retornado pela API Ã© considerado vÃ¡lido.
-          // Como agora iteramos estritamente pelas LACUNAS, se houver lacuna E evento, Ã© Reparcelamento.
+          // Todo evento retornado pela API ÃƒÂ© considerado vÃƒÂ¡lido.
+          // Como agora iteramos estritamente pelas LACUNAS, se houver lacuna E evento, ÃƒÂ© Reparcelamento.
           apiEventsList.push({
              type: 'api',
              date: r.date || r.createdAt || r.negotiationDate || r.remadeDate || null,
@@ -19042,7 +19042,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
        
        if (diffDays > 45) {
-          // Identificar data de baixa / recebimento da parcela anterior Ã  lacuna
+          // Identificar data de baixa / recebimento da parcela anterior ÃƒÂ  lacuna
           let prevReceiptDateStr = null;
           if (prevInst.receipts && prevInst.receipts.length > 0) {
               const recs = prevInst.receipts.filter(r => String(r.receiptType || r.type || "").toLowerCase() === 'recebimento');
@@ -19069,7 +19069,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
 
           if (!isPolaris) {
               if (hasApiData) {
-                  // Verifica se tem alguma renegociaÃ§Ã£o oficial (API) perto dessa data (margem de 90 dias)
+                  // Verifica se tem alguma renegociaÃƒÂ§ÃƒÂ£o oficial (API) perto dessa data (margem de 90 dias)
                   const matchedApi = apiEventsList.find(e => e.date && Math.abs(new Date(e.date) - currDate) < (1000 * 60 * 60 * 24 * 90));
                   if (matchedApi) {
                       isReparcelamento = true;
@@ -19103,7 +19103,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
 
     const gapEvents = events.filter(e => e.type === 'gap');
     
-    // Se a API retornou dados, ela Ã© a fonte oficial da quantidade. SenÃ£o, contamos pelas lacunas que nÃ£o sÃ£o carÃªncia nem polaris.
+    // Se a API retornou dados, ela ÃƒÂ© a fonte oficial da quantidade. SenÃƒÂ£o, contamos pelas lacunas que nÃƒÂ£o sÃƒÂ£o carÃƒÂªncia nem polaris.
     const totalRenegotiations = gapEvents.filter(e => e.gapType === 'reparcelamento').length;
     const totalCarencias = gapEvents.filter(e => e.gapType === 'carencia').length;
     const totalPolaris = gapEvents.filter(e => e.gapType === 'polaris').length;
@@ -19116,7 +19116,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
     document.querySelectorAll(".renegotiation-warning-badge").forEach(el => el.remove());
 
     if (events.length > 0) {
-        // Filtrar apenas eventos reais (api ou lacunas nÃ£o-carÃªncia) para a data da "Ãºltima renegociaÃ§Ã£o"
+        // Filtrar apenas eventos reais (api ou lacunas nÃƒÂ£o-carÃƒÂªncia) para a data da "ÃƒÂºltima renegociaÃƒÂ§ÃƒÂ£o"
         const realEvents = gapEvents.filter(e => e.gapType === 'reparcelamento');
         const sortedEvents = realEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
         
@@ -19134,7 +19134,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                  return due < today;
             });
             
-            // LÃ³gica do Badge Piscante
+            // LÃƒÂ³gica do Badge Piscante
             const btnRenegotiate = document.getElementById("btn-renegotiate-page");
             const btnBack = document.getElementById("btn-back-to-details-reneg");
             
@@ -19145,7 +19145,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                 
 
                 
-                // LÃ³gica de Bloqueio
+                // LÃƒÂ³gica de Bloqueio
                 let regrasStr = localStorage.getItem('crm_moura_regras_negociacao');
                 let configRegras = regrasStr ? JSON.parse(regrasStr) : {};
                 let blockMonths = configRegras.bloqueio_meses !== undefined ? parseInt(configRegras.bloqueio_meses) : 12;
@@ -19158,7 +19158,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                         btnRenegotiate.disabled = true;
                         btnRenegotiate.style.opacity = '0.5';
                         btnRenegotiate.style.cursor = 'not-allowed';
-                        btnRenegotiate.title = `Nova renegociaÃ§Ã£o bloqueada: Acordo anterior quebrado hÃ¡ ${monthsAgo} meses (mÃ­nimo exigido: ${blockMonths} meses).`;
+                        btnRenegotiate.title = `Nova renegociaÃƒÂ§ÃƒÂ£o bloqueada: Acordo anterior quebrado hÃƒÂ¡ ${monthsAgo} meses (mÃƒÂ­nimo exigido: ${blockMonths} meses).`;
                         // Impede o clique mantendo o tooltip
                         btnRenegotiate.onclick = (e) => { e.preventDefault(); e.stopPropagation(); return false; };
                     } else {
@@ -19166,7 +19166,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                         btnRenegotiate.style.opacity = '1';
                         btnRenegotiate.style.cursor = 'pointer';
                         btnRenegotiate.title = '';
-                        // O onclick original Ã© atribuÃ­do em viewCustomerCard, entÃ£o se foi sobrescrito precisaremos recriar
+                        // O onclick original ÃƒÂ© atribuÃƒÂ­do em viewCustomerCard, entÃƒÂ£o se foi sobrescrito precisaremos recriar
                         // Para evitar problemas, vamos depender do window.location.reload() que o select do perfil faz.
                     }
                 }
@@ -19184,7 +19184,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                     };
                     badge.onmouseover = () => { badge.style.background = 'rgba(220, 53, 69, 0.2)'; };
                     badge.onmouseout = () => { badge.style.background = 'rgba(220, 53, 69, 0.1)'; };
-                    badge.innerHTML = `<i data-lucide="alert-triangle" style="width: 14px; height: 14px;"></i> Acordo quebrado hÃ¡ ${monthsAgo} mes${monthsAgo > 1 || monthsAgo === 0 ? 'es' : 'Ãªs'}! <i data-lucide="external-link" style="width: 12px; height: 12px; margin-left: 2px;"></i>`;
+                    badge.innerHTML = `<i data-lucide="alert-triangle" style="width: 14px; height: 14px;"></i> Acordo quebrado hÃƒÂ¡ ${monthsAgo} mes${monthsAgo > 1 || monthsAgo === 0 ? 'es' : 'ÃƒÂªs'}! <i data-lucide="external-link" style="width: 12px; height: 12px; margin-left: 2px;"></i>`;
                     return badge;
                 };
 
@@ -19217,7 +19217,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
         }
     }
 
-    // Gerar Resumo de OperaÃ§Ãµes
+    // Gerar Resumo de OperaÃƒÂ§ÃƒÂµes
     let resumoHtml = '';
     let renegIndex = 1;
     let carenciaIndex = 1;
@@ -19226,7 +19226,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
     gapEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     if (gapEvents.length === 0) {
-        resumoHtml = '<p style="color: #666; font-style: italic; padding: 15px;">Nenhuma operaÃ§Ã£o registrada.</p>';
+        resumoHtml = '<p style="color: #666; font-style: italic; padding: 15px;">Nenhuma operaÃƒÂ§ÃƒÂ£o registrada.</p>';
     } else {
         resumoHtml += `
         <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: center;">
@@ -19240,7 +19240,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                     </th>
                     <th style="padding: 10px 5px; font-weight: 600; width: 20%;">
                         Pagou Quantas
-                        <span title="QUANTAS PARCELAS O CLIENTE PAGOU ATÃ‰ O PRÃ“XIMO ACORDO" style="cursor: help; color: #fff; display: inline-block; text-align: center; margin-left: 4px; font-weight: bold; border-radius: 50%; background: #f39c12; width: 14px; height: 14px; line-height: 14px; font-size: 10px; font-family: sans-serif; vertical-align: middle;">?</span>
+                        <span title="QUANTAS PARCELAS O CLIENTE PAGOU ATÃƒâ€° O PRÃƒâ€œXIMO ACORDO" style="cursor: help; color: #fff; display: inline-block; text-align: center; margin-left: 4px; font-weight: bold; border-radius: 50%; background: #f39c12; width: 14px; height: 14px; line-height: 14px; font-size: 10px; font-family: sans-serif; vertical-align: middle;">?</span>
                     </th>
                 </tr>
             </thead>
@@ -19257,7 +19257,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
             const cursorStyle = scrollId ? 'cursor: pointer;' : '';
             const hoverClass = scrollId ? 'class="resumo-row-hover"' : '';
 
-            // Calcular pagas atÃ© o prÃ³ximo acordo
+            // Calcular pagas atÃƒÂ© o prÃƒÂ³ximo acordo
             let endIndex = allInstallments.length;
             if (idx + 1 < gapEvents.length) {
                 endIndex = gapEvents[idx + 1].instIndex;
@@ -19283,7 +19283,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
             if (atrasos < 1) atrasos = 1;
 
             if (e.gapType === 'reparcelamento') {
-                typeName = `${renegIndex}Âº Reparcelamento`;
+                typeName = `${renegIndex}Ã‚Âº Reparcelamento`;
                 color = "var(--color-danger)";
                 renegIndex++;
                 if (e.matchedApi && e.matchedApi.date) {
@@ -19295,11 +19295,11 @@ async function loadRenegotiationHistory(customerId, saleId) {
                     realDateStr = dateStr;
                 }
             } else if (e.gapType === 'carencia') {
-                typeName = `${carenciaIndex}Âª CarÃªncia`;
+                typeName = `${carenciaIndex}Ã‚Âª CarÃƒÂªncia`;
                 color = "#fd7e14";
                 carenciaIndex++;
             } else if (e.gapType === 'polaris') {
-                typeName = `${polarisIndex}Âº Acordo Polaris`;
+                typeName = `${polarisIndex}Ã‚Âº Acordo Polaris`;
                 color = "#17a2b8";
                 polarisIndex++;
             }
@@ -19323,7 +19323,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
         resumoHtml += `</tbody></table>`;
     }
 
-    // Remover badge se nÃ£o caiu na condiÃ§Ã£o acima
+    // Remover badge se nÃƒÂ£o caiu na condiÃƒÂ§ÃƒÂ£o acima
     if (!isLastRenegotiationOverdue) {
         document.querySelectorAll(".renegotiation-warning-badge").forEach(el => el.remove());
         const btnRenegotiate = document.getElementById("btn-renegotiate-page");
@@ -19349,7 +19349,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                         <div style="font-size: 1rem; color: var(--color-text-dark); font-weight: 700; margin-top: 2px;">${totalRenegotiations}</div>
                     </div>
                     <div style="flex: 1; min-width: 0; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #fd7e14; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
-                        <div style="font-size: 0.6rem; color: #666; font-weight: 700; text-transform: uppercase;">CarÃªncias</div>
+                        <div style="font-size: 0.6rem; color: #666; font-weight: 700; text-transform: uppercase;">CarÃƒÂªncias</div>
                         <div style="font-size: 1rem; color: var(--color-text-dark); font-weight: 700; margin-top: 2px;">${totalCarencias}</div>
                     </div>
                     <div style="flex: 1; min-width: 0; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #17a2b8; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
@@ -19360,7 +19360,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                 <!-- Linha 2 -->
                 <div style="display: flex; flex-direction: row; gap: 10px;">
                     <div style="flex: 1; min-width: 0; background: white; border: 1px solid #e0e0e0; border-left: 4px solid #f39c12; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
-                        <div style="font-size: 0.6rem; color: #666; font-weight: 700; text-transform: uppercase;">MÃ©dia Atraso p/ Acordo</div>
+                        <div style="font-size: 0.6rem; color: #666; font-weight: 700; text-transform: uppercase;">MÃƒÂ©dia Atraso p/ Acordo</div>
                         <div style="font-size: 1rem; color: var(--color-text-dark); font-weight: 700; margin-top: 2px;">${avgDelayedInst} parc</div>
                     </div>
                     <div style="flex: 1; min-width: 0; background: white; border: 1px solid #e0e0e0; border-left: 4px solid ${isLastRenegotiationOverdue ? 'var(--color-danger)' : 'var(--color-success)'}; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center; ${isLastRenegotiationOverdue ? 'animation: pulse-danger 2s infinite;' : ''}">
@@ -19370,10 +19370,10 @@ async function loadRenegotiationHistory(customerId, saleId) {
                 </div>
             </div>
 
-            <!-- Resumo das OperaÃ§Ãµes -->
+            <!-- Resumo das OperaÃƒÂ§ÃƒÂµes -->
             <div style="flex: 1; border: 1px solid #ccc; border-radius: 8px; background: white; overflow: hidden; display: flex; flex-direction: column;">
                 <div style="background: #e2e3e5; color: #383d41; padding: 10px 15px; font-weight: bold; font-size: 0.9rem; border-bottom: 1px solid #ccc; display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                    <i data-lucide="list" style="width: 16px; height: 16px;"></i> RESUMO DAS OPERAÃ‡Ãƒâ€¢ES
+                    <i data-lucide="list" style="width: 16px; height: 16px;"></i> RESUMO DAS OPERAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES
                 </div>
                 <div style="overflow-y: auto; flex-grow: 1; padding: 0;">
                     ${resumoHtml}
@@ -19406,7 +19406,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
           '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">Recebido</th>' +
           '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">Juros</th>' +
           '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">Desconto</th>' +
-          '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">LÃ­quido</th>' +
+          '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">LÃƒÂ­quido</th>' +
           '<th style="padding:10px; border-bottom:1px solid #eee; background: white;">Status</th>' +
         '</tr>' +
       '</thead>' +
@@ -19425,7 +19425,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
             const months = Math.floor(inst._gapDays / 30);
             const days = inst._gapDays % 30;
             if (months > 0) {
-                gapText = `${months} mÃªs${months > 1 ? 'es' : ''}`;
+                gapText = `${months} mÃƒÂªs${months > 1 ? 'es' : ''}`;
                 if (days > 0) gapText += ` e ${days} dia${days > 1 ? 's' : ''}`;
             } else {
                 gapText = `${days} dia${days > 1 ? 's' : ''}`;
@@ -19440,7 +19440,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                 borderColor = "#bee5eb";
                 iconName = "history";
             } else if (inst._gapType === 'carencia') {
-                labelType = "CarÃªncia Identificada";
+                labelType = "CarÃƒÂªncia Identificada";
                 rowColor = "rgba(253, 126, 20, 0.05)";
                 textColor = "#d35400";
                 borderColor = "rgba(253, 126, 20, 0.2)";
@@ -19572,9 +19572,9 @@ async function loadRenegotiationHistory(customerId, saleId) {
     if (window.lucide) window.lucide.createIcons();
 
   } catch (error) {
-    console.error("Erro ao carregar histÃ³rico de operaÃ§Ãµes:", error);
+    console.error("Erro ao carregar histÃƒÂ³rico de operaÃƒÂ§ÃƒÂµes:", error);
     card.innerHTML = `
-      <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">HistÃ³rico de OperaÃ§Ãµes</h3>
+      <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">HistÃƒÂ³rico de OperaÃƒÂ§ÃƒÂµes</h3>
       <p style="font-size: 0.9rem; color: var(--color-danger);">Erro ao consultar os dados do contrato. Tente novamente.</p>
     `;
   }
@@ -19590,23 +19590,23 @@ window.renderVizinhosTab = async function() {
   contentEl.innerHTML = `
     <div style="text-align: center; padding: 20px;">
       <div class="loading-spinner" style="width: 28px; height: 28px; border: 3px solid rgba(16,84,54,0.15); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px;"></div>
-      <span style="font-size: 0.9rem; color: var(--color-text-muted);">Analisando as observaÃ§Ãµes do lote e buscando contatos dos vizinhos no Sienge...</span>
+      <span style="font-size: 0.9rem; color: var(--color-text-muted);">Analisando as observaÃƒÂ§ÃƒÂµes do lote e buscando contatos dos vizinhos no Sienge...</span>
     </div>
   `;
   
   try {
     const saleId = sessionStorage.getItem('currentSaleId');
-    if (!saleId) throw new Error("Venda atual nÃ£o encontrada.");
+    if (!saleId) throw new Error("Venda atual nÃƒÂ£o encontrada.");
     
     let sales = AppState.sales || [];
     let sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
-    if (!sale) throw new Error("Venda nÃ£o localizada no estado da aplicaÃ§Ã£o.");
+    if (!sale) throw new Error("Venda nÃƒÂ£o localizada no estado da aplicaÃƒÂ§ÃƒÂ£o.");
     
     let unitState = AppState.units && AppState.units[sale.unitId];
     if (!unitState || !unitState.id) {
       unitState = await SiengeApiService.getUnit(sale.unitId);
     }
-    if (!unitState || !unitState.id) throw new Error("Unidade nÃ£o localizada.");
+    if (!unitState || !unitState.id) throw new Error("Unidade nÃƒÂ£o localizada.");
     
     const blockStr = String(unitState.block || "").trim();
     const lotStr = String(unitState.lot || "").trim();
@@ -19615,7 +19615,7 @@ window.renderVizinhosTab = async function() {
       enterpriseId = String(sale.enterpriseId || sale.companyId || AppState.selectedEnterpriseId || "10100").trim();
     }
     
-    // 1. O nome real da unidade (ex: "10100 - 05-16") pode ser extraÃ­do diretamente de sale.unitId (ex: "U-10100-05-16") ou sale.units
+    // 1. O nome real da unidade (ex: "10100 - 05-16") pode ser extraÃƒÂ­do diretamente de sale.unitId (ex: "U-10100-05-16") ou sale.units
     const unitParts = String(sale.unitId || "").split("-");
     const unitName = unitParts.slice(2).join("-") || sale.units || "N/D";
     let realName = enterpriseId !== "N/D" && enterpriseId !== "" ? `${enterpriseId} - ${unitName}` : unitName;
@@ -19633,7 +19633,7 @@ window.renderVizinhosTab = async function() {
       return;
     }
     
-    // Obter observaÃ§Ãµes da Unidade Atual (Lote Atual)
+    // Obter observaÃƒÂ§ÃƒÂµes da Unidade Atual (Lote Atual)
     let currentUnitNote = "";
     try {
       const currentUnitData = await SiengeApiService.findUnitByName(enterpriseId, unitName);
@@ -19653,7 +19653,7 @@ window.renderVizinhosTab = async function() {
     
     if (!centerPoint) {
       contentEl.innerHTML = `<div style="padding: 20px; color: #c62828; text-align: center;">
-        Lote atual nÃ£o encontrado no arquivo KMZ.<br><br>
+        Lote atual nÃƒÂ£o encontrado no arquivo KMZ.<br><br>
         <div style="font-size: 11px; color: #666; text-align: left; background: #f5f5f5; padding: 10px; border-radius: 4px;">
           <b>DEBUG INFO:</b><br>
           realName: "${realName}"<br>
@@ -19722,7 +19722,7 @@ window.renderVizinhosTab = async function() {
       console.log(`DEBUG VIZINHOS [Buscando Vizinho ${neighborFullName} como ${neighborNameForSearch}]:`);
       let vData = { 
         lotNumber: neighborFullName, 
-        status: "NÃ£o encontrado", 
+        status: "NÃƒÂ£o encontrado", 
         customerName: "-", 
         customerPhone: "-", 
         customerEmail: "-", 
@@ -19734,7 +19734,7 @@ window.renderVizinhosTab = async function() {
       
       let neighborUnit = await SiengeApiService.findUnitByName(enterpriseId, neighborNameForSearch);
       
-      // Fallback: tentar remover os zeros Ã  esquerda da numeraÃ§Ã£o do lote (ex: 05-09 -> 05-9)
+      // Fallback: tentar remover os zeros ÃƒÂ  esquerda da numeraÃƒÂ§ÃƒÂ£o do lote (ex: 05-09 -> 05-9)
       if (!neighborUnit && neighborNameForSearch.includes("-0")) {
         const fallbackName = neighborNameForSearch.replace(/-0+/g, '-');
         neighborUnit = await SiengeApiService.findUnitByName(enterpriseId, fallbackName);
@@ -19743,7 +19743,7 @@ window.renderVizinhosTab = async function() {
       console.log(`DEBUG VIZINHOS [Vizinho ${neighborFullName} Result]:`, neighborUnit);
       
       if (neighborUnit) {
-        vData.status = neighborUnit.contractId ? "Vendido" : "DisponÃ­vel";
+        vData.status = neighborUnit.contractId ? "Vendido" : "DisponÃƒÂ­vel";
         
         if (neighborUnit.contractId || neighborUnit.contractNumber) {
           const contract = await SiengeApiService.getContractRaw(neighborUnit.contractId || neighborUnit.contractNumber);
@@ -19791,14 +19791,14 @@ window.renderVizinhosTab = async function() {
           const urlWithCache = mapCheckData.url + "?t=" + new Date().getTime();
           btnProjetoHtml = `
             <button class="btn btn-outline" style="color: #fff; background: var(--color-primary); border-color: var(--color-primary-dark); font-weight: bold; margin-left: auto; white-space: nowrap; flex-shrink: 0;" onclick="window.showProjectMap('${urlWithCache}')">
-              <i data-lucide="map" style="width: 16px;"></i> Visualizar Projeto UrbanÃ­stico
+              <i data-lucide="map" style="width: 16px;"></i> Visualizar Projeto UrbanÃƒÂ­stico
             </button>
           `;
         }
       }
     } catch(e) {}
     
-    // Adicionar a ObservaÃ§Ã£o do Lote Atual e o botÃ£o (se existir)
+    // Adicionar a ObservaÃƒÂ§ÃƒÂ£o do Lote Atual e o botÃƒÂ£o (se existir)
     if (currentUnitNote || btnProjetoHtml) {
       html += `
         <div style="margin-bottom: 20px; background: #e8f5e9; border-left: 4px solid var(--color-primary); padding: 15px; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 15px;">
@@ -19806,11 +19806,11 @@ window.renderVizinhosTab = async function() {
       `;
       if (currentUnitNote) {
         html += `
-            <strong style="color: var(--color-primary); font-size: 0.9rem; display: block; margin-bottom: 5px;"><i data-lucide="info" style="width:16px; margin-right: 5px; vertical-align: text-bottom;"></i> ObservaÃ§Ãµes do Lote Atual (${realName}):</strong>
+            <strong style="color: var(--color-primary); font-size: 0.9rem; display: block; margin-bottom: 5px;"><i data-lucide="info" style="width:16px; margin-right: 5px; vertical-align: text-bottom;"></i> ObservaÃƒÂ§ÃƒÂµes do Lote Atual (${realName}):</strong>
             <span style="font-size: 0.85rem; color: #333; white-space: pre-wrap;">${currentUnitNote}</span>
         `;
       } else {
-        html += `<strong style="color: var(--color-primary); font-size: 0.9rem; display: block; margin-bottom: 5px;">Projeto UrbanÃ­stico DisponÃ­vel</strong>`;
+        html += `<strong style="color: var(--color-primary); font-size: 0.9rem; display: block; margin-bottom: 5px;">Projeto UrbanÃƒÂ­stico DisponÃƒÂ­vel</strong>`;
       }
       
       html += `
@@ -19826,19 +19826,19 @@ window.renderVizinhosTab = async function() {
         <tr style="background-color: var(--color-primary); color: white;">
           <th style="padding: 12px 15px; font-weight: 600;">Lote</th>
           <th style="padding: 12px 15px; font-weight: 600;">Status</th>
-          <th style="padding: 12px 15px; font-weight: 600;">ProprietÃ¡rio</th>
+          <th style="padding: 12px 15px; font-weight: 600;">ProprietÃƒÂ¡rio</th>
           <th style="padding: 12px 15px; font-weight: 600;">Telefone</th>
           <th style="padding: 12px 15px; font-weight: 600;">E-mail</th>
           <th style="padding: 12px 15px; font-weight: 600;">Contrato</th>
-          <th style="padding: 12px 15px; font-weight: 600; text-align: center;">AÃ§Ãµes</th>
+          <th style="padding: 12px 15px; font-weight: 600; text-align: center;">AÃƒÂ§ÃƒÂµes</th>
         </tr>
       </thead>
       <tbody>
     `;
     
     for (const v of vizinhosData) {
-      let badgeColor = v.status === "Vendido" ? "#e8f5e9" : (v.status === "DisponÃ­vel" ? "#e3f2fd" : "#f5f5f5");
-      let textColor = v.status === "Vendido" ? "#2e7d32" : (v.status === "DisponÃ­vel" ? "#1565c0" : "#666");
+      let badgeColor = v.status === "Vendido" ? "#e8f5e9" : (v.status === "DisponÃƒÂ­vel" ? "#e3f2fd" : "#f5f5f5");
+      let textColor = v.status === "Vendido" ? "#2e7d32" : (v.status === "DisponÃƒÂ­vel" ? "#1565c0" : "#666");
       let rowBg = v.isSameCustomer ? "background-color: #fdfaf0;" : "";
       
       let ownerHtml = v.customerName;
@@ -20006,7 +20006,7 @@ window.clearRelacionamento = function() {
   
   if (customerCard) customerCard.style.display = 'none';
   if (resultsCard) resultsCard.style.display = 'none';
-  if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px; color: var(--color-text-muted);">FaÃ§a uma busca para ver os contratos do cliente.</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px; color: var(--color-text-muted);">FaÃƒÂ§a uma busca para ver os contratos do cliente.</td></tr>';
 };
 
 window.maskCpfCnpj = function(input) {
@@ -20047,7 +20047,7 @@ window.clearRelacionamentoSearch = function() {
     document.getElementById('relacionamento-customer-info-container').innerHTML = '';
     document.getElementById('relacionamento-results-card').style.display = 'none';
     const tbody = document.querySelector('#table-relacionamento-results tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--color-text-muted);">FaÃ§a uma busca para encontrar clientes.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--color-text-muted);">FaÃƒÂ§a uma busca para encontrar clientes.</td></tr>`;
     
     toggleRelacionamentoFilters();
 };
@@ -20076,7 +20076,7 @@ window.searchRelacionamento = async function() {
   const emailEl = document.getElementById('relacionamento-filter-email');
   const email = (emailEl && !emailEl.disabled) ? emailEl.value.trim() : '';
 
-  // Buscar na base carregada primeiro se usar os campos de texto, caso nÃ£o tenha selecionado no dropdown
+  // Buscar na base carregada primeiro se usar os campos de texto, caso nÃƒÂ£o tenha selecionado no dropdown
   if (!window.SelectedDynamicCustomerId && (nome || tel || email) && window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
       const normalizeStr = str => str ? String(str).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : '';
       let match = null;
@@ -20125,7 +20125,7 @@ window.searchRelacionamento = async function() {
   if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--color-text-muted);">
     <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
       <div class="loading-spinner" style="width:32px; height:32px; border:3px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite; margin: 0 auto;"></div>
-      <span>Buscando histÃ³rico financeiro detalhado do cliente...</span>
+      <span>Buscando histÃƒÂ³rico financeiro detalhado do cliente...</span>
     </div>
   </td></tr>`;
   if (resultsCard) resultsCard.style.display = 'block';
@@ -20157,13 +20157,13 @@ window.searchRelacionamento = async function() {
               
               const bType = String(bill.documentId || '').trim().toUpperCase();
               if (bType !== 'CT' && bType !== 'CTCV') {
-                  throw new Error(`TÃ­tulo ${titulo} encontrado, mas Ã© do tipo '${bill.documentId || 'Desconhecido'}'. Apenas tÃ­tulos tipo CT sÃ£o suportados.`);
+                  throw new Error(`TÃƒÂ­tulo ${titulo} encontrado, mas ÃƒÂ© do tipo '${bill.documentId || 'Desconhecido'}'. Apenas tÃƒÂ­tulos tipo CT sÃƒÂ£o suportados.`);
               }
           } else {
-              throw new Error(`TÃ­tulo nÃ£o encontrado. Nenhum resultado correspondeu ao nÃºmero '${titulo}'.`);
+              throw new Error(`TÃƒÂ­tulo nÃƒÂ£o encontrado. Nenhum resultado correspondeu ao nÃƒÂºmero '${titulo}'.`);
           }
       } catch(e) { 
-          throw e; // LanÃ§a o erro para ser capturado pelo bloco catch principal
+          throw e; // LanÃƒÂ§a o erro para ser capturado pelo bloco catch principal
       }
 
       if (bill) {
@@ -20173,14 +20173,14 @@ window.searchRelacionamento = async function() {
          targetUnityName = bill.unityName || bill.unitName;
          targetEnterpriseName = bill.enterpriseName;
       } else {
-         throw new Error("TÃ­tulo nÃ£o encontrado.");
+         throw new Error("TÃƒÂ­tulo nÃƒÂ£o encontrado.");
       }
     } else if (contrato) {
       // 2. Busca pelo contrato -> pega customerId
       let myContract = null;
       let bill = null;
 
-      // Buscar por number (parÃ¢metro correto da Sienge)
+      // Buscar por number (parÃƒÂ¢metro correto da Sienge)
       try {
           const urlId = `http://${host}:${port}/sienge-proxy/sales-contracts?number=${encodeURIComponent(contrato)}`;
           const resId = await fetch(urlId, { headers: { 'Authorization': authHeader } });
@@ -20202,7 +20202,7 @@ window.searchRelacionamento = async function() {
              else if (myContract.salesContractCustomers && myContract.salesContractCustomers.length > 0) customerId = myContract.salesContractCustomers[0].id || myContract.salesContractCustomers[0].customerId;
          }
          
-         // Se ainda nÃ£o tiver customerId, mas tiver receivableBillId, buscar o tÃ­tulo para pegar o customerId
+         // Se ainda nÃƒÂ£o tiver customerId, mas tiver receivableBillId, buscar o tÃƒÂ­tulo para pegar o customerId
          if (!customerId && myContract.receivableBillId) {
              try {
                  const billUrl = `http://${host}:${port}/sienge-proxy/accounts-receivable/receivable-bills/${myContract.receivableBillId}`;
@@ -20215,17 +20215,17 @@ window.searchRelacionamento = async function() {
          }
 
          if (!customerId) {
-             throw new Error("Cliente nÃ£o encontrado no contrato ou tÃ­tulo associado.");
+             throw new Error("Cliente nÃƒÂ£o encontrado no contrato ou tÃƒÂ­tulo associado.");
          }
 
          targetContractNumber = myContract.number || myContract.contractNumber || myContract.id;
          targetEnterpriseId = myContract.enterpriseId || myContract.enterpriseCode;
          targetUnityName = myContract.unitName || myContract.unityName;
       } else {
-         throw new Error(`Contrato nÃ£o encontrado na Sienge para '${contrato}'. Verifique se o nÃºmero estÃ¡ correto.`);
+         throw new Error(`Contrato nÃƒÂ£o encontrado na Sienge para '${contrato}'. Verifique se o nÃƒÂºmero estÃƒÂ¡ correto.`);
       }
     } else if (doc || window.SelectedDynamicCustomerId) {
-      // 2. Busca por CPF/CNPJ -> pega customerId (ou usa o ID direto da busca dinÃ¢mica)
+      // 2. Busca por CPF/CNPJ -> pega customerId (ou usa o ID direto da busca dinÃƒÂ¢mica)
       if (window.SelectedDynamicCustomerId && (!doc || (window.SelectedDynamicCustomerDoc && doc === window.SelectedDynamicCustomerDoc.replace(/\D/g,'')))) {
           customerId = window.SelectedDynamicCustomerId;
           customerNameCache = window.SelectedDynamicCustomerName;
@@ -20241,10 +20241,10 @@ window.searchRelacionamento = async function() {
                customerNameCache = cList[0].name;
                customerDocCache = cList[0].cpf || cList[0].cnpj || cList[0].cpfCnpj || doc;
              } else {
-               throw new Error("CPF/CNPJ nÃ£o encontrado.");
+               throw new Error("CPF/CNPJ nÃƒÂ£o encontrado.");
              }
           } else {
-             throw new Error(`A API da Sienge recusou o CPF/CNPJ (Status: ${res.status}). O documento pode ser invÃ¡lido.`);
+             throw new Error(`A API da Sienge recusou o CPF/CNPJ (Status: ${res.status}). O documento pode ser invÃƒÂ¡lido.`);
           }
       }
     } else if (unidadeId && emp) {
@@ -20254,7 +20254,7 @@ window.searchRelacionamento = async function() {
       let limit = 200;
       const unidadeName = unidadeSelect.options[unidadeSelect.selectedIndex].text.trim();
       
-      // ESTRATÃ‰GIA 1: Buscar a unidade especÃ­fica e pegar o currentSalesContract
+      // ESTRATÃƒâ€°GIA 1: Buscar a unidade especÃƒÂ­fica e pegar o currentSalesContract
       try {
           const unitUrl = `http://${host}:${port}/sienge-proxy/units?enterpriseId=${emp}&name=${encodeURIComponent(unidadeName)}`;
           const unitRes = await fetch(unitUrl, { headers: { 'Authorization': authHeader } });
@@ -20270,7 +20270,7 @@ window.searchRelacionamento = async function() {
                   }
               }
           }
-      } catch(e) { console.error("Erro na ESTRATÃ‰GIA 1", e); }
+      } catch(e) { console.error("Erro na ESTRATÃƒâ€°GIA 1", e); }
       
       if (!myContract) {
           try {
@@ -20285,7 +20285,7 @@ window.searchRelacionamento = async function() {
                                    matchingContracts[0];
                   }
               }
-          } catch(e) { console.error("Erro na ESTRATÃ‰GIA 2", e); }
+          } catch(e) { console.error("Erro na ESTRATÃƒâ€°GIA 2", e); }
       }
 
       if (!myContract) {
@@ -20350,7 +20350,7 @@ window.searchRelacionamento = async function() {
                 const optText = unidadeSelect.options[unidadeSelect.selectedIndex].text;
                 targetUnityName = optText.includes(' - ') ? optText.split(' - ').slice(1).join(' - ') : optText;
                 
-                // Se a unidade tem contrato mas nÃ£o retornou o customerId, buscar o contrato para pegar o customerId
+                // Se a unidade tem contrato mas nÃƒÂ£o retornou o customerId, buscar o contrato para pegar o customerId
                 if (!customerId && targetContractNumber) {
                     try {
                         const contractUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${targetContractNumber}`;
@@ -20381,11 +20381,11 @@ window.searchRelacionamento = async function() {
                 }
              }
          } catch(e) {
-             throw new Error(`Contrato ativo nÃ£o encontrado. (JSON=${e.message})`);
+             throw new Error(`Contrato ativo nÃƒÂ£o encontrado. (JSON=${e.message})`);
          }
       }
     } else {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px;">Preencha pelo menos um campo para buscar (TÃ­tulo, CPF/CNPJ ou Unidade).</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px;">Preencha pelo menos um campo para buscar (TÃƒÂ­tulo, CPF/CNPJ ou Unidade).</td></tr>';
       return;
     }
 
@@ -20404,7 +20404,7 @@ window.searchRelacionamento = async function() {
     // ENRIQUECIMENTO DE DADOS: A API de listagem omite campos cruciais como contractNumber, receivableBillId, e unityName.
     // Vamos buscar os detalhes de cada contrato paralelamente antes do loop principal.
     
-    // Buscar Extrato Financeiro Completo do Cliente para verificar InadimplÃªncia com precisÃ£o
+    // Buscar Extrato Financeiro Completo do Cliente para verificar InadimplÃƒÂªncia com precisÃƒÂ£o
     let customerDebitBalance = [];
     try {
         const balRes = await SiengeApiService.getCustomerFinancialStatements(customerId);
@@ -20437,7 +20437,7 @@ window.searchRelacionamento = async function() {
          return c;
     }));
 
-    // Buscar Cliente Completo (Nome, Doc, Telefones, EndereÃ§o)
+    // Buscar Cliente Completo (Nome, Doc, Telefones, EndereÃƒÂ§o)
     let fullCustomer = null;
     try {
         fullCustomer = await SiengeApiService.getCustomer(customerId);
@@ -20445,12 +20445,12 @@ window.searchRelacionamento = async function() {
             customerNameCache = fullCustomer.name || customerNameCache;
             customerDocCache = fullCustomer.cpfCnpj || fullCustomer.cpf || fullCustomer.cnpj || customerDocCache;
         } else {
-            console.warn("Cliente nÃ£o encontrado via getCustomer, ignorando dados avanÃ§ados.");
+            console.warn("Cliente nÃƒÂ£o encontrado via getCustomer, ignorando dados avanÃƒÂ§ados.");
         }
         
         if (infoContainer && customerCard && fullCustomer) {
             let phoneHTML = `<span style="font-size: 1rem; color: #1e293b; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-               <i data-lucide="phone" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span>NÃ£o informado</span>
+               <i data-lucide="phone" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span>NÃƒÂ£o informado</span>
             </span>`;
             if (fullCustomer.phones && fullCustomer.phones.length > 0) {
                 const phoneElements = fullCustomer.phones.map(p => {
@@ -20502,7 +20502,7 @@ window.searchRelacionamento = async function() {
                             <i data-lucide="phone" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
                             <span style="font-size: 0.95rem; color: #1e293b; font-weight: 500;">${p.formatted}</span>
                             ${p.isMain ? '<span class="badge badge-success" style="font-size:0.6rem; padding:2px 6px; text-transform:none; margin-left: 6px;">Principal</span>' : ''}
-                            <button onclick="copyToClipboard('${p.raw}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃºmero"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>
+                            <button onclick="copyToClipboard('${p.raw}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃƒÂºmero"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>
                         </div>
                     `).join('') + `</div>`;
                 }
@@ -20517,21 +20517,21 @@ window.searchRelacionamento = async function() {
                         <i data-lucide="phone" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
                         <span style="font-size: 1rem; color: #1e293b; font-weight: 600;">${formatted}</span>
                         <span class="badge badge-success" style="font-size:0.6rem; padding:2px 6px; text-transform:none; margin-left: 6px;">Principal</span>
-                        <button onclick="copyToClipboard('${rawNum || formatted}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃºmero"><i data-lucide="copy" style="width: 15px; height: 15px; color: var(--color-primary);"></i></button>
+                        <button onclick="copyToClipboard('${rawNum || formatted}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar nÃƒÂºmero"><i data-lucide="copy" style="width: 15px; height: 15px; color: var(--color-primary);"></i></button>
                     </div>
                 `;
             }
 
             const hasEmail = fullCustomer.email && fullCustomer.email !== 'N/D' && fullCustomer.email !== 'undefined';
             
-            let addrStr = 'NÃ£o informado';
+            let addrStr = 'NÃƒÂ£o informado';
             let addrIcon = 'home';
-            let addrTypeLabel = 'EndereÃ§o';
+            let addrTypeLabel = 'EndereÃƒÂ§o';
             if (fullCustomer.addresses && fullCustomer.addresses.length > 0) {
                const a = fullCustomer.addresses[0];
                const isCommercial = a.type === 2 || String(a.typeDescription || a.type || "").toUpperCase().includes("COM");
                addrIcon = isCommercial ? "building" : "home";
-               addrTypeLabel = isCommercial ? "EndereÃ§o Comercial" : "EndereÃ§o Residencial";
+               addrTypeLabel = isCommercial ? "EndereÃƒÂ§o Comercial" : "EndereÃƒÂ§o Residencial";
                const street = a.street || a.streetName || "";
                const num = a.number ? `, ${a.number}` : "";
                const compl = a.complement ? ` - ${a.complement}` : "";
@@ -20544,13 +20544,13 @@ window.searchRelacionamento = async function() {
                addrStr = fullCustomer.address;
             }
 
-            let age = "NÃ£o informado";
+            let age = "NÃƒÂ£o informado";
             if (fullCustomer.birthDate) {
               const isCNPJ = String(fullCustomer.cpfCnpj || "").replace(/\D/g, "").length > 11;
               if (isCNPJ) {
-                age = "NÃ£o se aplica";
+                age = "NÃƒÂ£o se aplica";
               } else if (fullCustomer.birthDate === "1980-01-01" || !fullCustomer.birthDate) {
-                age = "NÃ£o informado";
+                age = "NÃƒÂ£o informado";
               } else {
                 const birth = new Date(fullCustomer.birthDate + 'T12:00:00');
                 const today = new Date();
@@ -20567,7 +20567,7 @@ window.searchRelacionamento = async function() {
             let profIcon = "briefcase";
             const lowerProf = prof.toLowerCase();
             if (lowerProf.includes("engenh") || lowerProf.includes("arquit")) profIcon = "hammer";
-            else if (lowerProf.includes("mÃ©dic") || lowerProf.includes("enferm") || lowerProf.includes("dentis")) profIcon = "stethoscope";
+            else if (lowerProf.includes("mÃƒÂ©dic") || lowerProf.includes("enferm") || lowerProf.includes("dentis")) profIcon = "stethoscope";
             else if (lowerProf.includes("advogad") || lowerProf.includes("juiz") || lowerProf.includes("promotor")) profIcon = "scale";
             else if (lowerProf.includes("estudant")) profIcon = "graduation-cap";
             else if (lowerProf.includes("aposent")) profIcon = "sunset";
@@ -20598,15 +20598,15 @@ window.searchRelacionamento = async function() {
                      </span>
                   </div>
 
-                  <!-- ProfissÃ£o -->
+                  <!-- ProfissÃƒÂ£o -->
                   <div style="grid-column: 4; grid-row: 1;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">ProfissÃ£o</span>
+                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">ProfissÃƒÂ£o</span>
                      <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
                         <i data-lucide="${profIcon}" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span>${prof}</span>
                      </span>
                   </div>
 
-                  <!-- EndereÃ§o -->
+                  <!-- EndereÃƒÂ§o -->
                   <div style="grid-column: 5; grid-row: 1 / span 2;">
                      <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">${addrTypeLabel}</span>
                      <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
@@ -20624,7 +20624,7 @@ window.searchRelacionamento = async function() {
                   <div style="grid-column: 3 / span 2; grid-row: 2;">
                      <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">E-mail</span>
                      <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
-                       <i data-lucide="mail" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span style="word-break: break-all;">${hasEmail ? fullCustomer.email : 'NÃ£o informado'}</span>
+                       <i data-lucide="mail" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span style="word-break: break-all;">${hasEmail ? fullCustomer.email : 'NÃƒÂ£o informado'}</span>
                        ${hasEmail ? `<button onclick="copyToClipboard('${fullCustomer.email}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar E-mail"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>` : ''}
                      </span>
                   </div>
@@ -20656,7 +20656,7 @@ window.searchRelacionamento = async function() {
     } catch (e) {
         console.error("Erro ao buscar receivable-bills", e);
     }
-    // Filtrar apenas tÃ­tulos a receber que sÃ£o de venda de lotes (documentId = CT)
+    // Filtrar apenas tÃƒÂ­tulos a receber que sÃƒÂ£o de venda de lotes (documentId = CT)
     receivableBills = receivableBills.filter(rb => String(rb.documentId || '').trim().toUpperCase() === 'CT');
 
     const getBestContractMatch = (rb, contratosArray) => {
@@ -20672,7 +20672,7 @@ window.searchRelacionamento = async function() {
             if (c.id && (String(rb.salesContractId) === String(c.id) || String(rb.contractId) === String(c.id))) {
                 score += 100;
             } else if (c.id && (rb.salesContractId || rb.contractId)) {
-                // Se ambos tÃªm IDs explÃ­citos e eles NÃƒO batem, nÃ£o devemos mesclÃ¡-los de jeito nenhum!
+                // Se ambos tÃƒÂªm IDs explÃƒÂ­citos e eles NÃƒÆ’O batem, nÃƒÂ£o devemos mesclÃƒÂ¡-los de jeito nenhum!
                 score -= 200;
             }
             const origCDoc = String(c.contractNumber || c.number || c.documentNumber || c.id || '').toUpperCase().trim();
@@ -20696,7 +20696,7 @@ window.searchRelacionamento = async function() {
                 let clean = String(name).trim();
                 if (entId) {
                     const eStr = String(entId);
-                    if (clean === eStr) return ""; // Unidade Ã© apenas o ID do empreendimento (Faltante)
+                    if (clean === eStr) return ""; // Unidade ÃƒÂ© apenas o ID do empreendimento (Faltante)
                     if (clean.startsWith(eStr + " - ")) clean = clean.substring(eStr.length + 3);
                     else if (clean.startsWith(eStr + "-")) clean = clean.substring(eStr.length + 1);
                     else if (clean.startsWith(eStr + " ")) clean = clean.substring(eStr.length + 1);
@@ -20720,7 +20720,7 @@ window.searchRelacionamento = async function() {
             if (rbUnitClean && cUnitClean) {
                 if (rbUnitClean === cUnitClean) score += 50;
                 else if (cUnitClean.includes(rbUnitClean) || rbUnitClean.includes(cUnitClean)) score += 30;
-                else score -= 10000; // As unidades limpas sÃ£o explicitamente diferentes
+                else score -= 10000; // As unidades limpas sÃƒÂ£o explicitamente diferentes
             }
             
             if (c.contractDate && rb.issueDate) {
@@ -20839,10 +20839,10 @@ window.searchRelacionamento = async function() {
            unitStr = c.unitId;
        }
 
-       // Resgatar todos os dados reais do receivable-bills (extrato analÃ­tico) que pertencem a este contrato
+       // Resgatar todos os dados reais do receivable-bills (extrato analÃƒÂ­tico) que pertencem a este contrato
        const contractBills = receivableBills.filter(b => String(b._matchedContractId) === String(c.id));
        
-       // Vamos pegar o 'rb' primÃ¡rio para usar como referÃªncia de unidade/documento, se houver
+       // Vamos pegar o 'rb' primÃƒÂ¡rio para usar como referÃƒÂªncia de unidade/documento, se houver
        const rb = contractBills.length > 0 ? contractBills[0] : null;
        
        if (rb && rb.unityName) {
@@ -20894,7 +20894,7 @@ window.searchRelacionamento = async function() {
            console.error("Erro ao buscar unitDetails para formatar contrato", e);
        }
 
-       // Se o contrato ainda for puramente numÃ©rico (como 11667), vamos tentar buscar do prÃ³prio Sienge
+       // Se o contrato ainda for puramente numÃƒÂ©rico (como 11667), vamos tentar buscar do prÃƒÂ³prio Sienge
        if (/^\d+$/.test(String(realContractStr)) && c.id) {
            try {
                const contractUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${c.id}`;
@@ -20960,7 +20960,7 @@ window.searchRelacionamento = async function() {
            statusText = "Quitado";
            badgeColor = "#059669";
        } else if (isSubjudice) {
-           statusText = "Sub JÃºdice";
+           statusText = "Sub JÃƒÂºdice";
            badgeColor = "#f59e0b";
        } else if (isDefaulting) {
            statusText = "Inadimplente";
@@ -21021,7 +21021,7 @@ window.searchRelacionamento = async function() {
     });
 
     if (results.length === 0) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px;">O cliente nÃ£o possui contratos registrados.</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px;">O cliente nÃƒÂ£o possui contratos registrados.</td></tr>';
       return;
     }
 
@@ -21089,7 +21089,7 @@ document.addEventListener('tabChanged', async (e) => {
          ccs = ccs.filter(c => {
             const custom = customFields[c.id] || {};
             const tipo = custom.tipo_cc || '';
-            return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'IncorporaÃ§Ã£o';
+            return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'IncorporaÃƒÂ§ÃƒÂ£o';
          });
          
          // Sort by ID ascending
@@ -21195,13 +21195,13 @@ setTimeout(() => {
     }
 }, 2000);
 
-// --- GERENCIAMENTO DE OPÃ‡Ãƒâ€¢ES (CANAL E LEMBRETE) ---
+// --- GERENCIAMENTO DE OPÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES (CANAL E LEMBRETE) ---
 function getCanonicalOptionList(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
   const canonical = isCanal
-    ? ['LigaÃ§Ã£o', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Retorno Agendado']
-    : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'AprovaÃ§Ã£o Gestor'];
+    ? ['LigaÃƒÂ§ÃƒÂ£o', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Retorno Agendado']
+    : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'AprovaÃƒÂ§ÃƒÂ£o Gestor'];
 
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
@@ -21234,7 +21234,7 @@ window.openOptionsEditor = function(type) {
     currentOptions = merged;
     localStorage.setItem(storageKey, JSON.stringify(merged));
   }
-  if (!isCanal && !currentOptions.includes('AprovaÃ§Ã£o Gestor')) currentOptions.push('AprovaÃ§Ã£o Gestor');
+  if (!isCanal && !currentOptions.includes('AprovaÃƒÂ§ÃƒÂ£o Gestor')) currentOptions.push('AprovaÃƒÂ§ÃƒÂ£o Gestor');
   
   // Create Modal Overlay
   const overlay = document.createElement('div');
@@ -21293,12 +21293,12 @@ window.openOptionsEditor = function(type) {
     </div>
     <div id="options-list-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 20px; padding-right: 8px; padding-left: 2px; padding-top: 2px;"></div>
     <div style="display: flex; gap: 10px; margin-bottom: 25px;">
-      <input type="text" class="custom-input" id="new-option-input" placeholder="Nova opÃ§Ã£o..." style="flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onkeypress="if(event.key === 'Enter') addOptionToList()">
+      <input type="text" class="custom-input" id="new-option-input" placeholder="Nova opÃƒÂ§ÃƒÂ£o..." style="flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; transition: all 0.2s;" onkeypress="if(event.key === 'Enter') addOptionToList()">
       <button onclick="addOptionToList()" class="btn btn-primary" style="padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; display: flex; align-items: center; gap: 6px; font-weight: 600;"><i data-lucide="plus" style="width: 16px; height: 16px;"></i> Adicionar</button>
     </div>
     <div style="display: flex; gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
       <button style="flex: 1; padding: 10px 18px; font-size: 0.95rem; background: #f97316; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#ea580c'" onmouseout="this.style.background='#f97316'" onclick="closeOptionsEditor()">Cancelar</button>
-      <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="saveOptionsList('${type}')">Salvar AlteraÃ§Ãµes</button>
+      <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="saveOptionsList('${type}')">Salvar AlteraÃƒÂ§ÃƒÂµes</button>
     </div>
   `;
   
@@ -21313,7 +21313,7 @@ window.openOptionsEditor = function(type) {
         return `
         <div class="option-item" style="${isDisabled ? 'opacity: 0.6;' : ''}">
           <span style="font-size: 0.95rem; color: #334155; font-weight: 500; ${isDisabled ? 'text-decoration: line-through;' : ''}">${opt} ${isDisabled ? '(Inativo)' : ''}</span>
-          ${(opt === 'Nota interna' || opt === 'AprovaÃ§Ã£o Gestor') 
+          ${(opt === 'Nota interna' || opt === 'AprovaÃƒÂ§ÃƒÂ£o Gestor') 
             ? `<button class="option-trash-btn" style="color: #94a3b8; cursor: not-allowed;" title="Fixo no sistema" disabled><i data-lucide="lock" style="width: 16px; height: 16px;"></i></button>`
             : `<button class="option-trash-btn" onclick="removeOptionFromList(${index})" title="Remover/Desativar"><i data-lucide="trash-2" style="width: 16px; height: 16px;"></i></button>`
           }
@@ -21326,12 +21326,12 @@ window.openOptionsEditor = function(type) {
   window.removeOptionFromList = function(index) {
     const optValue = window.tempOptionsList[index];
     
-    if (optValue === "Nota interna" || optValue === "AprovaÃ§Ã£o Gestor") {
-      alert("A opÃ§Ã£o '" + optValue + "' Ã© nativa do sistema e nÃ£o pode ser removida.");
+    if (optValue === "Nota interna" || optValue === "AprovaÃƒÂ§ÃƒÂ£o Gestor") {
+      alert("A opÃƒÂ§ÃƒÂ£o '" + optValue + "' ÃƒÂ© nativa do sistema e nÃƒÂ£o pode ser removida.");
       return;
     }
     
-    // Verifica se hÃ¡ uso deste lembrete/canal
+    // Verifica se hÃƒÂ¡ uso deste lembrete/canal
     let hasOccurrence = false;
     Object.values(AppState.notes || {}).forEach(occList => {
        occList.forEach(occ => {
@@ -21344,13 +21344,13 @@ window.openOptionsEditor = function(type) {
     let disabledOptions = JSON.parse(localStorage.getItem('crm_disabled_options') || '[]');
     
     if (hasOccurrence) {
-       alert('NÃ£o Ã© possÃ­vel excluir esta opÃ§Ã£o pois jÃ¡ existem ocorrÃªncias cadastradas com ela. Ela serÃ¡ apenas desativada.');
+       alert('NÃƒÂ£o ÃƒÂ© possÃƒÂ­vel excluir esta opÃƒÂ§ÃƒÂ£o pois jÃƒÂ¡ existem ocorrÃƒÂªncias cadastradas com ela. Ela serÃƒÂ¡ apenas desativada.');
        if (!disabledOptions.includes(optValue)) {
            disabledOptions.push(optValue);
            localStorage.setItem('crm_disabled_options', JSON.stringify(disabledOptions));
        } else {
-           // Se jÃ¡ estava desativada, nÃ£o fazemos nada ou reativamos?
-           // O usuÃ¡rio nÃ£o pediu para reativar, entÃ£o deixamos desativada
+           // Se jÃƒÂ¡ estava desativada, nÃƒÂ£o fazemos nada ou reativamos?
+           // O usuÃƒÂ¡rio nÃƒÂ£o pediu para reativar, entÃƒÂ£o deixamos desativada
        }
     } else {
        window.tempOptionsList.splice(index, 1);
@@ -21374,7 +21374,7 @@ window.openOptionsEditor = function(type) {
   
   window.saveOptionsList = function(t) {
     if (window.tempOptionsList.length === 0) {
-      alert('A lista precisa ter pelo menos uma opÃ§Ã£o.');
+      alert('A lista precisa ter pelo menos uma opÃƒÂ§ÃƒÂ£o.');
       return;
     }
     const sKey = t === 'canal' ? 'crm_canal_options' : 'crm_lembrete_options';
@@ -21419,11 +21419,11 @@ window.renderSelectOptions = function(type) {
     currentOptions = [...new Set([...defaultOptions, ...currentOptions].filter(v => typeof v === 'string' && v.trim()))];
     localStorage.setItem(storageKey, JSON.stringify(currentOptions));
   }
-  if (!isCanal && !currentOptions.includes('AprovaÃ§Ã£o Gestor')) currentOptions.push('AprovaÃ§Ã£o Gestor');
+  if (!isCanal && !currentOptions.includes('AprovaÃƒÂ§ÃƒÂ£o Gestor')) currentOptions.push('AprovaÃƒÂ§ÃƒÂ£o Gestor');
   
   const disabledOptions = JSON.parse(localStorage.getItem('crm_disabled_options') || '[]');
 
-  // 1. Atualizar select da tela de ocorrÃªncias
+  // 1. Atualizar select da tela de ocorrÃƒÂªncias
   const selectEl = document.getElementById(selectId);
   if (selectEl) {
     const currentVal = selectEl.value;
@@ -21478,7 +21478,7 @@ window.renderSelectOptions = function(type) {
   }
 };
 
-// Carregar as opÃ§Ãµes salvas no boot
+// Carregar as opÃƒÂ§ÃƒÂµes salvas no boot
 document.addEventListener('DOMContentLoaded', () => {
   renderSelectOptions('canal');
   renderSelectOptions('lembrete');
@@ -21488,7 +21488,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// --- INTELIGÃŠNCIA DE PROMESSAS ---
+// --- INTELIGÃƒÅ NCIA DE PROMESSAS ---
 window.checkAndAutomatePromises = function() {
   const notes = AppState.notes || {};
   const mockData = window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : [];
@@ -21533,7 +21533,7 @@ window.checkAndAutomatePromises = function() {
                   allPaid = false;
                 }
               } else {
-                // Se nÃ£o achou a parcela no mock, assumimos que nÃ£o pagou para evitar falsos positivos
+                // Se nÃƒÂ£o achou a parcela no mock, assumimos que nÃƒÂ£o pagou para evitar falsos positivos
                 allPaid = false; 
               }
             } else {
@@ -21549,7 +21549,7 @@ window.checkAndAutomatePromises = function() {
               hasChanges = true;
             }
           } else {
-            // NÃ£o pagou todas. Verificar se atrasou.
+            // NÃƒÂ£o pagou todas. Verificar se atrasou.
             if (occ.promiseDate && occ.promiseDate < todayIso) {
               if (occ.promiseStatus === "Pendente") {
                 occ.promiseStatus = "Quebrado";
@@ -21604,7 +21604,7 @@ window.renderAgendaAlerts = function() {
               </div>
             </div>
             <button class="btn btn-outline btn-sm" onclick="dismissAgendaAlert(${custIdStr}, ${index})" style="background: white; border-color: #c8e6c9; color: #2e7d32;">
-              Dar CiÃªncia
+              Dar CiÃƒÂªncia
             </button>
           </div>
         `;
@@ -21636,7 +21636,7 @@ window.toggleCompanyFilter = function(companyId, checked) {
     renderFilaCobranca();
   }
 };
-// Listener global de seguranÃ§a para o Ã­cone de fases processuais
+// Listener global de seguranÃƒÂ§a para o ÃƒÂ­cone de fases processuais
 document.addEventListener('click', (e) => {
   const icon = e.target.closest('#btn-config-jud-fase');
   if (icon) {
@@ -21655,7 +21655,7 @@ window.saveJudicialOccurrence = function() {
   const pinEl = document.getElementById("jud-pin-checkbox");
 
   const fase = faseEl ? faseEl.value : "";
-  if (fase === "Proposta de renegociaÃ§Ã£o") {
+  if (fase === "Proposta de renegociaÃƒÂ§ÃƒÂ£o") {
       if (typeof window.applyRenegotiationText === 'function') {
           if (window.applyRenegotiationText('jud-') === false) {
               return;
@@ -21672,13 +21672,13 @@ window.saveJudicialOccurrence = function() {
     return;
   }
   if (!text) {
-    alert("Descreva os detalhes da ocorrÃªncia judicial.");
+    alert("Descreva os detalhes da ocorrÃƒÂªncia judicial.");
     return;
   }
   
-  if (fase !== 'Nota Interna' && fase !== 'Proposta de renegociaÃ§Ã£o') {
+  if (fase !== 'Nota Interna' && fase !== 'Proposta de renegociaÃƒÂ§ÃƒÂ£o') {
     if (!prazo) {
-      alert("Informe o prazo para resoluÃ§Ã£o.");
+      alert("Informe o prazo para resoluÃƒÂ§ÃƒÂ£o.");
       return;
     }
   }
@@ -21759,7 +21759,7 @@ window.copiarEConsultarProcesso = function() {
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(val).then(() => {
-                alert("NÃºmero " + val + " copiado para a Ã¡rea de transferÃªncia!\nCole-o (Ctrl+V) na pÃ¡gina de Consulta do Tribunal, caso nÃ£o preencha sozinho.");
+                alert("NÃƒÂºmero " + val + " copiado para a ÃƒÂ¡rea de transferÃƒÂªncia!\nCole-o (Ctrl+V) na pÃƒÂ¡gina de Consulta do Tribunal, caso nÃƒÂ£o preencha sozinho.");
                 window.open(eprocUrl, "_blank");
             }).catch(err => {
                 window.open(eprocUrl, "_blank");
@@ -21768,11 +21768,11 @@ window.copiarEConsultarProcesso = function() {
             // Fallback
             processInput.select();
             document.execCommand('copy');
-            alert("NÃºmero copiado!\nCole-o (Ctrl+V) na pÃ¡gina de Consulta do Tribunal, caso nÃ£o preencha sozinho.");
+            alert("NÃƒÂºmero copiado!\nCole-o (Ctrl+V) na pÃƒÂ¡gina de Consulta do Tribunal, caso nÃƒÂ£o preencha sozinho.");
             window.open(eprocUrl, "_blank");
         }
     } else {
-        alert("Por favor, preencha o nÃºmero do processo primeiro.");
+        alert("Por favor, preencha o nÃƒÂºmero do processo primeiro.");
     }
 };
 
@@ -21851,7 +21851,7 @@ window.renderJudicialTimeline = function() {
     }
 
     let repetirBtnHtml = "";
-    if (occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociaÃ§Ã£o') {
+    if (occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociaÃƒÂ§ÃƒÂ£o') {
         repetirBtnHtml = `
             <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc(${index})" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
                <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Repetir
@@ -22017,14 +22017,14 @@ window.errataJudicialOcc = function(customerId, occDate) {
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode inserir uma errata.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode inserir uma errata.");
     return;
   }
   
-  const newText = prompt("Insira a Errata (o texto anterior ficarÃ¡ tachado):");
+  const newText = prompt("Insira a Errata (o texto anterior ficarÃƒÂ¡ tachado):");
   if (newText === null) return;
   if (!newText.trim()) {
-    alert("O texto nÃ£o pode ser vazio.");
+    alert("O texto nÃƒÂ£o pode ser vazio.");
     return;
   }
   
@@ -22043,20 +22043,20 @@ window.editJudicialOccReal = function(customerId, occDate) {
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
-      alert("O prazo de 24 horas para ediÃ§Ã£o expirou. Utilize a Errata.");
+      alert("O prazo de 24 horas para ediÃƒÂ§ÃƒÂ£o expirou. Utilize a Errata.");
       return;
   }
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode editÃ¡-la.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode editÃƒÂ¡-la.");
     return;
   }
   
-  const newText = prompt("Edite o texto da ocorrÃªncia:", occ.text);
+  const newText = prompt("Edite o texto da ocorrÃƒÂªncia:", occ.text);
   if (newText === null) return;
   if (!newText.trim()) {
-    alert("O texto da ocorrÃªncia nÃ£o pode ser vazio.");
+    alert("O texto da ocorrÃƒÂªncia nÃƒÂ£o pode ser vazio.");
     return;
   }
   
@@ -22073,17 +22073,17 @@ window.cancelJudicialOcc = function(customerId, occDate) {
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
-      alert("O prazo de 24 horas expirou. NÃ£o Ã© mais possÃ­vel apagar ou cancelar esta ocorrÃªncia.");
+      alert("O prazo de 24 horas expirou. NÃƒÂ£o ÃƒÂ© mais possÃƒÂ­vel apagar ou cancelar esta ocorrÃƒÂªncia.");
       return;
   }
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
-    alert("Apenas o autor da ocorrÃªncia pode cancelÃ¡-la.");
+    alert("Apenas o autor da ocorrÃƒÂªncia pode cancelÃƒÂ¡-la.");
     return;
   }
   
-  const confirmDelete = confirm("Tem certeza que deseja apagar/excluir esta ocorrÃªncia judicial?");
+  const confirmDelete = confirm("Tem certeza que deseja apagar/excluir esta ocorrÃƒÂªncia judicial?");
   if (!confirmDelete) return;
   
   AppState.judNotes[customerId] = list.filter(x => x.date !== occDate);
@@ -22177,7 +22177,7 @@ window.openAnexosClienteModal = function(customerId) {
         const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
         const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
         
-        // Buscar o contrato de venda diretamente pelo ID e nÃ£o pela unidade
+        // Buscar o contrato de venda diretamente pelo ID e nÃƒÂ£o pela unidade
         fetch(`http://${host}:${port}/sienge-proxy/sales-contracts/${saleId}`, {
             headers: { 'Authorization': typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '' }
         }).then(res => res.json()).then(async (mainC) => {
@@ -22201,7 +22201,7 @@ window.openAnexosClienteModal = function(customerId) {
                 customers: mainC.salesContractCustomers || []
             };
 
-            // Disparar o handleClientMatch nativo do App se disponÃ­vel, para popular demais informaÃ§Ãµes
+            // Disparar o handleClientMatch nativo do App se disponÃƒÂ­vel, para popular demais informaÃƒÂ§ÃƒÂµes
             if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
                 SiengeApiService.getCustomerDetails(customerId).then(res => {
                     const cm = { id: customerId, ...res };
@@ -22249,8 +22249,8 @@ window.openAnexosClienteModal = function(customerId) {
                 renderAnexosModule();
                 
                 if (localFiles && localFiles.length > 0) {
-                    // JÃ¡ existem arquivos salvos localmente (tagueados)
-                    // NecessÃ¡rio regerar o previewUrl pois a URL de blob morre com a sessÃ£o
+                    // JÃƒÂ¡ existem arquivos salvos localmente (tagueados)
+                    // NecessÃƒÂ¡rio regerar o previewUrl pois a URL de blob morre com a sessÃƒÂ£o
                     localFiles.forEach(f => {
                         if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
                             try { f.previewUrl = URL.createObjectURL(f.file); } catch(e) {}
@@ -22279,7 +22279,7 @@ window.openAnexosClienteModal = function(customerId) {
         }
     }
   } else {
-     alert('MÃ³dulo de anexos nÃ£o estÃ¡ carregado.');
+     alert('MÃƒÂ³dulo de anexos nÃƒÂ£o estÃƒÂ¡ carregado.');
   }
 };
 
@@ -22317,9 +22317,9 @@ document.addEventListener('DOMContentLoaded', () => {
              const dateStr = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
              
              if (action === 'approve_occurrence') {
-                textEl.value = `Referente Ã  ocorrÃªncia de ${dateStr}:\nDE ACORDO / APROVADO. `;
+                textEl.value = `Referente ÃƒÂ  ocorrÃƒÂªncia de ${dateStr}:\nDE ACORDO / APROVADO. `;
              } else if (action === 'request_info_occurrence') {
-                textEl.value = `Referente Ã  ocorrÃªncia de ${dateStr}:\nSOLICITO MAIS INFORMAÃ‡Ãƒâ€¢ES: `;
+                textEl.value = `Referente ÃƒÂ  ocorrÃƒÂªncia de ${dateStr}:\nSOLICITO MAIS INFORMAÃƒâ€¡ÃƒÆ’Ã¢â‚¬Â¢ES: `;
              }
              textEl.focus();
              
@@ -22337,7 +22337,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.enviarParaJuridico = async function(customerId, saleId) {
-  // Abre a ficha do cliente (caso nÃ£o esteja aberta para este cliente)
+  // Abre a ficha do cliente (caso nÃƒÂ£o esteja aberta para este cliente)
   const viewDetails = document.getElementById("view-customer-details");
   const isDetailsOpen = viewDetails && viewDetails.style.display !== "none" && viewDetails.style.display !== "";
   
@@ -22345,30 +22345,30 @@ window.enviarParaJuridico = async function(customerId, saleId) {
       await viewCustomerCard(customerId, saleId);
   }
   
-  // ForÃ§a a aba judicial a aparecer
+  // ForÃƒÂ§a a aba judicial a aparecer
   const btnJudicial = document.getElementById("btn-tab-cobranca-judicial");
   if (btnJudicial) {
       btnJudicial.style.display = "inline-flex";
   }
 
-  // Mostra um aviso orientando a criar a ocorrÃªncia
-  showToast("Registre uma OcorrÃªncia Judicial para alterar o status no Sienge.", "info");
+  // Mostra um aviso orientando a criar a ocorrÃƒÂªncia
+  showToast("Registre uma OcorrÃƒÂªncia Judicial para alterar o status no Sienge.", "info");
 };
 
 // -------------------------------------------------------
-// MÃ¡scara de Moeda pt-BR para campos do Distrato
+// MÃƒÂ¡scara de Moeda pt-BR para campos do Distrato
 // -------------------------------------------------------
 
 function applyDistratoCurrencyMask() {
-  // Formata enquanto o usuÃ¡rio digita
+  // Formata enquanto o usuÃƒÂ¡rio digita
   function maskCurrencyInput(el) {
-    // Pega apenas dÃ­gitos
+    // Pega apenas dÃƒÂ­gitos
     let digits = el.value.replace(/\D/g, '');
     if (!digits) { el.value = ''; return; }
 
-    // Trata como centavos: Ãºltimos 2 dÃ­gitos = centavos
-    // Mas se o usuÃ¡rio nÃ£o digitou suficiente, mostra sem centavos
-    // EstratÃ©gia: acumular dÃ­gitos e formatar como X.XXX,XX
+    // Trata como centavos: ÃƒÂºltimos 2 dÃƒÂ­gitos = centavos
+    // Mas se o usuÃƒÂ¡rio nÃƒÂ£o digitou suficiente, mostra sem centavos
+    // EstratÃƒÂ©gia: acumular dÃƒÂ­gitos e formatar como X.XXX,XX
     let number = parseInt(digits, 10);
     // Divide por 100 para ter os centavos
     let formatted = (number / 100).toLocaleString('pt-BR', {
@@ -22394,13 +22394,13 @@ function applyDistratoCurrencyMask() {
       // Permitir: backspace, delete, tab, arrows, home, end
       const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
       if (allowed.includes(e.key)) return;
-      // SÃ³ deixar dÃ­gitos
+      // SÃƒÂ³ deixar dÃƒÂ­gitos
       if (!/^[0-9]$/.test(e.key)) {
         e.preventDefault();
       }
     };
 
-    // Remover o oninput inline para nÃ£o chamar calculateDistrato duas vezes
+    // Remover o oninput inline para nÃƒÂ£o chamar calculateDistrato duas vezes
     el.removeAttribute('oninput');
     el.addEventListener('keydown', el._currencyKeydownHandler);
     el.addEventListener('input', el._currencyMaskHandler);
@@ -22409,7 +22409,7 @@ function applyDistratoCurrencyMask() {
     if (el.value === '0' || el.value === '') {
       el.value = '0,00';
     } else {
-      // Se jÃ¡ tiver valor numÃ©rico, formatar
+      // Se jÃƒÂ¡ tiver valor numÃƒÂ©rico, formatar
       let num = parseFloat(el.value) || 0;
       el.value = num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
@@ -22554,7 +22554,7 @@ window.initAdvFiltersUI = function() {
         }
     });
 
-    // AÃ§Ãµes de Marcar/Desmarcar Todos nos Dropdowns
+    // AÃƒÂ§ÃƒÂµes de Marcar/Desmarcar Todos nos Dropdowns
     document.addEventListener('click', (e) => {
         if (e.target.matches('.btn-check-all')) {
             const list = e.target.closest('.adv-dropdown-list');
@@ -22608,7 +22608,7 @@ window.initAdvFiltersUI = function() {
                 }
             }
 
-            // LÃ³gica de cruzamento avanÃ§ado (Empresa <-> CCusto <-> Cidade)
+            // LÃƒÂ³gica de cruzamento avanÃƒÂ§ado (Empresa <-> CCusto <-> Cidade)
             if (container && ['adv-dropdown-empresa-container', 'adv-dropdown-ccusto-container', 'adv-dropdown-cidade-container'].includes(container.id)) {
                 
                 const selEmp = Array.from(document.querySelectorAll('#adv-dropdown-empresa-container input[type="checkbox"]:checked')).map(cb => cb.value);
@@ -22704,7 +22704,7 @@ window.openAdvFiltersModal = function(context = 'fila') {
                 const cleanName = ccName.replace(new RegExp(`^${c.costCenterId}\\s*-\\s*`), '');
                 ccustos.set(c.costCenterId, { label: `${c.costCenterId} - ${cleanName}`, companyId: c.companyId });
                 
-                // Extrai a cidade para popular os filtros (mesma lÃ³gica da AtribuiÃ§Ã£o)
+                // Extrai a cidade para popular os filtros (mesma lÃƒÂ³gica da AtribuiÃƒÂ§ÃƒÂ£o)
                 const city = window.extractCityFromCostCenter(c.costCenterId, ccName);
                 if (city) {
                     cities.add(city);
@@ -22772,7 +22772,7 @@ window.openAdvFiltersModal = function(context = 'fila') {
         const ccItems = Array.from(ccustos.entries()).map(([k,v]) => ({id: k, label: v.label, companyId: v.companyId})).sort((a,b)=> parseInt(a.id) - parseInt(b.id));
         renderDropdown('adv-dropdown-ccusto-container', ccItems, window.advFilters.ccusto, true);
         
-        // Dispara initial trigger para as lÃ³gicas de cruzamento dinÃ¢mico
+        // Dispara initial trigger para as lÃƒÂ³gicas de cruzamento dinÃƒÂ¢mico
         setTimeout(() => {
             if ((window.advFilters.empresa && window.advFilters.empresa.length > 0) || 
                 (window.advFilters.ccusto && window.advFilters.ccusto.length > 0) || 
@@ -22854,7 +22854,7 @@ window.applyAdvFilters = async function(keepOpen = false) {
     window.advFilters.ccusto = getDropdown('adv-dropdown-ccusto-container');
     window.advFilters.operador = getDropdown('adv-dropdown-operador-container');
     
-    // Sincronizar visualmente as abas de operador (filtros rÃ¡pidos)
+    // Sincronizar visualmente as abas de operador (filtros rÃƒÂ¡pidos)
     if (window.advFilters.operador.length === 1) {
         const selectedOp = window.advFilters.operador[0];
         let found = false;
@@ -22904,11 +22904,11 @@ window.applyAdvFilters = async function(keepOpen = false) {
         }
     }
     
-    // --- LÃ“GICA DE CONSUMO DA API PARA O FILTRO PAGAMENTO RECENTE ---
+    // --- LÃƒâ€œGICA DE CONSUMO DA API PARA O FILTRO PAGAMENTO RECENTE ---
     const applyBtn = document.querySelector('button[onclick="applyAdvFilters()"]') || document.querySelector('.adv-filters-footer .btn-primary');
     
-    // A busca na API agora acontece em SEGUNDO PLANO na funÃ§Ã£o window.prefetchRecentPayments()!
-    // Aqui no applyAdvFilters, nÃ£o faremos mais requisiÃ§Ãµes lentas, serÃ¡ tudo instantÃ¢neo.
+    // A busca na API agora acontece em SEGUNDO PLANO na funÃƒÂ§ÃƒÂ£o window.prefetchRecentPayments()!
+    // Aqui no applyAdvFilters, nÃƒÂ£o faremos mais requisiÃƒÂ§ÃƒÂµes lentas, serÃƒÂ¡ tudo instantÃƒÂ¢neo.
     
     if (!keepOpen) {
         window.closeAdvFiltersModal();
@@ -22926,7 +22926,7 @@ window.hasPrefetchedPayments = false;
 window.prefetchRecentPayments = async function(forceRefresh = false) {
     if (window.hasPrefetchedPayments && !forceRefresh) return;
     
-    // Se o paidMap jÃ¡ foi populado pelo Firebase Cache e tem dados, NÃƒO BUSQUE de novo!
+    // Se o paidMap jÃƒÂ¡ foi populado pelo Firebase Cache e tem dados, NÃƒÆ’O BUSQUE de novo!
     if (!forceRefresh && window.advFilters && window.advFilters.paidMap && window.advFilters.paidMap.size > 0) {
         window.hasPrefetchedPayments = true;
         return;
@@ -22948,7 +22948,7 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         
         const today = new Date();
         const dateChunks = [];
-        // Quebra em blocos de 6 dias para garantir que nunca passarÃ¡ do limite de 500 do Sienge
+        // Quebra em blocos de 6 dias para garantir que nunca passarÃƒÂ¡ do limite de 500 do Sienge
         for (let i = 0; i < 30; i += 6) {
             const chunkEnd = new Date(today);
             chunkEnd.setDate(chunkEnd.getDate() - i);
@@ -22966,7 +22966,7 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         
         window.advFilters.paidMap = window.advFilters.paidMap || new Map();
         
-        // Faz a busca empresa por empresa, bloco por bloco, de forma sequencial para nÃ£o travar o navegador
+        // Faz a busca empresa por empresa, bloco por bloco, de forma sequencial para nÃƒÂ£o travar o navegador
         for (const companyId of uniqueCompanies) {
             for (const chunk of dateChunks) {
                 try {
@@ -22977,7 +22977,7 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
                             if (bId) {
                                 let validDates = [];
                                 
-                                // No Sienge Bulk Data, 'receipts' vem na raiz do objeto do tÃ­tulo (diferente da API v1 padrÃ£o)
+                                // No Sienge Bulk Data, 'receipts' vem na raiz do objeto do tÃƒÂ­tulo (diferente da API v1 padrÃƒÂ£o)
                                 if (item.receipts && Array.isArray(item.receipts)) {
                                     item.receipts.forEach(receipt => {
                                         if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) {
@@ -22986,7 +22986,7 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
                                     });
                                 }
                                 
-                                // Fallback caso ainda venha aninhado (sÃ³ por garantia)
+                                // Fallback caso ainda venha aninhado (sÃƒÂ³ por garantia)
                                 if (item.receiptsCategories && Array.isArray(item.receiptsCategories)) {
                                     item.receiptsCategories.forEach(cat => {
                                         if (cat.receipts && Array.isArray(cat.receipts)) {
@@ -23084,12 +23084,12 @@ window.scrollToTop = function() {
 window.exportFilteredToExcel = function() {
     try {
         if (!window.clientList || window.clientList.length === 0) {
-            alert('NÃ£o hÃ¡ dados filtrados para exportar.');
+            alert('NÃƒÂ£o hÃƒÂ¡ dados filtrados para exportar.');
             return;
         }
 
         if (typeof XLSX === 'undefined') {
-            alert('A biblioteca XLSX nÃ£o foi carregada corretamente. Atualize a pÃ¡gina e tente novamente.');
+            alert('A biblioteca XLSX nÃƒÂ£o foi carregada corretamente. Atualize a pÃƒÂ¡gina e tente novamente.');
             return;
         }
 
@@ -23161,11 +23161,11 @@ window.exportFilteredToExcel = function() {
                 "Cliente ID": c.customerId,
                 "Nome do Cliente": c.customerName,
                 "CPF/CNPJ": documentStr, // Enviando como texto limpo pra evitar perda de zero
-                "TÃ­tulos": Array.isArray(c.billIds) ? c.billIds.join(" ; ") : c.billIds,
+                "TÃƒÂ­tulos": Array.isArray(c.billIds) ? c.billIds.join(" ; ") : c.billIds,
                 "Empreendimento ID": getPrimaryCostCenter(c.costCenterId),
                 "Unidade": c.unitName || '',
                 "Operador": c.assignedOperator,
-                "Dias em Atraso (MÃ¡x)": c.maxDaysDelay,
+                "Dias em Atraso (MÃƒÂ¡x)": c.maxDaysDelay,
                 "Parcelas Vencidas": c.billCount || (Array.isArray(c.billIds) ? c.billIds.length : 1),
                 "Valor Atrasado (R$)": (typeof c.overdueValue === 'number' ? c.overdueValue : 0) + (typeof c.overdueCharges === 'number' ? c.overdueCharges : 0),
                 "Sub judice": (c.subjudice === "S" || c.subjudice === true) ? "S" : "N",
@@ -23179,17 +23179,17 @@ window.exportFilteredToExcel = function() {
 
         const range = XLSX.utils.decode_range(ws['!ref']);
         
-        // Ajuste automÃ¡tico de largura das colunas
+        // Ajuste automÃƒÂ¡tico de largura das colunas
         ws['!cols'] = [
             { wch: 10 }, // Empresa ID
             { wch: 10 }, // Cliente ID
             { wch: 40 }, // Nome do Cliente
             { wch: 18 }, // CPF/CNPJ
-            { wch: 20 }, // TÃ­tulos
+            { wch: 20 }, // TÃƒÂ­tulos
             { wch: 18 }, // Empreendimento ID
             { wch: 10 }, // Unidade
             { wch: 15 }, // Operador
-            { wch: 12 }, // Dias em Atraso (MÃ¡x)
+            { wch: 12 }, // Dias em Atraso (MÃƒÂ¡x)
             { wch: 12 }, // Parcelas Vencidas
             { wch: 16 }, // Valor Atrasado (R$)
             { wch: 10 }, // Sub judice
@@ -23197,19 +23197,19 @@ window.exportFilteredToExcel = function() {
             { wch: 30 }  // E-mails
         ];
 
-        // Aplica formato monetÃ¡rio, bordas em toda a grade, e cabeÃ§alho cinza/negrito
+        // Aplica formato monetÃƒÂ¡rio, bordas em toda a grade, e cabeÃƒÂ§alho cinza/negrito
         for (let R = range.s.r; R <= range.e.r; ++R) {
             for (let C = range.s.c; C <= range.e.c; ++C) {
                 const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
                 let cell = ws[cellAddress];
                 
-                // Cria a cÃ©lula caso esteja vazia no range para garantir a grade
+                // Cria a cÃƒÂ©lula caso esteja vazia no range para garantir a grade
                 if (!cell) {
                     cell = { t: 's', v: '' };
                     ws[cellAddress] = cell;
                 }
                 
-                // ConfiguraÃ§Ã£o base de bordas e alinhamento
+                // ConfiguraÃƒÂ§ÃƒÂ£o base de bordas e alinhamento
                 cell.s = {
                     border: {
                         top: { style: "thin", color: { rgb: "000000" } },
@@ -23221,7 +23221,7 @@ window.exportFilteredToExcel = function() {
                     font: { name: "Calibri", sz: 11 }
                 };
 
-                // ConfiguraÃ§Ã£o do CabeÃ§alho
+                // ConfiguraÃƒÂ§ÃƒÂ£o do CabeÃƒÂ§alho
                 if (R === 0) {
                     cell.s.fill = { fgColor: { rgb: "E2E8F0" } }; // Cinza suave
                     cell.s.font.bold = true;
@@ -23229,23 +23229,23 @@ window.exportFilteredToExcel = function() {
                     cell.s.alignment.horizontal = "center";
                 }
                 
-                // ConfiguraÃ§Ã£o da coluna de Valor (index 10) nas linhas de dados
+                // ConfiguraÃƒÂ§ÃƒÂ£o da coluna de Valor (index 10) nas linhas de dados
                 if (R > 0 && C === 10 && cell.t === 'n') {
-                    cell.z = '#,##0.00'; // Formato numÃ©rico nativo
+                    cell.z = '#,##0.00'; // Formato numÃƒÂ©rico nativo
                 }
             }
         }
 
         // Criar o arquivo virtual e inserir a aba
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Fila de CobranÃ§a");
+        XLSX.utils.book_append_sheet(wb, ws, "Fila de CobranÃƒÂ§a");
 
-        // Fazer o download mÃ¡gico como .xlsx real!
+        // Fazer o download mÃƒÂ¡gico como .xlsx real!
         const dateStr = new Date().toISOString().split('T')[0];
         XLSX.writeFile(wb, `relatorio_cobranca_${dateStr}.xlsx`);
         
     } catch (error) {
-        console.error("Erro na exportaÃ§Ã£o XLSX:", error);
+        console.error("Erro na exportaÃƒÂ§ÃƒÂ£o XLSX:", error);
         alert("Ocorreu um erro ao gerar o Excel: " + error.message);
     }
 };
@@ -23270,7 +23270,7 @@ window.exportSubjudiceToExcel = function() {
     }
 };
 
-// FunÃ§Ã£o dinÃ¢mica para buscar operadores do localStorage "crm_users"
+// FunÃƒÂ§ÃƒÂ£o dinÃƒÂ¢mica para buscar operadores do localStorage "crm_users"
 window.getDynamicOperators = function(type = 'all') {
     let users = [];
     try {
@@ -23280,32 +23280,32 @@ window.getDynamicOperators = function(type = 'all') {
         } else {
             // Fallback
             users = [
-                { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno" },
-                { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno" },
-                { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno" },
-                { sienge_user: "THAIANE.CORDEIRO", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "externo" }
+                { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno" },
+                { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno" },
+                { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno" },
+                { sienge_user: "THAIANE.CORDEIRO", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "externo" }
             ];
         }
     } catch(e) {
         console.error("Erro ao buscar operadores", e);
     }
     
-    // Fallback caso o CRM local ainda nÃ£o tenha LucÃ©lia carregada.
+    // Fallback caso o CRM local ainda nÃƒÂ£o tenha LucÃƒÂ©lia carregada.
     const fallbackUsers = [
-        { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno", status: "ATIVO" },
-        { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno", status: "ATIVO" },
-        { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno", status: "ATIVO" },
-        { sienge_user: "LUCELIA JUSTO", profile_name: "OPERADOR COBRANÃ‡A", operator_type: "interno", status: "ATIVO" }
+        { sienge_user: "LETICIA.OLIVEIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "MICHELLE.VIEIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "MICHELLE.PEREIRA", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno", status: "ATIVO" },
+        { sienge_user: "LUCELIA JUSTO", profile_name: "OPERADOR COBRANÃƒâ€¡A", operator_type: "interno", status: "ATIVO" }
     ];
     if (users.length === 0) users = fallbackUsers;
     
-    // Filtrar APENAS usuÃ¡rios com perfil exato "OPERADOR COBRANÃ‡A" e que estejam ativos
+    // Filtrar APENAS usuÃƒÂ¡rios com perfil exato "OPERADOR COBRANÃƒâ€¡A" e que estejam ativos
     let ops = users.filter(u => {
         if (!u.profile_name) return false;
         const prof = u.profile_name.trim().toUpperCase();
-        // Somente perfil exato de cobranÃ§a
-        if (prof !== "OPERADOR COBRANÃ‡A") return false;
-        // NÃ£o Ã© inativo
+        // Somente perfil exato de cobranÃƒÂ§a
+        if (prof !== "OPERADOR COBRANÃƒâ€¡A") return false;
+        // NÃƒÂ£o ÃƒÂ© inativo
         if (u.status === "INATIVO") return false;
         return true;
     });
@@ -23341,7 +23341,7 @@ window.SYNC_KEYS = [
     "crm_centros_custo_tipos"
 ];
 
-// FunÃ§Ã£o que baixa configuraÃ§Ãµes na inicializaÃ§Ã£o
+// FunÃƒÂ§ÃƒÂ£o que baixa configuraÃƒÂ§ÃƒÂµes na inicializaÃƒÂ§ÃƒÂ£o
 window.syncGlobalConfigFromFirebase = async function() {
     try {
         if (!window.firebaseDb || !window.firebaseCollections) return;
@@ -23359,7 +23359,7 @@ window.syncGlobalConfigFromFirebase = async function() {
                             const localArr = JSON.parse(localStorage.getItem(k) || "[]");
                             const cloudArr = JSON.parse(globalData[k] || "[]");
                             if (localArr.length > cloudArr.length) {
-                                console.log("[Firebase] Local judiciais tem mais itens que a nuvem. ForÃ§ando upload da versÃ£o local...");
+                                console.log("[Firebase] Local judiciais tem mais itens que a nuvem. ForÃƒÂ§ando upload da versÃƒÂ£o local...");
                                 if (window.forceUploadLocalConfig) {
                                     setTimeout(() => window.forceUploadLocalConfig(true), 2000);
                                 }
@@ -23371,7 +23371,7 @@ window.syncGlobalConfigFromFirebase = async function() {
                     changed = true;
                 }
             });
-            // Sincroniza permissÃµes dinÃ¢micas
+            // Sincroniza permissÃƒÂµes dinÃƒÂ¢micas
             Object.keys(globalData).forEach(k => {
                 if (k.startsWith("crm_perms_") && globalData[k] !== localStorage.getItem(k)) {
                     _originalSetItem.call(localStorage, k, globalData[k]);
@@ -23380,14 +23380,14 @@ window.syncGlobalConfigFromFirebase = async function() {
             });
             
             if (changed) {
-                console.log("[Firebase] ConfiguraÃ§Ãµes alteradas recebidas da nuvem. Recarregando a pÃ¡gina para aplicar...");
+                console.log("[Firebase] ConfiguraÃƒÂ§ÃƒÂµes alteradas recebidas da nuvem. Recarregando a pÃƒÂ¡gina para aplicar...");
                 location.reload();
             } else {
-                console.log("[Firebase] ConfiguraÃ§Ãµes globais jÃ¡ estÃ£o atualizadas com a nuvem.");
+                console.log("[Firebase] ConfiguraÃƒÂ§ÃƒÂµes globais jÃƒÂ¡ estÃƒÂ£o atualizadas com a nuvem.");
             }
         }
     } catch(e) {
-        console.error("Erro na sincronizaÃ§Ã£o:", e);
+        console.error("Erro na sincronizaÃƒÂ§ÃƒÂ£o:", e);
     }
 };
 
@@ -23405,13 +23405,13 @@ window.forceUploadLocalConfig = async function(silent = true) {
             }
         }
         
-        if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase nÃ£o inicializado.");
+        if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase nÃƒÂ£o inicializado.");
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
         await window.firebaseCollections.setDoc(docRef, payload);
         if (!silent) {
-            alert("Ã¢Å“â€Ã¯Â¸Â SUCESSO!\n\nSuas configuraÃ§Ãµes globais, regras de atribuiÃ§Ã£o, personalizaÃ§Ã£o de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe jÃ¡ vai puxar essas configuraÃ§Ãµes.");
+            alert("ÃƒÂ¢Ã…â€œÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â SUCESSO!\n\nSuas configuraÃƒÂ§ÃƒÂµes globais, regras de atribuiÃƒÂ§ÃƒÂ£o, personalizaÃƒÂ§ÃƒÂ£o de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe jÃƒÂ¡ vai puxar essas configuraÃƒÂ§ÃƒÂµes.");
         } else {
-            console.log("ConfiguraÃ§Ãµes locais enviadas para nuvem com sucesso.");
+            console.log("ConfiguraÃƒÂ§ÃƒÂµes locais enviadas para nuvem com sucesso.");
         }
     } catch(e) {
         if (!silent) alert("Erro ao enviar: " + e.message);
@@ -23419,7 +23419,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
     }
 };
 
-// SincronizaÃ§Ã£o em lote de todas as notas (ocorrÃªncias, agenda, jud) para o Firebase
+// SincronizaÃƒÂ§ÃƒÂ£o em lote de todas as notas (ocorrÃƒÂªncias, agenda, jud) para o Firebase
 window.syncAllNotesToFirebase = async function() {
     const statusEl = document.getElementById('firebase-sync-status');
     const setStatus = (msg, color) => {
@@ -23428,14 +23428,14 @@ window.syncAllNotesToFirebase = async function() {
     };
     
     if (!window.firebaseDb || !window.firebaseCollections) {
-        setStatus('Ã¢ÂÅ’ Firebase nÃ£o estÃ¡ inicializado. Tente novamente em alguns instantes.', '#ef4444');
+        setStatus('ÃƒÂ¢Ã‚ÂÃ…â€™ Firebase nÃƒÂ£o estÃƒÂ¡ inicializado. Tente novamente em alguns instantes.', '#ef4444');
         return;
     }
     
     try {
-        setStatus('Ã°Å¸â€â€ž Sincronizando notas de clientes...', '#1d4ed8');
+        setStatus('ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Å¾ Sincronizando notas de clientes...', '#1d4ed8');
         
-        // 1. customer_notes (ocorrÃªncias e promessas)
+        // 1. customer_notes (ocorrÃƒÂªncias e promessas)
         const notes = window.AppState && window.AppState.notes ? window.AppState.notes : 
                       (JSON.parse(localStorage.getItem('crm_moura_notes') || '{}'));
         const noteKeys = Object.keys(notes);
@@ -23447,7 +23447,7 @@ window.syncAllNotesToFirebase = async function() {
                 await window.firebaseCollections.setDoc(docRef, { notes: notes[custId] }, { merge: false });
                 uploadedNotes++;
                 if (uploadedNotes % 10 === 0) {
-                    setStatus(`Ã°Å¸â€â€ž Sincronizando notas... ${uploadedNotes}/${noteKeys.length} clientes`, '#1d4ed8');
+                    setStatus(`ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Å¾ Sincronizando notas... ${uploadedNotes}/${noteKeys.length} clientes`, '#1d4ed8');
                 }
                 // Small delay to avoid rate limiting
                 if (uploadedNotes % 5 === 0) await new Promise(r => setTimeout(r, 200));
@@ -23455,7 +23455,7 @@ window.syncAllNotesToFirebase = async function() {
         }
         
         // 2. jud_notes
-        setStatus('Ã°Å¸â€â€ž Sincronizando notas judiciais...', '#1d4ed8');
+        setStatus('ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Å¾ Sincronizando notas judiciais...', '#1d4ed8');
         const judNotes = window.AppState && window.AppState.judNotes ? window.AppState.judNotes :
                          (JSON.parse(localStorage.getItem('crm_moura_jud_notes') || '{}'));
         let uploadedJud = 0;
@@ -23469,7 +23469,7 @@ window.syncAllNotesToFirebase = async function() {
         }
         
         // 3. agenda_personal_notes
-        setStatus('Ã°Å¸â€â€ž Sincronizando notas pessoais de agenda...', '#1d4ed8');
+        setStatus('ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Å¾ Sincronizando notas pessoais de agenda...', '#1d4ed8');
         const personalNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}');
         for (const key of Object.keys(personalNotes)) {
             if (personalNotes[key] && personalNotes[key].length > 0) {
@@ -23489,12 +23489,12 @@ window.syncAllNotesToFirebase = async function() {
             }
         }
         
-        const msg = `Ã¢Å“â€¦ SincronizaÃ§Ã£o concluÃ­da! ${uploadedNotes} clientes com ocorrÃªncias, ${uploadedJud} com notas judiciais enviados para o Firebase.`;
+        const msg = `ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ SincronizaÃƒÂ§ÃƒÂ£o concluÃƒÂ­da! ${uploadedNotes} clientes com ocorrÃƒÂªncias, ${uploadedJud} com notas judiciais enviados para o Firebase.`;
         setStatus(msg, '#16a34a');
-        setTimeout(() => alert(msg + '\n\nAtualize a pÃ¡gina na Vercel para ver os dados.'), 100);
+        setTimeout(() => alert(msg + '\n\nAtualize a pÃƒÂ¡gina na Vercel para ver os dados.'), 100);
         
     } catch(e) {
-        const errMsg = 'Ã¢ÂÅ’ Erro na sincronizaÃ§Ã£o: ' + e.message;
+        const errMsg = 'ÃƒÂ¢Ã‚ÂÃ…â€™ Erro na sincronizaÃƒÂ§ÃƒÂ£o: ' + e.message;
         setStatus(errMsg, '#ef4444');
         console.error('[SyncNotes] Erro:', e);
     }
@@ -23506,7 +23506,7 @@ const _originalSetItem = localStorage.setItem;
 localStorage.setItem = function(key, value) {
     _originalSetItem.call(this, key, value);
     
-    // Tratamento exclusivo de anotaÃ§Ãµes (mantÃ©m a lÃ³gica anterior)
+    // Tratamento exclusivo de anotaÃƒÂ§ÃƒÂµes (mantÃƒÂ©m a lÃƒÂ³gica anterior)
     if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing) {
         if (window._fbSyncTimeout) clearTimeout(window._fbSyncTimeout);
         window._fbSyncTimeout = setTimeout(() => {
@@ -23536,7 +23536,7 @@ localStorage.setItem = function(key, value) {
         }, 300);
     }
     
-    // Tratamento de ConfiguraÃ§Ãµes Globais
+    // Tratamento de ConfiguraÃƒÂ§ÃƒÂµes Globais
     if ((window.SYNC_KEYS && window.SYNC_KEYS.includes(key)) || key.startsWith("crm_perms_")) {
         if (window._fbConfigTimeout) clearTimeout(window._fbConfigTimeout);
         window._fbConfigTimeout = setTimeout(async () => {
@@ -23555,12 +23555,12 @@ localStorage.setItem = function(key, value) {
                     }
                     const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
-                    console.log("[Firebase] Upload automÃ¡tico: ConfiguraÃ§Ãµes globais atualizadas na nuvem.");
+                    console.log("[Firebase] Upload automÃƒÂ¡tico: ConfiguraÃƒÂ§ÃƒÂµes globais atualizadas na nuvem.");
                 } catch(e) {
                     console.error("Erro ao salvar configs na nuvem:", e);
                 }
             }
-        }, 1500); // 1.5s debounce para nÃ£o sobrecarregar em ediÃ§Ãµes em lote
+        }, 1500); // 1.5s debounce para nÃƒÂ£o sobrecarregar em ediÃƒÂ§ÃƒÂµes em lote
     }
 };
 // ---------------- SHARE AGENDA MODAL ----------------
@@ -23576,7 +23576,7 @@ window.openShareAgendaNoteModal = function(srcKey, originalIndex, isRecurring) {
         
         const note = allNotes[srcKey] ? allNotes[srcKey][originalIndex] : null;
         if(!note) {
-            alert("Erro: Lembrete nÃ£o encontrado na base local. Atualize a pÃ¡gina e tente novamente.");
+            alert("Erro: Lembrete nÃƒÂ£o encontrado na base local. Atualize a pÃƒÂ¡gina e tente novamente.");
             return;
         }
         
@@ -23611,7 +23611,7 @@ window.openShareAgendaNoteModal = function(srcKey, originalIndex, isRecurring) {
                 }
             });
             
-            if(html === '') html = '<p style="font-size:0.85rem; color:#64748b; text-align:center;">NÃ£o hÃ¡ outros operadores para compartilhar.</p>';
+            if(html === '') html = '<p style="font-size:0.85rem; color:#64748b; text-align:center;">NÃƒÂ£o hÃƒÂ¡ outros operadores para compartilhar.</p>';
             modalBody.innerHTML = html;
         }
         
@@ -23619,7 +23619,7 @@ window.openShareAgendaNoteModal = function(srcKey, originalIndex, isRecurring) {
         if (modal) {
             modal.style.display = "flex";
         } else {
-            alert("Erro estrutural: Modal de compartilhamento nÃ£o encontrado no HTML.");
+            alert("Erro estrutural: Modal de compartilhamento nÃƒÂ£o encontrado no HTML.");
         }
     } catch(err) {
         console.error("Erro ao abrir modal de compartilhar:", err);
@@ -23657,14 +23657,14 @@ window.saveShareAgendaNote = function() {
 window.exportAgendaToExcel = function() {
     const tableBody = document.getElementById("agenda-selected-day-body");
     if (!tableBody || tableBody.querySelectorAll('tr').length === 0 || tableBody.innerHTML.includes('Nenhum compromisso')) {
-        alert("NÃ£o hÃ¡ dados na agenda para exportar.");
+        alert("NÃƒÂ£o hÃƒÂ¡ dados na agenda para exportar.");
         return;
     }
 
     const rows = Array.from(tableBody.querySelectorAll("tr"));
     
     // Header
-    let csvContent = "\\uFEFF"; // BOM para acentuaÃ§Ã£o no Excel
+    let csvContent = "\\uFEFF"; // BOM para acentuaÃƒÂ§ÃƒÂ£o no Excel
     csvContent += "Status;Cliente/Unidade;Lembrete/Resumo;R$ Atualizado;Ultimo Contato;Registro\\n";
 
     rows.forEach(row => {
@@ -23758,9 +23758,9 @@ window.calculateSimpleRenegotiation = function(prefix = '') {
 
     if (fbEl) {
         if (sinalPct < 30 || sinalPct > 50) {
-            fbEl.innerHTML = `<span style="color: red;">AtenÃ§Ã£o: A entrada (${sinalPct.toFixed(1)}%) estÃ¡ fora da margem de 30% a 50%.</span>`;
+            fbEl.innerHTML = `<span style="color: red;">AtenÃƒÂ§ÃƒÂ£o: A entrada (${sinalPct.toFixed(1)}%) estÃƒÂ¡ fora da margem de 30% a 50%.</span>`;
         } else {
-            fbEl.innerHTML = `<span style="color: green;">Entrada vÃ¡lida (${sinalPct.toFixed(1)}%).</span>`;
+            fbEl.innerHTML = `<span style="color: green;">Entrada vÃƒÂ¡lida (${sinalPct.toFixed(1)}%).</span>`;
         }
     }
 
@@ -23814,7 +23814,7 @@ window.applyRenegotiationText = function(prefix = '') {
     }
     
     if (!sinalDateRaw) {
-        alert('Por favor, informe a Data do 1Âº Vencimento da entrada.');
+        alert('Por favor, informe a Data do 1Ã‚Âº Vencimento da entrada.');
         return false;
     }
 
@@ -23909,7 +23909,7 @@ window.toggleWhatsappAlert = async function() {
     const customerId = String(AppState.selectedCustomerId);
     if (!customerId || customerId === "null" || customerId === "undefined") return;
     
-    // Certificar de que estÃ¡ atualizado com o servidor antes de gravar
+    // Certificar de que estÃƒÂ¡ atualizado com o servidor antes de gravar
     await loadWhatsappAlerts();
     
     if (window.whatsappAlertsData.clients[customerId]) {
@@ -23993,12 +23993,12 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
     
     if (!isTest && !isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
-        return; // JÃ¡ feito este mÃªs
+        return; // JÃƒÂ¡ feito este mÃƒÂªs
     }
     
     const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
     if (clientIds.length === 0) {
-        if (isTest) alert("Nenhum cliente estÃ¡ com o Alerta de WhatsApp ativado.");
+        if (isTest) alert("Nenhum cliente estÃƒÂ¡ com o Alerta de WhatsApp ativado.");
         return;
     }
     
@@ -24010,11 +24010,11 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
         modal.innerHTML = `
             <div style="background: white; width: 600px; max-width: 90vw; border-radius: 12px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 85vh; display: flex; flex-direction: column;">
                 <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 1.25rem;">Lembrete de Envio de Boletos (WhatsApp)</h2>
-                <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Os seguintes clientes estÃ£o com o alerta ativado para envio manual da remessa mensal via WhatsApp:</p>
+                <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Os seguintes clientes estÃƒÂ£o com o alerta ativado para envio manual da remessa mensal via WhatsApp:</p>
                 <div id="whatsapp-alerts-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; padding-right: 5px;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 12px;">
                     <button class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="document.getElementById('modal-whatsapp-alerts').style.display='none'">Lembrar Mais Tarde</button>
-                    <button class="btn btn-primary" style="background: #0f766e; color: white; border: none; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.markWhatsappAlertsAsDone()">Marcar como ConcluÃ­do neste MÃªs</button>
+                    <button class="btn btn-primary" style="background: #0f766e; color: white; border: none; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.markWhatsappAlertsAsDone()">Marcar como ConcluÃƒÂ­do neste MÃƒÂªs</button>
                 </div>
             </div>
         `;
@@ -24107,7 +24107,7 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     let checkedState = {};
     try { checkedState = JSON.parse(localStorage.getItem('whatsappAlertsIndividual_' + monthKey) || '{}'); } catch(e){}
     
-    // Define a funÃ§Ã£o global se ainda nÃ£o existir
+    // Define a funÃƒÂ§ÃƒÂ£o global se ainda nÃƒÂ£o existir
     if (typeof window.toggleWhatsappIndividual === 'undefined') {
         window.toggleWhatsappIndividual = function(cid, el) {
             const mKey = window.currentMonthStr || new Date().toISOString().slice(0, 7);
@@ -24124,7 +24124,7 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             const email = data.email || "N/D";
             const phone = data.phones && data.phones[0] ? data.phones[0].number : (data.phoneNumber || "N/D");
             
-            // Tenta pegar o tÃ­tulo direto do rawClientList (bTitle)
+            // Tenta pegar o tÃƒÂ­tulo direto do rawClientList (bTitle)
             let rawC = window.rawClientList ? window.rawClientList.find(r => String(r.customerId) === String(id)) : null;
             let finalTitles = clientTitlesMap[id] || [];
             if (rawC && rawC.saleId && !finalTitles.includes(String(rawC.saleId))) {
@@ -24137,11 +24137,11 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             
             let titlesHtml = "";
             if (finalTitles.length > 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃ­tulos associados:</strong> ${finalTitles.join(', ')}</div>`;
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃƒÂ­tulos associados:</strong> ${finalTitles.join(', ')}</div>`;
             } else if (finalTitles.length === 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃ­tulo:</strong> ${finalTitles[0]}</div>`;
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃƒÂ­tulo:</strong> ${finalTitles[0]}</div>`;
             } else {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃ­tulo:</strong> NÃ£o identificado</div>`;
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>TÃƒÂ­tulo:</strong> NÃƒÂ£o identificado</div>`;
             }
             
             const isChecked = checkedState[id] ? "checked" : "";
@@ -24209,7 +24209,7 @@ window.testarZerarFila = function() {
       <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
           <div style="display: flex; align-items: center; gap: 10px;">
               <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
-              <span style="font-size: 1.15rem;">ParabÃ©ns! VocÃª finalizou sua fila de cobranÃ§a de hoje! ðŸŽ‰ (MODO TESTE)</span>
+              <span style="font-size: 1.15rem;">ParabÃƒÂ©ns! VocÃƒÂª finalizou sua fila de cobranÃƒÂ§a de hoje! Ã°Å¸Å½â€° (MODO TESTE)</span>
           </div>
           <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulseTest 2s infinite ease-in-out; border: 4px solid #166534;">
       </div>
@@ -24231,7 +24231,7 @@ window.testarZerarFila = function() {
 
 window.gerarMapaJuridicoPDF = function() {
     if (!window._subjudiceList || window._subjudiceList.length === 0) {
-        alert("NÃ£o hÃ¡ clientes no Sub Judice para gerar o mapa.");
+        alert("NÃƒÂ£o hÃƒÂ¡ clientes no Sub Judice para gerar o mapa.");
         return;
     }
 
@@ -24304,23 +24304,23 @@ window.gerarMapaJuridicoPDF = function() {
                 ${sortedAgg.map((item, idx) => {
                     const isActive = item.count > 0;
                     const cardHtml = isActive
-                        ? \`<div style="background: white; border: 1.5px solid #10b981; border-radius: 6px; width: 44px; padding: 10px 2px 4px 2px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
-                            <div style="background: #10b981; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 8px; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); border: 2px solid white;">\${item.prefix}</div>
-                            <div style="color: #64748b; font-size: 7px; text-transform: uppercase; font-weight: 700; margin-bottom: 1px;">TÃ­t.</div>
-                            <div style="font-size: 11px; font-weight: 900; color: #0f172a;">\${item.count}</div>
+                        ? `<div style="background: white; border: 1.5px solid #10b981; border-radius: 6px; width: 44px; padding: 10px 2px 4px 2px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
+                            <div style="background: #10b981; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 8px; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); border: 2px solid white;">${item.prefix}</div>
+                            <div style="color: #64748b; font-size: 7px; text-transform: uppercase; font-weight: 700; margin-bottom: 1px;">Tít.</div>
+                            <div style="font-size: 11px; font-weight: 900; color: #0f172a;">${item.count}</div>
                             <div style="height: 1px; background: #e2e8f0; margin: 4px 0;"></div>
-                            <div style="color: #ef4444; font-size: 8px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 1px;">\${fmtBRL(item.value)}</div>
-                        </div>\`
-                        : \`<div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; width: 18px; padding: 6px 1px 2px 1px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.6;">
-                            <div style="background: #94a3b8; color: white; width: 12px; height: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 6px; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border: 1px solid white;">\${item.prefix}</div>
+                            <div style="color: #ef4444; font-size: 8px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 1px;">${fmtBRL(item.value)}</div>
+                        </div>`
+                        : `<div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; width: 18px; padding: 6px 1px 2px 1px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.6;">
+                            <div style="background: #94a3b8; color: white; width: 12px; height: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 6px; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border: 1px solid white;">${item.prefix}</div>
                             <div style="font-size: 8px; font-weight: 900; color: #94a3b8;">0</div>
-                        </div>\`;
+                        </div>`;
                     const arrowHtml = idx < sortedAgg.length - 1
-                        ? \`<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 4px;">
+                        ? `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 4px;">
                             <div style="width: 100%; height: 1.5px; background: #cbd5e1; position: relative;">
                                 <div style="position: absolute; right: -2px; top: -2.5px; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid #cbd5e1;"></div>
                             </div>
-                        </div>\`
+                        </div>`
                         : '';
                     return cardHtml + arrowHtml;
                 }).join('')}
@@ -24357,16 +24357,16 @@ window.gerarMapaJuridicoPDF = function() {
         });
 
         const sortedCompanies = Object.keys(companyGroups).sort((a,b) => {
-            const nameA = window.getCompanyName ? window.getCompanyName(a) : \`Empresa \${a}\`;
-            const nameB = window.getCompanyName ? window.getCompanyName(b) : \`Empresa \${b}\`;
+            const nameA = window.getCompanyName ? window.getCompanyName(a) : `Empresa ${a}`;
+            const nameB = window.getCompanyName ? window.getCompanyName(b) : `Empresa ${b}`;
             return nameA.localeCompare(nameB);
         });
 
-        const generalResult = buildTimelineHtml("VisÃ£o Geral", generalList, true);
+        const generalResult = buildTimelineHtml("Visão Geral", generalList, true);
         let timelinesHtml = generalResult.html;
         
         sortedCompanies.forEach(compId => {
-            const compName = window.getCompanyName ? window.getCompanyName(compId) : \`Empresa \${compId}\`;
+            const compName = window.getCompanyName ? window.getCompanyName(compId) : `Empresa ${compId}`;
             timelinesHtml += buildTimelineHtml(compName, companyGroups[compId], false).html;
         });
 
@@ -24382,20 +24382,20 @@ window.gerarMapaJuridicoPDF = function() {
         container.style.boxSizing = "border-box";
         container.id = "mapa-juridico-pdf-container";
 
-        container.innerHTML = \`
+        container.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; gap: 15px;">
                     <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 35px; object-fit: contain;">
                     <div>
-                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Mapa JurÃ­dico</h1>
-                        <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">PosiÃ§Ã£o em: \${new Date().toLocaleDateString('pt-BR')} Ã s \${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Mapa Jurídico</h1>
+                        <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; flex: 1; margin-left: 30px;">
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
                             <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Valor em Atraso</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">\${fmtBRL(totalValue)}</div>
+                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${fmtBRL(totalValue)}</div>
                         </div>
                         <div style="background: #fee2e2; color: #ef4444; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
@@ -24404,7 +24404,7 @@ window.gerarMapaJuridicoPDF = function() {
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
                             <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Clientes</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">\${totalClients}</div>
+                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${totalClients}</div>
                         </div>
                         <div style="background: #ffedd5; color: #f97316; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -24412,8 +24412,8 @@ window.gerarMapaJuridicoPDF = function() {
                     </div>
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">TÃ­tulos</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">\${totalTitles}</div>
+                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Títulos</div>
+                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${totalTitles}</div>
                         </div>
                         <div style="background: #dcfce7; color: #22c55e; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -24421,8 +24421,8 @@ window.gerarMapaJuridicoPDF = function() {
                     </div>
                     <div style="background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; flex: 1; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Atraso MÃ©dio</div>
-                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">\${avgDelay} dias</div>
+                            <div style="color: #64748b; font-size: 8px; text-transform: uppercase; font-weight: 700;">Atraso MÃƒÂ©dio</div>
+                            <div style="color: #0f172a; font-size: 14px; font-weight: 900;">${avgDelay} dias</div>
                         </div>
                         <div style="background: #dbeafe; color: #3b82f6; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -24432,23 +24432,23 @@ window.gerarMapaJuridicoPDF = function() {
             </div>
             
             <div style="display: flex; flex-direction: column; width: 100%;">
-                \${timelinesHtml}
+                ${timelinesHtml}
             </div>
 
             <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin-top: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                 <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                    \${generalResult.agg.map(item => \`
+                    ${generalResult.agg.map(item => `
                         <div style="display: flex; align-items: center; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 8px; border: 1px solid #e2e8f0;">
-                            <span style="background: \${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 7px; margin-right: 4px;">
-                                \${item.prefix}
+                            <span style="background: ${item.count > 0 ? '#10b981' : '#94a3b8'}; color: white; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 7px; margin-right: 4px;">
+                                ${item.prefix}
                             </span>
-                            <span style="font-weight: 700; color: #334155; margin-right: 3px;">\${item.name}</span>
-                            <span style="color: #64748b; font-size: 7px;">(\${item.days} d)</span>
+                            <span style="font-weight: 700; color: #334155; margin-right: 3px;">${item.name}</span>
+                            <span style="color: #64748b; font-size: 7px;">(${item.days} d)</span>
                         </div>
-                    \`).join('')}
+                    `).join('')}
                 </div>
             </div>
-        \`;
+        `;
         document.body.appendChild(container);
 
         html2canvas(container, { 
@@ -24482,7 +24482,7 @@ window.gerarMapaJuridicoPDF = function() {
                 btn.disabled = false;
             }
         }).catch(err => {
-            console.error("Erro ao gerar mapa jurÃ­dico:", err);
+            console.error("Erro ao gerar mapa jurÃƒÂ­dico:", err);
             alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
             document.body.removeChild(container);
             if (btn) {
