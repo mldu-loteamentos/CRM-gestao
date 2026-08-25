@@ -5540,14 +5540,14 @@ function formatCpfCnpj(val) {
             const btnGe = document.createElement("button");
             btnGe.className = "btn-icon-ge";
             
-            if (match && match.coordinates) {
+            if (match && (match.coords || match.coordinates)) {
               btnGe.style.cssText = "background: #105436; border: none; color: white; padding: 4px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; transition: all 0.2s; white-space: nowrap;";
               btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Abrir Lote`;
               btnGe.title = "Visualizar lote no Google Earth";
               btnGe.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                abrirLoteGoogleEarth(blockLotFromName, match.coordinates, empIdToUse);
+                abrirLoteGoogleEarth(blockLotFromName, (match.coords || match.coordinates), empIdToUse);
               };
             } else {
               btnGe.style.cssText = "background: #ccc; border: none; color: #666; padding: 4px 8px; cursor: not-allowed; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; white-space: nowrap;";
@@ -5576,7 +5576,7 @@ function formatCpfCnpj(val) {
                 continue;
               }
 
-              if (!match || !match.coordinates) {
+              if (!match || !(match.coords || match.coordinates)) {
                 badge.style.background = "#ffebee";
                 badge.style.color = "#c62828";
                 badge.innerHTML = `⚠️ Lote não encontrado no KMZ`;
@@ -5657,7 +5657,7 @@ function formatCpfCnpj(val) {
                 const clientPt = turf.point([clientLon, clientLat]);
 
                 // Transform string '-48.5721,-22.7312,0 ...' into Array of Arrays [[-48.5721,-22.7312], ...]
-                const coordsPairs = match.coordinates.split(' ').filter(c => c.trim()).map(c => c.split(',').map(Number));
+                const coordsPairs = (match.coords || match.coordinates).split(' ').filter(c => c.trim()).map(c => c.split(',').map(Number));
                 const polyCoords = coordsPairs.map(c => [c[0], c[1]]);
                 
                 let poly;
@@ -24602,5 +24602,6 @@ window.gerarMapaJuridicoPDF = function() {
         }
     }, 50);
 };
+
 
 
