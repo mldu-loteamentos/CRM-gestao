@@ -1,4 +1,4 @@
-﻿// Lógica Central do CRM de Cobrança Moura Leite
+// Lógica Central do CRM de Cobrança Moura Leite
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
@@ -1594,15 +1594,11 @@ async function initializeApplication() {
       if (window.firebaseDb && window.firebaseCollections) {
           try {
               if (customerId) {
-           const customerKey = String(customerId);
-           const payload = JSON.stringify(AppState.notes[customerKey] || AppState.notes[customerId] || []);
-               if (window._fbNotesLastSavedPayload && window._fbNotesLastSavedPayload[customerKey] === payload) return;
+                 const customerKey = String(customerId);
                  console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
                  const chunkId = window.getCustomerNoteChunkId(customerId);
                  const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-           await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
-                 window._fbNotesLastSavedPayload = window._fbNotesLastSavedPayload || {};
-                 window._fbNotesLastSavedPayload[customerKey] = payload;
+                 await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
                  console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
               } else {
                  console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
@@ -10760,7 +10756,7 @@ window.submitReprocessBoleto = async function() {
       "finePercentage": fine,
       "insurancepercentage": 0,
       "correctAnnualInstallment": true,
-      "groupedInstalments": true,
+      "groupedInstalments": false,
       "installments": installmentsArray
     };
 
