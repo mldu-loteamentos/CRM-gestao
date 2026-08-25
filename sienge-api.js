@@ -239,7 +239,7 @@ async function siengeFetchWithRetry(endpoint, retries = 4) {
 // -----------------------------------------------
 // POST base com CORS handling
 // -----------------------------------------------
-async function siengePost(endpoint, payload) {
+async function siengePost(endpoint, payload, retries = 4) {
   if (s_apiMode === "simulado") {
     throw new Error("Chamada de API em Modo Simulado. Use os métodos simulados.");
   }
@@ -252,31 +252,47 @@ async function siengePost(endpoint, payload) {
   }
 
   const url = `${baseUrl}${endpoint}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": getBasicAuthHeader(),
-      "Accept": "application/json",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  let lastError;
 
-  if (!response.ok) {
-    let errBody = '';
-    try { errBody = await response.text(); } catch(e){}
-    throw new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText} | ${errBody}`);
-  }
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": getBasicAuthHeader(),
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
 
-  // Se não retornar nada no body, retorna vazio
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    // Sienge muitas vezes retorna um texto puro de sucesso, ex: "Cobrança gerada com sucesso"
-    return { success: true, message: text };
+      if (!response.ok) {
+        let errBody = '';
+        try { errBody = await response.text(); } catch(e){}
+        throw new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText} | ${errBody}`);
+      }
+
+      // Se não retornar nada no body, retorna vazio
+      const text = await response.text();
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        // Sienge muitas vezes retorna um texto puro de sucesso, ex: "Cobrança gerada com sucesso"
+        return { success: true, message: text };
+      }
+    } catch (err) {
+      lastError = err;
+      if (err.message && err.message.includes('429') && attempt < retries - 1) {
+        const waitMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
+        console.warn(`[Sienge] HTTP 429 POST — aguardando ${waitMs / 1000}s antes de tentar novamente (tentativa ${attempt + 2}/${retries})...`);
+        await new Promise(r => setTimeout(r, waitMs));
+      } else {
+        throw err;
+      }
+    }
   }
+  throw lastError;
 }
 
 // -----------------------------------------------
