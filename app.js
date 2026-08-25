@@ -13467,7 +13467,7 @@ async function _loadZeroPaidTab_Impl() {
       // Obter último contato
       const notesNormal = (AppState.notes && AppState.notes[bill.customerId]) ? AppState.notes[bill.customerId] : [];
       const notesJud = (AppState.judNotes && AppState.judNotes[bill.customerId]) ? AppState.judNotes[bill.customerId] : [];
-      const notes = [...notesNormal, ...notesJud];
+      const notes = [...notesNormal, ...notesJud].filter(n => { const c = (n.canal||"").toLowerCase(); return c !== 'nota interna' && n.fase !== 'Nota Interna'; });
       
       if (notes.length > 0) {
         notes.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -24602,4 +24602,5 @@ window.gerarMapaJuridicoPDF = function() {
         }
     }, 50);
 };
+
 

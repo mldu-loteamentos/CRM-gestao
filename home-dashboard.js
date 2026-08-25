@@ -1,4 +1,4 @@
-const HomeDashboard = {
+﻿const HomeDashboard = {
   // Mascotes disponíveis
   pets: [
     { id: '3d_iael', is3DModel: true, glbUrl: 'assets/pets/IA.eL.glb', icon: '🤖', name: 'IA.EL' },
@@ -278,7 +278,8 @@ const HomeDashboard = {
             const percent = totalDelayedValue > 0 ? ((c.overdueValue / totalDelayedValue) * 100).toFixed(1) : 0;
             
             const customerNotes = window.AppState?.notes?.[c.customerId] || [];
-            const lastContact = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+            const validNotes = customerNotes.filter(n => { const c = (n.canal||"").toLowerCase(); return c !== 'nota interna' && n.fase !== 'Nota Interna'; });
+            const lastContact = validNotes.length > 0 ? new Date(Math.max(...validNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
             const promiseNotes = customerNotes.filter(n => n.promiseDate);
             const lastPromise = promiseNotes.length > 0 ? new Date(Math.max(...promiseNotes.map(n => new Date(n.promiseDate + 'T12:00:00')))).toLocaleDateString('pt-BR') : "Nenhum";
             const extraInfo = hasHighDelay ? `&#10;Atenção: Cliente está no topo de dias em atraso.` : '';
@@ -332,7 +333,8 @@ const HomeDashboard = {
         
         let htmlDias = topDias.map(c => {
             const customerNotes = window.AppState?.notes?.[c.customerId] || [];
-            const lastContact = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+            const validNotes = customerNotes.filter(n => { const c = (n.canal||"").toLowerCase(); return c !== 'nota interna' && n.fase !== 'Nota Interna'; });
+            const lastContact = validNotes.length > 0 ? new Date(Math.max(...validNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
             const promiseNotes = customerNotes.filter(n => n.promiseDate);
             const lastPromise = promiseNotes.length > 0 ? new Date(Math.max(...promiseNotes.map(n => new Date(n.promiseDate + 'T12:00:00')))).toLocaleDateString('pt-BR') : "Nenhum";
             const tooltip = `Parcelas em atraso: ${c.billCount || 1}&#10;Dias em atraso: ${c.maxDaysDelay} dias&#10;Último contato: ${lastContact}&#10;Próximo retorno: ${lastPromise}&#10;Valor atrasado: R$ ${c.overdueValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
@@ -1098,3 +1100,4 @@ window.selectHomePet = (id) => {
 window.homePetSpeak = (includeFeedback) => HomeDashboard.speak(includeFeedback, true);
 
 // Fim das configurações do Mascot
+
