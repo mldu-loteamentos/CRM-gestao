@@ -1,4 +1,4 @@
-// Lógica Central do CRM de Cobrança Moura Leite
+﻿// Lógica Central do CRM de Cobrança Moura Leite
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
@@ -18346,7 +18346,7 @@ window.uploadEmpreendimentoMapa = async function() {
   }
 
   try {
-      const storageRef = window.firebaseCollections.ref(window.firebaseStorage, "projetos_urbanisticos/${empId}.pdf");
+      const storageRef = window.firebaseCollections.ref(window.firebaseStorage, `mapas/${empId}.pdf`);
       await window.firebaseCollections.uploadBytes(storageRef, file);
       
       statusDiv.style.color = "#2e7d32";
@@ -24606,3 +24606,53 @@ window.gerarMapaJuridicoPDF = function() {
 
 
 
+
+window.uploadMapa = async function() {
+  const empIdInput = document.getElementById("mapa-empreendimento-id");
+  const fileInput = document.getElementById("mapa-file-input");
+  const statusDiv = document.getElementById("mapa-upload-status");
+
+  if (!empIdInput || !fileInput || !statusDiv) return;
+
+  const empId = empIdInput.value.trim();
+  if (!empId) {
+    statusDiv.style.color = "var(--color-danger)";
+    statusDiv.innerHTML = "Informe o ID do Empreendimento.";
+    return;
+  }
+
+  const file = fileInput.files[0];
+  if (!file) {
+    statusDiv.style.color = "var(--color-danger)";
+    statusDiv.innerHTML = "Selecione um arquivo (.pdf).";
+    return;
+  }
+
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    statusDiv.style.color = "var(--color-danger)";
+    statusDiv.innerHTML = "Selecione um arquivo PDF vÃ¡lido.";
+    return;
+  }
+
+  statusDiv.style.color = "var(--color-primary)";
+  statusDiv.innerHTML = '<div class="loading-spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:8px;"></div> Processando arquivo...';
+
+  if (!window.firebaseStorage || !window.firebaseCollections) {
+    statusDiv.style.color = "var(--color-danger)";
+    statusDiv.innerHTML = "âŒ Erro: ServiÃ§o de nuvem indisponÃ­vel.";
+    return;
+  }
+
+  try {
+      const storageRef = window.firebaseCollections.ref(window.firebaseStorage, `mapas/${empId}.pdf`);
+      await window.firebaseCollections.uploadBytes(storageRef, file);
+      
+      statusDiv.style.color = "#2e7d32";
+      statusDiv.innerHTML = "âœ… Projeto carregado com sucesso!";
+      fileInput.value = "";
+      if (window.loadMapaList) window.loadMapaList();
+  } catch (err) {
+      statusDiv.style.color = "var(--color-danger)";
+      statusDiv.innerHTML = "âŒ Erro: " + (err && err.message ? err.message : 'Falha ao enviar ao Firebase Storage.');
+  }
+};
