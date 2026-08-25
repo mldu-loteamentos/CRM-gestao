@@ -1588,37 +1588,35 @@ async function initializeApplication() {
       window._isFirebaseSyncing = true;
       try {
         localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+        if (window.firebaseDb && window.firebaseCollections) {
+            if (customerId) {
+               const customerKey = String(customerId);
+               console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
+               const chunkId = window.getCustomerNoteChunkId(customerId);
+               const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
+               await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerKey] || AppState.notes[customerId] || [] }, { merge: true });
+               console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
+            } else {
+               console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
+               const chunks = {};
+               for (const custId of Object.keys(AppState.notes)) {
+                   const chunkId = window.getCustomerNoteChunkId(custId);
+                   if (!chunks[chunkId]) chunks[chunkId] = {};
+                   chunks[chunkId][String(custId)] = AppState.notes[custId] || [];
+               }
+               for (const [chunkId, data] of Object.entries(chunks)) {
+                   const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
+                   await window.firebaseCollections.setDoc(docRef, data, { merge: true });
+               }
+               console.log("[Firebase RT] Salvamento em massa (sharded) concluído!");
+            }
+        }
+      } catch(e) {
+          console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
+          alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
       } finally {
-        window._isFirebaseSyncing = false;
-      }
-      if (window.firebaseDb && window.firebaseCollections) {
-          try {
-              if (customerId) {
-                 const customerKey = String(customerId);
-                 console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
-                 const chunkId = window.getCustomerNoteChunkId(customerId);
-                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-                 await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerId] || AppState.notes[customerKey] || [] }, { merge: true });
-                 console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
-              } else {
-                 console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
-                 const chunks = {};
-                 for (const custId of Object.keys(AppState.notes)) {
-                     const chunkId = window.getCustomerNoteChunkId(custId);
-                     if (!chunks[chunkId]) chunks[chunkId] = {};
-                     chunks[chunkId][String(custId)] = AppState.notes[custId] || [];
-                 }
-                 for (const [chunkId, data] of Object.entries(chunks)) {
-                     const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-                     await window.firebaseCollections.setDoc(docRef, data, { merge: true });
-                 }
-                 console.log("[Firebase RT] Salvamento em massa (sharded) concluído!");
-              }
-          } catch(e) {
-              if (customerId && window._fbNotesLastSavedPayload) delete window._fbNotesLastSavedPayload[String(customerId)];
-              console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
-              alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
-          }
+          // Libera o flag com pequeno delay para o snapshot do proprio save ser ignorado
+          setTimeout(() => { window._isFirebaseSyncing = false; }, 500);
       }
   };
 
@@ -1632,18 +1630,17 @@ async function initializeApplication() {
       const shardId = window.getCustomerNoteChunkId(customerKey);
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', shardId);
       window.activeCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
+        if (window._isFirebaseSyncing) return; // Evita loop: ignorar snapshot causado pelo proprio save
         const data = snapshot.exists() ? snapshot.data() : {};
-          if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
+        if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
-        if (JSON.stringify(AppState.notes[customerKey] || []) === JSON.stringify(notes)) return;
+        // Sempre aceita a versao do Firebase (fonte de verdade para outros usuarios)
         AppState.notes[customerKey] = notes;
-        window._isFirebaseSyncing = true;
         try {
           localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-        } finally {
-          window._isFirebaseSyncing = false;
-        }
+        } catch(e) {}
         if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
+        if (typeof updateSidebarAgendaBadge === 'function') updateSidebarAgendaBadge();
       }, error => console.error('[Firebase RT] Erro nas notas do cliente ativo:', error));
     };
   // --- FIM MIGRACAO FIREBASE NOTES ---
