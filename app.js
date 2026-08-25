@@ -1,4 +1,4 @@
-﻿// Lógica Central do CRM de Cobrança Moura Leite
+// Lógica Central do CRM de Cobrança Moura Leite
 // Moura Leite Loteamentos - ERP Sienge & Azure AD Integration
 
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
@@ -5710,11 +5710,11 @@ function formatCpfCnpj(val) {
                 if (isInside || distanceMeters <= 30) {
                   badge.style.background = "#e8f5e9";
                   badge.style.color = "#2e7d32";
-                  badge.innerHTML = `ðŸŸ¢ Reside no Lote${fallbackText}`;
+                  badge.innerHTML = `🟢 Reside no Lote${fallbackText}`;
                 } else {
                   badge.style.background = "#ffebee";
                   badge.style.color = "#c62828";
-                  badge.innerHTML = `ðŸ”´ Não reside no lote - Distância: ${distFormatted}${fallbackText}`;
+                  badge.innerHTML = `🔴 Não reside no lote - Distância: ${distFormatted}${fallbackText}`;
                 }
                 
                 badge.title = `Lat: ${clientLat.toFixed(5)}, Lng: ${clientLon.toFixed(5)}${fallbackText ? " - " + fallbackText.trim() : ""}`;
