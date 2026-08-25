@@ -10661,7 +10661,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       accountSelect.innerHTML = '';
       data.availables.forEach(acc => {
         const option = document.createElement('option');
-        option.value = acc.accountNumber;
+        option.value = acc.checkingAccountId || acc.id || acc.accountNumber;
         option.textContent = `${acc.accountNumber} - ${acc.accountName}`;
         accountSelect.appendChild(option);
       });
@@ -10714,7 +10714,8 @@ window.validateReprocessForm = function() {
 window.submitReprocessBoleto = async function() {
   if (!currentReprocessBillId || currentReprocessInstId === null) return;
 
-  const account = document.getElementById('reprocess-account').value;
+  const accountRaw = document.getElementById('reprocess-account').value;
+  const account = accountRaw.includes('-') ? accountRaw : (parseInt(accountRaw, 10) || accountRaw);
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
