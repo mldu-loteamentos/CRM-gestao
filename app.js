@@ -10755,11 +10755,12 @@ window.submitReprocessBoleto = async function() {
       "interestPercentage": interest,
       "finePercentage": fine,
       "insurancepercentage": 0,
-      "correctAnnualInstallment": true,
+      "correctAnnualInstallment": false,
       "groupedInstalments": false,
       "installments": installmentsArray
     };
 
+    console.log("[CRM Boleto] Payload enviado ao Sienge:", JSON.stringify(payload, null, 2));
     const result = await SiengeApiService.createOverdueBill(payload);
     
     const parcelasLog = Array.isArray(currentReprocessInstId) ? currentReprocessInstId.join(", ") : currentReprocessInstId;
