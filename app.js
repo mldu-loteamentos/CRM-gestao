@@ -1530,58 +1530,54 @@ async function initializeApplication() {
   // Firebase wins on a per-customer basis if the customer exists in Firebase.
   try {
      const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
-    if (false && window.firebaseDb && window.firebaseCollections) {
-         // 1) Carga inicial + listener em tempo real para TODA a coleção customer_notes
-         //    Isso garante que gravações de QUALQUER operadora cheguem para TODAS em tempo real
-         if (window.globalCustomerNotesUnsubscribe) {
-             window.globalCustomerNotesUnsubscribe();
-         }
-         window.globalCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(
-             window.firebaseCollections.collection(window.firebaseDb, 'customer_notes_shards'),
-             (snapshot) => {
-                 let changed = false;
-                 snapshot.docChanges().forEach(change => {
-                     const data = change.doc.data();
-                     if (change.type !== 'removed' && data) {
-                         // data is a chunk containing multiple customers: { "123": [...], "456": [...] }
-                         Object.entries(data).forEach(([custId, notesList]) => {
-                             // Compare to avoid unnecessary re-renders
-                             if (JSON.stringify(AppState.notes[custId]) !== JSON.stringify(notesList)) {
-                                 AppState.notes[custId] = notesList;
-                                 changed = true;
-                             }
-                         });
+     AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
+     
+     const localJudNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
+     AppState.judNotes = localJudNotes;
+     
+     // Disparar carga assíncrona única dos shards para ter Último Contato atualizado sem onSnapshot caros
+     if (window.firebaseDb && window.firebaseCollections) {
+         setTimeout(async () => {
+             try {
+                 console.log("[Firebase RT] Sincronizando todos os shards iniciais (Cobrança)...");
+                 const { collection, getDocs } = window.firebaseCollections;
+                 
+                 const notesSnap = await getDocs(collection(window.firebaseDb, 'customer_notes_shards'));
+                 let hasUpdates = false;
+                 notesSnap.forEach(doc => {
+                     const data = doc.data();
+                     for (const [key, val] of Object.entries(data)) {
+                         AppState.notes[key] = val;
+                         hasUpdates = true;
                      }
                  });
-                 if (changed) {
-                     window._isFirebaseSyncing = true;
+                 if (hasUpdates) {
                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-                     window._isFirebaseSyncing = false;
-                     // Se a ficha do cliente alterado estiver aberta, re-renderiza automaticamente
-                     const openCustomerId = String(AppState.selectedCustomerId || '');
-                     const affectedIds = snapshot.docChanges().map(c => c.doc.id);
-                     if (openCustomerId && affectedIds.includes(openCustomerId)) {
-                         if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
-                         console.log(`[Firebase RT] Ocorrências do cliente ${openCustomerId} atualizadas em tempo real.`);
-                     }
-                     if (!snapshot.metadata.hasPendingWrites) {
-                         console.log(`[Firebase RT] customer_notes sincronizado: ${affectedIds.length} cliente(s) atualizado(s).`);
-                     }
                  }
-             },
-             (error) => {
-                 console.error("[Firebase RT] Erro no listener global de customer_notes:", error);
+                 
+                 console.log("[Firebase RT] Sincronizando todos os shards iniciais (Jurídico)...");
+                 const judNotesSnap = await getDocs(collection(window.firebaseDb, 'customer_jud_notes_shards'));
+                 let judHasUpdates = false;
+                 judNotesSnap.forEach(doc => {
+                     const data = doc.data();
+                     for (const [key, val] of Object.entries(data)) {
+                         AppState.judNotes[key] = val;
+                         judHasUpdates = true;
+                     }
+                 });
+                 if (judHasUpdates) {
+                     localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                 }
+                 
+                 console.log("[Firebase RT] Carga inicial unificada concluída com sucesso!");
+                 
+                 // Re-render dashboard se aberta
+                 if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
+                 if (typeof updateDashboardHeader === 'function') updateDashboardHeader();
+             } catch(e) {
+                 console.error("[Firebase RT] Erro ao sincronizar shards iniciais:", e);
              }
-         );
-
-         // Merge inicial: local como base, Firebase sobrescreve (já virá via onSnapshot acima)
-         AppState.notes = { ...localNotes };
-         if (Object.keys(AppState.notes).length === 0) {
-             AppState.notes = window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
-         }
-         console.log(`[Firebase RT] Listener em tempo real ativado para customer_notes. Base local: ${Object.keys(localNotes).length} clientes.`);
-     } else {
-         AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
+         }, 1500);
      }
   } catch (e) {
      console.error("Erro ao iniciar listener de notas do Firebase:", e);
@@ -2170,11 +2166,22 @@ window.toggleSortZero = function(col) {
   loadZeroPaidTab();
 };
 
-function getCompanyName(companyId) {
+function getCompanyName(companyId, useShort) {
   if (!AppState.companies) return `Empresa #${companyId}`;
   const comp = AppState.companies.find(c => Number(c.id) === Number(companyId));
   if (!comp) return `Empresa #${companyId}`;
-  
+
+  // Se pedir nome curto e existir nome_usual, usar
+  if (useShort) {
+    const nomeUsual = comp.nome_usual || comp.shortName || '';
+    if (nomeUsual.trim()) return nomeUsual.trim().toUpperCase();
+    // Fallback: pegar de AppState.companiesCustom se existir
+    if (window.AppState && AppState.companiesCustom) {
+      const custom = AppState.companiesCustom[String(companyId)];
+      if (custom && custom.nome_usual && custom.nome_usual.trim()) return custom.nome_usual.trim().toUpperCase();
+    }
+  }
+
   const compName = comp.name || comp.tradeName || `Empresa #${companyId}`;
   return compName.toUpperCase()
     .replace(/\bEMPREENDIMENTOS\b/gi, "EMPREENDIMENTO")
@@ -2184,8 +2191,8 @@ function getCompanyName(companyId) {
     .replace(/\bPRINCIPAL\b/gi, "")
     .replace(/\bLOTEAMENTOS\b/gi, "")
     .replace(/\bDESENVOLVIMENTO URBANO\b/gi, "")
-    .replace(/\bDESENVOLVIMENTO IMOBILIÃRIO SPE\b/gi, "")
-    .replace(/\bDESENVOLVIMENTO IMOBILIÃRIO\b/gi, "")
+    .replace(/\bDESENVOLVIMENTO IMOBILI\u00c1RIO SPE\b/gi, "")
+    .replace(/\bDESENVOLVIMENTO IMOBILI\u00c1RIO\b/gi, "")
     .replace(/\bSPE\b/gi, "")
     .replace(/\bLOTEADORA\b/gi, "")
     .replace(/\bPARCERIA\b/gi, "")
@@ -3700,7 +3707,9 @@ document.addEventListener("click", function(e) {
         const isZeroPaid = client.isZeroPaid;
         const zeroPaidHighlightClass = isZeroPaid ? "zero-paid-highlight" : "";
 
-        const customerNotes = AppState.notes[client.customerId] || [];
+        const notesNormal = AppState.notes[client.customerId] || [];
+        const notesJud = AppState.judNotes ? (AppState.judNotes[client.customerId] || []) : [];
+        const customerNotes = [...notesNormal, ...notesJud];
         const lastContactStr = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
 
         const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
@@ -3837,36 +3846,41 @@ document.addEventListener("click", function(e) {
 
   const kpiContainer = document.getElementById("subjudice-kpi-grid");
   if (kpiContainer) {
+    kpiContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    kpiContainer.style.gap = '10px';
+    kpiContainer.style.marginBottom = '1rem';
+    const _sk = v => Math.round(v).toLocaleString('pt-BR');
     kpiContainer.innerHTML = `
-      <div class="kpi-card total-delay">
+      <div class="kpi-card total-delay" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
         <div class="kpi-info">
-          <h3>Valor em Atraso</h3>
-          <div class="kpi-value">${subTotalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Valor em Atraso</h3>
+          <div class="kpi-value" style="font-size:1.25rem;">R$ ${_sk(subTotalOverdue)}</div>
         </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="alert-triangle"></i></div>
+        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="alert-triangle"></i></div>
       </div>
-      <div class="kpi-card clients-crit">
+      <div class="kpi-card clients-crit" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
         <div class="kpi-info">
-          <h3>Clientes em Atraso</h3>
-          <div class="kpi-value">${subTotalClients.size}</div>
+          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Clientes em Atraso</h3>
+          <div class="kpi-value" style="font-size:1.25rem;">${subTotalClients.size}</div>
         </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
+        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="users"></i></div>
       </div>
-      <div class="kpi-card promises">
+      <div class="kpi-card promises" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
         <div class="kpi-info">
-          <h3>Títulos Vencidos</h3>
-          <div class="kpi-value">${subTotalBills}</div>
+          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">T\u00edtulos Vencidos</h3>
+          <div class="kpi-value" style="font-size:1.25rem;">${subTotalBills}</div>
         </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
+        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="file-text"></i></div>
       </div>
-      <div class="kpi-card subjudice">
+      <div class="kpi-card subjudice" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
         <div class="kpi-info">
-          <h3>Atraso Médio</h3>
-          <div class="kpi-value">${subAvgDelay} dias</div>
+          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Atraso M\u00e9dio</h3>
+          <div class="kpi-value" style="font-size:1.25rem;">${subAvgDelay} dias</div>
         </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
+        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="clock"></i></div>
       </div>
     `;
+    if (window.lucide) lucide.createIcons();
   }
 
   const subCompSummaryBody = document.getElementById("subjudice-company-summary-body");
@@ -3933,20 +3947,45 @@ document.addEventListener("click", function(e) {
       else { summary.bracketAbove120 += value; ccSummary.bracketAbove120 += value; }
     });
 
-    const fmtNum = v => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Formatar valor inteiro (sem centavos)
+    const fmtNum = v => Math.round(v).toLocaleString('pt-BR');
+    const fmtCur = v => 'R$ ' + fmtNum(v);
 
-    let sumTitles = 0, sumTotal = 0, sum30 = 0, sum60 = 0, sum90 = 0, sum120 = 0, sumAbove120 = 0;
+    let sumTitles = 0, sumTotal = 0;
+
+    // Carregar nome_usual do cache de customizacoes (localStorage ou EmpresasState)
+    let _customCache = null;
+    try {
+      const raw = localStorage.getItem('crm_empresas_custom');
+      if (raw) _customCache = JSON.parse(raw);
+    } catch(e) {}
+    if (!_customCache && window.EmpresasState && EmpresasState.customFields) _customCache = EmpresasState.customFields;
+
+    const getShortName = (compId) => {
+      // 1. localStorage (fonte mais confiável)
+      if (_customCache) {
+        const custom = _customCache[String(compId)];
+        if (custom && custom.nome_usual && custom.nome_usual.trim()) return custom.nome_usual.trim().toUpperCase();
+      }
+      // 2. EmpresasState.customFields por índice numérico
+      if (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[compId]) {
+        const n = EmpresasState.customFields[compId].nome_usual;
+        if (n && n.trim()) return n.trim().toUpperCase();
+      }
+      // 3. AppState.companies
+      if (AppState.companies) {
+        const comp = AppState.companies.find(c => Number(c.id) === Number(compId));
+        if (comp && comp.nome_usual && comp.nome_usual.trim()) return comp.nome_usual.trim().toUpperCase();
+      }
+      return getCompanyName(compId);
+    };
+
 
     Object.values(subjudiceCompanySummary).forEach(summary => {
       const clientCount = summary.clientIds.size;
       if (clientCount === 0) return;
       sumTitles += summary.billIds.size;
       sumTotal += summary.totalOverdue;
-      sum30 += summary.bracket30;
-      sum60 += summary.bracket60;
-      sum90 += summary.bracket90;
-      sum120 += summary.bracket120;
-      sumAbove120 += summary.bracketAbove120;
 
       const calcPct = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
       const pct30 = calcPct(summary.bracket30, summary.totalOverdue);
@@ -3977,60 +4016,60 @@ document.addEventListener("click", function(e) {
         `;
       };
 
+      const shortName = getShortName(summary.id);
+      const fullName = summary.name;
       const hasCostCenters = Object.keys(summary.costCenters).length > 0;
-      const toggleHtml = hasCostCenters ? `<span class="cost-center-toggle" onclick="toggleCostCenters('scc-rows-${summary.id}', this)" title="Expandir Centros de Custo"><i data-lucide="chevron-right" style="width: 14px;"></i></span>` : '';
+      const toggleHtml = hasCostCenters
+        ? `<span class="cost-center-toggle" onclick="toggleCostCenters('scc-rows-${summary.id}', this)" title="Expandir Empreendimentos" style="cursor:pointer; margin-right: 6px;"><i data-lucide="chevron-right" style="width: 14px;"></i></span>`
+        : '';
 
       const tr = document.createElement("tr");
       tr.style.transition = "background-color 0.2s";
       tr.style.backgroundColor = "#f1f5f9";
+      tr.style.cursor = hasCostCenters ? 'pointer' : 'default';
+      if (hasCostCenters) {
+        tr.onclick = (e) => { if (!e.target.closest('.cost-center-toggle')) { const btn = tr.querySelector('.cost-center-toggle'); if (btn) btn.click(); } };
+      }
       tr.onmouseenter = () => tr.style.backgroundColor = "#e2e8f0";
       tr.onmouseleave = () => tr.style.backgroundColor = "#f1f5f9";
       tr.innerHTML = `
-        <td style="text-align: center; color: #64748b; font-weight: 500;">${summary.id}</td>
-        <td style="text-align: left; display: flex; align-items: center;">
+        <td style="text-align: center; color: #64748b; font-weight: 500; width: 40px;">${summary.id}</td>
+        <td style="text-align: left;">
+          <div style="display: flex; align-items: center;">
             ${toggleHtml}
-            <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">${summary.name}</div>
+            <div>
+              <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.3px;">${shortName}</div>
+              ${shortName !== fullName ? `<div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">${fullName}</div>` : ''}
+            </div>
+          </div>
         </td>
         <td style="text-align: center;">
             <div style="display: inline-flex; align-items: center; justify-content: center; background: #f1f5f9; color: #475569; font-weight: 700; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">
                 ${summary.billIds.size}
             </div>
         </td>
-        <td style="text-align: center;">
-            <strong style="font-size: 0.9rem; color: #0f172a;">R$ ${fmtNum(summary.totalOverdue)}</strong>
+        <td style="text-align: right; padding-right: 16px;">
+            <strong style="font-size: 0.9rem; color: #0f172a;">${fmtCur(summary.totalOverdue)}</strong>
         </td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket30, pct30, '#10b981')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket60, pct60, '#f59e0b')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket90, pct90, '#f97316')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket120, pct120, '#ef4444')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracketAbove120, pctAbove120, '#b91c1c')}</td>
       `;
       subCompSummaryBody.appendChild(tr);
 
       if (hasCostCenters) {
-        Object.values(summary.costCenters).forEach(cc => {
+        Object.values(summary.costCenters).sort((a, b) => b.totalOverdue - a.totalOverdue).forEach(cc => {
             const ccRow = document.createElement("tr");
             ccRow.className = `cost-center-row scc-rows-${summary.id}`;
             ccRow.style.display = "none";
+            ccRow.style.backgroundColor = '#fafafa';
             ccRow.innerHTML = `
               <td style="text-align: center; color: #64748b; font-size: 0.75rem; font-weight: 600;">${cc.id}</td>
               <td style="text-align: left; padding-left: 36px;">
-                  <div style="font-weight: 600; color: #64748b; font-size: 0.75rem; text-transform: uppercase;">${cc.name}</div>
+                  <div style="font-weight: 600; color: #334155; font-size: 0.8rem; text-transform: uppercase;">${cc.name}</div>
               </td>
               <td style="text-align: center; color: #64748b;">
                   ${cc.billIds.size}
               </td>
-              <td style="text-align: center;">
-                  <strong style="color: #334155;">R$ ${fmtNum(cc.totalOverdue)}</strong>
-              </td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket30)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket60)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket90)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket120)}</td>
-              <td style="padding: 6px 4px;">
-                  <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-                    <div style="font-weight: 600; color: #b91c1c; font-size: 0.85rem; margin-bottom: 3px;">${cc.bracketAbove120 > 0 ? fmtNum(cc.bracketAbove120) : '-'}</div>
-                  </div>
+              <td style="text-align: right; padding-right: 16px;">
+                  <span style="color: #334155; font-weight: 600; font-size: 0.85rem;">${fmtCur(cc.totalOverdue)}</span>
               </td>
             `;
             subCompSummaryBody.appendChild(ccRow);
@@ -4039,7 +4078,6 @@ document.addEventListener("click", function(e) {
     });
 
     if (sumTitles > 0) {
-      const fmtPct = v => sumTotal > 0 ? (v / sumTotal * 100).toFixed(1) + "%" : "0.0%";
       const tFoot = document.createElement("tr");
       tFoot.style.backgroundColor = "#fff7ed";
       tFoot.innerHTML = `
@@ -4049,15 +4087,11 @@ document.addEventListener("click", function(e) {
             ${sumTitles}
           </span>
         </td>
-        <td style="text-align: center; font-weight: 700; color: #c2410c; font-size: 0.9rem;">R$ ${fmtNum(sumTotal)}</td>
-        <td style="text-align: center; font-size: 0.75rem; color: #64748b;">${fmtNum(sum30)}<br/><span style="color:#105436">${fmtPct(sum30)}</span></td>
-        <td style="text-align: center; font-size: 0.75rem; color: #64748b;">${fmtNum(sum60)}<br/><span style="color:#f59e0b">${fmtPct(sum60)}</span></td>
-        <td style="text-align: center; font-size: 0.75rem; color: #64748b;">${fmtNum(sum90)}<br/><span style="color:#f97316">${fmtPct(sum90)}</span></td>
-        <td style="text-align: center; font-size: 0.75rem; color: #64748b;">${fmtNum(sum120)}<br/><span style="color:#ef4444">${fmtPct(sum120)}</span></td>
-        <td style="text-align: center; font-size: 0.75rem; color: #b91c1c; font-weight: 600;">${fmtNum(sumAbove120)}<br/>${fmtPct(sumAbove120)}</td>
+        <td style="text-align: right; padding-right: 16px; font-weight: 700; color: #c2410c; font-size: 0.9rem;">${fmtCur(sumTotal)}</td>
       `;
       subCompSummaryBody.appendChild(tFoot);
     }
+    if (window.lucide) lucide.createIcons();
   }
   // --- FIM SUB JUDICE KPIs ---
 
@@ -7904,7 +7938,9 @@ function renderCustomerOccurrences() {
   
   window.currentHistoryFilters = window.currentHistoryFilters || ['Todos'];
   
-  let list = AppState.notes[AppState.selectedCustomerId] || [];
+  let listNormal = AppState.notes[AppState.selectedCustomerId] || [];
+  let listJudicial = AppState.judNotes ? (AppState.judNotes[AppState.selectedCustomerId] || []) : [];
+  let list = [...listNormal, ...listJudicial];
   
   // Restringir a exibição apenas para o contrato selecionado ou legados (sem contrato definido)
   list = list.filter(occ => !occ.saleId || String(occ.saleId) === String(AppState.selectedSaleId));
@@ -12076,7 +12112,9 @@ window.fireConfetti = function() {
     const row = document.createElement("tr");
     row.style.borderBottom = "1px solid #e2e8f0";
     
-    const customerNotes = AppState.notes[item.customerId] || [];
+    const notesNormal = AppState.notes[item.customerId] || [];
+    const notesJud = AppState.judNotes ? (AppState.judNotes[item.customerId] || []) : [];
+    const customerNotes = [...notesNormal, ...notesJud];
     const lastContactStr = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
 
     row.innerHTML = `
@@ -13427,13 +13465,14 @@ async function _loadZeroPaidTab_Impl() {
       };
       
       // Obter último contato
-      if (AppState.notes && AppState.notes[bill.customerId]) {
-        const notes = AppState.notes[bill.customerId];
-        if (notes.length > 0) {
-          notes.sort((a, b) => new Date(b.date) - new Date(a.date));
-          const lastDate = new Date(notes[0].date);
-          consolidated[key].lastContactDate = isNaN(lastDate) ? "Sem contato" : lastDate.toLocaleDateString("pt-BR");
-        }
+      const notesNormal = (AppState.notes && AppState.notes[bill.customerId]) ? AppState.notes[bill.customerId] : [];
+      const notesJud = (AppState.judNotes && AppState.judNotes[bill.customerId]) ? AppState.judNotes[bill.customerId] : [];
+      const notes = [...notesNormal, ...notesJud];
+      
+      if (notes.length > 0) {
+        notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const lastDate = new Date(notes[0].date);
+        consolidated[key].lastContactDate = isNaN(lastDate) ? "Sem contato" : lastDate.toLocaleDateString("pt-BR");
       }
     }
     
@@ -13772,7 +13811,9 @@ async function _loadZeroPaidTab_Impl() {
     const isZeroPaid = client.isZeroPaid;
     const zeroPaidHighlightClass = isZeroPaid ? "zero-paid-highlight" : "";
 
-    const customerNotes = AppState.notes[client.customerId] || [];
+    const notesNormal = AppState.notes[client.customerId] || [];
+    const notesJud = AppState.judNotes ? (AppState.judNotes[client.customerId] || []) : [];
+    const customerNotes = [...notesNormal, ...notesJud];
     const lastContactStr = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
 
     const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
@@ -14430,6 +14471,41 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     
     const addressStr = `${customer.address}${customer.zipCode ? ` - CEP: ${customer.zipCode}` : ''}${customer.city ? ` - ${customer.city}` : ''}${customer.state ? ` - ${customer.state}` : ''}`;
     
+    let secondaryBuyersText = "";
+    if (sale && sale.customers && sale.customers.length > 1) {
+        const secondaryCustomers = sale.customers.filter(c => !c.main && String(c.id) !== String(customerId));
+        for (const sec of secondaryCustomers) {
+            try {
+                const secDetail = await SiengeApiService.getCustomer(sec.id);
+                if (secDetail) {
+                    const secName = secDetail.name || sec.name || '';
+                    const secCpf = (secDetail.cpfCnpj || '').replace(/\D/g,"");
+                    let formattedCpf = secCpf;
+                    if (secCpf.length <= 11) {
+                        formattedCpf = secCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+                    } else {
+                        formattedCpf = secCpf.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
+                    }
+                    
+                    let secSpouse = '';
+                    if (secDetail.spouseName && secDetail.spouseName.trim() !== '' && secDetail.spouseName !== '- X -') {
+                        let sCpf = (secDetail.spouseCpf || '').replace(/\D/g,"");
+                        if (sCpf.length <= 11) sCpf = sCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+                        secSpouse = ` e ${secDetail.spouseName}, portador(a) do C.P.F. nº ${sCpf}`;
+                    }
+                    secondaryBuyersText += `, e ${secName}, portador(a) do C.P.F. nº ${formattedCpf}${secSpouse}`;
+                }
+            } catch (e) {}
+        }
+    }
+    
+    const maskCpfCnpj = (v) => {
+        if (!v) return '';
+        v = String(v).replace(/\D/g,"");
+        if (v.length <= 11) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
+        return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
+    };
+    
     const allBills = AppState.defaultersReceivableBills || (getSiengeApiMode() === "simulado" ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []);
     const myBills = allBills.filter(b => String(b.saleId) === String(saleId) && b.status !== "PAID" && (b.overdueValue > 0 || b.daysDelay > 0));
     
@@ -14518,12 +14594,27 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             corpo = corpo.replace(/{{UNIDADE}}/g, formatUName);
             
             corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
-            const cpfCnpj = (customer.cpfCnpj || '').replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+            const cpfCnpj = maskCpfCnpj(customer.cpfCnpj);
             corpo = corpo.replace(/{{CPF_CLIENTE}}/g, cpfCnpj);
             corpo = corpo.replace(/{{CPF_CNPJ}}/g, cpfCnpj);
             
-            corpo = corpo.replace(/{{NOME_CONJUGE}}/g, customer.spouseName || '- X -');
-            corpo = corpo.replace(/{{CPF_CONJUGE}}/g, customer.spouseCpf ? customer.spouseCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : '- X -');
+            if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
+                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
+                corpo = corpo.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
+                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
+                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, '- X -');
+                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, '- X -');
+                if (secondaryBuyersText) {
+                    corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Aos Ilmos. Srs.');
+                } else {
+                    corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao(À) Ilmo(a). Sr(a).');
+                }
+            } else {
+                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
+                corpo = corpo.replace(/{{CPF_CONJUGE}}\s*\./g, maskCpfCnpj(customer.spouseCpf) + "." + secondaryBuyersText);
+                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(customer.spouseCpf));
+                corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Aos Ilmos. Srs.');
+            }
             
             corpo = corpo.replace(/{{ENDERECO_CLIENTE}}/g, (customer.address || '').toUpperCase());
             corpo = corpo.replace(/{{CEP_CLIENTE}}/g, customer.zipCode || '');
@@ -14546,6 +14637,19 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         }
     
     if (!docHtml) {
+        let saudacao = "Ao(À) Ilmo(a). Sr(a).";
+        let conjugeLinha = "";
+        
+        if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
+            if (secondaryBuyersText) {
+                saudacao = "Aos Ilmos. Srs.";
+                conjugeLinha = secondaryBuyersText.substring(2) + "<br>"; // remove ", "
+            }
+        } else {
+            saudacao = "Aos Ilmos. Srs.";
+            conjugeLinha = `e ${customer.spouseName}, portador(a) do C.P.F. nº ${maskCpfCnpj(customer.spouseCpf)}${secondaryBuyersText}<br>`;
+        }
+        
         docHtml = `
         <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
             <p style="text-align: right; margin-bottom: 2rem;">
@@ -14553,9 +14657,9 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             </p>
 
             <p style="margin-bottom: 2rem;">
-                Ao(À)(s) Ilmo(a)(s). Sr(a)(s).<br>
-                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${customer.cpfCnpj},<br>
-                e - X - , portador(a) do C.P.F. nº - X -<br>
+                ${saudacao}<br>
+                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${maskCpfCnpj(customer.cpfCnpj)},<br>
+                ${conjugeLinha}
                 ${addressStr.toUpperCase()}
             </p>
 
@@ -18207,17 +18311,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- Integração com Mapas Urbanísticos ---
-window.uploadMapa = function() {
-  const empIdInput = document.getElementById("mapa-empreendimento-id");
-  const fileInput = document.getElementById("mapa-file-input");
-  const statusDiv = document.getElementById("mapa-upload-status");
-
-  if (!empIdInput || !fileInput || !statusDiv) return;
-
-  const empId = empIdInput.value.trim();
-  if (!empId) {
-    statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "Informe o ID do Empreendimento.";
     return;
   }
 
@@ -18294,11 +18387,17 @@ window.loadMapaList = async function() {
   const container = document.getElementById('mapa-list-container');
   if (!container) return;
   
+  if (!window.firebaseStorage || !window.firebaseCollections) {
+    container.innerHTML = '<div style="color: var(--color-danger); padding: 15px;">Erro: Firebase não configurado.</div>';
+    return;
+  }
+  
   try {
-    const res = await fetch('/api/map-list');
-    const maps = await res.json();
+    const { ref, listAll, getDownloadURL } = window.firebaseCollections;
+    const listRef = ref(window.firebaseStorage, 'mapas');
+    const res = await listAll(listRef);
     
-    if (!maps || maps.length === 0) {
+    if (res.items.length === 0) {
       container.innerHTML = '<div style="text-align: center; color: #666; padding: 15px;">Nenhum projeto urbanístico carregado.</div>';
       return;
     }
@@ -18316,17 +18415,25 @@ window.loadMapaList = async function() {
           <tbody>
     `;
     
-    for (const m of maps) {
+    for (const item of res.items) {
+      const empId = item.name.replace('.pdf', '');
+      let url = "";
+      try {
+        url = await getDownloadURL(item);
+      } catch (e) {
+        console.error(e);
+      }
+      
       html += `
         <tr>
-          <td style="font-weight: 600;">${m.empreendimento_id}</td>
+          <td style="font-weight: 600;">${empId}</td>
           <td><span class="badge badge-success">PROJETO PDF</span></td>
           <td>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-outline btn-sm" onclick="window.showProjectMap('/uploads/maps/${m.empreendimento_id}.pdf')" style="padding: 4px 8px; font-size: 0.75rem;">
+              <button class="btn btn-outline btn-sm" onclick="window.showProjectMap('${url}')" style="padding: 4px 8px; font-size: 0.75rem;">
                 <i data-lucide="eye" style="width: 14px;"></i> Visualizar
               </button>
-              <button class="btn btn-danger btn-sm" onclick="window.deleteMapa('${m.empreendimento_id}')" style="padding: 4px 8px; font-size: 0.75rem;">
+              <button class="btn btn-danger btn-sm" onclick="window.deleteMapa('${empId}')" style="padding: 4px 8px; font-size: 0.75rem;">
                 <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
               </button>
             </div>
@@ -18339,24 +18446,22 @@ window.loadMapaList = async function() {
     container.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
   } catch (err) {
-    container.innerHTML = `<div style="color: var(--color-danger); padding: 15px;">Erro ao carregar lista: ${err.message}</div>`;
+    container.innerHTML = `<div style="color: var(--color-danger); padding: 15px;">Erro ao carregar lista do Storage: ${err.message}</div>`;
   }
 };
 
 window.deleteMapa = async function(empId) {
   if (!confirm(`Tem certeza que deseja excluir o projeto do empreendimento ${empId}?`)) return;
   
-  try {
-    const res = await fetch(`/api/map-delete/${empId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      window.loadMapaList();
-    } else {
-      alert("Erro ao excluir: " + data.error);
-    }
-  } catch(err) {
-    alert("Erro: " + err.message);
-  }
+  if (!window.firebaseStorage || !window.firebaseCollections) return;
+  const { ref, deleteObject } = window.firebaseCollections;
+  const mapRef = ref(window.firebaseStorage, `mapas/${empId}.pdf`);
+  
+  deleteObject(mapRef).then(() => {
+    window.loadMapaList();
+  }).catch(err => {
+    alert("Erro ao excluir mapa: " + err.message);
+  });
 };
 
 // --- Integração com KMZ (Google Earth) ---
@@ -21793,7 +21898,9 @@ window.renderJudicialTimeline = function() {
     AppState.judNotes = local ? JSON.parse(local) : {};
   }
 
-  let list = [...(AppState.judNotes[AppState.selectedCustomerId] || [])];
+  let listNormal = AppState.notes[AppState.selectedCustomerId] || [];
+  let listJudicial = AppState.judNotes ? (AppState.judNotes[AppState.selectedCustomerId] || []) : [];
+  let list = [...listNormal, ...listJudicial];
   
   if (window.currentJudicialHistoryFilter && window.currentJudicialHistoryFilter !== 'Todos') {
     list = list.filter(occ => {

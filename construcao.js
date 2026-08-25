@@ -1,4 +1,4 @@
-﻿// Lógica para a aba de Construção e Histórico de Vistorias
+// Lógica para a aba de Construção e Histórico de Vistorias
 
 window.ConstrucaoApp = {
     stages: ['Sem construção', 'Terraplanagem', 'Alicerce', 'Apenas muro', 'Altura de laje', 'Telhado', 'Casa pronta sem acabamento', 'Casa pronta'],
@@ -874,21 +874,35 @@ window.deleteNovaVistoria = async function(id) {
         try {
             const { doc, deleteDoc } = window.firebaseCollections;
             const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
-            if (!check) return;
 
-            const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
-            const currentUser = window.AppState && window.AppState.currentUser;
-            const isAdmin = !!(currentUser && (
-                (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
-                (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
-                (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
-            ));
-            if (isAppVistoria && !isAdmin) {
-                alert('Vistorias realizadas pelo aplicativo só podem ser excluídas pelo administrador.');
-                return;
+            // Se encontrou o registro localmente, faz verificações normais
+            if (check) {
+                const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
+                const currentUser = window.AppState && window.AppState.currentUser;
+                const isAdmin = !!(currentUser && (
+                    (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
+                    (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
+                    (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
+                ));
+                if (isAppVistoria && !isAdmin) {
+                    alert('Vistorias realizadas pelo aplicativo só podem ser excluídas pelo administrador.');
+                    return;
+                }
+                const collName = check._source === 'vistoria' ? 'vistorias' : 'construction_checks';
+                await deleteDoc(doc(window.firebaseDb, collName, id));
+            } else {
+                // Registro não encontrado no cache local (ex: Invalid Date)
+                // Tenta deletar de ambas as coleções para garantir a remoção
+                const tryDelete = async (coll) => {
+                    try { await deleteDoc(doc(window.firebaseDb, coll, id)); return true; } catch(e) { return false; }
+                };
+                const deleted = await tryDelete('construction_checks') || await tryDelete('vistorias');
+                if (!deleted) {
+                    alert('Não foi possível localizar este registro no banco de dados.');
+                    window.loadConstrucoes();
+                    return;
+                }
             }
-            
-            const collName = check._source === 'vistoria' ? 'vistorias' : 'construction_checks'; await deleteDoc(doc(window.firebaseDb, collName, id));
             window.loadConstrucoes();
         } catch(err) {
             console.error("Erro ao excluir vistoria:", err);
