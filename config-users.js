@@ -42,7 +42,8 @@ const ConfigUsersApp = {
           name: "Contas a Pagar", key: "sub_fin_cp",
           actions: [
             { id: "assistente_cp", label: "Assistente de Contas a Pagar" },
-            { id: "prestacao_contas", label: "Prestação de Contas" }
+            { id: "prestacao_contas", label: "Prestação de Contas" },
+            { id: "parametrizacao_parceiro", label: "Parametrização de Parceiro" }
           ]
         },
         {

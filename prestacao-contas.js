@@ -6,6 +6,7 @@ const PrestacaoContasApp = {
   companyId: "1",
   costCenterIds: ["13600", "13601"],
   selectionType: "M",
+  partnershipId: "",
   ccSearch: "",
   loading: false,
   error: "",
@@ -47,6 +48,22 @@ const PrestacaoContasApp = {
     if (companies.length && !companies.some(c => String(c.id) === String(this.companyId))) {
       this.companyId = String(companies[0].id);
     }
+    if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
+      ParametrizacaoParceiroApp.loadItems().then(() => this.render()).catch(() => {});
+    }
+    this.render();
+  },
+
+  applyPartnership(id) {
+    this.partnershipId = id || "";
+    if (!id || typeof ParametrizacaoParceiroApp === "undefined") {
+      this.render();
+      return;
+    }
+    const p = (ParametrizacaoParceiroApp.items || []).find(x => x.id === id);
+    if (!p) { this.render(); return; }
+    this.companyId = String(p.companyId);
+    this.costCenterIds = (p.costCenters || []).filter(c => c.inAccount).map(c => String(c.id));
     this.render();
   },
 
@@ -289,7 +306,7 @@ const PrestacaoContasApp = {
     const companies = (window.AppState && AppState.companies) || [];
     const ccs = this.costCenters();
     const q = (this.ccSearch || "").toLowerCase().trim();
-    const suggestions = [];
+    const partnerships = (typeof ParametrizacaoParceiroApp !== "undefined" && ParametrizacaoParceiroApp.items) || [];
     const monthLabel = label.charAt(0).toUpperCase() + label.slice(1);
     const ccNames = this.costCenterIds.map(id => {
       const cc = ccs.find(c => String(c.id) === String(id));
@@ -346,6 +363,12 @@ const PrestacaoContasApp = {
         </div>
 
         <div style="margin-top:12px;">
+          ${partnerships.length ? `<label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;max-width:480px;margin-bottom:10px;">Parceria
+            <select onchange="PrestacaoContasApp.applyPartnership(this.value)" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
+              <option value="">Selecionar parceria (opcional)</option>
+              ${partnerships.map(p => `<option value="${p.id}" ${this.partnershipId === p.id ? "selected" : ""}>${p.partnerName} · obra ${p.obraCode}</option>`).join("")}
+            </select>
+          </label>` : ""}
           <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Obra / centros de custo</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
             ${this.costCenterIds.map(id => `

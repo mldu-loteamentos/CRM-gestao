@@ -1097,6 +1097,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-negociacao": "Regras de Negociação",
     "regras-cobranca": "Regras de Cobrança",
     "prestacao-contas": "Prestação de Contas",
+    "parametrizacao-parceiro": "Parametrização de Parceiro",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",
@@ -1131,6 +1132,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-negociacao": "scale",
     "regras-cobranca": "sliders",
     "prestacao-contas": "receipt",
+    "parametrizacao-parceiro": "handshake",
     "plano-financeiro": "layout-list",
     "indexadores": "trending-up",
     "compromissario_prefeitura": "building",
@@ -1237,6 +1239,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
   } else if (tabId === "prestacao-contas") {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
+  } else if (tabId === "parametrizacao-parceiro") {
+    if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   }
 }
 
@@ -1483,7 +1487,10 @@ window.applyPermissions = function(profileName) {
         const modKey = item.getAttribute('data-module');
         const inheritedMkt = perms.mod_mkt === true || perms.sub_mkt_geral_marketing_acessar === true;
         const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar') && inheritedMkt;
-        if (perms[modKey] === true || mktAlias) {
+        const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
+          perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
+        );
+        if (perms[modKey] === true || mktAlias || cpAlias) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
