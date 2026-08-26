@@ -123,6 +123,8 @@ const AppState = {
   defaultersLoaded: false, // Indica se a lista inicial foi carregada das APIs Sienge
   selectedCustomerId: null,
   selectedSaleId: null,
+  selectedTitulo: null,
+  selectedContractId: null,
   companies: [],
   customers: {}, // Cache de clientes reais buscados do Sienge
   sales: [], // Cache de contratos reais buscados do Sienge
@@ -1554,6 +1556,65 @@ async function initializeApplication() {
       const s = window.normalizeCustomerNotesKey(customerId);
       const list = store[s] || store[customerId] || [];
       return Array.isArray(list) ? list : [];
+  };
+
+  window.normalizeContractIdToken = function(value) {
+      if (value == null || value === '') return '';
+      return String(value).replace(/^B-/i, '').split('-')[0].trim();
+  };
+
+  window.getCurrentContractIdSet = function() {
+      const set = new Set();
+      const add = (v) => {
+          const raw = v == null ? '' : String(v).trim();
+          if (!raw || raw === 'undefined' || raw === 'null') return;
+          set.add(raw);
+          const tok = window.normalizeContractIdToken(raw);
+          if (tok) set.add(tok);
+      };
+      add(AppState.selectedSaleId);
+      add(AppState.selectedTitulo);
+      add(AppState.selectedContractId);
+      add(sessionStorage.getItem('currentSaleId'));
+      add(sessionStorage.getItem('currentTitulo'));
+      const sel = String(AppState.selectedSaleId || '');
+      const tit = String(AppState.selectedTitulo || '');
+      const cid = String(AppState.selectedContractId || '');
+      (AppState.sales || []).forEach(s => {
+          const sid = String(s.id || '');
+          const bill = String(s.receivableBillId || '');
+          if (sid === sel || bill === sel || sid === tit || bill === tit || sid === cid || bill === cid) {
+              add(s.id);
+              add(s.receivableBillId);
+          }
+      });
+      const custId = String(AppState.selectedCustomerId || '');
+      (window.rawClientList || window.clientList || []).forEach(c => {
+          if (String(c.customerId) !== custId) return;
+          const billIds = (c.billIds || []).map(String);
+          const saleTok = window.normalizeContractIdToken(c.saleId);
+          const matches = String(c.saleId) === sel || String(c.saleId) === tit || String(c.saleId) === cid
+              || saleTok === window.normalizeContractIdToken(sel)
+              || saleTok === window.normalizeContractIdToken(tit)
+              || billIds.some(b => {
+                  const t = window.normalizeContractIdToken(b);
+                  return t && (t === window.normalizeContractIdToken(sel) || t === window.normalizeContractIdToken(tit) || t === window.normalizeContractIdToken(cid));
+              });
+          if (matches) {
+              add(c.saleId);
+              billIds.forEach(add);
+          }
+      });
+      return set;
+  };
+
+  window.occurrenceMatchesCurrentContract = function(occ) {
+      if (!occ || occ.saleId == null || occ.saleId === '') return true;
+      const set = window.getCurrentContractIdSet();
+      if (!set.size) return true;
+      const raw = String(occ.saleId);
+      const tok = window.normalizeContractIdToken(raw);
+      return set.has(raw) || (tok && set.has(tok));
   };
 
   window.occurrenceAuthorMatchesOperator = function(author, operatorName) {
@@ -4669,7 +4730,9 @@ window.showScoreDetailsModal = function() {
 
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   AppState.selectedCustomerId = customerId;
-  AppState.selectedSaleId = saleId;
+  AppState.selectedContractId = saleId || null;
+  AppState.selectedTitulo = specificTitulo || null;
+  AppState.selectedSaleId = specificTitulo || saleId;
 
   // Collapse sidebar automatically when entering client details
   const sidebar = document.querySelector(".sidebar");
@@ -4685,7 +4748,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   }
 
   sessionStorage.setItem('currentCustomerId', customerId);
-  sessionStorage.setItem('currentSaleId', saleId);
+  sessionStorage.setItem('currentSaleId', AppState.selectedSaleId);
+  if (specificTitulo) sessionStorage.setItem('currentTitulo', specificTitulo);
 
     if (window.subscribeCustomerNotes) window.subscribeCustomerNotes(customerId);
     if (window.subscribeCustomerJudNotes) window.subscribeCustomerJudNotes(customerId);
@@ -8046,7 +8110,7 @@ function renderCustomerOccurrences() {
   let list = [...listNormal, ...listJudicial];
   
   // Restringir a exibição apenas para o contrato selecionado ou legados (sem contrato definido)
-  list = list.filter(occ => !occ.saleId || String(occ.saleId) === String(AppState.selectedSaleId));
+  list = list.filter(occ => window.occurrenceMatchesCurrentContract ? window.occurrenceMatchesCurrentContract(occ) : (!occ.saleId || String(occ.saleId) === String(AppState.selectedSaleId)));
   
   if (!window.currentHistoryFilters.includes('Todos')) {
     list = list.filter(occ => {
