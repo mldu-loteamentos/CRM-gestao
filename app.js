@@ -1525,6 +1525,71 @@ async function initializeApplication() {
       }
       return 'chunk_' + (sum % 20); // 20 shards
   };
+
+  window.normalizeCustomerNotesKey = function(customerId) {
+      return String(customerId == null ? '' : customerId);
+  };
+
+  window.occurrenceIdentity = function(n) {
+      if (!n) return '';
+      if (n.id) return String(n.id);
+      return [n.date, n.author, n.canal || n.fase || '', n.promiseDate || n.prazo || '', String(n.text || '').slice(0, 80)].join('|');
+  };
+
+  window.mergeOccurrenceLists = function(a, b) {
+      const map = new Map();
+      const add = (n) => {
+          if (!n) return;
+          const k = window.occurrenceIdentity(n);
+          if (!k || k === '||||') return;
+          if (!map.has(k)) map.set(k, n);
+      };
+      (Array.isArray(a) ? a : []).forEach(add);
+      (Array.isArray(b) ? b : []).forEach(add);
+      return Array.from(map.values());
+  };
+
+  window.getCustomerNotesList = function(store, customerId) {
+      if (!store) return [];
+      const s = window.normalizeCustomerNotesKey(customerId);
+      const list = store[s] || store[customerId] || [];
+      return Array.isArray(list) ? list : [];
+  };
+
+  window.occurrenceAuthorMatchesOperator = function(author, operatorName) {
+      const normalize = str => String(str || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\./g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+      const a = normalize(author);
+      const o = normalize(operatorName);
+      if (!o || o === "todos") return true;
+      if (!a) return false;
+      if (a === o) return true;
+      if (a.includes(o) || o.includes(a)) return true;
+      const opTokens = o.split(" ").filter(t => t.length > 1);
+      if (opTokens.length && opTokens.every(t => a.includes(t))) return true;
+      try {
+          const users = JSON.parse(localStorage.getItem('crm_users') || '[]') || [];
+          const u = users.find(user => {
+              const name = normalize(user.name);
+              const sienge = normalize(user.sienge_user);
+              return name === o || sienge === o || name.includes(o) || sienge.includes(o) || o.includes(sienge) || o.includes(name);
+          });
+          if (u) {
+              const name = normalize(u.name);
+              const sienge = normalize(u.sienge_user);
+              if (a === name || a === sienge) return true;
+              if (a.includes(name) || a.includes(sienge) || name.includes(a) || sienge.includes(a)) return true;
+              const nameTokens = name.split(" ").filter(t => t.length > 1);
+              if (nameTokens.length && nameTokens.every(t => a.includes(t))) return true;
+          }
+      } catch (e) {}
+      return false;
+  };
   
   // Strategy: merge Firebase (source of truth for cloud) with localStorage (local fallback)
   // Firebase wins on a per-customer basis if the customer exists in Firebase.
@@ -1539,6 +1604,7 @@ async function initializeApplication() {
      if (window.firebaseDb && window.firebaseCollections) {
          setTimeout(async () => {
              try {
+                 window._isNotesHydrating = true;
                  console.log("[Firebase RT] Sincronizando todos os shards iniciais (Cobrança)...");
                  const { collection, getDocs } = window.firebaseCollections;
                  
@@ -1547,7 +1613,9 @@ async function initializeApplication() {
                  notesSnap.forEach(doc => {
                      const data = doc.data();
                      for (const [key, val] of Object.entries(data)) {
-                         AppState.notes[key] = val;
+                         const remote = Array.isArray(val) ? val : [];
+                         const local = window.getCustomerNotesList(AppState.notes, key);
+                         AppState.notes[String(key)] = window.mergeOccurrenceLists(local, remote);
                          hasUpdates = true;
                      }
                  });
@@ -1561,7 +1629,9 @@ async function initializeApplication() {
                  judNotesSnap.forEach(doc => {
                      const data = doc.data();
                      for (const [key, val] of Object.entries(data)) {
-                         AppState.judNotes[key] = val;
+                         const remote = Array.isArray(val) ? val : [];
+                         const local = window.getCustomerNotesList(AppState.judNotes, key);
+                         AppState.judNotes[String(key)] = window.mergeOccurrenceLists(local, remote);
                          judHasUpdates = true;
                      }
                  });
@@ -1569,13 +1639,32 @@ async function initializeApplication() {
                      localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
                  }
                  
+                 try {
+                     const judNotesSnapAlt = await getDocs(collection(window.firebaseDb, 'jud_notes_shards'));
+                     judNotesSnapAlt.forEach(doc => {
+                         const data = doc.data() || {};
+                         for (const [key, val] of Object.entries(data)) {
+                             const remote = Array.isArray(val) ? val : [];
+                             const local = window.getCustomerNotesList(AppState.judNotes, key);
+                             AppState.judNotes[String(key)] = window.mergeOccurrenceLists(local, remote);
+                             judHasUpdates = true;
+                         }
+                     });
+                     if (judHasUpdates) {
+                         localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                     }
+                 } catch (judAltErr) {
+                     console.warn("[Firebase RT] Shard jud_notes_shards indisponível:", judAltErr);
+                 }
+                 
                  console.log("[Firebase RT] Carga inicial unificada concluída com sucesso!");
                  
-                 // Re-render dashboard se aberta
                  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
                  if (typeof updateDashboardHeader === 'function') updateDashboardHeader();
              } catch(e) {
                  console.error("[Firebase RT] Erro ao sincronizar shards iniciais:", e);
+             } finally {
+                 window._isNotesHydrating = false;
              }
          }, 1500);
      }
@@ -1590,19 +1679,30 @@ async function initializeApplication() {
         localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
         if (window.firebaseDb && window.firebaseCollections) {
             if (customerId) {
-               const customerKey = String(customerId);
-               console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerId);
-               const chunkId = window.getCustomerNoteChunkId(customerId);
+               const customerKey = window.normalizeCustomerNotesKey(customerId);
+               const notesToSave = window.mergeOccurrenceLists(
+                   window.getCustomerNotesList(AppState.notes, customerKey),
+                   window.getCustomerNotesList(AppState.notes, customerId)
+               );
+               AppState.notes[customerKey] = notesToSave;
+               if (!notesToSave.length) {
+                   console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
+                   return;
+               }
+               console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerKey, notesToSave.length, "registro(s)");
+               const chunkId = window.getCustomerNoteChunkId(customerKey);
                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-               await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.notes[customerKey] || AppState.notes[customerId] || [] }, { merge: true });
+               await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
                console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
             } else {
                console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
                const chunks = {};
                for (const custId of Object.keys(AppState.notes)) {
+                   const list = window.getCustomerNotesList(AppState.notes, custId);
+                   if (!list.length) continue;
                    const chunkId = window.getCustomerNoteChunkId(custId);
                    if (!chunks[chunkId]) chunks[chunkId] = {};
-                   chunks[chunkId][String(custId)] = AppState.notes[custId] || [];
+                   chunks[chunkId][String(custId)] = list;
                }
                for (const [chunkId, data] of Object.entries(chunks)) {
                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
@@ -1615,7 +1715,6 @@ async function initializeApplication() {
           console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
           alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
       } finally {
-          // Libera o flag com pequeno delay para o snapshot do proprio save ser ignorado
           setTimeout(() => { window._isFirebaseSyncing = false; }, 500);
       }
   };
@@ -1626,19 +1725,24 @@ async function initializeApplication() {
         window.activeCustomerNotesUnsubscribe = null;
       }
       if (!customerId || !window.firebaseDb || !window.firebaseCollections) return;
-      const customerKey = String(customerId);
+      const customerKey = window.normalizeCustomerNotesKey(customerId);
       const shardId = window.getCustomerNoteChunkId(customerKey);
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', shardId);
       window.activeCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
-        if (window._isFirebaseSyncing) return; // Evita loop: ignorar snapshot causado pelo proprio save
+        if (window._isFirebaseSyncing || window._isNotesHydrating) return;
         const data = snapshot.exists() ? snapshot.data() : {};
         if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
-        const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
-        // Sempre aceita a versao do Firebase (fonte de verdade para outros usuarios)
-        AppState.notes[customerKey] = notes;
+        const remote = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
+        const local = window.getCustomerNotesList(AppState.notes, customerKey);
+        const merged = window.mergeOccurrenceLists(local, remote);
+        AppState.notes[customerKey] = merged;
         try {
+          window._isFirebaseSyncing = true;
           localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
         } catch(e) {}
+        finally {
+          window._isFirebaseSyncing = false;
+        }
         if (window.renderCustomerOccurrences) window.renderCustomerOccurrences();
         if (typeof updateSidebarAgendaBadge === 'function') updateSidebarAgendaBadge();
       }, error => console.error('[Firebase RT] Erro nas notas do cliente ativo:', error));
@@ -1738,37 +1842,40 @@ async function initializeApplication() {
   window.saveJudNotesToFirebase = async function(customerId) {
       window._isFirebaseSyncing = true;
       try {
-        localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+        localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes || {}));
+        if (!window.firebaseDb || !window.firebaseCollections) return;
+        const writeShard = async (collectionName, key, list) => {
+            const chunkId = window.getCustomerNoteChunkId(key);
+            const docRef = window.firebaseCollections.doc(window.firebaseDb, collectionName, chunkId);
+            await window.firebaseCollections.setDoc(docRef, { [key]: list }, { merge: true });
+        };
+        if (customerId) {
+           const customerKey = window.normalizeCustomerNotesKey(customerId);
+           const notesToSave = window.mergeOccurrenceLists(
+               window.getCustomerNotesList(AppState.judNotes, customerKey),
+               window.getCustomerNotesList(AppState.judNotes, customerId)
+           );
+           if (!AppState.judNotes) AppState.judNotes = {};
+           AppState.judNotes[customerKey] = notesToSave;
+           if (!notesToSave.length) {
+               console.warn("[Firebase RT] Notas judiciais vazias para", customerKey, "- não sobrescreve a nuvem.");
+               return;
+           }
+           await writeShard('jud_notes_shards', customerKey, notesToSave);
+           await writeShard('customer_jud_notes_shards', customerKey, notesToSave);
+        } else {
+           for (const custId of Object.keys(AppState.judNotes || {})) {
+               const list = window.getCustomerNotesList(AppState.judNotes, custId);
+               if (!list.length) continue;
+               const key = String(custId);
+               await writeShard('jud_notes_shards', key, list);
+               await writeShard('customer_jud_notes_shards', key, list);
+           }
+        }
+      } catch(e) {
+          console.error('Erro ao salvar jud_notes no Firebase', e);
       } finally {
-        window._isFirebaseSyncing = false;
-      }
-      if (window.firebaseDb && window.firebaseCollections) {
-          try {
-              if (customerId) {
-           const customerKey = String(customerId);
-           const payload = JSON.stringify(AppState.judNotes[customerKey] || AppState.judNotes[customerId] || []);
-                 if (window._fbJudNotesLastSavedPayload && window._fbJudNotesLastSavedPayload[customerKey] === payload) return;
-                 const chunkId = window.getCustomerNoteChunkId(customerId);
-                 const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
-           await window.firebaseCollections.setDoc(docRef, { [customerKey]: AppState.judNotes[customerId] || AppState.judNotes[customerKey] || [] }, { merge: true });
-                 window._fbJudNotesLastSavedPayload = window._fbJudNotesLastSavedPayload || {};
-                 window._fbJudNotesLastSavedPayload[customerKey] = payload;
-              } else {
-                 const chunks = {};
-                 for (const custId of Object.keys(AppState.judNotes)) {
-                     const chunkId = window.getCustomerNoteChunkId(custId);
-                     if (!chunks[chunkId]) chunks[chunkId] = {};
-                     chunks[chunkId][String(custId)] = AppState.judNotes[custId] || [];
-                 }
-                 for (const [chunkId, data] of Object.entries(chunks)) {
-                     const docRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', chunkId);
-                   await window.firebaseCollections.setDoc(docRef, data, { merge: true });
-                 }
-              }
-          } catch(e) {
-                if (customerId && window._fbJudNotesLastSavedPayload) delete window._fbJudNotesLastSavedPayload[String(customerId)];
-              console.error('Erro ao salvar jud_notes no Firebase', e);
-          }
+          setTimeout(() => { window._isFirebaseSyncing = false; }, 500);
       }
   };
 
@@ -1782,11 +1889,14 @@ async function initializeApplication() {
       const shardId = window.getCustomerNoteChunkId(customerKey);
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'jud_notes_shards', shardId);
       window.activeCustomerJudNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
+        if (window._isFirebaseSyncing || window._isNotesHydrating) return;
         const data = snapshot.exists() ? snapshot.data() : {};
-          if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
-        const notes = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
-        if (JSON.stringify(AppState.judNotes[customerKey] || []) === JSON.stringify(notes)) return;
-        AppState.judNotes[customerKey] = notes;
+        if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
+        const remote = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
+        const local = window.getCustomerNotesList(AppState.judNotes, customerKey);
+        const merged = window.mergeOccurrenceLists(local, remote);
+        if (JSON.stringify(local) === JSON.stringify(merged)) return;
+        AppState.judNotes[customerKey] = merged;
         window._isFirebaseSyncing = true;
         try {
           localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
@@ -7931,8 +8041,8 @@ function renderCustomerOccurrences() {
   
   window.currentHistoryFilters = window.currentHistoryFilters || ['Todos'];
   
-  let listNormal = AppState.notes[AppState.selectedCustomerId] || [];
-  let listJudicial = AppState.judNotes ? (AppState.judNotes[AppState.selectedCustomerId] || []) : [];
+  let listNormal = window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, AppState.selectedCustomerId) : (AppState.notes[AppState.selectedCustomerId] || []);
+  let listJudicial = AppState.judNotes ? (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.judNotes, AppState.selectedCustomerId) : (AppState.judNotes[AppState.selectedCustomerId] || [])) : [];
   let list = [...listNormal, ...listJudicial];
   
   // Restringir a exibição apenas para o contrato selecionado ou legados (sem contrato definido)
@@ -10786,12 +10896,13 @@ window.submitReprocessBoleto = async function() {
     }
 
     const finalPromessaText = userText ? `${userText}\n[SISTEMA]: ${boletoText}` : `[SISTEMA]: ${boletoText}`;
-    const currentUser = window.LOGGED_USER_NAME || "Operador";
 
     // Gera ocorrência com promessa preenchida pelo operador no modal
     const occurrence = {
+      id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `prom_${Date.now()}-${Math.random().toString(36).slice(2)}`,
       date: new Date().toISOString(),
-      author: currentUser,
+      author: AppState.currentUser ? AppState.currentUser.name : (window.LOGGED_USER_NAME || "Operador"),
+      saleId: AppState.selectedSaleId || null,
       text: finalPromessaText,
       promiseDate: dueDate,
       promiseStatus: 'Pendente',
@@ -10806,6 +10917,7 @@ window.submitReprocessBoleto = async function() {
     }
     AppState.notes[AppState.selectedCustomerId].push(occurrence);
     localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    if (window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId);
     if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
 
     alert("Boleto gerado e Promessa registrada com sucesso!");
@@ -11010,8 +11122,7 @@ async function loadAgendaTab(showLoader = false) {
     if (!customer) return;
     
     occList.forEach(occ => {
-      const occAuthor = normalizeStr(occ.author || "OUTROS");
-      if (selectedOperator !== "Todos" && occAuthor !== selOp) return;
+      if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
 
       // 1. Process Pending Promises for KPIs
       if (occ.promiseDate && occ.promiseStatus === "Pendente" && occ.status !== "Cancelada") {
@@ -11240,7 +11351,7 @@ async function renderAgendaCalendar() {
       occList.forEach(occ => {
         if (occ.promiseDate === cellDateStr && occ.promiseStatus === "Pendente" && occ.status !== "Cancelada") {
            // Apply Filters
-           if (selectedOperator !== "Todos" && occ.author !== selectedOperator) return;
+           if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
            if (typeFilter !== "todas") {
              if (typeFilter === "promessa" && (!occ.promiseDate)) return;
              if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
@@ -11369,16 +11480,14 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const applyTouchedFilter = (queue) => {
       queue.forEach(item => {
          let exclude = false;
-         const notes = AppState.notes[item.customerId] || [];
+         const notes = (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, item.customerId) : (AppState.notes[item.customerId] || []));
          notes.forEach(n => {
-           // Excluir se houver uma promessa pendente para hoje ou futuro
            if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) {
                   exclude = true;
               }
            }
-           // Excluir se o operador tiver feito qualquer anotação HOJE (significa que já tratou o cliente)
-           if (n.date && n.date.startsWith(todayStr) && n.author && n.author.toLowerCase().includes(selectedOperator.toLowerCase())) {
+           if (n.date && n.date.startsWith(todayStr) && window.occurrenceAuthorMatchesOperator(n.author, selectedOperator)) {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) {
                   exclude = true;
               }
@@ -11421,10 +11530,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   let scheduledCount = 0;
   Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
     occList.forEach(occ => {
-      const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-      const occAuthor = normalizeStr(occ.author);
-      const selOp = normalizeStr(selectedOperator);
-      if (occ.promiseDate === dateStr && occ.status !== "Cancelada" && occAuthor === selOp) {
+      if (occ.promiseDate === dateStr && occ.status !== "Cancelada" && window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) {
          scheduledCount++;
       }
     });
@@ -11890,10 +11996,7 @@ window.fireConfetti = function() {
           if (occ.promiseDate === dateStr && occ.status !== "Cancelada") {
             
             // Aplicação dos Filtros
-            const normalizeStr = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-            const occAuthor = normalizeStr(occ.author);
-            const selOp = normalizeStr(selectedOperator);
-            if (selectedOperator !== "Todos" && occAuthor !== selOp) return;
+            if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
             if (typeFilter !== "todas") {
                if (typeFilter === "promessa" && (!occ.promiseDate)) return;
                if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
@@ -21799,6 +21902,9 @@ window.saveJudicialOccurrence = function() {
   
   AppState.judNotes[AppState.selectedCustomerId].push(occurrence);
   localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+  if (window.saveJudNotesToFirebase) {
+    window.saveJudNotesToFirebase(AppState.selectedCustomerId);
+  }
 
   // Clear fields
   if(faseEl) faseEl.value = "";
@@ -21883,8 +21989,8 @@ window.renderJudicialTimeline = function() {
     AppState.judNotes = local ? JSON.parse(local) : {};
   }
 
-  let listNormal = AppState.notes[AppState.selectedCustomerId] || [];
-  let listJudicial = AppState.judNotes ? (AppState.judNotes[AppState.selectedCustomerId] || []) : [];
+  let listNormal = window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, AppState.selectedCustomerId) : (AppState.notes[AppState.selectedCustomerId] || []);
+  let listJudicial = AppState.judNotes ? (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.judNotes, AppState.selectedCustomerId) : (AppState.judNotes[AppState.selectedCustomerId] || [])) : [];
   let list = [...listNormal, ...listJudicial];
   
   if (window.currentJudicialHistoryFilter && window.currentJudicialHistoryFilter !== 'Todos') {
@@ -23599,7 +23705,7 @@ localStorage.setItem = function(key, value) {
     _originalSetItem.call(this, key, value);
     
     // Tratamento exclusivo de anotações (mantém a lógica anterior)
-    if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing) {
+    if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing && !window._isNotesHydrating) {
         if (window._fbSyncTimeout) clearTimeout(window._fbSyncTimeout);
         window._fbSyncTimeout = setTimeout(() => {
             if (window.AppState && window.AppState.selectedCustomerId) {
@@ -23610,7 +23716,7 @@ localStorage.setItem = function(key, value) {
         }, 300);
     }
 
-    if (key === "crm_moura_jud_notes" && window.saveJudNotesToFirebase && !window._isFirebaseSyncing) {
+    if (key === "crm_moura_jud_notes" && window.saveJudNotesToFirebase && !window._isFirebaseSyncing && !window._isNotesHydrating) {
         if (window._fbJudSyncTimeout) clearTimeout(window._fbJudSyncTimeout);
         window._fbJudSyncTimeout = setTimeout(() => {
             if (window.AppState && window.AppState.selectedCustomerId) {
