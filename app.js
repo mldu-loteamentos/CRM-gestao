@@ -1541,7 +1541,7 @@ async function initializeApplication() {
   window.mergeOccurrenceLists = function(a, b) {
       const map = new Map();
       const add = (n) => {
-          if (!n) return;
+          if (!n || window.isExactTesteOccurrence(n)) return;
           const k = window.occurrenceIdentity(n);
           if (!k || k === '||||') return;
           if (!map.has(k)) map.set(k, n);
@@ -1549,6 +1549,43 @@ async function initializeApplication() {
       (Array.isArray(a) ? a : []).forEach(add);
       (Array.isArray(b) ? b : []).forEach(add);
       return Array.from(map.values());
+  };
+
+  window.isExactTesteOccurrence = function(n) {
+      const t = String((n && n.text) || '')
+          .replace(/\u00a0/g, ' ')
+          .trim()
+          .toUpperCase()
+          .replace(/\s+/g, ' ');
+      return t === 'TESTE';
+  };
+
+  window.stripExactTesteNotes = function(list) {
+      return (Array.isArray(list) ? list : []).filter(n => !window.isExactTesteOccurrence(n));
+  };
+
+  window.stripExactTesteFromStore = function(store) {
+      if (!store) return store;
+      Object.keys(store).forEach(k => {
+          if (Array.isArray(store[k])) store[k] = window.stripExactTesteNotes(store[k]);
+      });
+      return store;
+  };
+
+  window.applyRemoteNotes = function(local, remote) {
+      const remoteList = window.stripExactTesteNotes(remote);
+      const localList = window.stripExactTesteNotes(local);
+      const remoteKeys = new Set(remoteList.map(n => window.occurrenceIdentity(n)));
+      const graceMs = 120000;
+      const now = Date.now();
+      const extras = [];
+      localList.forEach(n => {
+          const k = window.occurrenceIdentity(n);
+          if (!k || remoteKeys.has(k)) return;
+          const ts = new Date(n.date).getTime();
+          if (Number.isFinite(ts) && (now - ts) < graceMs) extras.push(n);
+      });
+      return remoteList.concat(extras);
   };
 
   window.getCustomerNotesList = function(store, customerId) {
@@ -1657,6 +1694,10 @@ async function initializeApplication() {
   try {
      const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
      AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
+     window.stripExactTesteFromStore(AppState.notes);
+     window._isNotesHydrating = true;
+     try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+     if (!(window.firebaseDb && window.firebaseCollections)) window._isNotesHydrating = false;
      
      const localJudNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
      AppState.judNotes = localJudNotes;
@@ -1676,7 +1717,7 @@ async function initializeApplication() {
                      for (const [key, val] of Object.entries(data)) {
                          const remote = Array.isArray(val) ? val : [];
                          const local = window.getCustomerNotesList(AppState.notes, key);
-                         AppState.notes[String(key)] = window.mergeOccurrenceLists(local, remote);
+                         AppState.notes[String(key)] = window.applyRemoteNotes(local, remote);
                          hasUpdates = true;
                      }
                  });
@@ -1741,10 +1782,10 @@ async function initializeApplication() {
         if (window.firebaseDb && window.firebaseCollections) {
             if (customerId) {
                const customerKey = window.normalizeCustomerNotesKey(customerId);
-               const notesToSave = window.mergeOccurrenceLists(
+               const notesToSave = window.stripExactTesteNotes(window.mergeOccurrenceLists(
                    window.getCustomerNotesList(AppState.notes, customerKey),
                    window.getCustomerNotesList(AppState.notes, customerId)
-               );
+               ));
                AppState.notes[customerKey] = notesToSave;
                if (!notesToSave.length) {
                    console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
@@ -1795,7 +1836,7 @@ async function initializeApplication() {
         if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const remote = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
         const local = window.getCustomerNotesList(AppState.notes, customerKey);
-        const merged = window.mergeOccurrenceLists(local, remote);
+        const merged = window.applyRemoteNotes(local, remote);
         AppState.notes[customerKey] = merged;
         try {
           window._isFirebaseSyncing = true;
