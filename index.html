@@ -1019,7 +1019,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.430 &nbsp;&middot;&nbsp; 26/08/2026
+            v1.0.432 &nbsp;&middot;&nbsp; 26/08/2026
           </span>
         </div>
       </div>
@@ -2356,13 +2356,18 @@ Atenciosamente,
               </h3>
             </div>
             <div class="table-container" style="box-shadow: none; border: 1px solid rgba(16, 84, 54, 0.08); overflow-x: auto;">
-              <table class="custom-table" style="font-size: 0.8rem; min-width: 500px;">
+              <table class="custom-table" style="font-size: 0.8rem; min-width: 900px;">
                 <thead>
                   <tr style="background-color: #fff7ed; border-bottom: 2px solid #f97316;">
-                    <th style="text-align: center; width: 50px;">ID</th>
-                    <th style="text-align: left;">EMPRESA | EMPREENDIMENTO</th>
-                    <th style="text-align: center; width: 80px;">TÍTULOS</th>
-                    <th style="text-align: right; width: 160px; padding-right: 16px;">R$ ATUALIZADO</th>
+                    <th style="text-align: center; width: 60px;">ID</th>
+                    <th style="text-align: left;">Empresa | Empreendimento</th>
+                    <th style="text-align: center;">Títulos</th>
+                    <th style="text-align: center;">R$ Atualizado</th>
+                    <th style="text-align: center;">Até 30 dias</th>
+                    <th style="text-align: center;">Até 60 dias</th>
+                    <th style="text-align: center;">Até 90 dias</th>
+                    <th style="text-align: center;">Até 120 dias</th>
+                    <th style="text-align: center;">Acima 120 dias</th>
                   </tr>
                 </thead>
                 <tbody id="subjudice-company-summary-body">
@@ -5528,6 +5533,28 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
               <div class="adv-pill" data-value="SEM_PAGAMENTO">Sem Pagto (>30d)</div>
             </div>
           </div>
+
+          <div class="filter-group" id="adv-filter-fase-processual-group" style="display: none;">
+            <label class="adv-filter-label">Fase Processual</label>
+            <div class="adv-pills-group" id="adv-pills-fase-processual">
+              <div class="adv-pill active" data-value="">Todos</div>
+            </div>
+          </div>
+
+          <div class="filter-group" id="adv-filter-data-fase-group" style="display: none;">
+            <label class="adv-filter-label">Data da Fase (Prazo)</label>
+            <div class="adv-pills-group" id="adv-pills-data-fase">
+              <div class="adv-pill active" data-value="">Todos</div>
+              <div class="adv-pill" data-value="VENCIDOS">Prazos vencidos</div>
+              <div class="adv-pill" data-value="MES">Vencem neste mês</div>
+              <div class="adv-pill" data-value="N_DIAS">Vence em N dias</div>
+            </div>
+            <div id="adv-data-fase-ndias-wrap" style="display: none; margin-top: 10px; align-items: center; gap: 8px; background: #f1f5f9; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
+              <label for="adv-input-data-fase-ndias" style="font-size: 0.8rem; color: #475569; font-weight: 600; white-space: nowrap;">Vence daqui</label>
+              <input type="number" id="adv-input-data-fase-ndias" min="1" max="3650" placeholder="N" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; outline: none; font-size: 0.85rem;" />
+              <span style="font-size: 0.8rem; color: #475569; font-weight: 600;">dias</span>
+            </div>
+          </div>
           
           <!-- Filtro de Jurídico & Sub Judice (Unificado) - Movido para cá -->
           <div class="filter-group">
@@ -5576,30 +5603,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=430"></script>
-  <script defer src="sienge-api.js?v=430"></script>
-  <script defer src="azure-auth.js?v=430"></script>
-  <script defer src="app.js?v=430"></script>
-  <script defer src="home-dashboard.js?v=430"></script>
-  <script defer src="anexos.js?v=430"></script>
-  <script defer src="contas-pagar.js?v=430"></script>
-  <script defer src="config-tags.js?v=430"></script>
-  <script defer src="config-users.js?v=430"></script>
-  <script defer src="construcao.js?v=430"></script>
-  <script defer src="empresas.js?v=430"></script>
-  <script defer src="relacionamento.js?v=430"></script>
+  <script defer src="data.js?v=432"></script>
+  <script defer src="sienge-api.js?v=432"></script>
+  <script defer src="azure-auth.js?v=432"></script>
+  <script defer src="app.js?v=432"></script>
+  <script defer src="home-dashboard.js?v=432"></script>
+  <script defer src="anexos.js?v=432"></script>
+  <script defer src="contas-pagar.js?v=432"></script>
+  <script defer src="config-tags.js?v=432"></script>
+  <script defer src="config-users.js?v=432"></script>
+  <script defer src="construcao.js?v=432"></script>
+  <script defer src="empresas.js?v=432"></script>
+  <script defer src="relacionamento.js?v=432"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=430"></script>
-  <script defer src="plano-financeiro.js?v=430"></script>
-  <script defer src="fiscal.js?v=430"></script>
-  <script defer src="indexadores.js?v=430"></script>
-  <script defer src="verificar-construcao.js?v=430"></script>
-  <script src="repactuacoes.js?v=430"></script>
+  <script defer src="centros-custo.js?v=432"></script>
+  <script defer src="plano-financeiro.js?v=432"></script>
+  <script defer src="fiscal.js?v=432"></script>
+  <script defer src="indexadores.js?v=432"></script>
+  <script defer src="verificar-construcao.js?v=432"></script>
+  <script src="repactuacoes.js?v=432"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=430"></script>
+  <script defer src="dashboard-inadimplencia.js?v=432"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

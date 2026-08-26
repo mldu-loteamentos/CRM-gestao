@@ -2543,6 +2543,51 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
   `;
 }
 
+window.getClientJudicialPhaseInfo = function(client) {
+  const empty = { fase: "Sem Fase", enteredAt: null, prazo: null, daysLeft: null, status: "SEM_PRAZO" };
+  if (!client) return empty;
+  const cid = String(client.customerId);
+  const customerNotes = (window.AppState && AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
+  const validJudNotes = customerNotes.filter(n => n && n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
+  if (validJudNotes.length === 0) return empty;
+  validJudNotes.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const last = validJudNotes[0];
+  const fase = last.fase || "Sem Fase";
+  const enteredAt = last.date ? new Date(last.date) : null;
+  let prazoDate = null;
+  if (last.prazo) {
+    const raw = String(last.prazo).split('T')[0];
+    const parts = raw.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      prazoDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    } else {
+      const parsed = new Date(last.prazo);
+      if (!Number.isNaN(parsed.getTime())) prazoDate = parsed;
+    }
+  }
+  if (!prazoDate && enteredAt && !Number.isNaN(enteredAt.getTime())) {
+    const etapas = window.EtapasJudiciaisState || [];
+    const etapa = etapas.find(e => String(e.nome || e.name || '').trim().toUpperCase() === String(fase).trim().toUpperCase());
+    const dias = etapa ? (parseInt(etapa.dias, 10) || 0) : 0;
+    if (dias > 0) {
+      prazoDate = new Date(enteredAt);
+      prazoDate.setHours(12, 0, 0, 0);
+      prazoDate.setDate(prazoDate.getDate() + dias);
+    }
+  }
+  let daysLeft = null;
+  let status = "SEM_PRAZO";
+  if (prazoDate && !Number.isNaN(prazoDate.getTime())) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const p = new Date(prazoDate);
+    p.setHours(0, 0, 0, 0);
+    daysLeft = Math.round((p - today) / (1000 * 60 * 60 * 24));
+    status = daysLeft < 0 ? "VENCIDO" : "NO_PRAZO";
+  }
+  return { fase, enteredAt, prazo: prazoDate, daysLeft, status };
+};
+
 async function loadDashboardData(forceRefresh = false) {
     if (window._isDefaultersLoading) return;
     window._isDefaultersLoading = true;
@@ -2552,7 +2597,8 @@ async function loadDashboardData(forceRefresh = false) {
 const defaultAdvFilterState = {
     lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
     cidade: [], empresa: [], ccusto: [], operador: [],
-    contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: []
+    contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: [],
+    faseProcessual: [], dataFase: [], dataFaseNDias: ''
 };
 window.advFiltersFila = JSON.parse(JSON.stringify(defaultAdvFilterState));
 window.advFiltersFila.paidMap = new Map();
@@ -2758,6 +2804,32 @@ window.applyAdvFiltersTo = (sourceList) => {
             });
         }
         
+        if (window.advFilters.faseProcessual && window.advFilters.faseProcessual.length > 0) {
+            filteredList = filteredList.filter(c => {
+                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : { fase: 'Sem Fase' };
+                return window.advFilters.faseProcessual.some(val => String(info.fase || 'Sem Fase').trim().toUpperCase() === String(val).trim().toUpperCase());
+            });
+        }
+
+        if (window.advFilters.dataFase && window.advFilters.dataFase.length > 0) {
+            const nDays = parseInt(window.advFilters.dataFaseNDias, 10);
+            filteredList = filteredList.filter(c => {
+                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : null;
+                if (!info || !info.prazo) return false;
+                const prazo = new Date(info.prazo);
+                prazo.setHours(0, 0, 0, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const daysLeft = Number.isFinite(info.daysLeft) ? info.daysLeft : Math.round((prazo - today) / (1000 * 60 * 60 * 24));
+                return window.advFilters.dataFase.some(val => {
+                    if (val === 'VENCIDOS') return daysLeft < 0;
+                    if (val === 'MES') return prazo.getMonth() === today.getMonth() && prazo.getFullYear() === today.getFullYear();
+                    if (val === 'N_DIAS') return Number.isFinite(nDays) && nDays > 0 && daysLeft >= 0 && daysLeft <= nDays;
+                    return false;
+                });
+            });
+        }
+
         if (window.advFilters.pagamentoRecente && window.advFilters.pagamentoRecente.length > 0 && window.advFilters.paidMap) {
             filteredList = filteredList.filter(c => {
                 let minDiff = Infinity;
@@ -4051,38 +4123,35 @@ document.addEventListener("click", function(e) {
 
   const kpiContainer = document.getElementById("subjudice-kpi-grid");
   if (kpiContainer) {
-    kpiContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
-    kpiContainer.style.gap = '10px';
-    kpiContainer.style.marginBottom = '1rem';
-    const _sk = v => Math.round(v).toLocaleString('pt-BR');
+    kpiContainer.removeAttribute('style');
     kpiContainer.innerHTML = `
-      <div class="kpi-card total-delay" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
+      <div class="kpi-card total-delay">
         <div class="kpi-info">
-          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Valor em Atraso</h3>
-          <div class="kpi-value" style="font-size:1.25rem;">R$ ${_sk(subTotalOverdue)}</div>
+          <h3>Valor em Atraso</h3>
+          <div class="kpi-value">${subTotalOverdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
         </div>
-        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="alert-triangle"></i></div>
+        <div class="kpi-icon-wrapper"><i data-lucide="alert-triangle"></i></div>
       </div>
-      <div class="kpi-card clients-crit" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
+      <div class="kpi-card clients-crit">
         <div class="kpi-info">
-          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Clientes em Atraso</h3>
-          <div class="kpi-value" style="font-size:1.25rem;">${subTotalClients.size}</div>
+          <h3>Clientes em Atraso</h3>
+          <div class="kpi-value">${subTotalClients.size}</div>
         </div>
-        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="users"></i></div>
+        <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
       </div>
-      <div class="kpi-card promises" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
+      <div class="kpi-card promises">
         <div class="kpi-info">
-          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">T\u00edtulos Vencidos</h3>
-          <div class="kpi-value" style="font-size:1.25rem;">${subTotalBills}</div>
+          <h3>Títulos Vencidos</h3>
+          <div class="kpi-value">${subTotalBills}</div>
         </div>
-        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="file-text"></i></div>
+        <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
       </div>
-      <div class="kpi-card subjudice" style="padding:0.6rem 1rem;display:flex;align-items:center;gap:10px;justify-content:space-between;">
+      <div class="kpi-card subjudice">
         <div class="kpi-info">
-          <h3 style="font-size:0.7rem;margin:0 0 2px 0;">Atraso M\u00e9dio</h3>
-          <div class="kpi-value" style="font-size:1.25rem;">${subAvgDelay} dias</div>
+          <h3>Atraso Médio</h3>
+          <div class="kpi-value">${subAvgDelay} dias</div>
         </div>
-        <div class="kpi-icon-wrapper" style="min-width:36px;height:36px;"><i data-lucide="clock"></i></div>
+        <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
       </div>
     `;
     if (window.lucide) lucide.createIcons();
@@ -4157,6 +4226,7 @@ document.addEventListener("click", function(e) {
     const fmtCur = v => 'R$ ' + fmtNum(v);
 
     let sumTitles = 0, sumTotal = 0;
+    let sumBracket30 = 0, sumBracket60 = 0, sumBracket90 = 0, sumBracket120 = 0, sumBracketAbove120 = 0;
 
     // Carregar nome_usual do cache de customizacoes (localStorage ou EmpresasState)
     let _customCache = null;
@@ -4191,6 +4261,11 @@ document.addEventListener("click", function(e) {
       if (clientCount === 0) return;
       sumTitles += summary.billIds.size;
       sumTotal += summary.totalOverdue;
+      sumBracket30 += summary.bracket30;
+      sumBracket60 += summary.bracket60;
+      sumBracket90 += summary.bracket90;
+      sumBracket120 += summary.bracket120;
+      sumBracketAbove120 += summary.bracketAbove120;
 
       const calcPct = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
       const pct30 = calcPct(summary.bracket30, summary.totalOverdue);
@@ -4198,12 +4273,13 @@ document.addEventListener("click", function(e) {
       const pct90 = calcPct(summary.bracket90, summary.totalOverdue);
       const pct120 = calcPct(summary.bracket120, summary.totalOverdue);
       const pctAbove120 = calcPct(summary.bracketAbove120, summary.totalOverdue);
+      const fmtMoney = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
       const renderCell = (val, pct, color) => {
         if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
         return `
           <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: 600; color: #334155; font-size: 0.85rem; margin-bottom: 3px;">${fmtNum(val)}</div>
+            <div style="font-weight: 600; color: #334155; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
             <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
               <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
               <span style="font-size: 0.7rem; color: #64748b; font-weight: 500; text-align: left;">${pct}%</span>
@@ -4216,7 +4292,7 @@ document.addEventListener("click", function(e) {
         if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
         return `
           <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: 600; color: #64748b; font-size: 0.85rem; margin-bottom: 3px;">${fmtNum(val)}</div>
+            <div style="font-weight: 600; color: #64748b; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
           </div>
         `;
       };
@@ -4238,7 +4314,7 @@ document.addEventListener("click", function(e) {
       tr.onmouseenter = () => tr.style.backgroundColor = "#e2e8f0";
       tr.onmouseleave = () => tr.style.backgroundColor = "#f1f5f9";
       tr.innerHTML = `
-        <td style="text-align: center; color: #64748b; font-weight: 500; width: 40px;">${summary.id}</td>
+        <td style="text-align: center; color: #64748b; font-weight: 500;">${summary.id}</td>
         <td style="text-align: left;">
           <div style="display: flex; align-items: center;">
             ${toggleHtml}
@@ -4253,9 +4329,14 @@ document.addEventListener("click", function(e) {
                 ${summary.billIds.size}
             </div>
         </td>
-        <td style="text-align: right; padding-right: 16px;">
-            <strong style="font-size: 0.9rem; color: #0f172a;">${fmtCur(summary.totalOverdue)}</strong>
+        <td style="text-align: center;">
+            <strong style="font-size: 0.9rem; color: #0f172a;">R$ ${fmtMoney(summary.totalOverdue)}</strong>
         </td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket30, pct30, '#10b981')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket60, pct60, '#f59e0b')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket90, pct90, '#f97316')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket120, pct120, '#ef4444')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracketAbove120, pctAbove120, '#b91c1c')}</td>
       `;
       subCompSummaryBody.appendChild(tr);
 
@@ -4273,9 +4354,14 @@ document.addEventListener("click", function(e) {
               <td style="text-align: center; color: #64748b;">
                   ${cc.billIds.size}
               </td>
-              <td style="text-align: right; padding-right: 16px;">
-                  <span style="color: #334155; font-weight: 600; font-size: 0.85rem;">${fmtCur(cc.totalOverdue)}</span>
+              <td style="text-align: center;">
+                  <strong style="color: #334155;">R$ ${fmtMoney(cc.totalOverdue)}</strong>
               </td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket30)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket60)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket90)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket120)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracketAbove120)}</td>
             `;
             subCompSummaryBody.appendChild(ccRow);
         });
@@ -4283,16 +4369,46 @@ document.addEventListener("click", function(e) {
     });
 
     if (sumTitles > 0) {
+      const calcPctTotal = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
+      const totalPct30 = calcPctTotal(sumBracket30, sumTotal);
+      const totalPct60 = calcPctTotal(sumBracket60, sumTotal);
+      const totalPct90 = calcPctTotal(sumBracket90, sumTotal);
+      const totalPct120 = calcPctTotal(sumBracket120, sumTotal);
+      const totalPctAbove120 = calcPctTotal(sumBracketAbove120, sumTotal);
+      const renderTotalCell = (val, pct, color) => {
+        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500;">-</div>`;
+        return `
+          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: 700; color: #0f172a; font-size: 0.9rem; margin-bottom: 3px;">${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
+              <span style="font-size: 0.75rem; color: #475569; font-weight: 600; text-align: left;">${pct}%</span>
+            </div>
+          </div>
+        `;
+      };
       const tFoot = document.createElement("tr");
       tFoot.style.backgroundColor = "#fff7ed";
       tFoot.innerHTML = `
-        <td colspan="2" style="text-align: right; font-weight: 700; color: #f97316; font-size: 0.85rem;">TOTAL GERAL</td>
-        <td style="text-align: center;">
+        <td style="border-top: 2px solid #f97316;"></td>
+        <td style="text-align: right; border-top: 2px solid #f97316; color: #ea580c; padding-right: 15px;">
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-weight: 800; font-size: 0.9rem;">
+                TOTAL GERAL
+            </div>
+        </td>
+        <td style="text-align: center; border-top: 2px solid #f97316;">
           <span style="background-color: #ea580c; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.8rem; color: white;">
             ${sumTitles}
           </span>
         </td>
-        <td style="text-align: right; padding-right: 16px; font-weight: 700; color: #c2410c; font-size: 0.9rem;">${fmtCur(sumTotal)}</td>
+        <td style="text-align: center; border-top: 2px solid #f97316;">
+            <strong style="font-size: 1rem; color: #c2410c;">R$ ${sumTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+        </td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket30, totalPct30, '#10b981')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket60, totalPct60, '#f59e0b')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket90, totalPct90, '#f97316')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket120, totalPct120, '#ef4444')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracketAbove120, totalPctAbove120, '#b91c1c')}</td>
       `;
       subCompSummaryBody.appendChild(tFoot);
     }
@@ -4305,7 +4421,7 @@ document.addEventListener("click", function(e) {
   if (subjudiceBody) {
     subjudiceBody.innerHTML = "";
     if (filteredSubjudice.length === 0) {
-      subjudiceBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
+      subjudiceBody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
     } else {
       filteredSubjudice.forEach(client => {
         const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22929,7 +23045,7 @@ window.initAdvFiltersUI = function() {
             const pill = e.target.closest('.adv-pill');
             if (!pill) return;
             
-            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente'].includes(group.id);
+            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente', 'adv-pills-fase-processual', 'adv-pills-data-fase'].includes(group.id);
             const val = pill.dataset.value;
 
             if (isMulti) {
@@ -22950,6 +23066,16 @@ window.initAdvFiltersUI = function() {
                 // Single select
                 group.querySelectorAll('.adv-pill').forEach(p => p.classList.remove('active'));
                 pill.classList.add('active');
+            }
+
+            if (group.id === 'adv-pills-data-fase') {
+                const nWrap = document.getElementById('adv-data-fase-ndias-wrap');
+                const nActive = !!group.querySelector('.adv-pill[data-value="N_DIAS"].active');
+                if (nWrap) nWrap.style.display = nActive ? 'flex' : 'none';
+                if (nActive) {
+                    const nInput = document.getElementById('adv-input-data-fase-ndias');
+                    if (nInput) nInput.focus();
+                }
             }
         });
     });
@@ -23183,6 +23309,46 @@ window.openAdvFiltersModal = function(context = 'fila') {
 
         const ccItems = Array.from(ccustos.entries()).map(([k,v]) => ({id: k, label: v.label, companyId: v.companyId})).sort((a,b)=> parseInt(a.id) - parseInt(b.id));
         renderDropdown('adv-dropdown-ccusto-container', ccItems, window.advFilters.ccusto, true);
+
+        const isSubjudiceCtx = context === 'subjudice';
+        const faseGroup = document.getElementById('adv-filter-fase-processual-group');
+        const dataFaseGroup = document.getElementById('adv-filter-data-fase-group');
+        if (faseGroup) faseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
+        if (dataFaseGroup) dataFaseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
+
+        if (isSubjudiceCtx) {
+            const faseContainer = document.getElementById('adv-pills-fase-processual');
+            if (faseContainer) {
+                const selectedFases = window.advFilters.faseProcessual || [];
+                const names = new Set((window.EtapasJudiciaisState || []).map(e => String(e.nome || e.name || '').trim()).filter(Boolean));
+                names.add('Sem Fase');
+                (window.rawClientList || []).forEach(c => {
+                    if (c.subjudice !== 'S' && c.subjudice !== true) return;
+                    const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : null;
+                    if (info && info.fase) names.add(String(info.fase).trim());
+                });
+                let html = `<div class="adv-pill ${selectedFases.length === 0 ? 'active' : ''}" data-value="">Todos</div>`;
+                Array.from(names).sort((a, b) => a.localeCompare(b, 'pt-BR')).forEach(nome => {
+                    const active = selectedFases.some(v => String(v).trim().toUpperCase() === nome.toUpperCase()) ? 'active' : '';
+                    html += `<div class="adv-pill ${active}" data-value="${nome.replace(/"/g, '&quot;')}">${nome}</div>`;
+                });
+                faseContainer.innerHTML = html;
+            }
+
+            const dataFaseContainer = document.getElementById('adv-pills-data-fase');
+            const selectedData = window.advFilters.dataFase || [];
+            if (dataFaseContainer) {
+                dataFaseContainer.querySelectorAll('.adv-pill').forEach(p => {
+                    const val = p.dataset.value || '';
+                    if (!val) p.classList.toggle('active', selectedData.length === 0);
+                    else p.classList.toggle('active', selectedData.includes(val));
+                });
+            }
+            const nInput = document.getElementById('adv-input-data-fase-ndias');
+            const nWrap = document.getElementById('adv-data-fase-ndias-wrap');
+            if (nInput) nInput.value = window.advFilters.dataFaseNDias || '';
+            if (nWrap) nWrap.style.display = selectedData.includes('N_DIAS') ? 'flex' : 'none';
+        }
         
         // Dispara initial trigger para as lógicas de cruzamento dinâmico
         setTimeout(() => {
@@ -23254,6 +23420,14 @@ window.applyAdvFilters = async function(keepOpen = false) {
     window.advFilters.zeropaid = zpPills.length > 0 ? zpPills[0] : 'TODOS';
     
     window.advFilters.pagamentoRecente = getPills('adv-pills-pagamento-recente');
+    window.advFilters.faseProcessual = getPills('adv-pills-fase-processual');
+    window.advFilters.dataFase = getPills('adv-pills-data-fase');
+    const nDiasEl = document.getElementById('adv-input-data-fase-ndias');
+    window.advFilters.dataFaseNDias = nDiasEl ? String(nDiasEl.value || '').trim() : '';
+    if ((window.advFilters.dataFase || []).includes('N_DIAS') && !window.advFilters.dataFaseNDias) {
+        alert('Informe a quantidade de dias para o filtro "Vence em N dias".');
+        return;
+    }
 
     const getDropdown = (containerId) => {
         const container = document.getElementById(containerId);
@@ -23301,6 +23475,8 @@ window.applyAdvFilters = async function(keepOpen = false) {
     if (window.advFilters.contato) count++;
     if (window.advFilters.subjudice && window.advFilters.subjudice !== 'TODOS') count++;
     if (window.advFilters.pagamentoRecente && window.advFilters.pagamentoRecente.length > 0) count++;
+    if (window.advFilters.faseProcessual && window.advFilters.faseProcessual.length > 0) count++;
+    if (window.advFilters.dataFase && window.advFilters.dataFase.length > 0) count++;
 
     let badgeId = 'adv-filters-badge';
     if (window.currentAdvFilterContext === 'subjudice') badgeId = 'subjudice-adv-filters-badge';
@@ -23458,7 +23634,8 @@ window.clearAdvFilters = function() {
     const defaultState = {
         lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
         cidade: [], empresa: [], ccusto: [], operador: [],
-        contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: []
+        contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: [],
+        faseProcessual: [], dataFase: [], dataFaseNDias: ''
     };
     if (window.currentAdvFilterContext === 'fila') window.advFiltersFila = defaultState;
     else if (window.currentAdvFilterContext === 'subjudice') window.advFiltersSubjudice = defaultState;
@@ -23479,6 +23656,10 @@ window.clearAdvFilters = function() {
     }
     const retroMesesEl = document.getElementById('adv-input-retroativo-meses');
     if (retroMesesEl) retroMesesEl.value = '90';
+    const nDiasEl = document.getElementById('adv-input-data-fase-ndias');
+    if (nDiasEl) nDiasEl.value = '';
+    const nWrap = document.getElementById('adv-data-fase-ndias-wrap');
+    if (nWrap) nWrap.style.display = 'none';
     
     document.querySelectorAll('.adv-dropdown-container input[type="checkbox"]').forEach(cb => cb.checked = false);
     document.querySelectorAll('.adv-dropdown-btn span').forEach(s => s.innerText = 'Todos');
@@ -23673,12 +23854,99 @@ window.exportZeropaidToExcel = function() {
 };
 
 window.exportSubjudiceToExcel = function() {
-    const oldList = window.clientList;
-    window.clientList = window._subjudiceList;
     try {
-        window.exportFilteredToExcel();
-    } finally {
-        window.clientList = oldList;
+        const list = window._subjudiceList;
+        if (!list || list.length === 0) {
+            alert('Não há dados filtrados para exportar.');
+            return;
+        }
+        if (typeof XLSX === 'undefined') {
+            alert('A biblioteca XLSX não foi carregada corretamente. Atualize a página e tente novamente.');
+            return;
+        }
+
+        const formatCpfCnpj = (val) => {
+            if (!val) return "";
+            let str = String(val).replace(/\D/g, "");
+            if (str.length === 11) return str.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+            if (str.length === 14) return str.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+            return val;
+        };
+        const fmtDate = (d) => {
+            if (!d) return "";
+            const dt = d instanceof Date ? d : new Date(d);
+            if (Number.isNaN(dt.getTime())) return "";
+            return dt.toLocaleDateString('pt-BR');
+        };
+        const fmtDays = (info) => {
+            if (!info || info.daysLeft == null) return "";
+            if (info.status === 'VENCIDO') return `Vencido há ${Math.abs(info.daysLeft)} dia(s)`;
+            if (info.daysLeft === 0) return "Vence hoje";
+            return `Faltam ${info.daysLeft} dia(s)`;
+        };
+
+        const rowsData = list.map(c => {
+            const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : { fase: 'Sem Fase' };
+            let documentStr = formatCpfCnpj(c.cpfCnpj || "");
+            if (!documentStr && window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+                const customerData = window.GlobalCustomerCache.data.find(cust => String(cust.customerId) === String(c.customerId) || String(cust.id) === String(c.customerId));
+                if (customerData) documentStr = formatCpfCnpj(customerData.cpfCnpj || customerData.document || customerData.cpf || customerData.cnpj || "");
+            }
+            return {
+                "Empresa ID": c.companyId,
+                "Cliente ID": c.customerId,
+                "Nome do Cliente": c.customerName,
+                "CPF/CNPJ": documentStr,
+                "Títulos": Array.isArray(c.billIds) ? c.billIds.join(" ; ") : c.billIds,
+                "Empreendimento ID": typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId,
+                "Unidade": c.unitName || '',
+                "Fase Processual": info.fase || "Sem Fase",
+                "Data de Entrada na Fase": fmtDate(info.enteredAt),
+                "Prazo Final da Fase": fmtDate(info.prazo),
+                "Dias para Concluir a Fase": fmtDays(info),
+                "Status do Prazo": info.status === 'VENCIDO' ? 'Vencido' : (info.status === 'NO_PRAZO' ? 'No prazo' : 'Sem prazo'),
+                "Dias em Atraso (Máx)": c.maxDaysDelay,
+                "Parcelas Vencidas": c.billCount || (Array.isArray(c.billIds) ? c.billIds.length : 1),
+                "Valor Atrasado (R$)": (typeof c.overdueValue === 'number' ? c.overdueValue : 0) + (typeof c.overdueCharges === 'number' ? c.overdueCharges : 0)
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rowsData);
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        ws['!cols'] = [
+            { wch: 10 }, { wch: 10 }, { wch: 40 }, { wch: 18 }, { wch: 20 },
+            { wch: 18 }, { wch: 12 }, { wch: 28 }, { wch: 18 }, { wch: 18 },
+            { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }
+        ];
+        for (let R = range.s.r; R <= range.e.r; ++R) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                let cell = ws[cellAddress];
+                if (!cell) { cell = { t: 's', v: '' }; ws[cellAddress] = cell; }
+                cell.s = {
+                    border: {
+                        top: { style: "thin", color: { rgb: "000000" } },
+                        bottom: { style: "thin", color: { rgb: "000000" } },
+                        left: { style: "thin", color: { rgb: "000000" } },
+                        right: { style: "thin", color: { rgb: "000000" } }
+                    },
+                    alignment: { vertical: "center", wrapText: true },
+                    font: { name: "Calibri", sz: 11 }
+                };
+                if (R === 0) {
+                    cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
+                    cell.s.font.bold = true;
+                    cell.s.alignment.horizontal = "center";
+                }
+                if (R > 0 && C === 14 && cell.t === 'n') cell.z = '#,##0.00';
+            }
+        }
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Sub Judice");
+        XLSX.writeFile(wb, `relatorio_subjudice_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (error) {
+        console.error("Erro na exportação XLSX:", error);
+        alert("Ocorreu um erro ao gerar o Excel: " + error.message);
     }
 };
 
