@@ -406,17 +406,17 @@ window.VerificarConstrucaoApp = {
                     const snap = await getDocs(q);
                     snap.forEach(doc => {
                         const data = doc.data();
-                        // Links de teste não concluídos devem voltar para a fila como pendentes.
-                        if (data.status === 'aguardando_fotos') return;
+                        if (data.isTest) return;
                         const docObj = { id: doc.id, ...data };
-                        checksByContract[String(data.contractId)] = docObj;
+                        const register = (key) => {
+                            if (key === undefined || key === null || String(key).trim() === '') return;
+                            checksByContract[String(key)] = docObj;
+                        };
+                        register(data.contractId);
+                        register(data.tituloKey);
+                        register(data.titulo);
                         if (data.contractKeys && Array.isArray(data.contractKeys)) {
-                            data.contractKeys.forEach(k => {
-                                checksByContract[String(k)] = docObj;
-                            });
-                        }
-                        if (data.tituloKey) {
-                            checksByContract[String(data.tituloKey)] = docObj;
+                            data.contractKeys.forEach(register);
                         }
                     });
 
@@ -561,7 +561,8 @@ window.VerificarConstrucaoApp = {
                 rows.push({
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
                     empreendimento, empLabel, unidade,
-                    clienteName, titulo, parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
+                    clienteName, titulo, tituloKey, contractNumberStr, realSaleIdStr,
+                    parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
                     statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys
                 });
             });
@@ -916,13 +917,15 @@ window.VerificarConstrucaoApp = {
 
             const cityGroups = {};
             const targetGroups = {};
-            const generatedIds = [];
 
             for (const r of selected) {
                 let vId = r.vistoriaAtiva ? r.vistoriaAtiva.id : null;
                 const loteCoords = await this._fetchLoteCoords(r.costCenterId);
-                
-                const contractKeys = [String(r.contractId)];
+
+                const contractKeys = Array.isArray(r.contractKeys) && r.contractKeys.length
+                    ? [...r.contractKeys]
+                    : [String(r.contractId)];
+                if (r.titulo) contractKeys.push(String(r.titulo));
                 if (r.tituloKey) contractKeys.push(String(r.tituloKey));
                 if (r.contractNumberStr) contractKeys.push(String(r.contractNumberStr));
                 if (r.realSaleIdStr) contractKeys.push(String(r.realSaleIdStr));
@@ -931,8 +934,9 @@ window.VerificarConstrucaoApp = {
                     const docRef = await addDoc(collection(window.firebaseDb, 'vistorias'), {
                         customerId: r.customerId,
                         contractId: r.contractId,
-                        contractKeys: contractKeys,
-                        tituloKey: r.tituloKey || '',
+                        contractKeys: [...new Set(contractKeys.map(String))],
+                        tituloKey: r.tituloKey || r.titulo || '',
+                        titulo: r.titulo || '',
                         cidade: r.cidade,
                         empreendimento: r.empreendimento,
                         costCenterId: r.costCenterId,
@@ -946,7 +950,7 @@ window.VerificarConstrucaoApp = {
                     await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { loteCoords });
                 }
 
-                generatedIds.push(vId);
+                r._generatedVistoriaId = vId;
 
                 if (!cityGroups[r.cidade]) cityGroups[r.cidade] = {};
                 if (!cityGroups[r.cidade][r.empreendimento]) cityGroups[r.cidade][r.empreendimento] = 0;
@@ -981,10 +985,9 @@ window.VerificarConstrucaoApp = {
             if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
             else if (hour >= 18) greeting = 'Boa noite';
 
-            const idsParam = generatedIds.join(',');
-            const link = `${baseUrl}vistoria.html?ids=${idsParam}`;
-
             Object.values(targetGroups).forEach(target => {
+                const idsParam = [...new Set(target.rows.map(r => r._generatedVistoriaId).filter(Boolean))].join(',');
+                const link = `${baseUrl}vistoria.html?ids=${idsParam}`;
                 let message = `${greeting}!\n\nSegue a lista de vistorias a serem realizadas na cidade *${String(target.city).toUpperCase()}*\n\n`;
                 const empMap = {};
                 target.rows.forEach(r => {
