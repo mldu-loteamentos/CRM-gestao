@@ -66,10 +66,23 @@ window.saveVistoriaRecurrence = function() {
 
 function _vcGetCostCenterName(costCenterId) {
     if (!costCenterId) return '-';
+    const id = String(costCenterId);
     const ccList = (window.AppState && window.AppState.cachedCostCenters) || [];
-    const cc = ccList.find(c => String(c.id) === String(costCenterId));
-    if (!cc) return 'CC ' + costCenterId;
-    return cc.name || ('CC ' + costCenterId);
+    const cc = ccList.find(c => String(c.id) === id);
+    if (cc && cc.name) return cc.name;
+    try {
+        const custom = JSON.parse(localStorage.getItem('crm_centros_custo_custom') || '{}');
+        const customEntry = custom[id];
+        if (typeof customEntry === 'string' && customEntry.trim()) return customEntry;
+        if (customEntry && customEntry.name) return customEntry.name;
+    } catch (e) {}
+    const fallbackNames = {
+        "10100": "ITATINGA - NOVO HORIZONTE",
+        "10200": "ITATINGA - NOVO HORIZONTE 2",
+        "16103": "ITATINGA - NOVO HORIZONTE"
+    };
+    if (fallbackNames[id]) return fallbackNames[id];
+    return 'CC ' + id;
 }
 
 function _vcGetCity(costCenterId) {
@@ -84,9 +97,66 @@ function _vcGetCity(costCenterId) {
 function _vcGetEmpLabel(costCenterId) {
     if (!costCenterId) return '-';
     const ccName = _vcGetCostCenterName(costCenterId);
-    if (!ccName || ccName === '-') return '-';
-    // ccName típico: "AVARÉ - CENTRAL PARQUE" ou "ARAÇARIGUAMA - JARDIM SÃO PAULO"
+    if (!ccName || ccName === '-') return String(costCenterId);
     return `${costCenterId} - ${ccName.trim().toUpperCase()}`;
+}
+
+function _vcEmpNameFromCc(costCenterId) {
+    const ccName = _vcGetCostCenterName(costCenterId);
+    if (!ccName || ccName === '-') return '';
+    return ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
+}
+
+function _vcExtractCostCenterId(c) {
+    if (!c) return null;
+    let id = c.costCenterId;
+    if ((!id || id === 'N/D') && c.costCentersId) {
+        id = Array.isArray(c.costCentersId) ? c.costCentersId[0] : c.costCentersId;
+    }
+    if ((!id || id === 'N/D') && c.unitId) {
+        const parts = String(c.unitId).split('-');
+        if (parts.length >= 2 && parts[1]) id = parts[1];
+    }
+    if (!id || id === 'N/D') return null;
+    return String(id);
+}
+
+function _vcReadObrasState() {
+    try {
+        const raw = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+        const out = {};
+        Object.keys(raw || {}).forEach(k => {
+            const v = raw[k];
+            if (typeof v === 'boolean') out[k] = { isOn: v, previsao: '' };
+            else if (v && typeof v === 'object') out[k] = { isOn: !!v.isOn, previsao: v.previsao || '' };
+        });
+        return out;
+    } catch (e) {
+        return {};
+    }
+}
+
+function _vcResolveObraEntry(state, costCenterId, empName) {
+    const idKey = costCenterId != null ? String(costCenterId) : '';
+    if (idKey && state[idKey]) return state[idKey];
+    if (empName && state[empName]) return state[empName];
+    return { isOn: false, previsao: '' };
+}
+
+function _vcCollectOverdueCostCenters() {
+    const clients = window.rawClientList || [];
+    const map = new Map();
+    clients.forEach(c => {
+        const id = _vcExtractCostCenterId(c);
+        if (!id || map.has(id)) return;
+        map.set(id, {
+            costCenterId: id,
+            id: parseInt(id, 10) || 0,
+            label: _vcGetEmpLabel(id),
+            empreendimentoName: _vcEmpNameFromCc(id)
+        });
+    });
+    return [...map.values()].sort((a, b) => a.id - b.id || a.label.localeCompare(b.label));
 }
 
 // ─── App ────────────────────────────────────────────────────────────────────
@@ -103,6 +173,7 @@ window.VerificarConstrucaoApp = {
 
     init() {
         this.render();
+        this._subscribeObrasAndamento();
         this.loadData();
         
         if (this._unsubscribeVistorias) this._unsubscribeVistorias();
@@ -120,6 +191,55 @@ window.VerificarConstrucaoApp = {
                 }, 1500);
             });
         }
+    },
+
+    _subscribeObrasAndamento() {
+        if (!window.firebaseDb || !window.firebaseCollections) return;
+        const { doc, onSnapshot } = window.firebaseCollections;
+        const ref = doc(window.firebaseDb, 'config', 'global');
+        if (this._unsubscribeObras) this._unsubscribeObras();
+        this._unsubscribeObras = onSnapshot(ref, (snap) => {
+            const data = snap.exists() ? snap.data() : null;
+            const cloudRaw = data && data.crm_obras_andamento;
+            if (cloudRaw) {
+                const cloud = typeof cloudRaw === 'string' ? cloudRaw : JSON.stringify(cloudRaw);
+                const local = localStorage.getItem('crm_obras_andamento') || '';
+                if (cloud !== local) {
+                    localStorage.setItem('crm_obras_andamento', cloud);
+                    if (document.getElementById('vc-tbody')) this.renderTable();
+                }
+            } else {
+                this._seedObrasCloudFromLocal();
+            }
+        }, (err) => console.warn('[Vistoria] Sync obras em andamento:', err));
+    },
+
+    _seedObrasCloudFromLocal() {
+        if (this._obrasSeeded) return;
+        const saved = _vcReadObrasState();
+        const hasIntentional = Object.values(saved).some(v => v && v.isOn && v.previsao);
+        if (!hasIntentional || !window.firebaseCollections) return;
+        this._obrasSeeded = true;
+
+        const empList = _vcCollectOverdueCostCenters();
+        const migrated = {};
+        empList.forEach(e => {
+            const entry = _vcResolveObraEntry(saved, e.costCenterId, e.empreendimentoName);
+            migrated[e.costCenterId] = { isOn: !!entry.isOn, previsao: entry.previsao || '' };
+        });
+        Object.keys(saved).forEach(k => {
+            if (/^\d+$/.test(k) && !migrated[k]) {
+                migrated[k] = { isOn: !!saved[k].isOn, previsao: saved[k].previsao || '' };
+            }
+        });
+
+        localStorage.setItem('crm_obras_andamento', JSON.stringify(migrated));
+        const { doc, setDoc } = window.firebaseCollections;
+        const userName = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) || '';
+        setDoc(doc(window.firebaseDb, 'config', 'global'), {
+            crm_obras_andamento: JSON.stringify(migrated),
+            crm_obras_andamento_meta: JSON.stringify({ updatedAt: Date.now(), updatedBy: userName })
+        }, { merge: true }).catch(err => console.error('[Vistoria] Falha ao publicar obras em andamento:', err));
     },
 
     render() {
@@ -378,14 +498,9 @@ window.VerificarConstrucaoApp = {
                 );
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
-                const costCenterId = c.costCenterId;
+                const costCenterId = _vcExtractCostCenterId(c);
                 const city = _vcGetCity(costCenterId);
-                const ccName = _vcGetCostCenterName(costCenterId);
-                let empreendimento = '-';
-                if (ccName && ccName !== '-') {
-                    empreendimento = ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
-                }
-                // Label completo: "13900 - AVARÉ - CENTRAL PARQUE II"
+                const empreendimento = _vcEmpNameFromCc(costCenterId) || '-';
                 const empLabel = _vcGetEmpLabel(costCenterId);
 
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
@@ -488,12 +603,13 @@ window.VerificarConstrucaoApp = {
         const grouped = {};
         filtered.forEach((r, idx) => {
             if (!grouped[r.cidade]) grouped[r.cidade] = {};
-            if (!grouped[r.cidade][r.empreendimento]) grouped[r.cidade][r.empreendimento] = { label: r.empLabel, items: [] };
-            grouped[r.cidade][r.empreendimento].items.push({ ...r, currentIdx: idx });
+            const empKey = String(r.costCenterId || r.empLabel || r.empreendimento);
+            if (!grouped[r.cidade][empKey]) grouped[r.cidade][empKey] = { label: r.empLabel, costCenterId: r.costCenterId, empreendimento: r.empreendimento, items: [] };
+            grouped[r.cidade][empKey].items.push({ ...r, currentIdx: idx });
         });
 
         let html = '';
-        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
+        const savedState = _vcReadObrasState();
 
         Object.keys(grouped).sort().forEach(cidade => {
             const safeCidade = cidade.replace(/[^a-zA-Z0-9]/g, '_');
@@ -510,15 +626,16 @@ window.VerificarConstrucaoApp = {
                 </tr>
             `;
 
-            Object.keys(grouped[cidade]).sort().forEach(emp => {
-                const safeEmp = emp.replace(/[^a-zA-Z0-9]/g, '_');
-                let isObraAndamento = false;
-                if (savedState[emp]) {
-                    if (typeof savedState[emp] === 'boolean') isObraAndamento = savedState[emp];
-                    else isObraAndamento = savedState[emp].isOn;
-                }
-                const empData = grouped[cidade][emp];
-                const empLabelDisplay = empData.label || emp;
+            Object.keys(grouped[cidade]).sort((a, b) => {
+                const labelA = grouped[cidade][a].label || a;
+                const labelB = grouped[cidade][b].label || b;
+                return String(labelA).localeCompare(String(labelB), 'pt-BR', { numeric: true });
+            }).forEach(empKey => {
+                const empData = grouped[cidade][empKey];
+                const safeEmp = String(empKey).replace(/[^a-zA-Z0-9]/g, '_');
+                const obraEntry = _vcResolveObraEntry(savedState, empData.costCenterId, empData.empreendimento);
+                const isObraAndamento = !!obraEntry.isOn;
+                const empLabelDisplay = empData.label || empKey;
 
                 // Empreendimento Header Row
                 html += `
@@ -611,97 +728,62 @@ window.VerificarConstrucaoApp = {
         const listDiv = document.getElementById('obras-andamento-list');
         if (!modal || !listDiv) return;
 
-        const allClientsForObras = window.rawClientList || (window.AppState && window.AppState.sales) || [];
-        if (!allClientsForObras || allClientsForObras.length === 0) {
-            listDiv.innerHTML = '<p style="color:#64748b; padding: 10px 0;">Nenhum centro de custo encontrado.</p>';
+        const empList = _vcCollectOverdueCostCenters();
+        if (!empList.length) {
+            listDiv.innerHTML = '<p style="color:#64748b; padding: 10px 0;">Nenhum centro de custo com carteira vencida foi encontrado.</p>';
             modal.style.display = 'flex';
             return;
         }
 
-        const empList = [];
-        const seenEmp = new Set();
-        
-        allClientsForObras.forEach(c => {
-            const costCenterId = c.costCenterId;
-            if (costCenterId && costCenterId !== 'N/D') {
-                const ccName = _vcGetCostCenterName(costCenterId);
-                let empreendimento = '-';
-                if (ccName && ccName !== '-') {
-                    empreendimento = ccName.includes('-') ? ccName.split('-').slice(1).join('-').trim() : ccName.trim();
-                }
-                const empLabel = _vcGetEmpLabel(costCenterId);
-                
-                if (empreendimento && empreendimento !== '-' && !seenEmp.has(empreendimento)) {
-                    seenEmp.add(empreendimento);
-                    empList.push({
-                        empreendimento: empreendimento,
-                        label: empLabel,
-                        id: parseInt(costCenterId) || 0
-                    });
-                }
-            }
-        });
-        
-        empList.sort((a,b) => a.label.localeCompare(b.label));
+        const savedState = _vcReadObrasState();
+        const dump = (() => {
+            const vals = Object.values(savedState);
+            if (vals.length < 6) return false;
+            const onEmpty = vals.filter(v => v.isOn && !v.previsao).length;
+            return onEmpty / vals.length > 0.8;
+        })();
+        this._tempObrasState = {};
 
-        const savedState = JSON.parse(localStorage.getItem('crm_obras_andamento') || '{}');
-        const isFirstRun = !localStorage.getItem('crm_obras_andamento_init');
-        
-        // Converter estado antigo
-        Object.keys(savedState).forEach(k => {
-            if (typeof savedState[k] === 'boolean') {
-                savedState[k] = { isOn: savedState[k], previsao: '' };
-            }
-        });
-
-        // Auto-enable new
         empList.forEach(e => {
-            if (!isFirstRun && !savedState[e.empreendimento]) {
-                // Novo empreendimento!
-                savedState[e.empreendimento] = { isOn: true, previsao: '', isNew: true };
-            } else if (!savedState[e.empreendimento]) {
-                savedState[e.empreendimento] = { isOn: false, previsao: '' };
-            }
+            const known = !!(savedState[e.costCenterId] || savedState[e.empreendimentoName]);
+            const entry = dump
+                ? { isOn: !!(savedState[e.costCenterId] && savedState[e.costCenterId].previsao), previsao: (savedState[e.costCenterId] && savedState[e.costCenterId].previsao) || (savedState[e.empreendimentoName] && savedState[e.empreendimentoName].previsao) || '' }
+                : _vcResolveObraEntry(savedState, e.costCenterId, e.empreendimentoName);
+            this._tempObrasState[e.costCenterId] = {
+                isOn: !!entry.isOn,
+                previsao: entry.previsao || '',
+                isNew: !known
+            };
         });
-
-        if (isFirstRun) localStorage.setItem('crm_obras_andamento_init', 'true');
-
-        // Guardar estado temporário para o botão Salvar
-        this._tempObrasState = JSON.parse(JSON.stringify(savedState));
 
         let html = '';
-        if (empList.length === 0) {
-            html = '<p style="color: #64748b;">Nenhum empreendimento listado no momento.</p>';
-        } else {
-            empList.sort((a, b) => a.id - b.id).forEach(({ empreendimento: emp, label }) => {
-                const state = this._tempObrasState[emp] || { isOn: false, previsao: '' };
-                const isOn = state.isOn;
-                const previsao = state.previsao || '';
-                const toggleId = `oa-toggle-${emp.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                
-                const badgeNew = state.isNew ? '<span style="background:#ef4444; color:white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight:bold; margin-left: 8px;">NOVO</span>' : '';
-                
-                html += `
-                    <div style="display: flex; flex-direction: column; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 8px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
-                            <div>
-                                <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label} ${badgeNew}</div>
-                            </div>
-                            <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
-                                <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${emp.replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
-                                <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
-                                    <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
-                                </span>
-                            </label>
+        empList.forEach(({ costCenterId, label }) => {
+            const state = this._tempObrasState[costCenterId] || { isOn: false, previsao: '' };
+            const isOn = !!state.isOn;
+            const previsao = state.previsao || '';
+            const toggleId = `oa-toggle-${String(costCenterId).replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const badgeNew = state.isNew ? '<span style="background:#ef4444; color:white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight:bold; margin-left: 8px;">NOVO</span>' : '';
+
+            html += `
+                <div style="display: flex; flex-direction: column; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+                        <div>
+                            <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label} ${badgeNew}</div>
                         </div>
-                        <div id="${toggleId}-date-container" style="display: ${isOn ? 'flex' : 'none'}; align-items: center; gap: 8px; margin-top: 4px;">
-                            <span style="font-size: 0.8rem; color: #64748b;">Previsão de término:</span>
-                            <input type="date" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${emp.replace(/"/g, '\\"')}', this.value)" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; color: #334155; outline: none;">
-                        </div>
+                        <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
+                            <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
+                            <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
+                                <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
+                            </span>
+                        </label>
                     </div>
-                `;
-            });
-        }
+                    <div id="${toggleId}-date-container" style="display: ${isOn ? 'flex' : 'none'}; align-items: center; gap: 8px; margin-top: 4px;">
+                        <span style="font-size: 0.8rem; color: #64748b;">Previsão de término:</span>
+                        <input type="date" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${String(costCenterId).replace(/'/g, "\\'")}', this.value)" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; color: #334155; outline: none;">
+                    </div>
+                </div>
+            `;
+        });
 
         listDiv.innerHTML = html;
         modal.style.display = 'flex';
@@ -731,12 +813,20 @@ window.VerificarConstrucaoApp = {
     },
 
     salvarObrasAndamento() {
-        if (this._tempObrasState) {
-            // Limpa flag de isNew ao salvar para todos
-            Object.keys(this._tempObrasState).forEach(k => {
-                if (this._tempObrasState[k]) this._tempObrasState[k].isNew = false;
-            });
-            localStorage.setItem('crm_obras_andamento', JSON.stringify(this._tempObrasState));
+        const toSave = {};
+        Object.keys(this._tempObrasState || {}).forEach(k => {
+            const v = this._tempObrasState[k];
+            if (!v) return;
+            toSave[k] = { isOn: !!v.isOn, previsao: v.previsao || '' };
+        });
+        localStorage.setItem('crm_obras_andamento', JSON.stringify(toSave));
+        if (window.firebaseDb && window.firebaseCollections) {
+            const { doc, setDoc } = window.firebaseCollections;
+            const userName = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) || '';
+            setDoc(doc(window.firebaseDb, 'config', 'global'), {
+                crm_obras_andamento: JSON.stringify(toSave),
+                crm_obras_andamento_meta: JSON.stringify({ updatedAt: Date.now(), updatedBy: userName })
+            }, { merge: true }).catch(err => console.error('[Vistoria] Falha ao sincronizar obras em andamento:', err));
         }
         document.getElementById('modal-obras-andamento').style.display = 'none';
         this.renderTable();

@@ -23819,7 +23819,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
         
         if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase não inicializado.");
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
-        await window.firebaseCollections.setDoc(docRef, payload);
+        await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
         if (!silent) {
             alert("âœ”ï¸ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
         } else {
