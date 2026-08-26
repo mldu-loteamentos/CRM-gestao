@@ -15340,6 +15340,11 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             corpo = corpo.replace(/{{TITULO_REF}}/g, assunto);
             corpo = corpo.replace(/{{EMPREENDIMENTO}}/g, empName || companyName || '');
             corpo = corpo.replace(/{{EMPRESA_NOME}}/g, companyName || empName || '');
+            const companyObj = (AppState.companies || []).find(x => String(x.id) === String(companyId));
+            const companyCnpjNex = (companyObj && (companyObj.cnpj || companyObj.cnpjCpf)) || costCenter.cnpj || '';
+            corpo = corpo.replace(/{{EMPRESA_CNPJ}}/g, maskCpfCnpj(companyCnpjNex));
+            corpo = corpo.replace(/{{NUM_CONTRATO}}/g, sale.receivableBillId || sale.contractNumber || saleId || '');
+            corpo = corpo.replace(/{{NUMERO_CONTRATO}}/g, sale.receivableBillId || sale.contractNumber || saleId || '');
             corpo = corpo.replace(/{{DATA_CONTRATO_ORIGINAL}}/g, formattedSaleDate);
             corpo = corpo.replace(/{{DATA_CONTRATO}}/g, formattedSaleDate);
             

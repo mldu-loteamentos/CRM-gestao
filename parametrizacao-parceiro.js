@@ -37,13 +37,74 @@ const ParametrizacaoParceiroApp = {
     return this.items.find(p => p.id === this.selectedId) || null;
   },
 
-  partnerPct(part, accountId) {
+  partnerPct(part, key) {
     if (!part) return 0;
-    if (part.accountShares && Object.prototype.hasOwnProperty.call(part.accountShares, accountId)) {
-      const n = Number(part.accountShares[accountId]);
+    if (this.isNA(part, key)) return 0;
+    if (part.accountShares && Object.prototype.hasOwnProperty.call(part.accountShares, key)) {
+      const n = Number(part.accountShares[key]);
       return Number.isFinite(n) ? n : Number(part.defaultPartnerShare) || 0;
     }
     return Number(part.defaultPartnerShare) || 0;
+  },
+
+  dfcDefaultGroups() {
+    return [
+      { id: "g_01", name: "01 RECEITAS", type: "total_n1", parentId: null },
+      { id: "g_01_01", name: "01.01 VENDA DE IMOVEIS", type: "resultado", parentId: "g_01", accounts: [] },
+      { id: "g_01_02", name: "01.02 RECEITA DE ALUGUEIS", type: "resultado", parentId: "g_01", accounts: [] },
+      { id: "g_01_03", name: "01.03 RECEITA DE SERVICOS", type: "resultado", parentId: "g_01", accounts: [] },
+      { id: "g_02", name: "02 DEDUCOES", type: "total_n1", parentId: null },
+      { id: "g_02_01", name: "02.01 IMPOSTOS SOBRE VENDAS", type: "resultado", parentId: "g_02", accounts: [] },
+      { id: "g_03", name: "03 CUSTOS E DESPESAS", type: "total_n1", parentId: null },
+      { id: "g_03_01", name: "03.01 CUSTOS", type: "totalizadora", parentId: "g_03" },
+      { id: "g_03_01_01", name: "03.01.01 TERRENOS", type: "resultado", parentId: "g_03_01", accounts: [] },
+      { id: "g_03_01_02", name: "03.01.02 PROJETOS", type: "resultado", parentId: "g_03_01", accounts: [] },
+      { id: "g_03_02", name: "03.02 DESPESAS", type: "totalizadora", parentId: "g_03" },
+      { id: "g_03_02_01", name: "03.02.01 COMERCIAIS", type: "resultado", parentId: "g_03_02", accounts: [] },
+      { id: "g_03_02_02", name: "03.02.02 ADMINISTRATIVAS", type: "resultado", parentId: "g_03_02", accounts: [] }
+    ];
+  },
+
+  dfcVisao() {
+    let visoes = [];
+    try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
+    if (typeof PlanoFinanceiroApp !== "undefined" && Array.isArray(PlanoFinanceiroApp.visoes) && PlanoFinanceiroApp.visoes.length) {
+      visoes = PlanoFinanceiroApp.visoes;
+    }
+    const visao = visoes.find(v => v.id === "dfc_default") || visoes.find(v => /dfc/i.test(v.name || "")) || visoes[0];
+    const groups = visao && Array.isArray(visao.groups) && visao.groups.length ? visao.groups : this.dfcDefaultGroups();
+    return { name: (visao && visao.name) || "DFC Padrão", groups };
+  },
+
+  catName(id) {
+    const c = (this.categories || []).find(x => String(x.id || x._id) === String(id));
+    return (c && (c._name || c.name || c.description)) || "";
+  },
+
+  isNA(part, key, ancestors) {
+    if (!part) return false;
+    if (part.naAccounts && part.naAccounts[key]) return true;
+    if (part.naNodes && part.naNodes[key]) return true;
+    return (ancestors || []).some(a => part.naNodes && part.naNodes[a]);
+  },
+
+  toggleNA(key, isAccount) {
+    const p = this.current();
+    if (!p) return;
+    p.naNodes = p.naNodes || {};
+    p.naAccounts = p.naAccounts || {};
+    const bag = isAccount ? p.naAccounts : p.naNodes;
+    if (bag[key]) delete bag[key];
+    else bag[key] = true;
+    this.persist();
+    this.render();
+  },
+
+  toggleExpand(id) {
+    this.expanded = this.expanded || new Set();
+    if (this.expanded.has(id)) this.expanded.delete(id);
+    else this.expanded.add(id);
+    this.render();
   },
 
   async init() {
@@ -421,9 +482,10 @@ const ParametrizacaoParceiroApp = {
         <div class="crm-card" style="padding:16px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
             <div>
-              <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Matriz DFC — plano financeiro × % do parceiro</h3>
+              <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Matriz DFC Padrão — % do parceiro</h3>
               <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">
-                Conta em branco herda o rateio padrão (${p.defaultPartnerShare}%). Preencha só as exceções. A Moura Leite fica com o complementar (100 − %).
+                Segue a visão <strong>DFC Padrão</strong>. Conta em branco herda ${p.defaultPartnerShare}%.
+                Use <strong>Não se aplica</strong> no nó ou no subnível quando o parceiro não participa daquela conta.
               </p>
             </div>
             <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:34px;font-size:0.78rem;">Usar padrão em todas</button>
@@ -452,50 +514,97 @@ const ParametrizacaoParceiroApp = {
   },
 
   matrixHtml(p) {
-    if (this.loadingCats) {
-      return `<div style="padding:24px;text-align:center;color:#64748b;">Carregando plano financeiro do Sienge...</div>`;
-    }
-    if (!this.categories.length) {
-      return `<div style="padding:24px;text-align:center;color:#94a3b8;">Não foi possível carregar o plano financeiro. Tente atualizar a página.</div>`;
-    }
-    const rows = this.categories.map(c => {
-      const custom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, c._id);
-      const pct = this.partnerPct(p, c._id);
-      const ml = 100 - pct;
-      const pad = 8 + (c._depth || 0) * 14;
-      if (c._isTotal) {
-        return `<tr style="background:#f8fafc;">
-          <td style="font-weight:800;color:#0f172a;padding-left:${pad}px;">${this.esc(c._id)}</td>
-          <td style="font-weight:800;color:#334155;">${this.esc(c._name)}</td>
-          <td colspan="3" style="color:#94a3b8;font-size:0.75rem;">Totalizadora</td>
-        </tr>`;
-      }
-      return `<tr>
-        <td style="padding-left:${pad}px;font-weight:700;color:#64748b;white-space:nowrap;">${this.esc(c._id)}</td>
-        <td>${this.esc(c._name)}</td>
-        <td style="text-align:center;">
-          <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${p.defaultPartnerShare}"
-            onchange="ParametrizacaoParceiroApp.setAccountShare('${c._id}', this.value)"
-            style="width:88px;height:30px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 8px;font-weight:700;">
-        </td>
-        <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:#105436;">${pct.toFixed(2)}%</td>
-        <td style="text-align:right;font-variant-numeric:tabular-nums;color:#64748b;">${ml.toFixed(2)}%</td>
-      </tr>`;
-    }).join("");
-    return `<div class="table-container" style="margin-top:12px;max-height:calc(100vh - 280px);overflow:auto;box-shadow:none;">
+    const visao = this.dfcVisao();
+    const groups = visao.groups || [];
+    this.expanded = this.expanded || new Set(groups.map(g => g.id));
+    const roots = groups.filter(g => !g.parentId);
+    const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
+    return `<div style="margin-top:8px;font-size:0.72rem;font-weight:700;color:#0f766e;text-transform:uppercase;letter-spacing:0.4px;">Visão: ${this.esc(visao.name)}</div>
+      <div class="table-container" style="margin-top:8px;max-height:calc(100vh - 260px);overflow:auto;box-shadow:none;">
       <table class="custom-table" style="font-size:0.8rem;">
         <thead>
           <tr>
-            <th>Conta</th>
-            <th>Plano financeiro</th>
+            <th>Nó / conta DFC</th>
+            <th style="width:130px;text-align:center;">Aplicação</th>
             <th style="text-align:center;">Parceiro paga %</th>
             <th style="text-align:right;">Efetivo parceiro</th>
             <th style="text-align:right;">Moura Leite</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${body || `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</td></tr>`}</tbody>
       </table>
     </div>`;
+  },
+
+  dfcNodeRows(p, node, groups, level, ancestors) {
+    const children = groups.filter(g => g.parentId === node.id);
+    const accounts = node.accounts || [];
+    const hasKids = children.length > 0 || accounts.length > 0;
+    const expanded = !this.expanded || this.expanded.has(node.id);
+    const naSelf = !!(p.naNodes && p.naNodes[node.id]);
+    const ancestorNA = ancestors.some(a => p.naNodes && p.naNodes[a]);
+    const na = ancestorNA || naSelf;
+    const custom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, node.id);
+    const pct = na ? 0 : this.partnerPct(p, node.id);
+    const ml = na ? 0 : (100 - pct);
+    const pad = 8 + level * 18;
+    const bg = na ? "#f8fafc" : (node.type === "total_n1" ? "#f0fdf4" : (level === 0 ? "#f8fafc" : "#fff"));
+    const chevron = hasKids
+      ? `<button onclick="ParametrizacaoParceiroApp.toggleExpand('${node.id}')" style="border:none;background:transparent;cursor:pointer;padding:0 4px 0 0;color:#64748b;vertical-align:middle;">
+           <i data-lucide="${expanded ? "chevron-down" : "chevron-right"}" style="width:14px;"></i>
+         </button>`
+      : "";
+    const naBtn = ancestorNA
+      ? `<span style="font-size:0.7rem;color:#94a3b8;font-weight:700;">Herda N/A</span>`
+      : `<button onclick="ParametrizacaoParceiroApp.toggleNA('${node.id}', false)"
+           style="border:1px solid ${naSelf ? "#b45309" : "#e2e8f0"};background:${naSelf ? "#fff7ed" : "#fff"};color:${naSelf ? "#c2410c" : "#475569"};border-radius:999px;padding:3px 8px;font-size:0.7rem;font-weight:800;cursor:pointer;white-space:nowrap;">
+           ${naSelf ? "Aplicar rateio" : "Não se aplica"}
+         </button>`;
+    let html = `<tr style="background:${bg};opacity:${na ? 0.72 : 1};">
+      <td style="padding-left:${pad}px;font-weight:${level === 0 ? 800 : 700};color:${na ? "#94a3b8" : "#0f172a"};">
+        ${chevron}${this.esc(node.name)}
+      </td>
+      <td style="text-align:center;">${naBtn}</td>
+      <td style="text-align:center;">
+        ${na ? `<span style="color:#94a3b8;font-weight:700;font-size:0.78rem;">—</span>` : `
+        <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${p.defaultPartnerShare}"
+          onchange="ParametrizacaoParceiroApp.setAccountShare('${node.id}', this.value)"
+          style="width:88px;height:30px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 8px;font-weight:700;">`}
+      </td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:${na ? "#94a3b8" : "#105436"};">${na ? "N/A" : pct.toFixed(2) + "%"}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;color:#64748b;">${na ? "—" : ml.toFixed(2) + "%"}</td>
+    </tr>`;
+    if (expanded) {
+      children.forEach(ch => { html += this.dfcNodeRows(p, ch, groups, level + 1, ancestors.concat(node.id)); });
+      accounts.forEach(accId => {
+        const naAccSelf = !!(p.naAccounts && p.naAccounts[accId]);
+        const naAcc = na || naAccSelf;
+        const accCustom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, accId);
+        const accPct = naAcc ? 0 : this.partnerPct(p, accId);
+        const accMl = naAcc ? 0 : (100 - accPct);
+        const naAccBtn = na
+          ? `<span style="font-size:0.7rem;color:#94a3b8;font-weight:700;">Herda N/A</span>`
+          : `<button onclick="ParametrizacaoParceiroApp.toggleNA('${accId}', true)"
+               style="border:1px solid ${naAccSelf ? "#b45309" : "#e2e8f0"};background:${naAccSelf ? "#fff7ed" : "#fff"};color:${naAccSelf ? "#c2410c" : "#475569"};border-radius:999px;padding:3px 8px;font-size:0.7rem;font-weight:800;cursor:pointer;white-space:nowrap;">
+               ${naAccSelf ? "Aplicar rateio" : "Não se aplica"}
+             </button>`;
+        html += `<tr style="background:${naAcc ? "#f8fafc" : "#fff"};opacity:${naAcc ? 0.72 : 1};">
+          <td style="padding-left:${pad + 28}px;color:${naAcc ? "#94a3b8" : "#64748b"};">
+            <strong style="color:#0f172a;">${this.esc(accId)}</strong> ${this.esc(this.catName(accId))}
+          </td>
+          <td style="text-align:center;">${naAccBtn}</td>
+          <td style="text-align:center;">
+            ${naAcc ? `<span style="color:#94a3b8;font-weight:700;font-size:0.78rem;">—</span>` : `
+            <input type="number" min="0" max="100" step="0.01" value="${accCustom ? accPct : ""}" placeholder="${p.defaultPartnerShare}"
+              onchange="ParametrizacaoParceiroApp.setAccountShare('${accId}', this.value)"
+              style="width:88px;height:30px;border:1px solid ${accCustom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 8px;font-weight:700;">`}
+          </td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:${naAcc ? "#94a3b8" : "#105436"};">${naAcc ? "N/A" : accPct.toFixed(2) + "%"}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;color:#64748b;">${naAcc ? "—" : accMl.toFixed(2) + "%"}</td>
+        </tr>`;
+      });
+    }
+    return html;
   }
 };
 
