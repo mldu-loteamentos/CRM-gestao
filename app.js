@@ -1107,7 +1107,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_prefeitura": "Compromissário (Prefeituras)",
     "compromissario_associacoes": "Compromissário (Associações)",
     "relacionamento_gestao": "Relacionamento com Cliente",
-    "condicoes-pagamento": "Condições de Pagamento"
+    "condicoes-pagamento": "Condições de Pagamento",
+    "construcao-marketing": "Marketing — Orçamentos"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
   
@@ -1132,7 +1133,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_prefeitura": "building",
     "compromissario_associacoes": "users-round",
     "relacionamento_gestao": "users",
-    "condicoes-pagamento": "file-text"
+    "condicoes-pagamento": "file-text",
+    "construcao-marketing": "megaphone"
   };
 
   // Esconder barra de contexto de cliente ao navegar para abas gerais
@@ -1146,7 +1148,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   if (titleEl) {
     let finalTitle = titleOverride || titleMap[tabId] || 'CRM Moura Leite';
     let finalIcon = iconMap[tabId] || 'layout-dashboard';
-    if (tabId.startsWith('construcao-')) {
+    if (tabId.startsWith('construcao-') && tabId !== 'construcao-marketing') {
       finalIcon = 'hammer';
     }
     titleEl.innerHTML = `<i data-lucide="${finalIcon}"></i> ${finalTitle}`;
@@ -1224,6 +1226,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     loadKMZList();
   } else if (tabId === "regras-cobranca") {
     renderRulesSettingsTable();
+  } else if (tabId === "construcao-marketing") {
+    if (typeof MarketingApp !== "undefined") MarketingApp.init();
   }
 }
 
