@@ -1235,6 +1235,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof MarketingApp !== "undefined") MarketingApp.init();
   } else if (tabId === "marketing-budget") {
     if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
+  } else if (tabId === "prestacao-contas") {
+    if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   }
 }
 
@@ -14002,7 +14004,8 @@ async function _loadZeroPaidTab_Impl() {
         maxDaysDelay: 0,
         billCount: 0,
         lastContactDate: "Sem contato",
-        billIds: []
+        billIds: [],
+        brokerName: (typeof window.extractSaleBrokerName === 'function' ? window.extractSaleBrokerName(sale) : (sale.brokerName || ''))
       };
       
       // Obter último contato
@@ -14453,6 +14456,28 @@ async function _loadZeroPaidTab_Impl() {
   if (checkAll) checkAll.checked = false;
 }
 
+window.extractSaleBrokerName = function(sale) {
+    if (!sale) return "";
+    if (sale.brokerName) return String(sale.brokerName).trim();
+    const list = sale.brokers || sale.salesContractBrokers || sale.salesmen || [];
+    if (Array.isArray(list) && list.length) {
+        const main = list.find(b => b.main === true || b.main === "S") || list[0];
+        const name = main && (main.name || main.brokerName || main.personName || main.fantasyName || main.tradeName);
+        if (name) return String(name).trim();
+    }
+    const fallback = sale.salespersonName || sale.salesmanName || sale.broker || sale.sellerName;
+    return fallback ? String(fallback).trim() : "";
+};
+
+window.matchZeroPaidSale = function(client, sales) {
+    const list = sales || (window.AppState && window.AppState.sales) || [];
+    return list.find(s =>
+        (client.realSaleId && String(s.id) === String(client.realSaleId)) ||
+        String(s.id) === String(client.saleId) ||
+        String(s.receivableBillId) === String(client.saleId)
+    ) || null;
+};
+
 window.fetchMissingZeroPaidSales = async function(zeroList) {
     if (!zeroList || zeroList.length === 0) return;
     const missing = zeroList.filter(c => c && !c.saleDate && c.customerId);
@@ -14473,7 +14498,7 @@ window.fetchMissingZeroPaidSales = async function(zeroList) {
             
             const clientsToUpdate = missing.filter(c => String(c.customerId) === String(custId));
             clientsToUpdate.forEach(c => {
-                const saleObj = sales.find(s => (c.realSaleId && String(s.id) === String(c.realSaleId)) || String(s.id) === String(c.saleId) || String(s.receivableBillId) === String(c.saleId)) || sales[0];
+                const saleObj = window.matchZeroPaidSale(c, sales) || sales[0];
                 if (saleObj && saleObj.saleDate) {
                     c.saleDate = saleObj.saleDate;
                     const cell = document.getElementById(`saledate-cell-${c.customerId}-${c.saleId}`);
@@ -14481,6 +14506,8 @@ window.fetchMissingZeroPaidSales = async function(zeroList) {
                         cell.innerText = new Date(c.saleDate + 'T12:00:00').toLocaleDateString('pt-BR');
                     }
                 }
+                const bn = window.extractSaleBrokerName(saleObj);
+                if (bn) c.brokerName = bn;
             });
         } catch (e) {
             console.error(`[fetchMissingZeroPaidSales] Erro buscando vendas para cliente ${custId}:`, e);
@@ -25782,6 +25809,339 @@ window.gerarMapaJuridicoPDF = async function() {
         alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
         if (container1 && container1.parentNode) document.body.removeChild(container1);
         if (container2 && container2.parentNode) document.body.removeChild(container2);
+        restoreBtn();
+    }
+};
+
+window.gerarMapaZeropaidPDF = async function() {
+    const list = (window.zeroPaidList && window.zeroPaidList.length) ? window.zeroPaidList : [];
+    if (!list.length) {
+        alert("Não há clientes 0% pago para gerar o mapa.");
+        return;
+    }
+
+    const btn = document.getElementById("btn-gerar-mapa-zeropaid");
+    const oldHtml = btn ? btn.innerHTML : "";
+    const restoreBtn = () => {
+        if (!btn) return;
+        btn.innerHTML = oldHtml;
+        btn.disabled = false;
+        if (window.lucide) window.lucide.createIcons();
+    };
+    if (btn) {
+        const lockedWidth = Math.max(btn.offsetWidth, 188);
+        btn.style.minWidth = lockedWidth + "px";
+        btn.style.width = lockedWidth + "px";
+        btn.innerHTML = `<span style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;flex-shrink:0;"></span>`;
+        btn.disabled = true;
+    }
+
+    const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 40)));
+    await yieldUI();
+
+    let container = null;
+    try {
+        const mergeSaleIntoClient = (c, saleObj) => {
+            if (!saleObj) return;
+            if (!c.saleDate && saleObj.saleDate) c.saleDate = saleObj.saleDate;
+            const bn = window.extractSaleBrokerName(saleObj);
+            if (bn) c.brokerName = bn;
+        };
+        list.forEach(c => mergeSaleIntoClient(c, window.matchZeroPaidSale(c)));
+
+        const needFetch = list.filter(c => c && c.customerId && (!c.saleDate || !c.brokerName));
+        const fetchIds = [...new Set(needFetch.map(c => c.customerId))];
+        if (fetchIds.length && typeof SiengeApiService !== "undefined" && typeof SiengeApiService.getSales === "function") {
+            const batchSize = 6;
+            for (let i = 0; i < fetchIds.length; i += batchSize) {
+                const batch = fetchIds.slice(i, i + batchSize);
+                await Promise.all(batch.map(async (custId) => {
+                    try {
+                        const sales = await SiengeApiService.getSales(custId);
+                        if (!window.AppState.sales) window.AppState.sales = [];
+                        sales.forEach(s => {
+                            const idx = window.AppState.sales.findIndex(xs => String(xs.id) === String(s.id));
+                            if (idx >= 0) window.AppState.sales[idx] = s;
+                            else window.AppState.sales.push(s);
+                        });
+                        needFetch.filter(c => String(c.customerId) === String(custId)).forEach(c => {
+                            mergeSaleIntoClient(c, window.matchZeroPaidSale(c, sales) || sales[0]);
+                        });
+                    } catch (err) {
+                        console.warn("Mapa 0% pago: falha ao buscar contrato", custId, err);
+                    }
+                }));
+                await yieldUI();
+            }
+        }
+
+        const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[ch]));
+        const fmtInt = (val) => Math.round(Number(val) || 0).toLocaleString("pt-BR");
+        const clientValue = (c) => (c.overdueValue || 0) + (c.overdueCharges || 0);
+        const titleCount = (c) => (c.billIds && c.billIds.length) ? c.billIds.length : 1;
+        const empLabel = (ccId) => {
+            const id = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(ccId) : String(ccId || "N/D");
+            const rawName = (typeof getCostCenterName === "function" ? getCostCenterName(ccId) : "") || "";
+            const clean = String(rawName).replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, "").trim();
+            const label = String(rawName).trim().toUpperCase().startsWith(String(id).toUpperCase())
+                ? rawName
+                : `${id} - ${clean || rawName || "N/D"}`;
+            return String(label).toUpperCase();
+        };
+        const parseSale = (c) => {
+            if (!c || !c.saleDate) return null;
+            const d = parseSafeDate(c.saleDate);
+            if (!d || isNaN(d.getTime()) || d.getTime() < 24 * 3600 * 1000) return null;
+            return d;
+        };
+
+        let totalValue = 0, totalTitles = 0, totalDaysDelay = 0, delayN = 0;
+        const clientSet = new Set();
+        list.forEach(c => {
+            totalValue += clientValue(c);
+            totalTitles += titleCount(c);
+            clientSet.add(String(c.customerId));
+            if (c.maxDaysDelay > 0) { totalDaysDelay += c.maxDaysDelay; delayN++; }
+        });
+        const totalClients = clientSet.size;
+        const avgDelay = delayN > 0 ? Math.round(totalDaysDelay / delayN) : 0;
+
+        const now = new Date();
+        let saleAgeSum = 0, saleAgeN = 0;
+        list.forEach(c => {
+            const d = parseSale(c);
+            if (!d) return;
+            const days = Math.max(0, Math.round((now - d) / 86400000));
+            saleAgeSum += days;
+            saleAgeN++;
+        });
+        const avgSaleDays = saleAgeN ? Math.round(saleAgeSum / saleAgeN) : 0;
+        const avgSaleLabel = !saleAgeN ? "N/D" : (avgSaleDays < 60 ? `${avgSaleDays} dias` : `${Math.round(avgSaleDays / 30)} meses`);
+
+        const pad2 = n => String(n).padStart(2, "0");
+        const monthKeys = [];
+        for (let i = 11; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            monthKeys.push(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}`);
+        }
+        const monthCounts = Object.fromEntries(monthKeys.map(k => [k, 0]));
+        let olderCount = 0, noDateCount = 0;
+        list.forEach(c => {
+            const d = parseSale(c);
+            if (!d) { noDateCount++; return; }
+            const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+            if (monthCounts[key] != null) monthCounts[key] += 1;
+            else olderCount += 1;
+        });
+        const chartLabels = monthKeys.map(k => `${k.slice(5, 7)}/${k.slice(2, 4)}`);
+        const chartData = monthKeys.map(k => monthCounts[k]);
+        if (olderCount) { chartLabels.unshift("Antes"); chartData.unshift(olderCount); }
+        if (noDateCount) { chartLabels.push("S/ data"); chartData.push(noDateCount); }
+
+        const recencyBuckets = [
+            { key: "30", label: "Até 30 dias", count: 0 },
+            { key: "90", label: "31 a 90 dias", count: 0 },
+            { key: "180", label: "91 a 180 dias", count: 0 },
+            { key: "365", label: "6 a 12 meses", count: 0 },
+            { key: "plus", label: "Mais de 1 ano", count: 0 },
+            { key: "nd", label: "Sem data de venda", count: 0 }
+        ];
+        list.forEach(c => {
+            const d = parseSale(c);
+            if (!d) { recencyBuckets[5].count++; return; }
+            const days = Math.max(0, Math.round((now - d) / 86400000));
+            if (days <= 30) recencyBuckets[0].count++;
+            else if (days <= 90) recencyBuckets[1].count++;
+            else if (days <= 180) recencyBuckets[2].count++;
+            else if (days <= 365) recencyBuckets[3].count++;
+            else recencyBuckets[4].count++;
+        });
+
+        const empMap = {};
+        list.forEach(c => {
+            const ccId = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D";
+            if (!empMap[ccId]) empMap[ccId] = { id: ccId, name: empLabel(c.costCenterId), clients: new Set(), titles: 0, value: 0 };
+            empMap[ccId].clients.add(String(c.customerId));
+            empMap[ccId].titles += titleCount(c);
+            empMap[ccId].value += clientValue(c);
+        });
+        const empSorted = Object.values(empMap).map(e => ({ ...e, clients: e.clients.size })).sort((a, b) => b.clients - a.clients || b.titles - a.titles);
+
+        const brokerMap = {};
+        list.forEach(c => {
+            const name = (c.brokerName && String(c.brokerName).trim()) ? String(c.brokerName).trim().toUpperCase() : "SEM CORRETOR";
+            if (!brokerMap[name]) brokerMap[name] = { name, clients: new Set(), titles: 0, value: 0 };
+            brokerMap[name].clients.add(String(c.customerId));
+            brokerMap[name].titles += titleCount(c);
+            brokerMap[name].value += clientValue(c);
+        });
+        const brokerSorted = Object.values(brokerMap).map(b => ({ ...b, clients: b.clients.size })).sort((a, b) => b.titles - a.titles || b.clients - a.clients);
+        const brokerTop = brokerSorted.slice(0, 10);
+        const brokerRest = brokerSorted.slice(10);
+        const brokerRows = brokerTop.map(b => ({ ...b, isOther: false }));
+        if (brokerRest.length) {
+            brokerRows.push({
+                name: "OUTROS", isOther: true,
+                clients: brokerRest.reduce((s, b) => s + b.clients, 0),
+                titles: brokerRest.reduce((s, b) => s + b.titles, 0),
+                value: brokerRest.reduce((s, b) => s + b.value, 0)
+            });
+        }
+
+        const countBarChart = (data, labels) => {
+            if (!data.length) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem datas de venda.</div>';
+            const maxVal = Math.max(...data, 1);
+            const W = 340, H = 150, padTop = 18, padBot = 22, padSide = 18;
+            const n = data.length;
+            const stepX = (W - padSide * 2) / Math.max(n, 1);
+            const barWidth = Math.min(18, Math.max(8, stepX * 0.62));
+            let bars = "", texts = "", xLabels = "";
+            data.forEach((v, i) => {
+                const x = padSide + stepX * i + stepX / 2;
+                const barH = (v / maxVal) * (H - padTop - padBot);
+                const y = H - padBot - barH;
+                bars += `<rect x="${x - barWidth / 2}" y="${y}" width="${barWidth}" height="${Math.max(barH, 1)}" fill="${v ? "#ea580c" : "#e2e8f0"}" rx="2"/>`;
+                if (v) texts += `<text x="${x}" y="${y - 4}" text-anchor="middle" font-size="8" font-weight="700" fill="#9a3412">${v}</text>`;
+                xLabels += `<text x="${x}" y="${H - 6}" text-anchor="middle" font-size="7" fill="#64748b">${labels[i]}</text>`;
+            });
+            return `<svg width="${W}" height="${H}" style="overflow:visible;display:block;margin:0 auto;">
+                <line x1="0" y1="${H - padBot}" x2="${W}" y2="${H - padBot}" stroke="#e2e8f0" stroke-width="1.5"/>
+                ${bars}${texts}${xLabels}
+            </svg>`;
+        };
+
+        const th = (label, align, extra) => `<th style="text-align:${align || "left"};padding:4px 6px;font-size:8px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;${extra || ""}">${label}</th>`;
+        const orangeZebra = (i) => i % 2 === 0 ? "#fff" : "#ffedd5";
+        const ellipsisTd = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+
+        const recencyTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;margin-top:4px;">
+                <colgroup><col style="width:70%"><col style="width:30%"></colgroup>
+                <thead><tr style="background:#ea580c;">${th("QUANDO COMPROU")}${th("TÍTULOS","center")}</tr></thead>
+                <tbody>
+                    ${recencyBuckets.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:4px 6px;font-weight:700;color:#9a3412;">${esc(r.label)}</td>
+                        <td style="padding:4px 6px;text-align:center;font-weight:800;">${r.count}</td>
+                    </tr>`).join("")}
+                </tbody>
+            </table>`;
+
+        const empTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
+                <colgroup><col style="width:14%"><col style="width:52%"><col style="width:17%"><col style="width:17%"></colgroup>
+                <thead><tr style="background:#ea580c;">${th("ID","center")}${th("EMPREENDIMENTO")}${th("CLIENTES","center")}${th("TÍTULOS","center")}</tr></thead>
+                <tbody>
+                    ${empSorted.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:4px 6px;text-align:center;color:#9a3412;">${esc(r.id)}</td>
+                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:#c2410c;" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:4px 6px;text-align:center;font-weight:800;">${r.clients}</td>
+                        <td style="padding:4px 6px;text-align:center;">${r.titles}</td>
+                    </tr>`).join("") || `<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8;">Sem dados</td></tr>`}
+                    <tr style="background:#fff7ed;">
+                        <td colspan="2" style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalClients}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
+                    </tr>
+                </tbody>
+            </table>`;
+
+        const brokerTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
+                <colgroup><col style="width:52%"><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
+                <thead><tr style="background:#ea580c;">${th("CORRETOR")}${th("CLIENTES","center")}${th("TÍTULOS","center")}${th("%","center")}</tr></thead>
+                <tbody>
+                    ${brokerRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:${r.isOther || r.name === "SEM CORRETOR" ? "#64748b" : "#9a3412"};" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:4px 6px;text-align:center;font-weight:800;">${r.clients}</td>
+                        <td style="padding:4px 6px;text-align:center;">${r.titles}</td>
+                        <td style="padding:4px 6px;text-align:center;">${totalTitles ? ((r.titles / totalTitles) * 100).toFixed(0) : 0}%</td>
+                    </tr>`).join("") || `<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8;">Sem corretores no contrato</td></tr>`}
+                    <tr style="background:#fff7ed;">
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalClients}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">100%</td>
+                    </tr>
+                </tbody>
+            </table>`;
+
+        const svgAlert = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
+        const svgUsers = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+        const svgFile = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
+        const svgCalendar = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg>`;
+        const kpiBox = (bg, fg, icon, label, value) => `
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;">
+                <div>
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;text-transform:uppercase;">${label}</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${value}</div>
+                </div>
+                <div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${bg};color:${fg};">${icon}</div>
+            </div>`;
+        const quadro = (title, body) => `
+            <div style="min-width:0;height:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;">
+                <div style="background:#ea580c;color:#fff;padding:6px 10px;font-weight:800;font-size:10px;letter-spacing:0.4px;text-transform:uppercase;">${esc(title)}</div>
+                <div style="flex:1;min-height:0;padding:6px 8px;overflow:hidden;">${body}</div>
+            </div>`;
+
+        const saleBody = `
+            <div style="display:flex;flex-direction:column;height:100%;gap:4px;">
+                <div style="font-size:8px;font-weight:800;color:#475569;text-transform:uppercase;text-align:center;">Vendas nos últimos 12 meses</div>
+                ${countBarChart(chartData, chartLabels)}
+                <div style="flex:1;min-height:0;overflow:hidden;">${recencyTable}</div>
+            </div>`;
+
+        const nowLabel = `${now.toLocaleDateString("pt-BR")} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+        const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
+
+        container = document.createElement("div");
+        container.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;height:793px;background:#fff;padding:14px 18px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;display:flex;flex-direction:column;";
+        container.id = "mapa-zeropaid-pdf-container";
+        container.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:8px;flex-shrink:0;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <img src="${logoUrl}" alt="Logo" style="height:32px;object-fit:contain;">
+                    <div>
+                        <h1 style="margin:0;color:#0f172a;font-size:16px;font-weight:800;">Mapa 0% Pago — Sem receita</h1>
+                        <p style="margin:2px 0 0 0;color:#64748b;font-size:10px;">Posição em: ${nowLabel} · Atraso médio ${avgDelay} dias</p>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;flex-shrink:0;">
+                ${kpiBox("#fee2e2","#ef4444", svgAlert, "VALOR EM ATRASO", fmtInt(totalValue))}
+                ${kpiBox("#fef3c7","#f59e0b", svgUsers, "CLIENTES 0% PAGO", totalClients)}
+                ${kpiBox("#dcfce7","#10b981", svgFile, "TÍTULOS", totalTitles)}
+                ${kpiBox("#e0f2fe","#3b82f6", svgCalendar, "MÉDIA DESDE A VENDA", avgSaleLabel)}
+            </div>
+            <div style="flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                ${quadro("Quando o cliente comprou o lote", saleBody)}
+                ${quadro("Clientes 0% pago por empreendimento", empTable)}
+                ${quadro("Principais corretores", brokerTable)}
+            </div>
+        `;
+
+        document.body.appendChild(container);
+        await yieldUI();
+        const canvas = await html2canvas(container, { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", logging: false });
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF("l", "mm", "a4");
+        const imgData = canvas.toDataURL("image/jpeg", 0.92);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const props = pdf.getImageProperties(imgData);
+        const ratio = props.width / props.height;
+        let w = pdfWidth;
+        let h = pdfWidth / ratio;
+        if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
+        pdf.addImage(imgData, "JPEG", (pdfWidth - w) / 2, 0, w, h);
+        pdf.save("Mapa_Clientes_0_Pago.pdf");
+        if (container.parentNode) document.body.removeChild(container);
+        restoreBtn();
+    } catch (e) {
+        console.error("Erro ao gerar mapa 0% pago:", e);
+        alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
+        if (container && container.parentNode) document.body.removeChild(container);
         restoreBtn();
     }
 };

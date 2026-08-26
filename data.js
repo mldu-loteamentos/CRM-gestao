@@ -25,7 +25,9 @@ const MOCK_COST_CENTERS = [
   { id: "20100", name: "Residencial Bella Vista", companyId: 2, city: "Botucatu" },
   { id: "20200", name: "Jardim das Palmeiras", companyId: 2, city: "Avaré" },
   { id: "60100", name: "Residencial Moura Leite 6", companyId: 6, city: "Cerqueira César" },
-  { id: "130100", name: "Residencial Moura Leite 13", companyId: 13, city: "Bauru" }
+  { id: "130100", name: "Residencial Moura Leite 13", companyId: 13, city: "Bauru" },
+  { id: "13600", name: "BOTUCATU - RESERVA CENTRAL PARQUE", companyId: 1, city: "Botucatu" },
+  { id: "13601", name: "BOTUCATU - RESERVA CENTRAL PARQUE (complementar)", companyId: 1, city: "Botucatu" }
 ];
 
 const MOCK_UNITS = {
@@ -163,7 +165,8 @@ const MOCK_SALES = [
     subjudice: "N",
     percPaid: 0.00,
     lastPaymentDate: null,
-    status: "Ativo"
+    status: "Ativo",
+    brokerName: "CARLOS MENDES"
   },
   {
     id: 103,
@@ -228,7 +231,8 @@ const MOCK_SALES = [
     subjudice: "N",
     percPaid: 0.04,
     lastPaymentDate: null,
-    status: "Ativo"
+    status: "Ativo",
+    brokerName: "ANA PAULA FERREIRA"
   },
   {
     id: 108,
@@ -752,7 +756,27 @@ const MOCK_BANK_MOVEMENTS = [
   { bankMovementAmount: 50000.00, companyId: 1, companyName: "Moura Leite Empreendimentos Avaré Ltda", bankMovementDate: "2026-06-12T10:00:00Z" },
   { bankMovementAmount: 320000.00, companyId: 2, companyName: "Moura Leite Loteamentos Principal", bankMovementDate: "2026-06-08T10:00:00Z" },
   { bankMovementAmount: -15000.00, companyId: 2, companyName: "Moura Leite Loteamentos Principal", bankMovementDate: "2026-06-09T10:00:00Z" },
-  { bankMovementAmount: 75000.00, companyId: 6, companyName: "Loteadora Moura Leite - Empresa 06", bankMovementDate: "2026-06-15T10:00:00Z" }
+  { bankMovementAmount: 75000.00, companyId: 6, companyName: "Loteadora Moura Leite - Empresa 06", bankMovementDate: "2026-06-15T10:00:00Z" },
+  {
+    bankMovementAmount: 52956.60, companyId: 1, companyName: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
+    bankMovementDate: "2026-07-10T10:00:00Z",
+    financialCategories: [{ costCenterId: 13600, costCenterName: "BOTUCATU - RESERVA CENTRAL PARQUE", financialCategoryId: "1.01.01.01", financialCategoryName: "Receita de Venda de Lotes", financialCategoryRate: 100 }]
+  },
+  {
+    bankMovementAmount: 403.83, companyId: 1, companyName: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
+    bankMovementDate: "2026-07-18T10:00:00Z",
+    financialCategories: [{ costCenterId: 13600, costCenterName: "BOTUCATU - RESERVA CENTRAL PARQUE", financialCategoryId: "1.03.01.02", financialCategoryName: "Juros Ativos", financialCategoryRate: 100 }]
+  },
+  {
+    bankMovementAmount: -10942.13, companyId: 1, companyName: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
+    bankMovementDate: "2026-07-22T10:00:00Z",
+    financialCategories: [{ costCenterId: 13600, costCenterName: "BOTUCATU - RESERVA CENTRAL PARQUE", financialCategoryId: "2.02.04.01", financialCategoryName: "Repasses", financialCategoryRate: 100 }]
+  },
+  {
+    bankMovementAmount: -33.29, companyId: 1, companyName: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
+    bankMovementDate: "2026-07-28T10:00:00Z",
+    financialCategories: [{ costCenterId: 13601, costCenterName: "BOTUCATU - RESERVA CENTRAL PARQUE", financialCategoryId: "2.05.01.05", financialCategoryName: "Despesas Bancárias", financialCategoryRate: 100 }]
+  }
 ];
 
 // Exportar para que outros módulos possam ler

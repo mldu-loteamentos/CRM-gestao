@@ -442,18 +442,36 @@ const SiengeApiService = {
     }
   },
 
-  // 1.6. Movimentos Bancários (Fiscal/Receitas)
-  async getBankMovements(startDate, endDate) {
+  // 1.6. Movimentos Bancários (Fiscal / Prestação de Contas)
+  // selectionType M = data de movimento (caixa), P = data de pagamento/vencimento
+  async getBankMovements(startDate, endDate, opts = {}) {
+    const selectionType = opts.selectionType || "M";
     if (s_apiMode === "simulado") {
-      // Retorna dados mockados se existir, ou array vazio
-      return window.MOCK_DATA && window.MOCK_DATA.BANK_MOVEMENTS ? window.MOCK_DATA.BANK_MOVEMENTS : [];
+      const all = window.MOCK_DATA && window.MOCK_DATA.BANK_MOVEMENTS ? window.MOCK_DATA.BANK_MOVEMENTS : [];
+      return all.filter(m => {
+        const d = String(m.bankMovementDate || "").slice(0, 10);
+        if (d && (d < startDate || d > endDate)) return false;
+        if (opts.companyId && String(m.companyId) !== String(opts.companyId)) return false;
+        if (opts.costCentersId) {
+          const wanted = String(opts.costCentersId).split(",").map(s => s.trim()).filter(Boolean);
+          if (wanted.length) {
+            const cats = m.financialCategories || [];
+            const hit = cats.some(fc => wanted.includes(String(fc.costCenterId))) || wanted.includes(String(m.costCenterId || ""));
+            if (!hit) return false;
+          }
+        }
+        return true;
+      });
     }
-    // Rota bulk-data não usa paginação offset-limit tradicional do Sienge, retorna um objeto data
-    const url = `/bulk-data/v1/bank-movement?startDate=${startDate}&endDate=${endDate}&selectionType=M`;
+    let url = `/bulk-data/v1/bank-movement?startDate=${startDate}&endDate=${endDate}&selectionType=${encodeURIComponent(selectionType)}`;
+    if (opts.companyId) url += `&companyId=${encodeURIComponent(opts.companyId)}`;
+    if (opts.costCentersId) {
+      const ids = Array.isArray(opts.costCentersId) ? opts.costCentersId.join(",") : String(opts.costCentersId);
+      url += `&costCentersId=${ids}`;
+    }
     const res = await siengeFetchWithRetry(url);
-    if (res && Array.isArray(res.data)) {
-        return res.data;
-    }
+    if (res && Array.isArray(res.data)) return res.data;
+    if (Array.isArray(res)) return res;
     return [];
   },
 
@@ -943,6 +961,13 @@ const SiengeApiService = {
           }
         }
 
+        const brokers = c.brokers || c.salesContractBrokers || [];
+        const mainBroker = (Array.isArray(brokers) && brokers.length)
+          ? (brokers.find(b => b.main === true || b.main === "S") || brokers[0])
+          : null;
+        const brokerName = (mainBroker && (mainBroker.name || mainBroker.brokerName || mainBroker.personName || mainBroker.fantasyName))
+          || c.salespersonName || c.salesmanName || c.brokerName || "";
+
         return {
           id: c.id,
           customerId: mainCustomer.id || customerId,
@@ -958,7 +983,9 @@ const SiengeApiService = {
           status: c.situation === "Distratado" ? "Distratado" : c.outstandingBalance === 0 ? "Quitado" : "Ativo",
           receivableBillId: c.receivableBillId,
           enterpriseId: c.enterpriseId,
-          customers: c.salesContractCustomers || []
+          customers: c.salesContractCustomers || [],
+          brokers,
+          brokerName: String(brokerName || "").trim()
         };
       });
 
