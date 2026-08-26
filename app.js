@@ -2543,8 +2543,77 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
   `;
 }
 
+window.canonicalJudicialPhaseName = function(fase) {
+  return String(fase == null ? '' : fase).trim().replace(/^\d+(?:\.\d+)*\.?\s+/, '');
+};
+
+window.buildJudicialStageCatalog = function() {
+  const etapas = [...(window.EtapasJudiciaisState || [])];
+  etapas.forEach((e, i) => { if (typeof e.order === 'undefined') e.order = i * 10; });
+  const sorted = etapas.sort((a, b) => (a.order || 0) - (b.order || 0));
+  const pid = (v) => (v == null || v === '') ? null : String(v);
+  const childrenOf = (parentId) => sorted.filter(e => pid(e.parentId) === pid(parentId));
+  const items = [];
+  const walk = (parentId, parentNum) => {
+    childrenOf(parentId).forEach((e, idx) => {
+      const prefix = parentNum ? `${parentNum}.${idx + 1}` : String(idx + 1);
+      const nome = String(e.nome || e.name || '').trim();
+      const kids = childrenOf(e.id);
+      items.push({
+        id: e.id,
+        nome,
+        prefix,
+        label: prefix.includes('.') ? `${prefix} ${nome}` : `${prefix}. ${nome}`,
+        hasChildren: kids.length > 0,
+        selectable: kids.length === 0,
+        dias: parseInt(e.dias, 10) || 0,
+        parentId: e.parentId || null
+      });
+      walk(e.id, prefix);
+    });
+  };
+  walk(null, '');
+  return items;
+};
+
+window.resolveJudicialStage = function(fase, faseId) {
+  const catalog = window.buildJudicialStageCatalog();
+  if (faseId) {
+    const byId = catalog.find(s => String(s.id) === String(faseId));
+    if (byId) return byId;
+  }
+  const can = window.canonicalJudicialPhaseName(fase).toUpperCase();
+  if (!can || can === 'SEM FASE') return null;
+  const exact = catalog.find(s => s.nome.toUpperCase() === can);
+  if (exact) return exact;
+  return catalog.filter(s => s.selectable).find(s => {
+    const n = s.nome.toUpperCase();
+    return can.endsWith(' - ' + n);
+  }) || null;
+};
+
+window.formatJudicialPhaseLabel = function(fase, faseId) {
+  const raw = String(fase || '').trim();
+  if (!raw || raw === 'Sem Fase') return 'Sem Fase';
+  if (raw === 'Nota Interna' || raw === 'Proposta de renegociação') return raw;
+  const stage = window.resolveJudicialStage(raw, faseId);
+  return stage ? stage.label : window.canonicalJudicialPhaseName(raw) || raw;
+};
+
+window.judicialPhasesMatch = function(storedFase, selectedVal, storedFaseId) {
+  if (selectedVal === 'Sem Fase') {
+    const can = window.canonicalJudicialPhaseName(storedFase);
+    return !can || can === 'Sem Fase';
+  }
+  const stage = window.resolveJudicialStage(storedFase, storedFaseId);
+  const storedCan = (stage ? stage.nome : window.canonicalJudicialPhaseName(storedFase)).toUpperCase();
+  const selectedCan = window.canonicalJudicialPhaseName(selectedVal).toUpperCase();
+  if (storedCan === selectedCan) return true;
+  return storedCan.endsWith(' - ' + selectedCan);
+};
+
 window.getClientJudicialPhaseInfo = function(client) {
-  const empty = { fase: "Sem Fase", enteredAt: null, prazo: null, daysLeft: null, status: "SEM_PRAZO" };
+  const empty = { fase: "Sem Fase", faseLabel: "Sem Fase", faseId: null, enteredAt: null, prazo: null, daysLeft: null, status: "SEM_PRAZO" };
   if (!client) return empty;
   const cid = String(client.customerId);
   const customerNotes = (window.AppState && AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
@@ -2552,7 +2621,9 @@ window.getClientJudicialPhaseInfo = function(client) {
   if (validJudNotes.length === 0) return empty;
   validJudNotes.sort((a, b) => new Date(b.date) - new Date(a.date));
   const last = validJudNotes[0];
-  const fase = last.fase || "Sem Fase";
+  const stage = window.resolveJudicialStage(last.fase, last.faseId);
+  const fase = stage ? stage.nome : (window.canonicalJudicialPhaseName(last.fase) || "Sem Fase");
+  const faseLabel = stage ? stage.label : (fase === "Sem Fase" ? "Sem Fase" : fase);
   const enteredAt = last.date ? new Date(last.date) : null;
   let prazoDate = null;
   if (last.prazo) {
@@ -2566,9 +2637,7 @@ window.getClientJudicialPhaseInfo = function(client) {
     }
   }
   if (!prazoDate && enteredAt && !Number.isNaN(enteredAt.getTime())) {
-    const etapas = window.EtapasJudiciaisState || [];
-    const etapa = etapas.find(e => String(e.nome || e.name || '').trim().toUpperCase() === String(fase).trim().toUpperCase());
-    const dias = etapa ? (parseInt(etapa.dias, 10) || 0) : 0;
+    const dias = stage ? stage.dias : 0;
     if (dias > 0) {
       prazoDate = new Date(enteredAt);
       prazoDate.setHours(12, 0, 0, 0);
@@ -2585,7 +2654,7 @@ window.getClientJudicialPhaseInfo = function(client) {
     daysLeft = Math.round((p - today) / (1000 * 60 * 60 * 24));
     status = daysLeft < 0 ? "VENCIDO" : "NO_PRAZO";
   }
-  return { fase, enteredAt, prazo: prazoDate, daysLeft, status };
+  return { fase, faseLabel, faseId: stage ? stage.id : (last.faseId || null), enteredAt, prazo: prazoDate, daysLeft, status };
 };
 
 async function loadDashboardData(forceRefresh = false) {
@@ -2807,7 +2876,7 @@ window.applyAdvFiltersTo = (sourceList) => {
         if (window.advFilters.faseProcessual && window.advFilters.faseProcessual.length > 0) {
             filteredList = filteredList.filter(c => {
                 const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : { fase: 'Sem Fase' };
-                return window.advFilters.faseProcessual.some(val => String(info.fase || 'Sem Fase').trim().toUpperCase() === String(val).trim().toUpperCase());
+                return window.advFilters.faseProcessual.some(val => window.judicialPhasesMatch(info.fase, val, info.faseId));
             });
         }
 
@@ -4397,7 +4466,7 @@ document.addEventListener("click", function(e) {
         const row = document.createElement("tr");
         row.className = "table-row-hover";
         row.innerHTML = `
-          <td><span>${client.companyId}</span></td>
+          <td style="text-align: center; width: 1%; white-space: nowrap;"><span>${client.companyId}</span></td>
           <td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${client.customerName}">
             <span style="text-transform:uppercase;">${client.customerName}</span>
           </td>
@@ -4411,14 +4480,8 @@ document.addEventListener("click", function(e) {
           </td>
           <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
             <span style="font-weight: 500; font-size: 0.75rem; text-transform: uppercase;">${(() => {
-                const cid = String(client.customerId);
-                const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
-                const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
-                if (validJudNotes.length > 0) {
-                    validJudNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
-                    return validJudNotes[0].fase;
-                }
-                return "Sem Fase";
+                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
+                return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
             })()}</span>
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;" title="Data da Fase">
@@ -4516,6 +4579,41 @@ document.addEventListener("click", function(e) {
   }
 }
 
+window.buildFichaPdfFilename = function(tipo, opts) {
+  opts = opts || {};
+  const getDom = (id) => {
+    const el = document.getElementById(id);
+    return el ? String(el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+  };
+  let contrato = String(opts.contrato || '').replace(/\s+/g, ' ').trim();
+  if (!contrato) {
+    const spanEl = document.getElementById('det-block-lot-span');
+    if (spanEl && spanEl.childNodes.length > 0) {
+      contrato = String(spanEl.childNodes[0].textContent || '').replace(/\s+/g, ' ').trim();
+    }
+    if (!contrato) contrato = getDom('det-block-lot');
+    if (!contrato) contrato = getDom('ctx-empreend-val');
+  }
+  let titulo = String(opts.titulo != null ? opts.titulo : (getDom('det-bill-id') || getDom('ctx-titulo-val') || '')).trim();
+  titulo = titulo.replace(/^B-/i, '').split('-')[0].trim();
+  let nome = String(opts.nome || getDom('det-name') || '').replace(/\s+/g, ' ').trim();
+  if (!nome && window.AppState && AppState.customers && AppState.selectedCustomerId) {
+    const c = AppState.customers[AppState.selectedCustomerId];
+    if (c && c.name) nome = String(c.name).trim();
+  }
+  nome = (nome || 'Cliente').toUpperCase();
+  const tipoLabel = String(tipo || 'Arquivo').trim();
+  const head = contrato ? `${tipoLabel} ${contrato}` : tipoLabel;
+  const raw = `${head} | Título ${titulo || '-'} | ${nome}.pdf`;
+  return raw.replace(/\|/g, '\uFF5C').replace(/[<>:"/\\?*\u0000-\u001F]/g, '-').replace(/\s+/g, ' ').trim();
+};
+
+window.openNamedSiengePdf = function(url, filename) {
+  if (!url) return;
+  const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
+  window.open(proxyUrl, '_blank');
+};
+
 window.visualizarExtratoDireto = function(btn) {
   const customerId = btn.dataset.customerId;
   const rawTitleNumber = btn.dataset.title;
@@ -4533,9 +4631,12 @@ window.visualizarExtratoDireto = function(btn) {
       lucide.createIcons();
       if (res && res.results && res.results.length > 0 && res.results[0].urlReport) {
         const originalUrl = res.results[0].urlReport;
-        const fileName = `${customerName} - Título ${rawTitleNumber} (${blockLot}).pdf`;
-        const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
-        window.open(proxyUrl, '_blank');
+        const fileName = window.buildFichaPdfFilename('Extrato', {
+          contrato: blockLot,
+          titulo: rawTitleNumber,
+          nome: customerName
+        });
+        window.openNamedSiengePdf(originalUrl, fileName);
       } else if (res && res.fileUrl) {
         window.open(res.fileUrl, '_blank');
       } else {
@@ -7369,14 +7470,12 @@ function formatCpfCnpj(val) {
              } else {
                  blockLot = getDomText("det-block-lot") || "";
              }
-             
-             // FABIO INOUYE - Título 14262 (10100 - 05-16).pdf
-             const fileName = `${customerName} - Título ${titulo} (${blockLot}).pdf`;
-             
-             // Usa o proxy local para forçar o nome do arquivo
-             const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(originalUrl)}&filename=${encodeURIComponent(fileName)}`;
-             
-             window.open(proxyUrl, '_blank');
+             const fileName = window.buildFichaPdfFilename('Extrato', {
+               contrato: blockLot,
+               titulo: titulo,
+               nome: customerName
+             });
+             window.openNamedSiengePdf(originalUrl, fileName);
           } else {
              alert('Extrato em PDF não disponível para este contrato.');
           }
@@ -10863,11 +10962,12 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
             blockLot = getDomText("det-block-lot") || "";
         }
         
-        // nome cliente - Titulo (empreendimento - quadra-lote).pdf
-        const fileName = `${customerName} - Titulo ${billId} (${blockLot}).pdf`;
-        
-        const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(urlReport)}&filename=${encodeURIComponent(fileName)}`;
-        window.open(proxyUrl, '_blank');
+        const fileName = window.buildFichaPdfFilename('Boleto', {
+            contrato: blockLot,
+            titulo: getDomText("det-bill-id") || billId,
+            nome: customerName
+        });
+        window.openNamedSiengePdf(urlReport, fileName);
       }
     } else {
       alert("Não foi possível localizar o link deste boleto no Sienge.");
@@ -10916,9 +11016,14 @@ window.downloadBoletoPdf = async function(billId, instId, btnElement) {
     const data = await SiengeApiService.getPaymentSlipNotification(billId, firstInstId);
     if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
        const url = data.results[0].urlReport;
-       
+       const getDomText = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ""; };
+       const customerName = customer ? (customer.name || "Cliente") : (getDomText("det-name") || "Cliente");
+       const fileName = window.buildFichaPdfFilename('Boleto', {
+         titulo: getDomText("det-bill-id") || billId,
+         nome: customerName
+       });
        alert("Devido a restrições de segurança (CORS) da Sienge, o arquivo será aberto em uma nova aba para você realizar o download. O PDF requer senha (o CPF/CNPJ já foi copiado, basta usar Ctrl+V).");
-       window.open(url, '_blank');
+       window.openNamedSiengePdf(url, fileName);
     } else {
        alert("Link do boleto indisponível no Sienge.");
     }
@@ -17282,8 +17387,13 @@ window.renderEtapasJudiciais = function() {
   const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));
   const rootItems = sorted.filter(e => !e.parentId);
   
-  const renderNode = (node, level, prefix) => {
+  const catalog = typeof window.buildJudicialStageCatalog === 'function' ? window.buildJudicialStageCatalog() : [];
+  const prefixById = {};
+  catalog.forEach(s => { prefixById[String(s.id)] = s.prefix.includes('.') ? s.prefix : s.prefix + '.'; });
+  
+  const renderNode = (node, level) => {
       const children = sorted.filter(e => e.parentId === node.id);
+      const numLabel = prefixById[String(node.id)] || '';
       
       let bgColor = '#ffffff';
       if (level === 0) bgColor = '#f8fafc'; // cinza claro
@@ -17301,7 +17411,7 @@ window.renderEtapasJudiciais = function() {
             <i data-lucide="grip-vertical" style="width: 16px; height: 16px; color: #94a3b8; cursor: grab;"></i>
             <div>
               <div style="font-size: 0.9rem; font-weight: 600; color: #334155;">
-                <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${prefix}</span>
+                <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${numLabel}</span>
                 ${node.nome}
               </div>
               <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} • <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
@@ -17320,14 +17430,14 @@ window.renderEtapasJudiciais = function() {
           </div>
         </div>
         <div class="jud-children">
-          ${children.map((c, i) => renderNode(c, level + 1, `${prefix}${i + 1}.`)).join('')}
+          ${children.map(c => renderNode(c, level + 1)).join('')}
         </div>
       </div>
       `;
       return html;
   };
   
-  container.innerHTML = rootItems.map((n, i) => renderNode(n, 0, `${i + 1}. `)).join('');
+  container.innerHTML = rootItems.map(n => renderNode(n, 0)).join('');
   
   if (typeof lucide !== 'undefined') lucide.createIcons();
 };
@@ -17588,31 +17698,18 @@ window.updateJudFaseDropdown = function() {
       console.warn('[Judicial] Não foi possível carregar as etapas salvas.', e);
     }
   }
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
   let html = `<option value="">Selecione...</option>`;
-  if(window.EtapasJudiciaisState) {
-    const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));
-    const rootItems = sorted.filter(e => !e.parentId);
-    
-    const buildOptions = (node, prefix) => {
-        const children = sorted.filter(e => e.parentId === node.id);
-        const hasChildren = children.length > 0;
-        
-        let optHtml;
-        if (hasChildren) {
-            optHtml = `<option value="" disabled style="font-weight:700; color:#374151; background:#f3f4f6;">${prefix}${node.nome}</option>`;
-            children.forEach(c => {
-                optHtml += buildOptions(c, prefix + "&nbsp;&nbsp;&nbsp;â†³ ");
-            });
-        } else {
-            optHtml = `<option value="${node.nome}" data-dias="${node.dias || 0}">${prefix}${node.nome}</option>`;
-        }
-        return optHtml;
-    };
-    
-    rootItems.forEach(e => {
-        html += buildOptions(e, "");
-    });
-  }
+  const catalog = typeof window.buildJudicialStageCatalog === 'function' ? window.buildJudicialStageCatalog() : [];
+  catalog.forEach(s => {
+    if (s.hasChildren) {
+      html += `<option value="" disabled style="font-weight:700; color:#374151; background:#f3f4f6;">${esc(s.label)}</option>`;
+    } else {
+      html += `<option value="${esc(s.nome)}" data-id="${esc(s.id)}" data-dias="${s.dias || 0}">${esc(s.label)}</option>`;
+    }
+  });
   html += `<option value="Nota Interna">Nota Interna</option>`;
   html += `<option value="Proposta de renegociação">Proposta de renegociação</option>`;
   sel.innerHTML = html;
@@ -22143,6 +22240,7 @@ window.saveJudicialOccurrence = function() {
   const pinEl = document.getElementById("jud-pin-checkbox");
 
   const fase = faseEl ? faseEl.value : "";
+  const faseId = (faseEl && faseEl.options[faseEl.selectedIndex]) ? (faseEl.options[faseEl.selectedIndex].getAttribute('data-id') || null) : null;
   if (fase === "Proposta de renegociação") {
       if (typeof window.applyRenegotiationText === 'function') {
           if (window.applyRenegotiationText('jud-') === false) {
@@ -22176,6 +22274,7 @@ window.saveJudicialOccurrence = function() {
     date: new Date().toISOString(),
     author: AppState.currentUser ? AppState.currentUser.name : "Advogado",
     fase: fase,
+    faseId: faseId,
     text: text,
     prazo: (fase !== 'Nota Interna') ? prazo : null,
     pinned: isPinned,
@@ -22440,7 +22539,7 @@ window.renderJudicialTimeline = function() {
       <div style="${cardStyle}">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
           <div>
-            <div style="font-size: 0.85rem; font-weight: 700; color: #1e293b; display: flex; align-items: center;">${titleIcon}${occ.fase} ${occ.pinned ? `<span style="background: var(--color-primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; margin-left: 8px; display: inline-flex; align-items: center; gap: 2px;"><i data-lucide="pin" style="width: 10px; height: 10px;"></i> Fixado</span>` : ''}</div>
+            <div style="font-size: 0.85rem; font-weight: 700; color: #1e293b; display: flex; align-items: center;">${titleIcon}${typeof window.formatJudicialPhaseLabel === 'function' ? window.formatJudicialPhaseLabel(occ.fase, occ.faseId) : occ.fase} ${occ.pinned ? `<span style="background: var(--color-primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; margin-left: 8px; display: inline-flex; align-items: center; gap: 2px;"><i data-lucide="pin" style="width: 10px; height: 10px;"></i> Fixado</span>` : ''}</div>
             <div style="font-size: 0.7rem; color: #64748b; margin-top: 2px;">Por ${occ.author} em ${dateStr}</div>
           </div>
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -23285,37 +23384,31 @@ window.openAdvFiltersModal = function(context = 'fila') {
             const faseContainer = document.getElementById('adv-pills-fase-processual');
             if (faseContainer) {
                 const selectedFases = window.advFilters.faseProcessual || [];
-                const etapas = [...(window.EtapasJudiciaisState || [])];
-                etapas.forEach((e, i) => { if (typeof e.order === 'undefined') e.order = i * 10; });
-                const sortedEtapas = etapas.sort((a, b) => (a.order || 0) - (b.order || 0));
-                const orderedNames = [];
-                const seenNames = new Set();
-                const pushNome = (nome) => {
-                    const n = String(nome || '').trim();
-                    if (!n) return;
-                    const key = n.toUpperCase();
-                    if (seenNames.has(key)) return;
-                    seenNames.add(key);
-                    orderedNames.push(n);
+                const catalog = typeof window.buildJudicialStageCatalog === 'function' ? window.buildJudicialStageCatalog() : [];
+                const orderedItems = [];
+                const seenKeys = new Set();
+                const pushItem = (value, label) => {
+                    const v = String(value || '').trim();
+                    if (!v) return;
+                    const key = v.toUpperCase();
+                    if (seenKeys.has(key)) return;
+                    seenKeys.add(key);
+                    orderedItems.push({ value: v, label: label || v });
                 };
-                const walk = (parentId) => {
-                    sortedEtapas.filter(e => (e.parentId || null) === parentId).forEach(e => {
-                        pushNome(e.nome || e.name);
-                        walk(e.id);
-                    });
-                };
-                walk(null);
-                sortedEtapas.forEach(e => pushNome(e.nome || e.name));
+                catalog.filter(s => s.selectable).forEach(s => pushItem(s.nome, s.label));
                 (window.rawClientList || []).forEach(c => {
                     if (c.subjudice !== 'S' && c.subjudice !== true) return;
                     const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : null;
-                    if (info && info.fase && info.fase !== 'Sem Fase') pushNome(info.fase);
+                    if (info && info.fase && info.fase !== 'Sem Fase') {
+                        const already = catalog.some(s => s.nome.toUpperCase() === String(info.fase).toUpperCase());
+                        if (!already) pushItem(info.fase, info.faseLabel || info.fase);
+                    }
                 });
-                pushNome('Sem Fase');
+                pushItem('Sem Fase', 'Sem Fase');
                 let html = `<div class="adv-pill ${selectedFases.length === 0 ? 'active' : ''}" data-value="">Todos</div>`;
-                orderedNames.forEach(nome => {
-                    const active = selectedFases.some(v => String(v).trim().toUpperCase() === nome.toUpperCase()) ? 'active' : '';
-                    html += `<div class="adv-pill ${active}" data-value="${nome.replace(/"/g, '&quot;')}">${nome}</div>`;
+                orderedItems.forEach(item => {
+                    const active = selectedFases.some(v => String(v).trim().toUpperCase() === item.value.toUpperCase()) ? 'active' : '';
+                    html += `<div class="adv-pill ${active}" data-value="${item.value.replace(/"/g, '&quot;')}">${item.label}</div>`;
                 });
                 faseContainer.innerHTML = html;
             }
@@ -23885,7 +23978,7 @@ window.exportSubjudiceToExcel = function() {
                 "Títulos": Array.isArray(c.billIds) ? c.billIds.join(" ; ") : c.billIds,
                 "Empreendimento ID": typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId,
                 "Unidade": c.unitName || '',
-                "Fase Processual": info.fase || "Sem Fase",
+                "Fase Processual": info.faseLabel || info.fase || "Sem Fase",
                 "Data de Entrada na Fase": fmtDate(info.enteredAt),
                 "Prazo Final da Fase": fmtDate(info.prazo),
                 "Dias para Concluir a Fase": fmtDays(info),
@@ -24894,22 +24987,34 @@ window.testarZerarFila = function() {
     }
 };
 
-window.gerarMapaJuridicoPDF = function() {
+window.gerarMapaJuridicoPDF = async function() {
     if (!window._subjudiceList || window._subjudiceList.length === 0) {
         alert("Não há clientes no Sub Judice para gerar o mapa.");
         return;
     }
 
-    const btn = document.querySelector('button[onclick="gerarMapaJuridicoPDF()"]');
+    const btn = document.getElementById('btn-gerar-mapa-juridico') || document.querySelector('button[onclick="gerarMapaJuridicoPDF()"]');
     const oldHtml = btn ? btn.innerHTML : '';
+    const restoreBtn = () => {
+        if (!btn) return;
+        btn.innerHTML = oldHtml;
+        btn.disabled = false;
+        if (window.lucide) window.lucide.createIcons();
+    };
     if (btn) {
-        btn.innerHTML = `<i data-lucide="loader-2" class="lucide-spin" style="width: 14px;"></i> Gerando...`;
+        const lockedWidth = Math.max(btn.offsetWidth, 188);
+        btn.style.minWidth = lockedWidth + 'px';
+        btn.style.width = lockedWidth + 'px';
+        btn.innerHTML = `<span style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;flex-shrink:0;"></span>`;
         btn.disabled = true;
     }
-    if (window.lucide) window.lucide.createIcons();
 
-    setTimeout(() => {
-        try {
+    const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 40)));
+    await yieldUI();
+
+    let container1 = null;
+    let container2 = null;
+    try {
         const prefixMap = {};
         const nameMap = {};
         const allStages = [...(window.EtapasJudiciaisState || [])].sort((a,b) => (a.order || 0) - (b.order || 0));
@@ -25028,147 +25133,257 @@ window.gerarMapaJuridicoPDF = function() {
             return nameA.localeCompare(nameB);
         });
 
+        const usualCompanyName = (compId) => {
+            if (typeof getCompanyName === 'function') {
+                return getCompanyName(compId, true) || getCompanyName(compId) || `Empresa ${compId}`;
+            }
+            return `Empresa ${compId}`;
+        };
+
         const generalResult = buildTimelineHtml("Visão Geral", generalList, true);
         let timelinesHtml = generalResult.html;
-        
         sortedCompanies.forEach(compId => {
-            const compName = window.getCompanyName ? window.getCompanyName(compId) : `Empresa ${compId}`;
-            timelinesHtml += buildTimelineHtml(compName, companyGroups[compId], false).html;
+            timelinesHtml += buildTimelineHtml(usualCompanyName(compId), companyGroups[compId], false).html;
         });
 
-        const container1 = document.createElement("div");
-        container1.style.position = "absolute";
-        container1.style.top = "-9999px";
-        container1.style.left = "-9999px";
-        container1.style.width = "1122px";
-        container1.style.backgroundColor = "#ffffff";
-        container1.style.padding = "20px";
-        container1.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
-        container1.id = "mapa-juridico-pdf-container-1";
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+        const fmtInt = (val) => Math.round(Number(val) || 0).toLocaleString('pt-BR');
+        const fmtPct = (val, total) => (total > 0 ? ((val / total) * 100).toFixed(1).replace('.', ',') : '0,0') + '%';
+        const clientValue = (c) => (c.overdueValue || 0) + (c.overdueCharges || 0);
+        const clientTitle = (c) => String((c.billIds && c.billIds[0]) || '').replace(/^B-/, '').split('-')[0] || '-';
+        const empLabel = (ccId) => {
+            const id = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(ccId) : String(ccId || 'N/D');
+            const rawName = (typeof getCostCenterName === 'function' ? getCostCenterName(ccId) : '') || '';
+            const clean = String(rawName).replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, '').trim();
+            const label = String(rawName).trim().toUpperCase().startsWith(String(id).toUpperCase())
+                ? rawName
+                : `${id} - ${clean || rawName || 'N/D'}`;
+            return String(label).toUpperCase();
+        };
+        const ellipsisTd = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 
-        const kpiGrid = document.getElementById('subjudice-kpi-grid');
-        const tableCard = document.querySelector('#tab-subjudice .crm-card');
-        
-        const header1 = document.createElement("div");
-        header1.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 15px;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 35px; object-fit: contain;">
+        const companyRows = Object.keys(companyGroups).map(compId => {
+            const list = companyGroups[compId];
+            const titles = new Set();
+            let value = 0;
+            list.forEach(c => {
+                value += clientValue(c);
+                if (c.billIds && c.billIds.length) c.billIds.forEach(id => titles.add(id));
+                else titles.add(c.customerId);
+            });
+            return { id: compId, name: usualCompanyName(compId), titles: titles.size, value };
+        }).sort((a, b) => b.value - a.value);
+
+        const empMap = {};
+        generalList.forEach(c => {
+            const ccId = (typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || 'N/D';
+            if (!empMap[ccId]) empMap[ccId] = { id: ccId, name: empLabel(c.costCenterId), titles: new Set(), value: 0 };
+            empMap[ccId].value += clientValue(c);
+            if (c.billIds && c.billIds.length) c.billIds.forEach(id => empMap[ccId].titles.add(id));
+            else empMap[ccId].titles.add(c.customerId);
+        });
+        const empSorted = Object.values(empMap).map(e => ({ ...e, titles: e.titles.size })).sort((a, b) => b.value - a.value);
+
+        const clientSorted = [...generalList]
+            .map(c => ({ title: clientTitle(c), name: (c.customerName || '').toUpperCase(), value: clientValue(c) }))
+            .sort((a, b) => b.value - a.value);
+
+        const top5PlusOthers = (items, nameKey) => {
+            const top = items.slice(0, 5);
+            const rest = items.slice(5);
+            const rows = top.map(item => ({ ...item, isOther: false }));
+            if (rest.length) {
+                rows.push({
+                    [nameKey]: 'OUTROS',
+                    title: '—',
+                    titles: rest.reduce((s, i) => s + (i.titles || 0), 0),
+                    value: rest.reduce((s, i) => s + (i.value || 0), 0),
+                    isOther: true
+                });
+            }
+            return rows;
+        };
+        const empRows = top5PlusOthers(empSorted, 'name');
+        const clientRows = top5PlusOthers(clientSorted, 'name');
+
+        const th = (label, align) => `<th style="text-align:${align || 'left'};padding:5px 6px;font-size:8px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;">${label}</th>`;
+        const buildQuadro = (title, titleColor, tableHtml) => `
+            <div style="flex:1;min-width:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                <div style="padding:8px 10px;font-weight:800;font-size:12px;color:${titleColor};">${esc(title)}</div>
+                ${tableHtml}
+            </div>`;
+        const zebra = (i) => i % 2 === 0 ? '#fff' : '#f8fafc';
+        const footTd = 'padding:6px 8px;border-top:1.5px solid #ea580c;font-weight:800;color:#ea580c;font-size:10px;';
+
+        const companyTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
+                <colgroup><col style="width:12%"><col style="width:48%"><col style="width:16%"><col style="width:24%"></colgroup>
+                <thead><tr style="background:#e0f2fe;">${th('ID','center')}${th('EMPRESA')}${th('TÍTULOS','center')}${th('R$ ATUALIZADO','right')}</tr></thead>
+                <tbody>
+                    ${companyRows.map((r, i) => `<tr style="background:${zebra(i)};">
+                        <td style="padding:5px 6px;text-align:center;color:#64748b;">${esc(r.id)}</td>
+                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#065f46;" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:5px 6px;text-align:center;">${r.titles}</td>
+                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
+                    </tr>`).join('')}
+                    <tr>
+                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;"></td>
+                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;font-weight:800;color:#ea580c;font-size:10px;">Total</td>
+                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
+                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;text-align:right;font-weight:800;color:#ea580c;font-size:10px;white-space:nowrap;">${fmtInt(totalValue)}</td>
+                    </tr>
+                </tbody>
+            </table>`;
+
+        const empTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
+                <colgroup><col style="width:46%"><col style="width:14%"><col style="width:22%"><col style="width:18%"></colgroup>
+                <thead><tr style="background:#e0f2fe;">${th('EMPREENDIMENTO')}${th('TÍTULOS','center')}${th('VALOR','right')}${th('PESO %','right')}</tr></thead>
+                <tbody>
+                    ${empRows.map((r, i) => `<tr style="background:${zebra(i)};">
+                        <td style="padding:5px 6px;${ellipsisTd}${r.isOther ? 'font-weight:700;color:#64748b;' : 'font-weight:700;color:#0f172a;'}" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:5px 6px;text-align:center;">${r.titles}</td>
+                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
+                        <td style="padding:5px 6px;text-align:right;color:#475569;">${fmtPct(r.value, totalValue)}</td>
+                    </tr>`).join('')}
+                    <tr>
+                        <td style="${footTd}">Total</td>
+                        <td style="${footTd}text-align:center;">${totalTitles}</td>
+                        <td style="${footTd}text-align:right;white-space:nowrap;">${fmtInt(totalValue)}</td>
+                        <td style="${footTd}text-align:right;">100,0%</td>
+                    </tr>
+                </tbody>
+            </table>`;
+
+        const clientTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
+                <colgroup><col style="width:16%"><col style="width:44%"><col style="width:22%"><col style="width:18%"></colgroup>
+                <thead><tr style="background:#e0f2fe;">${th('TÍTULO')}${th('CLIENTE')}${th('VALOR','right')}${th('PESO %','right')}</tr></thead>
+                <tbody>
+                    ${clientRows.map((r, i) => `<tr style="background:${zebra(i)};">
+                        <td style="padding:5px 6px;white-space:nowrap;">${esc(r.isOther ? '—' : r.title)}</td>
+                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#0f172a;" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
+                        <td style="padding:5px 6px;text-align:right;color:#475569;">${fmtPct(r.value, totalValue)}</td>
+                    </tr>`).join('')}
+                    <tr>
+                        <td colspan="2" style="${footTd}">Total</td>
+                        <td style="${footTd}text-align:right;white-space:nowrap;">${fmtInt(totalValue)}</td>
+                        <td style="${footTd}text-align:right;">100,0%</td>
+                    </tr>
+                </tbody>
+            </table>`;
+
+        const nowLabel = `${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`;
+        const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
+
+        container1 = document.createElement("div");
+        container1.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;background:#fff;padding:18px 20px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;";
+        container1.id = "mapa-juridico-pdf-container-1";
+        container1.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:12px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <img src="${logoUrl}" alt="Logo" style="height:32px;object-fit:contain;">
                     <div>
-                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Sub Judice por Empresa | Empreendimento</h1>
-                        <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                        <h1 style="margin:0;color:#0f172a;font-size:16px;font-weight:800;">Mapa Jurídico — Sub Judice</h1>
+                        <p style="margin:2px 0 0 0;color:#64748b;font-size:10px;">Posição em: ${nowLabel}</p>
                     </div>
                 </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-bottom:14px;">
+                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">VALOR EM ATRASO</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">R$ ${fmtInt(totalValue)}</div>
+                </div>
+                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">CLIENTES EM ATRASO</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${totalClients}</div>
+                </div>
+                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">TÍTULOS VENCIDOS</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${totalTitles}</div>
+                </div>
+                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">ATRASO MÉDIO</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${avgDelay} dias</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+                ${buildQuadro('POR EMPRESA', '#065f46', companyTable)}
+                ${buildQuadro('TOP 5 EMPREENDIMENTOS', '#0f172a', empTable)}
+                ${buildQuadro('TOP 5 CLIENTES', '#ea580c', clientTable)}
             </div>
         `;
-        container1.appendChild(header1);
 
-        if (kpiGrid) container1.appendChild(kpiGrid.cloneNode(true));
-        if (tableCard) {
-            const tableClone = tableCard.cloneNode(true);
-            const tableContainerClone = tableClone.querySelector('.table-container');
-            if (tableContainerClone) {
-                tableContainerClone.style.overflow = 'visible';
-                tableContainerClone.style.maxHeight = 'none';
-                tableContainerClone.style.height = 'auto';
-            }
-            container1.appendChild(tableClone);
-        }
-        
-        const container2 = document.createElement("div");
-        container2.style.position = "absolute";
-        container2.style.top = "-9999px";
-        container2.style.left = "-9999px";
-        container2.style.width = "1122px"; 
-        container2.style.minHeight = "793px"; 
-        container2.style.backgroundColor = "#ffffff"; 
-        container2.style.fontFamily = "'Inter', 'Segoe UI', sans-serif";
-        container2.style.padding = "20px 30px";
-        container2.style.boxSizing = "border-box";
+        container2 = document.createElement("div");
+        container2.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;min-height:793px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;padding:20px 30px;box-sizing:border-box;";
         container2.id = "mapa-juridico-pdf-container-2";
-
         container2.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 15px;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" alt="Logo Moura Leite" style="height: 35px; object-fit: contain;">
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:15px;">
+                <div style="display:flex;align-items:center;gap:15px;">
+                    <img src="${logoUrl}" alt="Logo" style="height:35px;object-fit:contain;">
                     <div>
-                        <h1 style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 800;">Mapa Jurídico - Estágios</h1>
-                        <p style="margin: 2px 0 0 0; color: #64748b; font-size: 10px;">Posição em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                        <h1 style="margin:0;color:#0f172a;font-size:16px;font-weight:800;">Mapa Jurídico - Estágios</h1>
+                        <p style="margin:2px 0 0 0;color:#64748b;font-size:10px;">Posição em: ${nowLabel}</p>
                     </div>
                 </div>
             </div>
-            
-            <div style="display: flex; flex-direction: column; width: 100%;">
-                ${timelinesHtml}
-            </div>
-
-            <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin-top: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <div style="display:flex;flex-direction:column;width:100%;">${timelinesHtml}</div>
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-top:15px;">
+                <div style="display:flex;flex-wrap:wrap;gap:4px;">
                     ${generalResult.agg.map(item => `
-                        <div style="display: flex; align-items: center; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 8px; border: 1px solid #e2e8f0;">
-                            <span style="background: ${item.count > 0 ? '#065f46' : '#475569'}; color: white; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 7px; margin-right: 4px;">
-                                ${item.prefix}
-                            </span>
-                            <span style="font-weight: 700; color: #334155; margin-right: 3px;">${item.name}</span>
-                            <span style="color: #64748b; font-size: 7px;">(${item.days} d)</span>
+                        <div style="display:flex;align-items:center;background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:8px;border:1px solid #e2e8f0;">
+                            <span style="background:${item.count > 0 ? '#065f46' : '#475569'};color:white;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:7px;margin-right:4px;">${item.prefix}</span>
+                            <span style="font-weight:700;color:#334155;margin-right:3px;">${esc(item.name)}</span>
+                            <span style="color:#64748b;font-size:7px;">(${item.days} d)</span>
                         </div>
                     `).join('')}
                 </div>
             </div>
         `;
-        document.body.appendChild(container1);
-        document.body.appendChild(container2);
 
-        Promise.all([
-            html2canvas(container1, { scale: 2, useCORS: true, backgroundColor: "#ffffff" }),
-            html2canvas(container2, { scale: 2, useCORS: true, backgroundColor: "#ffffff" })
-        ]).then(([canvas1, canvas2]) => {
-            const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF("l", "mm", "a4");
-            
+        document.body.appendChild(container1);
+        await yieldUI();
+
+        const canvasOpts = { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", logging: false };
+        const fitPage = (pdf, imgData) => {
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
-            
-            // PAGE 1
-            let imgData1 = canvas1.toDataURL("image/png");
-            let imgProps1 = pdf.getImageProperties(imgData1);
-            let ratio1 = imgProps1.width / imgProps1.height;
-            let finalWidth1 = pdfWidth;
-            let finalHeight1 = pdfWidth / ratio1;
-            if (finalHeight1 > pdfHeight) { finalHeight1 = pdfHeight; finalWidth1 = pdfHeight * ratio1; }
-            pdf.addImage(imgData1, "PNG", (pdfWidth - finalWidth1)/2, 0, finalWidth1, finalHeight1);
-            
-            // PAGE 2
-            pdf.addPage();
-            let imgData2 = canvas2.toDataURL("image/png");
-            let imgProps2 = pdf.getImageProperties(imgData2);
-            let ratio2 = imgProps2.width / imgProps2.height;
-            let finalWidth2 = pdfWidth;
-            let finalHeight2 = pdfWidth / ratio2;
-            if (finalHeight2 > pdfHeight) { finalHeight2 = pdfHeight; finalWidth2 = pdfHeight * ratio2; }
-            pdf.addImage(imgData2, "PNG", (pdfWidth - finalWidth2)/2, 0, finalWidth2, finalHeight2);
-            
-            pdf.save("Mapa_Juridico_SubJudice.pdf");
-            
-            document.body.removeChild(container1);
-            document.body.removeChild(container2);
-            if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
-        }).catch(err => {
-            console.error("Erro ao gerar mapa jurídico:", err);
-            alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
-            if(container1.parentNode) document.body.removeChild(container1);
-            if(container2.parentNode) document.body.removeChild(container2);
-            if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
-        });
+            const props = pdf.getImageProperties(imgData);
+            const ratio = props.width / props.height;
+            let w = pdfWidth;
+            let h = pdfWidth / ratio;
+            if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
+            pdf.addImage(imgData, "JPEG", (pdfWidth - w) / 2, 0, w, h);
+        };
 
+        const canvas1 = await html2canvas(container1, canvasOpts);
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF("l", "mm", "a4");
+        fitPage(pdf, canvas1.toDataURL("image/jpeg", 0.92));
+        if (container1.parentNode) document.body.removeChild(container1);
+        container1 = null;
+        await yieldUI();
+
+        document.body.appendChild(container2);
+        await yieldUI();
+        const canvas2 = await html2canvas(container2, canvasOpts);
+        pdf.addPage();
+        fitPage(pdf, canvas2.toDataURL("image/jpeg", 0.92));
+        if (container2.parentNode) document.body.removeChild(container2);
+        container2 = null;
+
+        pdf.save("Mapa_Juridico_SubJudice.pdf");
+        restoreBtn();
     } catch (e) {
-            console.error(e);
-            if (btn) {
-                btn.innerHTML = oldHtml;
-                btn.disabled = false;
-            }
-        }
-    }, 50);
+        console.error("Erro ao gerar mapa jurídico:", e);
+        alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
+        if (container1 && container1.parentNode) document.body.removeChild(container1);
+        if (container2 && container2.parentNode) document.body.removeChild(container2);
+        restoreBtn();
+    }
 };
 
 

@@ -40,19 +40,18 @@ module.exports = async function handler(req, res) {
       throw new Error(`Erro no servidor de origem: ${response.status} ${response.statusText}`);
     }
 
-    // Repassa os headers relevantes
     const responseHeaders = new Headers(response.headers);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    // Tenta obter o nome do arquivo se vier na URL ou no header
-    const providedFilename = req.query.filename || 'extrato.pdf';
-    
-    const contentDisposition = responseHeaders.get('content-disposition');
-    if (contentDisposition) {
-      res.setHeader('Content-Disposition', contentDisposition);
-    } else {
-      res.setHeader('Content-Disposition', `attachment; filename="${providedFilename}"`);
-    }
+
+    let providedFilename = String(req.query.filename || 'extrato.pdf').replace(/[\r\n"]/g, '').trim();
+    if (!providedFilename.toLowerCase().endsWith('.pdf')) providedFilename += '.pdf';
+    const asciiName = providedFilename
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
+      .replace(/[^\x20-\x7E]/g, '_');
+    const utf8Name = encodeURIComponent(providedFilename.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-'));
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`);
 
     const contentType = responseHeaders.get('content-type');
     if (contentType) {
