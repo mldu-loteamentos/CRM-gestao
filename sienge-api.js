@@ -1484,15 +1484,16 @@ const SiengeApiService = {
   // 22. Listar Contas Correntes Disponíveis pelo Centro de Custo
   async getCostCenterAvailableAccounts(costCenterId) {
     if (s_apiMode === "simulado") {
-      return { results: [{ accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }] };
+      return { availables: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }], results: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }] };
     }
-    if (!costCenterId) return { results: [] };
+    if (!costCenterId || costCenterId === "N/D" || costCenterId === "undefined") return { results: [], availables: [] };
     try {
       const res = await siengeFetchWithRetry(`/cost-centers/${costCenterId}/available`);
-      return res;
+      const list = (res && (res.availables || res.results)) || [];
+      return { ...(res || {}), availables: list, results: list };
     } catch (e) {
       console.error("[Sienge] Erro ao obter contas correntes disponíveis do CC:", e);
-      return { results: [] };
+      return { results: [], availables: [] };
     }
   },
 

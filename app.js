@@ -5673,6 +5673,9 @@ function formatCpfCnpj(val) {
   let blockLotFromName = "N/D";
   
   const empIdToUse = (unit.costCenterId && unit.costCenterId !== "N/D") ? unit.costCenterId : (enterpriseId || "N/D");
+  AppState.currentCostCenterId = empIdToUse !== "N/D" ? empIdToUse : null;
+  AppState.currentCompanyId = sale.companyId || unit.companyId || null;
+  AppState.currentReceivableBillId = specificTitulo || sale.receivableBillId || saleId || sale.id || null;
 
   // In real mode, getCostCenter to get empreendimento name; in mock, use MOCK_DATA
   if (getSiengeApiMode() === "simulado") {
@@ -8053,7 +8056,13 @@ function formatCpfCnpj(val) {
       }
     }
 
-    const instIds = AppState.selectedPromisedInstallments;
+    const instIds = typeof window.resolvePromisedInstallmentIds === "function"
+      ? window.resolvePromisedInstallmentIds(AppState.selectedPromisedInstallments)
+      : AppState.selectedPromisedInstallments;
+    if (!instIds || instIds.length === 0) {
+      alert("Não foi possível identificar o ID Sienge das parcelas selecionadas. Selecione novamente as parcelas e tente gerar o boleto.");
+      return;
+    }
     const billIdToMatch = sale.receivableBillId || saleId;
     window.reprocessBoleto(billIdToMatch, instIds, empIdToUse, 'ocorrencia');
   };
@@ -8429,6 +8438,49 @@ window.addReplyToOccurrence = function(occDate, isJudicial = false) {
   }
 };
 
+window.getPromisedInstallmentLabel = function(item) {
+  if (item && typeof item === "object") return item.label || item.valStr || "";
+  return String(item || "");
+};
+
+window.getPromisedInstallmentId = function(item) {
+  if (item && typeof item === "object" && item.installmentId != null) return Number(item.installmentId);
+  const raw = String(item || "");
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+  return null;
+};
+
+window.isPromisedInstallmentSelected = function(list, installmentId, label) {
+  return (list || []).some(item => {
+    const id = window.getPromisedInstallmentId(item);
+    if (id != null && installmentId != null && String(id) === String(installmentId)) return true;
+    const itemLabel = window.getPromisedInstallmentLabel(item);
+    return label && itemLabel === label;
+  });
+};
+
+window.resolvePromisedInstallmentIds = function(selected) {
+  const list = selected || [];
+  const insts = AppState.currentContractInstallments || [];
+  const ids = [];
+  list.forEach(item => {
+    const directId = window.getPromisedInstallmentId(item);
+    if (directId != null && !isNaN(directId)) {
+      ids.push(directId);
+      return;
+    }
+    const label = window.getPromisedInstallmentLabel(item);
+    const match = insts.find(inst => {
+      if (!inst) return false;
+      if (String(inst.installmentId) === String(item) || String(inst.installmentId) === label) return true;
+      const datePart = inst.dueDate ? new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
+      return label && label.startsWith(datePart + " - ");
+    });
+    if (match && match.installmentId != null) ids.push(Number(match.installmentId));
+  });
+  return [...new Set(ids.filter(n => !isNaN(n)))];
+};
+
 window.populatePromisedInstallmentsDropdown = function() {
   const selectEl = document.getElementById("note-installments-select");
   const pDateEl = document.getElementById("note-promise-date");
@@ -8476,10 +8528,10 @@ window.populatePromisedInstallmentsDropdown = function() {
       const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
       const valStr = datePart + " - " + formattedVal;
       
-      if (selectedVals.includes(valStr)) return;
+      if (window.isPromisedInstallmentSelected(selectedVals, inst.installmentId, valStr)) return;
       
       const opt = document.createElement("option");
-      opt.value = valStr;
+      opt.value = String(inst.installmentId);
       opt.textContent = valStr;
       selectEl.appendChild(opt);
     } catch(e) {
@@ -8586,9 +8638,9 @@ window.openPromisedInstallmentsModal = function() {
     const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
     const valStr = datePart + " - " + formattedVal;
     
-    const isAlreadySelected = selectedVals.includes(valStr);
+    const isAlreadySelected = window.isPromisedInstallmentSelected(selectedVals, inst.installmentId, valStr);
     
-    window.currentPromiseModalItems.push({ valStr, index: idx });
+    window.currentPromiseModalItems.push({ valStr, index: idx, installmentId: inst.installmentId });
     
     html += `
       <tr id="prom-modal-row-${idx}" style="border-bottom: 1px solid #f1f5f9; transition: background 0.2s;">
@@ -8657,8 +8709,8 @@ window.confirmPromiseModalSelection = function() {
   checks.forEach(c => {
     const idx = parseInt(c.value);
     const item = window.currentPromiseModalItems.find(i => i.index === idx);
-    if (item && !AppState.selectedPromisedInstallments.includes(item.valStr)) {
-      AppState.selectedPromisedInstallments.push(item.valStr);
+    if (item && !window.isPromisedInstallmentSelected(AppState.selectedPromisedInstallments, item.installmentId, item.valStr)) {
+      AppState.selectedPromisedInstallments.push({ installmentId: item.installmentId, label: item.valStr });
     }
   });
   
@@ -8669,19 +8721,24 @@ window.confirmPromiseModalSelection = function() {
 window.addPromisedInstallment = function() {
   const selectEl = document.getElementById("note-installments-select");
   if (!selectEl || !selectEl.value) return;
-  const val = selectEl.value;
+  const installmentId = parseInt(selectEl.value, 10);
+  const label = selectEl.options[selectEl.selectedIndex] ? selectEl.options[selectEl.selectedIndex].text : selectEl.value;
   if (!AppState.selectedPromisedInstallments) AppState.selectedPromisedInstallments = [];
-  if (AppState.selectedPromisedInstallments.includes(val)) {
+  if (window.isPromisedInstallmentSelected(AppState.selectedPromisedInstallments, installmentId, label)) {
     alert("Parcela já selecionada.");
     return;
   }
-  AppState.selectedPromisedInstallments.push(val);
+  AppState.selectedPromisedInstallments.push({ installmentId, label });
   window.renderPromisedInstallments();
 };
 
 window.removePromisedInstallment = function(val) {
   if (!AppState.selectedPromisedInstallments) return;
-  AppState.selectedPromisedInstallments = AppState.selectedPromisedInstallments.filter(d => d !== val);
+  AppState.selectedPromisedInstallments = AppState.selectedPromisedInstallments.filter(d => {
+    const id = window.getPromisedInstallmentId(d);
+    const label = window.getPromisedInstallmentLabel(d);
+    return String(id) !== String(val) && label !== val;
+  });
   window.renderPromisedInstallments();
 };
 
@@ -8695,12 +8752,15 @@ window.renderPromisedInstallments = function() {
     if (btnSimular) btnSimular.style.display = "none";
   } else {
     container.innerHTML = "";
-    AppState.selectedPromisedInstallments.forEach(val => {
+    AppState.selectedPromisedInstallments.forEach(item => {
+      const label = window.getPromisedInstallmentLabel(item);
+      const id = window.getPromisedInstallmentId(item);
+      const removeKey = id != null ? String(id) : String(label).replace(/'/g, "\\'");
       const pill = document.createElement("div");
       pill.style.cssText = "display: flex; align-items: center; gap: 5px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;";
       pill.innerHTML = `
-        ${val}
-        <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;" onclick="removePromisedInstallment('${val}')"></i>
+        ${label}
+        <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;" onclick="removePromisedInstallment('${removeKey}')"></i>
       `;
       container.appendChild(pill);
     });
@@ -8790,7 +8850,9 @@ async function saveCustomerOccurrence() {
     reminder: (canal === "Nota interna") ? null : reminder,
     canal: canal,
     iniciativa: (canal === "Nota interna") ? null : iniciativa,
-    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" ? [...AppState.selectedPromisedInstallments] : [],
+    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna"
+      ? AppState.selectedPromisedInstallments.map(item => window.getPromisedInstallmentLabel(item) || item)
+      : [],
     pinned: (canal === "Nota interna") ? isPinned : false
   };
   
@@ -10791,12 +10853,28 @@ window.downloadBoletoPdf = async function(billId, instId, btnElement) {
 
 let currentReprocessBillId = null;
 let currentReprocessInstId = null;
+let currentReprocessCostCenterId = null;
 let currentReprocessSource = 'avulso';
+
+window.resolveBoletoCostCenterId = function(passed) {
+  if (passed != null && passed !== "" && passed !== "N/D" && passed !== "undefined") return passed;
+  if (AppState.currentCostCenterId && AppState.currentCostCenterId !== "N/D") return AppState.currentCostCenterId;
+  const sale = (AppState.sales || []).find(s =>
+    String(s.id) === String(AppState.selectedSaleId) ||
+    String(s.receivableBillId) === String(AppState.selectedSaleId) ||
+    String(s.receivableBillId) === String(currentReprocessBillId)
+  );
+  if (sale) {
+    const unit = AppState.units && sale.unitId ? AppState.units[sale.unitId] : null;
+    return (unit && unit.costCenterId) || sale.costCenterId || sale.enterpriseId || null;
+  }
+  return null;
+};
 
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
   currentReprocessBillId = billId;
   currentReprocessInstId = instId;
-  currentReprocessCostCenterId = costCenterId;
+  currentReprocessCostCenterId = window.resolveBoletoCostCenterId(costCenterId);
   currentReprocessSource = source;
 
   const modal = document.getElementById('modal-reprocessar-boleto');
@@ -10807,6 +10885,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
 
   // Limpa e reseta
   accountSelect.innerHTML = '<option value="">Carregando contas...</option>';
+  accountSelect.disabled = true;
   
   // Vencimento pro dia de hoje
   const hoje = new Date();
@@ -10863,20 +10942,33 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   modal.classList.add('active');
 
   try {
-    const data = await SiengeApiService.getCostCenterAvailableAccounts(costCenterId);
-    
-    if (data && data.availables && data.availables.length > 0) {
+    const loadAccounts = async (ccId) => {
+      const data = await SiengeApiService.getCostCenterAvailableAccounts(ccId);
+      return (data && (data.availables || data.results)) || [];
+    };
+
+    let accounts = await loadAccounts(currentReprocessCostCenterId);
+    if ((!accounts || accounts.length === 0) && AppState.currentCostCenterId && String(AppState.currentCostCenterId) !== String(currentReprocessCostCenterId)) {
+      accounts = await loadAccounts(AppState.currentCostCenterId);
+      if (accounts && accounts.length > 0) currentReprocessCostCenterId = AppState.currentCostCenterId;
+    }
+
+    const withId = (accounts || []).filter(acc => acc.checkingAccountId || acc.id);
+    if (withId.length > 0) {
       accountSelect.innerHTML = '';
-      data.availables.forEach(acc => {
+      withId.forEach(acc => {
         const option = document.createElement('option');
-        option.value = acc.checkingAccountId || acc.id || acc.accountNumber;
-        option.textContent = `${acc.accountNumber} - ${acc.accountName}`;
+        option.value = acc.checkingAccountId || acc.id;
+        option.textContent = `${acc.accountNumber || acc.checkingAccountId || acc.id} - ${acc.accountName || 'Conta corrente'}`;
         accountSelect.appendChild(option);
       });
-      accountSelect.disabled = true; // Bloqueia a seleção como solicitado
+      accountSelect.disabled = withId.length === 1;
     } else {
       accountSelect.innerHTML = '<option value="">Nenhuma conta encontrada para o Centro de Custo</option>';
       accountSelect.disabled = true;
+    }
+    if (typeof window.validateReprocessForm === 'function') {
+      window.validateReprocessForm();
     }
   } catch (e) {
     console.error(e);
@@ -10923,7 +11015,7 @@ window.submitReprocessBoleto = async function() {
   if (!currentReprocessBillId || currentReprocessInstId === null) return;
 
   const accountRaw = document.getElementById('reprocess-account').value;
-  const account = accountRaw.includes('-') ? accountRaw : (parseInt(accountRaw, 10) || accountRaw);
+  const account = parseInt(String(accountRaw || "").replace(/\D/g, ""), 10);
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
@@ -10947,17 +11039,31 @@ window.submitReprocessBoleto = async function() {
     // O payload original pede companyId. Se não temos ele fácil no AppState,
     // podemos ter que buscar ou assumir. Na Moura Leite, geralmente é 2 ou 1.
     // Vamos buscar o companyId de AppState.customers se possível, ou passar fixo 2 se falhar.
-    let companyId = 2; // Padrão
-    const cust = AppState.customers[AppState.selectedCustomerId];
-    // Tenta encontrar em AppState.sales se houver
-    const sale = AppState.sales ? AppState.sales.find(s => s.saleId == currentReprocessBillId || (s.property && s.property.costCenterId == currentReprocessCostCenterId)) : null;
+    let companyId = AppState.currentCompanyId || 2;
+    const sale = (AppState.sales || []).find(s =>
+      String(s.id) === String(AppState.selectedSaleId) ||
+      String(s.saleId) === String(AppState.selectedSaleId) ||
+      String(s.receivableBillId) === String(AppState.selectedSaleId) ||
+      String(s.receivableBillId) === String(currentReprocessBillId) ||
+      String(s.id) === String(currentReprocessBillId) ||
+      (s.property && String(s.property.costCenterId) === String(currentReprocessCostCenterId))
+    );
     if (sale && sale.companyId) {
        companyId = sale.companyId;
     }
 
-    const installmentsArray = Array.isArray(currentReprocessInstId) 
-         ? currentReprocessInstId.map(id => ({ "installmentId": id })) 
-         : [ { "installmentId": currentReprocessInstId } ];
+    const rawInst = Array.isArray(currentReprocessInstId) ? currentReprocessInstId : [currentReprocessInstId];
+    const resolvedInstIds = (typeof window.resolvePromisedInstallmentIds === "function"
+      ? window.resolvePromisedInstallmentIds(rawInst)
+      : rawInst.map(Number)).filter(id => !isNaN(id));
+    if (resolvedInstIds.length === 0) {
+      alert("Não foi possível identificar as parcelas para gerar o boleto. Selecione novamente e tente de novo.");
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+      return;
+    }
+    currentReprocessInstId = resolvedInstIds;
+    const installmentsArray = resolvedInstIds.map(id => ({ "installmentId": id }));
 
     const payload = {
       "receivableBillId": currentReprocessBillId,
@@ -17598,6 +17704,9 @@ async function loadCustomerBoletos(customerId, saleId) {
       return;
     }
 
+    const boletoBillId = currentBill.billReceivableId || currentBill.receivableBillId || billIdToMatch;
+    const boletoCostCenterArg = JSON.stringify(AppState.currentCostCenterId || currentBill.costCenterId || currentBill.enterpriseId || null);
+
     let boletosHtml = `<table class="crm-table" style="width:100%; border-collapse:collapse; margin-top: 15px;">
       <thead>
         <tr style="background:#f5f5f5; text-align:left;">
@@ -17648,7 +17757,7 @@ async function loadCustomerBoletos(customerId, saleId) {
 
         let actionsHtml = '';
         if (isBaixado) {
-            actionsHtml = `<button class="btn btn-primary btn-sm btn-reprocess-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${saleId}, ${inst.installmentId}, ${currentBill.costCenterId})"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
+            actionsHtml = `<button class="btn btn-primary btn-sm btn-reprocess-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${JSON.stringify(boletoBillId)}, ${JSON.stringify(inst.installmentId)}, ${boletoCostCenterArg}, 'boletos')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
         } else {
             actionsHtml = `<button class="btn btn-primary btn-sm btn-view-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; white-space: nowrap;" onclick="openBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>
                            <button class="btn btn-outline btn-sm btn-download-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; margin-left: 5px; white-space: nowrap;" onclick="downloadBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="download" style="width:12px;height:12px;"></i> Download</button>`;
@@ -17742,7 +17851,7 @@ async function loadCustomerBoletos(customerId, saleId) {
                if (tdBadge && tdActions) {
                   if (isBaixado) {
                       tdBadge.innerHTML = `<span style="background:var(--color-danger); color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem;">Baixado (> 28 dias)</span>`;
-                      tdActions.innerHTML = `<button class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${saleId}, ${inst.installmentId}, ${currentBill.costCenterId})"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
+                      tdActions.innerHTML = `<button class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${JSON.stringify(boletoBillId)}, ${JSON.stringify(inst.installmentId)}, ${boletoCostCenterArg}, 'boletos')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
                   } else if (isOverdue) {
                       const diasValidade = 28 - diasAtraso;
                       tdBadge.innerHTML = `<span style="background:var(--color-warning); color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; color:#856404; background-color:#fff3cd; border: 1px solid #ffeeba;">Vencido (válido por ${diasValidade} dias)</span>`;
