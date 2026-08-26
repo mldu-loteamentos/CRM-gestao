@@ -239,12 +239,12 @@ const MarketingApp = {
               <i data-lucide="megaphone" style="width:18px;height:18px;color:#fff;"></i>
             </div>
             <div>
-              <div style="font-weight:800;font-size:1.05rem;">Orçamentos de Eventos</div>
-              <div style="font-size:0.8rem;opacity:0.85;">Controle de gastos por centro de custo</div>
+              <div style="font-weight:800;font-size:1.05rem;">Eventos</div>
+              <div style="font-size:0.8rem;opacity:0.85;">Orçamento e controle de gastos por centro de custo</div>
             </div>
           </div>
           <button class="btn" style="background:#fff;color:#105436;font-weight:700;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;" onclick="MarketingApp.openBudgetModal()">
-            <i data-lucide="plus" style="width:16px;height:16px;"></i> Novo orçamento
+            <i data-lucide="plus" style="width:16px;height:16px;"></i> Novo evento
           </button>
         </div>
         <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:18px 18px 8px;border-radius:0 0 12px 12px;">
@@ -376,7 +376,7 @@ const MarketingApp = {
       <div id="mkt-budget-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:100000;align-items:center;justify-content:center;padding:16px;">
         <div style="background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 40px rgba(0,0,0,0.18);">
           <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
-            <h3 id="mkt-modal-title" style="margin:0;font-size:1.05rem;">Novo orçamento</h3>
+            <h3 id="mkt-modal-title" style="margin:0;font-size:1.05rem;">Novo evento</h3>
             <button onclick="MarketingApp.closeBudgetModal()" style="border:none;background:none;cursor:pointer;font-size:1.2rem;color:#64748b;">✕</button>
           </div>
           <div style="padding:18px 20px;display:flex;flex-direction:column;gap:12px;">
@@ -411,7 +411,7 @@ const MarketingApp = {
           </div>
           <div style="padding:14px 20px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;">
             <button class="btn btn-outline" onclick="MarketingApp.closeBudgetModal()">Cancelar</button>
-            <button class="btn btn-primary" onclick="MarketingApp.saveBudget()">Salvar orçamento</button>
+            <button class="btn btn-primary" onclick="MarketingApp.saveBudget()">Salvar evento</button>
           </div>
         </div>
       </div>`;
@@ -455,7 +455,7 @@ const MarketingApp = {
     const modal = document.getElementById('mkt-budget-modal');
     if (!modal) return;
     const b = id ? MarketingState.budgets.find(x => x.id === id) : null;
-    document.getElementById('mkt-modal-title').textContent = b ? 'Editar orçamento' : 'Novo orçamento';
+    document.getElementById('mkt-modal-title').textContent = b ? 'Editar evento' : 'Novo evento';
     document.getElementById('mkt-edit-id').value = b ? b.id : '';
     document.getElementById('mkt-cc-search').value = b ? this.ccLabel({ id: b.costCenterId, name: b.costCenterName }) : '';
     document.getElementById('mkt-event-name').value = b ? (b.eventName || '') : '';
@@ -588,7 +588,35 @@ const MarketingApp = {
 window.MarketingApp = MarketingApp;
 
 document.addEventListener('tabChanged', (e) => {
-  if (e.detail === 'construcao-marketing') {
+  if (e.detail === 'marketing-eventos' || e.detail === 'construcao-marketing') {
     MarketingApp.init();
   }
+  if (e.detail === 'marketing-budget') {
+    MarketingBudgetApp.init();
+  }
 });
+
+const MarketingBudgetApp = {
+  init() {
+    const root = document.getElementById('marketing-budget-root');
+    if (!root) return;
+    root.innerHTML = `
+      <div style="padding:8px 4px 24px;">
+        <div style="background:#105436;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:12px;color:#fff;">
+          <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+            <i data-lucide="wallet" style="width:18px;height:18px;color:#fff;"></i>
+          </div>
+          <div>
+            <div style="font-weight:800;font-size:1.05rem;">Budget</div>
+            <div style="font-size:0.8rem;opacity:0.85;">Planejamento de verba de marketing por centro de custo</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:48px 24px;border-radius:0 0 12px 12px;text-align:center;color:#64748b;">
+          <p style="margin:0 0 8px;font-weight:700;color:#334155;">Em construção</p>
+          <p style="margin:0;max-width:480px;display:inline-block;">Aqui ficará o budget geral (anual/mensal) por centro de custo. Os eventos passam a consumir essa verba.</p>
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  }
+};
+window.MarketingBudgetApp = MarketingBudgetApp;

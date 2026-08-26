@@ -64,7 +64,10 @@ const ConfigUsersApp = {
     },
     {
       name: "Marketing", icon: "megaphone", key: "mod_mkt",
-      submodules: [{ name: "Geral", key: "sub_mkt_geral", actions: [{ id: "marketing", label: "Marketing" }] }]
+      submodules: [{ name: "Geral", key: "sub_mkt_geral", actions: [
+        { id: "budget", label: "Budget" },
+        { id: "eventos", label: "Eventos" }
+      ] }]
     },
     {
       name: "Relacionamento", icon: "users", key: "mod_rel",

@@ -1034,6 +1034,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // 2. CONTROLE DO FLUXO SPA (ABAS E CONTEÚDO)
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
+  if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
 
@@ -1108,7 +1109,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "Compromissário (Associações)",
     "relacionamento_gestao": "Relacionamento com Cliente",
     "condicoes-pagamento": "Condições de Pagamento",
-    "construcao-marketing": "Marketing — Orçamentos"
+    "construcao-marketing": "Eventos",
+    "marketing-eventos": "Eventos",
+    "marketing-budget": "Budget"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
   
@@ -1134,7 +1137,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "users-round",
     "relacionamento_gestao": "users",
     "condicoes-pagamento": "file-text",
-    "construcao-marketing": "megaphone"
+    "construcao-marketing": "calendar",
+    "marketing-eventos": "calendar",
+    "marketing-budget": "wallet"
   };
 
   // Esconder barra de contexto de cliente ao navegar para abas gerais
@@ -1226,8 +1231,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     loadKMZList();
   } else if (tabId === "regras-cobranca") {
     renderRulesSettingsTable();
-  } else if (tabId === "construcao-marketing") {
+  } else if (tabId === "construcao-marketing" || tabId === "marketing-eventos") {
     if (typeof MarketingApp !== "undefined") MarketingApp.init();
+  } else if (tabId === "marketing-budget") {
+    if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
   }
 }
 
@@ -1472,8 +1479,9 @@ window.applyPermissions = function(profileName) {
       
       moduleItems.forEach(item => {
         const modKey = item.getAttribute('data-module');
-        // Se o módulo não estiver marcado (true) nas permissões, ocultamos
-        if (perms[modKey] === true) {
+        const inheritedMkt = perms.mod_mkt === true || perms.sub_mkt_geral_marketing_acessar === true;
+        const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar') && inheritedMkt;
+        if (perms[modKey] === true || mktAlias) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -14979,30 +14987,164 @@ function triggerWeSendNotification(saleId, name) {
 }
 
 window.generateSingleNEXHtml = async function(customerId, saleId) {
+    customerId = customerId || (typeof AppState !== 'undefined' && AppState.selectedCustomerId) || sessionStorage.getItem('currentCustomerId');
+    saleId = saleId || (typeof AppState !== 'undefined' && (AppState.selectedSaleId || AppState.selectedTitulo)) || sessionStorage.getItem('currentSaleId');
 
-    let customer = getCustomerFromState(customerId);
+    const isBlankAddr = (v) => !v || v === 'N/D' || String(v).trim() === '' || /não cadastrado/i.test(String(v));
+    const formatAddrFromList = (addresses) => {
+        if (!addresses || !addresses.length) return null;
+        const addr = addresses[0];
+        const street = addr.street || addr.streetName || '';
+        const num = addr.number ? `, ${addr.number}` : '';
+        const compl = addr.complement ? ` - ${addr.complement}` : '';
+        const neigh = addr.neighborhood ? `, ${addr.neighborhood}` : '';
+        const city = addr.cityName || addr.city || '';
+        const state = addr.stateName || addr.state || '';
+        const zipRaw = String(addr.postalCode || addr.zipCode || '').replace(/\D/g, '');
+        const zip = zipRaw ? ` - CEP: ${zipRaw.replace(/(\d{5})(\d{3})/, '$1-$2')}` : '';
+        const line = `${street}${num}${compl}${neigh}${city || state ? `, ${city}${state ? '/' + state : ''}` : ''}${zip}`.trim();
+        return { line, city, state, zip: zipRaw ? zipRaw.replace(/(\d{5})(\d{3})/, '$1-$2') : '' };
+    };
+
+    let customer = getCustomerFromState(customerId) || {};
     if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
-        const cached = window.GlobalCustomerCache.data.find(c => c.customerId == customerId || c.id == customerId);
+        const cached = window.GlobalCustomerCache.data.find(c => String(c.customerId) === String(customerId) || String(c.id) === String(customerId));
         if (cached) {
             customer.name = cached.name || cached.customerName || customer.name;
             customer.cpfCnpj = cached.cpfCnpj || cached.cpf || customer.cpfCnpj;
             customer.address = cached.address || customer.address;
-            customer.city = cached.city || customer.city;
-            customer.state = cached.state || customer.state;
-            customer.zipCode = cached.zipCode || customer.zipCode;
+            customer.city = cached.city || cached.cityName || customer.city;
+            customer.state = cached.state || cached.stateName || customer.state;
+            customer.zipCode = cached.zipCode || cached.postalCode || customer.zipCode;
+            if (cached.addresses && cached.addresses.length) customer.addresses = cached.addresses;
+            customer.spouseName = cached.spouseName || customer.spouseName;
+            customer.spouseCpf = cached.spouseCpf || customer.spouseCpf;
         }
     }
-    
-    // Fallbacks
-    if (!customer.cpfCnpj) customer.cpfCnpj = "- X -";
-    if (!customer.address) customer.address = "Endereço não cadastrado";
+    if (window.customerData && (String(window.customerData.id) === String(customerId) || String(window.customerData.customerId) === String(customerId))) {
+        const cd = window.customerData;
+        customer.name = cd.name || customer.name;
+        customer.cpfCnpj = cd.cpfCnpj || customer.cpfCnpj;
+        customer.address = cd.address || customer.address;
+        customer.city = cd.city || customer.city;
+        customer.state = cd.state || customer.state;
+        customer.zipCode = cd.zipCode || customer.zipCode;
+        if (cd.addresses && cd.addresses.length) customer.addresses = cd.addresses;
+        customer.spouseName = cd.spouseName || customer.spouseName;
+        customer.spouseCpf = cd.spouseCpf || customer.spouseCpf;
+    }
 
-    const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
-    const sale = salesList.find(s => String(s.id) === String(saleId)) || {};
-    const unit = AppState.units[sale.unitId] || {};
-    const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || { name: "EMPRESA DO LOTEAMENTO" };
-    
-    const addressStr = `${customer.address}${customer.zipCode ? ` - CEP: ${customer.zipCode}` : ''}${customer.city ? ` - ${customer.city}` : ''}${customer.state ? ` - ${customer.state}` : ''}`;
+    if (isBlankAddr(customer.address) && customer.addresses && customer.addresses.length) {
+        const parsed = formatAddrFromList(customer.addresses);
+        if (parsed && parsed.line) {
+            customer.address = parsed.line;
+            customer.city = customer.city || parsed.city;
+            customer.state = customer.state || parsed.state;
+            customer.zipCode = customer.zipCode || parsed.zip;
+        }
+    }
+
+    if (getSiengeApiMode() !== 'simulado' && window.SiengeApiService && (isBlankAddr(customer.address) || !customer.cpfCnpj || customer.cpfCnpj === 'N/D')) {
+        try {
+            const detail = await SiengeApiService.getCustomer(customerId);
+            if (detail) {
+                customer.name = detail.name || customer.name;
+                customer.cpfCnpj = detail.cpfCnpj || customer.cpfCnpj;
+                customer.spouseName = detail.spouseName || customer.spouseName;
+                customer.spouseCpf = detail.spouseCpf || customer.spouseCpf;
+                const parsed = formatAddrFromList(detail.addresses);
+                if (parsed && parsed.line) {
+                    customer.address = parsed.line;
+                    customer.city = parsed.city || customer.city;
+                    customer.state = parsed.state || customer.state;
+                    customer.zipCode = parsed.zip || customer.zipCode;
+                } else if (detail.address) {
+                    customer.address = detail.address;
+                }
+            }
+        } catch (e) {
+            console.warn('[NEX] Falha ao buscar cliente no Sienge', e);
+        }
+    }
+
+    if (isBlankAddr(customer.address)) customer.address = '';
+    if (!customer.cpfCnpj || customer.cpfCnpj === 'N/D') customer.cpfCnpj = '';
+
+    const salesList = getSiengeApiMode() === 'simulado'
+        ? (window.MOCK_DATA.SALES || [])
+        : (AppState.sales && AppState.sales.length ? AppState.sales : []);
+    const matchSale = (s) => s && (
+        String(s.id) === String(saleId) ||
+        String(s.receivableBillId) === String(saleId) ||
+        String(s.contractNumber) === String(saleId) ||
+        String(s.saleId) === String(saleId)
+    );
+    let sale = salesList.find(matchSale) || {};
+    if (!sale.id && window.AnexosState && AnexosState.activeContract && matchSale(AnexosState.activeContract)) {
+        sale = AnexosState.activeContract;
+    } else if (!sale.id && window.AnexosState && AnexosState.activeContract) {
+        sale = AnexosState.activeContract;
+    }
+    const rawSale = (window.rawClientList || []).find(c =>
+        String(c.saleId) === String(saleId) ||
+        String(c.customerId) === String(customerId) && (String(c.saleId) === String(sale.id) || String(c.saleId) === String(saleId))
+    ) || (window.rawClientList || []).find(c => String(c.customerId) === String(customerId));
+
+    const unit = (AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
+    const ctxEmp = ((document.getElementById('ctx-empreend-val') || {}).textContent || '').trim();
+    let unitLabel = unit.name || sale.unitName || sale.unityName || sale.units || (rawSale && rawSale.unitName) || '';
+    let ccId = unit.costCenterId || sale.costCenterId || (rawSale && rawSale.costCenterId) || '';
+    if (ctxEmp) {
+        const m = ctxEmp.match(/^(\d+)\s*-\s*(.+)$/);
+        if (m) {
+            if (!ccId) ccId = m[1];
+            if (!unitLabel || unitLabel === 'N/D') unitLabel = m[2].trim();
+        } else if (!unitLabel) {
+            unitLabel = ctxEmp;
+        }
+    }
+
+    const ccList = AppState.cachedCostCenters || AppState.costCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
+    let costCenter = ccList.find(cc => String(cc.id) === String(ccId)) || {};
+    if (!costCenter.name && typeof getCostCenterName === 'function' && ccId) {
+        costCenter = { id: ccId, name: getCostCenterName(ccId), companyId: costCenter.companyId };
+    }
+    const empNameRaw = costCenter.name || sale.enterpriseName || sale.costCenterName || (rawSale && rawSale.costCenterName) || '';
+    const empName = String(empNameRaw).replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, '').trim() || empNameRaw;
+    const companyId = sale.companyId || costCenter.companyId || (rawSale && rawSale.companyId);
+    const companyName = (typeof getCompanyName === 'function' && companyId)
+        ? getCompanyName(companyId)
+        : (costCenter.name || 'MOURA LEITE LOTEAMENTOS');
+
+    const formatUName = String(unitLabel || '').replace(/^U\s*-\s*/i, '').replace(/^N\/D$/i, '');
+    const unidadeDisplay = (ccId && formatUName && !String(formatUName).startsWith(String(ccId)))
+        ? `${ccId} - ${formatUName}`
+        : (formatUName || (ccId ? String(ccId) : ''));
+
+    let quadra = unit.block || sale.block || '';
+    let lote = unit.lot || sale.lot || '';
+    if (!quadra && !lote && formatUName && formatUName.includes('-')) {
+        const parts = formatUName.split('-');
+        quadra = parts[0].trim();
+        lote = parts.slice(1).join('-').trim();
+    } else if (!lote) {
+        lote = formatUName;
+    }
+
+    const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.issueDate || (rawSale && (rawSale.saleDate || rawSale.contractDate));
+    let formattedSaleDate = '';
+    if (saleDateRaw) {
+        const iso = String(saleDateRaw).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}/.test(iso)) {
+            formattedSaleDate = iso.split('-').reverse().join('/');
+        } else {
+            const sd = new Date(saleDateRaw);
+            if (!isNaN(sd.getTime())) formattedSaleDate = sd.toLocaleDateString('pt-BR');
+            else formattedSaleDate = String(saleDateRaw);
+        }
+    }
+
+    const addressStr = [customer.address, customer.zipCode ? `CEP: ${customer.zipCode}` : '', [customer.city, customer.state].filter(Boolean).join('/')].filter(Boolean).join(' - ');
     
     let secondaryBuyersText = "";
     if (sale && sale.customers && sale.customers.length > 1) {
@@ -15040,7 +15182,10 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     };
     
     const allBills = AppState.defaultersReceivableBills || (getSiengeApiMode() === "simulado" ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []);
-    const myBills = allBills.filter(b => String(b.saleId) === String(saleId) && b.status !== "PAID" && (b.overdueValue > 0 || b.daysDelay > 0));
+    const myBills = allBills.filter(b =>
+        (String(b.saleId) === String(saleId) || String(b.saleId) === String(sale.id) || String(b.receivableBillId) === String(saleId) || String(b.documentId) === String(saleId))
+        && b.status !== "PAID" && (b.overdueValue > 0 || b.daysDelay > 0)
+    );
     
     // Sort by due date
     myBills.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
@@ -15121,10 +15266,11 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
             corpo = corpo.replace(/{{CIDADE_ATUAL}}/g, 'Botucatu');
             corpo = corpo.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
-            corpo = corpo.replace(/{{TITULO}}/g, saleId || 'N/D');
+            corpo = corpo.replace(/{{TITULO}}/g, sale.receivableBillId || saleId || 'N/D');
             
-            const formatUName = (unit.name || sale.unitName || sale.unitId || '').replace(/^U\s*-\s*/i, '');
-            corpo = corpo.replace(/{{UNIDADE}}/g, formatUName);
+            corpo = corpo.replace(/{{UNIDADE}}/g, unidadeDisplay);
+            corpo = corpo.replace(/{{QUADRA}}/g, quadra);
+            corpo = corpo.replace(/{{LOTE}}/g, lote);
             
             corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
             const cpfCnpj = maskCpfCnpj(customer.cpfCnpj);
@@ -15150,12 +15296,18 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             }
             
             corpo = corpo.replace(/{{ENDERECO_CLIENTE}}/g, (customer.address || '').toUpperCase());
+            if (!customer.zipCode && !customer.city && !customer.state || /CEP/i.test(customer.address || '')) {
+                corpo = corpo.replace(/[\r\n]*\{\{CEP_CLIENTE\}\}\s*-\s*\{\{CIDADE_CLIENTE\}\}\s*-\s*\{\{ESTADO_CLIENTE\}\}/g, '');
+            }
             corpo = corpo.replace(/{{CEP_CLIENTE}}/g, customer.zipCode || '');
             corpo = corpo.replace(/{{CIDADE_CLIENTE}}/g, (customer.city || '').toUpperCase());
             corpo = corpo.replace(/{{ESTADO_CLIENTE}}/g, (customer.state || '').toUpperCase());
+            corpo = corpo.replace(/^\s*-\s*-\s*$/gm, '');
             corpo = corpo.replace(/{{TITULO_REF}}/g, assunto);
-            corpo = corpo.replace(/{{EMPREENDIMENTO}}/g, costCenter.name || sale.enterpriseName || '');
-            corpo = corpo.replace(/{{DATA_CONTRATO_ORIGINAL}}/g, sale.date ? sale.date.split('-').reverse().join('/') : '');
+            corpo = corpo.replace(/{{EMPREENDIMENTO}}/g, empName || companyName || '');
+            corpo = corpo.replace(/{{EMPRESA_NOME}}/g, companyName || empName || '');
+            corpo = corpo.replace(/{{DATA_CONTRATO_ORIGINAL}}/g, formattedSaleDate);
+            corpo = corpo.replace(/{{DATA_CONTRATO}}/g, formattedSaleDate);
             
             corpo = corpo.replace(/{{TABELA_PARCELAS}}/g, tableHtml);
             corpo = corpo.replace(/{{VALOR_DIVIDA}}/g, totGeral.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}));
@@ -15199,7 +15351,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                <strong>${costCenter.name.toUpperCase()}</strong> (â€œNotificanteâ€), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${sale.date ? sale.date.split('-').reverse().join('/') : "___"}, correspondente a quadra e lote <strong>${unit.id}</strong>, no Loteamento <strong>${costCenter.name.toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
+                <strong>${(empName || companyName || costCenter.name || '').toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${formattedSaleDate || "___"}, correspondente a quadra e lote <strong>${unidadeDisplay || formatUName || '___'}</strong>, no Loteamento <strong>${(empName || '').toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
@@ -15222,7 +15374,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
 
             <p style="margin-bottom: 3rem;">
                 Atenciosamente,<br>
-                <strong>${costCenter.name.toUpperCase()}</strong>
+                <strong>${(empName || companyName || '').toUpperCase()}</strong>
             </p>
         </div>
         `;
@@ -15232,6 +15384,8 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
 };
 
 window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
+    customerId = customerId || (typeof AppState !== 'undefined' && AppState.selectedCustomerId) || sessionStorage.getItem('currentCustomerId');
+    saleId = saleId || (typeof AppState !== 'undefined' && (AppState.selectedSaleId || AppState.selectedTitulo)) || sessionStorage.getItem('currentSaleId');
     const btn = document.activeElement;
     let oldHtml = null;
     if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('NEX')) {

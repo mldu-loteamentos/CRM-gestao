@@ -907,11 +907,20 @@
           </ul>
         </li>
         <!-- 7 - MARKETING -->
-        <li class="nav-item" data-tab="construcao-marketing" data-module="mod_mkt">
-          <a onclick="switchTab('construcao-marketing', 'Marketing')" title="Marketing">
+        <li class="nav-item nav-group" data-module="mod_mkt">
+          <a onclick="toggleNavMenu(event, 'submenu-marketing')" title="Marketing">
             <i data-lucide="megaphone"></i>
             <span>Marketing</span>
+            <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
+          <ul class="nav-submenu" id="submenu-marketing" style="display: none;">
+            <li data-tab="marketing-budget" data-module="sub_mkt_geral_budget_acessar">
+              <a onclick="switchTab('marketing-budget', 'Budget')">Budget</a>
+            </li>
+            <li data-tab="marketing-eventos" data-module="sub_mkt_geral_eventos_acessar">
+              <a onclick="switchTab('marketing-eventos', 'Eventos')">Eventos</a>
+            </li>
+          </ul>
         </li>
         <!-- RELACIONAMENTO -->
         <li class="nav-item" data-tab="relacionamento_gestao" data-module="mod_rel">
@@ -1032,7 +1041,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.454 &nbsp;&middot;&nbsp; 26/08/2026
+            v1.0.457 &nbsp;&middot;&nbsp; 26/08/2026
           </span>
         </div>
       </div>
@@ -2057,7 +2066,10 @@ Atenciosamente,
         <div id="fiscal-root" style="height: 100%;"></div>
       </section>
 
-      <section id="tab-construcao-marketing" class="tab-pane" style="display: none;">
+      <section id="tab-marketing-budget" class="tab-pane" style="display: none;">
+        <div id="marketing-budget-root"></div>
+      </section>
+      <section id="tab-marketing-eventos" class="tab-pane" style="display: none;">
         <div id="marketing-root"></div>
       </section>
 
@@ -4406,7 +4418,7 @@ Atenciosamente,
                     <h3 style="font-size: 1.1rem; color: var(--color-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
                       <i data-lucide="mail" style="width: 20px; height: 20px;"></i> Histórico de Notificações Extrajudiciais
                     </h3>
-                    <button class="btn btn-sm" style="background-color: #dc2626; color: white;" onclick="window.gerarDocumentoFisicoNEX(sessionStorage.getItem('currentCustomerId'), sessionStorage.getItem('currentSaleId'))">
+                    <button class="btn btn-sm" style="background-color: #dc2626; color: white;" onclick="window.gerarDocumentoFisicoNEX(AppState.selectedCustomerId, AppState.selectedSaleId || AppState.selectedTitulo)">
                        <i data-lucide="file-text" style="width: 16px; height: 16px;"></i> Gerar NEX 
                     </button>
                   </div>
@@ -5609,31 +5621,31 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=454"></script>
-  <script defer src="sienge-api.js?v=454"></script>
-  <script defer src="azure-auth.js?v=454"></script>
-  <script defer src="app.js?v=454"></script>
-  <script defer src="home-dashboard.js?v=454"></script>
-  <script defer src="anexos.js?v=454"></script>
-  <script defer src="contas-pagar.js?v=454"></script>
-  <script defer src="config-tags.js?v=454"></script>
-  <script defer src="config-users.js?v=454"></script>
-  <script defer src="construcao.js?v=454"></script>
-  <script defer src="empresas.js?v=454"></script>
-  <script defer src="relacionamento.js?v=454"></script>
+  <script defer src="data.js?v=457"></script>
+  <script defer src="sienge-api.js?v=457"></script>
+  <script defer src="azure-auth.js?v=457"></script>
+  <script defer src="app.js?v=457"></script>
+  <script defer src="home-dashboard.js?v=457"></script>
+  <script defer src="anexos.js?v=457"></script>
+  <script defer src="contas-pagar.js?v=457"></script>
+  <script defer src="config-tags.js?v=457"></script>
+  <script defer src="config-users.js?v=457"></script>
+  <script defer src="construcao.js?v=457"></script>
+  <script defer src="empresas.js?v=457"></script>
+  <script defer src="relacionamento.js?v=457"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=454"></script>
-  <script defer src="marketing.js?v=454"></script>
-  <script defer src="plano-financeiro.js?v=454"></script>
-  <script defer src="fiscal.js?v=454"></script>
-  <script defer src="indexadores.js?v=454"></script>
-  <script defer src="verificar-construcao.js?v=454"></script>
-  <script src="repactuacoes.js?v=454"></script>
+  <script defer src="centros-custo.js?v=457"></script>
+  <script defer src="marketing.js?v=457"></script>
+  <script defer src="plano-financeiro.js?v=457"></script>
+  <script defer src="fiscal.js?v=457"></script>
+  <script defer src="indexadores.js?v=457"></script>
+  <script defer src="verificar-construcao.js?v=457"></script>
+  <script src="repactuacoes.js?v=457"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=454"></script>
+  <script defer src="dashboard-inadimplencia.js?v=457"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
