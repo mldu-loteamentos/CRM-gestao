@@ -68,6 +68,124 @@ window.ConstrucaoApp = {
         return "Não atribuído";
     },
 
+    digitsPhone(value) {
+        return String(value || '').replace(/\D/g, '');
+    },
+
+    isLinkVistoria(check) {
+        if (!check) return false;
+        const resp = String(check.responsible || '');
+        const digits = this.digitsPhone(resp);
+        if (resp === 'Vistoriador App' || digits === '15998118246' || digits.endsWith('998118246')) return true;
+        if (check.detailsText && String(check.detailsText).includes('Respostas do Cliente:')) return true;
+        if (check.observations && String(check.observations).includes('Respostas do Cliente:')) return true;
+        if (check.respostasFormulario) return true;
+        if (check.vistoriaId) return true;
+        if (check.fotoFrente || check.fotoMeioFundo || check.fotoFundoFrente) return true;
+        return false;
+    },
+
+    formatCheckDate(check) {
+        const raw = check && (check.date || check.createdAt || check.enviadoEm || check.updatedAt);
+        if (!raw) return '-';
+        let d;
+        if (raw && typeof raw.toDate === 'function') d = raw.toDate();
+        else if (raw && typeof raw === 'object' && raw.seconds) d = new Date(raw.seconds * 1000);
+        else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) d = new Date(raw + 'T00:00:00');
+        else d = new Date(raw);
+        if (!d || Number.isNaN(d.getTime())) return '-';
+        return d.toLocaleDateString('pt-BR');
+    },
+
+    resolveResponsibleName(check) {
+        const raw = String((check && check.responsible) || '').trim();
+        let users = [];
+        try { users = JSON.parse(localStorage.getItem('crm_users') || '[]'); } catch (e) { users = []; }
+        const digits = this.digitsPhone(raw);
+        if (digits.length >= 10) {
+            const byPhone = users.find(u => {
+                const ud = this.digitsPhone(u.phone);
+                return ud && (ud.endsWith(digits.slice(-8)) || digits.endsWith(ud.slice(-8)));
+            });
+            if (byPhone && byPhone.name && digits !== '15998118246' && !digits.endsWith('998118246')) {
+                return byPhone.name;
+            }
+        }
+        const looksLikePhoneOrApp = !raw || raw === 'Vistoriador App' || raw === '-' || digits.length >= 10;
+        if (looksLikePhoneOrApp) {
+            const city = String(check.cidade || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            const cityUsers = users.filter(u => u.check_construction && Array.isArray(u.const_cities) &&
+                u.const_cities.some(c => String(c).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() === city));
+            const preferred = cityUsers.find(u => !this.digitsPhone(u.phone).endsWith('998118246')) || cityUsers[0];
+            if (preferred && preferred.name) return preferred.name;
+            const op = this.getResponsibleOperator({
+                costCenterId: check.costCenterId,
+                costCenterName: check.empreendimento || check.costCenterName,
+                companyId: check.companyId
+            });
+            if (op && op !== 'Não atribuído') return op;
+        }
+        return raw || '-';
+    },
+
+    collectPhotoUrls(check, allDocs) {
+        const urls = [];
+        const add = (u) => { if (u && typeof u === 'string' && !urls.includes(u)) urls.push(u); };
+        (check.fileUrls || []).forEach(add);
+        add(check.fotoFrente);
+        add(check.fotoMeioFundo);
+        add(check.fotoFundoFrente);
+        add(check.fileUrl);
+        const keys = new Set([String(check.contractId || ''), ...((check.contractKeys || []).map(String))].filter(Boolean));
+        (allDocs || []).forEach(other => {
+            if (!other || other.id === check.id) return;
+            const otherKeys = [String(other.contractId || ''), ...((other.contractKeys || []).map(String))];
+            if (!otherKeys.some(k => k && keys.has(k))) return;
+            add(other.fotoFrente);
+            add(other.fotoMeioFundo);
+            add(other.fotoFundoFrente);
+            (other.fileUrls || []).forEach(add);
+            add(other.fileUrl);
+        });
+        return urls;
+    },
+
+    findLinkedVistoriaId(check, allDocs) {
+        if (check.vistoriaId) return check.vistoriaId;
+        if (check._collection === 'vistorias') return check.id;
+        const keys = new Set([String(check.contractId || ''), ...((check.contractKeys || []).map(String))].filter(Boolean));
+        const candidates = (allDocs || []).filter(o => {
+            if (!o || o._collection !== 'vistorias') return false;
+            const otherKeys = [String(o.contractId || ''), ...((o.contractKeys || []).map(String))];
+            return otherKeys.some(k => k && keys.has(k));
+        });
+        const withPhotos = candidates.find(o => o.fotoFrente || o.status === 'concluida' || o.status === 'aguardando_validacao');
+        return (withPhotos || candidates[0] || {}).id || null;
+    },
+
+    async fetchStoragePhotos(check, allDocs) {
+        const vId = this.findLinkedVistoriaId(check, allDocs);
+        if (!vId || !window.firebaseStorage || !window.firebaseCollections) return [];
+        try {
+            let listAllFn = window.firebaseCollections.listAll;
+            let getUrlFn = window.firebaseCollections.getDownloadURL;
+            let refFn = window.firebaseCollections.ref;
+            if (!listAllFn || !getUrlFn || !refFn) {
+                const storageMod = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js");
+                listAllFn = storageMod.listAll;
+                getUrlFn = storageMod.getDownloadURL;
+                refFn = storageMod.ref;
+            }
+            const folder = refFn(window.firebaseStorage, `vistorias/${vId}`);
+            const listed = await listAllFn(folder);
+            const urls = await Promise.all((listed.items || []).map(item => getUrlFn(item)));
+            return urls.filter(Boolean);
+        } catch (e) {
+            console.warn('[Construção] Não foi possível listar fotos no Storage:', e);
+            return [];
+        }
+    },
+
     async uploadFile(file, customerId) {
         if (!window.firebaseStorage || !window.firebaseCollections) throw new Error("Firebase Storage não inicializado");
         
@@ -141,47 +259,31 @@ window.loadConstrucoes = async function() {
     console.log('[Construção] Iniciando loadConstrucoes para cliente:', customerId, 'venda:', saleId);
     try {
         const { collection, query, where, getDocs } = window.firebaseCollections;
-        const promises = [];
-        
-        console.log('[Construção] Realizando busca em construction_checks (String)');
-        promises.push(getDocs(query(
-            collection(window.firebaseDb, "construction_checks"),
-            where("customerId", "==", String(customerId))
-        )));
-        
+        const querySpecs = [
+            { coll: "construction_checks", id: String(customerId) },
+            { coll: "vistorias", id: String(customerId) }
+        ];
         const numId = Number(customerId);
         if (!isNaN(numId)) {
-            console.log('[Construção] Realizando busca em construction_checks (Number)');
-            promises.push(getDocs(query(
-                collection(window.firebaseDb, "construction_checks"),
-                where("customerId", "==", numId)
-            )));
+            querySpecs.push({ coll: "construction_checks", id: numId });
+            querySpecs.push({ coll: "vistorias", id: numId });
         }
 
-        console.log('[Construção] Realizando busca em vistorias (String)');
-        promises.push(getDocs(query(
-            collection(window.firebaseDb, "vistorias"),
-            where("customerId", "==", String(customerId))
-        )));
-        
-        if (!isNaN(numId)) {
-            console.log('[Construção] Realizando busca em vistorias (Number)');
-            promises.push(getDocs(query(
-                collection(window.firebaseDb, "vistorias"),
-                where("customerId", "==", numId)
-            )));
-        }
-        
         loading.innerHTML = 'Carregando dados do servidor (pode demorar alguns segundos)...';
-        console.log('[Construção] Aguardando respostas do Firestore...');
-        
-        const snaps = await Promise.all(promises);
-        console.log('[Construção] Respostas do Firestore recebidas. Total de coleções consultadas:', snaps.length);
+        const snaps = await Promise.all(querySpecs.map(q =>
+            getDocs(query(collection(window.firebaseDb, q.coll), where("customerId", "==", q.id)))
+                .then(snap => ({ snap, coll: q.coll }))
+        ));
 
         const snapshot = [];
         const seenIds = new Set();
-        const addUnique = (d) => { if (!seenIds.has(d.id)) { seenIds.add(d.id); snapshot.push(d); } };
-        snaps.forEach(snap => snap.forEach(addUnique));
+        snaps.forEach(({ snap, coll }) => {
+            snap.forEach(d => {
+                if (seenIds.has(d.id)) return;
+                seenIds.add(d.id);
+                snapshot.push({ id: d.id, _collection: coll, data: () => d.data() });
+            });
+        });
         
         const results = [];
         
@@ -219,21 +321,60 @@ window.loadConstrucoes = async function() {
                 }
             }
             
-            if (!matches && (!data.contractId || data.contractId === "null" || data.contractId === "undefined" || String(data.contractId).trim() === "")) {
-                matches = true;
-            }
-            
             if (matches) {
-                results.push({ id: doc.id, _source: data.estagioObra ? 'vistoria' : 'check', ...data });
+                results.push({
+                    id: doc.id,
+                    _collection: doc._collection,
+                    _source: doc._collection === 'vistorias' ? 'vistoria' : 'check',
+                    ...data
+                });
             }
         });
-        
-        console.log('[Construção] Vistorias processadas (com filtro aplicado):', results.length);
-        
-        results.sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
-        window.ConstrucaoApp.currentChecks = results;
-        
-        renderConstrucaoHistory(results);
+
+        const sameContract = (a, b) => {
+            const keysA = new Set([String(a.contractId || ''), ...((a.contractKeys || []).map(String))].filter(k => k && k !== 'undefined' && k !== 'null'));
+            const keysB = new Set([String(b.contractId || ''), ...((b.contractKeys || []).map(String))].filter(k => k && k !== 'undefined' && k !== 'null'));
+            for (const k of keysA) { if (keysB.has(k)) return true; }
+            return false;
+        };
+        const hasInspectionContent = (data) => !!(
+            data.date || data.stage || data.fileUrl || data.fotoFrente ||
+            (data.fileUrls && data.fileUrls.length) || data.respostasFormulario ||
+            (data.detailsText && String(data.detailsText).includes('Respostas')) ||
+            (data.observations && data.observations !== '-' && String(data.observations).trim())
+        );
+        const pendingStatus = new Set(['aguardando_fotos', 'aguardando_validacao']);
+        window.ConstrucaoApp.allMatchedDocs = results.slice();
+        const display = results.filter(data => {
+            if (pendingStatus.has(data.status)) return false;
+            if (!hasInspectionContent(data)) return false;
+            if (data._collection === 'vistorias' && data.status === 'concluida') {
+                const hasCheck = results.some(o => o._collection === 'construction_checks' && sameContract(o, data));
+                if (hasCheck) return false;
+            }
+            return true;
+        });
+
+        for (const check of display) {
+            const urls = window.ConstrucaoApp.collectPhotoUrls(check, results);
+            if (urls.length < 3) {
+                const extra = await window.ConstrucaoApp.fetchStoragePhotos(check, results);
+                extra.forEach(u => { if (u && !urls.includes(u)) urls.push(u); });
+            }
+            check.fileUrls = urls;
+            if (!check.fileUrl && urls[0]) check.fileUrl = urls[0];
+        }
+
+        console.log('[Construção] Vistorias processadas (com filtro aplicado):', display.length);
+
+        display.sort((a, b) => {
+            const ta = new Date(a.createdAt || a.date || 0).getTime() || 0;
+            const tb = new Date(b.createdAt || b.date || 0).getTime() || 0;
+            return tb - ta;
+        });
+        window.ConstrucaoApp.currentChecks = display;
+
+        renderConstrucaoHistory(display);
     } catch(e) {
         console.error("Erro ao carregar vistorias:", e);
         loading.innerHTML = `
@@ -269,30 +410,34 @@ function renderConstrucaoHistory(checks) {
     `;
 
     checks.forEach(check => {
-        const dateObj = new Date(check.date + 'T00:00:00');
-        const dateStr = dateObj.toLocaleDateString('pt-BR');
-
+        const dateStr = window.ConstrucaoApp.formatCheckDate(check);
+        const photoUrls = (check.fileUrls && check.fileUrls.length) ? check.fileUrls : window.ConstrucaoApp.collectPhotoUrls(check, window.ConstrucaoApp.allMatchedDocs || []);
         let fileLink = '-';
-        if (check.fileUrl) {
-            fileLink = `<button onclick="window.open('${check.fileUrl}', '_blank')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Ver Anexo"><i data-lucide="image" style="width:14px; height:14px;"></i></button>`;
+        if (photoUrls.length) {
+            const countBadge = photoUrls.length > 1
+                ? `<span style="position:absolute; top:-6px; right:-6px; background:#166534; color:#fff; border-radius:10px; min-width:16px; height:16px; font-size:0.65rem; font-weight:700; display:flex; align-items:center; justify-content:center; padding:0 4px;">${photoUrls.length}</span>`
+                : '';
+            fileLink = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; position:relative;" title="${photoUrls.length} foto${photoUrls.length > 1 ? 's' : ''}"><i data-lucide="image" style="width:14px; height:14px;"></i>${countBadge}</button>`;
         }
-        
+
+        const isAppVistoria = window.ConstrucaoApp.isLinkVistoria(check);
         let obsBtn = '';
-        const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
         if (isAppVistoria) {
             obsBtn = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
         }
-        
-        const respName = check.responsible === 'Vistoriador App' ? '(15) 99811-8246' : (check.responsible || '-');
-        const currentUser = window.AppState && window.AppState.currentUser;
-        const isAdmin = !!(currentUser && (
-            (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
-            (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
-            (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
-        ));
-        const deleteBtn = !isAppVistoria || isAdmin
-            ? `<button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>`
-            : '<span style="color:#64748b; font-size:0.75rem;" title="Vistorias do aplicativo aprovadas só podem ser excluídas pelo administrador.">Protegida</span>';
+
+        const allDocs = window.ConstrucaoApp.allMatchedDocs || [];
+        const linkedId = window.ConstrucaoApp.findLinkedVistoriaId(check, allDocs);
+        const linked = allDocs.find(d => d.id === linkedId);
+        const respName = window.ConstrucaoApp.resolveResponsibleName({
+            ...check,
+            cidade: check.cidade || (linked && linked.cidade),
+            costCenterId: check.costCenterId || (linked && linked.costCenterId),
+            empreendimento: check.empreendimento || (linked && linked.empreendimento)
+        });
+        const deleteBtn = isAppVistoria
+            ? ''
+            : `<button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>`;
 
         html += `
         <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -398,17 +543,21 @@ window.showVistoriaInfo = function(id) {
     }
     
     let imgHtml = '';
-    if (check.fileUrl) {
+    const photoUrls = (check.fileUrls && check.fileUrls.length)
+        ? check.fileUrls
+        : window.ConstrucaoApp.collectPhotoUrls(check, window.ConstrucaoApp.allMatchedDocs || []);
+    if (photoUrls.length) {
         imgHtml = `
         <div style="margin-top: 20px;">
             <h4 style="margin: 0 0 15px 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="camera" style="width: 18px; color: #64748b;"></i> Fotos Recebidas
+                <i data-lucide="camera" style="width: 18px; color: #64748b;"></i> Fotos Recebidas (${photoUrls.length})
             </h4>
-            <div style="display: flex; gap: 15px;">
-                <div style="position: relative; width: 220px; height: 220px; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; cursor: pointer; background: #000;" onclick="window.open('${check.fileUrl}', '_blank')" title="Clique para ampliar">
-                    <img src="${check.fileUrl}" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.9; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">
-                    <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: white; padding: 6px; text-align: center; font-size: 0.8rem; font-weight: bold;">Foto da Vistoria</div>
-                </div>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                ${photoUrls.map((url, idx) => `
+                <div style="position: relative; width: 200px; height: 200px; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; cursor: pointer; background: #000;" onclick="window.open('${url}', '_blank')" title="Clique para ampliar">
+                    <img src="${url}" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.9; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.9'">
+                    <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: white; padding: 6px; text-align: center; font-size: 0.8rem; font-weight: bold;">Foto ${idx + 1}</div>
+                </div>`).join('')}
             </div>
         </div>`;
     }
@@ -874,28 +1023,18 @@ window.deleteNovaVistoria = async function(id) {
         try {
             const { doc, deleteDoc } = window.firebaseCollections;
             const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
-
-            // Se encontrou o registro localmente, faz verificações normais
-            if (check) {
-                const isAppVistoria = check.responsible === 'Vistoriador App' || check.responsible === '(15) 99811-8246' || (check.detailsText && check.detailsText.includes('Respostas do Cliente:')) || (check.observations && check.observations.includes('Respostas do Cliente:'));
-                const currentUser = window.AppState && window.AppState.currentUser;
-                const isAdmin = !!(currentUser && (
-                    (currentUser.role && String(currentUser.role).toUpperCase().includes('ADMIN')) ||
-                    (currentUser.profile_name && String(currentUser.profile_name).toUpperCase().includes('ADMIN')) ||
-                    (currentUser.email && ['israel@mouraleite.com.br', 'admin@mouraleite.com.br'].includes(String(currentUser.email).toLowerCase()))
-                ));
-                if (isAppVistoria && !isAdmin) {
-                    alert('Vistorias realizadas pelo aplicativo só podem ser excluídas pelo administrador.');
-                    return;
-                }
-                const collName = check._source === 'vistoria' ? 'vistorias' : 'construction_checks';
-                await deleteDoc(doc(window.firebaseDb, collName, id));
+            if (check && window.ConstrucaoApp.isLinkVistoria(check)) {
+                alert('Vistorias feitas pelo link não podem ser excluídas nesta tela.');
+                return;
+            }
+            const tryDelete = async (coll) => {
+                try { await deleteDoc(doc(window.firebaseDb, coll, id)); return true; } catch (e) { return false; }
+            };
+            if (check && check._collection) {
+                await tryDelete(check._collection);
+                const other = check._collection === 'vistorias' ? 'construction_checks' : 'vistorias';
+                await tryDelete(other);
             } else {
-                // Registro não encontrado no cache local (ex: Invalid Date)
-                // Tenta deletar de ambas as coleções para garantir a remoção
-                const tryDelete = async (coll) => {
-                    try { await deleteDoc(doc(window.firebaseDb, coll, id)); return true; } catch(e) { return false; }
-                };
                 const deleted = await tryDelete('construction_checks') || await tryDelete('vistorias');
                 if (!deleted) {
                     alert('Não foi possível localizar este registro no banco de dados.');

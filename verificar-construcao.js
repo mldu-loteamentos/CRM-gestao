@@ -1205,9 +1205,11 @@ window.VerificarConstrucaoApp = {
             const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\//g, '-');
             const dateStrDesc = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('.');
 
+            const photoUrls = [];
             for (let i = 0; i < listRes.items.length; i++) {
                 const itemRef = listRes.items[i];
                 const url = await getDownloadURL(itemRef);
+                photoUrls.push(url);
 
                 const imgRes = await fetch(url);
                 const blob = await imgRes.blob();
@@ -1268,17 +1270,35 @@ window.VerificarConstrucaoApp = {
                 detailsText += `- ${label}: ${val}\n`;
             }
 
+            let responsibleName = '';
+            try {
+                const users = JSON.parse(localStorage.getItem('crm_users') || '[]');
+                const city = String(row.cidade || '').toUpperCase().trim();
+                const cityUsers = users.filter(u => u.check_construction && Array.isArray(u.const_cities) &&
+                    u.const_cities.some(c => String(c).toUpperCase().trim() === city));
+                const preferred = cityUsers.find(u => String(u.phone || '').replace(/\D/g, '').slice(-8) !== '998118246') || cityUsers[0];
+                if (preferred && preferred.name) responsibleName = preferred.name;
+            } catch (e) {}
+
             const newCheck = {
                 customerId: String(row.customerId || ''),
                 contractId: String(row.contractId || ''),
                 contractKeys: row.contractKeys || [],
                 companyId: String(row.companyId || ''),
+                cidade: row.cidade || '',
+                costCenterId: row.costCenterId || '',
+                empreendimento: row.empreendimento || '',
+                vistoriaId: v.id,
                 date: new Date().toISOString().split('T')[0],
-                responsible: "(15) 99811-8246",
+                responsible: responsibleName || (v.responsavelNome || ''),
                 stage: resps.estagioObra || "Vistoria Validada",
                 observations: resps.observacoes || "-",
                 detailsText: detailsText,
-                fileUrl: await getDownloadURL(listRes.items[0]),
+                fileUrl: photoUrls[0] || v.fotoFrente || null,
+                fileUrls: photoUrls.length ? photoUrls : [v.fotoFrente, v.fotoMeioFundo, v.fotoFundoFrente].filter(Boolean),
+                fotoFrente: v.fotoFrente || photoUrls[0] || null,
+                fotoMeioFundo: v.fotoMeioFundo || photoUrls[1] || null,
+                fotoFundoFrente: v.fotoFundoFrente || photoUrls[2] || null,
                 fileName: "Foto Vistoria 1.jpg",
                 createdAt: new Date().toISOString()
             };

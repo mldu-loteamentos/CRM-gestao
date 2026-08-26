@@ -4158,7 +4158,7 @@ document.addEventListener("click", function(e) {
           </td>
           <td style="white-space: nowrap; text-align: center;">
             <div style="display: flex; justify-content: center; gap: 4px; align-items: center;">
-              <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
+              <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
                 <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
               </button>
               <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
@@ -4546,7 +4546,7 @@ document.addEventListener("click", function(e) {
               return `<td style="text-align: center; color: var(--color-text-muted); font-size: 0.75rem;">-</td>`;
           })()}
           <td style="white-space: nowrap; text-align: center;">
-            <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
+            <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
               <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
             </button>
             <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
@@ -4585,6 +4585,17 @@ window.buildFichaPdfFilename = function(tipo, opts) {
     const el = document.getElementById(id);
     return el ? String(el.textContent || '').replace(/\s+/g, ' ').trim() : '';
   };
+  const ccFromText = (text) => {
+    const m = String(text || '').trim().match(/^(\d{4,6})\b/);
+    return m ? m[1] : '';
+  };
+  const stripCcPrefix = (text, ccId) => {
+    let s = String(text || '').replace(/\s+/g, ' ').trim();
+    if (ccId) s = s.replace(new RegExp('^' + ccId + '\\s*-\\s*'), '').replace(new RegExp('^' + ccId + '\\s+'), '').trim();
+    s = s.replace(/^\d{4,6}\s*-\s*/, '').trim();
+    return s;
+  };
+
   let contrato = String(opts.contrato || '').replace(/\s+/g, ' ').trim();
   if (!contrato) {
     const spanEl = document.getElementById('det-block-lot-span');
@@ -4594,6 +4605,23 @@ window.buildFichaPdfFilename = function(tipo, opts) {
     if (!contrato) contrato = getDom('det-block-lot');
     if (!contrato) contrato = getDom('ctx-empreend-val');
   }
+
+  let ccId = String(opts.costCenterId || opts.cc || '').trim();
+  if (!ccId && window.AppState && AppState.currentCostCenterId && AppState.currentCostCenterId !== 'N/D') {
+    ccId = String(AppState.currentCostCenterId);
+  }
+  if (!ccId) ccId = ccFromText(contrato) || ccFromText(getDom('ctx-empreend-val'));
+  if (!ccId && typeof getPrimaryCostCenter === 'function' && opts.costCenterRaw) {
+    const primary = getPrimaryCostCenter(opts.costCenterRaw);
+    if (primary && primary !== 'C.C. N/D') ccId = String(primary).replace(/^C\.C\.\s*/i, '');
+  }
+
+  const unidade = stripCcPrefix(contrato, ccId);
+  const locParts = [];
+  if (ccId && ccId !== 'N/D') locParts.push(ccId);
+  if (unidade && unidade !== 'N/D') locParts.push(unidade);
+  const loc = locParts.join(' ');
+
   let titulo = String(opts.titulo != null ? opts.titulo : (getDom('det-bill-id') || getDom('ctx-titulo-val') || '')).trim();
   titulo = titulo.replace(/^B-/i, '').split('-')[0].trim();
   let nome = String(opts.nome || getDom('det-name') || '').replace(/\s+/g, ' ').trim();
@@ -4603,7 +4631,7 @@ window.buildFichaPdfFilename = function(tipo, opts) {
   }
   nome = (nome || 'Cliente').toUpperCase();
   const tipoLabel = String(tipo || 'Arquivo').trim();
-  const head = contrato ? `${tipoLabel} ${contrato}` : tipoLabel;
+  const head = loc ? `${tipoLabel} ${loc}` : tipoLabel;
   const raw = `${head} | Título ${titulo || '-'} | ${nome}.pdf`;
   return raw.replace(/\|/g, '\uFF5C').replace(/[<>:"/\\?*\u0000-\u001F]/g, '-').replace(/\s+/g, ' ').trim();
 };
@@ -4619,6 +4647,7 @@ window.visualizarExtratoDireto = function(btn) {
   const rawTitleNumber = btn.dataset.title;
   const customerName = btn.dataset.name || "Cliente";
   const blockLot = btn.dataset.unit || "";
+  const costCenterId = btn.dataset.cc || "";
 
   const originalHtml = btn.innerHTML;
   btn.innerHTML = '<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; display:inline-block; vertical-align:middle; margin-right:4px;"></div>Gerando...';
@@ -4633,6 +4662,7 @@ window.visualizarExtratoDireto = function(btn) {
         const originalUrl = res.results[0].urlReport;
         const fileName = window.buildFichaPdfFilename('Extrato', {
           contrato: blockLot,
+          costCenterId: costCenterId,
           titulo: rawTitleNumber,
           nome: customerName
         });
@@ -14389,7 +14419,7 @@ async function _loadZeroPaidTab_Impl() {
         <span>${lastContactStr}</span>
       </td>
       <td style="white-space: nowrap; text-align: center;">
-        <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
+        <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
           <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
         </button>
         <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
@@ -21631,7 +21661,7 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
-            <button class="btn btn-secondary btn-sm" data-customer-id="${customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
+            <button class="btn btn-secondary btn-sm" data-customer-id="${customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" data-cc="${String((r.unidade || '').split(' - ')[0] || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
               <i data-lucide="file-text" style="width:14px;height:14px; margin-right:4px;"></i> Extrato
             </button>
             <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
