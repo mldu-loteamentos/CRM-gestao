@@ -300,6 +300,9 @@ const ParametrizacaoParceiroApp = {
       p.accountShares[accountId] = Math.max(0, Math.min(100, n));
     }
     this.persist();
+    const pct = this.partnerPct(p, accountId);
+    document.querySelectorAll(`[data-pp-pct="${accountId}"]`).forEach(el => { el.textContent = pct.toFixed(1) + "%"; });
+    document.querySelectorAll(`[data-pp-bar="${accountId}"]`).forEach(el => { el.style.width = pct + "%"; });
   },
 
   applyDefaultToAll() {
@@ -479,19 +482,7 @@ const ParametrizacaoParceiroApp = {
           </div>
         </div>
 
-        <div class="crm-card" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
-            <div>
-              <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Matriz DFC Padrão — % do parceiro</h3>
-              <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">
-                Segue a visão <strong>DFC Padrão</strong>. Conta em branco herda ${p.defaultPartnerShare}%.
-                Use <strong>Não se aplica</strong> no nó ou no subnível quando o parceiro não participa daquela conta.
-              </p>
-            </div>
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:34px;font-size:0.78rem;">Usar padrão em todas</button>
-          </div>
-          ${this.matrixHtml(p)}
-        </div>
+        ${this.matrixHtml(p)}
       </div>
     `;
   },
@@ -513,27 +504,67 @@ const ParametrizacaoParceiroApp = {
     </div>`;
   },
 
+  rateioControlsHtml(p, key, isAccount, ancestorNA, naSelf) {
+    if (ancestorNA) {
+      return `<span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;">Fora (herda)</span>`;
+    }
+    if (naSelf) {
+      return `<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+        <span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;border-radius:99px;">Fora</span>
+        <button type="button" title="Incluir no rateio" onclick="event.stopPropagation();ParametrizacaoParceiroApp.toggleNA('${key}', ${!!isAccount})"
+          style="width:26px;height:26px;border:none;background:transparent;color:#105436;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:50%;">
+          <i data-lucide="undo-2" style="width:14px;height:14px;"></i>
+        </button>
+      </div>`;
+    }
+    const custom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, key);
+    const pct = this.partnerPct(p, key);
+    return `<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <div style="width:72px;height:6px;border-radius:99px;background:#e2e8f0;overflow:hidden;" title="Parceiro ${pct.toFixed(0)}% · Moura Leite ${(100 - pct).toFixed(0)}%">
+        <div data-pp-bar="${this.esc(key)}" style="width:${pct}%;height:100%;background:#105436;"></div>
+      </div>
+      <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${p.defaultPartnerShare}"
+        title="Percentual do parceiro. Vazio herda o padrão (${p.defaultPartnerShare}%)."
+        onclick="event.stopPropagation()"
+        onchange="ParametrizacaoParceiroApp.setAccountShare('${key}', this.value)"
+        style="width:58px;height:26px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 6px;font-size:0.75rem;font-weight:700;">
+      <span data-pp-pct="${this.esc(key)}" style="font-size:0.72rem;font-weight:800;color:#105436;min-width:42px;font-variant-numeric:tabular-nums;">${pct.toFixed(1)}%</span>
+      <button type="button" title="Fora da parceria" onclick="event.stopPropagation();ParametrizacaoParceiroApp.toggleNA('${key}', ${!!isAccount})"
+        style="width:26px;height:26px;border:none;background:transparent;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:50%;"
+        onmouseover="this.style.color='#ef4444';this.style.background='#fef2f2'" onmouseout="this.style.color='#94a3b8';this.style.background='transparent'">
+        <i data-lucide="ban" style="width:14px;height:14px;"></i>
+      </button>
+    </div>`;
+  },
+
   matrixHtml(p) {
     const visao = this.dfcVisao();
     const groups = visao.groups || [];
     this.expanded = this.expanded || new Set(groups.map(g => g.id));
     const roots = groups.filter(g => !g.parentId);
     const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
-    return `<div style="margin-top:8px;font-size:0.72rem;font-weight:700;color:#0f766e;text-transform:uppercase;letter-spacing:0.4px;">Visão: ${this.esc(visao.name)}</div>
-      <div class="table-container" style="margin-top:8px;max-height:calc(100vh - 260px);overflow:auto;box-shadow:none;">
-      <table class="custom-table" style="font-size:0.8rem;">
-        <thead>
-          <tr>
-            <th>Nó / conta DFC</th>
-            <th style="width:130px;text-align:center;">Aplicação</th>
-            <th style="text-align:center;">Parceiro paga %</th>
-            <th style="text-align:right;">Efetivo parceiro</th>
-            <th style="text-align:right;">Moura Leite</th>
-          </tr>
-        </thead>
-        <tbody>${body || `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</td></tr>`}</tbody>
-      </table>
-    </div>`;
+    return `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:360px;">
+        <div style="padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div>
+            <span style="font-weight:700;font-size:0.9rem;color:#1e293b;display:inline-flex;align-items:center;gap:6px;">
+              <i data-lucide="folder-tree" style="width:16px;height:16px;"></i>
+              Estrutura da Visão — ${this.esc(visao.name)}
+            </span>
+            <div style="font-size:0.72rem;color:#64748b;margin-top:3px;">
+              Campo em branco herda ${p.defaultPartnerShare}%. A barra é a parte do parceiro. O ícone de bloqueio tira o nó da conta.
+            </div>
+          </div>
+          <button type="button" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()"
+            style="padding:4px 10px;background:#105436;color:#fff;border:none;border-radius:4px;font-size:0.75rem;cursor:pointer;white-space:nowrap;">
+            Usar padrão em todas
+          </button>
+        </div>
+        <div style="flex:1;overflow:auto;padding:15px;background:#fff;">
+          ${body || `<div style="text-align:center;color:#94a3b8;padding:28px;font-size:0.85rem;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</div>`}
+        </div>
+      </div>
+    `;
   },
 
   dfcNodeRows(p, node, groups, level, ancestors) {
@@ -544,66 +575,49 @@ const ParametrizacaoParceiroApp = {
     const naSelf = !!(p.naNodes && p.naNodes[node.id]);
     const ancestorNA = ancestors.some(a => p.naNodes && p.naNodes[a]);
     const na = ancestorNA || naSelf;
-    const custom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, node.id);
-    const pct = na ? 0 : this.partnerPct(p, node.id);
-    const ml = na ? 0 : (100 - pct);
-    const pad = 8 + level * 18;
-    const bg = na ? "#f8fafc" : (node.type === "total_n1" ? "#f0fdf4" : (level === 0 ? "#f8fafc" : "#fff"));
+
+    let bg = "#fff", borderLeft = "#cbd5e1", icon = "folder";
+    if (node.type === "total_n1" || level === 0) { bg = "#f8fafc"; borderLeft = "#0f766e"; icon = "layers"; }
+    if (node.type === "totalizadora") { bg = "#fff"; borderLeft = "#3b82f6"; icon = "folder-open"; }
+    if (node.type === "resultado") { bg = "#fff"; borderLeft = "#eab308"; icon = "file-text"; }
+    if (na) { bg = "#f8fafc"; borderLeft = "#cbd5e1"; }
+
     const chevron = hasKids
-      ? `<button onclick="ParametrizacaoParceiroApp.toggleExpand('${node.id}')" style="border:none;background:transparent;cursor:pointer;padding:0 4px 0 0;color:#64748b;vertical-align:middle;">
-           <i data-lucide="${expanded ? "chevron-down" : "chevron-right"}" style="width:14px;"></i>
+      ? `<button type="button" onclick="ParametrizacaoParceiroApp.toggleExpand('${node.id}')" style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;">
+           <i data-lucide="${expanded ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>
          </button>`
-      : "";
-    const naBtn = ancestorNA
-      ? `<span style="font-size:0.7rem;color:#94a3b8;font-weight:700;">Herda N/A</span>`
-      : `<button onclick="ParametrizacaoParceiroApp.toggleNA('${node.id}', false)"
-           style="border:1px solid ${naSelf ? "#b45309" : "#e2e8f0"};background:${naSelf ? "#fff7ed" : "#fff"};color:${naSelf ? "#c2410c" : "#475569"};border-radius:999px;padding:3px 8px;font-size:0.7rem;font-weight:800;cursor:pointer;white-space:nowrap;">
-           ${naSelf ? "Aplicar rateio" : "Não se aplica"}
-         </button>`;
-    let html = `<tr style="background:${bg};opacity:${na ? 0.72 : 1};">
-      <td style="padding-left:${pad}px;font-weight:${level === 0 ? 800 : 700};color:${na ? "#94a3b8" : "#0f172a"};">
-        ${chevron}${this.esc(node.name)}
-      </td>
-      <td style="text-align:center;">${naBtn}</td>
-      <td style="text-align:center;">
-        ${na ? `<span style="color:#94a3b8;font-weight:700;font-size:0.78rem;">—</span>` : `
-        <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${p.defaultPartnerShare}"
-          onchange="ParametrizacaoParceiroApp.setAccountShare('${node.id}', this.value)"
-          style="width:88px;height:30px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 8px;font-weight:700;">`}
-      </td>
-      <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:${na ? "#94a3b8" : "#105436"};">${na ? "N/A" : pct.toFixed(2) + "%"}</td>
-      <td style="text-align:right;font-variant-numeric:tabular-nums;color:#64748b;">${na ? "—" : ml.toFixed(2) + "%"}</td>
-    </tr>`;
+      : `<span style="width:14px;"></span>`;
+
+    let html = `
+      <div style="margin-left:${level * 20}px;margin-bottom:5px;opacity:${na ? 0.72 : 1};">
+        <div style="background:${bg};border:1px solid #e2e8f0;border-left:4px solid ${borderLeft};border-radius:6px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 1px 2px rgba(0,0,0,0.02);">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+            ${chevron}
+            <i data-lucide="${icon}" style="width:14px;height:14px;color:${borderLeft};flex-shrink:0;"></i>
+            <span style="font-weight:${node.type === "total_n1" || level === 0 ? "700" : "600"};font-size:0.85rem;color:#1e293b;">${this.esc(node.name)}</span>
+          </div>
+          ${this.rateioControlsHtml(p, node.id, false, ancestorNA, naSelf)}
+        </div>
+    `;
+
     if (expanded) {
       children.forEach(ch => { html += this.dfcNodeRows(p, ch, groups, level + 1, ancestors.concat(node.id)); });
-      accounts.forEach(accId => {
-        const naAccSelf = !!(p.naAccounts && p.naAccounts[accId]);
-        const naAcc = na || naAccSelf;
-        const accCustom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, accId);
-        const accPct = naAcc ? 0 : this.partnerPct(p, accId);
-        const accMl = naAcc ? 0 : (100 - accPct);
-        const naAccBtn = na
-          ? `<span style="font-size:0.7rem;color:#94a3b8;font-weight:700;">Herda N/A</span>`
-          : `<button onclick="ParametrizacaoParceiroApp.toggleNA('${accId}', true)"
-               style="border:1px solid ${naAccSelf ? "#b45309" : "#e2e8f0"};background:${naAccSelf ? "#fff7ed" : "#fff"};color:${naAccSelf ? "#c2410c" : "#475569"};border-radius:999px;padding:3px 8px;font-size:0.7rem;font-weight:800;cursor:pointer;white-space:nowrap;">
-               ${naAccSelf ? "Aplicar rateio" : "Não se aplica"}
-             </button>`;
-        html += `<tr style="background:${naAcc ? "#f8fafc" : "#fff"};opacity:${naAcc ? 0.72 : 1};">
-          <td style="padding-left:${pad + 28}px;color:${naAcc ? "#94a3b8" : "#64748b"};">
-            <strong style="color:#0f172a;">${this.esc(accId)}</strong> ${this.esc(this.catName(accId))}
-          </td>
-          <td style="text-align:center;">${naAccBtn}</td>
-          <td style="text-align:center;">
-            ${naAcc ? `<span style="color:#94a3b8;font-weight:700;font-size:0.78rem;">—</span>` : `
-            <input type="number" min="0" max="100" step="0.01" value="${accCustom ? accPct : ""}" placeholder="${p.defaultPartnerShare}"
-              onchange="ParametrizacaoParceiroApp.setAccountShare('${accId}', this.value)"
-              style="width:88px;height:30px;border:1px solid ${accCustom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 8px;font-weight:700;">`}
-          </td>
-          <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:${naAcc ? "#94a3b8" : "#105436"};">${naAcc ? "N/A" : accPct.toFixed(2) + "%"}</td>
-          <td style="text-align:right;font-variant-numeric:tabular-nums;color:#64748b;">${naAcc ? "—" : accMl.toFixed(2) + "%"}</td>
-        </tr>`;
-      });
+      if (accounts.length) {
+        html += `<div style="margin-left:28px;margin-top:5px;margin-bottom:10px;display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid #e2e8f0;">`;
+        accounts.forEach(accId => {
+          const naAccSelf = !!(p.naAccounts && p.naAccounts[accId]);
+          const naAcc = na || naAccSelf;
+          html += `
+            <div style="background:#fff;border:1px solid #cbd5e1;padding:4px 8px;border-radius:4px;font-size:0.75rem;display:flex;justify-content:space-between;align-items:center;gap:8px;opacity:${naAcc ? 0.72 : 1};">
+              <div style="min-width:0;"><strong style="color:#0f172a;">${this.esc(accId)}</strong> <span style="color:#64748b;">${this.esc(this.catName(accId))}</span></div>
+              ${this.rateioControlsHtml(p, accId, true, na, naAccSelf)}
+            </div>`;
+        });
+        html += `</div>`;
+      }
     }
+
+    html += `</div>`;
     return html;
   }
 };

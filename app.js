@@ -15215,75 +15215,189 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
     };
     
-    const allBills = AppState.defaultersReceivableBills || (getSiengeApiMode() === "simulado" ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []);
-    const myBills = allBills.filter(b =>
-        (String(b.saleId) === String(saleId) || String(b.saleId) === String(sale.id) || String(b.receivableBillId) === String(saleId) || String(b.documentId) === String(saleId))
-        && b.status !== "PAID" && (b.overdueValue > 0 || b.daysDelay > 0)
+    const fmtMoneyNex = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const parseDueIso = (d) => {
+        if (!d) return '';
+        const s = String(d).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const dt = new Date(d);
+        return isNaN(dt.getTime()) ? '' : dt.toISOString().slice(0, 10);
+    };
+    const formatDueBr = (d) => {
+        const iso = parseDueIso(d);
+        return iso ? iso.split('-').reverse().join('/') : '-';
+    };
+    const calcDaysDelay = (due, given) => {
+        if (given !== undefined && given !== null && given !== '' && Number(given) > 0) return Math.round(Number(given));
+        const iso = parseDueIso(due);
+        if (!iso) return 0;
+        const dueD = new Date(iso + 'T12:00:00');
+        const now = new Date();
+        now.setHours(12, 0, 0, 0);
+        const days = Math.round((now - dueD) / 86400000);
+        return days > 0 ? days : 0;
+    };
+    const nexSaleKeys = new Set(
+        [saleId, sale.id, sale.saleId, sale.receivableBillId, sale.realSaleId, sale.contractNumber]
+            .filter(v => v !== undefined && v !== null && v !== '')
+            .map(v => String(v))
     );
-    
-    // Sort by due date
-    myBills.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
-    
-    let tableRows = '';
-    let totCorrigido = 0;
-    let totAcrescimo = 0;
-    let totGeral = 0;
-    
-    if (myBills.length === 0) {
-        tableRows = `<tr><td colspan="9" style="text-align: center; padding: 10px;">Nenhuma parcela em atraso encontrada.</td></tr>`;
-    } else {
+    const billMatchesNexSale = (b) => {
+        const keys = [b.id, b.saleId, b.realSaleId, b.receivableBillId, b.billReceivableId, b.documentId]
+            .filter(v => v !== undefined && v !== null && v !== '')
+            .map(v => String(v));
+        return keys.some(k => nexSaleKeys.has(k));
+    };
+    const rowFromInstallment = (inst) => {
+        const isPaid = inst.installmentSituation === 2 || inst.isValidReceipt === true
+            || inst.status === 'PAID' || inst.status === 'Quitado'
+            || (inst.currentBalance !== undefined && Number(inst.currentBalance) <= 0.01);
+        if (isPaid) return null;
+        const due = inst.dueDate || inst.originalDueDate;
+        const days = calcDaysDelay(due, inst.daysOfDelay ?? inst.daysDelay ?? inst.apiDaysDelay);
+        const original = Number(inst.originalValue ?? inst.value ?? 0) || 0;
+        let atualizado = Number(
+            inst.correctedValueWithAdditions ??
+            inst.currentBalanceWithAddition ??
+            inst.overdueValue
+        );
+        if (!isFinite(atualizado) || atualizado <= 0) {
+            const without = inst.correctedValueWithoutAdditions != null ? Number(inst.correctedValueWithoutAdditions) : original;
+            atualizado = without + Number(inst.interest || 0) + Number(inst.fine || 0);
+        }
+        if (days <= 0 && atualizado <= 0.01) return null;
+        if (days <= 0) return null;
+        let correcao = Number(inst.monetaryCorrection);
+        if (!isFinite(correcao) || correcao < 0) {
+            if (inst.correctedValueWithoutAdditions != null) {
+                correcao = Math.max(0, Number(inst.correctedValueWithoutAdditions) - original);
+            } else {
+                correcao = Math.max(0, atualizado - original);
+            }
+        }
+        return { due, days, original, correcao, atualizado };
+    };
+
+    const parcelRows = [];
+    const seenParcel = new Set();
+    const pushParcel = (row) => {
+        if (!row) return;
+        const key = `${parseDueIso(row.due)}|${Number(row.original).toFixed(2)}|${Number(row.atualizado).toFixed(2)}`;
+        if (seenParcel.has(key)) return;
+        seenParcel.add(key);
+        parcelRows.push(row);
+    };
+
+    const fichaCustomerOk = String(AppState.selectedCustomerId || '') === String(customerId);
+    const fichaSaleOk = nexSaleKeys.has(String(AppState.selectedSaleId || ''))
+        || nexSaleKeys.has(String(AppState.selectedTitulo || ''));
+    if (fichaCustomerOk && fichaSaleOk && Array.isArray(AppState.currentContractInstallments)) {
+        AppState.currentContractInstallments.forEach(inst => pushParcel(rowFromInstallment(inst)));
+    }
+
+    if (parcelRows.length === 0) {
+        let bills = (AppState.defaultersBills && AppState.defaultersBills.length)
+            ? AppState.defaultersBills
+            : (getSiengeApiMode() === 'simulado' ? (window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS) || [] : []);
+        let myBills = bills.filter(billMatchesNexSale);
+        if (!myBills.length) myBills = bills.filter(b => String(b.customerId) === String(customerId));
         myBills.forEach(b => {
-            const v = b.originalValue || b.overdueValue || 0;
-            const corr = v; // Sld Corrigido
-            const jurosMulta = Math.max(0, (b.overdueValue || 0) - v);
-            const tot = (b.overdueValue || v);
-            
-            totCorrigido += corr;
-            totAcrescimo += jurosMulta;
-            totGeral += tot;
-            
-            const dd = b.dueDate ? b.dueDate.split('-').reverse().join('/') : '-';
-            
-            tableRows += `
-            <tr style="border-bottom: 1px dashed #ccc; font-size: 9pt;">
-                <td style="padding: 4px;">${dd}</td>
-                <td style="padding: 4px;">${b.documentId || ''}</td>
-                <td style="padding: 4px;">${b.installmentNumber || ''}</td>
-                <td style="padding: 4px;">${b.taxCode || 'SI'}</td>
-                <td style="padding: 4px;">${b.id || ''}</td>
-                <td style="padding: 4px;">${corr.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                <td style="padding: 4px;">${b.daysDelay || 0}</td>
-                <td style="padding: 4px;">${jurosMulta.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                <td style="padding: 4px;">${tot.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-            </tr>`;
+            const insts = b.defaulterInstallments || [];
+            if (insts.length) {
+                insts.forEach(inst => pushParcel(rowFromInstallment(inst)));
+            } else {
+                const due = b.dueDate;
+                const days = calcDaysDelay(due, b.daysDelay);
+                if (days <= 0 && !(Number(b.overdueValue || b.value) > 0)) return;
+                const original = Number(b.originalValue ?? b.value ?? 0) || 0;
+                const atualizado = Number(b.overdueValue ?? b.value ?? original) || 0;
+                pushParcel({ due, days: days || Number(b.daysDelay || 0), original, correcao: Math.max(0, atualizado - original), atualizado });
+            }
         });
     }
-    
+
+    if (parcelRows.length === 0 && window.SiengeApiService && getSiengeApiMode() !== 'simulado' && customerId) {
+        try {
+            const balRes = await SiengeApiService.getCustomerFinancialStatements(customerId);
+            const raw = (balRes && balRes.results) || [];
+            const contracts = raw.flatMap(item => item.billsReceivable || []);
+            const billIdToMatch = sale.receivableBillId || saleId;
+            const dbContract = contracts.find(db =>
+                nexSaleKeys.has(String(db.billReceivableId || '')) ||
+                nexSaleKeys.has(String(db.receivableBillId || '')) ||
+                String(db.billReceivableId) === String(billIdToMatch) ||
+                String(db.receivableBillId) === String(billIdToMatch)
+            ) || (contracts.length === 1 ? contracts[0] : null);
+            ((dbContract && dbContract.installments) || []).forEach(inst => {
+                const mapped = {
+                    originalValue: inst.originalValue,
+                    value: inst.originalValue || inst.value,
+                    currentBalance: inst.currentBalance,
+                    currentBalanceWithAddition: inst.currentBalanceWithAddition != null
+                        ? inst.currentBalanceWithAddition
+                        : (Number(inst.currentBalance || 0) + Number(inst.additionalValue || 0)),
+                    dueDate: inst.dueDate,
+                    daysOfDelay: inst.daysOfDelay || inst.daysDelay,
+                    monetaryCorrection: inst.monetaryCorrection,
+                    correctedValueWithoutAdditions: inst.correctedValueWithoutAdditions,
+                    correctedValueWithAdditions: inst.correctedValueWithAdditions,
+                    interest: inst.interest,
+                    fine: inst.fine
+                };
+                pushParcel(rowFromInstallment(mapped));
+            });
+        } catch (e) {
+            console.warn('[NEX] Falha ao montar tabela de parcelas', e);
+        }
+    }
+
+    parcelRows.sort((a, b) => (parseDueIso(a.due) || '').localeCompare(parseDueIso(b.due) || ''));
+
+    let totOriginal = 0;
+    let totCorrecao = 0;
+    let totGeral = 0;
+    let tableRows = '';
+
+    if (parcelRows.length === 0) {
+        tableRows = `<tr><td colspan="5" style="text-align: center; padding: 10px;">Nenhuma parcela em atraso encontrada.</td></tr>`;
+    } else {
+        parcelRows.forEach(r => {
+            totOriginal += Number(r.original) || 0;
+            totCorrecao += Number(r.correcao) || 0;
+            totGeral += Number(r.atualizado) || 0;
+            tableRows += `
+            <tr style="border-bottom: 1px dashed #ccc; font-size: 9pt;">
+                <td style="padding: 4px 6px;">${formatDueBr(r.due)}</td>
+                <td style="padding: 4px 6px; text-align: center;">${r.days}</td>
+                <td style="padding: 4px 6px; text-align: right;">${fmtMoneyNex(r.original)}</td>
+                <td style="padding: 4px 6px; text-align: right;">${fmtMoneyNex(r.correcao)}</td>
+                <td style="padding: 4px 6px; text-align: right;">${fmtMoneyNex(r.atualizado)}</td>
+            </tr>`;
+        });
+        tableRows += `
+            <tr style="font-weight: bold; border-top: 1px solid #000; font-size: 9pt;">
+                <td style="padding: 6px;" colspan="2">Total</td>
+                <td style="padding: 6px; text-align: right;">${fmtMoneyNex(totOriginal)}</td>
+                <td style="padding: 6px; text-align: right;">${fmtMoneyNex(totCorrecao)}</td>
+                <td style="padding: 6px; text-align: right;">${fmtMoneyNex(totGeral)}</td>
+            </tr>`;
+    }
+
     const tableHtml = `
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 9pt;">
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 9pt;">
             <thead>
                 <tr style="border-bottom: 1px solid #000; text-align: left;">
-                    <th style="padding: 4px;">Vencimento</th>
-                    <th style="padding: 4px;">Documento</th>
-                    <th style="padding: 4px;">Tit/Parc.</th>
-                    <th style="padding: 4px;">TC</th>
-                    <th style="padding: 4px;">Id</th>
-                    <th style="padding: 4px;">Sld. Corrigido</th>
-                    <th style="padding: 4px;">Dias</th>
-                    <th style="padding: 4px;">Acréscimo</th>
-                    <th style="padding: 4px;">Total</th>
+                    <th style="padding: 4px 6px;">Vencimento da parcela</th>
+                    <th style="padding: 4px 6px; text-align: center;">Dias em atraso</th>
+                    <th style="padding: 4px 6px; text-align: right;">Valor original</th>
+                    <th style="padding: 4px 6px; text-align: right;">Correção</th>
+                    <th style="padding: 4px 6px; text-align: right;">Valor atualizado</th>
                 </tr>
             </thead>
             <tbody>
                 ${tableRows}
             </tbody>
-        </table>
-        
-        <div style="font-weight: bold; text-align: center; margin-bottom: 2rem; font-size: 10pt;">
-            Total Saldo Corrigido ${totCorrigido.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
-            &nbsp;&nbsp;&nbsp;Total Acréscimos ${totAcrescimo.toLocaleString('pt-BR', {minimumFractionDigits:2})} 
-            &nbsp;&nbsp;&nbsp;Total ${totGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}
-        </div>`;
+        </table>`;
 
     const templateStr = localStorage.getItem('crm_docpadrao_carta');
     let docHtml = '';
