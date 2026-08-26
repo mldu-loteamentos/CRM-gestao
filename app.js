@@ -4228,34 +4228,6 @@ document.addEventListener("click", function(e) {
     let sumTitles = 0, sumTotal = 0;
     let sumBracket30 = 0, sumBracket60 = 0, sumBracket90 = 0, sumBracket120 = 0, sumBracketAbove120 = 0;
 
-    // Carregar nome_usual do cache de customizacoes (localStorage ou EmpresasState)
-    let _customCache = null;
-    try {
-      const raw = localStorage.getItem('crm_empresas_custom');
-      if (raw) _customCache = JSON.parse(raw);
-    } catch(e) {}
-    if (!_customCache && window.EmpresasState && EmpresasState.customFields) _customCache = EmpresasState.customFields;
-
-    const getShortName = (compId) => {
-      // 1. localStorage (fonte mais confiável)
-      if (_customCache) {
-        const custom = _customCache[String(compId)];
-        if (custom && custom.nome_usual && custom.nome_usual.trim()) return custom.nome_usual.trim().toUpperCase();
-      }
-      // 2. EmpresasState.customFields por índice numérico
-      if (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[compId]) {
-        const n = EmpresasState.customFields[compId].nome_usual;
-        if (n && n.trim()) return n.trim().toUpperCase();
-      }
-      // 3. AppState.companies
-      if (AppState.companies) {
-        const comp = AppState.companies.find(c => Number(c.id) === Number(compId));
-        if (comp && comp.nome_usual && comp.nome_usual.trim()) return comp.nome_usual.trim().toUpperCase();
-      }
-      return getCompanyName(compId);
-    };
-
-
     Object.values(subjudiceCompanySummary).forEach(summary => {
       const clientCount = summary.clientIds.size;
       if (clientCount === 0) return;
@@ -4297,8 +4269,6 @@ document.addEventListener("click", function(e) {
         `;
       };
 
-      const shortName = getShortName(summary.id);
-      const fullName = summary.name;
       const hasCostCenters = Object.keys(summary.costCenters).length > 0;
       const toggleHtml = hasCostCenters
         ? `<span class="cost-center-toggle" onclick="toggleCostCenters('scc-rows-${summary.id}', this)" title="Expandir Empreendimentos" style="cursor:pointer; margin-right: 6px;"><i data-lucide="chevron-right" style="width: 14px;"></i></span>`
@@ -4315,14 +4285,9 @@ document.addEventListener("click", function(e) {
       tr.onmouseleave = () => tr.style.backgroundColor = "#f1f5f9";
       tr.innerHTML = `
         <td style="text-align: center; color: #64748b; font-weight: 500;">${summary.id}</td>
-        <td style="text-align: left;">
-          <div style="display: flex; align-items: center;">
+        <td style="text-align: left; display: flex; align-items: center;">
             ${toggleHtml}
-            <div>
-              <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.3px;">${shortName}</div>
-              ${shortName !== fullName ? `<div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">${fullName}</div>` : ''}
-            </div>
-          </div>
+            <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">${summary.name}</div>
         </td>
         <td style="text-align: center;">
             <div style="display: inline-flex; align-items: center; justify-content: center; background: #f1f5f9; color: #475569; font-weight: 700; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">
@@ -23320,15 +23285,35 @@ window.openAdvFiltersModal = function(context = 'fila') {
             const faseContainer = document.getElementById('adv-pills-fase-processual');
             if (faseContainer) {
                 const selectedFases = window.advFilters.faseProcessual || [];
-                const names = new Set((window.EtapasJudiciaisState || []).map(e => String(e.nome || e.name || '').trim()).filter(Boolean));
-                names.add('Sem Fase');
+                const etapas = [...(window.EtapasJudiciaisState || [])];
+                etapas.forEach((e, i) => { if (typeof e.order === 'undefined') e.order = i * 10; });
+                const sortedEtapas = etapas.sort((a, b) => (a.order || 0) - (b.order || 0));
+                const orderedNames = [];
+                const seenNames = new Set();
+                const pushNome = (nome) => {
+                    const n = String(nome || '').trim();
+                    if (!n) return;
+                    const key = n.toUpperCase();
+                    if (seenNames.has(key)) return;
+                    seenNames.add(key);
+                    orderedNames.push(n);
+                };
+                const walk = (parentId) => {
+                    sortedEtapas.filter(e => (e.parentId || null) === parentId).forEach(e => {
+                        pushNome(e.nome || e.name);
+                        walk(e.id);
+                    });
+                };
+                walk(null);
+                sortedEtapas.forEach(e => pushNome(e.nome || e.name));
                 (window.rawClientList || []).forEach(c => {
                     if (c.subjudice !== 'S' && c.subjudice !== true) return;
                     const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : null;
-                    if (info && info.fase) names.add(String(info.fase).trim());
+                    if (info && info.fase && info.fase !== 'Sem Fase') pushNome(info.fase);
                 });
+                pushNome('Sem Fase');
                 let html = `<div class="adv-pill ${selectedFases.length === 0 ? 'active' : ''}" data-value="">Todos</div>`;
-                Array.from(names).sort((a, b) => a.localeCompare(b, 'pt-BR')).forEach(nome => {
+                orderedNames.forEach(nome => {
                     const active = selectedFases.some(v => String(v).trim().toUpperCase() === nome.toUpperCase()) ? 'active' : '';
                     html += `<div class="adv-pill ${active}" data-value="${nome.replace(/"/g, '&quot;')}">${nome}</div>`;
                 });
