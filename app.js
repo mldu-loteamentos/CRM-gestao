@@ -1344,6 +1344,8 @@ async function processSuccessfulLogin(loggedUser) {
     }
 
     document.getElementById("login-modal-overlay").classList.remove("active");
+    const loginVideo = document.getElementById("login-bg-video");
+    if (loginVideo) loginVideo.pause();
     renderUserSession();
     await initializeApplication();
   } catch (err) {
@@ -1363,6 +1365,8 @@ async function checkAuthentication() {
   if (!user) {
     const overlay = document.getElementById("login-modal-overlay");
     overlay.classList.add("active");
+    const loginVideo = document.getElementById("login-bg-video");
+    if (loginVideo) loginVideo.play().catch(() => {});
     
     const authConfig = MouraAuth.getAuthConfig();
     const btn = document.getElementById("btn-submit-login");
@@ -25045,6 +25049,18 @@ window.gerarMapaJuridicoPDF = async function() {
     let container1 = null;
     let container2 = null;
     try {
+        let snapshots = [];
+        try {
+            if (window.firebaseCollections && window.firebaseDb) {
+                const snapRef = window.firebaseCollections.collection(window.firebaseDb, 'inadimplencia_snapshots');
+                const q = window.firebaseCollections.query(snapRef, window.firebaseCollections.orderBy('date', 'asc'));
+                const fbDocs = await window.firebaseCollections.getDocs(q);
+                fbDocs.forEach(d => { const data = d.data(); if (data) snapshots.push(data); });
+            }
+        } catch (snapErr) {
+            console.warn('Mapa jurídico: snapshots indisponíveis', snapErr);
+        }
+
         const prefixMap = {};
         const nameMap = {};
         const allStages = [...(window.EtapasJudiciaisState || [])].sort((a,b) => (a.order || 0) - (b.order || 0));
@@ -25180,9 +25196,7 @@ window.gerarMapaJuridicoPDF = async function() {
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[ch]));
         const fmtInt = (val) => Math.round(Number(val) || 0).toLocaleString('pt-BR');
-        const fmtPct = (val, total) => (total > 0 ? ((val / total) * 100).toFixed(1).replace('.', ',') : '0,0') + '%';
         const clientValue = (c) => (c.overdueValue || 0) + (c.overdueCharges || 0);
-        const clientTitle = (c) => String((c.billIds && c.billIds[0]) || '').replace(/^B-/, '').split('-')[0] || '-';
         const empLabel = (ccId) => {
             const id = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(ccId) : String(ccId || 'N/D');
             const rawName = (typeof getCostCenterName === 'function' ? getCostCenterName(ccId) : '') || '';
@@ -25216,104 +25230,313 @@ window.gerarMapaJuridicoPDF = async function() {
         });
         const empSorted = Object.values(empMap).map(e => ({ ...e, titles: e.titles.size })).sort((a, b) => b.value - a.value);
 
-        const clientSorted = [...generalList]
-            .map(c => ({ title: clientTitle(c), name: (c.customerName || '').toUpperCase(), value: clientValue(c) }))
-            .sort((a, b) => b.value - a.value);
-
-        const top5PlusOthers = (items, nameKey) => {
-            const top = items.slice(0, 5);
-            const rest = items.slice(5);
-            const rows = top.map(item => ({ ...item, isOther: false }));
-            if (rest.length) {
-                rows.push({
-                    [nameKey]: 'OUTROS',
-                    title: '—',
-                    titles: rest.reduce((s, i) => s + (i.titles || 0), 0),
-                    value: rest.reduce((s, i) => s + (i.value || 0), 0),
-                    isOther: true
-                });
-            }
-            return rows;
+        const pad2 = n => String(n).padStart(2, '0');
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+        const labelDM = (iso) => {
+            const p = String(iso || '').slice(0, 10).split('-');
+            return p.length === 3 ? `${p[2]}/${p[1]}` : String(iso || '');
         };
-        const empRows = top5PlusOthers(empSorted, 'name');
-        const clientRows = top5PlusOthers(clientSorted, 'name');
+        const isoFromAny = (dStr) => {
+            if (!dStr) return '';
+            const d = parseSafeDate(dStr);
+            if (!d || isNaN(d.getTime())) return '';
+            return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+        };
+        const sjVal = (s) => Number(s && s.subjudice_value) || 0;
+        const sjCli = (s) => Number((s && (s.subjudice_customers != null ? s.subjudice_customers : s.subjudice_count)) || 0);
 
-        const th = (label, align) => `<th style="text-align:${align || 'left'};padding:5px 6px;font-size:8px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;">${label}</th>`;
-        const buildQuadro = (title, titleColor, tableHtml) => `
-            <div style="flex:1;min-width:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                <div style="padding:8px 10px;font-weight:800;font-size:12px;color:${titleColor};">${esc(title)}</div>
-                ${tableHtml}
-            </div>`;
-        const zebra = (i) => i % 2 === 0 ? '#fff' : '#f8fafc';
-        const footTd = 'padding:6px 8px;border-top:1.5px solid #ea580c;font-weight:800;color:#ea580c;font-size:10px;';
+        const closeSnaps = snapshots
+            .filter(s => s && s.is_month_close)
+            .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+            .slice(-12);
+        const lastClose = closeSnaps.length ? closeSnaps[closeSnaps.length - 1] : null;
+        const closeDateStr = lastClose && lastClose.date ? String(lastClose.date).slice(0, 10) : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`;
+
+        const chartPoints = closeSnaps.map(s => ({
+            date: String(s.date).slice(0, 10),
+            label: labelDM(s.date),
+            value: sjVal(s),
+            clients: sjCli(s),
+            isToday: false
+        }));
+        if (!chartPoints.some(p => p.date === todayStr)) {
+            chartPoints.push({ date: todayStr, label: labelDM(todayStr), value: totalValue, clients: totalClients, isToday: true });
+        } else {
+            const p = chartPoints.find(x => x.date === todayStr);
+            p.value = totalValue;
+            p.clients = totalClients;
+            p.isToday = true;
+        }
+
+        const fmtM = (v) => (Number(v) / 1000000).toFixed(3).replace('.', ',');
+        const juridicoBarChart = (data, labels, isVal) => {
+            if (!data.length) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem histórico ainda — as colunas aparecem conforme a base for carregada.</div>';
+            const maxVal = Math.max(...data, 1);
+            const W = 500, H = 118, padTop = 28, padBot = 18, padSide = 28;
+            const n = data.length;
+            const stepX = (W - padSide * 2) / Math.max(n - 1, 1);
+            const barWidth = Math.min(22, n === 1 ? 28 : stepX * 0.55);
+            const closeIdx = Math.max(0, n - (chartPoints[n - 1] && chartPoints[n - 1].isToday && n > 1 ? 2 : 1));
+            const todayIdx = n - 1;
+            const firstVal = data[closeIdx];
+            const lastVal = data[todayIdx];
+            const diff = lastVal - firstVal;
+            const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : '0.0';
+            const sign = diff > 0 ? '+' : '';
+            const formatVal = (v) => isVal ? fmtM(v) : String(Math.round(v));
+            const xAt = (i) => padSide + i * stepX;
+            let bars = '', texts = '', xLabels = '';
+            data.forEach((v, i) => {
+                const x = xAt(i);
+                const barH = (v / maxVal) * (H - padTop - padBot);
+                const y = H - padBot - barH;
+                const isClose = i === closeIdx && !(chartPoints[i] && chartPoints[i].isToday && n === 1);
+                const color = isClose ? '#94a3b8' : (v <= firstVal ? '#4ade80' : '#f87171');
+                bars += `<rect x="${x - barWidth / 2}" y="${y}" width="${barWidth}" height="${Math.max(barH, 1)}" fill="${color}" rx="2"/>`;
+                texts += `<text x="${x}" y="${y - 4}" text-anchor="middle" font-size="8" font-weight="700" fill="#334155">${formatVal(v)}</text>`;
+                xLabels += `<text x="${x}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#64748b">${labels[i]}</text>`;
+            });
+            let arrow = '';
+            if (n > 1) {
+                const x1 = xAt(closeIdx), x2 = xAt(todayIdx), ay = 10;
+                const diffText = isVal ? `${sign}${fmtM(diff)} | ${sign}${pct}%` : `${sign}${Math.round(diff)} | ${sign}${pct}%`;
+                arrow = `<path d="M ${x1} ${ay + 5} L ${x1} ${ay} L ${x2} ${ay} L ${x2} ${ay + 5}" fill="none" stroke="#0f1e17" stroke-width="1.4"/>
+                    <path d="M ${x2 - 3} ${ay + 2} L ${x2} ${ay + 5} L ${x2 + 3} ${ay + 2}" fill="none" stroke="#0f1e17" stroke-width="1.4"/>
+                    <rect x="${(x1 + x2) / 2 - 42}" y="${ay - 9}" width="84" height="14" fill="#fff"/>
+                    <text x="${(x1 + x2) / 2}" y="${ay + 2}" text-anchor="middle" font-size="9" font-weight="800" fill="#0f1e17">${diffText}</text>`;
+            }
+            return `<svg width="${W}" height="${H}" style="overflow:visible;display:block;margin:0 auto;">
+                ${arrow}
+                <line x1="0" y1="${H - padBot}" x2="${W}" y2="${H - padBot}" stroke="#e2e8f0" stroke-width="1.5"/>
+                ${bars}${texts}${xLabels}
+            </svg>`;
+        };
+
+        const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
+        const closeDetail = (lastClose && lastClose.subjudice_detail) || {};
+        const closeClients = {};
+        (closeDetail.clients || []).forEach(c => { closeClients[String(c.id)] = c; });
+        const currentById = {};
+        generalList.forEach(c => {
+            const id = String(c.customerId);
+            const cc = String((typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || 'N/D');
+            if (!currentById[id]) currentById[id] = { id, name: c.customerName || `Cliente ${id}`, value: 0, cc, titles: 0 };
+            currentById[id].value += clientValue(c);
+            currentById[id].titles += (c.billIds && c.billIds.length) ? c.billIds.length : 1;
+        });
+        const nameOf = (id) => {
+            if (currentById[id] && currentById[id].name) return currentById[id].name;
+            if (closeClients[id] && closeClients[id].name) return closeClients[id].name;
+            const raw = (window.rawClientList || []).find(c => String(c.customerId) === String(id));
+            return (raw && raw.customerName) || `Cliente ${id}`;
+        };
+        const ccOf = (id, fallback) => {
+            if (currentById[id]) return currentById[id].cc;
+            if (closeClients[id] && closeClients[id].cc) return String(closeClients[id].cc);
+            return String(fallback || 'N/D');
+        };
+        const afterClose = (dStr) => {
+            const iso = isoFromAny(dStr);
+            return iso && iso > closeDateStr && iso <= todayStr;
+        };
+
+        const movers = {};
+        const touchMover = (id) => {
+            const k = String(id);
+            if (!movers[k]) movers[k] = { id: k, name: nameOf(k).toUpperCase(), entrou: 0, saiu: 0, cc: ccOf(k) };
+            return movers[k];
+        };
+        Object.values(currentById).forEach(c => {
+            const mem = subjudiceHistory[c.id] || subjudiceHistory[Number(c.id)];
+            const entered = (mem && afterClose(mem.entryDate)) || (lastClose && closeDetail.clients && !closeClients[c.id]);
+            if (entered) touchMover(c.id).entrou += c.value;
+        });
+        Object.keys(subjudiceHistory).forEach(id => {
+            const mem = subjudiceHistory[id];
+            if (!mem || !mem.exitDate || currentById[String(id)]) return;
+            if (!afterClose(mem.exitDate)) return;
+            const m = touchMover(id);
+            m.saiu += Number((closeClients[String(id)] && closeClients[String(id)].value) || 0);
+            m.cc = ccOf(id, m.cc);
+        });
+        Object.values(movers).forEach(m => { m.total = m.entrou - m.saiu; });
+
+        const hasCloseCc = Array.isArray(closeDetail.cost_centers) && closeDetail.cost_centers.length > 0;
+        const empMove = {};
+        const ensureEmp = (cc, name) => {
+            const k = String(cc || 'N/D');
+            if (!empMove[k]) empMove[k] = { id: k, name: name || empLabel(k), close: 0, saiu: 0, entrou: 0, hoje: 0 };
+            if (name) empMove[k].name = name;
+            return empMove[k];
+        };
+        empSorted.forEach(e => { ensureEmp(e.id, e.name).hoje = e.value; });
+        (closeDetail.cost_centers || []).forEach(e => { ensureEmp(e.id, e.name).close = Number(e.value) || 0; });
+        Object.values(movers).forEach(m => {
+            const row = ensureEmp(m.cc);
+            row.entrou += m.entrou;
+            row.saiu += m.saiu;
+        });
+        if (!hasCloseCc) {
+            Object.values(empMove).forEach(e => { e.close = e.hoje - e.entrou + e.saiu; });
+        }
+
+        const empFlowSorted = Object.values(empMove).sort((a, b) => b.hoje - a.hoje);
+        const empTop = empFlowSorted.slice(0, 10);
+        const empRest = empFlowSorted.slice(10);
+        const empFlowRows = empTop.map(e => ({ ...e, isOther: false }));
+        if (empRest.length) {
+            empFlowRows.push({
+                name: 'OUTROS', isOther: true,
+                close: empRest.reduce((s, e) => s + e.close, 0),
+                saiu: empRest.reduce((s, e) => s + e.saiu, 0),
+                entrou: empRest.reduce((s, e) => s + e.entrou, 0),
+                hoje: empRest.reduce((s, e) => s + e.hoje, 0)
+            });
+        }
+        const empFlowTot = empFlowSorted.reduce((acc, e) => ({
+            close: acc.close + e.close, saiu: acc.saiu + e.saiu, entrou: acc.entrou + e.entrou, hoje: acc.hoje + e.hoje
+        }), { close: 0, saiu: 0, entrou: 0, hoje: 0 });
+
+        const moverList = Object.values(movers).sort((a, b) => (Math.abs(b.total) || (b.entrou + b.saiu)) - (Math.abs(a.total) || (a.entrou + a.saiu)));
+        const top10 = moverList.slice(0, 10);
+        const others = moverList.slice(10);
+        const clientMoveRows = top10.map(m => ({ ...m, isOther: false }));
+        if (others.length) {
+            clientMoveRows.push({
+                name: 'OUTROS', isOther: true,
+                entrou: others.reduce((s, m) => s + m.entrou, 0),
+                saiu: others.reduce((s, m) => s + m.saiu, 0),
+                total: others.reduce((s, m) => s + m.total, 0)
+            });
+        }
+        const moveTot = moverList.reduce((acc, m) => ({
+            entrou: acc.entrou + m.entrou, saiu: acc.saiu + m.saiu, total: acc.total + m.total
+        }), { entrou: 0, saiu: 0, total: 0 });
+
+        try {
+            if (window.firebaseCollections && window.firebaseDb) {
+                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'inadimplencia_snapshots', todayStr);
+                window.firebaseCollections.setDoc(docRef, {
+                    date: todayStr,
+                    subjudice_count: totalTitles,
+                    subjudice_customers: totalClients,
+                    subjudice_value: totalValue,
+                    subjudice_detail: {
+                        clients: Object.values(currentById),
+                        cost_centers: empSorted.map(e => ({ id: String(e.id), name: e.name, titles: e.titles, value: e.value }))
+                    }
+                }, { merge: true }).catch(() => {});
+            }
+        } catch (persistErr) { /* histórico cresce na próxima geração */ }
+
+        const th = (label, align, extra) => `<th style="text-align:${align || 'left'};padding:4px 6px;font-size:8px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;${extra || ''}">${label}</th>`;
+        const orangeZebra = (i) => i % 2 === 0 ? '#fff' : '#ffedd5';
+        const signed = (v) => {
+            const n = Number(v) || 0;
+            const txt = (n < 0 ? '-' : '') + fmtInt(Math.abs(n));
+            const color = n < 0 ? '#16a34a' : (n > 0 ? '#c2410c' : '#64748b');
+            return `<span style="color:${color};font-weight:700;">${txt}</span>`;
+        };
 
         const companyTable = `
             <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
                 <colgroup><col style="width:12%"><col style="width:48%"><col style="width:16%"><col style="width:24%"></colgroup>
-                <thead><tr style="background:#e0f2fe;">${th('ID','center')}${th('EMPRESA')}${th('TÍTULOS','center')}${th('R$ ATUALIZADO','right')}</tr></thead>
+                <thead><tr style="background:#ea580c;">${th('ID','center')}${th('EMPRESA')}${th('TÍTULOS','center')}${th('ATUALIZADO','right')}</tr></thead>
                 <tbody>
-                    ${companyRows.map((r, i) => `<tr style="background:${zebra(i)};">
-                        <td style="padding:5px 6px;text-align:center;color:#64748b;">${esc(r.id)}</td>
-                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#065f46;" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:5px 6px;text-align:center;">${r.titles}</td>
-                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
+                    ${companyRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:5px 6px;text-align:center;color:#9a3412;">${esc(r.id)}</td>
+                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#c2410c;" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:5px 6px;text-align:center;color:#7c2d12;">${r.titles}</td>
+                        <td style="padding:5px 6px;text-align:right;font-weight:800;color:#9a3412;white-space:nowrap;">${fmtInt(r.value)}</td>
                     </tr>`).join('')}
-                    <tr>
-                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;"></td>
-                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;font-weight:800;color:#ea580c;font-size:10px;">Total</td>
-                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
-                        <td style="padding:6px 8px;border-top:1.5px solid #ea580c;text-align:right;font-weight:800;color:#ea580c;font-size:10px;white-space:nowrap;">${fmtInt(totalValue)}</td>
+                    <tr style="background:#fff7ed;">
+                        <td style="padding:6px 8px;border-top:2px solid #fdba74;"></td>
+                        <td style="padding:6px 8px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;font-size:10px;">Total</td>
+                        <td style="padding:6px 8px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
+                        <td style="padding:6px 8px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;font-size:10px;white-space:nowrap;">${fmtInt(totalValue)}</td>
                     </tr>
                 </tbody>
             </table>`;
 
-        const empTable = `
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
-                <colgroup><col style="width:46%"><col style="width:14%"><col style="width:22%"><col style="width:18%"></colgroup>
-                <thead><tr style="background:#e0f2fe;">${th('EMPREENDIMENTO')}${th('TÍTULOS','center')}${th('VALOR','right')}${th('PESO %','right')}</tr></thead>
+        const empFlowTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
+                <colgroup><col style="width:36%"><col style="width:16%"><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
+                <thead><tr style="background:#ea580c;">${th('EMPREENDIMENTO')}${th('FECHAMENTO','right')}${th('SAIU','right')}${th('ENTROU','right')}${th('HOJE','right')}</tr></thead>
                 <tbody>
-                    ${empRows.map((r, i) => `<tr style="background:${zebra(i)};">
-                        <td style="padding:5px 6px;${ellipsisTd}${r.isOther ? 'font-weight:700;color:#64748b;' : 'font-weight:700;color:#0f172a;'}" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:5px 6px;text-align:center;">${r.titles}</td>
-                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
-                        <td style="padding:5px 6px;text-align:right;color:#475569;">${fmtPct(r.value, totalValue)}</td>
-                    </tr>`).join('')}
-                    <tr>
-                        <td style="${footTd}">Total</td>
-                        <td style="${footTd}text-align:center;">${totalTitles}</td>
-                        <td style="${footTd}text-align:right;white-space:nowrap;">${fmtInt(totalValue)}</td>
-                        <td style="${footTd}text-align:right;">100,0%</td>
+                    ${empFlowRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:${r.isOther ? '#64748b' : '#9a3412'};" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.close)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:#16a34a;font-weight:700;">${fmtInt(r.saiu)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:#c2410c;font-weight:700;">${fmtInt(r.entrou)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;font-weight:800;">${fmtInt(r.hoje)}</td>
+                    </tr>`).join('') || `<tr><td colspan="5" style="padding:12px;text-align:center;color:#94a3b8;">Sem dados por empreendimento</td></tr>`}
+                    <tr style="background:#fff7ed;">
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.close)}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.saiu)}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.entrou)}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.hoje)}</td>
                     </tr>
                 </tbody>
             </table>`;
 
-        const clientTable = `
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
-                <colgroup><col style="width:16%"><col style="width:44%"><col style="width:22%"><col style="width:18%"></colgroup>
-                <thead><tr style="background:#e0f2fe;">${th('TÍTULO')}${th('CLIENTE')}${th('VALOR','right')}${th('PESO %','right')}</tr></thead>
+        const clientMoveTable = `
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
+                <colgroup><col style="width:46%"><col style="width:18%"><col style="width:18%"><col style="width:18%"></colgroup>
+                <thead><tr style="background:#ea580c;">${th('CLIENTE')}${th('ENTROU','right')}${th('SAIU','right')}${th('TOTAL','right')}</tr></thead>
                 <tbody>
-                    ${clientRows.map((r, i) => `<tr style="background:${zebra(i)};">
-                        <td style="padding:5px 6px;white-space:nowrap;">${esc(r.isOther ? '—' : r.title)}</td>
-                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#0f172a;" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:5px 6px;text-align:right;font-weight:700;white-space:nowrap;">${fmtInt(r.value)}</td>
-                        <td style="padding:5px 6px;text-align:right;color:#475569;">${fmtPct(r.value, totalValue)}</td>
-                    </tr>`).join('')}
-                    <tr>
-                        <td colspan="2" style="${footTd}">Total</td>
-                        <td style="${footTd}text-align:right;white-space:nowrap;">${fmtInt(totalValue)}</td>
-                        <td style="${footTd}text-align:right;">100,0%</td>
+                    ${clientMoveRows.length ? clientMoveRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
+                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:${r.isOther ? '#64748b' : '#9a3412'};" title="${esc(r.name)}">${esc(r.name)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.entrou)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.saiu)}</td>
+                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${signed(r.total)}</td>
+                    </tr>`).join('') : `<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8;">Sem entradas ou saídas desde o fechamento (${labelDM(closeDateStr)})</td></tr>`}
+                    <tr style="background:#fff7ed;">
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(moveTot.entrou)}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(moveTot.saiu)}</td>
+                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;">${signed(moveTot.total)}</td>
                     </tr>
                 </tbody>
             </table>`;
 
-        const nowLabel = `${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`;
+        const svgAlert = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
+        const svgUsers = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+        const svgFile = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`;
+        const svgClock = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
+        const kpiBox = (bg, fg, icon, label, value) => `
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;">
+                <div>
+                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;text-transform:uppercase;">${label}</div>
+                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${value}</div>
+                </div>
+                <div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${bg};color:${fg};">${icon}</div>
+            </div>`;
+
+        const quadro = (title, body) => `
+            <div style="min-width:0;height:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;">
+                <div style="background:#ea580c;color:#fff;padding:6px 10px;font-weight:800;font-size:10px;letter-spacing:0.4px;text-transform:uppercase;">${esc(title)}</div>
+                <div style="flex:1;min-height:0;padding:6px 8px;">${body}</div>
+            </div>`;
+
+        const chartLabels = chartPoints.map(p => p.label);
+        const chartBody = `
+            <div style="display:flex;flex-direction:column;gap:4px;height:100%;">
+                <div style="font-size:8px;font-weight:800;color:#475569;text-transform:uppercase;text-align:center;">Valores (em milhões)</div>
+                ${juridicoBarChart(chartPoints.map(p => p.value), chartLabels, true)}
+                <div style="font-size:8px;font-weight:800;color:#475569;text-transform:uppercase;text-align:center;margin-top:2px;">Clientes</div>
+                ${juridicoBarChart(chartPoints.map(p => p.clients), chartLabels, false)}
+            </div>`;
+
+        const nowLabel = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`;
         const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
 
         container1 = document.createElement("div");
-        container1.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;background:#fff;padding:18px 20px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;";
+        container1.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;height:793px;background:#fff;padding:14px 18px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;display:flex;flex-direction:column;";
         container1.id = "mapa-juridico-pdf-container-1";
         container1.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:8px;flex-shrink:0;">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <img src="${logoUrl}" alt="Logo" style="height:32px;object-fit:contain;">
                     <div>
@@ -25322,28 +25545,17 @@ window.gerarMapaJuridicoPDF = async function() {
                     </div>
                 </div>
             </div>
-            <div style="display:flex;gap:10px;margin-bottom:14px;">
-                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">VALOR EM ATRASO</div>
-                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">R$ ${fmtInt(totalValue)}</div>
-                </div>
-                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">CLIENTES EM ATRASO</div>
-                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${totalClients}</div>
-                </div>
-                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">TÍTULOS VENCIDOS</div>
-                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${totalTitles}</div>
-                </div>
-                <div style="flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;">ATRASO MÉDIO</div>
-                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${avgDelay} dias</div>
-                </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;flex-shrink:0;">
+                ${kpiBox('#fee2e2','#ef4444', svgAlert, 'VALOR EM ATRASO', fmtInt(totalValue))}
+                ${kpiBox('#fef3c7','#f59e0b', svgUsers, 'CLIENTES EM ATRASO', totalClients)}
+                ${kpiBox('#dcfce7','#10b981', svgFile, 'TÍTULOS VENCIDOS', totalTitles)}
+                ${kpiBox('#e0f2fe','#3b82f6', svgClock, 'ATRASO MÉDIO', avgDelay + ' dias')}
             </div>
-            <div style="display:flex;gap:10px;align-items:flex-start;">
-                ${buildQuadro('POR EMPRESA', '#065f46', companyTable)}
-                ${buildQuadro('TOP 5 EMPREENDIMENTOS', '#0f172a', empTable)}
-                ${buildQuadro('TOP 5 CLIENTES', '#ea580c', clientTable)}
+            <div style="flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;">
+                ${quadro('Por empresa', companyTable)}
+                ${quadro('Jurídico — 2º dia útil (12 meses) × hoje', chartBody)}
+                ${quadro('Empreendimento — fechamento × movimento do mês', empFlowTable)}
+                ${quadro('Top 10 clientes — entrou / saiu no mês', clientMoveTable)}
             </div>
         `;
 

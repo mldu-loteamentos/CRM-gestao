@@ -163,6 +163,35 @@ window.ConstrucaoApp = {
         return (withPhotos || candidates[0] || {}).id || null;
     },
 
+    resolveVistoriaObservation(check) {
+        const clean = (v) => {
+            const s = String(v == null ? '' : v).trim();
+            if (!s || s === '-' || /^nenhuma informa/i.test(s)) return '';
+            if (/respostas do cliente/i.test(s)) return '';
+            return s;
+        };
+        const fromForm = (doc) => {
+            if (!doc) return '';
+            const rf = doc.respostasFormulario || {};
+            return clean(rf.observacoes || rf.observacao || rf.obs);
+        };
+        const fromDetails = (text) => {
+            if (!text) return '';
+            const m = String(text).match(/-\s*Observa[cç][oõ]es(?:\s+Adicionais)?:\s*([\s\S]*?)(?=\n-\s|\n*$)/i);
+            return m ? clean(m[1]) : '';
+        };
+        const allDocs = this.allMatchedDocs || [];
+        const linkedId = this.findLinkedVistoriaId(check, allDocs);
+        const linked = linkedId ? allDocs.find(d => d.id === linkedId) : null;
+        return fromForm(check)
+            || fromForm(linked)
+            || clean(check.observations)
+            || clean(check.observacoes)
+            || fromDetails(check.detailsText)
+            || fromDetails(linked && linked.detailsText)
+            || '';
+    },
+
     async fetchStoragePhotos(check, allDocs) {
         const vId = this.findLinkedVistoriaId(check, allDocs);
         if (!vId || !window.firebaseStorage || !window.firebaseCollections) return [];
@@ -438,6 +467,9 @@ function renderConstrucaoHistory(checks) {
         const deleteBtn = isAppVistoria
             ? ''
             : `<button onclick="window.deleteNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; color: #dc2626; border-color: #fecaca;" title="Excluir"><i data-lucide="trash" style="width:14px; height:14px;"></i></button>`;
+        const editBtn = isAppVistoria
+            ? ''
+            : `<button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>`;
 
         html += `
         <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -449,12 +481,15 @@ function renderConstrucaoHistory(checks) {
                 </span>
             </td>
             <td style="padding: 12px; font-size: 0.8rem; color: #64748b; line-height: 1.3;">
-                ${check.observations ? check.observations.replace(/\\n/g, '<br>') : '-'}
+                ${(() => {
+                    const obs = window.ConstrucaoApp.resolveVistoriaObservation(check);
+                    return obs ? obs.replace(/\\n/g, '<br>').replace(/\n/g, '<br>') : '-';
+                })()}
             </td>
             <td style="padding: 12px; text-align: right; white-space: nowrap;">
                 ${obsBtn}
                 ${fileLink}
-                <button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>
+                ${editBtn}
                 ${deleteBtn}
             </td>
         </tr>
@@ -470,26 +505,35 @@ function renderConstrucaoHistory(checks) {
 }
 
 window.showVistoriaInfo = function(id) {
-    const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
-    if (!check) return;
+    const rawCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
+    if (!rawCheck) return;
+    const allDocs = window.ConstrucaoApp.allMatchedDocs || [];
+    const linkedId = window.ConstrucaoApp.findLinkedVistoriaId(rawCheck, allDocs);
+    const linked = linkedId ? allDocs.find(d => d.id === linkedId) : null;
+    const check = {
+        ...rawCheck,
+        respostasFormulario: rawCheck.respostasFormulario || (linked && linked.respostasFormulario) || null
+    };
     
-    let text = check.detailsText || check.observations || "Nenhuma informação adicional.";
+    let text = check.detailsText || '';
+    const savedObs = window.ConstrucaoApp.resolveVistoriaObservation(check);
     
     let hasCards = false;
     let cardsHtml = '';
     
-    if (text.includes("Respostas do Cliente:") || text.includes("Possui Água:")) {
+    if (text.includes("Respostas do Cliente:") || text.includes("Possui Água:") || check.respostasFormulario) {
         const extract = (key) => {
             const regex = new RegExp(`- ${key}:\\s*(.*?)(?:\\n|$)`, 'i');
             const match = text.match(regex);
             return match ? match[1].trim().toLowerCase() : null;
         };
         
-        const agua = extract("Possui Água");
-        const energia = extract("Possui Energia");
-        const entulho = extract("Possui Entulho");
-        const acesso = extract("Permite Acesso");
-        const estagio = extract("Estágio da Obra");
+        const rf = check.respostasFormulario || {};
+        const agua = extract("Possui Água") || (rf.possuiAgua ? String(rf.possuiAgua).toLowerCase() : null);
+        const energia = extract("Possui Energia") || (rf.possuiEnergia ? String(rf.possuiEnergia).toLowerCase() : null);
+        const entulho = extract("Possui Entulho") || (rf.possuiEntulho ? String(rf.possuiEntulho).toLowerCase() : null);
+        const acesso = extract("Permite Acesso") || (rf.permiteAcesso ? String(rf.permiteAcesso).toLowerCase() : null);
+        const estagio = extract("Estágio da Obra") || rf.estagioObra || null;
         
         if (agua || energia || entulho || acesso || estagio) {
             hasCards = true;
@@ -528,17 +572,62 @@ window.showVistoriaInfo = function(id) {
                        .replace(/- Possui Energia:.*?\n/g, '')
                        .replace(/- Possui Entulho:.*?\n/g, '')
                        .replace(/- Permite Acesso:.*?\n/g, '')
-                       .replace(/- Estágio da Obra:.*?(?:\n|$)/g, '');
+                       .replace(/- Estágio da Obra:.*?(?:\n|$)/g, '')
+                       .replace(/-\s*Observa[cç][oõ]es(?:\s+Adicionais)?:.*?(?:\n|$)/gi, '');
+        }
+    }
+
+    if (!hasCards && check.respostasFormulario) {
+        const rf = check.respostasFormulario;
+        const toVal = (v) => v ? String(v).trim().toLowerCase() : null;
+        const agua = toVal(rf.possuiAgua);
+        const energia = toVal(rf.possuiEnergia);
+        const entulho = toVal(rf.possuiEntulho);
+        const acesso = toVal(rf.permiteAcesso);
+        const estagio = rf.estagioObra;
+        if (agua || energia || entulho || acesso || estagio) {
+            hasCards = true;
+            const renderCard = (title, val, icon, color) => {
+                if (!val) return '';
+                const isSim = val === 'sim';
+                return `
+                <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; min-width: 120px;">
+                    <div style="color: #64748b; font-size: 0.8rem; font-weight: 600; margin-bottom: 8px; display:flex; align-items:center;"><i data-lucide="${icon}" style="width: 14px; margin-right: 4px; color: ${color};"></i> ${title}</div>
+                    <div style="${isSim ? 'color: #16a34a;' : 'color: #dc2626;'} font-weight: bold; font-size: 1.1rem;">
+                        ${isSim ? '✓ Sim' : '✗ Não'}
+                    </div>
+                </div>`;
+            };
+            cardsHtml = `
+            <div style="margin-bottom: 20px;">
+                <h4 style="margin: 0 0 15px 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="clipboard-list" style="width: 18px; color: #f97316;"></i> Respostas do Questionário
+                </h4>
+                <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                    ${renderCard('ÁGUA', agua, 'droplet', '#3b82f6')}
+                    ${renderCard('ENERGIA', energia, 'zap', '#eab308')}
+                    ${renderCard('ENTULHO', entulho, 'trash-2', '#f97316')}
+                    ${renderCard('ACESSO', acesso, 'door-open', '#8b5cf6')}
+                </div>
+                ${estagio ? `
+                <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="color: #64748b; font-size: 0.85rem; font-weight: 600; display:flex; align-items:center;"><i data-lucide="hammer" style="width: 16px; margin-right: 6px; color: #10b981;"></i> ESTÁGIO DA OBRA</div>
+                    <div style="font-weight: bold; font-size: 1.1rem; color: #10b981; text-transform: uppercase;">${String(estagio).replace(/_/g, ' ')}</div>
+                </div>` : ''}
+            </div>`;
         }
     }
     
     text = text.trim();
+    const obsText = savedObs || (text && text !== '-' ? text : '');
     let textHtml = '';
-    if (text && text !== '-') {
+    if (obsText) {
         textHtml = `
         <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
-            <strong style="display:block; margin-bottom: 8px; color: #475569; font-size: 0.9rem;">Observações Adicionais:</strong>
-            ${text.replace(/\n/g, '<br>')}
+            <strong style="display:block; margin-bottom: 8px; color: #475569; font-size: 0.9rem; display:flex; align-items:center; gap:6px;">
+                <i data-lucide="align-left" style="width:16px; height:16px; color:#64748b;"></i> Observações
+            </strong>
+            ${obsText.replace(/\n/g, '<br>')}
         </div>`;
     }
     
@@ -617,6 +706,10 @@ window.openNewConstrucaoModal = function(editId = null) {
         let editCheck = null;
         if (editId) {
             editCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === editId);
+            if (editCheck && window.ConstrucaoApp.isLinkVistoria(editCheck)) {
+                alert('Vistorias feitas in loco não podem ser editadas nesta tela.');
+                return;
+            }
         }
 
         const responsible = window.ConstrucaoApp.getResponsibleOperator(contractObj);
@@ -989,6 +1082,11 @@ window.saveNovaVistoria = async function() {
 };
 
 window.editNovaVistoria = function(id) {
+    const check = window.ConstrucaoApp.currentChecks.find(c => c.id === id);
+    if (check && window.ConstrucaoApp.isLinkVistoria(check)) {
+        alert('Vistorias feitas in loco não podem ser editadas nesta tela.');
+        return;
+    }
     window.openNewConstrucaoModal(id);
 };
 

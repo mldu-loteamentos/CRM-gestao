@@ -1724,6 +1724,32 @@ const SiengeApiService = {
         comp.aging[agingKey].value += b.value;
       });
       const uniqueCustomers = new Set(bills.map(b => b.customerId));
+
+      const sjClients = {};
+      const sjCenters = {};
+      bills.forEach(b => {
+        if (b.subjudice !== 'S') return;
+        const cid = String(b.customerId || '');
+        if (!cid) return;
+        if (!sjClients[cid]) {
+          sjClients[cid] = {
+            id: cid,
+            name: b.clientName || b.customerName || '',
+            value: 0,
+            titles: 0,
+            cc: String(b.costCenterId || (b.costCentersId && (Array.isArray(b.costCentersId) ? b.costCentersId[0] : b.costCentersId)) || 'N/D')
+          };
+        }
+        sjClients[cid].value += b.value || 0;
+        sjClients[cid].titles += 1;
+        const cc = sjClients[cid].cc;
+        if (!sjCenters[cc]) sjCenters[cc] = { id: cc, value: 0, titles: 0, clients: 0 };
+        sjCenters[cc].value += b.value || 0;
+        sjCenters[cc].titles += 1;
+      });
+      Object.values(sjClients).forEach(c => {
+        if (sjCenters[c.cc]) sjCenters[c.cc].clients += 1;
+      });
       
       const payload = {
         date: dateStr,
@@ -1735,7 +1761,12 @@ const SiengeApiService = {
         total_value: totalValue,
         avg_ticket: totalValue / bills.length,
         subjudice_count: subjudiceCount,
+        subjudice_customers: Object.keys(sjClients).length,
         subjudice_value: subjudiceValue,
+        subjudice_detail: {
+          clients: Object.values(sjClients),
+          cost_centers: Object.values(sjCenters)
+        },
         new_count: 0, // calculado no dashboard ao comparar com histórico
         recovered_count: 0, // calculado no dashboard ao comparar com histórico
         data_json: {

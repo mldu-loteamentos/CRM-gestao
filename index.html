@@ -373,14 +373,14 @@
       width: 100vw;
       height: 100vh;
       display: none;
-      align-items: center;
-      justify-content: center;
       z-index: 10000;
       font-family: 'Montserrat', 'Inter', sans-serif;
-      background: #003623; 
+      background: #ffffff;
     }
     .login-landing-page.active {
       display: flex;
+      flex-direction: row;
+      align-items: stretch;
     }
 
     /* Imagem de Fundo em tela cheia com escurecimento elegante */
@@ -570,7 +570,7 @@
 
 <body>
 
-  <!-- Landing Page Login (Minimalist Moura Leite Style) -->
+  <!-- Landing Page Login -->
   <div id="login-modal-overlay" class="login-landing-page active">
     
     <style>
@@ -580,47 +580,71 @@
         top: 0; left: 0; right: 0; bottom: 0;
         z-index: 99999;
         display: none;
-        background: url('https://images.unsplash.com/photo-1512917774080-9991f1c4c750?q=80&w=2070&auto=format&fit=crop') center/cover no-repeat;
+        background: #ffffff;
       }
       .login-landing-page.active {
         display: flex;
-        justify-content: center; /* Centered */
-        align-items: center;
+        flex-direction: row;
+        align-items: stretch;
+        justify-content: flex-start;
       }
+      .login-landing-page::before { display: none; }
 
-      .login-landing-page::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0, 0, 0, 0.4);
+      .login-pane-brand {
+        flex: 1 1 33.333%;
+        width: 33.333%;
+        max-width: 33.333%;
+        background: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 36px;
+        box-sizing: border-box;
+        z-index: 2;
+      }
+      .login-pane-video {
+        flex: 2 1 66.666%;
+        width: 66.666%;
+        max-width: 66.666%;
+        position: relative;
+        overflow: hidden;
+        background: #0f172a;
         z-index: 1;
+      }
+      .login-pane-video video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
 
       .login-center-card {
-        position: relative; /* REQUIRED for z-index to work */
-        background: #ffffff;
-        border-radius: 20px;
-        padding: 40px;
         width: 100%;
-        max-width: 400px;
-        z-index: 2;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        max-width: 360px;
+        background: transparent;
+        padding: 0;
+        box-shadow: none;
         display: flex;
         flex-direction: column;
         align-items: center;
       }
       
-      .login-center-card .ml-logo-text {
-        color: #105436;
-        text-align: center;
-      }
-
       .login-center-card .ml-logo-container {
         display: flex;
         flex-direction: column;
         align-items: center;
-        margin-bottom: 30px;
-        gap: 15px;
+        margin-bottom: 28px;
+        gap: 12px;
+        width: 100%;
+      }
+      .login-30-logo {
+        width: 100%;
+        max-width: 280px;
+        height: auto;
+        object-fit: contain;
+        display: block;
       }
 
       .login-input {
@@ -636,6 +660,7 @@
         color: #1e293b;
         transition: border-color 0.3s, box-shadow 0.3s;
         text-align: center;
+        box-sizing: border-box;
       }
       
       .login-input:focus {
@@ -672,64 +697,51 @@
         padding: 12px;
         border-radius: 8px;
         width: 100%;
+        box-sizing: border-box;
       }
 
-      .bottom-right-logo {
-        position: absolute;
-        bottom: 50px;
-        right: 60px;
-        z-index: 3;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-      }
-
-      @media (max-width: 768px) {
-        .login-center-card {
-          margin: 20px;
-          padding: 30px 20px;
+      @media (max-width: 900px) {
+        .login-landing-page.active {
+          flex-direction: column;
         }
-        .bottom-right-logo {
-          bottom: 30px;
-          right: auto;
-          left: 50%;
-          transform: translateX(-50%);
-          align-items: center;
+        .login-pane-brand,
+        .login-pane-video {
+          width: 100%;
+          max-width: 100%;
+          flex: none;
+        }
+        .login-pane-brand {
+          min-height: 52vh;
+          padding: 32px 24px;
+        }
+        .login-pane-video {
+          min-height: 48vh;
         }
       }
     </style>
 
-    <div class="login-center-card">
-      <div class="ml-logo-container">
-        <div class="ml-logo-text">
-          <h2 style="font-size: 1.8rem; font-weight: 800; margin: 0; letter-spacing: 1px;">MOURA LEITE</h2>
-          <span style="font-size: 0.9rem; letter-spacing: 3px; font-weight: 600;">LOTEAMENTOS</span>
+    <div class="login-pane-brand">
+      <div class="login-center-card">
+        <div class="ml-logo-container">
+          <img class="login-30-logo" src="Banner/logo preta comemorativa.png" alt="Moura Leite 30 anos" onerror="this.onerror=null; this.src='Banner/logo comemorativa.png'; this.style.filter='invert(1)';">
+          <p style="font-family: 'Metropolis', sans-serif; font-weight: 300; font-size: 0.9rem; text-align: center; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+            Transformar lugares para as pessoas transformarem suas vidas
+          </p>
         </div>
-        <p style="font-family: 'Metropolis', sans-serif; font-weight: 300; font-size: 0.95rem; text-align: center; color: #475569; margin: 10px 0 10px 0; line-height: 1.4;">
-          Transformar lugares para as pessoas transformarem suas vidas
-        </p>
-      </div>
 
-      <div id="login-error-msg"></div>
-      
-      <div id="mock-login-fields" style="width: 100%; display: flex; flex-direction: column;">
-        <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
-        <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
+        <div id="login-error-msg"></div>
+        
+        <div id="mock-login-fields" style="width: 100%; display: flex; flex-direction: column;">
+          <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
+          <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
+        </div>
       </div>
     </div>
-    
-    <!-- Bottom Right White Logo on the background image -->
-    <div class="bottom-right-logo">
-      <div class="ml-logo-text" style="color: white; text-align: right; border-bottom: 2px solid rgba(255,255,255,0.8); padding-bottom: 6px; margin-bottom: 8px; width: 100%;">
-        <h2 style="font-size: 1.4rem; font-weight: 800; margin: 0; letter-spacing: 1.5px; line-height: 1;">MOURA LEITE</h2>
-        <span style="font-size: 0.65rem; letter-spacing: 4px; font-weight: 600;">LOTEAMENTOS</span>
-      </div>
-      <div style="color: white; display: flex; align-items: flex-end; justify-content: flex-end; width: 100%;">
-        <span style="font-size: 4rem; font-weight: 800; line-height: 0.8; letter-spacing: -2px;">30</span>
-        <div style="display: flex; flex-direction: column; margin-left: 8px; padding-bottom: 6px;">
-           <span style="font-size: 1.1rem; font-weight: 800; letter-spacing: 1px; line-height: 1;">ANOS</span>
-        </div>
-      </div>
+
+    <div class="login-pane-video">
+      <video id="login-bg-video" autoplay muted loop playsinline preload="auto">
+        <source src="Banner/Banner_.mp4" type="video/mp4">
+      </video>
     </div>
     
   </div>
@@ -1019,7 +1031,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.443 &nbsp;&middot;&nbsp; 26/08/2026
+            v1.0.448 &nbsp;&middot;&nbsp; 26/08/2026
           </span>
         </div>
       </div>
@@ -5603,30 +5615,30 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=443"></script>
-  <script defer src="sienge-api.js?v=443"></script>
-  <script defer src="azure-auth.js?v=443"></script>
-  <script defer src="app.js?v=443"></script>
-  <script defer src="home-dashboard.js?v=443"></script>
-  <script defer src="anexos.js?v=443"></script>
-  <script defer src="contas-pagar.js?v=443"></script>
-  <script defer src="config-tags.js?v=443"></script>
-  <script defer src="config-users.js?v=443"></script>
-  <script defer src="construcao.js?v=443"></script>
-  <script defer src="empresas.js?v=443"></script>
-  <script defer src="relacionamento.js?v=443"></script>
+  <script defer src="data.js?v=448"></script>
+  <script defer src="sienge-api.js?v=448"></script>
+  <script defer src="azure-auth.js?v=448"></script>
+  <script defer src="app.js?v=448"></script>
+  <script defer src="home-dashboard.js?v=448"></script>
+  <script defer src="anexos.js?v=448"></script>
+  <script defer src="contas-pagar.js?v=448"></script>
+  <script defer src="config-tags.js?v=448"></script>
+  <script defer src="config-users.js?v=448"></script>
+  <script defer src="construcao.js?v=448"></script>
+  <script defer src="empresas.js?v=448"></script>
+  <script defer src="relacionamento.js?v=448"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=443"></script>
-  <script defer src="plano-financeiro.js?v=443"></script>
-  <script defer src="fiscal.js?v=443"></script>
-  <script defer src="indexadores.js?v=443"></script>
-  <script defer src="verificar-construcao.js?v=443"></script>
-  <script src="repactuacoes.js?v=443"></script>
+  <script defer src="centros-custo.js?v=448"></script>
+  <script defer src="plano-financeiro.js?v=448"></script>
+  <script defer src="fiscal.js?v=448"></script>
+  <script defer src="indexadores.js?v=448"></script>
+  <script defer src="verificar-construcao.js?v=448"></script>
+  <script src="repactuacoes.js?v=448"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=443"></script>
+  <script defer src="dashboard-inadimplencia.js?v=448"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

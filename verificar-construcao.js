@@ -1265,9 +1265,12 @@ window.VerificarConstrucaoApp = {
             
             let detailsText = "Respostas do Cliente:\n";
             for (const [k, val] of Object.entries(resps)) {
-                if (k === 'observacoes') continue;
+                if (k === 'observacoes' || k === 'observacao' || k === 'obs') continue;
                 const label = labels[k] || k;
                 detailsText += `- ${label}: ${val}\n`;
+            }
+            if (resps.observacoes) {
+                detailsText += `- Observações: ${resps.observacoes}\n`;
             }
 
             let responsibleName = '';
