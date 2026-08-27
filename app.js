@@ -7219,6 +7219,7 @@ function formatCpfCnpj(val) {
             value: orig,
             currentBalance: inst.currentBalance || orig,
             currentBalanceWithAddition: inst.currentBalanceWithAddition !== undefined ? inst.currentBalanceWithAddition : (inst.correctedValueWithAdditions !== undefined ? inst.correctedValueWithAdditions : (inst.currentBalance !== undefined ? inst.currentBalance + (inst.additionalValue || 0) : orig + (inst.additionalValue || 0))),
+            additionalValue: inst.additionalValue,
             dueDate: inst.dueDate,
             generatedBoleto: inst.generatedBoleto || false,
             receiptId: rId,
@@ -15053,6 +15054,9 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             if (cached.addresses && cached.addresses.length) customer.addresses = cached.addresses;
             customer.spouseName = cached.spouseName || customer.spouseName;
             customer.spouseCpf = cached.spouseCpf || customer.spouseCpf;
+            customer.sex = cached.sex || cached.gender || customer.sex;
+            customer.gender = cached.gender || cached.sex || customer.gender;
+            customer.personType = cached.personType || customer.personType;
         }
     }
     if (window.customerData && (String(window.customerData.id) === String(customerId) || String(window.customerData.customerId) === String(customerId))) {
@@ -15066,6 +15070,9 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         if (cd.addresses && cd.addresses.length) customer.addresses = cd.addresses;
         customer.spouseName = cd.spouseName || customer.spouseName;
         customer.spouseCpf = cd.spouseCpf || customer.spouseCpf;
+        customer.sex = cd.sex || cd.gender || customer.sex;
+        customer.gender = cd.gender || cd.sex || customer.gender;
+        customer.personType = cd.personType || customer.personType;
     }
 
     if (isBlankAddr(customer.address) && customer.addresses && customer.addresses.length) {
@@ -15078,14 +15085,18 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         }
     }
 
-    if (getSiengeApiMode() !== 'simulado' && window.SiengeApiService && (isBlankAddr(customer.address) || !customer.cpfCnpj || customer.cpfCnpj === 'N/D')) {
+    const sexMissing = !customer.sex || customer.sex === 'N/D' || !customer.gender;
+    if (getSiengeApiMode() !== 'simulado' && window.SiengeApiService && (isBlankAddr(customer.address) || !customer.cpfCnpj || customer.cpfCnpj === 'N/D' || sexMissing)) {
         try {
             const detail = await SiengeApiService.getCustomer(customerId);
             if (detail) {
                 customer.name = detail.name || customer.name;
-                customer.cpfCnpj = detail.cpfCnpj || customer.cpfCnpj;
-                customer.spouseName = detail.spouseName || customer.spouseName;
-                customer.spouseCpf = detail.spouseCpf || customer.spouseCpf;
+                customer.cpfCnpj = detail.cpfCnpj || detail.cpf || detail.cnpj || customer.cpfCnpj;
+                customer.spouseName = detail.spouseName || (detail.spouse && detail.spouse.name) || customer.spouseName;
+                customer.spouseCpf = detail.spouseCpf || (detail.spouse && (detail.spouse.cpf || detail.spouse.cpfCnpj)) || customer.spouseCpf;
+                customer.sex = detail.sex || detail.gender || customer.sex;
+                customer.gender = detail.gender || detail.sex || customer.gender;
+                customer.personType = detail.personType || customer.personType;
                 const parsed = formatAddrFromList(detail.addresses);
                 if (parsed && parsed.line) {
                     customer.address = parsed.line;
@@ -15179,41 +15190,107 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     }
 
     const addressStr = [customer.address, customer.zipCode ? `CEP: ${customer.zipCode}` : '', [customer.city, customer.state].filter(Boolean).join('/')].filter(Boolean).join(' - ');
-    
-    let secondaryBuyersText = "";
-    if (sale && sale.customers && sale.customers.length > 1) {
-        const secondaryCustomers = sale.customers.filter(c => !c.main && String(c.id) !== String(customerId));
-        for (const sec of secondaryCustomers) {
-            try {
-                const secDetail = await SiengeApiService.getCustomer(sec.id);
-                if (secDetail) {
-                    const secName = secDetail.name || sec.name || '';
-                    const secCpf = (secDetail.cpfCnpj || '').replace(/\D/g,"");
-                    let formattedCpf = secCpf;
-                    if (secCpf.length <= 11) {
-                        formattedCpf = secCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
-                    } else {
-                        formattedCpf = secCpf.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
-                    }
-                    
-                    let secSpouse = '';
-                    if (secDetail.spouseName && secDetail.spouseName.trim() !== '' && secDetail.spouseName !== '- X -') {
-                        let sCpf = (secDetail.spouseCpf || '').replace(/\D/g,"");
-                        if (sCpf.length <= 11) sCpf = sCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
-                        secSpouse = ` e ${secDetail.spouseName}, portador(a) do C.P.F. nº ${sCpf}`;
-                    }
-                    secondaryBuyersText += `, e ${secName}, portador(a) do C.P.F. nº ${formattedCpf}${secSpouse}`;
-                }
-            } catch (e) {}
-        }
-    }
-    
+
     const maskCpfCnpj = (v) => {
         if (!v) return '';
         v = String(v).replace(/\D/g,"");
         if (v.length <= 11) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,"$1.$2.$3-$4");
         return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
     };
+
+    const nexIsCompany = (p) => {
+        if (!p) return false;
+        const pType = String(p.personType || p.type || '').toUpperCase();
+        const doc = String(p.cpfCnpj || p.cpf || p.cnpj || '').replace(/\D/g, '');
+        return doc.length > 11 || pType === 'J' || /JURID/.test(pType);
+    };
+    const nexInferGender = (p) => {
+        if (!p) return 'M';
+        if (nexIsCompany(p)) return 'J';
+        const g = String(p.gender || p.sex || p.sexo || '').toUpperCase().trim();
+        if (g === 'F' || g.startsWith('FEM')) return 'F';
+        if (g === 'M' || g.startsWith('MASC')) return 'M';
+        const first = String(p.name || '').trim().split(/\s+/)[0]
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase().replace(/[^A-Z]/g, '');
+        const femaleNames = new Set(['ALICE','BEATRIZ','RAQUEL','ISABEL','INGRID','YASMIN','IASMIN','LAIS','THAIS','TAIS','IRIS','RUTH','RUTE','LEONOR','LOURDES','MERCEDES','CONCEICAO','LILIAN','LILIANE','IRENE','ESTER','ESTHER','NOEMI','SUELI','SUELY','IVONE','IVONETE','NEIDE','DENISE','DEISE','NICOLE','KAREN','KELLY','EVELYN','HELEN','HELLEN','INES','AGNES','CARMEN','CARMEM','GISELE','RAISSA','RAYSSA','SOPHIE','MARIE','JENNIFER','ISABELLE','MICHELLE']);
+        const maleEndingA = new Set(['LUCA','LUCCA','JOSHUA','NICOLA','TOMA','ELIA','MATTIA']);
+        if (femaleNames.has(first)) return 'F';
+        if (first.endsWith('A') && !maleEndingA.has(first)) return 'F';
+        return 'M';
+    };
+    const nexQualifyPerson = (p) => {
+        const g = nexInferGender(p);
+        const nm = String(p.name || '').trim();
+        const doc = maskCpfCnpj(p.cpfCnpj || p.cpf || p.cnpj);
+        if (g === 'J') return `${nm}, inscrita no CNPJ nº ${doc}`;
+        return `${nm}, ${g === 'F' ? 'portadora' : 'portador'} do CPF nº ${doc}`;
+    };
+    const nexGreeting = (genders) => {
+        if (!genders.length) return 'Ao Ilmo. Sr.';
+        if (genders.length === 1) {
+            if (genders[0] === 'J') return 'À';
+            if (genders[0] === 'F') return 'À Ilma. Sra.';
+            return 'Ao Ilmo. Sr.';
+        }
+        if (genders.every(g => g === 'F')) return 'Às Ilmas. Sras.';
+        return 'Aos Ilmos. Srs.';
+    };
+    const nexBlankName = (v) => !v || !String(v).trim() || String(v).trim() === '- X -';
+
+    const nexParties = [{
+        name: customer.name,
+        cpfCnpj: customer.cpfCnpj,
+        sex: customer.sex,
+        gender: customer.gender,
+        personType: customer.personType
+    }];
+    const spouseFromObj = customer.spouse && (customer.spouse.name || customer.spouse.spouseName);
+    const spouseName = !nexBlankName(customer.spouseName) ? customer.spouseName : spouseFromObj;
+    const spouseCpf = customer.spouseCpf || (customer.spouse && (customer.spouse.cpf || customer.spouse.cpfCnpj));
+    if (!nexBlankName(spouseName)) {
+        nexParties.push({ name: spouseName, cpfCnpj: spouseCpf, sex: customer.spouseSex || (customer.spouse && customer.spouse.sex) });
+    }
+
+    if (sale && sale.customers && sale.customers.length > 1) {
+        const secondaryCustomers = sale.customers.filter(c => !c.main && String(c.id) !== String(customerId));
+        for (const sec of secondaryCustomers) {
+            try {
+                const secDetail = await SiengeApiService.getCustomer(sec.id);
+                if (secDetail) {
+                    nexParties.push({
+                        name: secDetail.name || sec.name || '',
+                        cpfCnpj: secDetail.cpfCnpj || secDetail.cpf || secDetail.cnpj,
+                        sex: secDetail.sex,
+                        gender: secDetail.gender,
+                        personType: secDetail.personType
+                    });
+                    const secSpouse = secDetail.spouseName || (secDetail.spouse && secDetail.spouse.name);
+                    if (!nexBlankName(secSpouse)) {
+                        nexParties.push({
+                            name: secSpouse,
+                            cpfCnpj: secDetail.spouseCpf || (secDetail.spouse && (secDetail.spouse.cpf || secDetail.spouse.cpfCnpj)),
+                            sex: secDetail.spouse && secDetail.spouse.sex
+                        });
+                    }
+                }
+            } catch (e) {}
+        }
+    }
+    const nexGenders = nexParties.map(nexInferGender);
+    const nexVocativo = nexGreeting(nexGenders);
+    const nexPlural = nexParties.length > 1;
+    const nexAllFemale = nexGenders.length > 0 && nexGenders.every(g => g === 'F' || g === 'J');
+    let nexQualifBlock = '';
+    nexParties.forEach((p, i) => {
+        const q = nexQualifyPerson(p);
+        if (i === 0) nexQualifBlock = q;
+        else nexQualifBlock += `,\ne ${q}`;
+    });
+    nexQualifBlock += '.';
+    const secondaryBuyersText = nexParties.length > 1
+        ? nexParties.slice(1).map(p => `, e ${nexQualifyPerson(p)}`).join('')
+        : '';
     
     const fmtMoneyNex = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const parseDueIso = (d) => {
@@ -15248,6 +15325,11 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             .map(v => String(v));
         return keys.some(k => nexSaleKeys.has(k));
     };
+    const nexNum = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+    };
+    const nexHas = (v) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
     const rowFromInstallment = (inst) => {
         const isPaid = inst.installmentSituation === 2 || inst.isValidReceipt === true
             || inst.status === 'PAID' || inst.status === 'Quitado'
@@ -15255,36 +15337,45 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         if (isPaid) return null;
         const due = inst.dueDate || inst.originalDueDate;
         const days = calcDaysDelay(due, inst.daysOfDelay ?? inst.daysDelay ?? inst.apiDaysDelay);
-        const original = Number(inst.originalValue ?? inst.value ?? 0) || 0;
-        let atualizado = Number(
-            inst.correctedValueWithAdditions ??
-            inst.currentBalanceWithAddition ??
-            inst.overdueValue
+        const original = nexHas(inst.originalValue) ? nexNum(inst.originalValue) : nexNum(inst.value);
+        const additions = Math.max(
+            nexNum(inst.additionalValue),
+            nexNum(inst.overdueCharges),
+            nexNum(inst.extra),
+            nexNum(inst.interest) + nexNum(inst.interestAmount) + nexNum(inst.fine) + nexNum(inst.fineAmount) + nexNum(inst.monetaryCorrection) + nexNum(inst.correctionAmount)
         );
-        if (!isFinite(atualizado) || atualizado <= 0) {
-            const without = inst.correctedValueWithoutAdditions != null ? Number(inst.correctedValueWithoutAdditions) : original;
-            atualizado = without + Number(inst.interest || 0) + Number(inst.fine || 0);
-        }
+        const withAddCandidates = [
+            inst.correctedValueWithAdditions,
+            inst.currentBalanceWithAddition,
+            inst.overdueValue,
+            inst.totalValue
+        ].filter(nexHas).map(nexNum);
+        let atualizado = withAddCandidates.length ? Math.max(...withAddCandidates) : 0;
+        if (atualizado <= original + 0.009 && additions > 0.009) atualizado = original + additions;
+        if (atualizado < original) atualizado = original;
         if (days <= 0 && atualizado <= 0.01) return null;
         if (days <= 0) return null;
-        let correcao = Number(inst.monetaryCorrection);
-        if (!isFinite(correcao) || correcao < 0) {
-            if (inst.correctedValueWithoutAdditions != null) {
-                correcao = Math.max(0, Number(inst.correctedValueWithoutAdditions) - original);
-            } else {
-                correcao = Math.max(0, atualizado - original);
-            }
-        }
+        const correcao = Math.max(0, atualizado - original, additions);
+        if (original + correcao > atualizado + 0.009) atualizado = original + correcao;
         return { due, days, original, correcao, atualizado };
     };
 
     const parcelRows = [];
-    const seenParcel = new Set();
     const pushParcel = (row) => {
         if (!row) return;
-        const key = `${parseDueIso(row.due)}|${Number(row.original).toFixed(2)}|${Number(row.atualizado).toFixed(2)}`;
-        if (seenParcel.has(key)) return;
-        seenParcel.add(key);
+        const iso = parseDueIso(row.due);
+        const existing = parcelRows.find(r => parseDueIso(r.due) === iso && Math.abs(nexNum(r.original) - nexNum(row.original)) < 0.05);
+        if (existing) {
+            if (nexNum(row.atualizado) > nexNum(existing.atualizado) + 0.004) {
+                existing.atualizado = row.atualizado;
+                existing.correcao = row.correcao;
+            } else if (nexNum(row.correcao) > nexNum(existing.correcao) + 0.004) {
+                existing.correcao = row.correcao;
+                existing.atualizado = existing.original + row.correcao;
+            }
+            if (row.days > existing.days) existing.days = row.days;
+            return;
+        }
         parcelRows.push(row);
     };
 
@@ -15295,28 +15386,27 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         AppState.currentContractInstallments.forEach(inst => pushParcel(rowFromInstallment(inst)));
     }
 
-    if (parcelRows.length === 0) {
-        let bills = (AppState.defaultersBills && AppState.defaultersBills.length)
-            ? AppState.defaultersBills
-            : (getSiengeApiMode() === 'simulado' ? (window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS) || [] : []);
-        let myBills = bills.filter(billMatchesNexSale);
-        if (!myBills.length) myBills = bills.filter(b => String(b.customerId) === String(customerId));
-        myBills.forEach(b => {
-            const insts = b.defaulterInstallments || [];
-            if (insts.length) {
-                insts.forEach(inst => pushParcel(rowFromInstallment(inst)));
-            } else {
-                const due = b.dueDate;
-                const days = calcDaysDelay(due, b.daysDelay);
-                if (days <= 0 && !(Number(b.overdueValue || b.value) > 0)) return;
-                const original = Number(b.originalValue ?? b.value ?? 0) || 0;
-                const atualizado = Number(b.overdueValue ?? b.value ?? original) || 0;
-                pushParcel({ due, days: days || Number(b.daysDelay || 0), original, correcao: Math.max(0, atualizado - original), atualizado });
-            }
-        });
-    }
+    let bills = (AppState.defaultersBills && AppState.defaultersBills.length)
+        ? AppState.defaultersBills
+        : (getSiengeApiMode() === 'simulado' ? (window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS) || [] : []);
+    let myBills = bills.filter(billMatchesNexSale);
+    if (!myBills.length) myBills = bills.filter(b => String(b.customerId) === String(customerId));
+    myBills.forEach(b => {
+        const insts = b.defaulterInstallments || [];
+        if (insts.length) {
+            insts.forEach(inst => pushParcel(rowFromInstallment(inst)));
+        } else {
+            const due = b.dueDate;
+            const days = calcDaysDelay(due, b.daysDelay);
+            const original = nexNum(b.originalValue || b.value);
+            const atualizado = nexNum(b.overdueValue || b.value || original);
+            if (days <= 0 && atualizado <= 0.01) return;
+            pushParcel({ due, days: days || nexNum(b.daysDelay), original, correcao: Math.max(0, atualizado - original), atualizado });
+        }
+    });
 
-    if (parcelRows.length === 0 && window.SiengeApiService && getSiengeApiMode() !== 'simulado' && customerId) {
+    const needsAcrescimo = !parcelRows.length || parcelRows.some(r => nexNum(r.correcao) < 0.01);
+    if (needsAcrescimo && window.SiengeApiService && getSiengeApiMode() !== 'simulado' && customerId) {
         try {
             const balRes = await SiengeApiService.getCustomerFinancialStatements(customerId);
             const raw = (balRes && balRes.results) || [];
@@ -15333,16 +15423,21 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
                     originalValue: inst.originalValue,
                     value: inst.originalValue || inst.value,
                     currentBalance: inst.currentBalance,
-                    currentBalanceWithAddition: inst.currentBalanceWithAddition != null
+                    additionalValue: inst.additionalValue,
+                    overdueCharges: inst.overdueCharges,
+                    currentBalanceWithAddition: nexHas(inst.currentBalanceWithAddition)
                         ? inst.currentBalanceWithAddition
-                        : (Number(inst.currentBalance || 0) + Number(inst.additionalValue || 0)),
+                        : (nexNum(inst.currentBalance) + nexNum(inst.additionalValue)),
                     dueDate: inst.dueDate,
                     daysOfDelay: inst.daysOfDelay || inst.daysDelay,
                     monetaryCorrection: inst.monetaryCorrection,
+                    correctionAmount: inst.correctionAmount,
                     correctedValueWithoutAdditions: inst.correctedValueWithoutAdditions,
                     correctedValueWithAdditions: inst.correctedValueWithAdditions,
                     interest: inst.interest,
-                    fine: inst.fine
+                    interestAmount: inst.interestAmount,
+                    fine: inst.fine,
+                    fineAmount: inst.fineAmount
                 };
                 pushParcel(rowFromInstallment(mapped));
             });
@@ -15390,7 +15485,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
                     <th style="padding: 4px 6px;">Vencimento da parcela</th>
                     <th style="padding: 4px 6px; text-align: center;">Dias em atraso</th>
                     <th style="padding: 4px 6px; text-align: right;">Valor original</th>
-                    <th style="padding: 4px 6px; text-align: right;">Correção</th>
+                    <th style="padding: 4px 6px; text-align: right;">Acréscimo</th>
                     <th style="padding: 4px 6px; text-align: right;">Valor atualizado</th>
                 </tr>
             </thead>
@@ -15419,28 +15514,35 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             corpo = corpo.replace(/{{UNIDADE}}/g, unidadeDisplay);
             corpo = corpo.replace(/{{QUADRA}}/g, quadra);
             corpo = corpo.replace(/{{LOTE}}/g, lote);
-            
-            corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
+
             const cpfCnpj = maskCpfCnpj(customer.cpfCnpj);
+            corpo = corpo.replace(/Ao\(À\)\(s\)\s*Ilmo\(a\)\(s\)\.\s*Sr\(a\)\(s\)\./i, nexVocativo);
+            corpo = corpo.replace(/Ao\(À\)\s*Ilmo\(a\)\.\s*Sr\(a\)\./i, nexVocativo);
+            corpo = corpo.replace(
+                /\{\{NOME_CLIENTE\}\},\s*portador\(a\) do C\.?P\.?F\.?\s*n[ºo°]?\s*\{\{CPF_CLIENTE\}\},?/i,
+                nexParties.length === 1 ? (nexQualifyPerson(nexParties[0]) + '.') : (nexQualifyPerson(nexParties[0]) + ',')
+            );
+            const spouseLineRe = /[\r\n]*e\s*\{\{NOME_CONJUGE\}\}\s*,\s*portador\(a\) do C\.?P\.?F\.?\s*n[ºo°]?\s*\{\{CPF_CONJUGE\}\}\s*\.?/i;
+            if (nexParties.length === 1) {
+                corpo = corpo.replace(spouseLineRe, '');
+                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*(-\s*X\s*-|\{\{CPF_CONJUGE\}\})\s*\./gi, '');
+            } else {
+                const rest = nexParties.slice(1).map((p, i, arr) => {
+                    const end = i === arr.length - 1 ? '.' : ',';
+                    return `\ne ${nexQualifyPerson(p)}${end}`;
+                }).join('');
+                if (spouseLineRe.test(corpo)) corpo = corpo.replace(spouseLineRe, rest);
+                else corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*(-\s*X\s*-|\{\{CPF_CONJUGE\}\})\s*\./gi, rest.replace(/^\n/, ''));
+            }
+            corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
             corpo = corpo.replace(/{{CPF_CLIENTE}}/g, cpfCnpj);
             corpo = corpo.replace(/{{CPF_CNPJ}}/g, cpfCnpj);
-            
-            if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
-                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
-                corpo = corpo.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
-                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
-                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, '- X -');
-                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, '- X -');
-                if (secondaryBuyersText) {
-                    corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Aos Ilmos. Srs.');
-                } else {
-                    corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Ao(À) Ilmo(a). Sr(a).');
-                }
+            if (nexParties.length > 1 && nexParties[1]) {
+                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, nexParties[1].name || '');
+                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(nexParties[1].cpfCnpj));
             } else {
-                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
-                corpo = corpo.replace(/{{CPF_CONJUGE}}\s*\./g, maskCpfCnpj(customer.spouseCpf) + "." + secondaryBuyersText);
-                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(customer.spouseCpf));
-                corpo = corpo.replace(/Ao\(À\)\(s\) Ilmo\(a\)\(s\)\. Sr\(a\)\(s\)\./gi, 'Aos Ilmos. Srs.');
+                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, '');
+                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, '');
             }
             
             corpo = corpo.replace(/{{ENDERECO_CLIENTE}}/g, (customer.address || '').toUpperCase());
@@ -15464,6 +15566,22 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             
             corpo = corpo.replace(/{{TABELA_PARCELAS}}/g, tableHtml);
             corpo = corpo.replace(/{{VALOR_DIVIDA}}/g, totGeral.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}));
+
+            if (nexPlural) {
+                corpo = corpo.replace(/Vossa Senhoria/g, 'Vossas Senhorias');
+                corpo = corpo.replace(/V\.\s*Sa\./g, 'V. Sas.');
+                corpo = corpo.replace(/não cumprira\b/g, 'não cumpriram');
+                if (nexAllFemale) {
+                    corpo = corpo.replace(/\bo Notificado\b/g, 'as Notificadas');
+                    corpo = corpo.replace(/\bNotificado\b/g, 'Notificadas');
+                } else {
+                    corpo = corpo.replace(/\bo Notificado\b/g, 'os Notificados');
+                    corpo = corpo.replace(/\bNotificado\b/g, 'Notificados');
+                }
+            } else if (nexGenders[0] === 'F' || nexGenders[0] === 'J') {
+                corpo = corpo.replace(/\bo Notificado\b/g, 'a Notificada');
+                corpo = corpo.replace(/\bNotificado\b/g, 'Notificada');
+            }
             
             docHtml = `
               <div style="margin-bottom: 0;">
@@ -15475,19 +15593,10 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         }
     
     if (!docHtml) {
-        let saudacao = "Ao(À) Ilmo(a). Sr(a).";
-        let conjugeLinha = "";
-        
-        if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
-            if (secondaryBuyersText) {
-                saudacao = "Aos Ilmos. Srs.";
-                conjugeLinha = secondaryBuyersText.substring(2) + "<br>"; // remove ", "
-            }
-        } else {
-            saudacao = "Aos Ilmos. Srs.";
-            conjugeLinha = `e ${customer.spouseName}, portador(a) do C.P.F. nº ${maskCpfCnpj(customer.spouseCpf)}${secondaryBuyersText}<br>`;
-        }
-        
+        const notifWord = nexPlural ? (nexAllFemale ? 'as Notificadas' : 'os Notificados') : ((nexGenders[0] === 'F' || nexGenders[0] === 'J') ? 'a Notificada' : 'o Notificado');
+        const vossa = nexPlural ? 'Vossas Senhorias' : 'Vossa Senhoria';
+        const vSa = nexPlural ? 'V. Sas.' : 'V. Sa.';
+        const qualifHtml = nexQualifBlock.replace(/\n/g, '<br>');
         docHtml = `
         <div style="font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; text-align: justify; color: #000; padding: 20px;">
             <p style="text-align: right; margin-bottom: 2rem;">
@@ -15495,34 +15604,33 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             </p>
 
             <p style="margin-bottom: 2rem;">
-                ${saudacao}<br>
-                <strong>${customer.name.toUpperCase()}</strong>, portador(a) do C.P.F. nº ${maskCpfCnpj(customer.cpfCnpj)},<br>
-                ${conjugeLinha}
+                ${nexVocativo}<br>
+                ${qualifHtml}<br>
                 ${addressStr.toUpperCase()}
             </p>
 
             <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                <strong>${(empName || companyName || costCenter.name || '').toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de Vossa Senhoria dizer que a notificante celebrara com o Notificado o contrato de compromisso de compra e venda firmado em ${formattedSaleDate || "___"}, correspondente a quadra e lote <strong>${unidadeDisplay || formatUName || '___'}</strong>, no Loteamento <strong>${(empName || '').toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
+                <strong>${(empName || companyName || costCenter.name || '').toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de ${vossa} dizer que a notificante celebrara com ${notifWord} o contrato de compromisso de compra e venda firmado em ${formattedSaleDate || "___"}, correspondente a quadra e lote <strong>${unidadeDisplay || formatUName || '___'}</strong>, no Loteamento <strong>${(empName || '').toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                No entanto, o Notificado não cumprira integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, a quantia atualizada conforme tabela abaixo:
+                No entanto, ${notifWord} não ${nexPlural ? 'cumpriram' : 'cumprira'} integralmente o compromisso particular, deixando de efetuar o pagamento das mensalidades nas datas pactuadas, estando a dever, até a presente data, a quantia atualizada conforme tabela abaixo:
             </p>
 
             ${tableHtml}
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que o Notificado, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
+                Mediante o exposto e objetivando findar o presente deslinde, vem o Notificante, proceder a presente NOTIFICAÇÃO EXTRAJUDICIAL, a fim de que ${notifWord}, no prazo improrrogável de 30 (trinta) dias, nos termos do art. 32 da Lei 6.766, a contar do recebimento desta, entre em contato para pagamento do valor em aberto, sob pena de ajuizamento de medidas necessárias à reintegração de posse e rescisão contratual, se o caso.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
-                Caso V. Sa. tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
+                Caso ${vSa} tenha interesse na manutenção do contrato e em continuar na posse do imóvel objeto desta notificação, deverá procurar o escritório da empresa ou contatar a Notificante também pelo telefone do Setor de Recebimentos/Cobrança 4020-2109, ou e-mail: recebimentos@mouraleite.com.br, no sentido de regularizar a pendência.
             </p>
 
             <p style="text-indent: 2em; margin-bottom: 3rem;">
-                Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de V. Sa. desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
+                Caso a pendência acima já tenha sido regularizada, pedimos a gentileza de ${vSa} desconsiderar a presente como uma cobrança e entrar em contato com os telefones acima para nos encaminhar o comprovante respectivo, visando a baixa do apontamento em nossos registros.
             </p>
 
             <p style="margin-bottom: 3rem;">
