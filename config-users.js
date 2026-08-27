@@ -48,7 +48,10 @@ const ConfigUsersApp = {
         },
         {
           name: "Caixa e Banco", key: "sub_fin_cb",
-          actions: [{ id: "caixa_banco", label: "Caixa e Banco" }]
+          actions: [
+            { id: "caixa_banco", label: "Movimentações" },
+            { id: "fluxo_caixa", label: "Fluxo de Caixa" }
+          ]
         }
       ]
     },

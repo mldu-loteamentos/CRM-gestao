@@ -26,33 +26,7 @@ const PlanoFinanceiroApp = {
     if (!root) return;
 
     try { this.visoes = JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || []; } catch (e) { this.visoes = []; }
-    
-    // Cria DFC padrao se nao houver visoes (NOVA ESTRUTURA HIERÁRQUICA)
-    if (this.visoes.length === 0) {
-      this.visoes.push({
-        id: 'dfc_default',
-        name: 'DFC Padrão',
-        type: 'custom',
-        groups: [
-          { id: 'g_01', name: '01 RECEITAS', type: 'total_n1', parentId: null, expanded: true },
-          { id: 'g_01_01', name: '01.01 VENDA DE IMOVEIS', type: 'resultado', parentId: 'g_01', accounts: [], expanded: true },
-          { id: 'g_01_02', name: '01.02 RECEITA DE ALUGUEIS', type: 'resultado', parentId: 'g_01', accounts: [], expanded: true },
-          { id: 'g_01_03', name: '01.03 RECEITA DE SERVICOS', type: 'resultado', parentId: 'g_01', accounts: [], expanded: true },
-          
-          { id: 'g_02', name: '02 DEDUCOES', type: 'total_n1', parentId: null, expanded: true },
-          { id: 'g_02_01', name: '02.01 IMPOSTOS SOBRE VENDAS', type: 'resultado', parentId: 'g_02', accounts: [], expanded: true },
-
-          { id: 'g_03', name: '03 CUSTOS E DESPESAS', type: 'total_n1', parentId: null, expanded: true },
-          { id: 'g_03_01', name: '03.01 CUSTOS', type: 'totalizadora', parentId: 'g_03', expanded: true },
-          { id: 'g_03_01_01', name: '03.01.01 TERRENOS', type: 'resultado', parentId: 'g_03_01', accounts: [], expanded: true },
-          { id: 'g_03_01_02', name: '03.01.02 PROJETOS', type: 'resultado', parentId: 'g_03_01', accounts: [], expanded: true },
-          { id: 'g_03_02', name: '03.02 DESPESAS', type: 'totalizadora', parentId: 'g_03', expanded: true },
-          { id: 'g_03_02_01', name: '03.02.01 COMERCIAIS', type: 'resultado', parentId: 'g_03_02', accounts: [], expanded: true },
-          { id: 'g_03_02_02', name: '03.02.02 ADMINISTRATIVAS', type: 'resultado', parentId: 'g_03_02', accounts: [], expanded: true }
-        ]
-      });
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.visoes));
-    }
+    this.ensureDfcDefault();
 
     try { this.taxConfig = JSON.parse(localStorage.getItem('crm_plano_impostos')) || {}; } catch(e) {}
     try { 
@@ -66,6 +40,144 @@ const PlanoFinanceiroApp = {
 
     this.renderShell(root);
     await this.loadCategories();
+  },
+
+  dfcTemplateGroups() {
+    const n = (id, name, type, parentId, extra = {}) => ({
+      id, name, type, parentId, expanded: true,
+      accounts: type === 'resultado' ? [] : undefined,
+      ...extra
+    });
+    return [
+      n('g_01', '01 RECEITAS', 'total_n1', null),
+      n('g_01_01', '01.01 VENDA DE IMOVEIS', 'resultado', 'g_01'),
+      n('g_01_02', '01.02 RECEITA DE ALUGUEIS', 'resultado', 'g_01'),
+      n('g_01_03', '01.03 RECEITA DE SERVICOS', 'resultado', 'g_01'),
+      n('g_01_04', '01.04 RECEITAS NAO OPERACIONAIS', 'resultado', 'g_01'),
+      n('g_01_05', '01.05 CANCELAMENTO DE VENDAS', 'resultado', 'g_01', { redutora: true }),
+      n('g_02', '02 IMPOSTOS', 'total_n1', null),
+      n('g_02_01', '02.01 IMPOSTOS SOBRE VENDAS', 'resultado', 'g_02'),
+      n('g_02_02', '02.02 IMPOSTOS TRIMESTRAIS', 'resultado', 'g_02'),
+      n('g_03', '03 CUSTOS E DESPESAS', 'total_n1', null),
+      n('g_03_01', '03.01 CUSTOS', 'totalizadora', 'g_03'),
+      n('g_03_01_01', '03.01.01 TERRENOS / REPASSES', 'resultado', 'g_03_01'),
+      n('g_03_01_02', '03.01.02 PROJETOS', 'resultado', 'g_03_01'),
+      n('g_03_01_03', '03.01.03 OBRAS', 'resultado', 'g_03_01'),
+      n('g_03_01_04', '03.01.04 CUSTO ADM. EMPREENDIMENTOS', 'resultado', 'g_03_01'),
+      n('g_03_01_05', '03.01.05 AQUISICAO DE NOVAS AREAS', 'resultado', 'g_03_01'),
+      n('g_03_02', '03.02 DESPESAS', 'totalizadora', 'g_03'),
+      n('g_03_02_01', '03.02.01 COMERCIAIS', 'resultado', 'g_03_02'),
+      n('g_03_02_02', '03.02.02 ADMINISTRATIVAS', 'resultado', 'g_03_02'),
+      n('g_03_02_03', '03.02.03 PESSOAL', 'resultado', 'g_03_02'),
+      n('g_03_02_04', '03.02.04 RETENCOES', 'resultado', 'g_03_02'),
+      n('g_03_02_05', '03.02.05 MANUTENCAO', 'resultado', 'g_03_02'),
+      n('g_03_02_06', '03.02.06 CONVENIOS', 'resultado', 'g_03_02'),
+      n('g_03_02_07', '03.02.07 NAO OPERACIONAIS', 'resultado', 'g_03_02'),
+      n('g_06', '06 GCO - GERACAO DE CAIXA OPERACIONAL', 'formula', null, { formula: 'gco' }),
+      n('g_07', '07 RESULTADO FINANCEIRO', 'total_n1', null),
+      n('g_07_01', '07.01 RECEITAS FINANCEIRAS', 'resultado', 'g_07'),
+      n('g_07_02', '07.02 DESPESAS FINANCEIRAS', 'resultado', 'g_07'),
+      n('g_07_03', '07.03 CAPTACOES E AMORTIZACOES', 'resultado', 'g_07'),
+      n('g_08', '08 GCO - LIQUIDO DO RESULTADO', 'formula', null, { formula: 'gco_liq' }),
+      n('g_09', '09 INVESTIMENTOS E APORTES', 'total_n1', null),
+      n('g_09_01', '09.01 DIVIDENDOS', 'resultado', 'g_09'),
+      n('g_09_02', '09.02 APORTES', 'resultado', 'g_09'),
+      n('g_09_03', '09.03 INVESTIMENTOS / CAPEX', 'resultado', 'g_09'),
+      n('g_10', '10 VARIACAO DE CAIXA', 'formula', null, { formula: 'variacao' })
+    ];
+  },
+
+  ensureDfcDefault() {
+    if (!Array.isArray(this.visoes) || !this.visoes.length) {
+      try { this.visoes = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || "[]") || []; } catch (e) { this.visoes = []; }
+    }
+    const template = this.dfcTemplateGroups();
+    let visao = (this.visoes || []).find(v => v.id === 'dfc_default');
+    if (!visao) {
+      this.visoes = this.visoes || [];
+      this.visoes.unshift({ id: 'dfc_default', name: 'DFC Padrão', type: 'custom', groups: template });
+      this.saveToStorage();
+      return;
+    }
+    visao.groups = visao.groups || [];
+    const byId = Object.fromEntries(visao.groups.map(g => [g.id, g]));
+    template.forEach(t => {
+      if (!byId[t.id]) visao.groups.push({ ...t, accounts: t.accounts ? [] : t.accounts });
+      else {
+        if (t.redutora) byId[t.id].redutora = true;
+        if (t.formula) { byId[t.id].formula = t.formula; byId[t.id].type = 'formula'; }
+      }
+    });
+    if (byId.g_02 && /DEDUC/i.test(byId.g_02.name || '')) byId.g_02.name = '02 IMPOSTOS';
+    this.saveToStorage();
+  },
+
+  _normTxt(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  },
+
+  suggestGroup(cat) {
+    const id = String(cat.id || '');
+    const name = this._normTxt(cat.name || cat.description || '');
+    const type = this._normTxt(cat.type || cat.tpConta || cat.financialCategoryType || '');
+    if (/TOTAL/.test(type)) return null;
+    if (/CANCELAMENTO DE VEND/.test(name)) return 'g_01_05';
+    if (/VENDA DE LOTE|VENDA DE IMOV|JUROS ATIVOS|MULTAS?\/?ENCARGOS|DESCONTO DE JUROS/.test(name)) return 'g_01_01';
+    if (/ALUGUE/.test(name)) return 'g_01_02';
+    if (/RECEITA DE SERVIC|ADM(INISTRACAO)? DE EMPREENDIMENTO/.test(name) && /RECEITA|SERVIC/.test(name)) return 'g_01_03';
+    if (/NAO OPERACIONAL/.test(name) && /RECEITA/.test(name)) return 'g_01_04';
+    if (/ADIANTAMENTO DE VEND/.test(name)) return 'g_01_04';
+    if (/PIS|COFINS|ISS\b|IRRF|IMPOSTO SOBRE VEND/.test(name)) return 'g_02_01';
+    if (/CSLL|IRPJ|TRIMEST/.test(name) || (/IMPOSTO/.test(name) && /FINANC/.test(name))) return 'g_02_02';
+    if (/REPASSE|TERREN/.test(name)) return 'g_03_01_01';
+    if (/PROJETO|APROVAC/.test(name)) return 'g_03_01_02';
+    if (/\bOBRA|CONSTRUC/.test(name)) return 'g_03_01_03';
+    if (/CUSTO ADM|CUSTO ADIM/.test(name)) return 'g_03_01_04';
+    if (/AQUISICAO DE NOVA/.test(name)) return 'g_03_01_05';
+    if (/MARKETING|CORRETAG|COMISS|COMERCIAIS|DESPESAS COM VEND/.test(name)) return 'g_03_02_01';
+    if (/RETENC/.test(name)) return 'g_03_02_04';
+    if (/MANUTENC/.test(name)) return 'g_03_02_05';
+    if (/CONVENIO/.test(name)) return 'g_03_02_06';
+    if (/DONATIV/.test(name) || (/NAO OPERACIONAL/.test(name) && /DESPESA/.test(name))) return 'g_03_02_07';
+    if (/PESSOAL|SALARIO|ENCARGO|FGTS|\bINSS\b/.test(name)) return 'g_03_02_03';
+    if (/ADMINISTRAT|AGUA|ESGOTO|ENERGIA|ALUGUEL|ESCRITORIO|SOFTWARE|INTERNET|TELEFONE/.test(name)) return 'g_03_02_02';
+    if (/RECEITA FINANCEIRA|APLICACAO|RENDIMENTO/.test(name)) return 'g_07_01';
+    if (/DESPESA FINANCEIRA|TARIFA BANC|JUROS PASSIV|FUNDO DE INVEST/.test(name)) return 'g_07_02';
+    if (/CAPTACAO|AMORTIZ/.test(name)) return 'g_07_03';
+    if (/DIVIDEND/.test(name)) return 'g_09_01';
+    if (/\bAPORTE|ADIANTAMENTO/.test(name)) return 'g_09_02';
+    if (/CAPEX|INVESTIMENTO/.test(name)) return 'g_09_03';
+    if (/^1010|^1\.01\.01/.test(id)) return 'g_01_01';
+    if (/^1020|^1\.01\.02/.test(id)) return 'g_01_03';
+    return null;
+  },
+
+  autoAllocateUnassigned(silent) {
+    const v = this.visoes.find(x => x.id === 'dfc_default') || this.getVisao();
+    if (!v) return;
+    const assigned = new Set();
+    (v.groups || []).forEach(g => (g.accounts || []).forEach(a => assigned.add(String(a))));
+    let added = 0;
+    (this.categories || []).forEach(c => {
+      const cid = String(c.id || '');
+      if (!cid || assigned.has(cid)) return;
+      const nodeId = this.suggestGroup(c);
+      if (!nodeId) return;
+      const g = v.groups.find(x => x.id === nodeId);
+      if (!g || g.type !== 'resultado') return;
+      g.accounts = g.accounts || [];
+      g.accounts.push(cid);
+      assigned.add(cid);
+      added++;
+    });
+    (v.groups || []).forEach(g => {
+      if (g.accounts) g.accounts.sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+    });
+    this.saveToStorage();
+    if (!silent) {
+      alert(added ? `${added} conta(s) encaixada(s) nos nós do DFC Padrão. Revise o que restar em "Sienge Disponíveis".` : 'Nenhuma conta nova para alocar automaticamente. Arraste as restantes para o nó certo.');
+      this.renderBoard();
+    }
   },
 
   // ─── Render Estrutura Principal ───────────────────────────────────────────
@@ -159,6 +271,7 @@ const PlanoFinanceiroApp = {
                 <div style="padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
                   <span style="font-weight:700;font-size:0.9rem;color:#1e293b;"><i data-lucide="folder-tree" style="width:16px;height:16px;vertical-align:middle;margin-right:5px;"></i>Estrutura da Visão</span>
                   <div style="display:flex;gap:5px;">
+                     <button onclick="PlanoFinanceiroApp.autoAllocateUnassigned()" title="Encaixa contas Sienge nos nós por nome/código" style="padding:4px 10px;background:#fff;color:#105436;border:1px solid #105436;border-radius:4px;font-size:0.75rem;cursor:pointer;">Alocar contas</button>
                      <button onclick="PlanoFinanceiroApp.addNode(null)" style="padding:4px 10px;background:#105436;color:#fff;border:none;border-radius:4px;font-size:0.75rem;cursor:pointer;">+ Nó Raiz</button>
                   </div>
                 </div>
@@ -200,7 +313,11 @@ const PlanoFinanceiroApp = {
 
     try {
       this.categories = await SiengeApiService.getPaymentCategories();
-      this.categories.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+      this.categories.forEach(c => {
+        c.name = c.name || c.description || c.financialCategoryName || '';
+        c.tpConta = c.tpConta || c.type || c.financialCategoryType || '';
+      });
+      this.categories.sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), 'pt-BR', { numeric: true }));
       
       const idSet = new Set(this.categories.map(c => String(c.id || '')));
       this.categories.forEach(c => {
@@ -214,6 +331,10 @@ const PlanoFinanceiroApp = {
       
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
+
+      const visao = this.visoes.find(v => v.id === 'dfc_default');
+      const hasMapped = visao && (visao.groups || []).some(g => g.accounts && g.accounts.length);
+      if (!hasMapped) this.autoAllocateUnassigned(true);
 
       this.renderTable();
     } catch (e) {
@@ -581,8 +702,8 @@ const PlanoFinanceiroApp = {
     if (node.type === 'total_n1') { bg = '#f8fafc'; borderLeft = '#0f766e'; icon = 'layers'; }
     if (node.type === 'totalizadora') { bg = '#fff'; borderLeft = '#3b82f6'; icon = 'folder-open'; }
     if (node.type === 'resultado') { bg = '#fff'; borderLeft = '#eab308'; icon = 'file-text'; }
+    if (node.type === 'formula') { bg = '#ecfdf5'; borderLeft = '#105436'; icon = 'calculator'; }
 
-    // Dropzone apenas se for 'resultado'
     const dropEvents = node.type === 'resultado' ? `ondragover="PlanoFinanceiroApp.onDragOver(event)" ondrop="PlanoFinanceiroApp.onDropGroup(event, '${node.id}')"` : '';
 
     let html = `
@@ -597,7 +718,7 @@ const PlanoFinanceiroApp = {
           </div>
           
           <div style="display:flex; align-items:center; gap:5px;">
-            ${node.type !== 'resultado' ? `<button onclick="PlanoFinanceiroApp.addNode('${node.id}')" title="Adicionar Sub-nível" style="background:none;border:none;color:#10b981;cursor:pointer;padding:2px;"><i data-lucide="plus-circle" style="width:14px;height:14px;"></i></button>` : ''}
+            ${(node.type !== 'resultado' && node.type !== 'formula') ? `<button onclick="PlanoFinanceiroApp.addNode('${node.id}')" title="Adicionar Sub-nível" style="background:none;border:none;color:#10b981;cursor:pointer;padding:2px;"><i data-lucide="plus-circle" style="width:14px;height:14px;"></i></button>` : ''}
             <button onclick="PlanoFinanceiroApp.deleteNode('${node.id}')" title="Excluir" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
           </div>
         </div>
@@ -648,6 +769,7 @@ const PlanoFinanceiroApp = {
     let type = 'total_n1';
     if(parentId) {
       const parent = v.groups.find(g => g.id === parentId);
+      if (!parent || parent.type === 'formula') return;
       if(parent.type === 'total_n1') type = 'totalizadora';
       else if(parent.type === 'totalizadora') type = 'resultado';
     }

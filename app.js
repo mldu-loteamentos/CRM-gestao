@@ -1097,6 +1097,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-negociacao": "Regras de Negociação",
     "regras-cobranca": "Regras de Cobrança",
     "prestacao-contas": "Prestação de Contas",
+    "fluxo-caixa": "Fluxo de Caixa",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
@@ -1132,6 +1133,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-negociacao": "scale",
     "regras-cobranca": "sliders",
     "prestacao-contas": "receipt",
+    "fluxo-caixa": "git-branch",
     "parametrizacao-parceiro": "handshake",
     "plano-financeiro": "layout-list",
     "indexadores": "trending-up",
@@ -1239,6 +1241,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
   } else if (tabId === "prestacao-contas") {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
+  } else if (tabId === "fluxo-caixa") {
+    if (typeof FluxoCaixaApp !== "undefined") FluxoCaixaApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   }
@@ -1490,7 +1494,8 @@ window.applyPermissions = function(profileName) {
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias) {
+        const cbAlias = (modKey === 'sub_fin_cb_fluxo_caixa_acessar' || modKey === 'sub_fin_cb_caixa_banco_acessar') && perms.sub_fin_cb === true;
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -15236,7 +15241,17 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         if (genders.every(g => g === 'F')) return 'Às Ilmas. Sras.';
         return 'Aos Ilmos. Srs.';
     };
-    const nexBlankName = (v) => !v || !String(v).trim() || String(v).trim() === '- X -';
+    const nexBlankName = (v) => {
+        let s = String(v || '').replace(/[\u00a0]/g, ' ').replace(/[–—−]/g, '-').trim();
+        s = s.replace(/^e\s+/i, '').replace(/[.,;]+$/g, '').trim();
+        if (!s) return true;
+        if (/^n\/?d$/i.test(s)) return true;
+        if (/n[aã]o\s+informad/i.test(s)) return true;
+        if (/^sem\s+c[oô]njuge$/i.test(s)) return true;
+        if (/^[-.\s]*x[-.\s]*$/i.test(s)) return true;
+        if (/^[-_.x\s]+$/i.test(s)) return true;
+        return false;
+    };
 
     const nexParties = [{
         name: customer.name,
@@ -15257,25 +15272,29 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         for (const sec of secondaryCustomers) {
             try {
                 const secDetail = await SiengeApiService.getCustomer(sec.id);
-                if (secDetail) {
+                if (!secDetail) continue;
+                const secName = secDetail.name || sec.name || '';
+                if (nexBlankName(secName)) continue;
+                nexParties.push({
+                    name: secName,
+                    cpfCnpj: secDetail.cpfCnpj || secDetail.cpf || secDetail.cnpj,
+                    sex: secDetail.sex,
+                    gender: secDetail.gender,
+                    personType: secDetail.personType
+                });
+                const secSpouse = secDetail.spouseName || (secDetail.spouse && secDetail.spouse.name);
+                if (!nexBlankName(secSpouse)) {
                     nexParties.push({
-                        name: secDetail.name || sec.name || '',
-                        cpfCnpj: secDetail.cpfCnpj || secDetail.cpf || secDetail.cnpj,
-                        sex: secDetail.sex,
-                        gender: secDetail.gender,
-                        personType: secDetail.personType
+                        name: secSpouse,
+                        cpfCnpj: secDetail.spouseCpf || (secDetail.spouse && (secDetail.spouse.cpf || secDetail.spouse.cpfCnpj)),
+                        sex: secDetail.spouse && secDetail.spouse.sex
                     });
-                    const secSpouse = secDetail.spouseName || (secDetail.spouse && secDetail.spouse.name);
-                    if (!nexBlankName(secSpouse)) {
-                        nexParties.push({
-                            name: secSpouse,
-                            cpfCnpj: secDetail.spouseCpf || (secDetail.spouse && (secDetail.spouse.cpf || secDetail.spouse.cpfCnpj)),
-                            sex: secDetail.spouse && secDetail.spouse.sex
-                        });
-                    }
                 }
             } catch (e) {}
         }
+    }
+    for (let i = nexParties.length - 1; i >= 1; i--) {
+        if (nexBlankName(nexParties[i].name)) nexParties.splice(i, 1);
     }
     const nexGenders = nexParties.map(nexInferGender);
     const nexVocativo = nexGreeting(nexGenders);
@@ -15516,34 +15535,31 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             corpo = corpo.replace(/{{LOTE}}/g, lote);
 
             const cpfCnpj = maskCpfCnpj(customer.cpfCnpj);
-            corpo = corpo.replace(/Ao\(À\)\(s\)\s*Ilmo\(a\)\(s\)\.\s*Sr\(a\)\(s\)\./i, nexVocativo);
-            corpo = corpo.replace(/Ao\(À\)\s*Ilmo\(a\)\.\s*Sr\(a\)\./i, nexVocativo);
+            const vocRe = /Às Ilmas\. Sras\.|Aos Ilmos\. Srs\.|À Ilma\. Sra\.|Ao Ilmo\. Sr\.|Ao\(À\)\(s\)\s*Ilmo\(a\)\(s\)\.\s*Sr\(a\)\(s\)\.|Ao\(À\)\s*Ilmo\(a\)\.\s*Sr\(a\)\./gi;
+            corpo = corpo.replace(vocRe, nexVocativo);
+            vocRe.lastIndex = 0;
             corpo = corpo.replace(
                 /\{\{NOME_CLIENTE\}\},\s*portador\(a\) do C\.?P\.?F\.?\s*n[ºo°]?\s*\{\{CPF_CLIENTE\}\},?/i,
                 nexParties.length === 1 ? (nexQualifyPerson(nexParties[0]) + '.') : (nexQualifyPerson(nexParties[0]) + ',')
             );
+            const dummySpouseLineRe = /[\r\n]+[ \t]*e[ \t]+[-–—]?\s*X\s*[-–—]?[ \t]*,[ \t]*portador\(a\)[^\r\n]*/gi;
             const spouseLineRe = /[\r\n]*e\s*\{\{NOME_CONJUGE\}\}\s*,\s*portador\(a\) do C\.?P\.?F\.?\s*n[ºo°]?\s*\{\{CPF_CONJUGE\}\}\s*\.?/i;
             if (nexParties.length === 1) {
                 corpo = corpo.replace(spouseLineRe, '');
-                corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*(-\s*X\s*-|\{\{CPF_CONJUGE\}\})\s*\./gi, '');
+                corpo = corpo.replace(dummySpouseLineRe, '');
             } else {
                 const rest = nexParties.slice(1).map((p, i, arr) => {
                     const end = i === arr.length - 1 ? '.' : ',';
                     return `\ne ${nexQualifyPerson(p)}${end}`;
                 }).join('');
                 if (spouseLineRe.test(corpo)) corpo = corpo.replace(spouseLineRe, rest);
-                else corpo = corpo.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*(-\s*X\s*-|\{\{CPF_CONJUGE\}\})\s*\./gi, rest.replace(/^\n/, ''));
+                else corpo = corpo.replace(dummySpouseLineRe, rest);
             }
             corpo = corpo.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
             corpo = corpo.replace(/{{CPF_CLIENTE}}/g, cpfCnpj);
             corpo = corpo.replace(/{{CPF_CNPJ}}/g, cpfCnpj);
-            if (nexParties.length > 1 && nexParties[1]) {
-                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, nexParties[1].name || '');
-                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, maskCpfCnpj(nexParties[1].cpfCnpj));
-            } else {
-                corpo = corpo.replace(/{{NOME_CONJUGE}}/g, '');
-                corpo = corpo.replace(/{{CPF_CONJUGE}}/g, '');
-            }
+            corpo = corpo.replace(/{{NOME_CONJUGE}}/g, '');
+            corpo = corpo.replace(/{{CPF_CONJUGE}}/g, '');
             
             corpo = corpo.replace(/{{ENDERECO_CLIENTE}}/g, (customer.address || '').toUpperCase());
             if (!customer.zipCode && !customer.city && !customer.state || /CEP/i.test(customer.address || '')) {
@@ -15581,6 +15597,16 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             } else if (nexGenders[0] === 'F' || nexGenders[0] === 'J') {
                 corpo = corpo.replace(/\bo Notificado\b/g, 'a Notificada');
                 corpo = corpo.replace(/\bNotificado\b/g, 'Notificada');
+            }
+
+            vocRe.lastIndex = 0;
+            corpo = corpo.replace(vocRe, nexVocativo);
+            corpo = corpo.replace(/[\r\n]+[ \t]*e[ \t]+[-–—]?\s*X\s*[-–—]?[ \t]*,[ \t]*portador\(a\)[^\r\n]*/gi, '');
+            corpo = corpo.replace(/[\r\n]+[ \t]*e[ \t]*,[ \t]*portador\(a\)[^\r\n]*/gi, '');
+            if (nexParties.length === 1) {
+                const port = (nexGenders[0] === 'F' || nexGenders[0] === 'J') ? 'portadora' : 'portador';
+                corpo = corpo.replace(/portador\(a\)/g, port);
+                corpo = corpo.replace(/(portadora? do C\.?P\.?F\.? nº [0-9.\-\/]+)\s*,(\s*[\r\n])/i, '.$2');
             }
             
             docHtml = `
@@ -19029,10 +19055,10 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   
   if (!customer.spouseName || customer.spouseName.trim() === '' || customer.spouseName === '- X -') {
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*-\s*X\s*-\s*\./gi, '');
-      text = text.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText);
+      text = text.replace(/[\r\n]*e\s*{{NOME_CONJUGE}}\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, secondaryBuyersText || '');
       text = text.replace(/e\s*-\s*X\s*-\s*,\s*portador\(a\)\s*do\s*C\.P\.F\.\s*nº\s*{{CPF_CONJUGE}}\s*\./gi, '');
-      text = text.replace(/{{NOME_CONJUGE}}/g, '- X -');
-      text = text.replace(/{{CPF_CONJUGE}}/g, '- X -');
+      text = text.replace(/{{NOME_CONJUGE}}/g, '');
+      text = text.replace(/{{CPF_CONJUGE}}/g, '');
   } else {
       text = text.replace(/{{NOME_CONJUGE}}/g, customer.spouseName);
       text = text.replace(/{{CPF_CONJUGE}}\s*\./g, maskCpfCnpj(customer.spouseCpf) + "." + secondaryBuyersText);
