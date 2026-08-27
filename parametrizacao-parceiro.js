@@ -1,13 +1,18 @@
-// Parametrização de Parceiro — obra, centros de custo e matriz DFC (% do parceiro)
+// Parametrização de Parceiro — várias obras, matriz DFC e credor (título a pagar)
 
 const ParametrizacaoParceiroApp = {
   STORAGE_KEY: "crm_parcerias_v1",
   items: [],
   selectedId: null,
+  selectedObraCode: "",
   categories: [],
-  collapsed: new Set(),
   ccSearch: "",
   loadingCats: false,
+  creditorQuery: "",
+  creditorHits: [],
+  creditorSearching: false,
+  _creditorTimer: null,
+  _creditorIndex: null,
 
   obraFromCc(id) {
     const digits = String(id || "").replace(/\D/g, "");
@@ -33,18 +38,66 @@ const ParametrizacaoParceiroApp = {
     return (window.AppState && AppState.companies) || [];
   },
 
+  normalizeItem(p) {
+    if (!p) return p;
+    if (!Array.isArray(p.obras) || !p.obras.length) {
+      p.obras = [{
+        code: String(p.obraCode || ""),
+        defaultPartnerShare: Number(p.defaultPartnerShare) || 0,
+        costCenters: p.costCenters || [],
+        accountShares: p.accountShares || {},
+        naNodes: p.naNodes || {},
+        naAccounts: p.naAccounts || {}
+      }];
+    }
+    p.obras.forEach(o => {
+      o.code = String(o.code || "");
+      o.defaultPartnerShare = Number(o.defaultPartnerShare);
+      if (!Number.isFinite(o.defaultPartnerShare)) o.defaultPartnerShare = Number(p.defaultPartnerShare) || 0;
+      o.costCenters = o.costCenters || [];
+      o.accountShares = o.accountShares || {};
+      o.naNodes = o.naNodes || {};
+      o.naAccounts = o.naAccounts || {};
+    });
+    p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "" };
+    p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
+    const first = p.obras[0];
+    p.defaultPartnerShare = first ? first.defaultPartnerShare : (Number(p.defaultPartnerShare) || 0);
+    p.costCenters = (p.obras || []).flatMap(o => o.costCenters || []);
+    return p;
+  },
+
+  obrasOf(p) {
+    return (p && p.obras) || [];
+  },
+
   current() {
-    return this.items.find(p => p.id === this.selectedId) || null;
+    const p = this.items.find(x => x.id === this.selectedId) || null;
+    return p ? this.normalizeItem(p) : null;
+  },
+
+  currentObra(p) {
+    const part = p || this.current();
+    if (!part) return null;
+    const obras = this.obrasOf(part);
+    return obras.find(o => String(o.code) === String(this.selectedObraCode)) || obras[0] || null;
+  },
+
+  selectObra(code) {
+    this.selectedObraCode = String(code || "");
+    this.ccSearch = "";
+    this.render();
   },
 
   partnerPct(part, key) {
-    if (!part) return 0;
+    const obra = this.currentObra(part);
+    if (!obra) return 0;
     if (this.isNA(part, key)) return 0;
-    if (part.accountShares && Object.prototype.hasOwnProperty.call(part.accountShares, key)) {
-      const n = Number(part.accountShares[key]);
-      return Number.isFinite(n) ? n : Number(part.defaultPartnerShare) || 0;
+    if (obra.accountShares && Object.prototype.hasOwnProperty.call(obra.accountShares, key)) {
+      const n = Number(obra.accountShares[key]);
+      return Number.isFinite(n) ? n : Number(obra.defaultPartnerShare) || 0;
     }
-    return Number(part.defaultPartnerShare) || 0;
+    return Number(obra.defaultPartnerShare) || 0;
   },
 
   dfcDefaultGroups() {
@@ -71,18 +124,20 @@ const ParametrizacaoParceiroApp = {
   },
 
   isNA(part, key, ancestors) {
-    if (!part) return false;
-    if (part.naAccounts && part.naAccounts[key]) return true;
-    if (part.naNodes && part.naNodes[key]) return true;
-    return (ancestors || []).some(a => part.naNodes && part.naNodes[a]);
+    const obra = this.currentObra(part);
+    if (!obra) return false;
+    if (obra.naAccounts && obra.naAccounts[key]) return true;
+    if (obra.naNodes && obra.naNodes[key]) return true;
+    return (ancestors || []).some(a => obra.naNodes && obra.naNodes[a]);
   },
 
   toggleNA(key, isAccount) {
     const p = this.current();
-    if (!p) return;
-    p.naNodes = p.naNodes || {};
-    p.naAccounts = p.naAccounts || {};
-    const bag = isAccount ? p.naAccounts : p.naNodes;
+    const obra = this.currentObra(p);
+    if (!obra) return;
+    obra.naNodes = obra.naNodes || {};
+    obra.naAccounts = obra.naAccounts || {};
+    const bag = isAccount ? obra.naAccounts : obra.naNodes;
     if (bag[key]) delete bag[key];
     else bag[key] = true;
     this.persist();
@@ -94,6 +149,17 @@ const ParametrizacaoParceiroApp = {
     if (this.expanded.has(id)) this.expanded.delete(id);
     else this.expanded.add(id);
     this.render();
+  },
+
+  proxyUrl(path) {
+    const host = window.location.hostname;
+    const isLocal = !host || host === "localhost" || host === "127.0.0.1";
+    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+    const origin = isLocal ? `http://localhost:${port}` : "";
+    let p = String(path || "");
+    if (!p.startsWith("/")) p = "/" + p;
+    if (p.startsWith("/sienge-proxy")) p = "/api" + p;
+    return origin + p;
   },
 
   async init() {
@@ -119,10 +185,14 @@ const ParametrizacaoParceiroApp = {
         console.warn("[Parcerias] Firestore indisponível, usando cache local.", e);
       }
     }
+    this.items.forEach(p => this.normalizeItem(p));
     if (this.items.length && !this.selectedId) this.selectedId = this.items[0].id;
+    const cur = this.current();
+    if (cur && !this.selectedObraCode && cur.obras[0]) this.selectedObraCode = cur.obras[0].code;
   },
 
   persist() {
+    this.items.forEach(p => this.normalizeItem(p));
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.items));
     if (window.firebaseDb && window.firebaseCollections) {
       const { doc, setDoc } = window.firebaseCollections;
@@ -169,6 +239,26 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
+  seedCostCenters(obra, companyId, ccId) {
+    const siblings = this.costCentersOfObra(obra, companyId);
+    return (siblings.length ? siblings : [{ id: ccId, name: ccId }]).map(cc => ({
+      id: String(cc.id),
+      name: cc.name || String(cc.id),
+      inAccount: true
+    }));
+  },
+
+  makeObra(code, share, costCenters) {
+    return {
+      code: String(code || ""),
+      defaultPartnerShare: Number(share) || 0,
+      costCenters: costCenters || [],
+      accountShares: {},
+      naNodes: {},
+      naAccounts: {}
+    };
+  },
+
   createFromForm() {
     const companyId = document.getElementById("pp-new-company").value;
     const partnerName = (document.getElementById("pp-new-partner").value || "").trim();
@@ -184,25 +274,117 @@ const ParametrizacaoParceiroApp = {
     }
     const company = this.companies().find(c => String(c.id) === String(companyId));
     const obra = this.obraFromCc(ccId);
-    const siblings = this.costCentersOfObra(obra, companyId);
-    const seed = (siblings.length ? siblings : [{ id: ccId, name: ccId }]).map(cc => ({
-      id: String(cc.id),
-      name: cc.name || String(cc.id),
-      inAccount: true
-    }));
+    const seed = this.seedCostCenters(obra, companyId, ccId);
+    const existing = this.items.find(p =>
+      String(p.companyId) === String(companyId) &&
+      String(p.partnerName || "").trim().toLowerCase() === partnerName.toLowerCase()
+    );
+    if (existing) {
+      this.normalizeItem(existing);
+      if (existing.obras.some(o => String(o.code) === String(obra))) {
+        alert(`Este parceiro já tem a obra ${obra}. Abra o cadastro e ajuste o rateio dela.`);
+        this.selectedId = existing.id;
+        this.selectedObraCode = obra;
+        this.render();
+        return;
+      }
+      existing.obras.push(this.makeObra(obra, share, seed));
+      this.selectedId = existing.id;
+      this.selectedObraCode = obra;
+      this.persist();
+      this.render();
+      return;
+    }
     const item = {
       id: "par_" + Date.now(),
       companyId: String(companyId),
       companyName: company ? company.name : `Empresa ${companyId}`,
       partnerName,
-      obraCode: obra,
-      defaultPartnerShare: share,
-      costCenters: seed,
-      accountShares: {},
+      obras: [this.makeObra(obra, share, seed)],
+      creditor: { id: "", name: "", cpfCnpj: "", sharePct: "" },
       createdAt: new Date().toISOString()
     };
+    this.normalizeItem(item);
     this.items.push(item);
     this.selectedId = item.id;
+    this.selectedObraCode = obra;
+    this.persist();
+    this.render();
+  },
+
+  addObraFromForm() {
+    const p = this.current();
+    if (!p) return;
+    const ccId = (document.getElementById("pp-add-obra-cc") && document.getElementById("pp-add-obra-cc").value || "").trim();
+    const share = Number((document.getElementById("pp-add-obra-share") || {}).value);
+    if (!ccId) {
+      alert("Informe um centro de custo da nova obra.");
+      return;
+    }
+    if (!Number.isFinite(share) || share < 0 || share > 100) {
+      alert("O rateio da obra deve estar entre 0 e 100%.");
+      return;
+    }
+    const obra = this.obraFromCc(ccId);
+    if (p.obras.some(o => String(o.code) === String(obra))) {
+      alert(`A obra ${obra} já está nesta parceria.`);
+      this.selectedObraCode = obra;
+      this.render();
+      return;
+    }
+    const seed = this.seedCostCenters(obra, p.companyId, ccId);
+    p.obras.push(this.makeObra(obra, share, seed));
+    this.selectedObraCode = obra;
+    this.persist();
+    this.render();
+  },
+
+  duplicateObra() {
+    const p = this.current();
+    const src = this.currentObra(p);
+    if (!p || !src) return;
+    const destRaw = (document.getElementById("pp-dup-obra") && document.getElementById("pp-dup-obra").value || "").trim();
+    if (!destRaw) {
+      alert("Informe o código da obra destino (ex.: 134) ou um C.C. dela (ex.: 13400).");
+      return;
+    }
+    const destCode = destRaw.replace(/\D/g, "").length <= 3 ? destRaw.replace(/\D/g, "") : this.obraFromCc(destRaw);
+    if (!destCode) {
+      alert("Não foi possível identificar a obra destino.");
+      return;
+    }
+    if (String(destCode) === String(src.code)) {
+      alert("Escolha uma obra diferente da atual.");
+      return;
+    }
+    const cloneShares = JSON.parse(JSON.stringify(src.accountShares || {}));
+    const cloneNaN = JSON.parse(JSON.stringify(src.naNodes || {}));
+    const cloneNaA = JSON.parse(JSON.stringify(src.naAccounts || {}));
+    let dest = p.obras.find(o => String(o.code) === String(destCode));
+    if (!dest) {
+      const seed = this.seedCostCenters(destCode, p.companyId, destRaw);
+      dest = this.makeObra(destCode, src.defaultPartnerShare, seed);
+      p.obras.push(dest);
+    }
+    dest.defaultPartnerShare = src.defaultPartnerShare;
+    dest.accountShares = cloneShares;
+    dest.naNodes = cloneNaN;
+    dest.naAccounts = cloneNaA;
+    this.selectedObraCode = destCode;
+    this.persist();
+    this.render();
+  },
+
+  removeObra(code) {
+    const p = this.current();
+    if (!p) return;
+    if (p.obras.length <= 1) {
+      alert("A parceria precisa de ao menos uma obra. Exclua a parceria se quiser remover tudo.");
+      return;
+    }
+    if (!confirm(`Remover a obra ${code} desta parceria?`)) return;
+    p.obras = p.obras.filter(o => String(o.code) !== String(code));
+    this.selectedObraCode = p.obras[0].code;
     this.persist();
     this.render();
   },
@@ -210,20 +392,183 @@ const ParametrizacaoParceiroApp = {
   select(id) {
     this.selectedId = id;
     this.ccSearch = "";
+    const p = this.current();
+    this.selectedObraCode = p && p.obras[0] ? p.obras[0].code : "";
+    this.creditorQuery = "";
+    this.creditorHits = [];
     this.render();
   },
 
   updateField(field, value) {
     const p = this.current();
     if (!p) return;
-    if (field === "defaultPartnerShare") {
-      const n = Number(value);
-      p.defaultPartnerShare = Number.isFinite(n) ? n : 0;
-    } else if (field === "partnerName") {
-      p.partnerName = value;
-    }
+    if (field === "partnerName") p.partnerName = value;
     this.persist();
     this.renderListOnly();
+  },
+
+  updateObraShare(value) {
+    const obra = this.currentObra();
+    if (!obra) return;
+    const n = Number(value);
+    obra.defaultPartnerShare = Number.isFinite(n) ? n : 0;
+    this.persist();
+    this.renderListOnly();
+    const p = this.current();
+    document.querySelectorAll("[data-pp-placeholder]").forEach(el => {
+      el.setAttribute("placeholder", String(obra.defaultPartnerShare));
+    });
+    if (p) this.render();
+  },
+
+  updateCreditorShare(value) {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = p.creditor || {};
+    const raw = String(value).trim();
+    if (raw === "") p.creditor.sharePct = "";
+    else {
+      const n = Number(String(raw).replace(",", "."));
+      if (!Number.isFinite(n)) return;
+      p.creditor.sharePct = Math.max(0, Math.min(100, n));
+    }
+    this.persist();
+  },
+
+  clearCreditor() {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = { id: "", name: "", cpfCnpj: "", sharePct: (p.creditor && p.creditor.sharePct) || "" };
+    this.creditorQuery = "";
+    this.creditorHits = [];
+    this.persist();
+    this.render();
+  },
+
+  pickCreditorByIndex(i) {
+    const c = this.creditorHits[Number(i)];
+    if (!c) return;
+    this.pickCreditor(c.id, c.name, c.cpfCnpj);
+  },
+
+  pickCreditor(id, name, doc) {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = p.creditor || {};
+    p.creditor.id = String(id || "");
+    p.creditor.name = String(name || "");
+    p.creditor.cpfCnpj = String(doc || "");
+    this.creditorQuery = "";
+    this.creditorHits = [];
+    this.persist();
+    this.render();
+  },
+
+  onCreditorSearch(val) {
+    this.creditorQuery = val;
+    clearTimeout(this._creditorTimer);
+    this._creditorTimer = setTimeout(() => this.runCreditorSearch(val), 280);
+  },
+
+  mapCreditor(raw, fallbackId) {
+    if (!raw) return null;
+    const id = raw.id || raw.creditorId || fallbackId || "";
+    const name = raw.name || raw.nome || raw.fantasyName || raw.corporateName || raw.companyName || "";
+    const cpfCnpj = raw.cpfCnpj || raw.cnpj || raw.cpf || raw.document || "";
+    if (!id && !name) return null;
+    return { id: String(id), name: String(name), cpfCnpj: String(cpfCnpj) };
+  },
+
+  async loadFirebaseCreditors() {
+    if (this._creditorIndex) return this._creditorIndex;
+    const out = [];
+    if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDocs) {
+      this._creditorIndex = [];
+      return this._creditorIndex;
+    }
+    const { collection, getDocs } = window.firebaseCollections;
+    for (const col of ["sienge_creditors", "creditors"]) {
+      try {
+        const snap = await getDocs(collection(window.firebaseDb, col));
+        snap.forEach(d => {
+          const mapped = this.mapCreditor(d.data(), d.id);
+          if (mapped) out.push(mapped);
+        });
+        if (out.length) break;
+      } catch (e) {}
+    }
+    this._creditorIndex = out;
+    return out;
+  },
+
+  async runCreditorSearch(val) {
+    const q = String(val || "").trim().toLowerCase();
+    const digits = q.replace(/\D/g, "");
+    const box = document.getElementById("pp-cred-sugg");
+    if (q.length < 2 && digits.length < 3) {
+      this.creditorHits = [];
+      if (box) box.innerHTML = "";
+      return;
+    }
+    this.creditorSearching = true;
+    if (box) box.innerHTML = `<div style="padding:8px 10px;font-size:0.78rem;color:#64748b;">Buscando credor...</div>`;
+    let hits = [];
+    const index = await this.loadFirebaseCreditors();
+    if (index.length) {
+      hits = index.filter(c => {
+        const name = String(c.name || "").toLowerCase();
+        const doc = String(c.cpfCnpj || "").replace(/\D/g, "");
+        return name.includes(q) || (digits.length >= 3 && doc.includes(digits)) || String(c.id).includes(q);
+      }).slice(0, 15);
+    }
+    if (!hits.length) {
+      try {
+        const headers = { Authorization: typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "" };
+        const tries = [];
+        if (q.length >= 2) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&name=${encodeURIComponent(val)}`));
+        if (digits.length === 11) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&cpf=${digits}`));
+        if (digits.length === 14) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&cnpj=${digits}`));
+        if (digits.length >= 3 && digits.length !== 11 && digits.length !== 14) {
+          tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&id=${digits}`));
+        }
+        for (const url of tries) {
+          const res = await fetch(url, { headers });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const rows = json.results || json.resultSet || json.data || [];
+          rows.forEach(r => {
+            const mapped = this.mapCreditor(r);
+            if (mapped && !hits.some(h => String(h.id) === String(mapped.id))) hits.push(mapped);
+          });
+          if (hits.length) break;
+        }
+      } catch (e) {
+        console.warn("[Parcerias] Busca de credor:", e);
+      }
+    }
+    this.creditorHits = hits.slice(0, 15);
+    this.creditorSearching = false;
+    if (box) box.innerHTML = this.creditorSuggHtml();
+  },
+
+  creditorSuggHtml() {
+    if (!this.creditorHits.length) {
+      return this.creditorQuery
+        ? `<div style="padding:8px 10px;font-size:0.78rem;color:#94a3b8;">Nenhum credor encontrado.</div>`
+        : "";
+    }
+    return `<div style="border:1px solid #e2e8f0;border-radius:8px;margin-top:4px;background:#fff;overflow:hidden;max-height:240px;overflow-y:auto;">
+      ${this.creditorHits.map((c, idx) => {
+        const name = this.esc(c.name);
+        const doc = this.esc(c.cpfCnpj || "");
+        const id = this.esc(c.id);
+        return `<button type="button" onclick="ParametrizacaoParceiroApp.pickCreditorByIndex(${idx})"
+          style="display:block;width:100%;text-align:left;border:none;background:#fff;padding:8px 10px;cursor:pointer;font-size:0.8rem;border-bottom:1px solid #f1f5f9;">
+          <strong>${name}</strong> <span style="color:#94a3b8;">ID ${id}</span>
+          <div style="font-size:0.72rem;color:#64748b;">${doc || "sem CPF/CNPJ"}</div>
+        </button>`;
+      }).join("")}
+    </div>`;
   },
 
   renderListOnly() {
@@ -233,43 +578,45 @@ const ParametrizacaoParceiroApp = {
   },
 
   setCcInAccount(ccId, checked) {
-    const p = this.current();
-    if (!p) return;
-    const row = p.costCenters.find(c => String(c.id) === String(ccId));
+    const obra = this.currentObra();
+    if (!obra) return;
+    const row = obra.costCenters.find(c => String(c.id) === String(ccId));
     if (row) row.inAccount = !!checked;
     this.persist();
   },
 
   addCostCenter(ccId) {
     const p = this.current();
-    if (!p) return;
+    const obra = this.currentObra(p);
+    if (!p || !obra) return;
     const id = String(ccId);
-    if (p.costCenters.some(c => String(c.id) === id)) return;
-    if (this.obraFromCc(id) !== String(p.obraCode)) {
-      if (!confirm(`O centro ${id} pertence à obra ${this.obraFromCc(id) || "?"} e a parceria é da obra ${p.obraCode}. Incluir mesmo assim?`)) return;
+    if (obra.costCenters.some(c => String(c.id) === id)) return;
+    const ccObra = this.obraFromCc(id);
+    if (ccObra !== String(obra.code)) {
+      if (!confirm(`O centro ${id} é da obra ${ccObra || "?"}. Incluir na obra ${obra.code}?`)) return;
     }
     const cc = this.allCostCenters().find(c => String(c.id) === id);
-    p.costCenters.push({ id, name: (cc && cc.name) || id, inAccount: true });
+    obra.costCenters.push({ id, name: (cc && cc.name) || id, inAccount: true });
     this.ccSearch = "";
     this.persist();
     this.render();
   },
 
   removeCostCenter(ccId) {
-    const p = this.current();
-    if (!p) return;
-    p.costCenters = p.costCenters.filter(c => String(c.id) !== String(ccId));
+    const obra = this.currentObra();
+    if (!obra) return;
+    obra.costCenters = obra.costCenters.filter(c => String(c.id) !== String(ccId));
     this.persist();
     this.render();
   },
 
   importObraCenters() {
     const p = this.current();
-    if (!p) return;
-    const siblings = this.costCentersOfObra(p.obraCode, p.companyId);
-    siblings.forEach(cc => {
-      if (!p.costCenters.some(x => String(x.id) === String(cc.id))) {
-        p.costCenters.push({ id: String(cc.id), name: cc.name || String(cc.id), inAccount: true });
+    const obra = this.currentObra(p);
+    if (!p || !obra) return;
+    this.costCentersOfObra(obra.code, p.companyId).forEach(cc => {
+      if (!obra.costCenters.some(x => String(x.id) === String(cc.id))) {
+        obra.costCenters.push({ id: String(cc.id), name: cc.name || String(cc.id), inAccount: true });
       }
     });
     this.persist();
@@ -277,27 +624,27 @@ const ParametrizacaoParceiroApp = {
   },
 
   setAccountShare(accountId, value) {
-    const p = this.current();
-    if (!p) return;
-    if (!p.accountShares) p.accountShares = {};
+    const obra = this.currentObra();
+    if (!obra) return;
+    obra.accountShares = obra.accountShares || {};
     const raw = String(value).trim();
     if (raw === "") {
-      delete p.accountShares[accountId];
+      delete obra.accountShares[accountId];
     } else {
       const n = Number(raw.replace(",", "."));
       if (!Number.isFinite(n)) return;
-      p.accountShares[accountId] = Math.max(0, Math.min(100, n));
+      obra.accountShares[accountId] = Math.max(0, Math.min(100, n));
     }
     this.persist();
-    const pct = this.partnerPct(p, accountId);
+    const pct = this.partnerPct(this.current(), accountId);
     document.querySelectorAll(`[data-pp-pct="${accountId}"]`).forEach(el => { el.textContent = pct.toFixed(1) + "%"; });
     document.querySelectorAll(`[data-pp-bar="${accountId}"]`).forEach(el => { el.style.width = pct + "%"; });
   },
 
   applyDefaultToAll() {
-    const p = this.current();
-    if (!p) return;
-    p.accountShares = {};
+    const obra = this.currentObra();
+    if (!obra) return;
+    obra.accountShares = {};
     this.persist();
     this.render();
   },
@@ -305,9 +652,10 @@ const ParametrizacaoParceiroApp = {
   removeCurrent() {
     const p = this.current();
     if (!p) return;
-    if (!confirm(`Excluir a parceria de ${p.partnerName} (obra ${p.obraCode})?`)) return;
+    if (!confirm(`Excluir a parceria de ${p.partnerName}?`)) return;
     this.items = this.items.filter(x => x.id !== p.id);
     this.selectedId = this.items[0] ? this.items[0].id : null;
+    this.selectedObraCode = "";
     this.persist();
     this.render();
   },
@@ -320,13 +668,16 @@ const ParametrizacaoParceiroApp = {
     if (!this.items.length) {
       return `<div style="padding:16px;color:#94a3b8;font-size:0.8rem;">Nenhuma parceria cadastrada.</div>`;
     }
-    return this.items.map(p => {
+    return this.items.map(raw => {
+      const p = this.normalizeItem(raw);
       const active = p.id === this.selectedId;
-      const nCc = (p.costCenters || []).filter(c => c.inAccount).length;
+      const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
+      const obras = (p.obras || []).map(o => o.code).filter(Boolean).join(", ") || "—";
+      const shares = [...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ");
       return `<button onclick="ParametrizacaoParceiroApp.select('${p.id}')"
         style="width:100%;text-align:left;border:1.5px solid ${active ? "#105436" : "#e5e7eb"};background:${active ? "#e8f5ee" : "#fff"};color:${active ? "#105436" : "#334155"};border-radius:8px;padding:10px;margin-bottom:6px;cursor:pointer;">
         <div style="font-weight:800;font-size:0.82rem;">${this.esc(p.partnerName)}</div>
-        <div style="font-size:0.72rem;opacity:0.8;margin-top:2px;">Obra ${this.esc(p.obraCode)} · ${nCc} C.C. na conta · ${p.defaultPartnerShare}%</div>
+        <div style="font-size:0.72rem;opacity:0.8;margin-top:2px;">Obras ${this.esc(obras)} · ${nCc} C.C. · ${this.esc(shares)}</div>
       </button>`;
     }).join("");
   },
@@ -339,6 +690,7 @@ const ParametrizacaoParceiroApp = {
     const root = document.getElementById("parametrizacao-parceiro-root");
     if (!root) return;
     const p = this.selectedId === "__new__" ? null : this.current();
+    if (p && !this.selectedObraCode && p.obras[0]) this.selectedObraCode = p.obras[0].code;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
         <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:12px 12px 0 0;">
@@ -348,7 +700,7 @@ const ParametrizacaoParceiroApp = {
             </div>
             <div>
               <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Parametrização de Parceiro</h2>
-              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Obra + centros de custo + matriz DFC (% que o parceiro paga em cada conta)</p>
+              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Várias obras no mesmo terrenista · rateio por obra · credor para título a pagar</p>
             </div>
           </div>
         </div>
@@ -372,7 +724,7 @@ const ParametrizacaoParceiroApp = {
 
   emptyHtml() {
     return `<div class="crm-card" style="padding:40px;text-align:center;color:#64748b;">
-      Cadastre uma parceria para definir a obra, os centros de custo que entram na conta e o % do parceiro em cada conta do DFC.
+      Cadastre uma parceria. Depois inclua as obras do mesmo terrenista, cada uma com o próprio percentual.
     </div>`;
   },
 
@@ -381,7 +733,8 @@ const ParametrizacaoParceiroApp = {
     return `<div class="crm-card" style="padding:20px;max-width:720px;">
       <h3 style="margin:0 0 6px;color:var(--color-primary);">Nova parceria</h3>
       <p style="margin:0 0 16px;color:#64748b;font-size:0.82rem;">
-        Informe um centro de custo da obra. Ex.: <strong>13600</strong> e <strong>13601</strong> pertencem à obra <strong>136</strong> — os irmãos são sugeridos automaticamente.
+        Informe um centro de custo da primeira obra. Depois você adiciona 134, 135, 136 no mesmo parceiro, cada uma com o próprio %.
+        Se o nome do parceiro já existir na empresa, a nova obra entra nesse cadastro.
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Empresa
@@ -393,10 +746,10 @@ const ParametrizacaoParceiroApp = {
           <input id="pp-new-partner" placeholder="Nome do parceiro" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
         </label>
         <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Centro de custo da obra
-          <input id="pp-new-cc" placeholder="Ex.: 13600" list="pp-cc-list" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+          <input id="pp-new-cc" placeholder="Ex.: 13300" list="pp-cc-list" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
           <datalist id="pp-cc-list">${this.allCostCenters().slice(0, 400).map(cc => `<option value="${cc.id}">${this.esc(cc.name || "")}</option>`).join("")}</datalist>
         </label>
-        <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Rateio padrão do parceiro (%)
+        <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Rateio padrão desta obra (%)
           <input id="pp-new-share" type="number" min="0" max="100" step="0.01" value="50" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
         </label>
       </div>
@@ -408,14 +761,9 @@ const ParametrizacaoParceiroApp = {
   },
 
   detailHtml(p) {
-    const inAccount = (p.costCenters || []).filter(c => c.inAccount);
-    const q = (this.ccSearch || "").toLowerCase();
-    const sugg = q
-      ? this.allCostCenters().filter(cc =>
-          (!p.companyId || cc.companyId == null || String(cc.companyId) === String(p.companyId)) &&
-          (String(cc.id).includes(q) || String(cc.name || "").toLowerCase().includes(q))
-        ).slice(0, 10)
-      : [];
+    const obra = this.currentObra(p);
+    const inAccount = ((obra && obra.costCenters) || []).filter(c => c.inAccount);
+    const cred = p.creditor || {};
     return `
       <div style="display:flex;flex-direction:column;gap:14px;">
         <div class="crm-card" style="padding:16px;">
@@ -426,52 +774,109 @@ const ParametrizacaoParceiroApp = {
             </div>
             <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeCurrent()" style="color:#dc2626;border-color:#fecaca;">Excluir</button>
           </div>
-          <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.8fr;gap:12px;margin-top:14px;">
+          <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px;">
             <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Parceiro
               <input value="${this.esc(p.partnerName)}" onchange="ParametrizacaoParceiroApp.updateField('partnerName', this.value)"
-                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-            </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Obra
-              <input value="${this.esc(p.obraCode)}" disabled style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;background:#f8fafc;font-weight:800;">
-            </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;">Rateio padrão do parceiro (%)
-              <input type="number" min="0" max="100" step="0.01" value="${p.defaultPartnerShare}"
-                onchange="ParametrizacaoParceiroApp.updateField('defaultPartnerShare', this.value)"
                 style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
             </label>
           </div>
         </div>
 
         <div class="crm-card" style="padding:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-            <div>
-              <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Centros de custo da obra ${this.esc(p.obraCode)}</h3>
-              <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">Marque os que entram na conta da parceria. ${inAccount.length} ativo(s).</p>
+          <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Credor (título a pagar)</h3>
+          <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque na base de credores por nome, CPF ou CNPJ. O percentual entra na geração do título a pagar.</p>
+          ${cred.id ? `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+              <div>
+                <div style="font-weight:800;color:#065f46;">${this.esc(cred.name)}</div>
+                <div style="font-size:0.75rem;color:#047857;">ID ${this.esc(cred.id)} · ${this.esc(cred.cpfCnpj || "sem documento")}</div>
+              </div>
+              <button type="button" onclick="ParametrizacaoParceiroApp.clearCreditor()" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;">Trocar</button>
             </div>
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" style="height:34px;font-size:0.78rem;">Trazer irmãos da obra</button>
+          ` : `
+            <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
+              oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
+              style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
+          `}
+          <label style="margin-top:12px;font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;max-width:220px;">Percentual do credor no título (%)
+            <input type="number" min="0" max="100" step="0.01" value="${cred.sharePct === 0 || cred.sharePct ? cred.sharePct : ""}"
+              placeholder="ex.: 44" onchange="ParametrizacaoParceiroApp.updateCreditorShare(this.value)"
+              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+          </label>
+        </div>
+
+        <div class="crm-card" style="padding:16px;">
+          <h3 style="margin:0 0 8px;font-size:0.95rem;color:var(--color-primary);">Obras deste terrenista</h3>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+            ${(p.obras || []).map(o => {
+              const on = String(o.code) === String(this.selectedObraCode);
+              return `<button type="button" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"
+                style="border:1.5px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};border-radius:999px;padding:6px 12px;font-size:0.78rem;font-weight:800;cursor:pointer;">
+                Obra ${this.esc(o.code)} · ${o.defaultPartnerShare}%
+              </button>`;
+            }).join("")}
           </div>
-          <table class="custom-table" style="margin-top:12px;font-size:0.82rem;">
-            <thead><tr><th>C.C.</th><th>Nome</th><th style="text-align:center;">Entra na conta</th><th></th></tr></thead>
-            <tbody>
-              ${(p.costCenters || []).map(cc => `<tr>
-                <td style="font-weight:800;">${this.esc(cc.id)}</td>
-                <td>${this.esc(cc.name)}</td>
-                <td style="text-align:center;">
-                  <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)">
-                </td>
-                <td style="text-align:right;"><button onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;">remover</button></td>
-              </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:16px;">Nenhum centro de custo</td></tr>`}
-            </tbody>
-          </table>
-          <div style="margin-top:10px;max-width:420px;">
-            <input placeholder="Adicionar outro C.C. (ex. 13601)" value="${this.esc(this.ccSearch)}"
-              oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
-              style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-            <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
+          <div style="display:grid;grid-template-columns:1.2fr 0.7fr auto;gap:8px;align-items:end;max-width:640px;">
+            <label style="font-size:0.72rem;font-weight:700;color:#475569;">Adicionar obra (C.C.)
+              <input id="pp-add-obra-cc" placeholder="Ex.: 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            </label>
+            <label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio desta obra (%)
+              <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="${obra ? obra.defaultPartnerShare : 50}" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            </label>
+            <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;font-size:0.78rem;">Incluir obra</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1.2fr auto auto;gap:8px;align-items:end;max-width:640px;margin-top:10px;">
+            <label style="font-size:0.72rem;font-weight:700;color:#475569;">Duplicar rateio da obra ${this.esc(obra && obra.code)} para
+              <input id="pp-dup-obra" placeholder="134 ou 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            </label>
+            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;font-size:0.78rem;">Duplicar parametrização</button>
+            ${p.obras.length > 1 ? `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button>` : "<span></span>"}
           </div>
         </div>
 
-        ${this.matrixHtml(p)}
+        ${obra ? this.obraDetailHtml(p, obra, inAccount) : ""}
+        ${obra ? this.matrixHtml(p) : ""}
+      </div>
+    `;
+  },
+
+  obraDetailHtml(p, obra, inAccount) {
+    return `
+      <div class="crm-card" style="padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Centros de custo da obra ${this.esc(obra.code)}</h3>
+            <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">Marque os que entram na conta. ${inAccount.length} ativo(s). Rateio padrão desta obra: ${obra.defaultPartnerShare}%.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <label style="font-size:0.72rem;font-weight:700;color:#475569;">% padrão
+              <input type="number" min="0" max="100" step="0.01" value="${obra.defaultPartnerShare}"
+                onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)"
+                style="width:80px;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-weight:800;">
+            </label>
+            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" style="height:34px;font-size:0.78rem;">Trazer irmãos da obra</button>
+          </div>
+        </div>
+        <table class="custom-table" style="margin-top:12px;font-size:0.82rem;">
+          <thead><tr><th>C.C.</th><th>Nome</th><th style="text-align:center;">Entra na conta</th><th></th></tr></thead>
+          <tbody>
+            ${(obra.costCenters || []).map(cc => `<tr>
+              <td style="font-weight:800;">${this.esc(cc.id)}</td>
+              <td>${this.esc(cc.name)}</td>
+              <td style="text-align:center;">
+                <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)">
+              </td>
+              <td style="text-align:right;"><button onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;">remover</button></td>
+            </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:16px;">Nenhum centro de custo</td></tr>`}
+          </tbody>
+        </table>
+        <div style="margin-top:10px;max-width:420px;">
+          <input placeholder="Adicionar outro C.C. (ex. 13301)" value="${this.esc(this.ccSearch)}"
+            oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
+            style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+          <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
+        </div>
       </div>
     `;
   },
@@ -494,6 +899,7 @@ const ParametrizacaoParceiroApp = {
   },
 
   rateioControlsHtml(p, key, isAccount, ancestorNA, naSelf) {
+    const obra = this.currentObra(p);
     if (ancestorNA) {
       return `<span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;">Fora (herda)</span>`;
     }
@@ -506,14 +912,15 @@ const ParametrizacaoParceiroApp = {
         </button>
       </div>`;
     }
-    const custom = p.accountShares && Object.prototype.hasOwnProperty.call(p.accountShares, key);
+    const custom = obra && obra.accountShares && Object.prototype.hasOwnProperty.call(obra.accountShares, key);
     const pct = this.partnerPct(p, key);
+    const def = obra ? obra.defaultPartnerShare : 0;
     return `<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
       <div style="width:72px;height:6px;border-radius:99px;background:#e2e8f0;overflow:hidden;" title="Parceiro ${pct.toFixed(0)}% · Moura Leite ${(100 - pct).toFixed(0)}%">
         <div data-pp-bar="${this.esc(key)}" style="width:${pct}%;height:100%;background:#105436;"></div>
       </div>
-      <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${p.defaultPartnerShare}"
-        title="Percentual do parceiro. Vazio herda o padrão (${p.defaultPartnerShare}%)."
+      <input type="number" min="0" max="100" step="0.01" value="${custom ? pct : ""}" placeholder="${def}" data-pp-placeholder
+        title="Percentual do parceiro nesta obra. Vazio herda o padrão (${def}%)."
         onclick="event.stopPropagation()"
         onchange="ParametrizacaoParceiroApp.setAccountShare('${key}', this.value)"
         style="width:58px;height:26px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 6px;font-size:0.75rem;font-weight:700;">
@@ -529,19 +936,21 @@ const ParametrizacaoParceiroApp = {
   matrixHtml(p) {
     const visao = this.dfcVisao();
     const groups = visao.groups || [];
+    const obra = this.currentObra(p);
     this.expanded = this.expanded || new Set(groups.map(g => g.id));
     const roots = groups.filter(g => !g.parentId);
     const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
+    const def = obra ? obra.defaultPartnerShare : 0;
     return `
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:360px;">
         <div style="padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
           <div>
             <span style="font-weight:700;font-size:0.9rem;color:#1e293b;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="folder-tree" style="width:16px;height:16px;"></i>
-              Estrutura da Visão — ${this.esc(visao.name)}
+              Rateio DFC — obra ${this.esc(obra && obra.code)} · ${this.esc(visao.name)}
             </span>
             <div style="font-size:0.72rem;color:#64748b;margin-top:3px;">
-              Campo em branco herda ${p.defaultPartnerShare}%. A barra é a parte do parceiro. O ícone de bloqueio tira o nó da conta.
+              Contas 1.xxx entram como receita (positivo) e 2.xxx como despesa (negativo) na prestação de contas. Campo em branco herda ${def}%.
             </div>
           </div>
           <button type="button" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()"
@@ -561,8 +970,8 @@ const ParametrizacaoParceiroApp = {
     const accounts = node.accounts || [];
     const hasKids = children.length > 0 || accounts.length > 0;
     const expanded = !this.expanded || this.expanded.has(node.id);
-    const naSelf = !!(p.naNodes && p.naNodes[node.id]);
-    const ancestorNA = ancestors.some(a => p.naNodes && p.naNodes[a]);
+    const naSelf = !!(this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[node.id]);
+    const ancestorNA = ancestors.some(a => this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[a]);
     const na = ancestorNA || naSelf;
 
     let bg = "#fff", borderLeft = "#cbd5e1", icon = "folder";
@@ -594,7 +1003,8 @@ const ParametrizacaoParceiroApp = {
       if (accounts.length) {
         html += `<div style="margin-left:28px;margin-top:5px;margin-bottom:10px;display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid #e2e8f0;">`;
         accounts.forEach(accId => {
-          const naAccSelf = !!(p.naAccounts && p.naAccounts[accId]);
+          const obra = this.currentObra(p);
+          const naAccSelf = !!(obra && obra.naAccounts && obra.naAccounts[accId]);
           const naAcc = na || naAccSelf;
           html += `
             <div style="background:#fff;border:1px solid #cbd5e1;padding:4px 8px;border-radius:4px;font-size:0.75rem;display:flex;justify-content:space-between;align-items:center;gap:8px;opacity:${naAcc ? 0.72 : 1};">

@@ -63,7 +63,8 @@ const PrestacaoContasApp = {
     const p = (ParametrizacaoParceiroApp.items || []).find(x => x.id === id);
     if (!p) { this.render(); return; }
     this.companyId = String(p.companyId);
-    this.costCenterIds = (p.costCenters || []).filter(c => c.inAccount).map(c => String(c.id));
+    const obras = Array.isArray(p.obras) && p.obras.length ? p.obras : [{ costCenters: p.costCenters || [] }];
+    this.costCenterIds = [...new Set(obras.flatMap(o => (o.costCenters || []).filter(c => c.inAccount).map(c => String(c.id))))];
     this.render();
   },
 
@@ -123,6 +124,13 @@ const PrestacaoContasApp = {
     this.render();
   },
 
+  signedAmount(categoryId, amount) {
+    const digits = String(categoryId || "").replace(/\D/g, "");
+    const abs = Math.abs(Number(amount) || 0);
+    if (digits.startsWith("2")) return -abs;
+    return abs;
+  },
+
   allocate(mov) {
     const amount = Number(mov.bankMovementAmount) || 0;
     const wanted = this.costCenterIds.map(String);
@@ -133,7 +141,7 @@ const PrestacaoContasApp = {
     if (!cats.length) {
       if (wanted.length) return [];
       return [{
-        amount,
+        amount: this.signedAmount("SEM_CONTA", amount),
         categoryId: "SEM_CONTA",
         categoryName: "Sem plano financeiro",
         costCenterId: mov.costCenterId || "",
@@ -146,9 +154,10 @@ const PrestacaoContasApp = {
       if (rate > 1) share = rate / 100;
       else if (rate > 0) share = rate;
       else share = 1 / cats.length;
+      const categoryId = String(fc.financialCategoryId || "SEM_CONTA");
       return {
-        amount: amount * share,
-        categoryId: String(fc.financialCategoryId || "SEM_CONTA"),
+        amount: this.signedAmount(categoryId, amount * share),
+        categoryId,
         categoryName: fc.financialCategoryName || "Sem nome",
         costCenterId: fc.costCenterId,
         costCenterName: fc.costCenterName,
@@ -366,7 +375,10 @@ const PrestacaoContasApp = {
           ${partnerships.length ? `<label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;max-width:480px;margin-bottom:10px;">Parceria
             <select onchange="PrestacaoContasApp.applyPartnership(this.value)" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
               <option value="">Selecionar parceria (opcional)</option>
-              ${partnerships.map(p => `<option value="${p.id}" ${this.partnershipId === p.id ? "selected" : ""}>${p.partnerName} · obra ${p.obraCode}</option>`).join("")}
+              ${partnerships.map(p => {
+                const obras = (p.obras && p.obras.map(o => o.code).filter(Boolean).join(", ")) || p.obraCode || "";
+                return `<option value="${p.id}" ${this.partnershipId === p.id ? "selected" : ""}>${p.partnerName}${obras ? " · obras " + obras : ""}</option>`;
+              }).join("")}
             </select>
           </label>` : ""}
           <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Obra / centros de custo</div>

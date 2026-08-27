@@ -638,6 +638,10 @@ function switchCustomerTab(tabId) {
   if (tabId === 'tab-construcao' && typeof window.loadConstrucoes === 'function') {
     window.loadConstrucoes();
   }
+
+  if (tabId === 'tab-notificacoes' && typeof window.renderNexHistory === 'function') {
+    window.renderNexHistory();
+  }
   
   const activeBtn = document.querySelector(`.customer-tab-btn[data-target="${tabId}"]`);
   if (activeBtn) {
@@ -10167,7 +10171,7 @@ function generateAgreementPDF() {
   const preambleText = AppState.preambles[unit.costCenterId] || "PREÃ‚MBULO NÃO CADASTRADO NO SHAREPOINT.";
   
   // Obter Cláusulas Editadas
-  let textTemplate = document.getElementById("reneg-clauses-editor").value;
+  let textTemplate = formatDocPadraoMarkup(document.getElementById("reneg-clauses-editor").value);
   
   // Substituir variáveis
   textTemplate = textTemplate
@@ -15530,6 +15534,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     let assunto = t['doc-carta-assunto'] || (document.getElementById('doc-carta-assunto') ? document.getElementById('doc-carta-assunto').value : 'NOTIFICAÇÃO EXTRAJUDICIAL');
     
     if (corpo) {
+            corpo = formatDocPadraoMarkup(corpo);
             const today = new Date();
             let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
             corpo = corpo.replace(/{{CIDADE_ATUAL}}/g, 'Botucatu');
@@ -15674,6 +15679,274 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     }
 
     return docHtml;
+};
+
+window.NEX_STATUS_OPTIONS = [
+  "Ausente",
+  "Desconhecido",
+  "End. insuficiente",
+  "Entregue",
+  "Falecido",
+  "Mudou-se",
+  "Não existe nº indicador",
+  "Não procurado",
+  "Recusado",
+  "Retornou ao remetente"
+].sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+window.nexHistoryKey = function(customerId, saleId) {
+  return String(customerId || "") + "_" + String(saleId || "");
+};
+
+window.nexParseIso = function(d) {
+  if (!d) return "";
+  const s = String(d).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+};
+
+window.nexFmtBr = function(d) {
+  const iso = window.nexParseIso(d);
+  return iso ? iso.split("-").reverse().join("/") : "—";
+};
+
+window.nexCurrentUserName = function() {
+  const u = (window.AppState && AppState.currentUser) || {};
+  return u.name || u.email || "Operador";
+};
+
+window.nexPaymentDatesAfter = function(isoDate) {
+  const cut = window.nexParseIso(isoDate);
+  if (!cut) return [];
+  const insts = (window.AppState && AppState.currentContractInstallments) || [];
+  const dates = [];
+  insts.forEach(inst => {
+    const receipts = Array.isArray(inst.receipts) ? inst.receipts : [];
+    if (receipts.length) {
+      receipts.forEach(r => {
+        const type = String(r.type || r.receiptType || r.receiptTypeId || r.typeId || r.receiptId || "").toLowerCase();
+        if (type && type !== "2" && !type.includes("recebimento")) return;
+        const val = Number(r.receiptValue || r.value || 0);
+        if (!(val > 0.01) && inst.installmentSituation !== 2) return;
+        const d = window.nexParseIso(r.receiptDate || r.date || r.paymentDate);
+        if (d && d > cut) dates.push(d);
+      });
+    } else if (inst.installmentSituation === 2 || inst.status === "PAID" || inst.status === "Quitado") {
+      const d = window.nexParseIso(inst.receiptDate || inst.payOffDate);
+      if (d && d > cut) dates.push(d);
+    }
+  });
+  return dates;
+};
+
+window.nexIsLegallyValid = function(item) {
+  if (!item || String(item.status || "") !== "Entregue") return { ok: false, reason: "Somente a opção Entregue tem validade jurídica." };
+  const pays = window.nexPaymentDatesAfter(item.date || item.createdAt);
+  if (pays.length) {
+    return { ok: false, reason: "Cliente pagou parcela depois da data da NEX (" + window.nexFmtBr(pays[0]) + "). Sem validade jurídica." };
+  }
+  return { ok: true, reason: "Constituído em mora (entregue, sem pagamento posterior)." };
+};
+
+window.nexValidInLast90Days = function(items) {
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const limit = new Date(now.getTime() - 90 * 86400000);
+  const limitIso = window.nexParseIso(limit.toISOString());
+  return (items || []).find(it => {
+    const v = window.nexIsLegallyValid(it);
+    if (!v.ok) return false;
+    const iso = window.nexParseIso(it.date || it.createdAt);
+    return iso && iso >= limitIso;
+  }) || null;
+};
+
+window.loadNexHistory = async function(customerId, saleId) {
+  customerId = customerId || (AppState && AppState.selectedCustomerId);
+  saleId = saleId || (AppState && (AppState.selectedSaleId || AppState.selectedTitulo));
+  const key = window.nexHistoryKey(customerId, saleId);
+  window._nexHistory = window._nexHistory || {};
+  let local = [];
+  try {
+    const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
+    if (Array.isArray(bag[key])) local = bag[key];
+  } catch (e) {}
+  if (window.firebaseDb && window.firebaseCollections) {
+    try {
+      const { doc, getDoc } = window.firebaseCollections;
+      const snap = await getDoc(doc(window.firebaseDb, "nex_letters", key));
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        if (Array.isArray(data.items)) local = data.items;
+      }
+    } catch (e) {
+      console.warn("[NEX] Falha ao ler histórico", e);
+    }
+  }
+  window._nexHistory[key] = local;
+  return local;
+};
+
+window.saveNexHistory = async function(customerId, saleId, items) {
+  const key = window.nexHistoryKey(customerId, saleId);
+  window._nexHistory = window._nexHistory || {};
+  window._nexHistory[key] = items;
+  try {
+    const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
+    bag[key] = items.map(it => {
+      const copy = { ...it };
+      if (copy.html && copy.html.length > 80000) copy.html = "";
+      return copy;
+    });
+    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+  } catch (e) {}
+  if (window.firebaseDb && window.firebaseCollections) {
+    try {
+      const { doc, setDoc } = window.firebaseCollections;
+      await setDoc(doc(window.firebaseDb, "nex_letters", key), {
+        customerId: String(customerId),
+        saleId: String(saleId),
+        items,
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("[NEX] Falha ao salvar histórico", e);
+    }
+  }
+};
+
+window.renderNexHistory = async function() {
+  const root = document.getElementById("nex-history-root");
+  if (!root) return;
+  const customerId = AppState.selectedCustomerId;
+  const saleId = AppState.selectedSaleId || AppState.selectedTitulo;
+  if (!customerId || !saleId) {
+    root.innerHTML = `<div style="padding:20px;color:#94a3b8;text-align:center;">Abra um contrato para ver as NEX.</div>`;
+    return;
+  }
+  const items = await window.loadNexHistory(customerId, saleId);
+  if (!items.length) {
+    root.innerHTML = `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:30px;text-align:center;color:#64748b;">
+      <i data-lucide="inbox" style="width:48px;height:48px;color:#94a3b8;margin-bottom:12px;"></i>
+      <p style="margin:0;font-size:0.95rem;">Nenhuma notificação extrajudicial enviada ou registrada ainda.</p>
+    </div>`;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+  const sorted = [...items].sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+  const opts = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join("");
+  root.innerHTML = `
+    <div class="table-container" style="box-shadow:none;overflow:auto;">
+      <table class="custom-table" style="font-size:0.8rem;min-width:980px;">
+        <thead>
+          <tr>
+            <th>Data da NEX</th>
+            <th>Quem fez</th>
+            <th>Tipo de carta</th>
+            <th style="text-align:center;">PDF</th>
+            <th>Objeto de rastreio</th>
+            <th style="text-align:center;">Correios</th>
+            <th>Status da carta</th>
+            <th>Validade jurídica</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sorted.map(it => {
+            const valid = window.nexIsLegallyValid(it);
+            const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (it.status || "") ? "selected" : ""}>${s}</option>`).join("");
+            return `<tr>
+              <td style="white-space:nowrap;font-weight:700;">${window.nexFmtBr(it.date || it.createdAt)}</td>
+              <td>${(it.author || "—").replace(/</g, "&lt;")}</td>
+              <td>${(it.letterType || "Notificação Extrajudicial").replace(/</g, "&lt;")}</td>
+              <td style="text-align:center;">
+                <button type="button" title="Visualizar NEX desta data" onclick="window.viewNexPdf('${it.id}')"
+                  style="border:none;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 8px;cursor:pointer;">
+                  <i data-lucide="file-text" style="width:16px;height:16px;"></i>
+                </button>
+              </td>
+              <td>
+                <input value="${(it.tracking || "").replace(/"/g, "&quot;")}" placeholder="AA123456789BR"
+                  onchange="window.updateNexTracking('${it.id}', this.value)"
+                  style="width:150px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.78rem;">
+              </td>
+              <td style="text-align:center;">
+                <button type="button" title="Copiar objeto e abrir Correios" onclick="window.openNexCorreios('${it.id}')"
+                  style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">
+                  Consultar
+                </button>
+              </td>
+              <td>
+                <select onchange="window.updateNexStatus('${it.id}', this.value)"
+                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.75rem;max-width:200px;">
+                  <option value="">Selecionar...</option>
+                  ${sel}
+                </select>
+              </td>
+              <td>
+                <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:3px 8px;border-radius:99px;font-size:0.7rem;font-weight:800;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
+                  ${valid.ok ? "Válida" : "Sem validade"}
+                </span>
+              </td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Somente <strong>Entregue</strong> gera validade jurídica. Pagamento de parcela depois da NEX também tira a validade. Nova NEX só é bloqueada se já houver mora válida nos últimos 90 dias.</p>
+  `;
+  if (window.lucide) lucide.createIcons();
+};
+
+window.nexFindItem = function(id) {
+  const customerId = AppState.selectedCustomerId;
+  const saleId = AppState.selectedSaleId || AppState.selectedTitulo;
+  const key = window.nexHistoryKey(customerId, saleId);
+  const items = (window._nexHistory && window._nexHistory[key]) || [];
+  return { key, items, item: items.find(x => String(x.id) === String(id)), customerId, saleId };
+};
+
+window.updateNexTracking = async function(id, value) {
+  const ctx = window.nexFindItem(id);
+  if (!ctx.item) return;
+  ctx.item.tracking = String(value || "").trim().toUpperCase();
+  await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+};
+
+window.updateNexStatus = async function(id, value) {
+  const ctx = window.nexFindItem(id);
+  if (!ctx.item) return;
+  ctx.item.status = value;
+  await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.renderNexHistory();
+};
+
+window.viewNexPdf = function(id) {
+  const ctx = window.nexFindItem(id);
+  if (!ctx.item || !ctx.item.html) {
+    alert("Não há PDF armazenado desta NEX. Gere novamente se precisar do documento.");
+    return;
+  }
+  const title = document.getElementById("pdf-modal-title");
+  const content = document.getElementById("pdf-document-content");
+  const overlay = document.getElementById("pdf-view-overlay");
+  if (title) title.textContent = "NEX de " + window.nexFmtBr(ctx.item.date);
+  if (content) content.innerHTML = ctx.item.html;
+  if (overlay) overlay.classList.add("active");
+  if (window.lucide) lucide.createIcons();
+};
+
+window.openNexCorreios = async function(id) {
+  const ctx = window.nexFindItem(id);
+  const code = ctx.item && String(ctx.item.tracking || "").replace(/\s+/g, "").toUpperCase();
+  if (!code) {
+    alert("Preencha o número do objeto de rastreio antes de consultar os Correios.");
+    return;
+  }
+  try { await navigator.clipboard.writeText(code); } catch (e) {}
+  window.open("https://rastreamento.correios.com.br/app/index.php?objetos=" + encodeURIComponent(code), "_blank", "noopener");
 };
 
 window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
@@ -18651,6 +18924,53 @@ window.copyVar = function(el) {
   });
 };
 
+window.wrapDocPadraoBold = function(textareaId) {
+  const el = typeof textareaId === 'string' ? document.getElementById(textareaId) : textareaId;
+  if (!el || el.tagName !== 'TEXTAREA') return;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const val = el.value;
+  const selected = val.slice(start, end);
+  let next;
+  if (!selected) {
+    next = '**texto em negrito**';
+    el.value = val.slice(0, start) + next + val.slice(end);
+    el.setSelectionRange(start + 2, start + next.length - 2);
+  } else if (/^\*\*[\s\S]*\*\*$/.test(selected) && selected.length >= 4) {
+    next = selected.slice(2, -2);
+    el.value = val.slice(0, start) + next + val.slice(end);
+    el.setSelectionRange(start, start + next.length);
+  } else {
+    next = '**' + selected + '**';
+    el.value = val.slice(0, start) + next + val.slice(end);
+    el.setSelectionRange(start, start + next.length);
+  }
+  el.focus();
+};
+
+window.docPadraoEditorKey = function(e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+    e.preventDefault();
+    wrapDocPadraoBold(e.target);
+  }
+};
+
+window.formatDocPadraoMarkup = function(text) {
+  const chunks = [];
+  let s = String(text || '');
+  s = s.replace(/\*\*([\s\S]+?)\*\*/g, (_, inner) => {
+    chunks.push(inner);
+    return '\u0000B' + (chunks.length - 1) + '\u0000';
+  });
+  s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  s = s.replace(/\u0000B(\d+)\u0000/g, (_, i) => {
+    const inner = String(chunks[Number(i)] || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return '<strong>' + inner + '</strong>';
+  });
+  return s;
+};
+
 async function saveDocPadrao(tipo) {
   const keyMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
@@ -18712,7 +19032,7 @@ function previewDocPadrao(tipo) {
     const title = document.getElementById('doc-reneg-title')?.value || '';
     const subtitle = document.getElementById('doc-reneg-subtitle')?.value || '';
     const clauses = document.getElementById('doc-reneg-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${clauses}</pre>`;
+    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(clauses)}</div>`;
   } else if (tipo === 'boleto') {
     const inst1 = document.getElementById('doc-boleto-inst1')?.value || '';
     const inst2 = document.getElementById('doc-boleto-inst2')?.value || '';
@@ -18721,16 +19041,16 @@ function previewDocPadrao(tipo) {
   } else if (tipo === 'carta') {
     const assunto = document.getElementById('doc-carta-assunto')?.value || '';
     const corpo = document.getElementById('doc-carta-corpo')?.value || '';
-    content = `<h2 style="text-align:center;">${assunto}</h2><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre>`;
+    content = `<h2 style="text-align:center;">${assunto}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(corpo)}</div>`;
   } else if (tipo === 'suspensao') {
     const ref = document.getElementById('doc-suspensao-ref')?.value || '';
     const corpo = document.getElementById('doc-suspensao-corpo')?.value || '';
-    content = `<h2 style="text-align:center;">${ref}</h2><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${corpo}</pre>`;
+    content = `<h2 style="text-align:center;">${ref}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(corpo)}</div>`;
   } else if (tipo === 'distrato') {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
     const clauses = document.getElementById('doc-distrato-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><hr><pre style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${clauses}</pre>`;
+    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(clauses)}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -19049,7 +19369,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
     }
   };
 
-  let text = corpo;
+  let text = formatDocPadraoMarkup(corpo);
   
   // Replace variables
   text = text.replace(/{{NOME_CLIENTE}}/g, customer.name || '');
@@ -19218,7 +19538,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       <h2 style="text-align:center; color: #105436; font-size: 12.5pt; font-weight: bold; margin-top: 0; margin-bottom: 3px;">${ref}</h2>
       <hr style="border: 1px solid #ccc; margin: 8px 0;">
       ${!hasHeaderInTemplate ? `<div style="font-family: 'Times New Roman', serif; font-size: 11pt; margin-bottom: 12px; text-align: left;">${headerDateStr}</div>` : ''}
-      <pre style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; text-align: justify; margin: 0;">${text}</pre>
+      <div style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; text-align: justify; margin: 0;">${text}</div>
     </div>
   `;
   
