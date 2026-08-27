@@ -425,14 +425,14 @@ function renderConstrucaoHistory(checks) {
       }
 
     let html = `
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+    <table class="ficha-hist-table">
         <thead>
-            <tr style="background-color: #f1f5f9; text-align: left; font-size: 0.85rem; color: #475569;">
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">DATA</th>
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">RESPONSÁVEL</th>
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0;">ESTÁGIO</th>
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; width: 35%;">OBSERVAÇÕES</th>
-                <th style="padding: 12px; border-bottom: 2px solid #e2e8f0; text-align: right;">AÇÕES</th>
+            <tr>
+                <th>DATA</th>
+                <th>RESPONSÁVEL</th>
+                <th>ESTÁGIO</th>
+                <th style="width: 35%;">OBSERVAÇÕES</th>
+                <th style="text-align: right;">AÇÕES</th>
             </tr>
         </thead>
         <tbody>
@@ -472,21 +472,21 @@ function renderConstrucaoHistory(checks) {
             : `<button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>`;
 
         html += `
-        <tr style="border-bottom: 1px solid #e2e8f0; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
-            <td style="padding: 12px; font-weight: 500; font-size: 0.9rem;">${dateStr}</td>
-            <td style="padding: 12px; font-size: 0.9rem;">${respName}</td>
-            <td style="padding: 12px; font-size: 0.9rem;">
+        <tr>
+            <td style="font-weight: 500; white-space: nowrap;">${dateStr}</td>
+            <td>${(window.shortOperatorName ? window.shortOperatorName(respName) : respName)}</td>
+            <td>
                 <span style="background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
                     ${check.stage || '-'}
                 </span>
             </td>
-            <td style="padding: 12px; font-size: 0.8rem; color: #64748b; line-height: 1.3;">
+            <td style="font-size: 0.8rem; color: #64748b; line-height: 1.3;">
                 ${(() => {
                     const obs = window.ConstrucaoApp.resolveVistoriaObservation(check);
                     return obs ? obs.replace(/\\n/g, '<br>').replace(/\n/g, '<br>') : '-';
                 })()}
             </td>
-            <td style="padding: 12px; text-align: right; white-space: nowrap;">
+            <td style="text-align: right; white-space: nowrap;">
                 ${obsBtn}
                 ${fileLink}
                 ${editBtn}

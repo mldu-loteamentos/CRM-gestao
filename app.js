@@ -15698,6 +15698,51 @@ window.nexHistoryKey = function(customerId, saleId) {
   return String(customerId || "") + "_" + String(saleId || "");
 };
 
+window.nexCanonicalTitulo = function(fallbackSaleId) {
+  const st = window.AppState || {};
+  const current = String(st.currentReceivableBillId || st.selectedTitulo || "");
+  const fb = fallbackSaleId != null && String(fallbackSaleId).trim() !== "" ? String(fallbackSaleId) : "";
+  if (fb) {
+    const sameFicha = [st.currentReceivableBillId, st.selectedTitulo, st.selectedSaleId, st.selectedContractId]
+      .some(v => v != null && String(v) === fb);
+    if (sameFicha && current) return current;
+    return fb;
+  }
+  return String(current || st.selectedSaleId || st.selectedContractId || "");
+};
+
+window.nexCandidateIds = function(fallbackSaleId) {
+  const st = window.AppState || {};
+  const ids = [
+    st.currentReceivableBillId,
+    st.selectedTitulo,
+    fallbackSaleId,
+    st.selectedSaleId,
+    st.selectedContractId,
+    sessionStorage.getItem("currentTitulo"),
+    sessionStorage.getItem("currentSaleId")
+  ].filter(v => v !== undefined && v !== null && String(v).trim() !== "");
+  return [...new Set(ids.map(v => String(v)))];
+};
+
+window.nexMergeItems = function(lists) {
+  const byId = new Map();
+  (lists || []).forEach(list => {
+    (list || []).forEach(it => {
+      if (!it || !it.id) return;
+      const prev = byId.get(String(it.id));
+      if (!prev) {
+        byId.set(String(it.id), it);
+        return;
+      }
+      const prevT = prev.updatedAt || prev.createdAt || "";
+      const nextT = it.updatedAt || it.createdAt || "";
+      if (String(nextT) >= String(prevT)) byId.set(String(it.id), { ...prev, ...it });
+    });
+  });
+  return [...byId.values()];
+};
+
 window.nexParseIso = function(d) {
   if (!d) return "";
   const s = String(d).slice(0, 10);
@@ -15766,38 +15811,72 @@ window.nexValidInLast90Days = function(items) {
 
 window.loadNexHistory = async function(customerId, saleId) {
   customerId = customerId || (AppState && AppState.selectedCustomerId);
-  saleId = saleId || (AppState && (AppState.selectedSaleId || AppState.selectedTitulo));
-  const key = window.nexHistoryKey(customerId, saleId);
+  const titulo = window.nexCanonicalTitulo(saleId);
+  const candidates = window.nexCandidateIds(saleId);
   window._nexHistory = window._nexHistory || {};
-  let local = [];
-  try {
-    const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
-    if (Array.isArray(bag[key])) local = bag[key];
-  } catch (e) {}
+  const lists = [];
+  let bag = {};
+  try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+  const prefix = String(customerId) + "_";
+  Object.keys(bag).forEach(k => {
+    if (k !== window.nexHistoryKey(customerId, titulo) && !k.startsWith(prefix)) return;
+    const sid = k.startsWith(prefix) ? k.slice(prefix.length) : "";
+    const rows = Array.isArray(bag[k]) ? bag[k] : [];
+    const keep = rows.filter(it => {
+      const t = String(it.titulo || sid || "");
+      return !t || t === String(titulo) || candidates.includes(t);
+    });
+    if (keep.length) lists.push(keep);
+  });
   if (window.firebaseDb && window.firebaseCollections) {
     try {
-      const { doc, getDoc } = window.firebaseCollections;
-      const snap = await getDoc(doc(window.firebaseDb, "nex_letters", key));
-      if (snap.exists()) {
-        const data = snap.data() || {};
-        if (Array.isArray(data.items)) local = data.items;
+      const { doc, getDoc, collection, query, where, getDocs } = window.firebaseCollections;
+      const seen = new Set();
+      const takeDoc = (data) => {
+        if (!data || !Array.isArray(data.items) || !data.items.length) return;
+        const sid = String(data.titulo || data.saleId || "");
+        const keep = data.items.filter(it => {
+          const t = String(it.titulo || sid || "");
+          return !t || t === String(titulo) || candidates.includes(t);
+        });
+        if (keep.length) lists.push(keep);
+      };
+      if (query && getDocs && collection && where) {
+        const snap = await getDocs(query(collection(window.firebaseDb, "nex_letters"), where("customerId", "==", String(customerId))));
+        snap.forEach(d => {
+          seen.add(d.id);
+          takeDoc(d.data() || {});
+        });
+      }
+      for (const id of candidates) {
+        const docId = window.nexHistoryKey(customerId, id);
+        if (seen.has(docId)) continue;
+        const snap = await getDoc(doc(window.firebaseDb, "nex_letters", docId));
+        if (snap.exists()) takeDoc(snap.data() || {});
       }
     } catch (e) {
       console.warn("[NEX] Falha ao ler histórico", e);
     }
   }
-  window._nexHistory[key] = local;
-  return local;
+  const merged = window.nexMergeItems(lists).map(it => ({
+    ...it,
+    titulo: it.titulo || titulo,
+    customerId: String(it.customerId || customerId)
+  }));
+  const key = window.nexHistoryKey(customerId, titulo);
+  window._nexHistory[key] = merged;
+  return merged;
 };
 
 window.saveNexHistory = async function(customerId, saleId, items) {
-  const key = window.nexHistoryKey(customerId, saleId);
+  const titulo = window.nexCanonicalTitulo(saleId);
+  const key = window.nexHistoryKey(customerId, titulo);
   window._nexHistory = window._nexHistory || {};
   window._nexHistory[key] = items;
   try {
     const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
     bag[key] = items.map(it => {
-      const copy = { ...it };
+      const copy = { ...it, titulo: it.titulo || titulo, customerId: String(customerId) };
       if (copy.html && copy.html.length > 80000) copy.html = "";
       return copy;
     });
@@ -15808,7 +15887,8 @@ window.saveNexHistory = async function(customerId, saleId, items) {
       const { doc, setDoc } = window.firebaseCollections;
       await setDoc(doc(window.firebaseDb, "nex_letters", key), {
         customerId: String(customerId),
-        saleId: String(saleId),
+        saleId: String(titulo),
+        titulo: String(titulo),
         items,
         updatedAt: Date.now()
       }, { merge: true });
@@ -15818,20 +15898,30 @@ window.saveNexHistory = async function(customerId, saleId, items) {
   }
 };
 
+window.shortOperatorName = function(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "—";
+  const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  if (parts.length === 1) return cap(parts[0]);
+  return cap(parts[0]) + " " + cap(parts[parts.length - 1]);
+};
+
 window.renderNexHistory = async function() {
   const root = document.getElementById("nex-history-root");
   if (!root) return;
   const customerId = AppState.selectedCustomerId;
-  const saleId = AppState.selectedSaleId || AppState.selectedTitulo;
+  const saleId = window.nexCanonicalTitulo();
   if (!customerId || !saleId) {
     root.innerHTML = `<div style="padding:20px;color:#94a3b8;text-align:center;">Abra um contrato para ver as NEX.</div>`;
     return;
   }
   const items = await window.loadNexHistory(customerId, saleId);
+  const tituloAtual = AppState.currentReceivableBillId || AppState.selectedTitulo || saleId;
   if (!items.length) {
     root.innerHTML = `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:30px;text-align:center;color:#64748b;">
       <i data-lucide="inbox" style="width:48px;height:48px;color:#94a3b8;margin-bottom:12px;"></i>
-      <p style="margin:0;font-size:0.95rem;">Nenhuma notificação extrajudicial enviada ou registrada ainda.</p>
+      <p style="margin:0;font-size:0.95rem;">Nenhuma NEX neste título <strong>${tituloAtual}</strong>.</p>
+      <p style="margin:8px 0 0;font-size:0.8rem;color:#94a3b8;">A carta só aparece no cliente e no título em que foi gerada. Se você gerou em outra ficha, abra aquele contrato.</p>
     </div>`;
     if (window.lucide) lucide.createIcons();
     return;
@@ -15839,10 +15929,12 @@ window.renderNexHistory = async function() {
   const sorted = [...items].sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
   const opts = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join("");
   root.innerHTML = `
+    <div style="font-size:0.8rem;color:#166534;font-weight:700;margin-bottom:8px;">Título ${items[0].titulo || tituloAtual}</div>
     <div class="table-container" style="box-shadow:none;overflow:auto;">
-      <table class="custom-table" style="font-size:0.8rem;min-width:980px;">
+      <table class="ficha-hist-table" style="min-width:980px;">
         <thead>
           <tr>
+            <th>Título</th>
             <th>Data da NEX</th>
             <th>Quem fez</th>
             <th>Tipo de carta</th>
@@ -15857,9 +15949,11 @@ window.renderNexHistory = async function() {
           ${sorted.map(it => {
             const valid = window.nexIsLegallyValid(it);
             const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (it.status || "") ? "selected" : ""}>${s}</option>`).join("");
+            const author = window.shortOperatorName(it.author);
             return `<tr>
-              <td style="white-space:nowrap;font-weight:700;">${window.nexFmtBr(it.date || it.createdAt)}</td>
-              <td>${(it.author || "—").replace(/</g, "&lt;")}</td>
+              <td style="font-weight:700;white-space:nowrap;">${(it.titulo || tituloAtual || "—")}</td>
+              <td style="white-space:nowrap;font-weight:500;">${window.nexFmtBr(it.date || it.createdAt)}</td>
+              <td>${author.replace(/</g, "&lt;")}</td>
               <td>${(it.letterType || "Notificação Extrajudicial").replace(/</g, "&lt;")}</td>
               <td style="text-align:center;">
                 <button type="button" title="Visualizar NEX desta data" onclick="window.viewNexPdf('${it.id}')"
@@ -15870,23 +15964,23 @@ window.renderNexHistory = async function() {
               <td>
                 <input value="${(it.tracking || "").replace(/"/g, "&quot;")}" placeholder="AA123456789BR"
                   onchange="window.updateNexTracking('${it.id}', this.value)"
-                  style="width:150px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.78rem;">
+                  style="width:150px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
               </td>
               <td style="text-align:center;">
                 <button type="button" title="Copiar objeto e abrir Correios" onclick="window.openNexCorreios('${it.id}')"
-                  style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">
+                  style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.75rem;font-weight:700;">
                   Consultar
                 </button>
               </td>
               <td>
                 <select onchange="window.updateNexStatus('${it.id}', this.value)"
-                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.75rem;max-width:200px;">
+                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:200px;">
                   <option value="">Selecionar...</option>
                   ${sel}
                 </select>
               </td>
               <td>
-                <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:3px 8px;border-radius:99px;font-size:0.7rem;font-weight:800;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
+                <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
                   ${valid.ok ? "Válida" : "Sem validade"}
                 </span>
               </td>
@@ -15902,7 +15996,7 @@ window.renderNexHistory = async function() {
 
 window.nexFindItem = function(id) {
   const customerId = AppState.selectedCustomerId;
-  const saleId = AppState.selectedSaleId || AppState.selectedTitulo;
+  const saleId = window.nexCanonicalTitulo();
   const key = window.nexHistoryKey(customerId, saleId);
   const items = (window._nexHistory && window._nexHistory[key]) || [];
   return { key, items, item: items.find(x => String(x.id) === String(id)), customerId, saleId };
@@ -15951,7 +16045,7 @@ window.openNexCorreios = async function(id) {
 
 window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
     customerId = customerId || (typeof AppState !== 'undefined' && AppState.selectedCustomerId) || sessionStorage.getItem('currentCustomerId');
-    saleId = saleId || (typeof AppState !== 'undefined' && (AppState.selectedSaleId || AppState.selectedTitulo)) || sessionStorage.getItem('currentSaleId');
+    saleId = saleId || (typeof window.nexCanonicalTitulo === "function" && window.nexCanonicalTitulo()) || sessionStorage.getItem('currentTitulo') || sessionStorage.getItem('currentSaleId');
     const btn = document.activeElement;
     let oldHtml = null;
     if (btn && btn.tagName === 'BUTTON' && (btn.innerText.includes('NEX') || /Gerando/i.test(btn.innerText))) {
@@ -15981,7 +16075,9 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             letterType: "Notificação Extrajudicial",
             tracking: "",
             status: "",
-            html: docHtml
+            html: docHtml,
+            titulo: String((AppState && (AppState.currentReceivableBillId || AppState.selectedTitulo)) || saleId || ""),
+            customerId: String(customerId || "")
         };
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
         if (typeof window.renderNexHistory === "function") window.renderNexHistory();
