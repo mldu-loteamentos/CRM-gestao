@@ -222,22 +222,17 @@ const FluxoCaixaApp = {
       });
       return { months, total };
     };
-    const gco = sumNodes(["g_01", "g_02", "g_03"]);
-    const rf = sumNodes(["g_07"]);
-    const ap = sumNodes(["g_09"]);
-    if (byId.g_06) { byId.g_06.months = gco.months; byId.g_06.total = gco.total; }
-    if (byId.g_08) {
-      const months = this.emptyMonths(this.months);
-      this.months.forEach(m => { months[m] = (gco.months[m] || 0) + (rf.months[m] || 0); });
-      byId.g_08.months = months;
-      byId.g_08.total = gco.total + rf.total;
-    }
-    if (byId.g_10) {
-      const months = this.emptyMonths(this.months);
-      this.months.forEach(m => { months[m] = (gco.months[m] || 0) + (rf.months[m] || 0) + (ap.months[m] || 0); });
-      byId.g_10.months = months;
-      byId.g_10.total = gco.total + rf.total + ap.total;
-    }
+    const applySum = (id, parts) => {
+      if (!byId[id]) return;
+      const s = sumNodes(parts);
+      byId[id].months = s.months;
+      byId[id].total = s.total;
+    };
+    applySum("g_03", ["g_04", "g_05"]);
+    applySum("g_06", ["g_01", "g_02", "g_03"]);
+    applySum("g_08", ["g_06", "g_07"]);
+    applySum("g_10", ["g_08", "g_09"]);
+    applySum("g_12", ["g_10", "g_11"]);
 
     if (this.expanded.size === 0) {
       groups.filter(g => !g.parentId).forEach(g => this.expanded.add(g.id));

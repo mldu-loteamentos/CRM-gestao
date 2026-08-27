@@ -42,6 +42,8 @@ const PlanoFinanceiroApp = {
     await this.loadCategories();
   },
 
+  DFC_TEMPLATE_VER: 3,
+
   dfcTemplateGroups() {
     const n = (id, name, type, parentId, extra = {}) => ({
       id, name, type, parentId, expanded: true,
@@ -51,40 +53,98 @@ const PlanoFinanceiroApp = {
     return [
       n('g_01', '01 RECEITAS', 'total_n1', null),
       n('g_01_01', '01.01 VENDA DE IMOVEIS', 'resultado', 'g_01'),
-      n('g_01_02', '01.02 RECEITA DE ALUGUEIS', 'resultado', 'g_01'),
-      n('g_01_03', '01.03 RECEITA DE SERVICOS', 'resultado', 'g_01'),
-      n('g_01_04', '01.04 RECEITAS NAO OPERACIONAIS', 'resultado', 'g_01'),
-      n('g_01_05', '01.05 CANCELAMENTO DE VENDAS', 'resultado', 'g_01', { redutora: true }),
+      n('g_01_02', '01.02 RECEITA DE SERVICOS', 'resultado', 'g_01'),
+      n('g_01_03', '01.03 RECEITAS NAO OPERACIONAIS', 'resultado', 'g_01'),
+      n('g_01_04', '01.04 CANCELAMENTOS DE VENDAS', 'resultado', 'g_01', { redutora: true }),
       n('g_02', '02 IMPOSTOS', 'total_n1', null),
       n('g_02_01', '02.01 IMPOSTOS SOBRE VENDAS', 'resultado', 'g_02'),
       n('g_02_02', '02.02 IMPOSTOS TRIMESTRAIS', 'resultado', 'g_02'),
-      n('g_03', '03 CUSTOS E DESPESAS', 'total_n1', null),
-      n('g_03_01', '03.01 CUSTOS', 'totalizadora', 'g_03'),
-      n('g_03_01_01', '03.01.01 TERRENOS / REPASSES', 'resultado', 'g_03_01'),
-      n('g_03_01_02', '03.01.02 PROJETOS', 'resultado', 'g_03_01'),
-      n('g_03_01_03', '03.01.03 OBRAS', 'resultado', 'g_03_01'),
-      n('g_03_01_04', '03.01.04 CUSTO ADM. EMPREENDIMENTOS', 'resultado', 'g_03_01'),
-      n('g_03_01_05', '03.01.05 AQUISICAO DE NOVAS AREAS', 'resultado', 'g_03_01'),
-      n('g_03_02', '03.02 DESPESAS', 'totalizadora', 'g_03'),
-      n('g_03_02_01', '03.02.01 COMERCIAIS', 'resultado', 'g_03_02'),
-      n('g_03_02_02', '03.02.02 ADMINISTRATIVAS', 'resultado', 'g_03_02'),
-      n('g_03_02_03', '03.02.03 PESSOAL', 'resultado', 'g_03_02'),
-      n('g_03_02_04', '03.02.04 RETENCOES', 'resultado', 'g_03_02'),
-      n('g_03_02_05', '03.02.05 MANUTENCAO', 'resultado', 'g_03_02'),
-      n('g_03_02_06', '03.02.06 CONVENIOS', 'resultado', 'g_03_02'),
-      n('g_03_02_07', '03.02.07 NAO OPERACIONAIS', 'resultado', 'g_03_02'),
+      n('g_03', '03 CUSTOS E DESPESAS', 'formula', null, { formula: 'custos_desp' }),
+      n('g_04', '04 CUSTOS', 'total_n1', null),
+      n('g_04_01', '04.01 REPASSES TERRENISTAS', 'resultado', 'g_04'),
+      n('g_04_02', '04.02 PROJETOS E APROVACOES', 'resultado', 'g_04'),
+      n('g_04_03', '04.03 OBRAS', 'resultado', 'g_04'),
+      n('g_04_04', '04.04 CUSTO ADM DE EMPREENDIMENTOS', 'resultado', 'g_04'),
+      n('g_04_05', '04.05 AQUISICAO DE NOVAS AREAS', 'resultado', 'g_04'),
+      n('g_05', '05 DESPESAS', 'total_n1', null),
+      n('g_05_01', '05.01 DESPESAS COMERCIAIS', 'resultado', 'g_05'),
+      n('g_05_02', '05.02 MARKETING', 'resultado', 'g_05'),
+      n('g_05_03', '05.03 ADMINISTRATIVAS', 'resultado', 'g_05'),
+      n('g_05_04', '05.04 PESSOAL', 'resultado', 'g_05'),
+      n('g_05_05', '05.05 DESPESAS COM ESTOQUE', 'resultado', 'g_05'),
+      n('g_05_06', '05.06 DESPESAS NAO OPERACIONAIS', 'resultado', 'g_05'),
+      n('g_05_07', '05.07 DONATIVOS E CONTRIBUICOES', 'resultado', 'g_05'),
+      n('g_05_08', '05.08 ADIANTAMENTO A FORNECEDORES', 'resultado', 'g_05'),
+      n('g_05_09', '05.09 RETENCOES', 'resultado', 'g_05'),
+      n('g_05_10', '05.10 OUTROS MOVIMENTOS', 'resultado', 'g_05'),
+      n('g_05_11', '05.11 DESPESAS COM MANUTENCAO', 'resultado', 'g_05'),
       n('g_06', '06 GCO - GERACAO DE CAIXA OPERACIONAL', 'formula', null, { formula: 'gco' }),
-      n('g_07', '07 RESULTADO FINANCEIRO', 'total_n1', null),
-      n('g_07_01', '07.01 RECEITAS FINANCEIRAS', 'resultado', 'g_07'),
-      n('g_07_02', '07.02 DESPESAS FINANCEIRAS', 'resultado', 'g_07'),
-      n('g_07_03', '07.03 CAPTACOES E AMORTIZACOES', 'resultado', 'g_07'),
-      n('g_08', '08 GCO - LIQUIDO DO RESULTADO', 'formula', null, { formula: 'gco_liq' }),
-      n('g_09', '09 INVESTIMENTOS E APORTES', 'total_n1', null),
-      n('g_09_01', '09.01 DIVIDENDOS', 'resultado', 'g_09'),
-      n('g_09_02', '09.02 APORTES', 'resultado', 'g_09'),
-      n('g_09_03', '09.03 INVESTIMENTOS / CAPEX', 'resultado', 'g_09'),
-      n('g_10', '10 VARIACAO DE CAIXA', 'formula', null, { formula: 'variacao' })
+      n('g_07', '07 CAPEX', 'resultado', null),
+      n('g_08', '08 FCF - FLUXO DE CAIXA LIVRE', 'formula', null, { formula: 'fcf' }),
+      n('g_09', '09 RESULTADO FINANCEIRO', 'total_n1', null),
+      n('g_09_01', '09.01 RECEITAS FINANCEIRAS', 'resultado', 'g_09'),
+      n('g_09_02', '09.02 DESPESAS FINANCEIRAS', 'resultado', 'g_09'),
+      n('g_09_03', '09.03 FUNDO DE INVESTIMENTO', 'resultado', 'g_09'),
+      n('g_09_05', '09.05 AMORTIZACOES', 'resultado', 'g_09'),
+      n('g_10', '10 GCO - LIQUIDO DO RESULTADO', 'formula', null, { formula: 'gco_liq' }),
+      n('g_11', '11 DIVIDENDOS E APORTES', 'total_n1', null),
+      n('g_11_01', '11.01 (-) DIVIDENDOS', 'resultado', 'g_11', { redutora: true }),
+      n('g_11_02', '11.02 (+) DIVIDENDOS', 'resultado', 'g_11'),
+      n('g_11_03', '11.03 APORTES', 'resultado', 'g_11'),
+      n('g_12', '12 VARIACAO DE CAIXA', 'formula', null, { formula: 'variacao' })
     ];
+  },
+
+  dfcAccountRemap() {
+    return {
+      g_01_01: 'g_01_01',
+      g_01_02: 'g_01_03',
+      g_01_03: 'g_01_02',
+      g_01_04: 'g_01_03',
+      g_01_05: 'g_01_04',
+      g_02_01: 'g_02_01',
+      g_02_02: 'g_02_02',
+      g_03_01_01: 'g_04_01',
+      g_03_01_02: 'g_04_02',
+      g_03_01_03: 'g_04_03',
+      g_03_01_04: 'g_04_04',
+      g_03_01_05: 'g_04_05',
+      g_03_02_01: 'g_05_01',
+      g_03_02_02: 'g_05_03',
+      g_03_02_03: 'g_05_04',
+      g_03_02_04: 'g_05_09',
+      g_03_02_05: 'g_05_11',
+      g_03_02_06: 'g_05_07',
+      g_03_02_07: 'g_05_06',
+      g_07: 'g_07',
+      g_07_01: 'g_09_01',
+      g_07_02: 'g_09_02',
+      g_07_03: 'g_09_05',
+      g_09_01: 'g_11_01',
+      g_09_02: 'g_11_03',
+      g_09_03: 'g_07'
+    };
+  },
+
+  applyDfcTemplate(visao) {
+    const template = this.dfcTemplateGroups();
+    const remap = this.dfcAccountRemap();
+    const merged = {};
+    (visao.groups || []).forEach(g => {
+      const accounts = (g.accounts || []).map(String);
+      if (!accounts.length) return;
+      const newId = remap[g.id] || g.id;
+      merged[newId] = (merged[newId] || []).concat(accounts);
+    });
+    visao.groups = template.map(t => {
+      const node = { ...t };
+      if (t.type === 'resultado') {
+        node.accounts = [...new Set(merged[t.id] || [])];
+      }
+      return node;
+    });
+    visao.name = 'DFC Padrão';
+    visao.templateVer = this.DFC_TEMPLATE_VER;
   },
 
   ensureDfcDefault() {
@@ -95,21 +155,14 @@ const PlanoFinanceiroApp = {
     let visao = (this.visoes || []).find(v => v.id === 'dfc_default');
     if (!visao) {
       this.visoes = this.visoes || [];
-      this.visoes.unshift({ id: 'dfc_default', name: 'DFC Padrão', type: 'custom', groups: template });
+      this.visoes.unshift({ id: 'dfc_default', name: 'DFC Padrão', type: 'custom', templateVer: this.DFC_TEMPLATE_VER, groups: template });
       this.saveToStorage();
       return;
     }
-    visao.groups = visao.groups || [];
-    const byId = Object.fromEntries(visao.groups.map(g => [g.id, g]));
-    template.forEach(t => {
-      if (!byId[t.id]) visao.groups.push({ ...t, accounts: t.accounts ? [] : t.accounts });
-      else {
-        if (t.redutora) byId[t.id].redutora = true;
-        if (t.formula) { byId[t.id].formula = t.formula; byId[t.id].type = 'formula'; }
-      }
-    });
-    if (byId.g_02 && /DEDUC/i.test(byId.g_02.name || '')) byId.g_02.name = '02 IMPOSTOS';
-    this.saveToStorage();
+    if (visao.templateVer !== this.DFC_TEMPLATE_VER) {
+      this.applyDfcTemplate(visao);
+      this.saveToStorage();
+    }
   },
 
   _normTxt(s) {
@@ -121,34 +174,38 @@ const PlanoFinanceiroApp = {
     const name = this._normTxt(cat.name || cat.description || '');
     const type = this._normTxt(cat.type || cat.tpConta || cat.financialCategoryType || '');
     if (/TOTAL/.test(type)) return null;
-    if (/CANCELAMENTO DE VEND/.test(name)) return 'g_01_05';
+    if (/CANCELAMENTO DE VEND/.test(name)) return 'g_01_04';
     if (/VENDA DE LOTE|VENDA DE IMOV|JUROS ATIVOS|MULTAS?\/?ENCARGOS|DESCONTO DE JUROS/.test(name)) return 'g_01_01';
-    if (/ALUGUE/.test(name)) return 'g_01_02';
-    if (/RECEITA DE SERVIC|ADM(INISTRACAO)? DE EMPREENDIMENTO/.test(name) && /RECEITA|SERVIC/.test(name)) return 'g_01_03';
-    if (/NAO OPERACIONAL/.test(name) && /RECEITA/.test(name)) return 'g_01_04';
-    if (/ADIANTAMENTO DE VEND/.test(name)) return 'g_01_04';
+    if (/RECEITA DE SERVIC|ADM(INISTRACAO)? DE EMPREENDIMENTO/.test(name) && /RECEITA|SERVIC/.test(name)) return 'g_01_02';
+    if (/ALUGUE/.test(name) || (/NAO OPERACIONAL/.test(name) && /RECEITA/.test(name))) return 'g_01_03';
+    if (/ADIANTAMENTO DE VEND/.test(name)) return 'g_01_03';
     if (/PIS|COFINS|ISS\b|IRRF|IMPOSTO SOBRE VEND/.test(name)) return 'g_02_01';
     if (/CSLL|IRPJ|TRIMEST/.test(name) || (/IMPOSTO/.test(name) && /FINANC/.test(name))) return 'g_02_02';
-    if (/REPASSE|TERREN/.test(name)) return 'g_03_01_01';
-    if (/PROJETO|APROVAC/.test(name)) return 'g_03_01_02';
-    if (/\bOBRA|CONSTRUC/.test(name)) return 'g_03_01_03';
-    if (/CUSTO ADM|CUSTO ADIM/.test(name)) return 'g_03_01_04';
-    if (/AQUISICAO DE NOVA/.test(name)) return 'g_03_01_05';
-    if (/MARKETING|CORRETAG|COMISS|COMERCIAIS|DESPESAS COM VEND/.test(name)) return 'g_03_02_01';
-    if (/RETENC/.test(name)) return 'g_03_02_04';
-    if (/MANUTENC/.test(name)) return 'g_03_02_05';
-    if (/CONVENIO/.test(name)) return 'g_03_02_06';
-    if (/DONATIV/.test(name) || (/NAO OPERACIONAL/.test(name) && /DESPESA/.test(name))) return 'g_03_02_07';
-    if (/PESSOAL|SALARIO|ENCARGO|FGTS|\bINSS\b/.test(name)) return 'g_03_02_03';
-    if (/ADMINISTRAT|AGUA|ESGOTO|ENERGIA|ALUGUEL|ESCRITORIO|SOFTWARE|INTERNET|TELEFONE/.test(name)) return 'g_03_02_02';
-    if (/RECEITA FINANCEIRA|APLICACAO|RENDIMENTO/.test(name)) return 'g_07_01';
-    if (/DESPESA FINANCEIRA|TARIFA BANC|JUROS PASSIV|FUNDO DE INVEST/.test(name)) return 'g_07_02';
-    if (/CAPTACAO|AMORTIZ/.test(name)) return 'g_07_03';
-    if (/DIVIDEND/.test(name)) return 'g_09_01';
-    if (/\bAPORTE|ADIANTAMENTO/.test(name)) return 'g_09_02';
-    if (/CAPEX|INVESTIMENTO/.test(name)) return 'g_09_03';
+    if (/REPASSE|TERREN/.test(name)) return 'g_04_01';
+    if (/PROJETO|APROVAC/.test(name)) return 'g_04_02';
+    if (/\bOBRA|CONSTRUC/.test(name)) return 'g_04_03';
+    if (/CUSTO ADM|CUSTO ADIM/.test(name)) return 'g_04_04';
+    if (/AQUISICAO DE NOVA/.test(name)) return 'g_04_05';
+    if (/MARKETING/.test(name)) return 'g_05_02';
+    if (/CORRETAG|COMISS|COMERCIAIS|DESPESAS COM VEND/.test(name)) return 'g_05_01';
+    if (/ESTOQUE/.test(name)) return 'g_05_05';
+    if (/DONATIV|CONVENIO|CONTRIBU/.test(name)) return 'g_05_07';
+    if (/ADIANTAMENTO A FORNEC|ADIANTAMENTO FORNEC/.test(name)) return 'g_05_08';
+    if (/RETENC/.test(name)) return 'g_05_09';
+    if (/MANUTENC/.test(name)) return 'g_05_11';
+    if (/NAO OPERACIONAL/.test(name) && /DESPESA/.test(name)) return 'g_05_06';
+    if (/PESSOAL|SALARIO|ENCARGO|FGTS|\bINSS\b/.test(name)) return 'g_05_04';
+    if (/ADMINISTRAT|AGUA|ESGOTO|ENERGIA|ALUGUEL|ESCRITORIO|SOFTWARE|INTERNET|TELEFONE/.test(name)) return 'g_05_03';
+    if (/RECEITA FINANCEIRA|APLICACAO|RENDIMENTO/.test(name)) return 'g_09_01';
+    if (/FUNDO DE INVEST/.test(name)) return 'g_09_03';
+    if (/DESPESA FINANCEIRA|TARIFA BANC|JUROS PASSIV/.test(name)) return 'g_09_02';
+    if (/CAPTACAO|AMORTIZ/.test(name)) return 'g_09_05';
+    if (/DIVIDEND/.test(name) && /\+|RECEB|ENTRADA/.test(name)) return 'g_11_02';
+    if (/DIVIDEND/.test(name)) return 'g_11_01';
+    if (/\bAPORTE/.test(name)) return 'g_11_03';
+    if (/CAPEX|INVESTIMENTO/.test(name)) return 'g_07';
     if (/^1010|^1\.01\.01/.test(id)) return 'g_01_01';
-    if (/^1020|^1\.01\.02/.test(id)) return 'g_01_03';
+    if (/^1020|^1\.01\.02/.test(id)) return 'g_01_02';
     return null;
   },
 

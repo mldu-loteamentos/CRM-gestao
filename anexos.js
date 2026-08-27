@@ -16,6 +16,17 @@ const AnexosState = {
   downloadedFilesIds: new Set()
 };
 
+function anexosApiUrl(path) {
+  const host = window.location.hostname;
+  const isLocal = !host || host === 'localhost' || host === '127.0.0.1';
+  const port = (window.location.port === '5500' || !window.location.port) ? '3000' : window.location.port;
+  const origin = isLocal ? `http://localhost:${port}` : '';
+  let p = String(path || '');
+  if (!p.startsWith('/')) p = '/' + p;
+  if (p.startsWith('/sienge-proxy')) p = '/api' + p;
+  return origin + p;
+}
+
 // --- RENDERIZAÇÃO DA INTERFACE ---
 
 function renderAnexosModule() {
@@ -503,11 +514,7 @@ const AnexosApp = {
       if (!ccStr) return;
       // To get contract for unit, we can use the backend proxy directly
       
-      const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-      const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-      
-      // We will search sales-contracts by unitId
-      const scRes = await fetch(`http://${host}:${port}/sienge-proxy/sales-contracts?unitId=${unitId}`, {
+      const scRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts?unitId=${unitId}`), {
         headers: { 'Authorization': getBasicAuthHeader() }
       });
       if (scRes.ok) {
@@ -556,7 +563,7 @@ const AnexosApp = {
 
           let allAttachments = [];
           // Fetch attachments do contrato atual
-          const attRes = await fetch(`http://${host}:${port}/sienge-proxy/sales-contracts/${mainC.id}/attachments`, {
+          const attRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`), {
             headers: { 'Authorization': getBasicAuthHeader() }
           });
           if (attRes.ok) {
@@ -572,7 +579,7 @@ const AnexosApp = {
             const numContrato = mainC.contractNumber || mainC.number || mainC.id;
             
             if (ccStr && nomeUnidade && numContrato) {
-                const histRes = await fetch(`http://${host}:${port}/api/sienge/historico-cessao?unidade=${encodeURIComponent(nomeUnidade)}&empreendimento=${encodeURIComponent(ccStr)}&contrato=${encodeURIComponent(numContrato)}`);
+                const histRes = await fetch(anexosApiUrl(`/api/sienge/historico-cessao?unidade=${encodeURIComponent(nomeUnidade)}&empreendimento=${encodeURIComponent(ccStr)}&contrato=${encodeURIComponent(numContrato)}`));
                 if (histRes.ok) {
                    historicCustomers = await histRes.json();
                 }
@@ -589,7 +596,7 @@ const AnexosApp = {
           // Fetch attachments das fichas dos clientes
           for (const custId of customersToFetch) {
             try {
-              const cAttRes = await fetch(`http://${host}:${port}/sienge-proxy/customers/${custId}/attachments`, {
+              const cAttRes = await fetch(anexosApiUrl(`/sienge-proxy/customers/${custId}/attachments`), {
                 headers: { 'Authorization': getBasicAuthHeader() }
               });
               if (cAttRes.ok) {
@@ -627,10 +634,6 @@ const AnexosApp = {
       return;
     }
 
-    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-    const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-
-    // Filtrar anexos que ainda não estão na lista (para evitar duplicatas ao baixar novamente)
     const attachmentsToImport = AnexosState.contractAttachments.filter(att => {
         return !AnexosState.files.some(f => f.downloadedId === att.id);
     });
@@ -665,9 +668,9 @@ const AnexosApp = {
       setTimeout(async () => {
         try {
           const attId = att.attachmentid || att.attachmentId || att.id;
-          let url = `http://${host}:${port}/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${attId}`;
+          let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${attId}`);
           if (att.isCustomerAttachment) {
-             url = `http://${host}:${port}/sienge-proxy/customers/${att.customerId}/attachments/${attId}`;
+             url = anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`);
           }
           const res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
           if (res.ok) {
@@ -891,9 +894,7 @@ const AnexosApp = {
             this.renderFilesList();
           }
 
-          const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-          const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-          const res = await fetch(`http://${host}:${port}/api/ocr/classify`, {
+          const res = await fetch(anexosApiUrl('/api/ocr/classify'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image_data: ocrImageB64 })
@@ -1171,9 +1172,7 @@ const AnexosApp = {
     const email = (AppState.currentUser && AppState.currentUser.email) ? AppState.currentUser.email : 'operador@mouraleite.com.br';
 
     try {
-      const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-      const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-      const res = await fetch(`http://${host}:${port}/api/tags/request`, {
+      const res = await fetch(anexosApiUrl('/api/tags/request'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tag_name: nome, reason: motivo, type: type, requested_by_email: email })
@@ -1274,13 +1273,12 @@ const AnexosApp = {
       return;
     }
 
-    const isExactMatch = filesToSend.length > 0 && 
-                         AnexosState.downloadedFilesIds.size > 0 && 
-                         filesToSend.length === AnexosState.downloadedFilesIds.size && 
-                         filesToSend.every(f => AnexosState.downloadedFilesIds.has(f.downloadedId));
+    const isExactMatch = filesToSend.length > 0 &&
+                         filesToSend.every(f => f.downloadedId);
     if (isExactMatch) {
-      alert("Você está tentando enviar exatamente os mesmos documentos que foram baixados do contrato. Isso criará duplicidade. Ação bloqueada.");
-      return;
+      if (!confirm("Estes arquivos vieram do contrato/ficha. Eles serão copiados para o destino definido pelas tags (unidade ou cliente). Deseja continuar?")) {
+        return;
+      }
     }
 
     let selectedUnitName = '';
@@ -1335,8 +1333,6 @@ const AnexosApp = {
     modal.style.display = 'flex';
     setTimeout(() => modal.classList.add('active'), 10);
     
-    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-    const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
     const unitId = AnexosState.selectedUnidade;
     const cc = AnexosState.cc;
 
@@ -1354,7 +1350,7 @@ const AnexosApp = {
       if (docClean.length >= 11) {
         document.getElementById('upload-status-text').innerText = "Resolvendo CPF/CNPJ do cliente...";
         try {
-          const cRes = await fetch(`http://${host}:${port}/sienge-proxy/customers?cpfCnpj=${docClean}`, {
+          const cRes = await fetch(anexosApiUrl(`/sienge-proxy/customers?cpfCnpj=${docClean}`), {
             headers: { 'Authorization': typeof getBasicAuthHeader !== 'undefined' ? getBasicAuthHeader() : '' }
           });
           if (cRes.ok) {
@@ -1433,17 +1429,17 @@ const AnexosApp = {
       let targetCustId = fileObj.targetCustomerId || finalCustomerId;
       
       if (destinoAPI === 'Cliente' && targetCustId) {
-        apiUrl = `http://${host}:${port}/sienge-proxy/customers/${targetCustId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+        apiUrl = anexosApiUrl(`/sienge-proxy/customers/${targetCustId}/attachments?description=${encodeURIComponent(descricaoSienge)}`);
       } else {
-        apiUrl = `http://${host}:${port}/sienge-proxy/units/${AnexosState.selectedUnidade}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
+        apiUrl = anexosApiUrl(`/sienge-proxy/units/${AnexosState.selectedUnidade}/attachments?description=${encodeURIComponent(descricaoSienge)}`);
       }
 
       try {
         // Se o arquivo foi importado do contrato, buscar o binário real antes de enviar
         let fileBlob = fileObj.file;
-        if (fileObj.downloadedId && fileObj.size === 0) {
+        if (fileObj.downloadedId && (!fileBlob || !fileBlob.size)) {
            document.getElementById('upload-status-text').innerText = "Baixando arquivo do contrato...";
-           const dRes = await fetch(`http://${host}:${port}/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${fileObj.downloadedId}/file`, {
+           const dRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${fileObj.downloadedId}/file`), {
              headers: { 'Authorization': getBasicAuthHeader() }
            });
            if (dRes.ok) {
@@ -1522,7 +1518,9 @@ const AnexosApp = {
       }
 
       // Delay 2000ms entre uploads
-      await new Promise(r => setTimeout(r, 2000));
+      if (i < filesToSend.length - 1) {
+        await new Promise(r => setTimeout(r, 250));
+      }
     }
 
     if (AnexosState.isUploading) {

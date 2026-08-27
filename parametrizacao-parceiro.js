@@ -48,21 +48,10 @@ const ParametrizacaoParceiroApp = {
   },
 
   dfcDefaultGroups() {
-    return [
-      { id: "g_01", name: "01 RECEITAS", type: "total_n1", parentId: null },
-      { id: "g_01_01", name: "01.01 VENDA DE IMOVEIS", type: "resultado", parentId: "g_01", accounts: [] },
-      { id: "g_01_02", name: "01.02 RECEITA DE ALUGUEIS", type: "resultado", parentId: "g_01", accounts: [] },
-      { id: "g_01_03", name: "01.03 RECEITA DE SERVICOS", type: "resultado", parentId: "g_01", accounts: [] },
-      { id: "g_02", name: "02 DEDUCOES", type: "total_n1", parentId: null },
-      { id: "g_02_01", name: "02.01 IMPOSTOS SOBRE VENDAS", type: "resultado", parentId: "g_02", accounts: [] },
-      { id: "g_03", name: "03 CUSTOS E DESPESAS", type: "total_n1", parentId: null },
-      { id: "g_03_01", name: "03.01 CUSTOS", type: "totalizadora", parentId: "g_03" },
-      { id: "g_03_01_01", name: "03.01.01 TERRENOS", type: "resultado", parentId: "g_03_01", accounts: [] },
-      { id: "g_03_01_02", name: "03.01.02 PROJETOS", type: "resultado", parentId: "g_03_01", accounts: [] },
-      { id: "g_03_02", name: "03.02 DESPESAS", type: "totalizadora", parentId: "g_03" },
-      { id: "g_03_02_01", name: "03.02.01 COMERCIAIS", type: "resultado", parentId: "g_03_02", accounts: [] },
-      { id: "g_03_02_02", name: "03.02.02 ADMINISTRATIVAS", type: "resultado", parentId: "g_03_02", accounts: [] }
-    ];
+    if (typeof PlanoFinanceiroApp !== "undefined" && typeof PlanoFinanceiroApp.dfcTemplateGroups === "function") {
+      return PlanoFinanceiroApp.dfcTemplateGroups();
+    }
+    return [];
   },
 
   dfcVisao() {

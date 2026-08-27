@@ -804,3 +804,34 @@ server.listen(PORT, () => {
   }
 });
 
+// Sincronização Diária de Credores às 08:30
+const syncCreditors = require('./sync-creditors');
+
+function setupDailyCreditorSync() {
+  const TARGET_HOUR = 8;
+  const TARGET_MINUTE = 30;
+
+  // Variável para evitar rodar mais de uma vez no mesmo dia caso o servidor seja reiniciado
+  let lastSyncDate = null;
+
+  setInterval(() => {
+    const now = new Date();
+    const isTargetTime = now.getHours() === TARGET_HOUR && now.getMinutes() === TARGET_MINUTE;
+    
+    // Verifica se é a hora certa e se ainda não rodou hoje
+    const todayStr = now.toISOString().split('T')[0];
+    if (isTargetTime && lastSyncDate !== todayStr) {
+      lastSyncDate = todayStr;
+      console.log(`[${now.toISOString()}] Executando sincronização agendada de credores (08:30)...`);
+      syncCreditors().catch(err => {
+        console.error("Erro na sincronização de credores:", err);
+      });
+    }
+  }, 60000); // Checa a cada minuto
+  
+  console.log(`⏱️ Agendador de Sincronização de Credores iniciado (Agendado para as ${String(TARGET_HOUR).padStart(2, '0')}:${String(TARGET_MINUTE).padStart(2, '0')}).`);
+}
+
+// Inicia o agendador
+setupDailyCreditorSync();
+

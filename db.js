@@ -122,6 +122,15 @@ function initSchema() {
       data_json TEXT,                 -- JSON completo (por empresa, CC, aging)
       created_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS creditors (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      cnpj TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      raw_data TEXT
+    );
   `);
   // Adicionar coluna caso a tabela já exista (migração)
   try {

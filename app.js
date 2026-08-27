@@ -15348,6 +15348,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         const n = Number(v);
         return Number.isFinite(n) ? n : 0;
     };
+    const nexHas = (v) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
     const nexRound2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
     const nexCalcMora = (principal, days) => {
         if (!(days >= 1) || !(principal > 0)) return 0;
@@ -15692,21 +15693,28 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
     saleId = saleId || (typeof AppState !== 'undefined' && (AppState.selectedSaleId || AppState.selectedTitulo)) || sessionStorage.getItem('currentSaleId');
     const btn = document.activeElement;
     let oldHtml = null;
-    if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('NEX')) {
+    if (btn && btn.tagName === 'BUTTON' && (btn.innerText.includes('NEX') || /Gerando/i.test(btn.innerText))) {
         oldHtml = btn.innerHTML;
         btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
+        btn.disabled = true;
         if (window.lucide) lucide.createIcons();
     }
 
-    const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
-    
-    document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
-    document.getElementById("pdf-document-content").innerHTML = docHtml;
-    document.getElementById("pdf-view-overlay").classList.add("active");
-    if (window.lucide) lucide.createIcons();
-    
-    if (btn && oldHtml) {
-        btn.innerHTML = oldHtml;
+    try {
+        const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
+        document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
+        document.getElementById("pdf-document-content").innerHTML = docHtml;
+        document.getElementById("pdf-view-overlay").classList.add("active");
+        if (window.lucide) lucide.createIcons();
+    } catch (e) {
+        console.error('[NEX] Falha ao gerar documento', e);
+        alert('Não foi possível gerar a NEX. Tente novamente.');
+    } finally {
+        if (btn && oldHtml) {
+            btn.innerHTML = oldHtml;
+            btn.disabled = false;
+            if (window.lucide) lucide.createIcons();
+        }
     }
 };
 
@@ -15725,6 +15733,7 @@ window.gerarDocumentosFisicosNEXEmMassa = async function() {
         if (window.lucide) lucide.createIcons();
     }
 
+    try {
     let fullHtml = '';
     for (let i = 0; i < checkboxes.length; i++) {
         const chk = checkboxes[i];
@@ -15743,9 +15752,15 @@ window.gerarDocumentosFisicosNEXEmMassa = async function() {
     document.getElementById("pdf-document-content").innerHTML = fullHtml;
     document.getElementById("pdf-view-overlay").classList.add("active");
     if (window.lucide) lucide.createIcons();
-    
+    } catch (e) {
+        console.error('[NEX] Falha ao gerar lote', e);
+        alert('Não foi possível gerar as NEX em lote. Tente novamente.');
+    } finally {
     if (btn && oldHtml) {
         btn.innerHTML = oldHtml;
+        btn.disabled = false;
+        if (window.lucide) lucide.createIcons();
+    }
     }
 };
 
