@@ -15348,7 +15348,13 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         const n = Number(v);
         return Number.isFinite(n) ? n : 0;
     };
-    const nexHas = (v) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+    const nexRound2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const nexCalcMora = (principal, days) => {
+        if (!(days >= 1) || !(principal > 0)) return 0;
+        const multa = principal * 0.02;
+        const juros = principal * 0.01 * (days / 30);
+        return nexRound2(multa + juros);
+    };
     const rowFromInstallment = (inst) => {
         const isPaid = inst.installmentSituation === 2 || inst.isValidReceipt === true
             || inst.status === 'PAID' || inst.status === 'Quitado'
@@ -15357,11 +15363,12 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         const due = inst.dueDate || inst.originalDueDate;
         const days = calcDaysDelay(due, inst.daysOfDelay ?? inst.daysDelay ?? inst.apiDaysDelay);
         const original = nexHas(inst.originalValue) ? nexNum(inst.originalValue) : nexNum(inst.value);
-        const additions = Math.max(
+        const jurosMultaApi = nexNum(inst.interest) + nexNum(inst.interestAmount) + nexNum(inst.fine) + nexNum(inst.fineAmount);
+        const additionsApi = Math.max(
+            jurosMultaApi,
             nexNum(inst.additionalValue),
             nexNum(inst.overdueCharges),
-            nexNum(inst.extra),
-            nexNum(inst.interest) + nexNum(inst.interestAmount) + nexNum(inst.fine) + nexNum(inst.fineAmount) + nexNum(inst.monetaryCorrection) + nexNum(inst.correctionAmount)
+            nexNum(inst.monetaryCorrection) + nexNum(inst.correctionAmount)
         );
         const withAddCandidates = [
             inst.correctedValueWithAdditions,
@@ -15370,11 +15377,12 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             inst.totalValue
         ].filter(nexHas).map(nexNum);
         let atualizado = withAddCandidates.length ? Math.max(...withAddCandidates) : 0;
+        const moraCalc = nexCalcMora(original, days);
+        const additions = Math.max(additionsApi, moraCalc, atualizado > original ? nexRound2(atualizado - original) : 0);
         if (atualizado <= original + 0.009 && additions > 0.009) atualizado = original + additions;
         if (atualizado < original) atualizado = original;
-        if (days <= 0 && atualizado <= 0.01) return null;
         if (days <= 0) return null;
-        const correcao = Math.max(0, atualizado - original, additions);
+        const correcao = Math.max(0, nexRound2(atualizado - original), additions);
         if (original + correcao > atualizado + 0.009) atualizado = original + correcao;
         return { due, days, original, correcao, atualizado };
     };
@@ -15420,7 +15428,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             const original = nexNum(b.originalValue || b.value);
             const atualizado = nexNum(b.overdueValue || b.value || original);
             if (days <= 0 && atualizado <= 0.01) return;
-            pushParcel({ due, days: days || nexNum(b.daysDelay), original, correcao: Math.max(0, atualizado - original), atualizado });
+            pushParcel({ due, days: days || nexNum(b.daysDelay), original, correcao: Math.max(0, atualizado - original, nexCalcMora(original, days || nexNum(b.daysDelay))), atualizado });
         }
     });
 
@@ -15466,6 +15474,15 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
     }
 
     parcelRows.sort((a, b) => (parseDueIso(a.due) || '').localeCompare(parseDueIso(b.due) || ''));
+    parcelRows.forEach(r => {
+        const mora = nexCalcMora(r.original, r.days);
+        if (nexNum(r.correcao) < mora - 0.004) {
+            r.correcao = mora;
+            r.atualizado = nexRound2(nexNum(r.original) + mora);
+        } else if (nexNum(r.atualizado) < nexNum(r.original) + nexNum(r.correcao) - 0.004) {
+            r.atualizado = nexRound2(nexNum(r.original) + nexNum(r.correcao));
+        }
+    });
 
     let totOriginal = 0;
     let totCorrecao = 0;
@@ -15504,7 +15521,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
                     <th style="padding: 4px 6px;">Vencimento da parcela</th>
                     <th style="padding: 4px 6px; text-align: center;">Dias em atraso</th>
                     <th style="padding: 4px 6px; text-align: right;">Valor original</th>
-                    <th style="padding: 4px 6px; text-align: right;">Acréscimo</th>
+                    <th style="padding: 4px 6px; text-align: right;">Correção</th>
                     <th style="padding: 4px 6px; text-align: right;">Valor atualizado</th>
                 </tr>
             </thead>
