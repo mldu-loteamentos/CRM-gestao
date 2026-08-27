@@ -30,8 +30,11 @@ const ConfigTagsApp = {
             <td>${t.destino === 'Cliente' ? '<span class="badge badge-primary">Cliente</span>' : '<span class="badge badge-secondary">Unidade</span>'}</td>
             <td>${t.status === 'Ativa' ? '<span class="badge badge-success">ATIVA</span>' : '<span class="badge badge-danger">INATIVA</span>'}</td>
             <td>
-               <button class="btn btn-outline btn-sm" onclick="ConfigTagsApp.showTagModal(${t.id})" style="padding: 4px 10px; font-size: 0.75rem;">
+               <button class="btn btn-outline btn-sm" onclick="ConfigTagsApp.showTagModal('${t.id}')" style="padding: 4px 10px; font-size: 0.75rem;">
                  <i data-lucide="edit-3" style="width: 14px;"></i> Editar
+               </button>
+               <button class="btn btn-outline btn-sm btn-danger" onclick="ConfigTagsApp.deleteTag('${t.id}')" style="padding: 4px 10px; font-size: 0.75rem; color: #dc3545; border-color: #dc3545; margin-left: 5px;">
+                 <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
                </button>
             </td>
           </tr>
@@ -210,6 +213,17 @@ const ConfigTagsApp = {
       this.loadTags();
     } catch (e) {
       alert("Erro ao salvar TAG: " + e.message);
+    }
+  },
+
+  async deleteTag(id) {
+    if (!confirm("Tem certeza que deseja excluir esta TAG? Esta ação não pode ser desfeita.")) return;
+    try {
+      const docRef = window.firebaseCollections.doc(window.firebaseDb, 'tags', id.toString());
+      await window.firebaseCollections.deleteDoc(docRef);
+      this.loadTags();
+    } catch (e) {
+      alert("Erro ao excluir TAG: " + e.message);
     }
   }
 };
