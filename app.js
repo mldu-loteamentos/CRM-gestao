@@ -15356,55 +15356,52 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         const juros = principal * 0.01 * (days / 30);
         return nexRound2(multa + juros);
     };
+    const nexPositive = (v) => (nexHas(v) && nexNum(v) > 0.01 ? nexNum(v) : 0);
     const rowFromInstallment = (inst) => {
         const isPaid = inst.installmentSituation === 2 || inst.isValidReceipt === true
-            || inst.status === 'PAID' || inst.status === 'Quitado'
-            || (inst.currentBalance !== undefined && Number(inst.currentBalance) <= 0.01);
+            || inst.status === 'PAID' || inst.status === 'Quitado';
         if (isPaid) return null;
         const due = inst.dueDate || inst.originalDueDate;
-        const days = calcDaysDelay(due, inst.daysOfDelay ?? inst.daysDelay ?? inst.apiDaysDelay);
-        const original = nexHas(inst.originalValue) ? nexNum(inst.originalValue) : nexNum(inst.value);
-        const jurosMultaApi = nexNum(inst.interest) + nexNum(inst.interestAmount) + nexNum(inst.fine) + nexNum(inst.fineAmount);
-        const additionsApi = Math.max(
-            jurosMultaApi,
-            nexNum(inst.additionalValue),
-            nexNum(inst.overdueCharges),
-            nexNum(inst.monetaryCorrection) + nexNum(inst.correctionAmount)
-        );
-        const withAddCandidates = [
-            inst.correctedValueWithAdditions,
-            inst.currentBalanceWithAddition,
-            inst.overdueValue,
-            inst.totalValue
-        ].filter(nexHas).map(nexNum);
-        let atualizado = withAddCandidates.length ? Math.max(...withAddCandidates) : 0;
-        const moraCalc = nexCalcMora(original, days);
-        const additions = Math.max(additionsApi, moraCalc, atualizado > original ? nexRound2(atualizado - original) : 0);
-        if (atualizado <= original + 0.009 && additions > 0.009) atualizado = original + additions;
-        if (atualizado < original) atualizado = original;
+        const daysGiven = inst.daysOfDelay ?? inst.daysDelay ?? inst.apiDaysDelay;
+        const daysFromApi = nexHas(daysGiven) && nexNum(daysGiven) > 0;
+        const days = calcDaysDelay(due, daysGiven);
         if (days <= 0) return null;
-        const correcao = Math.max(0, nexRound2(atualizado - original), additions);
-        if (original + correcao > atualizado + 0.009) atualizado = original + correcao;
-        return { due, days, original, correcao, atualizado };
+        const original = nexPositive(inst.originalValue)
+            || nexPositive(inst.value)
+            || nexPositive(inst.currentBalance)
+            || nexPositive(inst.correctedValueWithoutAdditions);
+        if (inst.currentBalance !== undefined && nexNum(inst.currentBalance) <= 0.01 && original > 0.01) return null;
+        if (original <= 0.01 && !daysFromApi) return null;
+        return { due, days, daysFromApi, original };
     };
 
     const parcelRows = [];
     const pushParcel = (row) => {
-        if (!row) return;
-        const iso = parseDueIso(row.due);
-        const existing = parcelRows.find(r => parseDueIso(r.due) === iso && Math.abs(nexNum(r.original) - nexNum(row.original)) < 0.05);
-        if (existing) {
-            if (nexNum(row.atualizado) > nexNum(existing.atualizado) + 0.004) {
-                existing.atualizado = row.atualizado;
-                existing.correcao = row.correcao;
-            } else if (nexNum(row.correcao) > nexNum(existing.correcao) + 0.004) {
-                existing.correcao = row.correcao;
-                existing.atualizado = existing.original + row.correcao;
-            }
-            if (row.days > existing.days) existing.days = row.days;
-            return;
-        }
+        if (!row || !parseDueIso(row.due)) return;
         parcelRows.push(row);
+    };
+    const collapseParcelRows = (rows) => {
+        const byDue = new Map();
+        rows.forEach(row => {
+            const iso = parseDueIso(row.due);
+            if (!iso) return;
+            const prev = byDue.get(iso);
+            if (!prev) {
+                byDue.set(iso, { due: row.due, days: row.days, daysFromApi: !!row.daysFromApi, original: nexNum(row.original) });
+                return;
+            }
+            prev.original = Math.max(nexNum(prev.original), nexNum(row.original));
+            if (row.daysFromApi && (!prev.daysFromApi || nexNum(row.days) < nexNum(prev.days))) {
+                prev.days = row.days;
+                prev.daysFromApi = true;
+            } else if (!prev.daysFromApi && nexNum(row.days) > nexNum(prev.days)) {
+                prev.days = row.days;
+            }
+        });
+        return [...byDue.values()].filter(r => nexNum(r.original) > 0.01).map(r => {
+            const correcao = nexCalcMora(r.original, r.days);
+            return { due: r.due, days: r.days, original: r.original, correcao, atualizado: nexRound2(nexNum(r.original) + correcao) };
+        });
     };
 
     const fichaCustomerOk = String(AppState.selectedCustomerId || '') === String(customerId);
@@ -15426,14 +15423,13 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         } else {
             const due = b.dueDate;
             const days = calcDaysDelay(due, b.daysDelay);
-            const original = nexNum(b.originalValue || b.value);
-            const atualizado = nexNum(b.overdueValue || b.value || original);
-            if (days <= 0 && atualizado <= 0.01) return;
-            pushParcel({ due, days: days || nexNum(b.daysDelay), original, correcao: Math.max(0, atualizado - original, nexCalcMora(original, days || nexNum(b.daysDelay))), atualizado });
+            const original = nexPositive(b.originalValue) || nexPositive(b.value);
+            if (days <= 0) return;
+            pushParcel({ due, days: days || nexNum(b.daysDelay), daysFromApi: nexHas(b.daysDelay) && nexNum(b.daysDelay) > 0, original });
         }
     });
 
-    const needsAcrescimo = !parcelRows.length || parcelRows.some(r => nexNum(r.correcao) < 0.01);
+    const needsAcrescimo = !parcelRows.length || parcelRows.every(r => !r.daysFromApi);
     if (needsAcrescimo && window.SiengeApiService && getSiengeApiMode() !== 'simulado' && customerId) {
         try {
             const balRes = await SiengeApiService.getCustomerFinancialStatements(customerId);
@@ -15474,26 +15470,18 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
         }
     }
 
-    parcelRows.sort((a, b) => (parseDueIso(a.due) || '').localeCompare(parseDueIso(b.due) || ''));
-    parcelRows.forEach(r => {
-        const mora = nexCalcMora(r.original, r.days);
-        if (nexNum(r.correcao) < mora - 0.004) {
-            r.correcao = mora;
-            r.atualizado = nexRound2(nexNum(r.original) + mora);
-        } else if (nexNum(r.atualizado) < nexNum(r.original) + nexNum(r.correcao) - 0.004) {
-            r.atualizado = nexRound2(nexNum(r.original) + nexNum(r.correcao));
-        }
-    });
+    const nexParcelRows = collapseParcelRows(parcelRows);
+    nexParcelRows.sort((a, b) => (parseDueIso(a.due) || '').localeCompare(parseDueIso(b.due) || ''));
 
     let totOriginal = 0;
     let totCorrecao = 0;
     let totGeral = 0;
     let tableRows = '';
 
-    if (parcelRows.length === 0) {
+    if (nexParcelRows.length === 0) {
         tableRows = `<tr><td colspan="5" style="text-align: center; padding: 10px;">Nenhuma parcela em atraso encontrada.</td></tr>`;
     } else {
-        parcelRows.forEach(r => {
+        nexParcelRows.forEach(r => {
             totOriginal += Number(r.original) || 0;
             totCorrecao += Number(r.correcao) || 0;
             totGeral += Number(r.atualizado) || 0;
