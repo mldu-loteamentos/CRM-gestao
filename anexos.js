@@ -34,26 +34,89 @@ function anexosPersonId(p) {
   return '';
 }
 
+function anexosNormName(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function anexosLookupCustomerName(id) {
+  if (!id) return '';
+  const sid = String(id);
+  const fromObj = (c) => {
+    if (!c) return '';
+    return String(c.name || c.nome || c.customerName || '').trim();
+  };
+  const st = window.AppState;
+  if (st && st.customers) {
+    const hit = st.customers[sid] || st.customers[id] || st.customers[Number(sid)];
+    const n = fromObj(hit);
+    if (n) return n;
+  }
+  if (st && Array.isArray(st.allCustomers)) {
+    const hit = st.allCustomers.find(c => String(c.id) === sid);
+    const n = fromObj(hit);
+    if (n) return n;
+  }
+  return '';
+}
+
+function anexosPersonLabel(id, fallback) {
+  return anexosLookupCustomerName(id) || String(fallback || '').trim() || (id ? `Cliente ${id}` : '');
+}
+
+async function anexosHydrateContractPeople() {
+  const ac = AnexosState.activeContract;
+  if (!ac) return;
+  const ids = new Set();
+  (Array.isArray(ac.customers) ? ac.customers : []).forEach(cust => {
+    const id = anexosPersonId(cust);
+    if (id) ids.add(id);
+    const spouseObj = cust && cust.spouse && typeof cust.spouse === 'object' ? cust.spouse : null;
+    if (spouseObj) {
+      const sid = anexosPersonId(spouseObj);
+      if (sid) ids.add(sid);
+    }
+  });
+  if (ac.customerId) ids.add(String(ac.customerId));
+  const svc = window.SiengeApiService;
+  if (!svc || typeof svc.getCustomer !== 'function' || !ids.size) return;
+  window.AppState = window.AppState || {};
+  AppState.customers = AppState.customers || {};
+  await Promise.all([...ids].map(async (id) => {
+    if (anexosLookupCustomerName(id)) return;
+    try {
+      const c = await svc.getCustomer(id);
+      if (c) AppState.customers[id] = c;
+    } catch (e) {}
+  }));
+  const cadName = anexosLookupCustomerName(ac.customerId);
+  if (cadName) ac.customerName = cadName;
+}
+
 function anexosContractPeople() {
   const ac = AnexosState.activeContract;
   const raw = (ac && Array.isArray(ac.customers)) ? ac.customers : [];
   const out = [];
   const push = (id, name, role) => {
-    if (!id || !String(name || '').trim()) return;
-    out.push({ id: String(id), name: String(name).trim(), role });
+    if (!id) return;
+    const label = anexosPersonLabel(id, name);
+    if (!label) return;
+    out.push({ id: String(id), name: label, role });
   };
   raw.forEach(cust => {
     const spouseObj = cust && cust.spouse && typeof cust.spouse === 'object' ? cust.spouse : null;
     const isMain = cust.main === true || cust.main === 'true';
     const isSpouseFlag = cust.spouse === true || cust.spouse === 'true';
     const role = isMain ? 'Principal' : (isSpouseFlag ? 'Cônjuge' : 'Secundário / Rep.');
-    push(anexosPersonId(cust), cust.name || cust.customerName, role);
+    const pid = anexosPersonId(cust);
+    let rawName = cust.name || cust.customerName || '';
+    const nestedSpouseName = spouseObj ? (spouseObj.name || spouseObj.customerName || spouseObj.spouseName) : '';
+    if (nestedSpouseName && anexosNormName(rawName) === anexosNormName(nestedSpouseName)) rawName = '';
+    push(pid, rawName, role);
     if (spouseObj) {
-      push(
-        anexosPersonId(spouseObj),
-        spouseObj.name || spouseObj.customerName || spouseObj.spouseName,
-        'Cônjuge'
-      );
+      const sid = anexosPersonId(spouseObj);
+      if (sid && sid !== pid) {
+        push(sid, nestedSpouseName, 'Cônjuge');
+      }
     }
   });
   const byId = new Map();
@@ -66,7 +129,7 @@ function anexosContractPeople() {
     return rank(a.role) - rank(b.role);
   });
   if (!people.length && ac && ac.customerId) {
-    people.push({ id: String(ac.customerId), name: ac.customerName || 'Cliente', role: 'Principal' });
+    people.push({ id: String(ac.customerId), name: anexosPersonLabel(ac.customerId, ac.customerName), role: 'Principal' });
   }
   return people;
 }
@@ -633,6 +696,7 @@ const AnexosApp = {
             customerId: mainCust.customerId || mainCust.id,
             customers: mainC.salesContractCustomers || []
           };
+          await anexosHydrateContractPeople();
 
           if (AnexosState.contexto === 'Ambos' && !AnexosState.idCliente) {
             let doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj;

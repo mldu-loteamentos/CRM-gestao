@@ -43,6 +43,7 @@ const PlanoFinanceiroApp = {
   },
 
   DFC_TEMPLATE_VER: 3,
+  ACCOUNTS_MAP_VER: 1,
 
   dfcTemplateGroups() {
     const n = (id, name, type, parentId, extra = {}) => ({
@@ -169,68 +170,206 @@ const PlanoFinanceiroApp = {
     return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   },
 
+  _idMatchesPrefix(id, prefix) {
+    const a = String(id || '').trim();
+    const p = String(prefix || '').trim();
+    if (!a || !p) return false;
+    if (a === p || a.startsWith(p + '.')) return true;
+    const an = a.replace(/\D/g, '');
+    const pn = p.replace(/\D/g, '');
+    return !!(pn && an && (an === pn || (an.startsWith(pn) && pn.length >= 4)));
+  },
+
+  dfcCodePrefixes() {
+    return [
+      ['2.02.04.04.03', 'g_04_03'],
+      ['2.02.04.04.01', 'g_04_03'],
+      ['2.02.04.04', 'g_04_03'],
+      ['2.02.02.03.03', 'g_04_03'],
+      ['2.02.02.02.01', 'g_04_03'],
+      ['2.02.02.01.01', 'g_04_03'],
+      ['2.02.02', 'g_04_03'],
+      ['2.02.05.01', 'g_04_04'],
+      ['2.02.05', 'g_04_04'],
+      ['2.02.04.01', 'g_04_01'],
+      ['2.02.01.01', 'g_04_02'],
+      ['2.02.01', 'g_04_02'],
+      ['2.01.01.02', 'g_04_02'],
+      ['2.03.05.01', 'g_04_04'],
+      ['1.01.01.01', 'g_01_01'],
+      ['1.01.01', 'g_01_01'],
+      ['1.02.01.08', 'g_01_02'],
+      ['1.02.01.07', 'g_01_02'],
+      ['1.02.01.06', 'g_01_02'],
+      ['1.02.01.05', 'g_01_02'],
+      ['1.02.01.04', 'g_01_02'],
+      ['1.02.01.02', 'g_01_02'],
+      ['1.02.01.01', 'g_01_02'],
+      ['1.02.01', 'g_01_02'],
+      ['1.04.01.10', 'g_11_01'],
+      ['1.04.01.08', 'g_01_03'],
+      ['1.04.01.07', 'g_01_03'],
+      ['1.04.01.06', 'g_01_03'],
+      ['1.04.01.05', 'g_01_03'],
+      ['1.04.01.04', 'g_01_03'],
+      ['1.04.01.03', 'g_01_03'],
+      ['1.04.01.02', 'g_01_03'],
+      ['1.04.01.01', 'g_01_03'],
+      ['1.04.01', 'g_01_03'],
+      ['2.08.01.04', 'g_01_04'],
+      ['2.08.01.01', 'g_01_04'],
+      ['2.08.01', 'g_01_04'],
+      ['2.04.01.99', 'g_05_03'],
+      ['2.04.01.30', 'g_05_03'],
+      ['2.04.01.08', 'g_05_03'],
+      ['2.04.01.04', 'g_02_02'],
+      ['2.04.01.03', 'g_02_02'],
+      ['2.04.01.02', 'g_02_01'],
+      ['2.04.01.01', 'g_02_01'],
+      ['2.05.01.11', 'g_09_02'],
+      ['2.05.01.10', 'g_04_01'],
+      ['2.05.01.09', 'g_09_05'],
+      ['2.05.01.08', 'g_09_05'],
+      ['2.05.01.06', 'g_09_02'],
+      ['2.05.01.05', 'g_05_03'],
+      ['2.05.01.04', 'g_09_02'],
+      ['2.05.01.03', 'g_01_01'],
+      ['2.05.01.02', 'g_09_02'],
+      ['2.05.01.01', 'g_09_02'],
+      ['2.06.01.05', 'g_09_02'],
+      ['2.03.07.03', 'g_05_05'],
+      ['2.03.07.02', 'g_05_05'],
+      ['2.03.07.01', 'g_05_05'],
+      ['2.03.07', 'g_05_05'],
+      ['2.03.02', 'g_05_03'],
+      ['2.03.04', 'g_05_03'],
+      ['2.03.06', 'g_05_03'],
+      ['2.03.03', 'g_05_03'],
+      ['2.03.05', 'g_05_03'],
+      ['2.09.03', 'g_05_09'],
+      ['2.09.01', 'g_05_09'],
+      ['2.11.03', 'g_04_01'],
+      ['2.11.00', 'g_04_01'],
+      ['2.11.01', 'g_05_08'],
+      ['2.07.07', 'g_11_01'],
+      ['2.07.06', 'g_11_01'],
+      ['2.07.05', 'g_11_01'],
+      ['2.07.04', 'g_11_01'],
+      ['2.07.01', 'g_11_01'],
+      ['2.07', 'g_11_01'],
+      ['2.01.08', 'g_04_01'],
+      ['2.01.07', 'g_11_01'],
+      ['2.01.05', 'g_11_01'],
+      ['2.01.04', 'g_11_01'],
+      ['2.01.01.23', 'g_11_01']
+    ];
+  },
+
+  lookupDfcByCode(id) {
+    const prefixes = this.dfcCodePrefixes().slice().sort((a, b) => b[0].length - a[0].length);
+    for (let i = 0; i < prefixes.length; i++) {
+      if (this._idMatchesPrefix(id, prefixes[i][0])) return prefixes[i][1];
+    }
+    return null;
+  },
+
   suggestGroup(cat) {
     const id = String(cat.id || '');
     const name = this._normTxt(cat.name || cat.description || '');
     const type = this._normTxt(cat.type || cat.tpConta || cat.financialCategoryType || '');
     if (/TOTAL/.test(type)) return null;
+
+    if (/DISTRATO/.test(name)) return 'g_01_04';
+    if (/DESCONTO.?S OBTID/.test(name)) return 'g_05_03';
+    if (/RENDIMENTO.*APLICAC|APLICACAO FINANCEIRA/.test(name)) return 'g_09_01';
+    if (/ASSISTENCIA TECNICA POS|POS.?OBRA/.test(name)) return 'g_05_11';
+    if (/ADIANTAMENTO A FORNEC/.test(name)) return 'g_05_08';
+    if (/ADIANTAMENTO A PARCEIRO/.test(name)) return 'g_04_01';
+    if (/DISTRIBUICAO (DE )?LUCRO.*REPASSE|REPASSE.*LUCRO/.test(name)) return 'g_04_01';
+    if (/\bPLR\b|DISTRIBUICAO (DE )?LUCRO|ESTORNO DE DIVIDEND/.test(name)) return 'g_11_01';
+    if (/RETENCAO|RECOLHIMENTO/.test(name) && /TERCEIRO/.test(name)) return 'g_05_09';
+    if (/RECOLHIMENTO DE IMPOSTOS RETIDOS/.test(name)) return 'g_05_09';
+    if (/RETENCAO DE (COFINS|PIS|INSS|\bIR\b|ISS)/.test(name)) return 'g_01_02';
+    if (/RECEITA DE VENDA DE LOTE|VENDA DE LOTE/.test(name)) return 'g_01_01';
+    if (/JUROS ATIVOS|DESCONTO DE JUROS CONTRAT/.test(name)) return 'g_01_01';
+    if (/RECEITA DE (ADMINISTRACAO|SERVICOS TECNICOS|TAXA DE CESSAO|LOCAC|COMISSAO)/.test(name)) return 'g_01_02';
+    if (/VENDA DE (AREA|EQUIPAMENTO|SUCATA|VEICULO)/.test(name)) return 'g_01_03';
+    if (/RECEBIMENTO EM DUPLIC|DEPOSITOS NAO IDENT|REEMBOLSO/.test(name)) return 'g_01_03';
+    if (/^PIS$|^COFINS$/.test(name)) return 'g_02_01';
+    if (/^IRPJ$|^CSLL$/.test(name)) return 'g_02_02';
+    if (/DESPESA DE ADMINISTRACAO DE EMPREEND/.test(name)) return 'g_04_04';
+    if (/^REPASSE$|\bMUTUO\b/.test(name)) return 'g_04_01';
+    if (/AQUISICAO DE TERRENO|PROJETOS DIVERSOS/.test(name)) return 'g_04_02';
+    if (/\(OBRA\)|MATERIAIS APLICADOS|SERVICOS DE TERCEIROS \(OBRA\)|CONCESSIONARIA/.test(name)) return 'g_04_03';
+    if (/IPTU|\bITR\b|TAXA ASSOCIATIVA DE LOTE|DESPESAS COM ESTOQUE|DESPESAS COM LOTE/.test(name)) return 'g_05_05';
+    if (/OUTROS IMPOSTOS\/TAXAS|EMOLUMENTO|^ISS$/.test(name)) return 'g_05_03';
+    if (/DESPESAS BANCARIAS/.test(name)) return 'g_05_03';
+    if (/^JUROS$|^MULTAS$|^IOF$|IR SOBRE APLICAC/.test(name)) return 'g_09_02';
+    if (/INVESTIMENTOS E APLICACOES/.test(name)) return 'g_09_02';
+    if (/OUTRAS DESPESAS FINANCEIRAS/.test(name)) return 'g_09_05';
+
+    const byCode = this.lookupDfcByCode(id);
+    if (byCode) return byCode;
+
     if (/CANCELAMENTO DE VEND/.test(name)) return 'g_01_04';
-    if (/VENDA DE LOTE|VENDA DE IMOV|JUROS ATIVOS|MULTAS?\/?ENCARGOS|DESCONTO DE JUROS/.test(name)) return 'g_01_01';
-    if (/RECEITA DE SERVIC|ADM(INISTRACAO)? DE EMPREENDIMENTO/.test(name) && /RECEITA|SERVIC/.test(name)) return 'g_01_02';
-    if (/ALUGUE/.test(name) || (/NAO OPERACIONAL/.test(name) && /RECEITA/.test(name))) return 'g_01_03';
-    if (/ADIANTAMENTO DE VEND/.test(name)) return 'g_01_03';
-    if (/PIS|COFINS|ISS\b|IRRF|IMPOSTO SOBRE VEND/.test(name)) return 'g_02_01';
-    if (/CSLL|IRPJ|TRIMEST/.test(name) || (/IMPOSTO/.test(name) && /FINANC/.test(name))) return 'g_02_02';
-    if (/REPASSE|TERREN/.test(name)) return 'g_04_01';
+    if (/VENDA DE IMOV/.test(name)) return 'g_01_01';
+    if (/RECEITA DE SERVIC/.test(name)) return 'g_01_02';
+    if (/ALUGUE/.test(name) && /RECEITA/.test(name)) return 'g_01_02';
+    if (/NAO OPERACIONAL/.test(name) && /RECEITA/.test(name)) return 'g_01_03';
+    if (/REPASSE|TERRENISTA/.test(name)) return 'g_04_01';
     if (/PROJETO|APROVAC/.test(name)) return 'g_04_02';
-    if (/\bOBRA|CONSTRUC/.test(name)) return 'g_04_03';
-    if (/CUSTO ADM|CUSTO ADIM/.test(name)) return 'g_04_04';
+    if (/\bOBRA/.test(name) && /DESPESA|CUSTO|MATERIAL|SERVICO/.test(name)) return 'g_04_03';
     if (/AQUISICAO DE NOVA/.test(name)) return 'g_04_05';
-    if (/MARKETING/.test(name)) return 'g_05_02';
-    if (/CORRETAG|COMISS|COMERCIAIS|DESPESAS COM VEND/.test(name)) return 'g_05_01';
-    if (/ESTOQUE/.test(name)) return 'g_05_05';
-    if (/DONATIV|CONVENIO|CONTRIBU/.test(name)) return 'g_05_07';
-    if (/ADIANTAMENTO A FORNEC|ADIANTAMENTO FORNEC/.test(name)) return 'g_05_08';
+    if (/CORRETAG|COMISSAO|COMERCIAIS|DESPESAS COM VEND/.test(name) && !/RECEITA/.test(name)) return 'g_05_01';
+    if (/DONATIV|CONVENIO|CONTRIBUICOES/.test(name) && !/DISTRIBUICAO/.test(name)) return 'g_05_07';
     if (/RETENC/.test(name)) return 'g_05_09';
-    if (/MANUTENC/.test(name)) return 'g_05_11';
+    if (/MANUTENC/.test(name) && /EMPREEND|POS/.test(name)) return 'g_05_11';
     if (/NAO OPERACIONAL/.test(name) && /DESPESA/.test(name)) return 'g_05_06';
-    if (/PESSOAL|SALARIO|ENCARGO|FGTS|\bINSS\b/.test(name)) return 'g_05_04';
-    if (/ADMINISTRAT|AGUA|ESGOTO|ENERGIA|ALUGUEL|ESCRITORIO|SOFTWARE|INTERNET|TELEFONE/.test(name)) return 'g_05_03';
-    if (/RECEITA FINANCEIRA|APLICACAO|RENDIMENTO/.test(name)) return 'g_09_01';
+    if (/PESSOAL|SALARIO|ENCARGO|\bFGTS\b|VALE TRANSP|VALE ALIMENT|ASSISTENCIA MEDICA|RESCISO/.test(name) && !/TERCEIRO/.test(name)) return 'g_05_04';
+    if (/ADMINISTRAT|AGUA|ESGOTO|ENERGIA|ALUGUEL|ESCRITORIO|SOFTWARE|INTERNET|TELEFONE|CONSULTOR|JURIDICO|CONTABIL/.test(name)) return 'g_05_03';
+    if (/RECEITA FINANCEIRA/.test(name)) return 'g_09_01';
     if (/FUNDO DE INVEST/.test(name)) return 'g_09_03';
     if (/DESPESA FINANCEIRA|TARIFA BANC|JUROS PASSIV/.test(name)) return 'g_09_02';
-    if (/CAPTACAO|AMORTIZ/.test(name)) return 'g_09_05';
+    if (/AMORTIZ/.test(name)) return 'g_09_05';
     if (/DIVIDEND/.test(name) && /\+|RECEB|ENTRADA/.test(name)) return 'g_11_02';
     if (/DIVIDEND/.test(name)) return 'g_11_01';
     if (/\bAPORTE/.test(name)) return 'g_11_03';
-    if (/CAPEX|INVESTIMENTO/.test(name)) return 'g_07';
-    if (/^1010|^1\.01\.01/.test(id)) return 'g_01_01';
-    if (/^1020|^1\.01\.02/.test(id)) return 'g_01_02';
+    if (/CAPEX/.test(name)) return 'g_07';
     return null;
   },
 
-  autoAllocateUnassigned(silent) {
-    const v = this.visoes.find(x => x.id === 'dfc_default') || this.getVisao();
-    if (!v) return;
-    const assigned = new Set();
-    (v.groups || []).forEach(g => (g.accounts || []).forEach(a => assigned.add(String(a))));
+  remapDfcAccounts() {
+    const v = this.visoes.find(x => x.id === 'dfc_default');
+    if (!v || !this.categories || !this.categories.length) return 0;
+    (v.groups || []).forEach(g => {
+      if (g.type === 'resultado') g.accounts = [];
+    });
     let added = 0;
     (this.categories || []).forEach(c => {
       const cid = String(c.id || '');
-      if (!cid || assigned.has(cid)) return;
+      if (!cid) return;
       const nodeId = this.suggestGroup(c);
       if (!nodeId) return;
       const g = v.groups.find(x => x.id === nodeId);
       if (!g || g.type !== 'resultado') return;
       g.accounts = g.accounts || [];
-      g.accounts.push(cid);
-      assigned.add(cid);
-      added++;
+      if (!g.accounts.includes(cid)) {
+        g.accounts.push(cid);
+        added++;
+      }
     });
     (v.groups || []).forEach(g => {
       if (g.accounts) g.accounts.sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
     });
+    v.accountsMapVer = this.ACCOUNTS_MAP_VER;
     this.saveToStorage();
+    return added;
+  },
+
+  autoAllocateUnassigned(silent) {
+    const v = this.visoes.find(x => x.id === 'dfc_default') || this.getVisao();
+    if (!v) return;
+    const added = this.remapDfcAccounts();
     if (!silent) {
       alert(added ? `${added} conta(s) encaixada(s) nos nós do DFC Padrão. Revise o que restar em "Sienge Disponíveis".` : 'Nenhuma conta nova para alocar automaticamente. Arraste as restantes para o nó certo.');
       this.renderBoard();
@@ -390,8 +529,7 @@ const PlanoFinanceiroApp = {
       if (allCount) allCount.textContent = this.categories.length;
 
       const visao = this.visoes.find(v => v.id === 'dfc_default');
-      const hasMapped = visao && (visao.groups || []).some(g => g.accounts && g.accounts.length);
-      if (!hasMapped) this.autoAllocateUnassigned(true);
+      if (visao && visao.accountsMapVer !== this.ACCOUNTS_MAP_VER) this.remapDfcAccounts();
 
       this.renderTable();
     } catch (e) {

@@ -11211,7 +11211,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       });
       accountSelect.disabled = withId.length === 1;
     } else {
-      accountSelect.innerHTML = '<option value="">Nenhuma conta encontrada para o Centro de Custo</option>';
+      accountSelect.innerHTML = '<option value="">Conta disponível no Sienge não configurada. Consulte o time de tesouraria</option>';
       accountSelect.disabled = true;
     }
     if (typeof window.validateReprocessForm === 'function') {

@@ -10649,8 +10649,8 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   modal.classList.add('active');
 
   try {
-    const data = await SiengeApiService.getCostCenterAvailableAccounts(costCenterId);
-    
+    let data = await SiengeApiService.getCostCenterAvailableAccounts(costCenterId);
+
     if (data && data.availables && data.availables.length > 0) {
       accountSelect.innerHTML = '';
       data.availables.forEach(acc => {
@@ -10661,7 +10661,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       });
       accountSelect.disabled = true; // Bloqueia a seleção como solicitado
     } else {
-      accountSelect.innerHTML = '<option value="">Nenhuma conta encontrada para o Centro de Custo</option>';
+      accountSelect.innerHTML = '<option value="">Conta disponível no Sienge não configurada. Consulte o time de tesouraria</option>';
       accountSelect.disabled = true;
     }
   } catch (e) {
