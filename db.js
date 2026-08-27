@@ -152,6 +152,13 @@ function initSchema() {
   } catch(e) {
     console.error("Erro ao verificar/adicionar colunas de construção em users:", e.message);
   }
+
+  // Deleta a tag CNH (solicitação específica)
+  try {
+    db.exec(`DELETE FROM tags WHERE name = 'CNH'`);
+  } catch(e) {
+    // ignorar
+  }
 }
 
 // Seed initial data
@@ -190,7 +197,7 @@ function seedData() {
     VALUES (?, 1, 'Ativa', 'System', ?)
   `);
 
-  const tagsCliente = ['RG', 'CNH', 'CPF', 'COMPROVANTE DE RESIDÊNCIA', 'CERTIDÃO DE NASCIMENTO', 'CERTIDÃO DE CASAMENTO'];
+  const tagsCliente = ['RG', 'CPF', 'COMPROVANTE DE RESIDÊNCIA', 'CERTIDÃO DE NASCIMENTO', 'CERTIDÃO DE CASAMENTO'];
   const tagsUnidade = ['TCD', 'CONTRATO', 'DISTRATO', 'ADITAMENTO', 'CESSÃO DE DIREITOS', 'CND', 'DOC'];
 
   tagsCliente.forEach(tag => tagInsert.run(tag, 'Cliente'));

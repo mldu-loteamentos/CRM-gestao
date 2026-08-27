@@ -27,6 +27,97 @@ function anexosApiUrl(path) {
   return origin + p;
 }
 
+function anexosPersonId(p) {
+  if (!p) return '';
+  if (p.customerId !== undefined && p.customerId !== null && p.customerId !== '') return String(p.customerId);
+  if (p.id !== undefined && p.id !== null && p.id !== '') return String(p.id);
+  return '';
+}
+
+function anexosContractPeople() {
+  const ac = AnexosState.activeContract;
+  const raw = (ac && Array.isArray(ac.customers)) ? ac.customers : [];
+  const out = [];
+  const push = (id, name, role) => {
+    if (!id || !String(name || '').trim()) return;
+    out.push({ id: String(id), name: String(name).trim(), role });
+  };
+  raw.forEach(cust => {
+    const spouseObj = cust && cust.spouse && typeof cust.spouse === 'object' ? cust.spouse : null;
+    const isMain = cust.main === true || cust.main === 'true';
+    const isSpouseFlag = cust.spouse === true || cust.spouse === 'true';
+    const role = isMain ? 'Principal' : (isSpouseFlag ? 'Cônjuge' : 'Secundário / Rep.');
+    push(anexosPersonId(cust), cust.name || cust.customerName, role);
+    if (spouseObj) {
+      push(
+        anexosPersonId(spouseObj),
+        spouseObj.name || spouseObj.customerName || spouseObj.spouseName,
+        'Cônjuge'
+      );
+    }
+  });
+  const byId = new Map();
+  out.forEach(p => {
+    const prev = byId.get(p.id);
+    if (!prev || p.role === 'Principal') byId.set(p.id, p);
+  });
+  const people = [...byId.values()].sort((a, b) => {
+    const rank = (r) => (r === 'Principal' ? 0 : r === 'Cônjuge' ? 1 : 2);
+    return rank(a.role) - rank(b.role);
+  });
+  if (!people.length && ac && ac.customerId) {
+    people.push({ id: String(ac.customerId), name: ac.customerName || 'Cliente', role: 'Principal' });
+  }
+  return people;
+}
+
+function anexosAssignClientTarget(file) {
+  if (!file) return;
+  const mainTag = AnexosState.tagsAtivas.find(t => t.name === file.tags[0]);
+  if (!mainTag || mainTag.destino !== 'Cliente') return;
+  const people = anexosContractPeople();
+  if (people.length === 1) file.targetCustomerId = people[0].id;
+}
+
+function anexosSafeFileName(name) {
+  let s = String(name || 'arquivo');
+  s = s.replace(/[\\/:*?"<>|]+/g, '-');
+  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/^\.+/, '');
+  if (!s) s = 'arquivo';
+  return s.slice(0, 180);
+}
+
+function anexosLatin1Bytes(str) {
+  const u8 = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c > 255) {
+      const a = str[i].normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      c = a.charCodeAt(0);
+      if (!(c <= 255)) c = 95;
+    }
+    u8[i] = c;
+  }
+  return u8;
+}
+
+async function anexosMultipartBody(fileBlob, filename) {
+  const safeName = anexosSafeFileName(filename).replace(/"/g, "'");
+  const mime = (fileBlob && fileBlob.type) || 'application/octet-stream';
+  const boundary = '----CrmAnexos' + Date.now().toString(16);
+  const head = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeName}"\r\nContent-Type: ${mime}\r\n\r\n`;
+  const tail = `\r\n--${boundary}--\r\n`;
+  const fileBuf = new Uint8Array(await (fileBlob instanceof Blob ? fileBlob.arrayBuffer() : new Blob([fileBlob]).arrayBuffer()));
+  const headB = anexosLatin1Bytes(head);
+  const tailB = anexosLatin1Bytes(tail);
+  const body = new Uint8Array(headB.length + fileBuf.length + tailB.length);
+  body.set(headB, 0);
+  body.set(fileBuf, headB.length);
+  body.set(tailB, headB.length + fileBuf.length);
+  return { body, contentType: `multipart/form-data; boundary=${boundary}`, fileName: safeName };
+}
+
 // --- RENDERIZAÇÃO DA INTERFACE ---
 
 function renderAnexosModule() {
@@ -900,6 +991,7 @@ const AnexosApp = {
           
           fileObj.tags = [detectedTag];
           fileObj.status = detectedTag === 'DOC' ? 'Revisar' : 'Pronto';
+          anexosAssignClientTarget(fileObj);
           
         } catch (err) {
           console.error("Erro no OCR:", err);
@@ -1020,21 +1112,21 @@ const AnexosApp = {
                 let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
                 let isClienteDest = mainTag && mainTag.destino === 'Cliente';
                 if (!isClienteDest) return '';
-                
-                let optionsHtml = '<option value="">Selecione a pessoa alvo do documento...</option>';
-                if (AnexosState.activeContract && AnexosState.activeContract.customers) {
-                  AnexosState.activeContract.customers.forEach(cust => {
-                    const role = cust.main ? 'Principal' : (cust.spouse ? 'Cônjuge' : 'Secundário / Rep.');
-                    const cId = cust.customerId || cust.id;
-                    const sel = f.targetCustomerId == cId ? 'selected' : '';
-                    optionsHtml += `<option value="${cId}" ${sel}>${cust.name} (${role}) - ID: ${cId}</option>`;
-                  });
-                }
-                
+                anexosAssignClientTarget(f);
+                const people = anexosContractPeople();
+                let optionsHtml = people.length === 1
+                  ? ''
+                  : '<option value="">Selecione a pessoa alvo do documento...</option>';
+                people.forEach(p => {
+                  const sel = String(f.targetCustomerId) === String(p.id) ? 'selected' : '';
+                  optionsHtml += `<option value="${p.id}" ${sel}>${p.name} (${p.role}) - ID: ${p.id}</option>`;
+                });
+                const borderOk = f.targetCustomerId ? 'var(--color-border)' : 'var(--color-danger)';
+                const colorOk = f.targetCustomerId ? 'var(--color-text)' : 'var(--color-danger)';
                 return `
-                  <div style="display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid ${f.targetCustomerId ? 'var(--color-border)' : 'var(--color-danger)'}; width: 100%;">
+                  <div style="display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid ${borderOk}; width: 100%;">
                     <i data-lucide="user" style="width:14px; color:${f.targetCustomerId ? 'var(--color-primary)' : 'var(--color-danger)'};"></i>
-                    <select class="form-control" style="padding: 2px 4px; font-size: 0.8rem; flex: 1; border: none; background: transparent; outline: none; color: ${f.targetCustomerId ? 'var(--color-text)' : 'var(--color-danger)'}; font-weight: ${f.targetCustomerId ? 'normal' : '500'}; cursor: pointer;" onchange="AnexosApp.setTargetCustomer('${f.id}', this.value)">
+                    <select class="form-control" style="padding: 2px 4px; font-size: 0.8rem; flex: 1; border: none; background: transparent; outline: none; color: ${colorOk}; font-weight: ${f.targetCustomerId ? 'normal' : '500'}; cursor: pointer;" onchange="AnexosApp.setTargetCustomer('${f.id}', this.value)">
                       ${optionsHtml}
                     </select>
                   </div>
@@ -1072,6 +1164,7 @@ const AnexosApp = {
 
     if (!file.tags.includes(tag)) {
       file.tags = [tag];
+      anexosAssignClientTarget(file);
       this.evalFileStatus(file);
       this.renderFilesList();
     }
@@ -1102,7 +1195,7 @@ const AnexosApp = {
   setTargetCustomer(id, customerId) {
     const file = AnexosState.files.find(f => f.id === id);
     if (file) {
-      file.targetCustomerId = customerId;
+      file.targetCustomerId = customerId ? String(customerId) : '';
       this.renderFilesList();
     }
   },
@@ -1405,9 +1498,8 @@ const AnexosApp = {
       const idClienteStr = AnexosState.idCliente ? `[${AnexosState.idCliente}]` : '';
       const prefix = AnexosState.contexto === 'Cliente' ? idClienteStr : `${cc} ${unitName}`;
       const extFinal = fileObj.ext === 'jpeg' ? 'jpg' : fileObj.ext;
-      const nomeFinalArquivo = `${prefix} - ${tagLabel}${duplicateSuffix}${dataSuffix}.${extFinal}`;
-      
-      const descricaoSienge = `${dataFormatada} - ${tagLabel}`;
+      const nomeFinalArquivo = anexosSafeFileName(`${prefix} - ${tagLabel}${duplicateSuffix}${dataSuffix}.${extFinal}`);
+      const descricaoSienge = `${dataFormatada} - ${String(tagLabel).replace(/[\\/]+/g, ' ')}`.replace(/\s+/g, ' ').trim();
       
       // Identificar Destino da API baseada na primeira TAG do arquivo
       const mainTag = AnexosState.tagsAtivas.find(t => t.name === fileObj.tags[0]);
@@ -1438,11 +1530,13 @@ const AnexosApp = {
         }
 
         document.getElementById('upload-status-text').innerText = "Enviando arquivo...";
+        const multipart = await anexosMultipartBody(fileBlob, nomeFinalArquivo);
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', apiUrl);
           xhr.setRequestHeader('Authorization', getBasicAuthHeader());
           xhr.setRequestHeader('Accept', 'application/json');
+          xhr.setRequestHeader('Content-Type', multipart.contentType);
           
           xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
@@ -1460,13 +1554,11 @@ const AnexosApp = {
               const summaryEl = document.getElementById('upload-summary');
               if (destinoAPI === 'Cliente') {
                  let custName = 'Cliente';
-                 if (AnexosState.activeContract && AnexosState.activeContract.customers) {
-                   const matchedCust = AnexosState.activeContract.customers.find(c => (c.customerId || c.id) == targetCustId);
-                   if (matchedCust) custName = matchedCust.name;
-                 }
+                 const matchedCust = anexosContractPeople().find(c => String(c.id) === String(targetCustId));
+                 if (matchedCust) custName = matchedCust.name;
                  const summaryMsg = `✅ Enviado p/ Cliente: <strong>${custName} (ID: ${targetCustId})</strong>`;
                  if (summaryEl) summaryEl.innerHTML += `<div style="color: var(--color-success); margin-bottom: 4px; font-weight: 500;">${summaryMsg}</div>`;
-                 console.log(`[SUCESSO] Anexo '${nomeFinalArquivo}' enviado para o Cliente ID: ${targetCustId}`);
+                 console.log(`[SUCESSO] Anexo '${multipart.fileName}' enviado para o Cliente ID: ${targetCustId}`);
                  AnexosState.lastUploadedCustomerId = targetCustId;
               } else {
                  const summaryMsg = `✓ Enviado p/ Unidade: <strong>${unitName.trim()}</strong>`;
@@ -1479,16 +1571,7 @@ const AnexosApp = {
           };
 
           xhr.onerror = () => reject(new Error("Erro de Rede"));
-
-          const formData = new FormData();
-          
-          if (destinoAPI === 'Cliente') {
-            formData.append('file', fileBlob, nomeFinalArquivo);
-          } else {
-            formData.append('file', fileBlob, nomeFinalArquivo);
-          }
-          
-          xhr.send(formData);
+          xhr.send(multipart.body);
         });
 
       } catch (err) {

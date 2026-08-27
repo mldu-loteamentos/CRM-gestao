@@ -1,5 +1,44 @@
 const https = require('https');
 
+function encodeLatin1Query(str) {
+  let out = '';
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const c = ch.charCodeAt(0);
+    if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || ch === '.' || ch === '_' || ch === '-') {
+      out += ch;
+    } else if (c === 32) {
+      out += '%20';
+    } else if (c <= 255) {
+      out += '%' + c.toString(16).toUpperCase().padStart(2, '0');
+    } else {
+      const a = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      out += encodeURIComponent(a || '_');
+    }
+  }
+  return out;
+}
+
+function encodeSiengePath(rawPath) {
+  const q = String(rawPath || '').indexOf('?');
+  if (q < 0) return rawPath;
+  const pathname = rawPath.slice(0, q);
+  const search = rawPath.slice(q + 1);
+  try {
+    const params = new URLSearchParams(search);
+    if (!params.has('description')) return rawPath;
+    const parts = [];
+    params.forEach((value, key) => {
+      const encVal = key === 'description' ? encodeLatin1Query(value) : encodeURIComponent(value);
+      parts.push(encodeURIComponent(key) + '=' + encVal);
+    });
+    return pathname + '?' + parts.join('&');
+  } catch (e) {
+    return rawPath;
+  }
+}
+
 // Desabilitar o bodyParser da Vercel para podermos lidar com streams binários (multipart/form-data)
 module.exports.config = {
   api: {
@@ -26,6 +65,7 @@ module.exports = function handler(req, res) {
   } else {
     targetPath = SIENGE_PATH_PREFIX + targetPath;
   }
+  targetPath = encodeSiengePath(targetPath);
 
   const proxyHeaders = { ...req.headers };
   delete proxyHeaders.origin;
