@@ -15962,10 +15962,29 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
     }
 
     try {
+        const existing = await window.loadNexHistory(customerId, saleId);
+        const blocked = window.nexValidInLast90Days(existing);
+        if (blocked) {
+            alert("Cliente já foi constituído em mora nos últimos 90 dias (NEX de " + window.nexFmtBr(blocked.date || blocked.createdAt) + "). Novo envio só é permitido após 90 dias da NEX válida.");
+            return;
+        }
         const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
         document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
         document.getElementById("pdf-document-content").innerHTML = docHtml;
         document.getElementById("pdf-view-overlay").classList.add("active");
+        const now = new Date();
+        const rec = {
+            id: "nex_" + Date.now(),
+            date: window.nexParseIso(now.toISOString()),
+            createdAt: now.toISOString(),
+            author: window.nexCurrentUserName(),
+            letterType: "Notificação Extrajudicial",
+            tracking: "",
+            status: "",
+            html: docHtml
+        };
+        await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
+        if (typeof window.renderNexHistory === "function") window.renderNexHistory();
         if (window.lucide) lucide.createIcons();
     } catch (e) {
         console.error('[NEX] Falha ao gerar documento', e);
