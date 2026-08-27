@@ -704,10 +704,6 @@ const AnexosApp = {
 
     AnexosState.files = [...AnexosState.files, ...novos];
     AnexosState.importedContracts.add(AnexosState.activeContract.id);
-    
-    // Trava de duplicidade
-    novos.forEach(n => AnexosState.downloadedFilesIds.add(n.downloadedId));
-
     renderAnexosModule();
   },
 
@@ -1225,7 +1221,7 @@ const AnexosApp = {
                     AnexosState.files.every(f => {
                       if (isModal) return true; // Permite salvar localmente em qualquer estado
                       const hasDate = f.dateOverride || AnexosState.dataDocumento;
-                      const isReady = f.status === 'Pronto' || f.status === 'Enviado';
+                      const isReady = f.status === 'Pronto' || (f.status === 'Enviado' && f.sentOk);
                       return hasDate && isReady;
                     });
     
@@ -1259,7 +1255,7 @@ const AnexosApp = {
 
   confirmarEnvio() {
     const isModal = window.anexosTargetId === 'anexos-cliente-root';
-    const filesToSend = isModal ? AnexosState.files : [...AnexosState.files.filter(f => f.status === 'Pronto')];
+    const filesToSend = isModal ? AnexosState.files : [...AnexosState.files.filter(f => f.status === 'Pronto' && !f.sentOk)];
     if (filesToSend.length === 0) return;
 
     if (isModal) {
@@ -1271,14 +1267,6 @@ const AnexosApp = {
         alert("Erro ao salvar anexos localmente.");
       });
       return;
-    }
-
-    const isExactMatch = filesToSend.length > 0 &&
-                         filesToSend.every(f => f.downloadedId);
-    if (isExactMatch) {
-      if (!confirm("Estes arquivos vieram do contrato/ficha. Eles serão copiados para o destino definido pelas tags (unidade ou cliente). Deseja continuar?")) {
-        return;
-      }
     }
 
     let selectedUnitName = '';
@@ -1336,7 +1324,7 @@ const AnexosApp = {
     const unitId = AnexosState.selectedUnidade;
     const cc = AnexosState.cc;
 
-    const filesToSend = [...AnexosState.files.filter(f => f.status === 'Pronto')];
+    const filesToSend = [...AnexosState.files.filter(f => f.status === 'Pronto' && !f.sentOk)];
     
     // Não usamos mais finalCustomerId global. Cada arquivo de Cliente usa seu targetCustomerId.
     const needsCustomerAPI = filesToSend.some(f => {
@@ -1466,6 +1454,7 @@ const AnexosApp = {
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
+              fileObj.sentOk = true;
               fileObj.status = 'Enviado';
               sentFiles++;
               const summaryEl = document.getElementById('upload-summary');
@@ -1503,6 +1492,7 @@ const AnexosApp = {
         });
 
       } catch (err) {
+        fileObj.sentOk = false;
         fileObj.status = 'Erro: ' + err.message;
       }
 
