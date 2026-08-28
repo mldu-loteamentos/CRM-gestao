@@ -28258,9 +28258,10 @@ window.closeMapaJuridico = function() {
   if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
 };
 
-window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
+window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
 
 window.mapaJuridicoShowMap = function() {
+  window._mapaJuridicoLastPhase = null;
   const mapView = document.getElementById("mapa-juridico-view-map");
   const phaseView = document.getElementById("mapa-juridico-view-phase");
   if (mapView) mapView.style.display = "block";
@@ -28272,6 +28273,14 @@ window.mapaJuridicoClientMatches = function(c) {
   if (f.company && String(c.companyId) !== String(f.company)) return false;
   const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
   if (f.emp && String(cc) !== String(f.emp)) return false;
+  const q = String(f.q || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (q) {
+    const name = String(c.customerName || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/i, "").split("-")[0];
+    const ids = (c.billIds || []).join(" ");
+    const blob = `${name} ${title} ${ids} ${c.saleId || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (!blob.includes(q)) return false;
+  }
   if (!f.prazo) return true;
   const info = (typeof window.getClientJudicialPhaseInfo === "function")
     ? window.getClientJudicialPhaseInfo(c)
@@ -28341,7 +28350,7 @@ window.mapaJuridicoFillEmpSelect = function() {
 };
 
 window.mapaJuridicoSetFilter = function(key, val) {
-  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
   window._mapaJuridicoFilters[key] = val;
   if (key === "company") {
     window._mapaJuridicoFilters.emp = "";
@@ -28349,11 +28358,23 @@ window.mapaJuridicoSetFilter = function(key, val) {
   }
   const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
   if (nWrap) nWrap.style.visibility = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "visible" : "hidden";
+  const phaseView = document.getElementById("mapa-juridico-view-phase");
+  const inPhase = phaseView && phaseView.style.display !== "none";
   window.mapaJuridicoRenderStages();
-  window.mapaJuridicoShowMap();
+  if (inPhase && window._mapaJuridicoLastPhase) {
+    window.mapaJuridicoShowPhase(window._mapaJuridicoLastPhase.prefix, window._mapaJuridicoLastPhase.compId);
+  } else {
+    window.mapaJuridicoShowMap();
+  }
+};
+
+window.mapaJuridicoSetSearch = function(val) {
+  clearTimeout(window._mapaJuridicoSearchTimer);
+  window._mapaJuridicoSearchTimer = setTimeout(() => window.mapaJuridicoSetFilter("q", val), 180);
 };
 
 window.mapaJuridicoShowPhase = function(prefix, compId) {
+  window._mapaJuridicoLastPhase = { prefix, compId };
   const cache = window._mapaJuridicoCache;
   if (!cache) return;
   const key = (compId ? ("c:" + compId + "|") : "g|") + String(prefix);
@@ -28381,23 +28402,80 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
     return;
   }
   const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatPrazoEtapa = (prazo) => {
+    if (!prazo) return "";
+    if (prazo instanceof Date && !Number.isNaN(prazo.getTime())) {
+      const d = String(prazo.getDate()).padStart(2, "0");
+      const m = String(prazo.getMonth() + 1).padStart(2, "0");
+      return `${d}/${m}/${prazo.getFullYear()}`;
+    }
+    const raw = String(prazo).trim();
+    const iso = raw.split("T")[0];
+    const parts = iso.split("-");
+    if (parts.length === 3 && parts[0].length === 4) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    const parsed = new Date(prazo);
+    if (!Number.isNaN(parsed.getTime())) {
+      const d = String(parsed.getDate()).padStart(2, "0");
+      const m = String(parsed.getMonth() + 1).padStart(2, "0");
+      return `${d}/${m}/${parsed.getFullYear()}`;
+    }
+    return "";
+  };
   const phasePrazoHtml = (client) => {
     const info = (typeof window.getClientJudicialPhaseInfo === "function") ? window.getClientJudicialPhaseInfo(client) : null;
-    if (!info || !info.prazo) return '<span style="color:#94a3b8;">—</span>';
-    const parts = String(info.prazo).split("-");
-    const label = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : info.prazo;
-    let style = "font-weight:600;font-size:0.75rem;padding:2px 6px;border-radius:4px;";
+    const label = info ? formatPrazoEtapa(info.prazo) : "";
+    if (!label) return '<span style="color:#94a3b8;">—</span>';
+    let style = "font-weight:700;font-size:0.75rem;padding:3px 8px;border-radius:6px;display:inline-block;";
     if (Number.isFinite(info.daysLeft)) {
       if (info.daysLeft < 0) style += "color:#7f1d1d;background:#fef2f2;border:1px solid #fecaca;";
       else if (info.daysLeft <= 7) style += "color:#854d0e;background:#fefce8;border:1px solid #fef08a;";
+      else style += "color:#14532d;background:#ecfdf5;border:1px solid #bbf7d0;";
     }
     return `<span style="${style}">${label}</span>`;
   };
+  const moneyOf = (client) => {
+    const sales = (window.AppState && AppState.sales) || [];
+    const sale = (typeof window.matchZeroPaidSale === "function")
+      ? window.matchZeroPaidSale(client, sales)
+      : sales.find(s =>
+          (client.realSaleId && String(s.id) === String(client.realSaleId)) ||
+          String(s.id) === String(client.saleId) ||
+          String(s.receivableBillId) === String(client.saleId)
+        );
+    const contract = Number((sale && (sale.updatedContractValue || sale.contractValue || sale.value || sale.totalSellingValue)) || 0);
+    let perc = client.percPaid != null ? Number(client.percPaid) : (sale && sale.percPaid != null ? Number(sale.percPaid) : null);
+    if (perc != null && perc > 1) perc = perc / 100;
+    const overdue = (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
+    let paid = 0;
+    if (sale && sale.outstandingBalance != null && contract > 0) {
+      paid = Math.max(0, contract - Number(sale.outstandingBalance));
+    } else if (perc != null && contract > 0) {
+      paid = contract * perc;
+    }
+    const remaining = (sale && sale.outstandingBalance != null)
+      ? Math.max(0, Number(sale.outstandingBalance))
+      : (contract > 0 ? Math.max(0, contract - paid) : overdue);
+    const future = Math.max(0, remaining - (Number(client.overdueValue) || 0));
+    const present = overdue + (future * 0.85);
+    return { paid, remaining, present, overdue };
+  };
   bodyEl.innerHTML = `
-    <div class="table-container" style="margin:0;max-height:calc(100vh - 280px);overflow-y:auto;">
+    <div class="table-container" style="margin:0;max-height:calc(100vh - 280px);overflow:auto;border:1px solid rgba(16,84,54,0.12);border-radius:8px;">
       <style>
-        #mapa-juridico-phase-table th { font-size: 0.75rem !important; padding: 6px 10px !important; }
-        #mapa-juridico-phase-table td { font-size: 0.8rem !important; padding: 4px 10px !important; }
+        #mapa-juridico-phase-table { width:100%; min-width:1180px; border-collapse:collapse; }
+        #mapa-juridico-phase-table thead th {
+          position: sticky; top: 0; z-index: 2;
+          background: #105436 !important; color: #fff !important;
+          font-size: 0.72rem !important; font-weight: 700; letter-spacing: 0.3px;
+          text-transform: uppercase; padding: 10px 10px !important;
+          border-bottom: 2px solid #0b3d27; white-space: nowrap;
+        }
+        #mapa-juridico-phase-table tbody td {
+          font-size: 0.8rem !important; padding: 8px 10px !important;
+          border-bottom: 1px solid #e2e8f0; color: #1e293b; vertical-align: middle;
+        }
+        #mapa-juridico-phase-table tbody tr:nth-child(even) { background: #f4f6f4; }
+        #mapa-juridico-phase-table tbody tr:hover { background: #eef6f1 !important; }
       </style>
       <table class="custom-table" id="mapa-juridico-phase-table">
         <thead>
@@ -28408,29 +28486,45 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
             <th style="text-align:center;">Aging</th>
             <th style="text-align:center;">Vencidas</th>
             <th style="text-align:center;">Prazo etapa</th>
+            <th style="text-align:right;">Pago até agora</th>
+            <th style="text-align:right;">Quanto falta</th>
+            <th style="text-align:right;">Valor presente</th>
             <th style="text-align:right;">R$ Atualizado</th>
+            <th style="text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
           ${clients.map(c => {
             const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/, "").split("-")[0];
             const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
-            const val = (c.overdueValue || 0) + (c.overdueCharges || 0);
             const name = String(c.customerName || "").replace(/</g, "&lt;");
             const aging = (typeof getDelayBadgeHtml === "function") ? getDelayBadgeHtml(c.maxDaysDelay) : (c.maxDaysDelay || 0);
+            const money = moneyOf(c);
+            const unitEsc = String(c.unitName || "").replace(/"/g, "&quot;");
+            const cc = String(typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")).replace(/"/g, "&quot;");
+            const nameEsc = String(c.customerName || "").replace(/"/g, "&quot;");
             return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
-              <td style="white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;" title="${name}">${name}</td>
-              <td>${title || "—"}</td>
+              <td style="white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;font-weight:600;" title="${name}">${name}</td>
+              <td style="font-weight:700;color:#105436;">${title || "—"}</td>
               <td style="white-space:nowrap;">${String(unit).replace(/</g, "&lt;")}</td>
               <td style="text-align:center;white-space:nowrap;">${aging}</td>
               <td style="text-align:center;">${c.billCount || (c.billIds ? c.billIds.length : 1)}</td>
               <td style="text-align:center;white-space:nowrap;">${phasePrazoHtml(c)}</td>
-              <td style="text-align:right;font-weight:700;white-space:nowrap;">${fmt(val)}</td>
+              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#105436;">${fmt(money.paid)}</td>
+              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#b45309;">${fmt(money.remaining)}</td>
+              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#1d4ed8;">${fmt(money.present)}</td>
+              <td style="text-align:right;font-weight:800;white-space:nowrap;color:#0f172a;">${fmt(money.overdue)}</td>
+              <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation()">
+                <button type="button" class="btn btn-secondary btn-sm" data-customer-id="${c.customerId}" data-title="${title}" data-name="${nameEsc}" data-unit="${unitEsc}" data-cc="${cc}" onclick="event.stopPropagation();visualizarExtratoDireto(this)" style="padding:3px 8px;font-size:0.7rem;line-height:1.2;background:#ea580c;border:none;color:#fff;border-radius:4px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                  <i data-lucide="file-text" style="width:14px;height:14px;"></i> Extrato
+                </button>
+              </td>
             </tr>`;
           }).join("")}
         </tbody>
       </table>
     </div>`;
+  if (window.lucide) lucide.createIcons();
 };
 
 window.mapaJuridicoRenderStages = function() {
@@ -28614,7 +28708,7 @@ window.exportMapaJuridicoPDF = async function() {
 
 window.showMapaJuridicoOverlay = function(ui) {
   window.closeMapaJuridico();
-  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
   const overlay = document.createElement("div");
   overlay.id = "mapa-juridico-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
@@ -28631,14 +28725,15 @@ window.showMapaJuridicoOverlay = function(ui) {
       #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
       #mapa-juridico-overlay .mapa-filtros {
         display: grid;
-        grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1.5fr) 210px 88px;
+        grid-template-columns: minmax(200px, 1.1fr) minmax(200px, 1.2fr) 190px 80px minmax(240px, 1.5fr);
         gap: 10px 12px;
         align-items: end;
         width: 100%;
         box-sizing: border-box;
       }
       #mapa-juridico-overlay .mapa-filtros label { min-width: 0; }
-      #mapa-juridico-overlay .mapa-filtros select {
+      #mapa-juridico-overlay .mapa-filtros select,
+      #mapa-juridico-overlay .mapa-filtros input[type="search"] {
         display: block;
         width: 100%;
         height: 32px;
@@ -28691,6 +28786,10 @@ window.showMapaJuridicoOverlay = function(ui) {
         <label id="mapa-juridico-ndias-wrap" style="visibility:hidden;font-size:0.7rem;font-weight:700;color:#64748b;">N dias
           <input type="number" min="1" value="7" onchange="mapaJuridicoSetFilter('nDias', this.value)"
             style="display:block;height:32px;width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
+        </label>
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Nome ou título
+          <input type="search" id="mapa-filtro-busca" placeholder="Pesquise pelo nome ou título..."
+            oninput="mapaJuridicoSetSearch(this.value)" autocomplete="off">
         </label>
       </div>
     </div>
