@@ -5,6 +5,22 @@ window.isOperadorCobrancaProfile = function(name) {
   return n.includes("OPERADOR COBRANCA");
 };
 
+window.syncConfiguracoesPermAliases = function(perms) {
+  if (!perms) return perms;
+  ["acessar", "visualizar", "editar"].forEach(flag => {
+    const cfg = !!perms["sub_fin_cr_configuracoes_" + flag];
+    perms["sub_fin_cr_regras_cobranca_" + flag] = cfg;
+    perms["sub_fin_cr_regras_negociacao_" + flag] = cfg;
+  });
+  return perms;
+};
+
+window.configuracoesPermChecked = function(savedPerms, flag) {
+  return !!(savedPerms["sub_fin_cr_configuracoes_" + flag]
+    || savedPerms["sub_fin_cr_regras_cobranca_" + flag]
+    || savedPerms["sub_fin_cr_regras_negociacao_" + flag]);
+};
+
 const ConfigUsersApp = {
   
   users: [
@@ -39,8 +55,7 @@ const ConfigUsersApp = {
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
             { id: "notificacoes", label: "Notificações" },
-            { id: "regras_negociacao", label: "Regras de Negociação" },
-            { id: "regras_cobranca", label: "Regras de Cobrança" }
+            { id: "configuracoes", label: "Configurações" }
           ]
         },
         {
@@ -768,9 +783,10 @@ const ConfigUsersApp = {
               const permKeyAcc = `${sub.key}_${act.id}_acessar`;
               const permKeyVis = `${sub.key}_${act.id}_visualizar`;
               const permKeyEdi = `${sub.key}_${act.id}_editar`;
-              const chkAcc = savedPerms[permKeyAcc] ? 'checked' : '';
-              const chkVis = savedPerms[permKeyVis] ? 'checked' : '';
-              const chkEdi = savedPerms[permKeyEdi] ? 'checked' : '';
+              const unionCfg = act.id === "configuracoes" && typeof window.configuracoesPermChecked === "function";
+              const chkAcc = (unionCfg ? window.configuracoesPermChecked(savedPerms, "acessar") : savedPerms[permKeyAcc]) ? "checked" : "";
+              const chkVis = (unionCfg ? window.configuracoesPermChecked(savedPerms, "visualizar") : savedPerms[permKeyVis]) ? "checked" : "";
+              const chkEdi = (unionCfg ? window.configuracoesPermChecked(savedPerms, "editar") : savedPerms[permKeyEdi]) ? "checked" : "";
               const actIsBlockedByParent = !isAdmin && (!savedPerms[mod.key] || !savedPerms[sub.key]);
               const actDisabledAttr = (isAdmin || actIsBlockedByParent) ? 'disabled' : '';
               const actOpacity = actIsBlockedByParent ? '0.5' : '1';
@@ -789,12 +805,12 @@ const ConfigUsersApp = {
                      </label>
                   </div>
                </div>`;
-              if (act.id === "regras_negociacao" || act.id === "regras_cobranca") regras.push(tile);
+              if (act.id === "configuracoes") regras.push(tile);
               else regular.push(tile);
             });
             const regrasBlock = regras.length ? `
               <div style="flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 16px; padding-top: 8px; border-top: 1px dashed #cbd5e1;">
-                <div style="flex: 1 1 100%; font-size: 0.75rem; font-weight: 700; color: #105436; letter-spacing: 0.04em; text-transform: uppercase;">Regras</div>
+                <div style="flex: 1 1 100%; font-size: 0.75rem; font-weight: 700; color: #105436; letter-spacing: 0.04em; text-transform: uppercase;">Configurações</div>
                 ${regras.join("")}
               </div>` : "";
             return regular.join("") + regrasBlock;
@@ -957,6 +973,7 @@ const ConfigUsersApp = {
        }
     }
 
+    window.syncConfiguracoesPermAliases(perms);
     localStorage.setItem(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms));
     
     const isAdmin = this.selectedProfile === 'admin';
@@ -1017,6 +1034,7 @@ const ConfigUsersApp = {
        }
        perms[key] = cb.checked;
     });
+    window.syncConfiguracoesPermAliases(perms);
 
     if (this.selectedProfile !== 'admin' && totalEdit > 0 && checkedEdit === totalEdit) {
        alert("Acesso Negado: Não é permitido criar um perfil com permissão de edição em todas as funcionalidades. Perfil com edição irrestrita é um privilégio exclusivo do Administrador.");

@@ -882,11 +882,8 @@
                 <li data-tab="wesend" data-module="sub_fin_cr_notificacoes_acessar">
                   <a onclick="switchTab('wesend', 'Notificações')">Notificações</a>
                 </li>
-                <li data-tab="regras-negociacao" data-module="sub_fin_cr_regras_negociacao_acessar">
-                  <a onclick="switchTab('regras-negociacao', 'Regras de Negociação')">Regras de Negociação</a>
-                </li>
-                <li data-tab="regras-cobranca" data-module="sub_fin_cr_regras_cobranca_acessar">
-                  <a onclick="switchTab('regras-cobranca', 'Regras de Cobrança')">Regras de Cobrança</a>
+                <li data-tab="configuracoes" data-module="sub_fin_cr_configuracoes_acessar">
+                  <a onclick="switchTab('configuracoes', 'Configurações')">Configurações</a>
                 </li>
               </ul>
             </li>
@@ -1092,7 +1089,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.514 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.515 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2342,7 +2339,7 @@ Atenciosamente,
               <i data-lucide="alert-circle" style="width: 20px; vertical-align: middle; margin-right: 8px; color: #d39e00;"></i>
               <span id="dashboard-new-city-alert-text">Existem novas Cidades sem operador responsável configurado!</span>
             </div>
-            <button class="btn btn-sm btn-outline" style="border-color: #856404; color: #856404; padding: 4px 10px;" onclick="switchTab('regras-cobranca', 'Regras de Cobrança')">Configurar Agora</button>
+            <button class="btn btn-sm btn-outline" style="border-color: #856404; color: #856404; padding: 4px 10px;" onclick="switchTab('configuracoes', 'Configurações')">Configurar Agora</button>
           </div>
 
           <!-- Grid de Cards de KPI -->
@@ -2930,8 +2927,11 @@ Atenciosamente,
               Se o cliente pagou depois do envio, a NEX sai desta lista e perde validade jurídica.
             </p>
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-              <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.85rem;font-weight:600;color:#334155;cursor:pointer;">
-                <input type="checkbox" id="nex-followup-zero-only" onchange="window.setNexFollowupZeroOnly(this.checked)">
+              <label style="display:inline-flex;align-items:center;gap:10px;font-size:0.85rem;font-weight:600;color:#334155;cursor:pointer;user-select:none;">
+                <span class="custom-switch">
+                  <input type="checkbox" id="nex-followup-zero-only" onchange="window.setNexFollowupZeroOnly(this.checked)">
+                  <span class="custom-switch-slider"></span>
+                </span>
                 NEX apenas de 0% pago
               </label>
               <button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexFollowupSelected()" style="border-color:#fecaca;color:#b91c1c;">
@@ -2992,15 +2992,9 @@ Atenciosamente,
           <div id="wesend-panel-61" style="display:none; margin-top: 1.2rem;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
               <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Demais clientes elegíveis</h3>
-              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.82rem;color:#334155;font-weight:600;">
-                  Corte 61 dias a partir de
-                  <input type="date" id="nex-61-cutoff" onchange="window.setNex61Cutoff(this.value)" style="height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
-                </label>
-                <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-61')">
-                  <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
-                </button>
-              </div>
+              <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-61')">
+                <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
+              </button>
             </div>
             <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
               <table class="custom-table" id="wesend-61-table">
@@ -5851,34 +5845,34 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=514"></script>
-  <script defer src="sienge-api.js?v=514"></script>
-  <script defer src="azure-auth.js?v=514"></script>
-  <script defer src="app.js?v=514"></script>
-  <script defer src="home-dashboard.js?v=514"></script>
-  <script defer src="anexos.js?v=514"></script>
-  <script defer src="contas-pagar.js?v=514"></script>
-  <script defer src="config-tags.js?v=514"></script>
-  <script defer src="config-users.js?v=514"></script>
-  <script defer src="construcao.js?v=514"></script>
-  <script defer src="empresas.js?v=514"></script>
-  <script defer src="relacionamento.js?v=514"></script>
+  <script defer src="data.js?v=515"></script>
+  <script defer src="sienge-api.js?v=515"></script>
+  <script defer src="azure-auth.js?v=515"></script>
+  <script defer src="app.js?v=515"></script>
+  <script defer src="home-dashboard.js?v=515"></script>
+  <script defer src="anexos.js?v=515"></script>
+  <script defer src="contas-pagar.js?v=515"></script>
+  <script defer src="config-tags.js?v=515"></script>
+  <script defer src="config-users.js?v=515"></script>
+  <script defer src="construcao.js?v=515"></script>
+  <script defer src="empresas.js?v=515"></script>
+  <script defer src="relacionamento.js?v=515"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=514"></script>
-  <script defer src="marketing.js?v=514"></script>
-  <script defer src="plano-financeiro.js?v=514"></script>
-  <script defer src="prestacao-contas.js?v=514"></script>
-  <script defer src="fluxo-caixa.js?v=514"></script>
-  <script defer src="parametrizacao-parceiro.js?v=514"></script>
-  <script defer src="fiscal.js?v=514"></script>
-  <script defer src="indexadores.js?v=514"></script>
-  <script defer src="verificar-construcao.js?v=514"></script>
-  <script src="repactuacoes.js?v=514"></script>
+  <script defer src="centros-custo.js?v=515"></script>
+  <script defer src="marketing.js?v=515"></script>
+  <script defer src="plano-financeiro.js?v=515"></script>
+  <script defer src="prestacao-contas.js?v=515"></script>
+  <script defer src="fluxo-caixa.js?v=515"></script>
+  <script defer src="parametrizacao-parceiro.js?v=515"></script>
+  <script defer src="fiscal.js?v=515"></script>
+  <script defer src="indexadores.js?v=515"></script>
+  <script defer src="verificar-construcao.js?v=515"></script>
+  <script src="repactuacoes.js?v=515"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=514"></script>
+  <script defer src="dashboard-inadimplencia.js?v=515"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

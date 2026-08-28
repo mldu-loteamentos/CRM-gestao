@@ -1044,13 +1044,15 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
-  if (tabId === 'regras-cobranca' && typeof window.hasFinCrAction === 'function' && !window.hasFinCrAction('regras_cobranca', 'acessar')) {
-    alert('Sem permissão para acessar Regras de Cobrança.');
-    return;
-  }
-  if (tabId === 'regras-negociacao' && typeof window.hasFinCrAction === 'function' && !window.hasFinCrAction('regras_negociacao', 'acessar')) {
-    alert('Sem permissão para acessar Regras de Negociação.');
-    return;
+  if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
+  if (tabId === 'configuracoes' && typeof window.hasFinCrAction === 'function') {
+    const canCfg = window.hasFinCrAction('configuracoes', 'acessar')
+      || window.hasFinCrAction('regras_cobranca', 'acessar')
+      || window.hasFinCrAction('regras_negociacao', 'acessar');
+    if (!canCfg) {
+      alert('Sem permissão para acessar Configurações.');
+      return;
+    }
   }
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
@@ -1068,7 +1070,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   document.querySelectorAll(".multi-select-content").forEach(el => el.classList.remove("show"));
 
   // Mostrar aba solicitada
-  const paneId = tabId === "regras-negociacao" ? "tab-regras-cobranca" : `tab-${tabId}`;
+  const paneId = (tabId === "configuracoes" || tabId === "regras-negociacao") ? "tab-regras-cobranca" : `tab-${tabId}`;
   const activePane = document.getElementById(paneId);
   if (activePane) {
     activePane.style.display = "block";
@@ -1112,8 +1114,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
     subjudice: "Sub Judice",
-    "regras-negociacao": "Regras de Negociação",
-    "regras-cobranca": "Regras de Cobrança",
+    "configuracoes": "Configurações",
+    "regras-negociacao": "Configurações",
+    "regras-cobranca": "Configurações",
     "prestacao-contas": "Prestação de Contas",
     "fluxo-caixa": "Fluxo de Caixa",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
@@ -1148,7 +1151,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "config-users": "users",
     "doc-padrao": "file-cog",
     subjudice: "scale",
-    "regras-negociacao": "scale",
+    "configuracoes": "sliders",
+    "regras-negociacao": "sliders",
     "regras-cobranca": "sliders",
     "prestacao-contas": "receipt",
     "fluxo-caixa": "git-branch",
@@ -1199,14 +1203,13 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (!AppState.dashboardRendered) {
       loadDashboardData();
     }
-  } else if (tabId === "regras-negociacao") {
-    loadRegrasNegociacao();
-    if (typeof window.switchRegrasTab === "function") window.switchRegrasTab("regra-negociacao");
+  } else if (tabId === "configuracoes" || tabId === "regras-negociacao" || tabId === "regras-cobranca") {
+    if (typeof renderRulesSettingsTable === "function") renderRulesSettingsTable();
+    if (typeof loadRegrasNegociacao === "function") loadRegrasNegociacao();
     if (typeof window.initializeNegotiationRules === "function") window.initializeNegotiationRules();
-    if (typeof window.applyRulesModulePermissions === "function") window.applyRulesModulePermissions();
-  } else if (tabId === "regras-cobranca") {
-    renderRulesSettingsTable();
-    if (typeof window.switchRegrasTab === "function") window.switchRegrasTab("regra-regua");
+    const canCob = typeof window.hasFinCrAction !== "function" || window.hasFinCrAction("regras_cobranca", "acessar");
+    const start = canCob ? "regra-regua" : "regra-negociacao";
+    if (typeof window.switchRegrasTab === "function") window.switchRegrasTab(start);
     if (typeof window.applyRulesModulePermissions === "function") window.applyRulesModulePermissions();
   } else if (tabId === "agenda") {
     loadAgendaTab(showLoader);
@@ -1569,6 +1572,13 @@ window.isCrmSuperAdmin = function() {
 window.permCoversMenuKey = function(perms, modKey) {
   if (!perms || !modKey) return false;
   if (perms[modKey] === true) return true;
+  if (modKey === "sub_fin_cr_configuracoes_acessar") {
+    return ["configuracoes", "regras_cobranca", "regras_negociacao"].some(id =>
+      perms["sub_fin_cr_" + id + "_acessar"] === true
+      || perms["sub_fin_cr_" + id + "_visualizar"] === true
+      || perms["sub_fin_cr_" + id + "_editar"] === true
+    );
+  }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
   return perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true;
@@ -1592,11 +1602,20 @@ window.hasCrmPerm = function(key) {
 };
 
 window.hasFinCrAction = function(actionId, flag) {
-  const base = "sub_fin_cr_" + actionId;
-  if (window.hasCrmPerm(base + "_" + flag)) return true;
-  if (flag === "visualizar" && window.hasCrmPerm(base + "_editar")) return true;
-  if (flag === "acessar" && (window.hasCrmPerm(base + "_visualizar") || window.hasCrmPerm(base + "_editar"))) return true;
-  return false;
+  const check = (id) => {
+    const base = "sub_fin_cr_" + id;
+    if (window.hasCrmPerm(base + "_" + flag)) return true;
+    if (flag === "visualizar" && window.hasCrmPerm(base + "_editar")) return true;
+    if (flag === "acessar" && (window.hasCrmPerm(base + "_visualizar") || window.hasCrmPerm(base + "_editar"))) return true;
+    return false;
+  };
+  if (actionId === "configuracoes") {
+    return check("configuracoes") || check("regras_cobranca") || check("regras_negociacao");
+  }
+  if (actionId === "regras_cobranca" || actionId === "regras_negociacao") {
+    return check(actionId) || check("configuracoes");
+  }
+  return check(actionId);
 };
 
 window.setRulesSectionMode = function(root, canView, canEdit) {
@@ -1911,11 +1930,6 @@ async function initializeApplication() {
                          hasUpdates = true;
                      }
                  });
-                 if (typeof window.stripNexNotesFromState === "function") {
-                     try {
-                         if (localStorage.getItem("crm_nex_cleared_all_v20260828") === "1" && window.stripNexNotesFromState()) hasUpdates = true;
-                     } catch (e) {}
-                 }
                  if (hasUpdates) {
                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
                  }
@@ -14618,37 +14632,28 @@ async function _loadZeroPaidTab_Impl() {
     row.className = rowClass.trim();
 
     let delayBadge = getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
-    let ccConfig = {};
-    try {
-      const customConfigStr = localStorage.getItem('crm_centros_custo_custom');
-      if (customConfigStr) {
-        const configMap = JSON.parse(customConfigStr);
-        ccConfig = configMap[client.costCenterId] || {};
-        if (!ccConfig.clausula_suspensiva_ativa && client.unitName) {
-            const match = client.unitName.match(/^(\d{4,5})/);
-            if (match && configMap[match[1]]) {
-                ccConfig = configMap[match[1]];
-            }
-        }
-      }
-    } catch (e) {}
+    const ccConfig = (typeof window.nexCcConfig === "function")
+      ? window.nexCcConfig(client.costCenterId, client.unitName)
+      : {};
+    const zeroDays = (typeof window.nexReguaDays === "function" ? window.nexReguaDays().zero : 31);
+    const titleHint = String((client.billIds && client.billIds[0]) || "").replace(/^B-/, "").split("-")[0];
+    const hasNex = typeof window.nexHasLetter === "function" && (
+      window.nexHasLetter(client.customerId, client.saleId) ||
+      (titleHint && window.nexHasLetter(client.customerId, titleHint))
+    );
 
     if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
       delayBadge = `
-        <button class="btn btn-sm" onclick="gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
+        <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
           <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
         </button>
       `;
-    } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= 31) {
-      const statusKey = `crm_wesend_status_${client.saleId}`;
-      const currentStatus = localStorage.getItem(statusKey) || "Pendente";
-      if (currentStatus === "Pendente") {
-        delayBadge = `
-          <button class="btn btn-sm" onclick="window.gerarDocumentoFisicoNEX(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Gerar Notificação Extrajudicial (NEX)">
-            <i data-lucide="file-text" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
-          </button>
-        `;
-      }
+    } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= zeroDays && !hasNex) {
+      delayBadge = `
+        <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Abrir Notificações — elegíveis 0% pago">
+          <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
+        </button>
+      `;
     }
     
     row.innerHTML = `
@@ -15006,6 +15011,7 @@ window.toggleSimulateAll = function(checked) {
 // 10. WE SEND - MÓDULO EXTRAJUDICIAL >= 61 DIAS
 // ----------------------------------------------------
 async function loadWeSendTab() {
+  if (typeof window.hydrateNexHistoryBag === "function") await window.hydrateNexHistoryBag();
   const bills = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS
     : (AppState.defaultersLoaded
@@ -15211,8 +15217,6 @@ async function loadWeSendTab() {
 
   fillBody("wesend-zero-body", zeroList, "chk-wesend-zero", "elegiveis-zero", true);
   fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
-  const cutoffInput = document.getElementById("nex-61-cutoff");
-  if (cutoffInput) cutoffInput.value = window.getNex61Cutoff();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
   const restorePanel = sessionStorage.getItem("wesendActivePanel") || sessionStorage.getItem("wesendReturnPanel");
   if (restorePanel && typeof window.switchWesendPanel === "function") window.switchWesendPanel(restorePanel);
@@ -16378,11 +16382,7 @@ window.purgeAllNexOccurrenceNotes = async function() {
 window.ensureAllNexCleared = async function() {
   const flag = "crm_nex_cleared_all_v20260828";
   try {
-    if (localStorage.getItem(flag) === "1") {
-      await window.purgeNexItems(() => true, { localOnly: true });
-      window.stripNexNotesFromState();
-      return 0;
-    }
+    if (localStorage.getItem(flag) === "1") return 0;
   } catch (e) {}
   if (window._nexClearAllPromise) return window._nexClearAllPromise;
   window._nexClearAllPromise = (async () => {
@@ -16397,8 +16397,6 @@ window.ensureAllNexCleared = async function() {
         const flagRef = doc(window.firebaseDb, "settings", "nex_cleared_all_20260828");
         const snap = await getDoc(flagRef);
         if (snap.exists()) {
-          await window.purgeNexItems(() => true, { localOnly: true });
-          window.stripNexNotesFromState();
           try { localStorage.setItem(flag, "1"); } catch (e) {}
           return 0;
         }
@@ -16498,9 +16496,6 @@ window.ensureNexTodayPurged = async function() {
 };
 
 window.loadNexHistory = async function(customerId, saleId) {
-  await window.ensureAllNexCleared();
-  await window.ensureNexTodayPurged();
-  await window.ensureNexTitulo12753Removed();
   customerId = customerId || (AppState && AppState.selectedCustomerId);
   const titulo = window.nexCanonicalTitulo(saleId);
   const candidates = window.nexCandidateIds(saleId);
@@ -16557,6 +16552,15 @@ window.loadNexHistory = async function(customerId, saleId) {
   }));
   const key = window.nexHistoryKey(customerId, titulo);
   window._nexHistory[key] = merged;
+  try {
+    const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
+    bag[key] = merged.map(it => {
+      const copy = { ...it, titulo: it.titulo || titulo, customerId: String(customerId) };
+      if (copy.html && copy.html.length > 80000) copy.html = "";
+      return copy;
+    });
+    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+  } catch (e) {}
   return merged;
 };
 
@@ -16633,7 +16637,6 @@ window.renderNexHistory = async function() {
       <table class="ficha-hist-table" style="min-width:1280px;">
         <thead>
           <tr>
-            <th>Título</th>
             <th>Data da NEX</th>
             <th>Quem fez</th>
             <th>Tipo de carta</th>
@@ -16668,7 +16671,6 @@ window.renderNexHistory = async function() {
                 ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
                 : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`);
             return `<tr>
-              <td style="font-weight:700;white-space:nowrap;">${(it.titulo || tituloAtual || "—")}</td>
               <td style="white-space:nowrap;font-weight:500;">${window.nexFmtBr(it.date || it.createdAt)}</td>
               <td>${author.replace(/</g, "&lt;")}</td>
               <td>${(it.letterType || "Notificação Extrajudicial").replace(/</g, "&lt;")}</td>
@@ -16817,9 +16819,47 @@ window.viewNexPdf = async function(id) {
   if (window.lucide) lucide.createIcons();
 };
 
+window.hydrateNexHistoryBag = async function() {
+  if (window._nexBagHydrated) return;
+  if (!(window.firebaseDb && window.firebaseCollections)) return;
+  try {
+    const { collection, getDocs } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
+    let bag = {};
+    try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+    window._nexHistory = window._nexHistory || {};
+    snap.forEach(d => {
+      const data = d.data() || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) return;
+      const key = d.id;
+      const local = Array.isArray(bag[key]) ? bag[key] : [];
+      const byId = {};
+      local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+      bag[key] = Object.values(byId);
+      window._nexHistory[key] = bag[key];
+    });
+    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+    window._nexBagHydrated = true;
+  } catch (e) {
+    console.warn("[NEX] Falha ao sincronizar follow-up", e);
+  }
+};
+
 window.nexCollectAll = function() {
   let bag = {};
   try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+  if (window._nexHistory) {
+    Object.keys(window._nexHistory).forEach(k => {
+      const mem = Array.isArray(window._nexHistory[k]) ? window._nexHistory[k] : [];
+      if (!mem.length) return;
+      const local = Array.isArray(bag[k]) ? bag[k] : [];
+      const byId = {};
+      local.forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+      mem.forEach(it => { if (it && it.id) byId[String(it.id)] = { ...(byId[String(it.id)] || {}), ...it }; });
+      bag[k] = Object.values(byId);
+    });
+  }
   const items = [];
   Object.keys(bag).forEach(k => {
     (Array.isArray(bag[k]) ? bag[k] : []).forEach(it => {
@@ -16988,6 +17028,12 @@ window.nexInFollowup = function(item) {
   const pendingConsult = !item.tracking || !item.status;
   const inDeadline = days != null && days <= 10;
   return inDeadline || pendingConsult;
+};
+
+window.openNexElegiveisZero = function() {
+  sessionStorage.setItem("wesendActivePanel", "elegiveis-zero");
+  sessionStorage.setItem("wesendReturnPanel", "elegiveis-zero");
+  if (typeof switchTab === "function") switchTab("wesend", "Notificações");
 };
 
 window.switchWesendPanel = function(panel) {
