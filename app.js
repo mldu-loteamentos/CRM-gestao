@@ -1120,6 +1120,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-cobranca": "Configurações",
     "prestacao-contas": "Prestação de Contas",
     "fluxo-caixa": "Fluxo de Caixa",
+    "investimento": "Investimento",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
@@ -1157,6 +1158,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-cobranca": "sliders",
     "prestacao-contas": "receipt",
     "fluxo-caixa": "git-branch",
+    "investimento": "trending-up",
     "parametrizacao-parceiro": "handshake",
     "plano-financeiro": "layout-list",
     "indexadores": "trending-up",
@@ -1270,6 +1272,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   } else if (tabId === "fluxo-caixa") {
     if (typeof FluxoCaixaApp !== "undefined") FluxoCaixaApp.init();
+  } else if (tabId === "investimento") {
+    if (typeof InvestimentoApp !== "undefined") InvestimentoApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   }
@@ -1521,7 +1525,7 @@ window.applyPermissions = function(profileName) {
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
-        const cbAlias = (modKey === 'sub_fin_cb_fluxo_caixa_acessar' || modKey === 'sub_fin_cb_caixa_banco_acessar') && perms.sub_fin_cb === true;
+        const cbAlias = (modKey === 'sub_fin_cb_fluxo_caixa_acessar' || modKey === 'sub_fin_cb_caixa_banco_acessar' || modKey === 'sub_fin_cb_investimento_acessar') && perms.sub_fin_cb === true;
         if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {

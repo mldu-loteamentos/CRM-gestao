@@ -752,7 +752,7 @@ const INITIAL_PREAMBLE_DATA = {
 };
 
 const MOCK_BANK_MOVEMENTS = [
-  { bankMovementAmount: 150000.00, companyId: 1, companyName: "Moura Leite Empreendimentos Avaré Ltda", bankMovementDate: "2026-06-05T10:00:00Z" },
+  { bankMovementAmount: 150000.00, companyId: 1, companyName: "Moura Leite Empreendimentos Avaré Ltda", bankMovementDate: "2026-06-05T10:00:00Z", accountNumber: "99363-5" },
   { bankMovementAmount: 50000.00, companyId: 1, companyName: "Moura Leite Empreendimentos Avaré Ltda", bankMovementDate: "2026-06-12T10:00:00Z" },
   { bankMovementAmount: 320000.00, companyId: 2, companyName: "Moura Leite Loteamentos Principal", bankMovementDate: "2026-06-08T10:00:00Z" },
   { bankMovementAmount: -15000.00, companyId: 2, companyName: "Moura Leite Loteamentos Principal", bankMovementDate: "2026-06-09T10:00:00Z" },
@@ -776,7 +776,31 @@ const MOCK_BANK_MOVEMENTS = [
     bankMovementAmount: -33.29, companyId: 1, companyName: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
     bankMovementDate: "2026-07-28T10:00:00Z",
     financialCategories: [{ costCenterId: 13601, costCenterName: "BOTUCATU - RESERVA CENTRAL PARQUE", financialCategoryId: "2.05.01.05", financialCategoryName: "Despesas Bancárias", financialCategoryRate: 100 }]
+  },
+  {
+    bankMovementAmount: 200000.00, companyId: 1, accountNumber: "12001-8", accountName: "APLICAÇÃO CDB ITAÚ",
+    bankMovementDate: "2026-07-02T10:00:00Z", historic: "APORTE APLICACAO CDB"
+  },
+  {
+    bankMovementAmount: 1840.55, companyId: 1, accountNumber: "12001-8", accountName: "APLICAÇÃO CDB ITAÚ",
+    bankMovementDate: "2026-07-31T10:00:00Z", historic: "RENDIMENTO APLICACAO",
+    financialCategories: [{ financialCategoryId: "1.03.01.02", financialCategoryName: "Juros Ativos", financialCategoryRate: 100 }]
+  },
+  {
+    bankMovementAmount: -50000.00, companyId: 1, accountNumber: "12001-8", accountName: "APLICAÇÃO CDB ITAÚ",
+    bankMovementDate: "2026-07-20T10:00:00Z", historic: "RESGATE PARCIAL CDB"
   }
+];
+
+const MOCK_CHECKING_ACCOUNTS = [
+  { id: 1, companyId: 1, accountNumber: "99363-5", accountName: "C/C (EMPR) - ITAU", accountType: "CHECKING" },
+  { id: 2, companyId: 1, accountNumber: "12001-8", accountName: "APLICAÇÃO CDB ITAÚ", accountType: "APPLICATION" }
+];
+
+const MOCK_ACCOUNT_BALANCES = [
+  { accountNumber: "12001-8", companyId: 1, amount: 480000.00, balanceDate: "2026-06-30", accountStatus: "ENABLED" },
+  { accountNumber: "12001-8", companyId: 1, amount: 631840.55, balanceDate: "2026-07-31", accountStatus: "ENABLED" },
+  { accountNumber: "99363-5", companyId: 1, amount: 90000.00, balanceDate: "2026-07-31", accountStatus: "ENABLED" }
 ];
 
 // Exportar para que outros módulos possam ler
@@ -793,5 +817,7 @@ window.MOCK_DATA = {
   REMADE_INSTALLMENTS: MOCK_REMADE_INSTALLMENTS,
   INITIAL_MOCK_NOTES: INITIAL_MOCK_NOTES,
   INITIAL_PREAMBLE_DATA: INITIAL_PREAMBLE_DATA,
-  BANK_MOVEMENTS: MOCK_BANK_MOVEMENTS
+  BANK_MOVEMENTS: MOCK_BANK_MOVEMENTS,
+  CHECKING_ACCOUNTS: MOCK_CHECKING_ACCOUNTS,
+  ACCOUNT_BALANCES: MOCK_ACCOUNT_BALANCES
 };

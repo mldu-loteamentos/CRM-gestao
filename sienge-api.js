@@ -1496,15 +1496,41 @@ const SiengeApiService = {
   // 21. Listar Contas Correntes (checking-accounts)
   async getCheckingAccounts(companyId) {
     if (s_apiMode === "simulado") {
-      return { results: [{ accountNumber: "6538-2", accountName: "Conta Simulada" }] };
+      const all = (window.MOCK_DATA && window.MOCK_DATA.CHECKING_ACCOUNTS) || [{ accountNumber: "6538-2", accountName: "Conta Simulada", accountType: "CHECKING", companyId: 1 }];
+      if (!companyId) return { results: all };
+      return { results: all.filter(a => String(a.companyId) === String(companyId)) };
     }
-    if (!companyId) return { results: [] };
     try {
-      const res = await siengeFetchWithRetry(`/checking-accounts?companyId=${companyId}&accountStatus=ENABLED&limit=100&offset=0`);
-      return res;
+      const q = companyId
+        ? `/checking-accounts?companyId=${companyId}&accountStatus=ENABLED`
+        : `/checking-accounts?accountStatus=ENABLED`;
+      const list = await siengeFetchAllPages(q, 100);
+      return { results: list };
     } catch (e) {
       console.error("[Sienge] Erro ao obter contas correntes:", e);
       return { results: [] };
+    }
+  },
+
+  async getAccountBalances(balanceDate, opts = {}) {
+    const date = String(balanceDate || "").slice(0, 10);
+    const showLast = opts.showLast === false ? "N" : "S";
+    if (s_apiMode === "simulado") {
+      const all = (window.MOCK_DATA && window.MOCK_DATA.ACCOUNT_BALANCES) || [];
+      return all
+        .filter(b => !date || String(b.balanceDate || "").slice(0, 10) <= date)
+        .map(b => ({ ...b }));
+    }
+    if (!date) return [];
+    try {
+      const ep = `/accounts-balances?balanceDate=${encodeURIComponent(date)}&showLastBalanceIfNotExistBalance=${showLast}`;
+      const list = await siengeFetchAllPages(ep, 300);
+      if (list && list.length) return list;
+      const res = await siengeFetchWithRetry(`${ep}&limit=300&offset=0`);
+      return (res && (res.results || res.data)) || [];
+    } catch (e) {
+      console.error("[Sienge] Erro ao obter saldos de contas:", e);
+      return [];
     }
   },
 
