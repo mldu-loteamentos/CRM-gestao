@@ -39,6 +39,7 @@ const PlanoFinanceiroApp = {
     }
 
     this.renderShell(root);
+    await this.syncVisoesWithCloud();
     await this.loadCategories();
   },
 
@@ -157,12 +158,12 @@ const PlanoFinanceiroApp = {
     if (!visao) {
       this.visoes = this.visoes || [];
       this.visoes.unshift({ id: 'dfc_default', name: 'DFC Padrão', type: 'custom', templateVer: this.DFC_TEMPLATE_VER, groups: template });
-      this.saveToStorage();
+      this.saveToStorage({ silent: true });
       return;
     }
     if (visao.templateVer !== this.DFC_TEMPLATE_VER) {
       this.applyDfcTemplate(visao);
-      this.saveToStorage();
+      this.saveToStorage({ silent: true });
     }
   },
 
@@ -362,7 +363,7 @@ const PlanoFinanceiroApp = {
       if (g.accounts) g.accounts.sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
     });
     v.accountsMapVer = this.ACCOUNTS_MAP_VER;
-    this.saveToStorage();
+    this.saveToStorage({ silent: true });
     return added;
   },
 
@@ -371,6 +372,7 @@ const PlanoFinanceiroApp = {
     if (!v) return;
     const added = this.remapDfcAccounts();
     if (!silent) {
+      this.saveToStorage();
       alert(added ? `${added} conta(s) encaixada(s) nos nós do DFC Padrão. Revise o que restar em "Sienge Disponíveis".` : 'Nenhuma conta nova para alocar automaticamente. Arraste as restantes para o nó certo.');
       this.renderBoard();
     }
@@ -386,8 +388,12 @@ const PlanoFinanceiroApp = {
             <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
               <i data-lucide="layout-list" style="width:18px;height:18px;color:#fff;"></i>
             </div>
-            <h2 style="margin:0; color:#fff; font-size:1.2rem; font-weight:600;">Gestão de Planos Financeiros e Visões</h2>
+            <div>
+              <h2 style="margin:0; color:#fff; font-size:1.2rem; font-weight:600;">Gestão de Planos Financeiros e Visões</h2>
+              <p style="margin:4px 0 0;color:rgba(255,255,255,0.8);font-size:0.75rem;">Mapeamento compartilhado com a equipe. O DFC com valores fica em Fluxo de Caixa.</p>
+            </div>
           </div>
+          <button type="button" onclick="switchTab('fluxo-caixa','Fluxo de Caixa')" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:8px;padding:8px 12px;font-size:0.78rem;font-weight:600;cursor:pointer;">Ver Fluxo de Caixa</button>
         </div>
         <!-- CORPO SPLIT -->
         <div style="display:flex;flex:1;overflow:hidden;background:#f8fafc;border-radius:0 0 12px 12px;border:1px solid #e2e8f0;border-top:none;min-height:0;">
@@ -527,9 +533,6 @@ const PlanoFinanceiroApp = {
       
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
-
-      const visao = this.visoes.find(v => v.id === 'dfc_default');
-      if (visao && visao.accountsMapVer !== this.ACCOUNTS_MAP_VER) this.remapDfcAccounts();
 
       this.renderTable();
     } catch (e) {
@@ -803,7 +806,40 @@ const PlanoFinanceiroApp = {
   // ─── DFC Drag&Drop & Estrutura Hierárquica ─────────────────────────────────
   
   getVisao() { return this.visoes.find(vis => vis.id === this.selectedVisaoId); },
-  saveToStorage() { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.visoes)); },
+  saveToStorage(opts) {
+    if (!opts || !opts.silent) {
+      const now = Date.now();
+      (this.visoes || []).forEach(v => { v.updatedAt = now; });
+    }
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.visoes));
+  },
+
+  async syncVisoesWithCloud() {
+    try {
+      if (!window.firebaseDb || !window.firebaseCollections) return;
+      const { doc, getDoc, setDoc } = window.firebaseCollections;
+      const docRef = doc(window.firebaseDb, "config", "global");
+      const snap = await getDoc(docRef);
+      const cloud = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists) ? (snap.data() || {}) : {};
+      const local = localStorage.getItem(this.STORAGE_KEY) || "[]";
+      const merged = (typeof window.mergePlanoVisoes === "function")
+        ? window.mergePlanoVisoes(local, cloud.crm_plano_visoes_v2)
+        : (cloud.crm_plano_visoes_v2 || local);
+      if (merged && merged !== local) {
+        try { this.visoes = JSON.parse(merged) || this.visoes; } catch (e) {}
+        this.ensureDfcDefault();
+        this.saveToStorage({ silent: true });
+        this.renderVisoesList();
+        if (this.selectedVisaoId) this.renderBoard();
+        else this.renderTable();
+      }
+      if (merged && merged !== cloud.crm_plano_visoes_v2) {
+        await setDoc(docRef, { crm_plano_visoes_v2: merged }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("[Plano Financeiro] Sync visões:", e);
+    }
+  },
 
   renderBoard() {
     const v = this.getVisao();

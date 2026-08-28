@@ -25896,8 +25896,40 @@ window.SYNC_KEYS = [
     "crm_moura_timeline_gatilhos",
     "crm_moura_vistoria_recurrence_days",
     "crm_centros_custo_custom",
-    "crm_centros_custo_tipos"
+    "crm_centros_custo_tipos",
+    "crm_plano_visoes_v2"
 ];
+
+window.planoVisoesAccountCount = function(str) {
+  try {
+    const arr = JSON.parse(str || "[]") || [];
+    return arr.reduce((n, v) => n + (v.groups || []).reduce((m, g) => m + (Array.isArray(g.accounts) ? g.accounts.length : 0), 0), 0);
+  } catch (e) { return 0; }
+};
+
+window.planoVisoesUpdatedAt = function(str) {
+  try {
+    const arr = JSON.parse(str || "[]") || [];
+    return Math.max(0, ...arr.map(v => Number(v.updatedAt || 0)));
+  } catch (e) { return 0; }
+};
+
+window.mergePlanoVisoes = function(localStr, cloudStr) {
+  const local = localStr || "";
+  const cloud = cloudStr || "";
+  if (!cloud) return local || "[]";
+  if (!local) return cloud;
+  const lN = window.planoVisoesAccountCount(local);
+  const cN = window.planoVisoesAccountCount(cloud);
+  if (!lN && cN) return cloud;
+  if (!cN && lN) return local;
+  const lT = window.planoVisoesUpdatedAt(local);
+  const cT = window.planoVisoesUpdatedAt(cloud);
+  if (lT && cT) return cT > lT ? cloud : local;
+  if (lT && !cT) return cN > lN ? cloud : local;
+  if (cT && !lT) return lN > cN ? local : cloud;
+  return cN > lN ? cloud : local;
+};
 
 window.cityOpsLooksForcedDefault = function(op) {
   const arr = (Array.isArray(op) ? op : (op ? [op] : []))
@@ -25955,6 +25987,17 @@ window.syncGlobalConfigFromFirebase = async function() {
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
+                    if (k === "crm_plano_visoes_v2") {
+                        const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
+                        if (merged && merged !== localStorage.getItem(k)) {
+                            _originalSetItem.call(localStorage, k, merged);
+                            changed = true;
+                        }
+                        if (merged && merged !== globalData[k] && window.forceUploadLocalConfig) {
+                            setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                        }
+                        return;
+                    }
                     if (k === "crm_moura_rules") {
                         const merged = window.mergeCityAssignmentRules(localStorage.getItem(k), globalData[k]);
                         if (merged !== localStorage.getItem(k)) {
@@ -26020,6 +26063,15 @@ window.forceUploadLocalConfig = async function(silent = true) {
         
         if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase não inicializado.");
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+        try {
+          const snap = await window.firebaseCollections.getDoc(docRef);
+          const cloud = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists) ? (snap.data() || {}) : {};
+          if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
+            payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
+          } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
+            payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
+          }
+        } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
         if (!silent) {
             alert("âœ”ï¸ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
@@ -26167,6 +26219,15 @@ localStorage.setItem = function(key, value) {
                         }
                     }
                     const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+                    try {
+                      const snap = await window.firebaseCollections.getDoc(docRef);
+                      const cloud = snap && snap.exists() ? (snap.data() || {}) : {};
+                      if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
+                        payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
+                      } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
+                        payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
+                      }
+                    } catch (mergeErr) {}
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
                     console.log("[Firebase] Upload automático: Configurações globais atualizadas na nuvem.");
                 } catch(e) {
