@@ -1,4 +1,4 @@
-/* CSS Principal - Moura Leite CRM de Cobran√ßa */
+/* CSS Principal - Moura Leite CRM de CobranÁa */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
 :root {
@@ -11,8 +11,8 @@
   --color-secondary-hover: #ff9d5c; /* Laranja Moura Suave */
   --color-bg-dark: #0c291d; /* Verde Escuro Profundo (Sidebar) */
   --color-bg-light: #f4f7f5; /* Fundo Suave */
-  --color-text-dark: #1c2e24; /* Texto Leg√≠vel */
-  --color-text-muted: #6b8474; /* Texto Secund√°rio */
+  --color-text-dark: #1c2e24; /* Texto LegÌvel */
+  --color-text-muted: #6b8474; /* Texto Secund·rio */
   --color-white: #ffffff;
   
   /* Cores de Alerta */
@@ -143,7 +143,7 @@ body {
   margin-bottom: 2.5rem;
 }
 
-/* Simula√ß√£o da Logo √Årvore + Sol Laranja */
+/* SimulaÁ„o da Logo ¡rvore + Sol Laranja */
 .brand-logo-container {
   width: 48px;
   height: 48px;
@@ -296,7 +296,7 @@ body {
   border-color: var(--color-danger);
 }
 
-/* √Årea de Conte√∫do Principal */
+/* ¡rea de Conte˙do Principal */
 .main-content {
   margin-left: 280px;
   width: calc(100% - 280px);
@@ -451,7 +451,7 @@ body {
   color: var(--color-info);
 }
 
-/* Pain√©is de Busca e Filtros */
+/* PainÈis de Busca e Filtros */
 .search-filter-panel {
   background: var(--color-white);
   border-radius: var(--border-radius-md);
@@ -502,6 +502,34 @@ body {
   align-items: center;
 }
 
+.search-filter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content minmax(250px, max-content);
+  column-gap: 8px;
+  row-gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+
+.fila-align-btn {
+  width: 100%;
+  height: 36px;
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fila-align-side {
+  min-width: 250px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;
@@ -535,7 +563,7 @@ body {
   border-color: var(--color-primary);
 }
 
-/* Estilo para Abas R√°pidas de Operadores */
+/* Estilo para Abas R·pidas de Operadores */
 .operator-tabs {
   display: flex;
   gap: 8px;
@@ -567,7 +595,7 @@ body {
   color: var(--color-white);
 }
 
-/* Tabelas e Exibi√ß√µes */
+/* Tabelas e ExibiÁıes */
 .table-container {
   background: var(--color-white);
   border-radius: var(--border-radius-md);
@@ -673,7 +701,7 @@ body {
   color: var(--color-text-muted);
 }
 
-/* Detalhe de Regra de Cobran√ßa */
+/* Detalhe de Regra de CobranÁa */
 .rule-tag {
   font-size: 0.75rem;
   font-weight: 600;
@@ -685,7 +713,7 @@ body {
   margin-top: 4px;
 }
 
-/* Bot√µes */
+/* Botıes */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -803,7 +831,7 @@ body {
   color: var(--color-text-dark);
 }
 
-/* Hist√≥rico de Conversas e Ocorr√™ncias */
+/* HistÛrico de Conversas e OcorrÍncias */
 .history-timeline {
   display: flex;
   flex-direction: column;
@@ -847,7 +875,7 @@ body {
   align-items: center;
 }
 
-/* Form de Ocorr√™ncias */
+/* Form de OcorrÍncias */
 .notes-form {
   display: flex;
   flex-direction: column;
@@ -888,7 +916,7 @@ body {
   border-color: var(--color-primary);
 }
 
-/* Calculadora de Renegocia√ß√£o e Distrato */
+/* Calculadora de RenegociaÁ„o e Distrato */
 .calculator-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -927,7 +955,7 @@ body {
   margin-top: 8px;
 }
 
-/* Dashboard de Prospec√ß√£o de Carteira */
+/* Dashboard de ProspecÁ„o de Carteira */
 .chart-box-container {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -942,7 +970,7 @@ body {
   border: 1px solid rgba(16, 84, 54, 0.05);
 }
 
-/* Simula√ß√£o Gr√°fica usando divs/flexbox e efeitos premium */
+/* SimulaÁ„o Gr·fica usando divs/flexbox e efeitos premium */
 .bar-chart-container {
   display: flex;
   align-items: flex-end;
@@ -1076,8 +1104,8 @@ body {
   color: #000;
 }
 
-/* Responsividade B√°sica */
-/* Responsividade B√°sica */
+/* Responsividade B·sica */
+/* Responsividade B·sica */
 @media (max-width: 1024px) {
   .crm-layout {
     grid-template-columns: 1fr;
@@ -1092,7 +1120,7 @@ body {
 }
 
 /* ====================================================
-   NOVOS COMPONENTES E ESTILOS - MULTI-SELECT E GR√ÅFICOS
+   NOVOS COMPONENTES E ESTILOS - MULTI-SELECT E GR¡FICOS
    ==================================================== */
 
 /* Custom Multi-select Dropdown */
@@ -1264,7 +1292,7 @@ rect.lot-rect:hover {
   display: none;
 }
 
-/* Gr√°fico de Rosca SVG */
+/* Gr·fico de Rosca SVG */
 circle.donut-ring {
   fill: none;
   stroke: #eaeded;
@@ -1281,7 +1309,7 @@ circle.donut-segment {
   background-color: rgba(16, 84, 54, 0.08) !important;
 }
 
-/* Estilos para o Calend√°rio da Agenda */
+/* Estilos para o Calend·rio da Agenda */
 .calendar-grid-container {
   background: var(--color-white);
   border-radius: 8px;
@@ -1415,7 +1443,7 @@ circle.donut-segment {
   border-color: var(--color-success) !important;
 }
 
-/* Submenu ConfiguraÁıes */
+/* Submenu Configura??es */
 .nav-submenu {
   list-style: none;
   padding-left: 20px;
@@ -1465,12 +1493,12 @@ circle.donut-segment {
   border-radius: 4px;
 }
 
-/* --- FIX DE CONTRASTE PARA NÕVEIS DO MENU LATERAL --- */
+/* --- FIX DE CONTRASTE PARA N?VEIS DO MENU LATERAL --- */
 
-/* NÌvel 1 - Item Principal */
-/* J· tem o estilo padr„o .nav-item a */
+/* N?vel 1 - Item Principal */
+/* J? tem o estilo padr?o .nav-item a */
 
-/* NÌvel 2 - Submenu (Grupos ou Itens Diretos) */
+/* N?vel 2 - Submenu (Grupos ou Itens Diretos) */
 .nav-submenu {
   background: rgba(0, 0, 0, 0.15); /* Fundo um pouco mais escuro para o bloco do submenu */
   border-radius: 6px;
@@ -1497,7 +1525,7 @@ circle.donut-segment {
   border-left: 3px solid var(--color-secondary) !important;
 }
 
-/* NÌvel 3 - Submenu dentro de Submenu */
+/* N?vel 3 - Submenu dentro de Submenu */
 .nav-submenu .nav-submenu {
   background: rgba(0, 0, 0, 0.2); /* Ainda mais escuro */
   padding-left: 10px;

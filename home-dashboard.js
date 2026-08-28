@@ -847,122 +847,15 @@
     if(window.lucide) window.lucide.createIcons();
   },
 
-  clientCity(c) {
-    const ccId = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId;
-    const ccName = (typeof getCostCenterName === 'function' ? getCostCenterName(c.costCenterId) : '') || c.unitName || '';
-    const city = (typeof window.extractCityFromCostCenter === 'function')
-      ? window.extractCityFromCostCenter(ccId || c.costCenterId, ccName)
-      : '';
-    return String(city || 'SEM CIDADE').toUpperCase();
-  },
-
   clientOverdueValue(c) {
     return (Number(c.overdueValue) || 0) + (Number(c.overdueCharges) || 0);
-  },
-
-  stackedBarSvg(categories, series, colors) {
-    const W = 520, H = 220, padL = 44, padR = 10, padT = 12, padB = 36;
-    const totals = categories.map((_, i) => series.reduce((s, row) => s + (row.values[i] || 0), 0));
-    const max = Math.max(...totals, 1);
-    const n = Math.max(categories.length, 1);
-    const gap = 16;
-    const barW = Math.min(56, (W - padL - padR - gap * (n - 1)) / n);
-    let bars = '';
-    categories.forEach((cat, i) => {
-      const x = padL + i * ((W - padL - padR) / n) + (((W - padL - padR) / n) - barW) / 2;
-      let y = H - padB;
-      series.forEach((row, si) => {
-        const v = row.values[i] || 0;
-        const h = (v / max) * (H - padT - padB);
-        if (h < 0.5) return;
-        y -= h;
-        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colors[si % colors.length]}" rx="2"><title>${this.escHtml(row.name)} · ${cat}: ${this.fmtChart(v)}</title></rect>`;
-      });
-    });
-    const labels = categories.map((cat, i) => {
-      const x = padL + i * ((W - padL - padR) / n) + ((W - padL - padR) / n) / 2;
-      return `<text x="${x}" y="${H - 12}" text-anchor="middle" font-size="10" fill="#64748b">${this.escHtml(cat)}</text>`;
-    }).join('');
-    const ticks = [0, 0.5, 1].map(p => {
-      const y = H - padB - p * (H - padT - padB);
-      return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>
-        <text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${this.fmtChart(max * p)}</text>`;
-    }).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:220px;display:block;">${ticks}${bars}${labels}</svg>`;
-  },
-
-  fmtChart(n) {
-    const v = Number(n) || 0;
-    if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1).replace('.', ',') + ' mi';
-    if (Math.abs(v) >= 1000) return (v / 1000).toFixed(0) + ' mil';
-    return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
   },
 
   renderCityCharts() {
     const box = document.getElementById('home-op-charts-container');
     if (!box) return;
-    const mine = this.getMyClients().filter(c => (Number(c.maxDaysDelay) || 0) >= 31);
-    if (!mine.length) {
-      box.style.display = 'none';
-      box.innerHTML = '';
-      return;
-    }
-    const colors = ['#105436', '#2563eb', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#db2777', '#4f46e5', '#64748b', '#b45309'];
-    const cityTotals = {};
-    mine.forEach(c => {
-      const city = this.clientCity(c);
-      cityTotals[city] = (cityTotals[city] || 0) + this.clientOverdueValue(c);
-    });
-    const topCities = Object.keys(cityTotals).sort((a, b) => cityTotals[b] - cityTotals[a]).slice(0, 8);
-    const cityOf = (c) => {
-      const city = this.clientCity(c);
-      return topCities.includes(city) ? city : 'OUTRAS';
-    };
-    const cities = topCities.includes('OUTRAS') ? topCities : (Object.keys(cityTotals).length > 8 ? topCities.concat('OUTRAS') : topCities);
-    const palette = cities.map((_, i) => colors[i % colors.length]);
-
-    const agingCats = ['31-60', '61-90', '91-120', '120+'];
-    const agingIdx = (d) => {
-      if (d <= 60) return 0;
-      if (d <= 90) return 1;
-      if (d <= 120) return 2;
-      return 3;
-    };
-    const agingSeries = cities.map(city => ({ name: city, values: [0, 0, 0, 0] }));
-    mine.forEach(c => {
-      const i = agingIdx(Number(c.maxDaysDelay) || 0);
-      const row = agingSeries.find(s => s.name === cityOf(c));
-      if (row) row.values[i] += this.clientOverdueValue(c);
-    });
-
-    const splitCats = ['31 a 90 dias', 'Acima de 90'];
-    const splitSeries = cities.map(city => ({ name: city, values: [0, 0] }));
-    mine.forEach(c => {
-      const i = (Number(c.maxDaysDelay) || 0) > 90 ? 1 : 0;
-      const row = splitSeries.find(s => s.name === cityOf(c));
-      if (row) row.values[i] += this.clientOverdueValue(c);
-    });
-
-    const legend = cities.map((city, i) =>
-      `<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.72rem;color:#475569;margin-right:10px;">
-        <span style="width:9px;height:9px;border-radius:2px;background:${palette[i]};display:inline-block;"></span>${this.escHtml(city)}
-      </span>`
-    ).join('');
-    const card = (title, cats, series) => `
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
-        <div style="background:#f8fafc;padding:15px 20px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px;">
-          <i data-lucide="bar-chart-3" style="width:20px;color:#105436;"></i>
-          <h3 style="margin:0;font-size:1.1rem;color:#1e293b;">${title}</h3>
-        </div>
-        <div style="padding:12px 14px 8px;">
-          ${this.stackedBarSvg(cats, series, palette)}
-          <div style="margin-top:8px;line-height:1.8;">${legend}</div>
-        </div>
-      </div>`;
-    box.style.display = 'grid';
-    box.innerHTML = card('Valor em atraso 31+ · por faixa e cidade', agingCats, agingSeries)
-      + card('Valor em atraso 31+ · 31–90 × acima de 90', splitCats, splitSeries);
-    if (window.lucide) lucide.createIcons();
+    box.style.display = 'none';
+    box.innerHTML = '';
   },
 
   operatorKeysMatch(name, opKey) {
@@ -1077,7 +970,7 @@
     const barCount = data.length;
     const stepX = (W - padSide * 2) / (barCount > 1 ? barCount - 1 : 1);
     const barWidth = Math.min(18, stepX * 0.5);
-    const firstVal = data[0];
+    const firstVal = Number(data[0]) || 0;
     const lastVal = data[data.length - 1];
     const diff = lastVal - firstVal;
     const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : 0;
@@ -1094,15 +987,16 @@
       <text x="${W / 2}" y="${arrowY + 3}" text-anchor="middle" font-size="10" font-weight="800" fill="#0f1e17">${diffText}</text>`;
     let bars = '', textLabels = '', xLabels = '';
     data.forEach((v, i) => {
+      const n = Number(v) || 0;
       const xCenter = padSide + i * stepX;
-      const barH = (v / maxVal) * (H - padTop - padBot);
+      const barH = (n / maxVal) * (H - padTop - padBot);
       const y = H - padBot - barH;
       let currentBarColor = '#94a3b8';
-      if (labels[i] !== 'Fech.') {
-        currentBarColor = (v <= firstVal) ? '#4ade80' : '#f87171';
+      if (i !== 0) {
+        currentBarColor = (n <= firstVal) ? '#4ade80' : '#f87171';
       }
       bars += `<rect x="${xCenter - barWidth / 2}" y="${y}" width="${barWidth}" height="${Math.max(barH, 0)}" fill="${currentBarColor}" rx="2" />`;
-      textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${formatVal(v)}</text>`;
+      textLabels += `<text x="${xCenter}" y="${y - 5}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#334155">${formatVal(n)}</text>`;
       xLabels += `<text x="${xCenter}" y="${H - 5}" text-anchor="middle" font-size="8.5" fill="#64748b">${labels[i]}</text>`;
     });
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:420px;height:150px;overflow:visible;display:block;margin:0 auto;">
@@ -1125,12 +1019,16 @@
 
     if (!snapshots.length) {
       el.innerHTML = `
-        <div style="background:linear-gradient(135deg,#f97316 0%,#c2410c 100%);border-radius:12px;padding:12px;color:#fff;">
-          <div style="font-size:12px;font-weight:800;text-transform:uppercase;margin-bottom:8px;">Títulos 31+ da carteira</div>
-          <div style="background:rgba(255,255,255,0.95);border-radius:8px;padding:14px;color:#64748b;font-size:0.85rem;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+          <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;">
+            <i data-lucide="bar-chart-3" style="width:18px;color:#105436;"></i>
+            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Títulos 31+ da carteira</h3>
+          </div>
+          <div style="padding:14px;color:#64748b;font-size:0.85rem;">
             Hoje: <b style="color:#0f172a;">${live.c}</b> títulos · R$ ${fmtMoney(live.v)}. Sem histórico de fechamento no Firebase ainda.
           </div>
         </div>`;
+      if (window.lucide) lucide.createIcons();
       return;
     }
 
@@ -1161,23 +1059,27 @@
     const pctCarteira = mineTotal > 0 ? ((lastC / mineTotal) * 100).toFixed(1) : '0.0';
 
     el.innerHTML = `
-      <div style="background:linear-gradient(135deg,#f97316 0%,#c2410c 100%);border-radius:12px;padding:12px;color:#fff;box-shadow:0 4px 6px rgba(249,115,22,0.2);">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;">Títulos 31+ da carteira</div>
-          <div style="font-size:12px;font-weight:700;">${lastC} Títulos <span style="font-size:10px;font-weight:500;">(${pctCarteira}% da carteira)</span></div>
-          <div style="font-size:12px;font-weight:800;">Total: ${fmtMoney(lastV)}</div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="bar-chart-3" style="width:18px;color:#105436;"></i>
+            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Títulos 31+ da carteira</h3>
+          </div>
+          <div style="font-size:0.8rem;font-weight:700;color:#334155;">${lastC} Títulos <span style="font-weight:500;color:#64748b;">(${pctCarteira}% da carteira)</span></div>
+          <div style="font-size:0.8rem;font-weight:800;color:#0f172a;">Total: ${fmtMoney(lastV)}</div>
         </div>
-        <div style="background:rgba(255,255,255,0.95);border-radius:8px;padding:10px;display:flex;gap:15px;justify-content:space-around;flex-wrap:wrap;">
+        <div style="padding:10px 12px 14px;display:flex;gap:15px;justify-content:space-around;flex-wrap:wrap;">
           <div style="flex:1;min-width:240px;display:flex;flex-direction:column;align-items:center;">
             <div style="font-size:9.5px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Título</div>
             ${this.fechCompareBarSvg(chart31t, labels, false)}
           </div>
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;border-left:1px solid #e2e8f0;">
+          <div style="flex:1;min-width:240px;display:flex;flex-direction:column;align-items:center;border-left:1px solid #e2e8f0;">
             <div style="font-size:9.5px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Valores (em milhões)</div>
             ${this.fechCompareBarSvg(chart31v, labels, true)}
           </div>
         </div>
       </div>`;
+    if (window.lucide) lucide.createIcons();
   },
 
   renderLembretes() {

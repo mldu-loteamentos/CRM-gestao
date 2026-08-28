@@ -28348,7 +28348,7 @@ window.mapaJuridicoSetFilter = function(key, val) {
     window.mapaJuridicoFillEmpSelect();
   }
   const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
-  if (nWrap) nWrap.style.display = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "inline-flex" : "none";
+  if (nWrap) nWrap.style.visibility = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "visible" : "hidden";
   window.mapaJuridicoRenderStages();
   window.mapaJuridicoShowMap();
 };
@@ -28482,25 +28482,27 @@ window.mapaJuridicoRenderStages = function() {
 
   const timeline = (items, compId) => {
     const cidArg = compId ? `'${String(compId).replace(/'/g, "\\'")}'` : "''";
-    return `<div style="display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:max-content;max-width:100%;padding:16px 2px 4px;overflow-x:auto;">
+    return `<div style="display:flex;flex-wrap:nowrap;gap:6px;align-items:stretch;width:100%;padding:16px 2px 4px;box-sizing:border-box;">
       ${items.map((item, idx) => {
         const active = item.count > 0;
         const tip = esc(item.name) + (item.days ? ` · prazo médio ${item.days} d` : "");
         const card = active
           ? `<button type="button" class="mapa-fase-ativa" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
-              style="background:#fff;border:2px solid #105436;border-radius:8px;width:72px;padding:14px 4px 6px;text-align:center;box-shadow:0 4px 10px rgba(16,84,54,0.16);position:relative;flex:0 0 auto;cursor:pointer;">
+              style="background:#fff;border:2px solid #105436;border-radius:8px;flex:1.2 1 0;min-width:68px;padding:16px 6px 8px;text-align:center;box-shadow:0 4px 10px rgba(16,84,54,0.16);position:relative;cursor:pointer;">
               <div style="background:#105436;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;position:absolute;top:-11px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
               <div style="color:#64748b;font-size:8px;text-transform:uppercase;font-weight:700;letter-spacing:0.3px;">Tít.</div>
               <div style="font-size:16px;font-weight:900;color:#0f172a;line-height:1.15;">${item.count}</div>
               <div style="height:1px;background:#d1fae5;margin:4px 4px;"></div>
               <div style="color:#dc2626;font-size:9px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtBRL(item.value)}</div>
             </button>`
-          : `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
-              style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:4px;width:14px;height:26px;padding:0;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.45;cursor:pointer;">
-              <span style="font-size:7px;font-weight:800;color:#94a3b8;transform:rotate(-90deg);white-space:nowrap;">${item.prefix}</span>
+          : `<button type="button" class="mapa-fase-vazia" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
+              style="background:#f8fafc;border:1.5px dashed #94a3b8;border-radius:8px;flex:0.7 1 0;min-width:40px;min-height:52px;padding:16px 4px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:pointer;">
+              <div style="background:#64748b;color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9px;position:absolute;top:-10px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
+              <div style="color:#94a3b8;font-size:8px;text-transform:uppercase;font-weight:700;">Tít.</div>
+              <div style="font-size:14px;font-weight:800;color:#94a3b8;line-height:1.15;">0</div>
             </button>`;
         const arrow = idx < items.length - 1
-          ? `<div style="flex:0 0 8px;width:8px;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:9px;line-height:1;">›</div>` : "";
+          ? `<div style="flex:0 0 16px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:16px;font-weight:700;line-height:1;">›</div>` : "";
         return card + arrow;
       }).join("")}
     </div>`;
@@ -28519,7 +28521,7 @@ window.mapaJuridicoRenderStages = function() {
   root.innerHTML = `
     <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase com títulos para abrir a lista. Passe o mouse na legenda para ver a explicação da etapa.</p>
     ${blocks.map(block => `
-      <div class="crm-card" style="padding:12px 14px 14px;margin-bottom:10px;">
+      <div class="crm-card" style="padding:12px 14px 14px;margin-bottom:10px;width:100%;box-sizing:border-box;">
         <div style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;">${esc(block.title)}</div>
         ${timeline(block.items, block.compId)}
       </div>`).join("") || `<div style="padding:28px;text-align:center;color:#94a3b8;">Nenhum título com os filtros atuais.</div>`}
@@ -28616,7 +28618,6 @@ window.showMapaJuridicoOverlay = function(ui) {
   const overlay = document.createElement("div");
   overlay.id = "mapa-juridico-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
-  const sel = "height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;background:#fff;min-width:160px;";
   overlay.innerHTML = `
     <style>
       #mapa-juridico-overlay .mapa-legenda-item { position: relative; }
@@ -28628,6 +28629,30 @@ window.showMapaJuridicoOverlay = function(ui) {
       }
       #mapa-juridico-overlay .mapa-legenda-item:hover .mapa-legenda-tip { display: block; }
       #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
+      #mapa-juridico-overlay .mapa-filtros {
+        display: grid;
+        grid-template-columns: minmax(260px, 1.3fr) minmax(260px, 1.5fr) 210px 88px;
+        gap: 10px 12px;
+        align-items: end;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      #mapa-juridico-overlay .mapa-filtros label { min-width: 0; }
+      #mapa-juridico-overlay .mapa-filtros select {
+        display: block;
+        width: 100%;
+        height: 32px;
+        box-sizing: border-box;
+        min-width: 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 0 8px;
+        font-size: 0.8rem;
+        background: #fff;
+      }
+      @media (max-width: 900px) {
+        #mapa-juridico-overlay .mapa-filtros { grid-template-columns: 1fr 1fr; }
+      }
     </style>
     <div style="flex-shrink:0;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
       <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 8px;">
@@ -28642,34 +28667,34 @@ window.showMapaJuridicoOverlay = function(ui) {
           <i data-lucide="file-down" style="width:16px;"></i> Gerar PDF
         </button>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:0 18px 12px;">
+      <div class="mapa-filtros" style="padding:0 18px 12px;">
         <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empresa
-          <select id="mapa-filtro-empresa" onchange="mapaJuridicoSetFilter('company', this.value)" style="display:block;${sel}">
+          <select id="mapa-filtro-empresa" onchange="mapaJuridicoSetFilter('company', this.value)">
             <option value="">Todas</option>
             ${(ui.companyOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
           </select>
         </label>
         <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empreendimento
-          <select id="mapa-filtro-emp" onchange="mapaJuridicoSetFilter('emp', this.value)" style="display:block;${sel}min-width:220px;">
+          <select id="mapa-filtro-emp" onchange="mapaJuridicoSetFilter('emp', this.value)">
             <option value="">Todos</option>
             ${(ui.empOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
           </select>
         </label>
         <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Prazo da etapa
-          <select id="mapa-filtro-prazo" onchange="mapaJuridicoSetFilter('prazo', this.value)" style="display:block;${sel}">
+          <select id="mapa-filtro-prazo" onchange="mapaJuridicoSetFilter('prazo', this.value)">
             <option value="">Todos</option>
             <option value="VENCIDOS">Etapas vencidas</option>
             <option value="MES">Vencem este mês</option>
             <option value="N_DIAS">Vencem em N dias</option>
           </select>
         </label>
-        <label id="mapa-juridico-ndias-wrap" style="display:none;font-size:0.7rem;font-weight:700;color:#64748b;align-items:center;gap:6px;">N dias
+        <label id="mapa-juridico-ndias-wrap" style="visibility:hidden;font-size:0.7rem;font-weight:700;color:#64748b;">N dias
           <input type="number" min="1" value="7" onchange="mapaJuridicoSetFilter('nDias', this.value)"
-            style="height:32px;width:72px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
+            style="display:block;height:32px;width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
         </label>
       </div>
     </div>
-    <div style="flex:1;overflow:auto;padding:16px 18px 28px;">
+    <div style="flex:1;overflow:auto;padding:16px 16px 28px;">
       <div id="mapa-juridico-view-map">
         <div id="mapa-juridico-stages-root"></div>
       </div>
@@ -28857,6 +28882,11 @@ window.gerarMapaJuridicoPDF = async function() {
                 return getCompanyName(compId, true) || getCompanyName(compId) || `Empresa ${compId}`;
             }
             return `Empresa ${compId}`;
+        };
+        const companyLegalLabel = (compId) => {
+            const comp = (window.AppState && AppState.companies || []).find(c => Number(c.id) === Number(compId));
+            const full = (comp && (comp.name || comp.tradeName)) || (typeof getCompanyName === "function" ? getCompanyName(compId) : "") || `Empresa ${compId}`;
+            return `${compId} - ${String(full).toUpperCase()}`;
         };
 
         const generalResult = buildTimelineHtml("Visão Geral", generalList, true, "");
@@ -29278,7 +29308,7 @@ window.gerarMapaJuridicoPDF = async function() {
         });
         const empOptions = Object.keys(empOptionsMap).map(id => ({ id, name: empOptionsMap[id] }))
             .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
-        const companyOptions = sortedCompanies.map(id => ({ id, name: companyNames[id] }));
+        const companyOptions = sortedCompanies.map(id => ({ id, name: companyLegalLabel(id) }));
 
         window._mapaJuridicoCache = {
             byKey,

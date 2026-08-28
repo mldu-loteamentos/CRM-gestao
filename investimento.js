@@ -34,7 +34,7 @@ const InvestimentoApp = {
     if (!this.selectedCompanyIds.length) this.selectedCompanyIds = geridas.map(c => String(c.id));
     if (!window._invDropBound) {
       window._invDropBound = true;
-      document.addEventListener("click", (e) => {
+      document.addEventListener("mousedown", (e) => {
         if (!InvestimentoApp.companyDropOpen) return;
         if (e.target && e.target.closest && e.target.closest("#inv-emp-drop")) return;
         InvestimentoApp.companyDropOpen = false;
@@ -90,19 +90,21 @@ const InvestimentoApp = {
     const all = (window.AppState && AppState.companies) || [];
     const seen = new Set();
     const out = [];
-    const add = (id, name) => {
+    const add = (id, usual, legal) => {
       const sid = String(id);
       if (!sid || seen.has(sid)) return;
       seen.add(sid);
-      out.push({ id: sid, name: name || `Empresa ${sid}` });
+      const legalName = legal || usual || `Empresa ${sid}`;
+      out.push({ id: sid, name: usual || legalName, legalName });
     };
     all.forEach(c => {
       const cfg = custom[c.id] || custom[String(c.id)] || {};
-      if (this.isGeridaFlag(cfg)) add(c.id, cfg.nome_usual || c.name);
+      if (this.isGeridaFlag(cfg)) add(c.id, cfg.nome_usual, c.name);
     });
     Object.values(custom).forEach(cfg => {
       if (!cfg || typeof cfg !== "object" || cfg.company_id == null) return;
-      if (this.isGeridaFlag(cfg)) add(cfg.company_id, cfg.nome_usual);
+      const found = all.find(x => String(x.id) === String(cfg.company_id));
+      if (this.isGeridaFlag(cfg)) add(cfg.company_id, cfg.nome_usual, found && found.name);
     });
     return out.sort((a, b) => Number(a.id) - Number(b.id));
   },
@@ -423,7 +425,10 @@ const InvestimentoApp = {
     const n = this.selectedCompanyIds.length;
     if (!all.length) return "Nenhuma empresa gerida";
     if (n === all.length) return `Todas (${n})`;
-    if (n === 1) return this.companyName(this.selectedCompanyIds[0]);
+    if (n === 1) {
+      const c = all.find(x => String(x.id) === String(this.selectedCompanyIds[0]));
+      return c ? this.companyFullLabel(c) : this.companyName(this.selectedCompanyIds[0]);
+    }
     if (n === 0) return "Selecione empresas";
     return `${n} empresas`;
   },
@@ -441,19 +446,28 @@ const InvestimentoApp = {
     box.innerHTML = this.companyListHtml();
   },
 
+  companyFullLabel(c) {
+    const legal = (c && (c.legalName || c.name)) || "";
+    return `${c.id} - ${legal}`;
+  },
+
   companyListHtml() {
     const companies = this.geridasCompanies();
     const q = (this.companyQuery || "").toLowerCase().trim();
     const filtered = companies.filter(c => {
       if (!q) return true;
-      return String(c.name).toLowerCase().includes(q) || String(c.id).includes(q);
+      const blob = `${c.id} ${c.name} ${c.legalName || ""}`.toLowerCase();
+      return blob.includes(q);
     });
     if (!filtered.length) return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma empresa com esse nome.</div>`;
     return filtered.map(c => {
       const on = this.selectedCompanyIds.includes(c.id);
-      return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
-        <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)">
-        <span style="font-weight:${on ? 700 : 500};color:#334155;">${this.esc(c.name)}</span>
+      const usual = c.name && c.legalName && String(c.name).toUpperCase() !== String(c.legalName).toUpperCase()
+        ? `<span style="display:block;font-size:0.72rem;font-weight:600;color:#64748b;">${this.esc(c.name)}</span>`
+        : "";
+      return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
+        <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)" style="margin-top:3px;flex-shrink:0;">
+        <span style="font-weight:${on ? 700 : 600};color:#334155;line-height:1.35;white-space:normal;">${this.esc(this.companyFullLabel(c))}${usual}</span>
       </label>`;
     }).join("");
   },
@@ -463,24 +477,28 @@ const InvestimentoApp = {
     if (!companies.length) {
       return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
     }
-    return `<div id="inv-emp-drop" style="position:relative;min-width:280px;max-width:360px;">
+    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:520px;max-width:760px;" onmousedown="event.stopPropagation()">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas geridas pelo grupo</div>
-      <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
-        style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;">
-        <span>${this.esc(this.companyDropLabel())}</span>
-        <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;"></i>
-      </button>
+      <div style="display:flex;gap:8px;align-items:stretch;">
+        <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
+          style="flex:1;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
+          <span style="white-space:normal;line-height:1.3;">${this.esc(this.companyDropLabel())}</span>
+          <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;flex-shrink:0;"></i>
+        </button>
+        <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="height:34px;padding:0 12px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;white-space:nowrap;">Marcar todas</button>
+        <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="height:34px;padding:0 12px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;white-space:nowrap;">Desmarcar todas</button>
+      </div>
       ${this.companyDropOpen ? `
-        <div style="position:absolute;left:0;right:0;top:54px;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
+        <div style="position:absolute;left:0;right:0;top:58px;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
           <div style="display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
-            <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="flex:1;height:28px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;">Marcar todas</button>
-            <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="flex:1;height:28px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="flex:1;height:30px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Marcar todas</button>
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="flex:1;height:30px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
           </div>
-          <input id="inv-emp-search" placeholder="Buscar empresa..." value="${this.esc(this.companyQuery)}"
+          <input id="inv-emp-search" placeholder="Buscar por ID ou nome..." value="${this.esc(this.companyQuery)}"
             onclick="event.stopPropagation()"
             oninput="InvestimentoApp.filterCompanyList(this.value)"
             style="width:100%;height:32px;border:none;border-bottom:1px solid #e2e8f0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
-          <div id="inv-emp-list" style="max-height:220px;overflow:auto;">
+          <div id="inv-emp-list" style="max-height:280px;overflow:auto;">
             ${this.companyListHtml()}
           </div>
         </div>` : ""}

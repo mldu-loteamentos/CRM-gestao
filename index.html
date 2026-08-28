@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=535">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1092,7 +1092,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.534 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.535 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2537,45 +2537,32 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
             <button type="button" class="btn btn-secondary btn-sm" onclick="window.clearHomeInsightFilter()" style="white-space:nowrap;">Limpar filtro</button>
           </div>
           <div class="search-filter-panel" style="margin-top: 1.5rem;">
-            <div style="display: flex; gap: 15px; width: 100%; align-items: center; justify-content: space-between;">
-              <div style="display: flex; gap: 15px; align-items: center; flex: 1;">
-                <div class="search-box-wrapper" style="flex: 1;">
-                  <input type="text" id="dashboard-search-input" class="search-input"
-                    placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;">
-                  <i data-lucide="search" class="search-icon"></i>
-                </div>
+            <div class="search-filter-toolbar">
+              <div class="search-box-wrapper">
+                <input type="text" id="dashboard-search-input" class="search-input"
+                  placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;">
+                <i data-lucide="search" class="search-icon"></i>
               </div>
-              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
-                <button id="btn-refresh-dashboard" class="btn btn-primary"
-                  style="display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; font-weight: 600; white-space: nowrap; border: none; border-radius: 4px; color: white; cursor: pointer;">
-                  <i data-lucide="refresh-cw" style="width: 14px; height: 14px;"></i> Atualizar Fila
+              <button id="btn-refresh-dashboard" class="btn btn-primary fila-align-btn"
+                style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;">
+                <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
+              </button>
+              <div class="fila-align-side">
+                <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap;"></span>
+              </div>
+
+              <div id="operator-tabs-container" class="operator-tabs" style="min-width: 0; width: 100%;">
+                <button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>
+              </div>
+              <button id="btn-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600;">
+                <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
+                <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
+              </button>
+              <div class="fila-align-side" style="gap: 8px;">
+                <div style="border-left: 2px solid #cbd5e1; height: 28px; flex-shrink: 0;"></div>
+                <button id="btn-export-excel" class="btn btn-secondary" onclick="exportFilteredToExcel()" style="white-space: nowrap; background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; height: 36px; border-radius: 4px; cursor: pointer; flex: 1; justify-content: center;" title="Exportar tabela atual para Excel">
+                    <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
                 </button>
-                <div style="display: flex; align-items: center; justify-content: flex-end; min-width: 250px; white-space: nowrap;">
-                  <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right;"></span>
-                </div>
-              </div>
-            </div>
-
-            <div class="filters-row">
-              <!-- Abas Rápidas de Operadores (SWITCH) -->
-              <div class="filter-group" style="min-width: 100%;">
-                <!-- Label removida a pedido do usuário -->
-                <div id="operator-tabs-container" class="operator-tabs" style="display: flex; width: 100%;">
-                  <!-- TABS SERAO INJETADAS AQUI VIA JS -->
-                  <button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>
-                  
-                  <div style="flex: 1;"></div>
-                  
-                  <button id="btn-adv-filters" class="adv-filter-trigger" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="white-space: nowrap; opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; margin-left: 8px; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; height: 36px; border-radius: 4px; font-weight: 600;">
-                    <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados 
-                    <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
-                  </button>
-                  <div style="border-left: 2px solid #cbd5e1; height: 28px; margin: 0 8px; align-self: center;"></div>
-
-                  <button id="btn-export-excel" class="btn btn-secondary" onclick="exportFilteredToExcel()" style="white-space: nowrap; margin-left: 0; background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; height: 36px; border-radius: 4px; cursor: pointer; min-width: 250px; justify-content: center;" title="Exportar tabela atual para Excel">
-                      <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -6073,35 +6060,35 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=534"></script>
-  <script defer src="sienge-api.js?v=534"></script>
-  <script defer src="azure-auth.js?v=534"></script>
-  <script defer src="app.js?v=534"></script>
-  <script defer src="home-dashboard.js?v=534"></script>
-  <script defer src="anexos.js?v=534"></script>
-  <script defer src="contas-pagar.js?v=534"></script>
-  <script defer src="config-tags.js?v=534"></script>
-  <script defer src="config-users.js?v=534"></script>
-  <script defer src="construcao.js?v=534"></script>
-  <script defer src="empresas.js?v=534"></script>
-  <script defer src="relacionamento.js?v=534"></script>
+  <script defer src="data.js?v=535"></script>
+  <script defer src="sienge-api.js?v=535"></script>
+  <script defer src="azure-auth.js?v=535"></script>
+  <script defer src="app.js?v=535"></script>
+  <script defer src="home-dashboard.js?v=535"></script>
+  <script defer src="anexos.js?v=535"></script>
+  <script defer src="contas-pagar.js?v=535"></script>
+  <script defer src="config-tags.js?v=535"></script>
+  <script defer src="config-users.js?v=535"></script>
+  <script defer src="construcao.js?v=535"></script>
+  <script defer src="empresas.js?v=535"></script>
+  <script defer src="relacionamento.js?v=535"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=534"></script>
-  <script defer src="marketing.js?v=534"></script>
-  <script defer src="plano-financeiro.js?v=534"></script>
-  <script defer src="prestacao-contas.js?v=534"></script>
-  <script defer src="fluxo-caixa.js?v=534"></script>
-  <script defer src="investimento.js?v=534"></script>
-  <script defer src="parametrizacao-parceiro.js?v=534"></script>
-  <script defer src="fiscal.js?v=534"></script>
-  <script defer src="indexadores.js?v=534"></script>
-  <script defer src="verificar-construcao.js?v=534"></script>
-  <script src="repactuacoes.js?v=534"></script>
+  <script defer src="centros-custo.js?v=535"></script>
+  <script defer src="marketing.js?v=535"></script>
+  <script defer src="plano-financeiro.js?v=535"></script>
+  <script defer src="prestacao-contas.js?v=535"></script>
+  <script defer src="fluxo-caixa.js?v=535"></script>
+  <script defer src="investimento.js?v=535"></script>
+  <script defer src="parametrizacao-parceiro.js?v=535"></script>
+  <script defer src="fiscal.js?v=535"></script>
+  <script defer src="indexadores.js?v=535"></script>
+  <script defer src="verificar-construcao.js?v=535"></script>
+  <script src="repactuacoes.js?v=535"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=534"></script>
+  <script defer src="dashboard-inadimplencia.js?v=535"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
