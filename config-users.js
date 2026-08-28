@@ -434,10 +434,37 @@ const ConfigUsersApp = {
       // constCompaniesHtml was removed because construction checking only requires cities.
       const constCitiesHtml = buildCheckboxList(cityItems, 'umodal-const-cities', user ? user.const_cities : []);
 
+      const switchCss = `
+        <style>
+          .ml-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+          .ml-switch input { opacity: 0; width: 0; height: 0; }
+          .ml-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #cbd5e1; transition: .25s; border-radius: 24px; }
+          .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+          .ml-switch input:checked + .ml-slider { background: #105436; }
+          .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
+          .ml-switch-row { display: flex; align-items: center; gap: 10px; font-weight: 600; color: #334155; font-size: 0.85rem; cursor: pointer; margin: 0; }
+        </style>`;
+      const switchField = (id, checked, onchange, label) => `
+        <label class="ml-switch-row">
+          <span class="ml-switch">
+            <input type="checkbox" id="${id}" ${checked ? "checked" : ""} onchange="${onchange}">
+            <span class="ml-slider"></span>
+          </span>
+          ${label}
+        </label>`;
+
       const modalHtml = `
-      <div id="user-modal-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
-         <div style="background: #fff; border-radius: 12px; width: 700px; max-width: 95%; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-            <h3 style="margin-top: 0; margin-bottom: 20px; font-size: 1.25rem; color: #202124;">${user ? 'Editar Dados do Usuário' : 'Convidar Novo Usuário'}</h3>
+      <div id="user-modal-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(12, 41, 29, 0.55); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 24px;">
+         ${switchCss}
+         <div style="background: #fff; border-radius: 16px; width: 920px; max-width: 100%; max-height: 92vh; overflow: hidden; box-shadow: 0 16px 48px rgba(16, 84, 54, 0.22); display: flex; flex-direction: column; border: 1px solid rgba(16,84,54,0.12);">
+            <div style="background: #105436; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+              <div>
+                <div style="color: rgba(255,255,255,0.75); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;">Cadastro de usuários</div>
+                <h3 style="margin: 4px 0 0; font-size: 1.2rem; color: #fff; font-weight: 700;">${user ? 'Editar usuário' : 'Convidar novo usuário'}</h3>
+              </div>
+              <button type="button" onclick="document.getElementById('user-modal-overlay').remove()" style="border: none; background: rgba(255,255,255,0.15); color: #fff; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; line-height: 1;">×</button>
+            </div>
+            <div style="padding: 24px 28px; overflow-y: auto; flex: 1;">
             
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
@@ -529,32 +556,16 @@ const ConfigUsersApp = {
                </div>
             </div>
 
-            <div style="margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
-               <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
-                  <input type="checkbox" id="umodal-check-const" ${user && user.check_construction ? 'checked' : ''} onchange="document.getElementById('umodal-const-config').style.display = this.checked ? 'block' : 'none';" style="margin-right: 8px; width: 16px; height: 16px;">
-                  Responsável por Checar Construção
-               </label>
-               
+            <div style="margin-bottom: 18px; padding: 16px; background: #f0fdf4; border: 1px solid #d1fae5; border-radius: 10px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+               ${switchField("umodal-check-const", !!(user && user.check_construction), "document.getElementById('umodal-const-config').style.display = this.checked ? 'block' : 'none';", "Responsável por checar construção")}
                <div id="umodal-resend-billet-container" style="display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
-                   <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
-                      <input type="checkbox" id="umodal-resend-billet" ${user && user.resend_billet ? 'checked' : ''} style="margin-right: 8px; width: 16px; height: 16px;">
-                      Responsável por reenviar boleto de cliente
-                   </label>
+                   ${switchField("umodal-resend-billet", !!(user && user.resend_billet), "", "Responsável por reenviar boleto de cliente")}
                </div>
-               <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
-                  <input type="checkbox" id="umodal-assina-testemunha" ${user && user.assina_testemunha ? 'checked' : ''} onchange="document.getElementById('umodal-witness-docs').style.display = this.checked ? 'flex' : 'none';" style="margin-right: 8px; width: 16px; height: 16px;">
-                  Assina documentos como testemunha
-               </label>
+               ${switchField("umodal-assina-testemunha", !!(user && user.assina_testemunha), "document.getElementById('umodal-witness-docs').style.display = this.checked ? 'block' : 'none';", "Assina documentos como testemunha")}
             </div>
-            <div id="umodal-witness-docs" style="margin-bottom: 16px; display: ${user && user.assina_testemunha ? 'flex' : 'none'}; gap: 16px;">
-               <div style="flex: 1;">
-                  <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">CPF (testemunha)</label>
-                  <input type="text" id="umodal-doc-cpf" value="${user ? (user.doc_cpf || user.cpf || '') : ''}" placeholder="000.000.000-00" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;">
-               </div>
-               <div style="flex: 1;">
-                  <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">RG (opcional)</label>
-                  <input type="text" id="umodal-doc-rg" value="${user ? (user.doc_rg || user.rg || '') : ''}" placeholder="RG" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;">
-               </div>
+            <div id="umodal-witness-docs" style="margin-bottom: 16px; display: ${user && user.assina_testemunha ? 'block' : 'none'};">
+               <label style="display: block; font-weight: 600; color: #334155; margin-bottom: 6px; font-size: 0.85rem;">RG da testemunha</label>
+               <input type="text" id="umodal-doc-rg" value="${user ? (user.doc_rg || user.rg || '') : ''}" placeholder="00.000.000-0" style="width: 280px; max-width: 100%; padding: 10px; border: 1px solid #d1fae5; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;">
             </div>
 
             <div id="umodal-const-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && user.check_construction ? 'block' : 'none'};">
@@ -582,9 +593,10 @@ const ConfigUsersApp = {
                </div>
             </div>
 
-            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
-               <button onclick="document.getElementById('user-modal-overlay').remove()" style="padding: 10px 16px; border: 1px solid #e8eaed; background: transparent; color: #5f6368; font-weight: 600; border-radius: 8px; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background='transparent'">Cancelar</button>
-               <button onclick="ConfigUsersApp.saveUserModal(${user ? user.id : 'null'})" style="padding: 10px 16px; border: none; background: #105436; color: #fff; font-weight: 600; border-radius: 8px; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar Dados</button>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 18px; border-top: 1px solid #e8eaed;">
+               <button onclick="document.getElementById('user-modal-overlay').remove()" style="padding: 11px 18px; border: 1px solid #d1d5db; background: #fff; color: #475569; font-weight: 600; border-radius: 8px; cursor: pointer;">Cancelar</button>
+               <button onclick="ConfigUsersApp.saveUserModal(${user ? user.id : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
+            </div>
             </div>
          </div>
       </div>
@@ -630,7 +642,6 @@ const ConfigUsersApp = {
 
       const resendBillet = document.getElementById('umodal-resend-billet') ? document.getElementById('umodal-resend-billet').checked : false;
       const assinaTestemunha = document.getElementById('umodal-assina-testemunha') ? document.getElementById('umodal-assina-testemunha').checked : false;
-      const docCpf = document.getElementById('umodal-doc-cpf') ? document.getElementById('umodal-doc-cpf').value.trim() : '';
       const docRg = document.getElementById('umodal-doc-rg') ? document.getElementById('umodal-doc-rg').value.trim() : '';
 
       if (!name || !email) {
@@ -658,7 +669,6 @@ const ConfigUsersApp = {
               user.badge_color = badgeColor;
               user.resend_billet = resendBillet;
               user.assina_testemunha = assinaTestemunha;
-              user.doc_cpf = docCpf;
               user.doc_rg = docRg;
           }
       } else {
@@ -682,7 +692,6 @@ const ConfigUsersApp = {
              badge_color: badgeColor,
              resend_billet: resendBillet,
              assina_testemunha: assinaTestemunha,
-             doc_cpf: docCpf,
              doc_rg: docRg,
              status: "PENDENTE"
           });
@@ -702,14 +711,13 @@ const ConfigUsersApp = {
     if (!root) return;
 
     let trs = this.users.map(u => {
-      let statusBadge = '';
-      if (u.status === 'ATIVO') {
-        statusBadge = '<span style="background: #e6f4ea; color: #1e8e3e; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">ATIVO</span>';
-      } else if (u.status === 'PENDENTE') {
-        statusBadge = '<span style="background: #fef7e0; color: #f29900; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">PENDENTE</span>';
-      } else {
-        statusBadge = `<span style="background: #fce8e6; color: #d93025; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">${u.status}</span>`;
-      }
+      const isActive = u.status === 'ATIVO';
+      const statusSwitch = u.status === 'PENDENTE'
+        ? '<span style="background: #fef7e0; color: #f29900; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">PENDENTE</span>'
+        : `<label class="ml-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
+             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${u.id})">
+             <span class="ml-slider"></span>
+           </label>`;
 
       return `
         <tr style="border-bottom: 1px solid #f0f0f0;">
@@ -723,16 +731,9 @@ const ConfigUsersApp = {
              ${u.profile_name}
              ${(u.operator_type && window.isOperadorCobrancaProfile(u.profile_name)) ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : (u.operator_type === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
           </td>
-          <td style="padding: 16px 15px;">${statusBadge}</td>
+          <td style="padding: 16px 15px;">${statusSwitch}</td>
           <td style="padding: 16px 15px;">
-             <div style="display: flex; gap: 8px;">
-               <button onclick="ConfigUsersApp.openUserModal(${u.id})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #5f6368; color: #5f6368;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
-               ${u.status === 'ATIVO' ? 
-                  `<button onclick="ConfigUsersApp.toggleUserStatus(${u.id})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #d93025; color: #d93025;" title="Desativar Usuário"><i data-lucide="power-off" style="width:18px;height:18px;"></i></button>`
-                  :
-                  `<button onclick="ConfigUsersApp.toggleUserStatus(${u.id})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Ativar Usuário"><i data-lucide="power" style="width:18px;height:18px;"></i></button>`
-               }
-             </div>
+             <button onclick="ConfigUsersApp.openUserModal(${u.id})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
           </td>
         </tr>
       `;
@@ -874,6 +875,14 @@ const ConfigUsersApp = {
     }).join('');
 
     root.innerHTML = `
+      <style>
+        .ml-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; vertical-align: middle; }
+        .ml-switch input { opacity: 0; width: 0; height: 0; }
+        .ml-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #cbd5e1; transition: .25s; border-radius: 24px; }
+        .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .ml-switch input:checked + .ml-slider { background: #105436; }
+        .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
+      </style>
       <div style="padding: 30px; max-width: 1100px; margin: 0 auto;">
         
         <!-- SEÇÃO: USUÁRIOS -->

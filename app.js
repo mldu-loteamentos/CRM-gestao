@@ -11083,8 +11083,8 @@ function populateDistratoWitnessSelects() {
   const users = getDistratoWitnessUsers();
   const hint = document.getElementById("dist-testemunha-hint");
   const opts = ['<option value="">Selecione...</option>'].concat(users.map(u => {
-    const cpf = u.doc_cpf || u.cpf || "";
-    return `<option value="${u.id}">${u.name}${cpf ? " — " + cpf : ""}</option>`;
+    const rg = u.doc_rg || u.rg || "";
+    return `<option value="${u.id}">${u.name}${rg ? " — RG " + rg : ""}</option>`;
   }));
   ["dist-testemunha-1", "dist-testemunha-2"].forEach(id => {
     const el = document.getElementById(id);
@@ -11103,10 +11103,10 @@ function populateDistratoWitnessSelects() {
 function getDistratoWitnessBySelect(id) {
   const el = document.getElementById(id);
   const uid = el ? el.value : "";
-  if (!uid) return { nome: "", cpf: "" };
+  if (!uid) return { nome: "", rg: "" };
   const u = getDistratoWitnessUsers().find(x => String(x.id) === String(uid));
-  if (!u) return { nome: "", cpf: "" };
-  return { nome: u.name || "", cpf: u.doc_cpf || u.cpf || u.doc_rg || u.rg || "" };
+  if (!u) return { nome: "", rg: "" };
+  return { nome: u.name || "", rg: u.doc_rg || u.rg || "" };
 }
 
 function numeroPorExtenso(n) {
@@ -11356,9 +11356,9 @@ window.generateDistratoPDF = function generateDistratoPDF() {
       DATA_HOJE_EXTENSO: dateExt,
       DATA_ATUAL_EXTENSO: dateExt,
       TESTEMUNHA_1_NOME: w1.nome || t.test1Nome || '________________',
-      TESTEMUNHA_1_RG: w1.cpf || t.test1Rg || '________________',
+      TESTEMUNHA_1_RG: w1.rg || t.test1Rg || '________________',
       TESTEMUNHA_2_NOME: w2.nome || t.test2Nome || '________________',
-      TESTEMUNHA_2_RG: w2.cpf || t.test2Rg || '________________',
+      TESTEMUNHA_2_RG: w2.rg || t.test2Rg || '________________',
       PREAMBULO: preambleText
     });
     docHtml = `

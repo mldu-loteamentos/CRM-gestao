@@ -601,7 +601,6 @@ const InvestimentoApp = {
   render() {
     const root = document.getElementById("investimento-root");
     if (!root) return;
-    const companies = this.geridasCompanies();
     const k = this.kpis;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
@@ -653,6 +652,13 @@ const InvestimentoApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    if (this.companyDropOpen) {
+      const s = document.getElementById("inv-emp-search");
+      if (s) {
+        s.focus();
+        try { s.setSelectionRange(s.value.length, s.value.length); } catch (e) {}
+      }
+    }
   },
 
   tableHtml() {
@@ -663,21 +669,47 @@ const InvestimentoApp = {
     const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;${extra || ""}">${label}</th>`;
     const money = (n, bold) => `<td style="padding:6px 8px;${this.cell(n, bold)}">${this.fmt(n)}</td>`;
     const empty = `<td style="padding:6px 8px;text-align:right;color:#cbd5e1;">—</td>`;
+    const rendTd = (n, opening, mk, bold) => {
+      const tip = this.esc(this.cdiTip(n, opening, mk));
+      return `<td title="${tip}" style="padding:6px 8px;${this.cell(n, bold)};cursor:help;">${this.fmt(n)}</td>`;
+    };
 
-    const groupRows = (label, sub, opening, monthFlow, isTotal) => {
+    const groupRows = (label, sub, opening, monthFlow, isTotal, opts) => {
+      opts = opts || {};
+      const collapseKey = opts.collapseKey;
+      const collapsed = collapseKey && this.collapsedAccounts.has(collapseKey);
       const bgHead = isTotal ? "#ecfdf5" : "#f8fafc";
+      const sticky = "position:sticky;left:0;z-index:1;";
+      const chevron = collapseKey
+        ? `<button type="button" onclick="InvestimentoApp.toggleAccountCollapse(decodeURIComponent('${encodeURIComponent(collapseKey)}'))" style="border:none;background:none;cursor:pointer;padding:0;color:#64748b;display:inline-flex;align-items:center;margin-right:4px;">
+             <i data-lucide="${collapsed ? "chevron-right" : "chevron-down"}" style="width:14px;height:14px;"></i>
+           </button>`
+        : "";
+      const labelCell = `
+        <td rowspan="${collapsed ? 1 : 4}" style="padding:8px 10px;vertical-align:top;min-width:180px;max-width:260px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
+          <div style="display:flex;align-items:flex-start;gap:2px;">
+            ${chevron}
+            <div>
+              <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
+              ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
+            </div>
+          </div>
+        </td>`;
+      const saldos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).closing || 0);
+      if (collapsed) {
+        return `<tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
+          ${labelCell}
+          <td style="padding:6px 10px;font-weight:800;color:#0f172a;">Saldo</td>
+          ${money(opening, true)}
+          ${saldos.map(n => money(n, true)).join("")}
+        </tr>`;
+      }
       const entradas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).aportes || 0);
       const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
-      const rends = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).rendimento || 0);
-      const saldos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).closing || 0);
-      const rowspan = 4;
-      const sticky = "position:sticky;left:0;z-index:1;";
+      const rends = months.map(mk => monthFlow.find(f => f.month === mk) || { rendimento: 0, opening: 0, month: mk });
       return `
         <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
-          <td rowspan="${rowspan}" style="padding:8px 10px;vertical-align:top;min-width:180px;max-width:240px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
-            <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
-            ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
-          </td>
+          ${labelCell}
           <td style="padding:6px 10px;font-weight:700;color:#105436;white-space:nowrap;">Entrada</td>
           ${empty}
           ${entradas.map(n => money(n)).join("")}
@@ -690,7 +722,7 @@ const InvestimentoApp = {
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
           ${empty}
-          ${rends.map(n => money(n)).join("")}
+          ${rends.map(f => rendTd(f.rendimento || 0, f.opening || 0, f.month)).join("")}
         </tr>
         <tr style="background:${isTotal ? "#d1fae5" : "#f1f5f9"};">
           <td style="padding:6px 10px;font-weight:800;color:#0f172a;white-space:nowrap;">Saldo</td>
@@ -700,14 +732,51 @@ const InvestimentoApp = {
     };
 
     const consolidado = groupRows("Consolidado", "Empresas selecionadas", this.kpis.opening, this.consolidatedFlow(), true);
-    const contas = this.accounts.map(r =>
-      groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false)
-    ).join("");
+    let body = consolidado;
+    const showGroup = this.groupByCompany && this.selectedCompanyIds.length > 1;
+    if (showGroup) {
+      const ids = [...new Set(this.accounts.map(a => String(a.companyId)))];
+      ids.sort((a, b) => this.companyName(a).localeCompare(this.companyName(b), "pt-BR"));
+      ids.forEach(cid => {
+        const accs = this.companyAccounts(cid);
+        if (!accs.length) return;
+        const agg = this.aggregateFlow(accs);
+        const closed = this.collapsedCompanies.has(String(cid));
+        const colCount = 3 + months.length;
+        body += `<tr style="background:#0f766e;">
+          <td colspan="${colCount}" style="padding:8px 10px;color:#fff;font-weight:800;font-size:0.8rem;">
+            <button type="button" onclick="InvestimentoApp.toggleCompanyCollapse('${cid}')" style="border:none;background:none;color:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:800;">
+              <i data-lucide="${closed ? "chevron-right" : "chevron-down"}" style="width:14px;height:14px;"></i>
+              ${this.esc(this.companyName(cid))}
+              <span style="font-weight:600;opacity:.85;">· ${accs.length} conta(s)</span>
+            </button>
+          </td>
+        </tr>`;
+        if (!closed) {
+          body += groupRows("Total da empresa", this.companyName(cid), agg.opening, agg.months, true, { collapseKey: "co-" + cid });
+          body += accs.map(r =>
+            groupRows(r.accountNumber || r.accountName, r.accountName, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key })
+          ).join("");
+        }
+      });
+    } else {
+      body += this.accounts.map(r =>
+        groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key })
+      ).join("");
+    }
 
+    const canGroup = this.selectedCompanyIds.length > 1;
     return `
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
-        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">
-          Kardex — conta × movimento · saldo inicial e meses
+        <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:0.82rem;font-weight:800;color:#0f172a;">Kardex — conta × movimento · saldo inicial e meses</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            ${canGroup ? `<label style="font-size:0.75rem;font-weight:700;color:#334155;display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <input type="checkbox" ${this.groupByCompany ? "checked" : ""} onchange="InvestimentoApp.toggleGroupByCompany()">
+              Agrupar por empresa
+            </label>` : ""}
+            <span style="font-size:0.7rem;color:#64748b;">Passe o mouse no rendimento para ver % do CDI</span>
+          </div>
         </div>
         <table class="custom-table" style="width:max-content;min-width:100%;border-collapse:collapse;font-size:0.78rem;">
           <thead>
@@ -719,11 +788,50 @@ const InvestimentoApp = {
             </tr>
           </thead>
           <tbody>
-            ${consolidado}
-            ${contas}
+            ${body}
           </tbody>
         </table>
       </div>`;
+  },
+
+  exportExcel() {
+    if (!this.accounts.length) {
+      alert("Consulte o período antes de exportar.");
+      return;
+    }
+    if (typeof XLSX === "undefined") {
+      alert("Biblioteca de Excel não carregou. Recarregue a página.");
+      return;
+    }
+    const months = this.months;
+    const header = ["Empresa", "Conta", "Nº conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))];
+    const rows = [header];
+    const push = (empresa, conta, num, opening, monthFlow) => {
+      const find = mk => monthFlow.find(f => f.month === mk) || {};
+      rows.push([empresa, conta, num, "Entrada", "", ...months.map(mk => Number(find(mk).aportes) || 0)]);
+      rows.push([empresa, conta, num, "Saída", "", ...months.map(mk => Number(find(mk).resgates) || 0)]);
+      rows.push([empresa, conta, num, "Rendimento", "", ...months.map(mk => Number(find(mk).rendimento) || 0)]);
+      rows.push([empresa, conta, num, "Saldo", Number(opening) || 0, ...months.map(mk => Number(find(mk).closing) || 0)]);
+    };
+    push("Consolidado", "Empresas selecionadas", "", this.kpis.opening, this.consolidatedFlow());
+    if (this.groupByCompany && this.selectedCompanyIds.length > 1) {
+      const ids = [...new Set(this.accounts.map(a => String(a.companyId)))];
+      ids.sort((a, b) => this.companyName(a).localeCompare(this.companyName(b), "pt-BR"));
+      ids.forEach(cid => {
+        const accs = this.companyAccounts(cid);
+        const agg = this.aggregateFlow(accs);
+        const emp = this.companyName(cid);
+        push(emp, "Total da empresa", "", agg.opening, agg.months);
+        accs.forEach(r => push(emp, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
+      });
+    } else {
+      this.accounts.forEach(r => push(r.companyName, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, this.groupByCompany ? "Por empresa" : "Kardex");
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `investimento_${stamp}.xlsx`);
   }
 };
 

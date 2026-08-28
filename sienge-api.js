@@ -1763,6 +1763,7 @@ const SiengeApiService = {
       let subjudiceValue = 0;
       
       const companyMap = {};
+      const operatorMap = {};
       
       bills.forEach(b => {
         totalValue += b.value;
@@ -1801,7 +1802,7 @@ const SiengeApiService = {
         comp.cost_centers[cc].value += b.value;
         
         // Aging
-        const delay = b.daysDelay || 0;
+        const delay = Number(b.daysDelay != null ? b.daysDelay : b.maxDaysDelay) || 0;
         let agingKey = '';
         if (delay <= 30) agingKey = 'd0_30';
         else if (delay <= 60) agingKey = 'd31_60';
@@ -1812,6 +1813,21 @@ const SiengeApiService = {
         
         comp.aging[agingKey].count++;
         comp.aging[agingKey].value += b.value;
+
+        const opName = String(b.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
+        const billVal = Number(b.value != null ? b.value : b.overdueValue) || 0;
+        const nTit = (Array.isArray(b.titles) && b.titles.length)
+          ? b.titles.length
+          : (Number(b.billCount) || 1);
+        if (!operatorMap[opName]) {
+          operatorMap[opName] = { name: opName, total_count: 0, total_value: 0, above31_count: 0, above31_value: 0 };
+        }
+        operatorMap[opName].total_count += nTit;
+        operatorMap[opName].total_value += billVal;
+        if (delay >= 31) {
+          operatorMap[opName].above31_count += nTit;
+          operatorMap[opName].above31_value += billVal;
+        }
       });
       const uniqueCustomers = new Set(bills.map(b => b.customerId));
 
@@ -1863,7 +1879,8 @@ const SiengeApiService = {
           companies: Object.values(companyMap).map(c => ({
             ...c,
             cost_centers: Object.values(c.cost_centers)
-          }))
+          })),
+          operators: Object.values(operatorMap)
         }
       };
 
