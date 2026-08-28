@@ -90,7 +90,8 @@ const ParametrizacaoParceiroApp = {
         costCenters: p.costCenters || [],
         accountShares: p.accountShares || {},
         naNodes: p.naNodes || {},
-        naAccounts: p.naAccounts || {}
+        naAccounts: p.naAccounts || {},
+        inAccounts: p.inAccounts || {}
       }];
     }
     p.obras.forEach(o => {
@@ -101,6 +102,7 @@ const ParametrizacaoParceiroApp = {
       o.accountShares = o.accountShares || {};
       o.naNodes = o.naNodes || {};
       o.naAccounts = o.naAccounts || {};
+      o.inAccounts = o.inAccounts || {};
     });
     p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "" };
     p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
@@ -172,12 +174,87 @@ const ParametrizacaoParceiroApp = {
     return (c && (c._name || c.name || c.description)) || "";
   },
 
-  isNA(part, key, ancestors) {
+  dfcGroups() {
+    return this.dfcVisao().groups || [];
+  },
+
+  accountParentId(accId) {
+    const g = this.dfcGroups().find(g => (g.accounts || []).map(String).includes(String(accId)));
+    return g ? g.id : null;
+  },
+
+  nodeAncestors(nodeId) {
+    const groups = this.dfcGroups();
+    const ids = [];
+    let cur = groups.find(g => g.id === nodeId);
+    while (cur && cur.parentId) {
+      ids.push(cur.parentId);
+      cur = groups.find(g => g.id === cur.parentId);
+    }
+    return ids;
+  },
+
+  subtreeAccountIds(nodeId) {
+    const groups = this.dfcGroups();
+    const ids = [];
+    const walk = (id) => {
+      const n = groups.find(g => g.id === id);
+      if (!n) return;
+      (n.accounts || []).forEach(a => ids.push(String(a)));
+      groups.filter(g => g.parentId === id).forEach(ch => walk(ch.id));
+    };
+    walk(nodeId);
+    return ids;
+  },
+
+  subtreeNodeIds(nodeId) {
+    const groups = this.dfcGroups();
+    const ids = [];
+    const walk = (id) => {
+      ids.push(id);
+      groups.filter(g => g.parentId === id).forEach(ch => walk(ch.id));
+    };
+    walk(nodeId);
+    return ids;
+  },
+
+  hasAncestorNA(part, nodeId) {
     const obra = this.currentObra(part);
     if (!obra) return false;
-    if (obra.naAccounts && obra.naAccounts[key]) return true;
+    return this.nodeAncestors(nodeId).some(a => obra.naNodes && obra.naNodes[a]);
+  },
+
+  isAccountNA(part, accId) {
+    const obra = this.currentObra(part);
+    if (!obra) return false;
+    const parent = this.accountParentId(accId);
+    const ancs = parent ? [parent].concat(this.nodeAncestors(parent)) : [];
+    const ancestorNA = ancs.some(a => obra.naNodes && obra.naNodes[a]);
+    if (ancestorNA) return !(obra.inAccounts && obra.inAccounts[accId]);
+    return !!(obra.naAccounts && obra.naAccounts[accId]);
+  },
+
+  isNA(part, key, ancestors) {
+    const groups = this.dfcGroups();
+    const isAcc = groups.some(g => (g.accounts || []).map(String).includes(String(key)));
+    if (isAcc) return this.isAccountNA(part, key);
+    const obra = this.currentObra(part);
+    if (!obra) return false;
     if (obra.naNodes && obra.naNodes[key]) return true;
-    return (ancestors || []).some(a => obra.naNodes && obra.naNodes[a]);
+    if ((ancestors || []).some(a => obra.naNodes && obra.naNodes[a])) return true;
+    return this.hasAncestorNA(part, key);
+  },
+
+  groupAccountStats(part, nodeId) {
+    const accs = this.subtreeAccountIds(nodeId);
+    const inCount = accs.filter(id => !this.isAccountNA(part, id)).length;
+    return {
+      total: accs.length,
+      inCount,
+      allIn: accs.length > 0 && inCount === accs.length,
+      allOut: accs.length === 0 ? this.isNA(part, nodeId) : inCount === 0,
+      partial: accs.length > 0 && inCount > 0 && inCount < accs.length
+    };
   },
 
   toggleNA(key, isAccount) {
@@ -186,9 +263,85 @@ const ParametrizacaoParceiroApp = {
     if (!obra) return;
     obra.naNodes = obra.naNodes || {};
     obra.naAccounts = obra.naAccounts || {};
-    const bag = isAccount ? obra.naAccounts : obra.naNodes;
-    if (bag[key]) delete bag[key];
-    else bag[key] = true;
+    obra.inAccounts = obra.inAccounts || {};
+    if (isAccount) {
+      if (this.isAccountNA(p, key)) {
+        const parent = this.accountParentId(key);
+        const ancs = parent ? [parent].concat(this.nodeAncestors(parent)) : [];
+        const ancestorNA = ancs.some(a => obra.naNodes && obra.naNodes[a]);
+        if (ancestorNA) obra.inAccounts[key] = true;
+        delete obra.naAccounts[key];
+      } else {
+        const parent = this.accountParentId(key);
+        const ancs = parent ? [parent].concat(this.nodeAncestors(parent)) : [];
+        const ancestorNA = ancs.some(a => obra.naNodes && obra.naNodes[a]);
+        if (ancestorNA) delete obra.inAccounts[key];
+        else {
+          obra.naAccounts[key] = true;
+          delete obra.inAccounts[key];
+        }
+      }
+    } else if (obra.naNodes[key]) {
+      this.setSubtreeNA(key, false);
+      return;
+    } else if (this.hasAncestorNA(p, key)) {
+      this.includeSubtree(key);
+      return;
+    } else {
+      this.setSubtreeNA(key, true);
+      return;
+    }
+    this.persist();
+    this.render();
+  },
+
+  setSubtreeNA(nodeId, out) {
+    const p = this.current();
+    const obra = this.currentObra(p);
+    if (!obra) return;
+    obra.naNodes = obra.naNodes || {};
+    obra.naAccounts = obra.naAccounts || {};
+    obra.inAccounts = obra.inAccounts || {};
+    const accs = this.subtreeAccountIds(nodeId);
+    const nodes = this.subtreeNodeIds(nodeId);
+    if (out) {
+      obra.naNodes[nodeId] = true;
+      nodes.forEach(id => { if (id !== nodeId) delete obra.naNodes[id]; });
+      accs.forEach(id => {
+        delete obra.inAccounts[id];
+        delete obra.naAccounts[id];
+      });
+    } else {
+      nodes.forEach(id => delete obra.naNodes[id]);
+      accs.forEach(id => {
+        delete obra.inAccounts[id];
+        delete obra.naAccounts[id];
+      });
+    }
+    this.persist();
+    this.render();
+  },
+
+  includeSubtree(nodeId) {
+    const p = this.current();
+    const obra = this.currentObra(p);
+    if (!obra) return;
+    obra.inAccounts = obra.inAccounts || {};
+    obra.naAccounts = obra.naAccounts || {};
+    this.subtreeAccountIds(nodeId).forEach(id => {
+      obra.inAccounts[id] = true;
+      delete obra.naAccounts[id];
+    });
+    this.persist();
+    this.render();
+  },
+
+  excludeSubtreeExceptions(nodeId) {
+    const p = this.current();
+    const obra = this.currentObra(p);
+    if (!obra) return;
+    obra.inAccounts = obra.inAccounts || {};
+    this.subtreeAccountIds(nodeId).forEach(id => delete obra.inAccounts[id]);
     this.persist();
     this.render();
   },
@@ -304,7 +457,8 @@ const ParametrizacaoParceiroApp = {
       costCenters: costCenters || [],
       accountShares: {},
       naNodes: {},
-      naAccounts: {}
+      naAccounts: {},
+      inAccounts: {}
     };
   },
 
@@ -399,6 +553,7 @@ const ParametrizacaoParceiroApp = {
     const cloneShares = JSON.parse(JSON.stringify(src.accountShares || {}));
     const cloneNaN = JSON.parse(JSON.stringify(src.naNodes || {}));
     const cloneNaA = JSON.parse(JSON.stringify(src.naAccounts || {}));
+    const cloneInA = JSON.parse(JSON.stringify(src.inAccounts || {}));
     let dest = p.obras.find(o => String(o.code) === String(destCode));
     if (!dest) {
       const seed = this.seedCostCenters(destCode, p.companyId, destRaw);
@@ -409,6 +564,7 @@ const ParametrizacaoParceiroApp = {
     dest.accountShares = cloneShares;
     dest.naNodes = cloneNaN;
     dest.naAccounts = cloneNaA;
+    dest.inAccounts = cloneInA;
     this.selectedObraCode = destCode;
     this.persist();
     this.render();
@@ -1023,21 +1179,53 @@ const ParametrizacaoParceiroApp = {
     </div>`;
   },
 
-  rateioControlsHtml(p, key, isAccount, ancestorNA, naSelf) {
+  rateioControlsHtml(p, key, isAccount, ancestorNA, naSelf, partial) {
     if (this.isSociedade(p)) return "";
     const obra = this.currentObra(p);
-    if (ancestorNA) {
-      return `<span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;">Fora (herda)</span>`;
-    }
-    if (naSelf) {
+    const iconBtn = (title, onclick, lucideName, color) =>
+      `<button type="button" title="${title}" onclick="event.stopPropagation();${onclick}"
+        style="width:26px;height:26px;border:none;background:transparent;color:${color};cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:50%;">
+        <i data-lucide="${lucideName}" style="width:14px;height:14px;"></i>
+      </button>`;
+    const pill = (text, extra) =>
+      `<span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;border-radius:99px;">${text}${extra || ""}</span>`;
+
+    if (isAccount) {
+      if (this.isAccountNA(p, key)) {
+        return `<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+          ${pill("Fora")}
+          ${iconBtn("Incluir no rateio", `ParametrizacaoParceiroApp.toggleNA('${key}', true)`, "undo-2", "#105436")}
+        </div>`;
+      }
+    } else if (partial) {
+      const stats = this.groupAccountStats(p, key);
+      return `<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+        ${pill("Parcial", ` · ${stats.inCount}/${stats.total}`)}
+        ${iconBtn("Incluir todas as contas deste grupo", `ParametrizacaoParceiroApp.includeSubtree('${key}')`, "check", "#105436")}
+        ${iconBtn("Deixar todas fora", naSelf
+          ? `ParametrizacaoParceiroApp.excludeSubtreeExceptions('${key}')`
+          : `ParametrizacaoParceiroApp.setSubtreeNA('${key}', true)`, "ban", "#94a3b8")}
+        ${naSelf ? iconBtn("Incluir o grupo inteiro de novo", `ParametrizacaoParceiroApp.setSubtreeNA('${key}', false)`, "undo-2", "#105436") : ""}
+      </div>`;
+    } else if (naSelf || ancestorNA) {
+      const stats = this.groupAccountStats(p, key);
+      if (stats.allIn && stats.total) {
+        const pct = this.partnerPct(p, key);
+        return `<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          ${pill("Exceção")}
+          <span style="font-size:0.72rem;font-weight:800;color:#105436;min-width:42px;font-variant-numeric:tabular-nums;">${pct.toFixed(1)}%</span>
+          ${iconBtn("Deixar o grupo fora", `ParametrizacaoParceiroApp.excludeSubtreeExceptions('${key}')`, "ban", "#94a3b8")}
+        </div>`;
+      }
       return `<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-        <span style="font-size:0.65rem;font-weight:800;letter-spacing:0.3px;text-transform:uppercase;color:#94a3b8;background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;border-radius:99px;">Fora</span>
-        <button type="button" title="Incluir no rateio" onclick="event.stopPropagation();ParametrizacaoParceiroApp.toggleNA('${key}', ${!!isAccount})"
-          style="width:26px;height:26px;border:none;background:transparent;color:#105436;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:50%;">
-          <i data-lucide="undo-2" style="width:14px;height:14px;"></i>
-        </button>
+        ${pill(naSelf ? "Fora" : "Fora (herda)")}
+        ${iconBtn(naSelf ? "Incluir o grupo no rateio" : "Incluir todas as contas deste grupo", naSelf
+          ? `ParametrizacaoParceiroApp.setSubtreeNA('${key}', false)`
+          : `ParametrizacaoParceiroApp.includeSubtree('${key}')`, "undo-2", "#105436")}
+        ${naSelf ? iconBtn("Incluir contas uma a uma (mantém o grupo fora)", `ParametrizacaoParceiroApp.includeSubtree('${key}')`, "check", "#105436") : ""}
       </div>`;
     }
+
     const custom = obra && obra.accountShares && Object.prototype.hasOwnProperty.call(obra.accountShares, key);
     const pct = this.partnerPct(p, key);
     const def = obra ? obra.defaultPartnerShare : 0;
@@ -1051,7 +1239,7 @@ const ParametrizacaoParceiroApp = {
         onchange="ParametrizacaoParceiroApp.setAccountShare('${key}', this.value)"
         style="width:58px;height:26px;border:1px solid ${custom ? "#105436" : "#e2e8f0"};border-radius:6px;text-align:right;padding:0 6px;font-size:0.75rem;font-weight:700;">
       <span data-pp-pct="${this.esc(key)}" style="font-size:0.72rem;font-weight:800;color:#105436;min-width:42px;font-variant-numeric:tabular-nums;">${pct.toFixed(1)}%</span>
-      <button type="button" title="Fora da parceria" onclick="event.stopPropagation();ParametrizacaoParceiroApp.toggleNA('${key}', ${!!isAccount})"
+      <button type="button" title="Fora da parceria" onclick="event.stopPropagation();ParametrizacaoParceiroApp.${isAccount ? `toggleNA('${key}', true)` : `setSubtreeNA('${key}', true)`}"
         style="width:26px;height:26px;border:none;background:transparent;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:50%;"
         onmouseover="this.style.color='#ef4444';this.style.background='#fef2f2'" onmouseout="this.style.color='#94a3b8';this.style.background='transparent'">
         <i data-lucide="ban" style="width:14px;height:14px;"></i>
@@ -1087,6 +1275,7 @@ const ParametrizacaoParceiroApp = {
             </span>
             <div style="font-size:0.72rem;color:#64748b;margin-top:3px;">
               Contas 1.xxx entram como receita (positivo) e 2.xxx como despesa (negativo) na prestação de contas. Campo em branco herda ${def}%.
+              Desmarcar um grupo tira todas as contas; dá para incluir de volta uma a uma (o grupo fica Parcial) ou usar o ícone de check para incluir todas.
             </div>
           </div>
           <button type="button" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()"
@@ -1109,7 +1298,9 @@ const ParametrizacaoParceiroApp = {
     const expanded = !this.expanded || this.expanded.has(node.id);
     const naSelf = !!(this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[node.id]);
     const ancestorNA = ancestors.some(a => this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[a]);
-    const na = ancestorNA || naSelf;
+    const stats = this.groupAccountStats(p, node.id);
+    const partial = stats.partial;
+    const na = (ancestorNA || naSelf) && !partial && !stats.allIn;
 
     let bg = "#fff", borderLeft = "#cbd5e1", icon = "folder";
     if (node.type === "total_n1" || level === 0) { bg = "#f8fafc"; borderLeft = "#0f766e"; icon = "layers"; }
@@ -1131,7 +1322,7 @@ const ParametrizacaoParceiroApp = {
             <i data-lucide="${icon}" style="width:14px;height:14px;color:${borderLeft};flex-shrink:0;"></i>
             <span style="font-weight:${node.type === "total_n1" || level === 0 ? "700" : "600"};font-size:0.85rem;color:#1e293b;">${this.esc(node.name)}</span>
           </div>
-          ${this.rateioControlsHtml(p, node.id, false, ancestorNA, naSelf)}
+          ${this.rateioControlsHtml(p, node.id, false, ancestorNA, naSelf, partial)}
         </div>
     `;
 
@@ -1140,13 +1331,11 @@ const ParametrizacaoParceiroApp = {
       if (accounts.length) {
         html += `<div style="margin-left:28px;margin-top:5px;margin-bottom:10px;display:flex;flex-direction:column;gap:4px;padding-left:10px;border-left:2px solid #e2e8f0;">`;
         accounts.forEach(accId => {
-          const obra = this.currentObra(p);
-          const naAccSelf = !!(obra && obra.naAccounts && obra.naAccounts[accId]);
-          const naAcc = na || naAccSelf;
+          const naAcc = this.isAccountNA(p, accId);
           html += `
             <div style="background:#fff;border:1px solid #cbd5e1;padding:4px 8px;border-radius:4px;font-size:0.75rem;display:flex;justify-content:space-between;align-items:center;gap:8px;opacity:${naAcc ? 0.72 : 1};">
               <div style="min-width:0;"><strong style="color:#0f172a;">${this.esc(accId)}</strong> <span style="color:#64748b;">${this.esc(this.catName(accId))}</span></div>
-              ${this.rateioControlsHtml(p, accId, true, na, naAccSelf)}
+              ${this.rateioControlsHtml(p, accId, true, false, naAcc, false)}
             </div>`;
         });
         html += `</div>`;

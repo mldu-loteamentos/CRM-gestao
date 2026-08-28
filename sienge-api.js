@@ -357,7 +357,7 @@ const SiengeApiService = {
     } catch(e) {}
 
     try {
-        const list = await siengeFetchWithRetry("/companies?limit=100", 2); // Menos retentativas
+    const list = await siengeFetchWithRetry("/companies?limit=200", 2);
         const array = list && list.results ? list.results : list;
         if (array && array.length > 0) {
             try { localStorage.setItem(cacheKey, JSON.stringify(array)); } catch(e){}

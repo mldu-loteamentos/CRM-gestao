@@ -64,22 +64,15 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   let opsToShow = dynOps.slice();
   if (useActualData) {
       const clients = window.rawClientList || [];
-      const allBills = [
-        ...(window.AppState && window.AppState.defaultersBills ? window.AppState.defaultersBills : []),
-        ...(window.AppState && window.AppState.subjudiceBills ? window.AppState.subjudiceBills : []),
-        ...(window.AppState && window.AppState.zeroPaidBills ? window.AppState.zeroPaidBills : [])
-      ];
       const activeSet = new Set();
       const addOp = (op) => {
           const n = normOp(op);
-          if (!n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS") return;
+          if (!n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS" || n === "SEM CARTEIRA INADIMPLENTE" || n === "NAO COBRAR") return;
           activeSet.add(n);
       };
       clients.forEach(c => addOp(c.assignedOperator));
-      allBills.forEach(b => addOp(b.assignedOperator));
-      if (activeSet.size > 0) {
-          const matched = dynOps.filter(op => activeSet.has(normOp(op)));
-          opsToShow = matched.length ? matched : Array.from(activeSet).sort((a, b) => a.localeCompare(b, "pt-BR"));
+      if (clients.length > 0) {
+          opsToShow = dynOps.filter(op => activeSet.has(normOp(op)));
       }
   }
 
@@ -87,14 +80,16 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   if (filaTabs) {
      const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
      existingOpBtns.forEach(btn => btn.remove());
-     
-     let opBtnsHtml = `<button class="operator-tab-btn active" data-operator="TODOS">TODOS</button>`;
+     const prev = String(window.activeOperatorFilter || "TODOS");
+     const stillVisible = prev === "TODOS" || opsToShow.some(op => String(op) === prev);
+     const activeName = stillVisible ? prev : "TODOS";
+     if (!stillVisible) window.activeOperatorFilter = "TODOS";
+
+     let opBtnsHtml = `<button class="operator-tab-btn${activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
      opsToShow.forEach(op => {
-         opBtnsHtml += `<button class="operator-tab-btn" data-operator="${op}">${op}</button>`;
+         opBtnsHtml += `<button class="operator-tab-btn${activeName === op ? " active" : ""}" data-operator="${op}">${op}</button>`;
      });
-     opBtnsHtml += `<button class="operator-tab-btn" data-operator="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</button>`;
-     opBtnsHtml += `<button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>`;
-     
+
      filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
 

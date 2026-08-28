@@ -932,7 +932,17 @@
   },
 
   buildOpChartSnaps(snapshots) {
-    const fechSnapReal = snapshots.find(s => s.is_month_close) || snapshots[0];
+    const closes = snapshots.filter(s => s.is_month_close);
+    let fechSnapReal = null;
+    for (let i = closes.length - 1; i >= 0; i--) {
+      const g = this.getSnapAbove31Global(closes[i]);
+      if ((g.v || 0) > 0 || (g.c || 0) > 0) {
+        fechSnapReal = closes[i];
+        break;
+      }
+    }
+    if (!fechSnapReal && closes.length) fechSnapReal = closes[closes.length - 1];
+    if (!fechSnapReal) fechSnapReal = snapshots[0];
     const dateSet = new Set();
     let chartSnaps = [];
     if (fechSnapReal) {
@@ -1053,20 +1063,12 @@
 
     const chart31t = series.map(x => Math.round(x.c));
     const chart31v = series.map(x => x.v);
-    const lastC = chart31t[chart31t.length - 1] || 0;
-    const lastV = chart31v[chart31v.length - 1] || 0;
-    const mineTotal = this.getMyClients().reduce((s, c) => s + this.clientTitleCount(c), 0);
-    const pctCarteira = mineTotal > 0 ? ((lastC / mineTotal) * 100).toFixed(1) : '0.0';
 
     el.innerHTML = `
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
-        <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <i data-lucide="bar-chart-3" style="width:18px;color:#105436;"></i>
-            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Títulos 31+ da carteira</h3>
-          </div>
-          <div style="font-size:0.8rem;font-weight:700;color:#334155;">${lastC} Títulos <span style="font-weight:500;color:#64748b;">(${pctCarteira}% da carteira)</span></div>
-          <div style="font-size:0.8rem;font-weight:800;color:#0f172a;">Total: ${fmtMoney(lastV)}</div>
+        <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;">
+          <i data-lucide="bar-chart-3" style="width:18px;color:#105436;"></i>
+          <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Títulos 31+ da carteira</h3>
         </div>
         <div style="padding:10px 12px 14px;display:flex;gap:15px;justify-content:space-around;flex-wrap:wrap;">
           <div style="flex:1;min-width:240px;display:flex;flex-direction:column;align-items:center;">
