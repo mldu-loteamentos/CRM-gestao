@@ -28104,12 +28104,29 @@ window.mapaJuridicoFillEmpSelect = function() {
   const cache = window._mapaJuridicoCache;
   if (!sel || !cache) return;
   const f = window._mapaJuridicoFilters || {};
-  const list = (cache.generalList || []).filter(c => !f.company || String(c.companyId) === String(f.company));
+  const ccs = (window.AppState && AppState.cachedCostCenters) || [];
+  const companyOf = (c) => {
+    if (c.companyId != null && String(c.companyId) !== "") return String(c.companyId);
+    const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId;
+    const found = ccs.find(x => String(x.id) === String(ccId) || String(x.id) === String(c.costCenterId));
+    return found && found.companyId != null ? String(found.companyId) : "";
+  };
+  const list = (cache.generalList || []).filter(c => !f.company || companyOf(c) === String(f.company));
   const map = {};
   list.forEach(c => {
     const ccId = String((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D");
     if (!map[ccId]) map[ccId] = window.mapaJuridicoEmpLabel(c.costCenterId);
   });
+  if (f.company && ccs.length) {
+    const ownerOf = (id) => {
+      const found = ccs.find(x => String(x.id) === String(id));
+      return found && found.companyId != null ? String(found.companyId) : "";
+    };
+    Object.keys(map).forEach(id => {
+      const owner = ownerOf(id);
+      if (owner && owner !== String(f.company)) delete map[id];
+    });
+  }
   const opts = Object.keys(map).map(id => ({ id, name: map[id] }))
     .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
   if (f.emp && !opts.some(o => String(o.id) === String(f.emp))) {
@@ -28264,49 +28281,56 @@ window.mapaJuridicoRenderStages = function() {
 
   const timeline = (items, compId) => {
     const cidArg = compId ? `'${String(compId).replace(/'/g, "\\'")}'` : "''";
-    return `<div style="display:flex;flex-wrap:nowrap;gap:2px;align-items:center;width:100%;padding-top:12px;overflow-x:auto;">
+    return `<div style="display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:max-content;max-width:100%;padding:16px 2px 4px;overflow-x:auto;">
       ${items.map((item, idx) => {
         const active = item.count > 0;
+        const tip = esc(item.name) + (item.days ? ` · prazo médio ${item.days} d` : "");
         const card = active
-          ? `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${esc(item.name)}"
-              style="background:#fff;border:1.5px solid #065f46;border-radius:6px;width:56px;padding:12px 2px 4px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05);position:relative;flex-shrink:0;cursor:pointer;">
-              <div style="background:#065f46;color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9px;position:absolute;top:-10px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
-              <div style="color:#64748b;font-size:8px;text-transform:uppercase;font-weight:700;">Tít.</div>
-              <div style="font-size:13px;font-weight:900;color:#0f172a;">${item.count}</div>
-              <div style="height:1px;background:#e2e8f0;margin:4px 2px;"></div>
-              <div style="color:#ef4444;font-size:9px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtBRL(item.value)}</div>
+          ? `<button type="button" class="mapa-fase-ativa" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
+              style="background:#fff;border:2px solid #105436;border-radius:8px;width:72px;padding:14px 4px 6px;text-align:center;box-shadow:0 4px 10px rgba(16,84,54,0.16);position:relative;flex:0 0 auto;cursor:pointer;">
+              <div style="background:#105436;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10px;position:absolute;top:-11px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
+              <div style="color:#64748b;font-size:8px;text-transform:uppercase;font-weight:700;letter-spacing:0.3px;">Tít.</div>
+              <div style="font-size:16px;font-weight:900;color:#0f172a;line-height:1.15;">${item.count}</div>
+              <div style="height:1px;background:#d1fae5;margin:4px 4px;"></div>
+              <div style="color:#dc2626;font-size:9px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtBRL(item.value)}</div>
             </button>`
-          : `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${esc(item.name)}"
-              style="background:#fff;border:1px solid #e2e8f0;border-radius:4px;width:20px;padding:8px 1px 3px;text-align:center;position:relative;flex-shrink:0;opacity:0.65;cursor:pointer;">
-              <div style="background:#475569;color:#fff;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:7px;position:absolute;top:-7px;left:50%;transform:translateX(-50%);border:1px solid #fff;">${item.prefix}</div>
-              <div style="font-size:9px;font-weight:900;color:#475569;">0</div>
+          : `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
+              style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:4px;width:14px;height:26px;padding:0;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.45;cursor:pointer;">
+              <span style="font-size:7px;font-weight:800;color:#94a3b8;transform:rotate(-90deg);white-space:nowrap;">${item.prefix}</span>
             </button>`;
         const arrow = idx < items.length - 1
-          ? `<div style="display:flex;align-items:center;justify-content:center;flex:1;min-width:6px;">
-              <div style="width:100%;height:1.5px;background:#cbd5e1;position:relative;">
-                <div style="position:absolute;right:-2px;top:-2.5px;width:0;height:0;border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:4px solid #cbd5e1;"></div>
-              </div>
-            </div>` : "";
+          ? `<div style="flex:0 0 8px;width:8px;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:9px;line-height:1;">›</div>` : "";
         return card + arrow;
       }).join("")}
     </div>`;
   };
 
+  const tipHtml = (item) => {
+    const desc = String(item.descricao || item.explicacao || "").trim() || "Sem explicação cadastrada para esta etapa.";
+    const prazo = Number(item.days) || 0;
+    return `<div class="mapa-legenda-tip">
+      <div style="font-weight:800;margin-bottom:4px;">${esc(item.prefix)} · ${esc(item.name)}</div>
+      <div style="font-size:11px;line-height:1.4;opacity:0.95;">${esc(desc)}</div>
+      <div style="margin-top:6px;font-size:10px;opacity:0.85;">Prazo médio estimado: <strong>${prazo} dia${prazo === 1 ? "" : "s"}</strong></div>
+    </div>`;
+  };
+
   root.innerHTML = `
-    <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase para ver os contratos. Clique no cliente para abrir a ficha.</p>
+    <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase com títulos para abrir a lista. Passe o mouse na legenda para ver a explicação da etapa.</p>
     ${blocks.map(block => `
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px 16px;margin-bottom:10px;">
-        <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;">${esc(block.title)}</div>
+      <div class="crm-card" style="padding:12px 14px 14px;margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;">${esc(block.title)}</div>
         ${timeline(block.items, block.compId)}
       </div>`).join("") || `<div style="padding:28px;text-align:center;color:#94a3b8;">Nenhum título com os filtros atuais.</div>`}
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:8px;">
+    <div class="crm-card" style="padding:12px 14px;margin-top:8px;">
       <div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;">Legenda</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;">
         ${generalAgg.map(item => `
-          <div style="display:flex;align-items:center;background:#f1f5f9;padding:4px 8px;border-radius:4px;font-size:11px;border:1px solid #e2e8f0;">
-            <span style="background:${item.count > 0 ? "#065f46" : "#475569"};color:white;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:8px;margin-right:6px;">${item.prefix}</span>
+          <div class="mapa-legenda-item" style="display:flex;align-items:center;background:#f8fafc;padding:4px 8px;border-radius:4px;font-size:11px;border:1px solid #e2e8f0;cursor:help;position:relative;">
+            <span style="background:${item.count > 0 ? "#105436" : "#94a3b8"};color:white;min-width:16px;height:16px;padding:0 3px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:8px;margin-right:6px;">${item.prefix}</span>
             <span style="font-weight:700;color:#334155;margin-right:4px;">${esc(item.name)}</span>
             <span style="color:#64748b;font-size:10px;">(${item.days} d)</span>
+            ${tipHtml(item)}
           </div>`).join("")}
       </div>
     </div>`;
@@ -28393,13 +28417,24 @@ window.showMapaJuridicoOverlay = function(ui) {
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
   const sel = "height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;background:#fff;min-width:160px;";
   overlay.innerHTML = `
+    <style>
+      #mapa-juridico-overlay .mapa-legenda-item { position: relative; }
+      #mapa-juridico-overlay .mapa-legenda-tip {
+        display: none; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 80;
+        width: min(320px, 70vw); background: #0f172a; color: #fff; padding: 10px 12px;
+        border-radius: 8px; font-size: 12px; font-weight: 400; line-height: 1.4;
+        box-shadow: 0 10px 24px rgba(15,23,42,0.28); pointer-events: none;
+      }
+      #mapa-juridico-overlay .mapa-legenda-item:hover .mapa-legenda-tip { display: block; }
+      #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
+    </style>
     <div style="flex-shrink:0;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
       <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 8px;">
         <button type="button" class="btn btn-secondary" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;">
           <i data-lucide="x" style="width:16px;"></i> Fechar
         </button>
         <div style="flex:1;">
-          <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Mapa Jurídico — Fases processuais</div>
+          <div style="font-size:1.05rem;font-weight:800;color:var(--color-primary);">Mapa Jurídico — Fases processuais</div>
           <div style="font-size:0.75rem;color:#64748b;">${ui.nowLabel || ""}</div>
         </div>
         <button type="button" id="btn-mapa-juridico-pdf" class="btn btn-primary" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;">
@@ -28438,15 +28473,23 @@ window.showMapaJuridicoOverlay = function(ui) {
         <div id="mapa-juridico-stages-root"></div>
       </div>
       <div id="mapa-juridico-view-phase" style="display:none;">
-        <button type="button" class="btn btn-secondary" onclick="mapaJuridicoShowMap()" style="margin-bottom:12px;display:inline-flex;align-items:center;gap:6px;">
-          <i data-lucide="arrow-left" style="width:16px;"></i> Voltar ao mapa
-        </button>
-        <h2 id="mapa-juridico-phase-title" style="margin:0 0 12px;font-size:1.1rem;color:#0f172a;"></h2>
-        <div id="mapa-juridico-phase-body"></div>
+        <div class="crm-card" style="padding:1.2rem;">
+          <button type="button" class="btn btn-secondary" onclick="mapaJuridicoShowMap()" style="margin-bottom:14px;display:inline-flex;align-items:center;gap:6px;">
+            <i data-lucide="arrow-left" style="width:16px;"></i> Voltar ao mapa
+          </button>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px;">
+            <div>
+              <h2 id="mapa-juridico-phase-title" style="margin:0;font-size:1.1rem;font-weight:700;color:var(--color-primary);"></h2>
+              <div id="mapa-juridico-phase-sub" style="margin-top:4px;font-size:0.8rem;color:#64748b;"></div>
+            </div>
+          </div>
+          <div id="mapa-juridico-phase-body"></div>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   if (window.lucide) lucide.createIcons();
+  window.mapaJuridicoFillEmpSelect();
   window.mapaJuridicoRenderStages();
 };
 
@@ -28511,17 +28554,17 @@ window.gerarMapaJuridicoPDF = async function() {
                     if (!childName) return;
                     const childPrefix = `${topIndex}.${childIndex}`;
                     prefixMap[child.id] = childPrefix;
-                    nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100) };
+                    nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100), descricao: child.descricao || child.explicacao || "" };
                     childIndex++;
                 });
             } else {
                 prefixMap[s.id] = String(topIndex);
-                nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex };
+                nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex, descricao: s.descricao || s.explicacao || "" };
             }
             topIndex++;
         });
 
-        nameMap["Sem Fase"] = { prefix: "0", name: "Sem Fase", id: "sem-fase", days: 0, order: 0 };
+        nameMap["Sem Fase"] = { prefix: "0", name: "Sem Fase", id: "sem-fase", days: 0, order: 0, descricao: "Contratos em sub judice ainda sem etapa processual cadastrada." };
 
         const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -28644,15 +28687,7 @@ window.gerarMapaJuridicoPDF = async function() {
         }[ch]));
         const fmtInt = (val) => Math.round(Number(val) || 0).toLocaleString('pt-BR');
         const clientValue = (c) => (c.overdueValue || 0) + (c.overdueCharges || 0);
-        const empLabel = (ccId) => {
-            const id = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(ccId) : String(ccId || 'N/D');
-            const rawName = (typeof getCostCenterName === 'function' ? getCostCenterName(ccId) : '') || '';
-            const clean = String(rawName).replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, '').trim();
-            const label = String(rawName).trim().toUpperCase().startsWith(String(id).toUpperCase())
-                ? rawName
-                : `${id} - ${clean || rawName || 'N/D'}`;
-            return String(label).toUpperCase();
-        };
+        const empLabel = (ccId) => window.mapaJuridicoEmpLabel(ccId);
         const ellipsisTd = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
 
         const companyRows = Object.keys(companyGroups).map(compId => {
