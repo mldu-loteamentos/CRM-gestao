@@ -1533,7 +1533,14 @@ const SiengeApiService = {
         rows.forEach(row => {
           if (!row || typeof row !== "object") return;
           const accountNumber = String(row.accountNumber || row.number || row.account || "").trim();
-          const checkingAccountId = row.checkingAccountId || row.idCheckingAccount || row.accountId || null;
+          const idCandidates = [row.checkingAccountId, row.idCheckingAccount, row.accountId, row.idAccount, row.bankAccountId, row.id];
+          let checkingAccountId = null;
+          for (let i = 0; i < idCandidates.length; i++) {
+            const raw = idCandidates[i];
+            if (raw == null || raw === "") continue;
+            const s = String(raw).trim();
+            if (/^\d+$/.test(s)) { checkingAccountId = Number(s); break; }
+          }
           if (!accountNumber && !checkingAccountId) return;
           const key = String(checkingAccountId || accountNumber);
           if (seen.has(key)) return;

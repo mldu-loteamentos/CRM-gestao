@@ -111,6 +111,183 @@
     return list.filter(c => this.normalizeOperatorKey(c.assignedOperator) === opKey);
   },
 
+  isBackOfficeUser(user) {
+    const p = String(user?.profile_name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (p.includes('BACK OFFICE') || p.includes('BACKOFFICE')) return true;
+    const blob = String(user?.name || '') + ' ' + String(user?.sienge_user || '');
+    return /LUCELIA/i.test(blob);
+  },
+
+  isInternoCobrancaUser(user) {
+    if (!user) return false;
+    if (this.isBackOfficeUser(user)) return false;
+    const p = String(user.profile_name || '').toUpperCase();
+    const t = String(user.operator_type || 'interno');
+    return p.includes('OPERADOR') && t === 'interno';
+  },
+
+  clientKey(c) {
+    return String(c.customerId) + '-' + String(c.saleId);
+  },
+
+  displayedTitle(c) {
+    return String((c.billIds && c.billIds[0]) || c.saleId || '').replace(/^B-/, '').split('-')[0];
+  },
+
+  hasRealContact(c) {
+    const notes = (window.AppState && AppState.notes && AppState.notes[c.customerId]) || [];
+    return notes.some(n => {
+      const canal = String(n.canal || '').toLowerCase();
+      if (canal === 'nota interna' || n.fase === 'Nota Interna') return false;
+      return !!(n.text || n.date);
+    });
+  },
+
+  isZeroPaidClient(c) {
+    if (!c) return false;
+    if (c.isZeroPaid) return true;
+    if (c.percPaid != null && Number(c.percPaid) === 0) return true;
+    return typeof window.nexClientIsZeroPaid === 'function' && window.nexClientIsZeroPaid(c.customerId, c.saleId);
+  },
+
+  isSuspenderZero(c) {
+    if (!this.isZeroPaidClient(c)) return false;
+    const cc = typeof window.nexCcConfig === 'function' ? window.nexCcConfig(c.costCenterId, c.unitName) : {};
+    if (!cc.clausula_suspensiva_ativa) return false;
+    const days = Number(c.maxDaysDelay) || 0;
+    return days >= (Number(cc.clausula_suspensiva_dias) || 30);
+  },
+
+  isEnviarNexZero(c) {
+    if (!this.isZeroPaidClient(c)) return false;
+    const cc = typeof window.nexCcConfig === 'function' ? window.nexCcConfig(c.costCenterId, c.unitName) : {};
+    if (cc.clausula_suspensiva_ativa) return false;
+    const days = Number(c.maxDaysDelay) || 0;
+    const zeroDays = (typeof window.nexReguaDays === 'function' ? window.nexReguaDays().zero : 31) || 31;
+    if (days < zeroDays) return false;
+    if (typeof window.nexHasLetterForClient === 'function') return !window.nexHasLetterForClient(c);
+    return !(typeof window.nexHasLetter === 'function' && window.nexHasLetter(c.customerId, c.saleId));
+  },
+
+  isRecenteJuridico(c) {
+    try {
+      const hist = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}') || {};
+      const mem = hist[c.customerId] || hist[String(c.customerId)];
+      if (!mem || !mem.exitDate) return false;
+      const retroDays = parseInt((window.advFilters && window.advFilters.retroMeses) || '90', 10);
+      const limit = new Date();
+      limit.setDate(limit.getDate() - retroDays);
+      const ed = new Date(String(mem.exitDate).split('T')[0] + 'T12:00:00');
+      return !Number.isNaN(ed.getTime()) && ed >= limit;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  unfinishedYesterday(opName) {
+    let cache = {};
+    try { cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {}; } catch (e) { cache = {}; }
+    const today = new Date().toISOString().split('T')[0];
+    const prefixes = [opName, this.normalizeOperatorKey(opName)];
+    let latest = null;
+    let latestKey = null;
+    Object.keys(cache).forEach(k => {
+      const d = k.split('_').pop();
+      if (!d || d >= today) return;
+      const head = k.slice(0, k.length - d.length - 1);
+      const ok = prefixes.some(p => this.normalizeOperatorKey(head) === this.normalizeOperatorKey(p) || this.normalizeOperatorKey(head).includes(this.normalizeOperatorKey(p).split(' ')[0]));
+      if (!ok) return;
+      if (!latest || d > latest) {
+        latest = d;
+        latestKey = k;
+      }
+    });
+    if (!latestKey) return [];
+    const queue = cache[latestKey] || [];
+    return queue.filter(item => {
+      const notes = (window.AppState && AppState.notes && AppState.notes[item.customerId]) || [];
+      let done = false;
+      notes.forEach(n => {
+        if (n.promiseDate >= today && n.promiseStatus === 'Pendente' && n.status !== 'Cancelada') {
+          if (!n.saleId || String(n.saleId) === String(item.saleId)) done = true;
+        }
+        if (n.date && String(n.date).slice(0, 10) >= latest && n.author && this.normalizeOperatorKey(n.author).includes(this.normalizeOperatorKey(opName).split(' ')[0])) {
+          if (!n.saleId || String(n.saleId) === String(item.saleId)) done = true;
+        }
+      });
+      return !done;
+    });
+  },
+
+  collectInsightGroups(scopeClients, user) {
+    const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
+    const thresholdJuridico = juridicoNode ? juridicoNode.dias : 151;
+    const groups = [];
+    const back = this.isBackOfficeUser(user);
+
+    if (back) {
+      const vencidos = scopeClients.filter(c => {
+        const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(c) : null;
+        return info && info.status === 'VENCIDO';
+      });
+      const paraJuridico = scopeClients.filter(c => c.subjudice !== 'S' && (Number(c.maxDaysDelay) || 0) >= thresholdJuridico);
+      const aposAcordo = scopeClients.filter(c => this.isRecenteJuridico(c));
+      groups.push({ id: 'prazo-etapa', label: vencidos.length + ' títulos venceram prazo da etapa', items: vencidos, hideIfEmpty: false });
+      groups.push({ id: 'ir-juridico', label: paraJuridico.length + ' títulos precisam ir para jurídico', items: paraJuridico, hideIfEmpty: false });
+      groups.push({ id: 'apos-acordo', label: aposAcordo.length + ' títulos atrasaram após acordo', items: aposAcordo, hideIfEmpty: false });
+      return groups;
+    }
+
+    const suspender = scopeClients.filter(c => this.isSuspenderZero(c));
+    const uniqueCust = new Set(suspender.map(c => String(c.customerId)));
+    const enviar = scopeClients.filter(c => this.isEnviarNexZero(c));
+    const semContato = scopeClients.filter(c => this.isZeroPaidClient(c) && !this.hasRealContact(c));
+    const opName = user?.sienge_user || user?.name || '';
+    const leftover = this.unfinishedYesterday(opName);
+    const leftoverKeys = new Set(leftover.map(i => String(i.customerId) + '-' + String(i.saleId)));
+    const leftoverClients = scopeClients.filter(c => leftoverKeys.has(this.clientKey(c)));
+    const mais91 = scopeClients.filter(c => (Number(c.maxDaysDelay) || 0) >= 91);
+
+    groups.push({ id: 'suspender', label: uniqueCust.size + ' clientes 0% pago para suspender', items: suspender, hideIfEmpty: true, count: uniqueCust.size });
+    groups.push({ id: 'enviar-nex', label: enviar.length + ' títulos 0% pago enviar Nex', items: enviar, hideIfEmpty: true });
+    groups.push({ id: 'sem-contato', label: semContato.length + ' títulos 0% sem nenhum contato', items: semContato, hideIfEmpty: false });
+    groups.push({ id: 'ontem', label: leftoverClients.length + ' títulos da sua fila não foram finalizados ontem', items: leftoverClients.length ? leftoverClients : leftover, hideIfEmpty: false });
+    groups.push({ id: 'mais-91', label: mais91.length + ' títulos com mais de 91 dias', items: mais91, hideIfEmpty: false });
+    return groups;
+  },
+
+  renderInsights() {
+    const box = document.getElementById('home-op-insights-container');
+    if (!box) return;
+    const user = this.getViewUser();
+    const back = this.isBackOfficeUser(user);
+    const scope = back ? (window.rawClientList || []) : this.getMyClients();
+    const groups = this.collectInsightGroups(scope, user).filter(g => !g.hideIfEmpty || (g.count != null ? g.count : g.items.length) > 0);
+    this._insightGroups = groups;
+    if (!groups.length) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const firstName = (user?.name || 'Operador').split(' ')[0].toUpperCase();
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+        <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
+          <i data-lucide="lightbulb" style="width:18px;color:#ca8a04;"></i>
+          <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Insights importantes — ${firstName}</h3>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; padding:14px;">
+          ${groups.map((g, i) => {
+            return `<button type="button" onclick="window.openHomeInsight(${i})" style="text-align:left; border:1px solid #e2e8f0; background:#fffbeb; border-radius:8px; padding:10px 12px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#854d0e;">
+              ${g.label}
+            </button>`;
+          }).join('')}
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
   renderPreviewBar() {
     const bar = document.getElementById('home-op-preview-bar');
     const select = document.getElementById('home-op-preview-select');
@@ -151,6 +328,8 @@
          document.getElementById('home-op-load-data-container').style.display = 'block';
          document.getElementById('home-op-grids-container').style.display = 'none';
          document.getElementById('home-op-lembretes-container').style.display = 'none';
+         const ins0 = document.getElementById('home-op-insights-container');
+         if (ins0) ins0.style.display = 'none';
       } else {
          document.getElementById('home-op-load-data-container').style.display = 'none';
          document.getElementById('home-op-grids-container').style.display = 'grid';
@@ -158,6 +337,7 @@
          
          this.renderGrids();
          this.renderLembretes();
+         this.renderInsights();
          
          setTimeout(() => { this.speak(true, false); }, 2000);
       }
@@ -1060,6 +1240,53 @@
        box.style.display = 'none';
     }, 8000);
   }
+};
+
+window.openHomeInsight = function(idx) {
+  const groups = HomeDashboard._insightGroups || [];
+  const g = groups[idx];
+  if (!g) return;
+  const keys = new Set((g.items || []).map(c => String(c.customerId) + '-' + String(c.saleId)));
+  window.homeInsightFilter = { keys: keys, label: g.label };
+  const banner = document.getElementById('home-insight-banner');
+  const txt = document.getElementById('home-insight-banner-text');
+  if (banner && txt) {
+    banner.style.display = 'flex';
+    txt.textContent = 'Insight: ' + g.label;
+  }
+  if (typeof switchTab === 'function') switchTab('dashboard', 'Fila de Cobrança');
+  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
+};
+
+window.clearHomeInsightFilter = function() {
+  window.homeInsightFilter = null;
+  const banner = document.getElementById('home-insight-banner');
+  if (banner) banner.style.display = 'none';
+  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
+};
+
+window.buildSprintOperatorSummaries = function() {
+  const hd = HomeDashboard;
+  const users = hd.getOperatorUsers();
+  const all = window.rawClientList || [];
+  const lines = [];
+  users.filter(u => hd.isInternoCobrancaUser(u)).forEach(u => {
+    const opKey = hd.normalizeOperatorKey(u.sienge_user || u.name);
+    const mine = all.filter(c => hd.normalizeOperatorKey(c.assignedOperator) === opKey);
+    const groups = hd.collectInsightGroups(mine, u).filter(g => !g.hideIfEmpty || (g.count != null ? g.count : g.items.length) > 0);
+    if (!groups.length) return;
+    const first = (u.name || u.sienge_user || 'Operador').split(' ')[0].toUpperCase();
+    lines.push('*' + first + '*');
+    groups.forEach(g => lines.push('• ' + g.label));
+  });
+  users.filter(u => hd.isBackOfficeUser(u)).forEach(u => {
+    const groups = hd.collectInsightGroups(all, u).filter(g => !g.hideIfEmpty || (g.count != null ? g.count : g.items.length) > 0);
+    if (!groups.length) return;
+    const first = (u.name || u.sienge_user || 'Operador').split(' ')[0].toUpperCase();
+    lines.push('*' + first + '*');
+    groups.forEach(g => lines.push('• ' + g.label));
+  });
+  return lines.join('\n');
 };
 
 // Funções globais necessárias para os botões do HTML

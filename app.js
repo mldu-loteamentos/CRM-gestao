@@ -2779,10 +2779,12 @@ window.nexAgingSpecialHtml = function(client) {
   const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31 };
   const zeroDays = Number(regua.zero) || 31;
   const titleHint = String((client.billIds && client.billIds[0]) || client.saleId || "").replace(/^B-/, "").split("-")[0];
-  const hasNex = typeof window.nexHasLetter === "function" && (
-    window.nexHasLetter(client.customerId, client.saleId) ||
-    (titleHint && window.nexHasLetter(client.customerId, titleHint))
-  );
+  const hasNex = typeof window.nexHasLetterForClient === "function"
+    ? window.nexHasLetterForClient(client)
+    : (typeof window.nexHasLetter === "function" && (
+      window.nexHasLetter(client.customerId, client.saleId) ||
+      (titleHint && window.nexHasLetter(client.customerId, titleHint))
+    ));
   const suspensivaDias = Number(ccConfig.clausula_suspensiva_dias) || 30;
 
   if (ccConfig.clausula_suspensiva_ativa && days >= suspensivaDias) {
@@ -3973,6 +3975,10 @@ document.addEventListener("click", function(e) {
     clientList = clientList.filter(c => c.assignedOperator === activeOperatorFilter);
   }
 
+  if (window.homeInsightFilter && window.homeInsightFilter.keys instanceof Set && window.homeInsightFilter.keys.size) {
+    clientList = clientList.filter(c => window.homeInsightFilter.keys.has(String(c.customerId) + "-" + String(c.saleId)));
+  }
+
   const originalAdvFilters = window.advFilters;
   window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
@@ -4802,10 +4808,10 @@ document.addEventListener("click", function(e) {
             <span>${formattedVal}</span>
           </td>
           ${(() => {
-              const notesList = AppState.notes[client.customerId] || [];
+              const judNotesList = AppState.judNotes && AppState.judNotes[client.customerId] ? AppState.judNotes[client.customerId] : [];
               let latestNote = null;
               let latestIndex = -1;
-              notesList.forEach((n, idx) => {
+              judNotesList.forEach((n, idx) => {
                   if (!latestNote || new Date(n.date) > new Date(latestNote.date)) {
                       latestNote = n;
                       latestIndex = idx;
@@ -4813,10 +4819,9 @@ document.addEventListener("click", function(e) {
               });
               if (latestNote) {
                   const dateStr = new Date(latestNote.date).toLocaleDateString('pt-BR');
-                  // Use same tooltip logic as agenda if possible, but adjust for no 'isFila'
                   return `<td style="white-space: nowrap; text-align: center; font-size: 0.75rem;" 
-                            onmouseenter="if(window.showAgendaTooltip) window.showAgendaTooltip(event, ${client.customerId}, ${latestIndex})" 
-                            onmouseleave="if(window.hideAgendaTooltip) window.hideAgendaTooltip()">
+                            onmouseenter="if(window.showJudTooltip) window.showJudTooltip(event, ${client.customerId}, ${latestIndex})" 
+                            onmouseleave="if(window.hideJudTooltip) window.hideJudTooltip()">
                             <span style="border-bottom: 1px dashed var(--color-primary); cursor: help;">${dateStr}</span>
                           </td>`;
               }
@@ -10968,6 +10973,50 @@ function toggleDistratoPaymentFields() {
   document.getElementById("dist-bank-pix-fields").style.display = type === "PIX" ? "flex" : "none";
 }
 
+function numeroPorExtenso(n) {
+  n = Math.floor(Math.abs(Number(n) || 0));
+  if (n === 0) return 'zero';
+  const u = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+  const d = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+  const c = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+  function ate999(x) {
+    if (x === 0) return '';
+    if (x === 100) return 'cem';
+    if (x < 20) return u[x];
+    if (x < 100) return d[Math.floor(x / 10)] + (x % 10 ? ' e ' + u[x % 10] : '');
+    return c[Math.floor(x / 100)] + (x % 100 ? ' e ' + ate999(x % 100) : '');
+  }
+  if (n < 1000) return ate999(n);
+  const mil = Math.floor(n / 1000);
+  const rest = n % 1000;
+  const milStr = mil === 1 ? 'mil' : ate999(mil) + ' mil';
+  if (!rest) return milStr;
+  return milStr + (rest < 100 ? ' e ' : ' ') + ate999(rest);
+}
+
+function valorPorExtensoBRL(valor) {
+  const v = Math.round((Number(valor) || 0) * 100) / 100;
+  const reais = Math.floor(v);
+  const cents = Math.round((v - reais) * 100);
+  let s = numeroPorExtenso(reais) + (reais === 1 ? ' real' : ' reais');
+  if (cents) s += ' e ' + numeroPorExtenso(cents) + (cents === 1 ? ' centavo' : ' centavos');
+  return s;
+}
+
+function isLegacyDistratoClauses(text) {
+  const s = String(text || '').trim();
+  return s.length < 280 && /As partes acordam na rescisão do contrato de compra e venda/i.test(s);
+}
+
+function applyDistratoTemplateVars(text, map) {
+  let s = String(text || '');
+  Object.keys(map).forEach(key => {
+    const re = new RegExp('\\{\\{' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\}\\}', 'g');
+    s = s.replace(re, map[key] == null ? '' : String(map[key]));
+  });
+  return s;
+}
+
 function generateDistratoPDF() {
   const results = AppState.currentDistratoResult;
   if (!results) return;
@@ -10983,7 +11032,7 @@ function generateDistratoPDF() {
   }
 
   const unit = AppState.units[g_distSale.unitId] || {};
-  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃ‚MBULO DO EMPREENDIMENTO IMOBILIÃRIO.";
+  const preambleText = AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.";
 
   // Dados Bancários
   const payType = document.getElementById("dist-bank-transfer-type").value;
@@ -11003,9 +11052,80 @@ function generateDistratoPDF() {
     payInfoHtml = `PIX: Chave (${pixType}) - ${pixKey}`;
   }
 
-  const docHtml = `
+  let t = {};
+  try { t = JSON.parse(localStorage.getItem('crm_docpadrao_distrato') || '{}'); } catch (e) {}
+  const titleEl = document.getElementById('doc-distrato-title');
+  const clausesEl = document.getElementById('doc-distrato-clauses');
+  const pctEl = document.getElementById('doc-distrato-pct');
+  const docTitle = (titleEl && titleEl.value) || t['doc-distrato-title'] || 'INSTRUMENTO PARTICULAR DE DISTRATO DE COMPROMISSO DE COMPRA E VENDA';
+  let clauses = (t['doc-distrato-clauses'] && !isLegacyDistratoClauses(t['doc-distrato-clauses']))
+    ? t['doc-distrato-clauses']
+    : (clausesEl && clausesEl.value) || '';
+  const pctRetencao = (pctEl && pctEl.value) || t['doc-distrato-pct'] || results.restitutionPct || '';
+
+  const useLegalTemplate = clauses && !isLegacyDistratoClauses(clauses);
+  let docHtml = '';
+
+  if (useLegalTemplate) {
+    const emp = AppState.enterprises && (AppState.enterprises[unit.enterpriseId] || AppState.enterprises.find?.(e => String(e.id) === String(unit.enterpriseId)));
+    const empName = (emp && (emp.name || emp.nome)) || unit.enterpriseName || unit.enterprise || '';
+    const cidadeLote = unit.city || (emp && (emp.city || emp.cidade)) || 'Botucatu-SP';
+    const areaNum = unit.area || unit.privateArea || unit.Privatearea || '';
+    const areaLabel = areaNum === '' || areaNum == null ? '____' : (String(areaNum).match(/m/) ? String(areaNum) : (areaNum + ' m²'));
+    const areaExt = areaNum && !isNaN(Number(areaNum))
+      ? (numeroPorExtenso(areaNum) + ' metros quadrados')
+      : '____';
+    const saleDateStr = g_distSale.saleDate
+      ? new Date(g_distSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR')
+      : '____';
+    const dateExt = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+    const valorLiq = results.refundNet || 0;
+    const valorFmt = valorLiq.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const cpfCnpj = (typeof maskCpfCnpj === 'function') ? maskCpfCnpj(g_distCustomer.cpfCnpj) : (g_distCustomer.cpfCnpj || '');
+    const filled = applyDistratoTemplateVars(formatDocPadraoMarkup(clauses), {
+      QUADRA: unit.block || unit.quadra || '____',
+      LOTE: unit.lot || unit.lote || '____',
+      TITULO: g_distSale.receivableBillId || g_distSale.id || '____',
+      UNIDADE: unit.id || [unit.block, unit.lot].filter(Boolean).join('-') || '____',
+      NOME_CLIENTE: g_distCustomer.name || '',
+      CPF_CNPJ: cpfCnpj,
+      RG_CLIENTE: g_distCustomer.rg || g_distCustomer.identity || '____',
+      NACIONALIDADE_CLIENTE: g_distCustomer.nationality || g_distCustomer.nacionalidade || 'brasileiro(a)',
+      ESTADO_CIVIL: g_distCustomer.maritalStatus || g_distCustomer.civilStatus || '',
+      PROFISSAO_CLIENTE: g_distCustomer.profession || g_distCustomer.occupation || '',
+      ENDERECO_CLIENTE: g_distCustomer.address || '',
+      CIDADE_CLIENTE: g_distCustomer.city || '',
+      DATA_CONTRATO: saleDateStr,
+      DATA_CONTRATO_ORIGINAL: saleDateStr,
+      EMPREENDIMENTO: empName || '____',
+      EMPRESA_NOME: 'MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA',
+      EMPRESA_CNPJ: '01.066.134/0001-78',
+      CIDADE_LOTEAMENTO: cidadeLote,
+      CIDADE_ATUAL: 'Botucatu',
+      AREA_LOTE: areaLabel,
+      AREA_LOTE_EXTENSO: areaExt,
+      VALOR_RESTITUICAO: valorFmt,
+      VALOR_RESTITUICAO_EXTENSO: valorPorExtensoBRL(valorLiq),
+      PERCENTUAL_RETENCAO: pctRetencao,
+      NOVO_LOTE: '____',
+      DATA_HOJE_EXTENSO: dateExt,
+      DATA_ATUAL_EXTENSO: dateExt,
+      TESTEMUNHA_1_NOME: t.test1Nome || '________________',
+      TESTEMUNHA_1_RG: t.test1Rg || '________________',
+      TESTEMUNHA_2_NOME: t.test2Nome || '________________',
+      TESTEMUNHA_2_RG: t.test2Rg || '________________',
+      PREAMBULO: preambleText
+    });
+    docHtml = `
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <h2 style="color: #105436; font-size: 13pt; font-weight: bold; margin-bottom: 5px;">${docTitle}</h2>
+      </div>
+      <div style="font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.45; text-align: justify; white-space: pre-wrap;">${filled}</div>
+    `;
+  } else {
+  const docHtmlOld = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">TERMO DE DISTRATO E RESCISÃO DE CONTRATO IMOBILIÃRIO</h2>
+      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">TERMO DE DISTRATO E RESCISÃO DE CONTRATO IMOBILIÁRIO</h2>
       <h3 style="font-size: 12pt; color: #666; margin: 0;">Moura Leite Loteamentos</h3>
     </div>
 
@@ -11046,7 +11166,7 @@ function generateDistratoPDF() {
           const nameMap = {
             taxaAssoc: "Taxa Associativa",
             iptu: "IPTU Vencido",
-            agua: "Conta de Ãgua",
+            agua: "Conta de Água",
             luz: "Conta de Luz",
             homolog: "Homologação do Acordo",
             outros: "Outras despesas",
@@ -11091,6 +11211,8 @@ function generateDistratoPDF() {
       </div>
     </div>
   `;
+    docHtml = docHtmlOld;
+  }
 
   document.getElementById("pdf-modal-title").textContent = "Termo de Rescisão e Distrato - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
@@ -11540,14 +11662,50 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       if (accounts && accounts.length > 0) currentReprocessCostCenterId = window.normalizeBoletoCostCenterId(AppState.currentCostCenterId);
     }
 
+    const companyForLookup = currentReprocessCompanyId || AppState.currentCompanyId;
+    if (accounts && accounts.length && companyForLookup && typeof SiengeApiService.getCheckingAccounts === "function") {
+      const missingNumericId = accounts.some(acc => {
+        const id = acc.checkingAccountId || acc.id;
+        return !id || !/^\d+$/.test(String(id).trim());
+      });
+      if (missingNumericId) {
+        try {
+          const caData = await SiengeApiService.getCheckingAccounts(companyForLookup);
+          const catalog = (caData && caData.results) || [];
+          const byNum = new Map();
+          catalog.forEach(row => {
+            const num = String(row.accountNumber || row.number || "").trim();
+            const id = row.id || row.checkingAccountId || row.idCheckingAccount;
+            if (!num || id == null || !/^\d+$/.test(String(id).trim())) return;
+            byNum.set(num, Number(id));
+            byNum.set(num.replace(/\D/g, ""), Number(id));
+          });
+          accounts = accounts.map(acc => {
+            const existing = acc.checkingAccountId || acc.id;
+            if (existing && /^\d+$/.test(String(existing).trim())) {
+              return { ...acc, checkingAccountId: Number(existing) };
+            }
+            const num = String(acc.accountNumber || "").trim();
+            const found = byNum.get(num) || byNum.get(num.replace(/\D/g, ""));
+            return found ? { ...acc, checkingAccountId: found } : acc;
+          });
+        } catch (enrichErr) {
+          console.warn("[CRM Boleto] Não foi possível cruzar contas correntes da empresa:", enrichErr);
+        }
+      }
+    }
+
     const usable = (accounts || []).filter(acc => acc.accountNumber || acc.checkingAccountId || acc.id);
     if (usable.length > 0) {
       accountSelect.innerHTML = '';
       usable.forEach(acc => {
         const option = document.createElement('option');
-        const value = acc.checkingAccountId || acc.id || acc.accountNumber;
+        const numericId = (acc.checkingAccountId || acc.id);
+        const value = (numericId != null && /^\d+$/.test(String(numericId).trim()))
+          ? String(numericId).trim()
+          : (acc.accountNumber || "");
         option.value = value;
-        option.dataset.checkingAccountId = acc.checkingAccountId || acc.id || "";
+        option.dataset.checkingAccountId = (numericId != null && /^\d+$/.test(String(numericId).trim())) ? String(numericId).trim() : "";
         option.dataset.accountNumber = acc.accountNumber || "";
         option.textContent = `${acc.accountNumber || value} - ${acc.accountName || acc.name || 'Conta corrente'}`;
         accountSelect.appendChild(option);
@@ -11607,18 +11765,36 @@ window.submitReprocessBoleto = async function() {
   const accountRaw = accountSelectEl ? accountSelectEl.value : "";
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
   const accountFromData = selectedOpt && selectedOpt.dataset.checkingAccountId;
-  let account = NaN;
-  if (accountFromData && /^\d+$/.test(String(accountFromData).trim())) {
-    account = parseInt(String(accountFromData).trim(), 10);
-  } else if (/^\d+$/.test(String(accountRaw).trim())) {
-    account = parseInt(String(accountRaw).trim(), 10);
+  const parseAccId = (raw) => {
+    const s = String(raw == null ? "" : raw).trim();
+    return /^\d+$/.test(s) ? parseInt(s, 10) : NaN;
+  };
+  let account = parseAccId(accountFromData);
+  if (!Number.isFinite(account) || account <= 0) account = parseAccId(accountRaw);
+  if (!Number.isFinite(account) || account <= 0) {
+    const accountNumber = (selectedOpt && selectedOpt.dataset.accountNumber) || accountRaw;
+    const companyIdGuess = currentReprocessCompanyId || AppState.currentCompanyId;
+    if (accountNumber && companyIdGuess) {
+      try {
+        const caData = await SiengeApiService.getCheckingAccounts(companyIdGuess);
+        const catalog = (caData && caData.results) || [];
+        const norm = (s) => String(s || "").replace(/\D/g, "");
+        const match = catalog.find(row => {
+          const num = String(row.accountNumber || row.number || "").trim();
+          return num === String(accountNumber).trim() || (norm(num) && norm(num) === norm(accountNumber));
+        });
+        account = parseAccId(match && (match.id || match.checkingAccountId || match.idCheckingAccount));
+      } catch (e) {
+        console.warn("[CRM Boleto] Falha ao resolver ID da conta corrente:", e);
+      }
+    }
   }
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
 
-  if (!account) {
-    alert("Selecione uma conta corrente válida.");
+  if (!Number.isFinite(account) || account <= 0) {
+    alert("Não foi possível identificar o código da conta corrente no Sienge. Selecione novamente a conta Itaú e tente de novo.");
     return;
   }
   if (!dueDate) {
@@ -13138,6 +13314,60 @@ window.showAgendaTooltip = function(event, custId, occIndex) {
 
 window.hideAgendaTooltip = function() {
   const tooltip = document.getElementById('agenda-hover-tooltip');
+  if (tooltip) tooltip.style.display = 'none';
+}
+
+window.showJudTooltip = function(event, custId, occIndex) {
+  let tooltip = document.getElementById('jud-hover-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'jud-hover-tooltip';
+    tooltip.style.cssText = 'position:fixed; z-index:99999; display:none; background:transparent; width:400px; pointer-events:none; border-radius: 8px; box-shadow:0 8px 24px rgba(0,0,0,0.12);';
+    document.body.appendChild(tooltip);
+  }
+  
+  const list = AppState.judNotes && AppState.judNotes[custId] ? AppState.judNotes[custId] : [];
+  const occ = list[occIndex];
+  if (!occ) return;
+  
+  const dateStr = new Date(occ.date).toLocaleString('pt-BR');
+  const typeLabel = occ.fase || 'Histórico';
+  
+  tooltip.innerHTML = `
+    <div style="border-left: 4px solid var(--color-primary); padding: 12px; background: white; border-radius: 8px;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <div style="font-size:0.75rem; color:var(--color-text-muted);">
+          <span style="font-weight:700; color:var(--color-text-dark);">Por: ${occ.author || 'Sistema'}</span>
+          <span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: var(--color-text-muted); margin-left:6px;"><i data-lucide="info" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${typeLabel}</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--color-text-muted);">${dateStr}</div>
+      </div>
+      <div style="font-size:0.8rem; color:var(--color-text-dark); white-space:pre-wrap;">${occ.text || ''}</div>
+    </div>
+  `;
+  
+  if (window.lucide) {
+    lucide.createIcons({root: tooltip});
+  }
+  
+  tooltip.style.display = 'block';
+  
+  let top = event.clientY + 15;
+  let left = event.clientX + 15;
+  
+  if (left + 450 > window.innerWidth) {
+    left = event.clientX - 465;
+  }
+  if (top + tooltip.offsetHeight > window.innerHeight) {
+    top = event.clientY - tooltip.offsetHeight - 15;
+  }
+  
+  tooltip.style.top = top + 'px';
+  tooltip.style.left = left + 'px';
+}
+
+window.hideJudTooltip = function() {
+  const tooltip = document.getElementById('jud-hover-tooltip');
   if (tooltip) tooltip.style.display = 'none';
 }
 
@@ -17281,20 +17511,45 @@ window.updateNexEligibleHelp = function() {
 
   const zeroEl = document.getElementById("nex-help-zero");
   if (zeroEl) {
-    let suspensivaTxt = "Nenhum empreendimento está com cláusula suspensiva ativa no cadastro de centros de custo.";
-    if (rules.length) {
-      const items = rules.map(r => {
-        const label = r.name ? (r.id + " — " + r.name) : r.id;
-        return "<strong>" + esc(label) + "</strong>: a partir de <strong>" + r.dias + " dias</strong>";
-      }).join("; ");
-      suspensivaTxt = "Empreendimentos com cláusula suspensiva (não entram nesta lista; seguem o fluxo de suspender): " + items + ".";
-    }
-    zeroEl.innerHTML = "Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>" + zeroDays + " dias</strong> (prazo da régua de cobrança), <strong>sem cláusula suspensiva</strong> e ainda <strong>sem NEX gerada</strong>. " + suspensivaTxt;
+    const listHtml = rules.length
+      ? `<ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+          ${rules.map(r => {
+            const label = r.name ? (r.id + " — " + r.name) : r.id;
+            return `<li><strong>${esc(label)}</strong> — a partir de <strong>${r.dias} dias</strong></li>`;
+          }).join("")}
+        </ul>`
+      : `<p style="margin:0;">Nenhum empreendimento está com cláusula suspensiva ativa no cadastro de centros de custo.</p>`;
+    zeroEl.innerHTML = `Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>${zeroDays} dias</strong> (prazo da régua de cobrança), <strong>sem cláusula suspensiva</strong> e ainda <strong>sem NEX gerada</strong>.
+      <button type="button" onclick="window.toggleNexSuspensivaHelp(event)" title="Ver empreendimentos com cláusula suspensiva" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:4px;padding:0;border:none;border-radius:50%;background:#e2e8f0;color:#475569;cursor:pointer;vertical-align:middle;">
+        <i data-lucide="info" style="width:12px;height:12px;"></i>
+      </button>
+      <div id="nex-suspensiva-pop" style="display:none;position:absolute;z-index:40;left:0;top:100%;margin-top:6px;max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.12);padding:12px 14px;color:#334155;font-size:0.8rem;line-height:1.4;">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Empreendimentos com cláusula suspensiva</div>
+        <p style="margin:0 0 8px;">Não entram nesta lista; seguem o fluxo de suspender.</p>
+        ${listHtml}
+      </div>`;
+    if (window.lucide) lucide.createIcons();
   }
 
   const d61El = document.getElementById("nex-help-61");
   if (d61El) {
     d61El.innerHTML = "Entram nesta lista os demais clientes (já houve algum pagamento), com atraso a partir de <strong>" + stdDays + " dias</strong> conforme a <strong>régua de cobrança</strong>, e ainda <strong>sem NEX gerada</strong>. Se o prazo da régua mudar, esta lista acompanha o novo valor automaticamente.";
+  }
+};
+
+window.toggleNexSuspensivaHelp = function(ev) {
+  if (ev) ev.stopPropagation();
+  const pop = document.getElementById("nex-suspensiva-pop");
+  if (!pop) return;
+  const open = pop.style.display === "none" || !pop.style.display;
+  pop.style.display = open ? "block" : "none";
+  if (open) {
+    const close = function(e) {
+      if (pop.contains(e.target)) return;
+      pop.style.display = "none";
+      document.removeEventListener("click", close);
+    };
+    setTimeout(() => document.addEventListener("click", close), 0);
   }
 };
 
@@ -17364,9 +17619,19 @@ window.nexHasLetter = function(customerId, saleId) {
   if (!cid || !sid) return false;
   return window.nexCollectAll().some(it => {
     if (String(it.customerId) !== cid) return false;
+    if (typeof window.nexLostValidityByPayment === "function" && window.nexLostValidityByPayment(it).lost) return false;
     const t = String(it.titulo || it.saleId || "").replace(/^B-/, "").split("-")[0];
     return t && t === sid;
   });
+};
+
+window.nexHasLetterForClient = function(client) {
+  if (!client) return false;
+  const displayed = String((client.billIds && client.billIds[0]) || "").replace(/^B-/, "").split("-")[0];
+  const sid = String(client.saleId || "").replace(/^B-/, "").split("-")[0];
+  const matchId = displayed || sid;
+  if (!matchId) return false;
+  return window.nexHasLetter(client.customerId, matchId);
 };
 
 window.nexInFollowup = function(item) {
@@ -20801,6 +21066,16 @@ function previewDocPadrao(tipo) {
   }
 }
 
+function applySavedDocPadraoFields(tipo, data, fieldMap) {
+  (fieldMap[tipo] || []).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || data[id] === undefined) return;
+    if (id === 'doc-distrato-clauses' && isLegacyDistratoClauses(data[id])) return;
+    if (id === 'doc-distrato-title' && /INSTRUMENTO DE DISTRATO E RESCISÃO CONTRATUAL/i.test(String(data[id] || ''))) return;
+    el.value = data[id];
+  });
+}
+
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
   const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato'];
@@ -20822,20 +21097,14 @@ async function loadDocPadraoTemplates() {
         if (snap.exists()) {
           const data = snap.data();
           localStorage.setItem(`crm_docpadrao_${tipo}`, JSON.stringify(data));
-          (fieldMap[tipo] || []).forEach(id => {
-            const el = document.getElementById(id);
-            if (el && data[id] !== undefined) el.value = data[id];
-          });
+          applySavedDocPadraoFields(tipo, data, fieldMap);
         } else {
           // Fallback para localstorage caso nao tenha no firebase
           const saved = localStorage.getItem(`crm_docpadrao_${tipo}`);
           if (saved) {
             try {
               const data = JSON.parse(saved);
-              (fieldMap[tipo] || []).forEach(id => {
-                const el = document.getElementById(id);
-                if (el && data[id] !== undefined) el.value = data[id];
-              });
+              applySavedDocPadraoFields(tipo, data, fieldMap);
             } catch(e) {}
           }
         }
@@ -20849,10 +21118,7 @@ async function loadDocPadraoTemplates() {
       if (saved) {
         try {
           const data = JSON.parse(saved);
-          (fieldMap[tipo] || []).forEach(id => {
-            const el = document.getElementById(id);
-            if (el && data[id] !== undefined) el.value = data[id];
-          });
+          applySavedDocPadraoFields(tipo, data, fieldMap);
         } catch(e) {}
       }
     });
