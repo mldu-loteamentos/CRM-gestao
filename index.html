@@ -1635,7 +1635,7 @@ Atenciosamente,
                   <label>Cláusulas do Distrato</label>
                   <div class="doc-fmt-bar">
                     <button type="button" class="doc-fmt-btn" onclick="wrapDocPadraoBold('doc-distrato-clauses')" title="Negrito (Ctrl+B)"><b>N</b> Negrito</button>
-                    <span class="doc-fmt-hint">Um único modelo. Use {{#SE_RESTITUICAO}} ... {{/SE_RESTITUICAO}} quando houver valor a devolver, e {{#SE_SEM_RESTITUICAO}} ... {{/SE_SEM_RESTITUICAO}} quando não houver. O PDF escolhe o bloco automaticamente.</span>
+                    <span class="doc-fmt-hint">Um único modelo. Use {{#SE_RESTITUICAO}}, {{#SE_SEM_RESTITUICAO}} e {{#SE_PERMUTA}} na cláusula 5, e {{#SE_INICIATIVA_CLIENTE}} / {{#SE_INICIATIVA_EMPRESA}} na cláusula 2. O PDF escolhe o bloco automaticamente.</span>
                   </div>
                   <textarea class="form-control" id="doc-distrato-clauses" rows="32" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">PROMITENTE COMPRADOR(A): {{NOME_CLIENTE}}, {{NACIONALIDADE_CLIENTE}}, {{PROFISSAO_CLIENTE}}, {{ESTADO_CIVIL}}, portador(a) da Cédula de Identidade RG nº {{RG_CLIENTE}}, inscrito(a) no CPF/MF sob o nº {{CPF_CNPJ}}, residente e domiciliado(a) na {{ENDERECO_CLIENTE}}.
 
@@ -5250,9 +5250,15 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
 
             <!-- CÁLCULO DE DISTRATO -->
             <div class="dist-block" style="margin-bottom: 20px;">
-              <div class="dist-block-header" style="border-left: 3px solid #334155; background: #475569; color: white;">
-                <i data-lucide="calculator" style="width:14px; color: white;"></i>
-                <span style="color: white; font-weight: 800;">CÁLCULO DE DISTRATO</span>
+              <div class="dist-block-header" style="border-left: 3px solid #334155; background: #475569; color: white; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="calculator" style="width:14px; color: white;"></i>
+                  <span style="color: white; font-weight: 800;">CÁLCULO DE DISTRATO</span>
+                </span>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.78rem; font-weight: 700; color: #fff; margin: 0;">
+                  <span>Permuta</span>
+                  <input type="checkbox" id="dist-permuta-toggle" onchange="toggleDistratoPermuta()" style="width: 16px; height: 16px; accent-color: #f97316;">
+                </label>
               </div>
               <div class="dist-calc-table" style="font-size: 0.9rem;">
                 <style>
@@ -5280,18 +5286,18 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                 </div>
 
                 <div class="dist-calc-row">
-                  <span>Multa por Rescisão (10%)</span>
+                  <span id="dist-penalty-label">Multa por Rescisão (10% do contrato)</span>
                   <span id="dist-calc-penalty" class="dist-calc-val">0,00</span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Fruição (0,75%) <span id="dist-fruition-container" style="display:none;">- <input type="number" id="dist-fruition-months" style="width: 40px; padding: 0;" value="1" min="0" oninput="calculateDistrato()"> meses</span></span>
                   <span id="dist-calc-fruition" class="dist-calc-val">0,00</span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Homologação do Acordo</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-homolog" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
-                <div class="dist-calc-row" id="dist-comissao-group">
+                <div class="dist-calc-row dist-standard-only" id="dist-comissao-group">
                   <span>Comissão</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-comissao" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
@@ -5305,33 +5311,33 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                   <span id="dist-sum-restituicao-total" class="dist-calc-val">0,00</span>
                 </div>
                 
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>IPTU</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-iptu" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Água</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-agua" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Energia (Luz)</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-luz" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Taxa associativa</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-taxa-assoc" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
-                <div class="dist-calc-row">
+                <div class="dist-calc-row dist-standard-only">
                   <span>Outras despesas</span>
                   <span class="dist-calc-val"><input type="text" inputmode="numeric" id="dist-outros" class="dist-calc-input currency-mask" value="0" oninput="calculateDistrato()"></span>
                 </div>
                 
-                <div class="dist-calc-row total-multa">
+                <div class="dist-calc-row total-multa dist-standard-only">
                   <span>Outras Deduções</span>
                   <span id="dist-sum-outras-deducoes" class="dist-calc-val">0,00</span>
                 </div>
                 <div class="dist-calc-row total-restituicao" style="font-size: 1.05rem;">
-                  <span>Restituiçao Líquida (Lei do Distrato)</span>
+                  <span id="dist-liquida-label">Restituiçao Líquida (Lei do Distrato)</span>
                   <span id="dist-sum-restituicao-liquida" class="dist-calc-val">0,00</span>
                 </div>
               </div>
@@ -5344,6 +5350,19 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                 <span style="color:#1e40af; font-weight: 700;">Negociação de Devolução</span>
               </div>
               <div class="dist-block-body">
+                <div style="display: flex; align-items: end; gap: 16px; margin-bottom: 15px; flex-wrap: wrap;">
+                  <div>
+                    <label style="font-size: 0.8rem; font-weight: 700; color: #1e40af; display: block; margin-bottom: 4px;">Seguir com distrato</label>
+                    <select id="dist-iniciativa" class="form-control" style="width: 280px; font-weight: 700; border-color: #93c5fd;">
+                      <option value="cliente">Por iniciativa do cliente</option>
+                      <option value="empresa">Por iniciativa da empresa</option>
+                    </select>
+                  </div>
+                  <div id="dist-permuta-lote-wrap" style="display: none;">
+                    <label for="dist-novo-lote" style="font-size: 0.8rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Lote de compensação (opcional)</label>
+                    <input type="text" id="dist-novo-lote" class="form-control" placeholder="Ex.: lote 08, quadra C4" style="width: 260px;">
+                  </div>
+                </div>
                 <div id="dist-negotiation-options" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
                   <!-- Options rendered dynamically -->
                 </div>
@@ -5351,12 +5370,13 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                 <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
                   <div style="display: flex; gap: 15px; align-items: end;">
                     <div>
-                      <label style="font-size: 0.8rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Opção Escolhida</label>
+                      <label style="font-size: 0.8rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Faixa de devolução</label>
                       <select id="dist-restitution-choice" class="form-control" style="width: 200px; font-weight: 700; border-color: #cbd5e1;" onchange="handleDistratoChoiceChange()">
                         <option value="custom">Personalizado</option>
                         <option value="min">Mínima (55%)</option>
                         <option value="max">Máxima (65%)</option>
                         <option value="lei">Lei do Distrato</option>
+                        <option value="permuta">Permuta (90%)</option>
                       </select>
                     </div>
                     <div id="dist-custom-pct-container" style="display: flex; gap: 10px;">
@@ -5395,6 +5415,75 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                   Estimativa do 1º Pagamento: <strong style="color: #475569;">20 dias corridos após assinatura do termo</strong>
                 </div>
 
+                <div id="dist-payment-block" style="margin-top: 8px; padding: 14px; border: 1px solid #bfdbfe; background: #f8fbff; border-radius: 8px;">
+                  <div style="font-size: 0.85rem; font-weight: 800; color: #1e40af; margin-bottom: 10px;">Dados para crédito (TED ou PIX)</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Beneficiário</label>
+                      <input type="text" id="dist-bank-beneficiary-name" class="form-control" placeholder="Nome completo">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">CPF/CNPJ do beneficiário</label>
+                      <input type="text" id="dist-bank-cpf" class="form-control" placeholder="000.000.000-00">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Forma de pagamento</label>
+                      <select id="dist-bank-transfer-type" class="form-control" onchange="toggleDistratoPaymentFields()">
+                        <option value="PIX">PIX</option>
+                        <option value="TED">TED Bancário</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div id="dist-bank-ted-fields" style="display: none; grid-template-columns: 1.2fr 0.8fr 1fr 0.5fr; gap: 10px; margin-top: 10px;">
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Banco</label>
+                      <input type="text" id="dist-bank-name" class="form-control" placeholder="Nome ou código">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Agência</label>
+                      <input type="text" id="dist-bank-agency" class="form-control">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Conta</label>
+                      <input type="text" id="dist-bank-account" class="form-control">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Dígito</label>
+                      <input type="text" id="dist-bank-digit" class="form-control">
+                    </div>
+                  </div>
+                  <div id="dist-bank-pix-fields" style="display: flex; gap: 10px; margin-top: 10px;">
+                    <div style="width: 160px;">
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Tipo da chave</label>
+                      <select id="dist-bank-pix-type" class="form-control">
+                        <option value="CPF/CNPJ">CPF/CNPJ</option>
+                        <option value="Celular">Celular</option>
+                        <option value="E-mail">E-mail</option>
+                        <option value="Aleatória">Aleatória</option>
+                      </select>
+                    </div>
+                    <div style="flex: 1;">
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Chave PIX</label>
+                      <input type="text" id="dist-bank-pix-key" class="form-control" placeholder="Chave PIX">
+                    </div>
+                  </div>
+                </div>
+
+                <div style="margin-top: 14px; padding: 14px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px;">
+                  <div style="font-size: 0.85rem; font-weight: 800; color: #334155; margin-bottom: 10px;">Testemunhas (quem assina documentos)</div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Testemunha 1</label>
+                      <select id="dist-testemunha-1" class="form-control"></select>
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Testemunha 2</label>
+                      <select id="dist-testemunha-2" class="form-control"></select>
+                    </div>
+                  </div>
+                  <div id="dist-testemunha-hint" style="font-size: 0.75rem; color: #64748b; margin-top: 8px;">Somente usuários com “Assina documentos como testemunha” ligado no cadastro.</div>
+                </div>
+
                 <div style="margin-top: 15px; border-top: 1px solid #e2e8f0; padding-top: 15px; display: flex; gap: 10px;">
                   <button class="btn btn-outline" onclick="generateDemonstrativoDistratoPDF()" style="flex: 1; font-weight: 700; color: #1e40af; border-color: #bfdbfe; background: #eff6ff;">
                     <i data-lucide="calculator" style="width: 16px;"></i> Gerar Cálculo (Demonstrativo)
@@ -5407,21 +5496,6 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
             </div>
           </div>
 
-          <!-- Campos bancários ocultos para o PDF -->
-          <div style="display: none;">
-            <select id="dist-bank-transfer-type"><option value="TED">TED Bancário</option><option value="PIX">PIX</option></select>
-            <input type="text" id="dist-bank-beneficiary-name">
-            <div id="dist-bank-ted-fields">
-              <input type="text" id="dist-bank-name">
-              <input type="text" id="dist-bank-agency">
-              <input type="text" id="dist-bank-account">
-              <input type="text" id="dist-bank-digit">
-            </div>
-            <div id="dist-bank-pix-fields">
-              <select id="dist-bank-pix-type"><option value="CPF">CPF/CNPJ</option></select>
-              <input type="text" id="dist-bank-pix-key">
-            </div>
-            <input type="text" id="dist-bank-cpf">
           </div>
 
         </section>

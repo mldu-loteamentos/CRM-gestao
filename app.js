@@ -10757,8 +10757,19 @@ async function showDistratoView(customer, sale, bills) {
     }
   }
 
+  const permutaEl = document.getElementById("dist-permuta-toggle");
+  if (permutaEl) permutaEl.checked = false;
+  const iniciativaEl = document.getElementById("dist-iniciativa");
+  if (iniciativaEl) iniciativaEl.value = "cliente";
+  const nomeBen = document.getElementById("dist-bank-beneficiary-name");
+  if (nomeBen && !nomeBen.value && customer) nomeBen.value = customer.name || "";
+  const cpfBen = document.getElementById("dist-bank-cpf");
+  if (cpfBen && !cpfBen.value && customer) cpfBen.value = customer.cpfCnpj || "";
+
+  populateDistratoWitnessSelects();
   calculateDistrato();
   toggleDistratoPaymentFields();
+  if (typeof window.toggleDistratoPermuta === "function") window.toggleDistratoPermuta();
 }
 
 function calculateDistrato() {
@@ -10772,8 +10783,10 @@ function calculateDistrato() {
     elTotalPagoCalc.textContent = totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   
+  const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+
   // 1. Multas (Penalty, Fruição, Comissão)
-  const penalty = contractVal * 0.10; // 10% do valor do contrato
+  const penalty = isPermuta ? (totalPaid * 0.10) : (contractVal * 0.10);
   
   // Converte string formatada pt-BR (ex: "1.500,75") para número
   const parseCurrencyInput = (id) => {
@@ -10785,12 +10798,12 @@ function calculateDistrato() {
     return val < 0 ? 0 : val;
   };
   
-  const fruitionMonths = parseCurrencyInput("dist-fruition-months");
+  const fruitionMonths = isPermuta ? 0 : parseCurrencyInput("dist-fruition-months");
   const fruitionRate = 0.0075; // 0.75% a.m.
-  const fruition = contractVal * fruitionRate * fruitionMonths;
+  const fruition = isPermuta ? 0 : (contractVal * fruitionRate * fruitionMonths);
   
-  const comissao = parseCurrencyInput("dist-comissao");
-  const homolog = parseCurrencyInput("dist-homolog");
+  const comissao = isPermuta ? 0 : parseCurrencyInput("dist-comissao");
+  const homolog = isPermuta ? 0 : parseCurrencyInput("dist-homolog");
   
   const totalMulta = penalty + fruition + comissao + homolog;
   
@@ -10798,11 +10811,11 @@ function calculateDistrato() {
   const restituicaoTotal = Math.max(0, totalPaid - totalMulta);
   
   // 2. Despesas
-  const taxaAssoc = parseCurrencyInput("dist-taxa-assoc");
-  const iptu = parseCurrencyInput("dist-iptu");
-  const agua = parseCurrencyInput("dist-agua");
-  const luz = parseCurrencyInput("dist-luz");
-  const outros = parseCurrencyInput("dist-outros");
+  const taxaAssoc = isPermuta ? 0 : parseCurrencyInput("dist-taxa-assoc");
+  const iptu = isPermuta ? 0 : parseCurrencyInput("dist-iptu");
+  const agua = isPermuta ? 0 : parseCurrencyInput("dist-agua");
+  const luz = isPermuta ? 0 : parseCurrencyInput("dist-luz");
+  const outros = isPermuta ? 0 : parseCurrencyInput("dist-outros");
 
   const outrasDeducoes = taxaAssoc + iptu + agua + luz + outros;
   
@@ -10899,9 +10912,10 @@ window.handleDistratoChoiceChange = function() {
   const maxOption = document.querySelector('#dist-restitution-choice option[value="max"]');
   if (maxOption) maxOption.disabled = maxDisabled;
 
-  // Handle chosen option
   const choiceEl = document.getElementById("dist-restitution-choice");
+  if (isPermuta && choiceEl) choiceEl.value = "permuta";
   let choice = choiceEl ? choiceEl.value : "custom";
+  if (isPermuta) choice = "permuta";
   
   if (choice === "min" && minDisabled) {
     choice = "lei";
@@ -10917,7 +10931,11 @@ window.handleDistratoChoiceChange = function() {
   let negotiatedRefund = 0;
   let restitutionPct = 0;
 
-  if (choice === "min") {
+  if (choice === "permuta") {
+    negotiatedRefund = restituicaoLiquida;
+    restitutionPct = totalPaid > 0 ? 90 : 0;
+    if (pctContainer) pctContainer.style.display = "none";
+  } else if (choice === "min") {
     negotiatedRefund = minRefund;
     restitutionPct = 55;
     if (pctContainer) pctContainer.style.display = "none";
@@ -10975,6 +10993,21 @@ window.handleDistratoChoiceChange = function() {
   }
   const refundInstallment = negotiatedRefund / instQty;
 
+  const penaltyLabel = document.getElementById("dist-penalty-label");
+  if (penaltyLabel) penaltyLabel.textContent = isPermuta ? "Multa por permuta (10% do recebido)" : "Multa por Rescisão (10% do contrato)";
+  const liquidaLabel = document.getElementById("dist-liquida-label");
+  if (liquidaLabel) liquidaLabel.textContent = isPermuta ? "Restituição (90% do recebido)" : "Restituiçao Líquida (Lei do Distrato)";
+  document.querySelectorAll(".dist-standard-only").forEach(el => {
+    el.style.display = isPermuta ? "none" : "flex";
+  });
+  const negOpts = document.getElementById("dist-negotiation-options");
+  if (negOpts) negOpts.style.display = isPermuta ? "none" : "grid";
+  const choiceWrap = document.getElementById("dist-restitution-choice");
+  if (choiceWrap && choiceWrap.closest("div")) {
+    const parent = choiceWrap.parentElement;
+    if (parent) parent.style.display = isPermuta ? "none" : "";
+  }
+
   // Preencher DOM
   document.getElementById("dist-calc-penalty").textContent = penalty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   document.getElementById("dist-calc-fruition").textContent = fruition.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -11014,14 +11047,66 @@ window.handleDistratoChoiceChange = function() {
     refundNet: negotiatedRefund,
     instQty,
     refundInstallment,
-    extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros }
+    extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros },
+    isPermuta
   };
 }
 
 function toggleDistratoPaymentFields() {
-  const type = document.getElementById("dist-bank-transfer-type").value;
-  document.getElementById("dist-bank-ted-fields").style.display = type === "TED" ? "flex" : "none";
-  document.getElementById("dist-bank-pix-fields").style.display = type === "PIX" ? "flex" : "none";
+  const typeEl = document.getElementById("dist-bank-transfer-type");
+  const type = typeEl ? typeEl.value : "PIX";
+  const ted = document.getElementById("dist-bank-ted-fields");
+  const pix = document.getElementById("dist-bank-pix-fields");
+  if (ted) ted.style.display = type === "TED" ? "grid" : "none";
+  if (pix) pix.style.display = type === "PIX" ? "flex" : "none";
+}
+
+window.toggleDistratoPermuta = function() {
+  const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  const loteWrap = document.getElementById("dist-permuta-lote-wrap");
+  if (loteWrap) loteWrap.style.display = on ? "block" : "none";
+  const choiceEl = document.getElementById("dist-restitution-choice");
+  if (choiceEl) choiceEl.value = on ? "permuta" : (choiceEl.value === "permuta" ? "lei" : choiceEl.value);
+  calculateDistrato();
+};
+
+function getDistratoWitnessUsers() {
+  let users = [];
+  try { users = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) {}
+  if ((!users || !users.length) && window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users)) {
+    users = ConfigUsersApp.users;
+  }
+  return (users || []).filter(u => u && u.assina_testemunha && String(u.status || "").toUpperCase() !== "INATIVO");
+}
+
+function populateDistratoWitnessSelects() {
+  const users = getDistratoWitnessUsers();
+  const hint = document.getElementById("dist-testemunha-hint");
+  const opts = ['<option value="">Selecione...</option>'].concat(users.map(u => {
+    const cpf = u.doc_cpf || u.cpf || "";
+    return `<option value="${u.id}">${u.name}${cpf ? " — " + cpf : ""}</option>`;
+  }));
+  ["dist-testemunha-1", "dist-testemunha-2"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const prev = el.value;
+    el.innerHTML = opts.join("");
+    if (prev && users.some(u => String(u.id) === String(prev))) el.value = prev;
+  });
+  if (hint) {
+    hint.textContent = users.length
+      ? "Somente usuários com “Assina documentos como testemunha” ligado no cadastro."
+      : "Nenhum usuário marcado como testemunha. Ligue o botão no cadastro de usuários.";
+  }
+}
+
+function getDistratoWitnessBySelect(id) {
+  const el = document.getElementById(id);
+  const uid = el ? el.value : "";
+  if (!uid) return { nome: "", cpf: "" };
+  const u = getDistratoWitnessUsers().find(x => String(x.id) === String(uid));
+  if (!u) return { nome: "", cpf: "" };
+  return { nome: u.name || "", cpf: u.doc_cpf || u.cpf || u.doc_rg || u.rg || "" };
 }
 
 function numeroPorExtenso(n) {
