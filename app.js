@@ -11469,7 +11469,8 @@ window.generateDemonstrativoDistratoPDF = function() {
   }, 500);
 }
 
-window.openBoletoPdf = async function(billId, instId, btnElement) {
+window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
+  opts = opts || {};
   let originalHtml = "";
   if (btnElement) {
     originalHtml = btnElement.innerHTML;
@@ -11496,17 +11497,29 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
     } catch(e) {}
   }
 
-  const firstInstId = Array.isArray(instId) ? instId[0] : instId;
+  const instIds = (Array.isArray(instId) ? instId : [instId]).filter(id => id != null && id !== "");
+  const retries = Math.max(1, Number(opts.retries) || 1);
 
   try {
-    const data = await SiengeApiService.getPaymentSlipNotification(billId, firstInstId);
-    if (data && data.results && data.results.length > 0) {
-      const boletoInfo = data.results[0];
+    let boletoInfo = null;
+    for (let attempt = 0; attempt < retries && !boletoInfo; attempt++) {
+      for (const oneId of instIds) {
+        const data = await SiengeApiService.getPaymentSlipNotification(billId, oneId);
+        if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
+          boletoInfo = data.results[0];
+          break;
+        }
+      }
+      if (!boletoInfo && attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, 1800));
+      }
+    }
+
+    if (boletoInfo) {
       const urlReport = boletoInfo.urlReport;
-      const digitableNumber = boletoInfo.digitableNumber;
-
-      alert(`BOLETO ENCONTRADO!\n\nO boleto será aberto em uma nova guia. Para a senha do PDF, é só dar Ctrl+V (o CPF/CNPJ já foi copiado).`);
-
+      if (!opts.quiet) {
+        alert(`BOLETO ENCONTRADO!\n\nO boleto será aberto em uma nova guia. Para a senha do PDF, é só dar Ctrl+V (o CPF/CNPJ já foi copiado).`);
+      }
       if (urlReport) {
         const getDomText = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ""; };
         const customerName = customer ? (customer.name || "Cliente") : "Cliente";
@@ -11525,12 +11538,16 @@ window.openBoletoPdf = async function(billId, instId, btnElement) {
         });
         window.openNamedSiengePdf(urlReport, fileName);
       }
-    } else {
+      return true;
+    }
+    if (!opts.quiet) {
       alert("Não foi possível localizar o link deste boleto no Sienge.");
     }
+    return false;
   } catch (err) {
     console.error(err);
-    alert("Erro ao buscar informações do boleto no Sienge.");
+    if (!opts.quiet) alert("Erro ao buscar informações do boleto no Sienge.");
+    return false;
   } finally {
     if (btnElement) {
       btnElement.innerHTML = originalHtml;
@@ -11907,8 +11924,16 @@ window.submitReprocessBoleto = async function() {
 
     console.log("[CRM Boleto] Payload enviado ao Sienge:", JSON.stringify(payload, null, 2));
     const result = await SiengeApiService.createOverdueBill(payload);
+    console.log("[CRM Boleto] Resposta Sienge:", result);
     
-    const parcelasLog = Array.isArray(currentReprocessInstId) ? currentReprocessInstId.join(", ") : currentReprocessInstId;
+    const billId = currentReprocessBillId;
+    const instIds = resolvedInstIds.slice();
+    const customerId = AppState.selectedCustomerId;
+    const custKey = (typeof window.normalizeCustomerNotesKey === "function")
+      ? window.normalizeCustomerNotesKey(customerId)
+      : customerId;
+
+    const parcelasLog = instIds.join(", ");
     const checkDate = window.addDaysIso(dueDate, 1);
     const checkDateBr = checkDate ? new Date(checkDate + "T12:00:00").toLocaleDateString("pt-BR") : "";
     const boletoText = `Boleto gerado. Parcelas Originais ID: ${parcelasLog} | Novo Vencimento: ${dueDate} | Multa: ${fine}% | Juros: ${interest}% | Lembrete automático: Checar pagamento em ${checkDateBr} (D+1)`;
@@ -11934,12 +11959,11 @@ window.submitReprocessBoleto = async function() {
 
     const finalPromessaText = userText ? `${userText}\n[SISTEMA]: ${boletoText}` : `[SISTEMA]: ${boletoText}`;
 
-    // Gera ocorrência com lembrete automático de checagem (banco confirma no D+1)
     const occurrence = {
       id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `prom_${Date.now()}-${Math.random().toString(36).slice(2)}`,
       date: new Date().toISOString(),
       author: AppState.currentUser ? AppState.currentUser.name : (window.LOGGED_USER_NAME || "Operador"),
-      saleId: AppState.selectedSaleId || null,
+      saleId: AppState.selectedSaleId || billId || null,
       text: finalPromessaText,
       boletoDueDate: dueDate,
       checkPaymentDate: checkDate,
@@ -11952,22 +11976,32 @@ window.submitReprocessBoleto = async function() {
       pastTexts: []
     };
 
-    if (!AppState.notes[AppState.selectedCustomerId]) {
-      AppState.notes[AppState.selectedCustomerId] = [];
-    }
-    AppState.notes[AppState.selectedCustomerId].push(occurrence);
+    if (!AppState.notes) AppState.notes = {};
+    const existing = (typeof window.getCustomerNotesList === "function")
+      ? window.getCustomerNotesList(AppState.notes, custKey)
+      : (AppState.notes[custKey] || AppState.notes[customerId] || []);
+    AppState.notes[custKey] = existing.concat([occurrence]);
     localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-    if (window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId);
+    if (window.saveNotesToFirebase) {
+      await window.saveNotesToFirebase(custKey);
+    }
     if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
+    if (typeof renderAgendaCalendar === "function") renderAgendaCalendar();
 
-    alert("Boleto gerado. Lembrete automático 'Checar pagamento' agendado para D+1 do vencimento.");
+    btn.innerHTML = originalHtml;
+    btn.disabled = false;
     closeReprocessModal();
-    
-    // Atualiza listagem
-    loadCustomerBoletos(AppState.selectedCustomerId, currentReprocessBillId);
 
-    // Faz a varredura e abre o boleto gerado
-    await window.openBoletoPdf(currentReprocessBillId, currentReprocessInstId, null);
+    if (typeof loadCustomerBoletos === "function") {
+      try { await loadCustomerBoletos(customerId, billId); } catch (e) { console.warn(e); }
+    }
+
+    const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 5 });
+    if (opened) {
+      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' (D+1) foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V).");
+    } else {
+      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela aba Boletos em alguns segundos.");
+    }
 
   } catch (e) {
     console.error("Erro ao gerar boleto:", e);
@@ -16701,12 +16735,13 @@ window.isBoletoGeradoOccurrence = function(n) {
 
 window.isTitulo4868BoletoOccurrence = function(n, customerId) {
   if (!n) return false;
+  const tRaw = String(n.text || "").replace(/\u00a0/g, " ").trim().toUpperCase().replace(/\s+/g, " ");
+  if (tRaw.includes("[SISTEMA]") && tRaw.includes("BOLETO GERADO")) return false;
   const sale = String(n.saleId != null ? n.saleId : (n.titulo || "")).trim();
   const cid = String(customerId != null ? customerId : (n.customerId || "")).trim();
   if (sale !== "4868" && cid !== "5187") return false;
-  const t = String(n.text || "").replace(/\u00a0/g, " ").trim().toUpperCase().replace(/\s+/g, " ");
-  if (!t.includes("TESTE")) return false;
-  return t === "TESTE" || t.indexOf("BOLETO GERADO") !== -1 || !!n.checkPayment;
+  if (!tRaw.includes("TESTE")) return false;
+  return tRaw === "TESTE" || tRaw.indexOf("BOLETO GERADO") !== -1 || !!n.checkPayment;
 };
 
 window.stripBoletoNotesTitulo4868FromState = function() {
