@@ -1,4 +1,4 @@
-/* CSS Principal - Moura Leite CRM de Cobrança */
+/* CSS Principal - Moura Leite CRM de Cobran?a */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
 :root {
@@ -11,8 +11,8 @@
   --color-secondary-hover: #ff9d5c; /* Laranja Moura Suave */
   --color-bg-dark: #0c291d; /* Verde Escuro Profundo (Sidebar) */
   --color-bg-light: #f4f7f5; /* Fundo Suave */
-  --color-text-dark: #1c2e24; /* Texto Legível */
-  --color-text-muted: #6b8474; /* Texto Secundário */
+  --color-text-dark: #1c2e24; /* Texto Leg?vel */
+  --color-text-muted: #6b8474; /* Texto Secund?rio */
   --color-white: #ffffff;
   
   /* Cores de Alerta */
@@ -143,7 +143,7 @@ body {
   margin-bottom: 2.5rem;
 }
 
-/* Simulação da Logo Árvore + Sol Laranja */
+/* Simula??o da Logo ?rvore + Sol Laranja */
 .brand-logo-container {
   width: 48px;
   height: 48px;
@@ -296,7 +296,7 @@ body {
   border-color: var(--color-danger);
 }
 
-/* Área de Conteúdo Principal */
+/* ?rea de Conte?do Principal */
 .main-content {
   margin-left: 280px;
   width: calc(100% - 280px);
@@ -451,7 +451,7 @@ body {
   color: var(--color-info);
 }
 
-/* Painéis de Busca e Filtros */
+/* Pain?is de Busca e Filtros */
 .search-filter-panel {
   background: var(--color-white);
   border-radius: var(--border-radius-md);
@@ -563,12 +563,15 @@ body {
   border-color: var(--color-primary);
 }
 
-/* Estilo para Abas Rápidas de Operadores */
+/* Estilo para Abas R?pidas de Operadores */
 .operator-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
+  overflow: visible;
   padding-bottom: 4px;
+  width: 100%;
+  min-width: 0;
 }
 
 .operator-tab-btn {
@@ -595,7 +598,7 @@ body {
   color: var(--color-white);
 }
 
-/* Tabelas e Exibições */
+/* Tabelas e Exibi??es */
 .table-container {
   background: var(--color-white);
   border-radius: var(--border-radius-md);
@@ -701,7 +704,7 @@ body {
   color: var(--color-text-muted);
 }
 
-/* Detalhe de Regra de Cobrança */
+/* Detalhe de Regra de Cobran?a */
 .rule-tag {
   font-size: 0.75rem;
   font-weight: 600;
@@ -713,7 +716,7 @@ body {
   margin-top: 4px;
 }
 
-/* Botões */
+/* Bot?es */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -831,7 +834,7 @@ body {
   color: var(--color-text-dark);
 }
 
-/* Histórico de Conversas e Ocorrências */
+/* Hist?rico de Conversas e Ocorr?ncias */
 .history-timeline {
   display: flex;
   flex-direction: column;
@@ -875,7 +878,7 @@ body {
   align-items: center;
 }
 
-/* Form de Ocorrências */
+/* Form de Ocorr?ncias */
 .notes-form {
   display: flex;
   flex-direction: column;
@@ -916,7 +919,7 @@ body {
   border-color: var(--color-primary);
 }
 
-/* Calculadora de Renegociação e Distrato */
+/* Calculadora de Renegocia??o e Distrato */
 .calculator-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -955,7 +958,7 @@ body {
   margin-top: 8px;
 }
 
-/* Dashboard de Prospecção de Carteira */
+/* Dashboard de Prospec??o de Carteira */
 .chart-box-container {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -970,7 +973,7 @@ body {
   border: 1px solid rgba(16, 84, 54, 0.05);
 }
 
-/* Simulação Gráfica usando divs/flexbox e efeitos premium */
+/* Simula??o Gr?fica usando divs/flexbox e efeitos premium */
 .bar-chart-container {
   display: flex;
   align-items: flex-end;
@@ -1104,8 +1107,8 @@ body {
   color: #000;
 }
 
-/* Responsividade Básica */
-/* Responsividade Básica */
+/* Responsividade B?sica */
+/* Responsividade B?sica */
 @media (max-width: 1024px) {
   .crm-layout {
     grid-template-columns: 1fr;
@@ -1120,7 +1123,7 @@ body {
 }
 
 /* ====================================================
-   NOVOS COMPONENTES E ESTILOS - MULTI-SELECT E GRÁFICOS
+   NOVOS COMPONENTES E ESTILOS - MULTI-SELECT E GR?FICOS
    ==================================================== */
 
 /* Custom Multi-select Dropdown */
@@ -1292,7 +1295,7 @@ rect.lot-rect:hover {
   display: none;
 }
 
-/* Gráfico de Rosca SVG */
+/* Gr?fico de Rosca SVG */
 circle.donut-ring {
   fill: none;
   stroke: #eaeded;
@@ -1309,7 +1312,7 @@ circle.donut-segment {
   background-color: rgba(16, 84, 54, 0.08) !important;
 }
 
-/* Estilos para o Calendário da Agenda */
+/* Estilos para o Calend?rio da Agenda */
 .calendar-grid-container {
   background: var(--color-white);
   border-radius: 8px;

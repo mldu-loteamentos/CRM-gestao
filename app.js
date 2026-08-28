@@ -52,23 +52,34 @@ if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
 // getDynamicOperators was removed from here because it is defined at the end of the file.
 
 window.updateOperatorTabsUI = function(useActualData = true) {
-  const dynOps = window.getDynamicOperators();
-  
-  let opsToShow = dynOps;
+  const dynOps = window.getDynamicOperators() || [];
+  const normOp = (s) => String(s || "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\./g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let opsToShow = dynOps.slice();
   if (useActualData) {
+      const clients = window.rawClientList || [];
       const allBills = [
         ...(window.AppState && window.AppState.defaultersBills ? window.AppState.defaultersBills : []),
         ...(window.AppState && window.AppState.subjudiceBills ? window.AppState.subjudiceBills : []),
         ...(window.AppState && window.AppState.zeroPaidBills ? window.AppState.zeroPaidBills : [])
       ];
-      if (allBills.length > 0) {
-          let activeSet = new Set();
-          allBills.forEach(b => {
-              if (b.assignedOperator && b.assignedOperator !== "NÃO ATRIBUÍDO" && b.assignedOperator !== "TODOS" && b.assignedOperator !== "OUTROS") {
-                  activeSet.add(b.assignedOperator.toUpperCase().trim());
-              }
-          });
-          opsToShow = dynOps.filter(op => activeSet.has(op.toUpperCase().trim()));
+      const activeSet = new Set();
+      const addOp = (op) => {
+          const n = normOp(op);
+          if (!n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS") return;
+          activeSet.add(n);
+      };
+      clients.forEach(c => addOp(c.assignedOperator));
+      allBills.forEach(b => addOp(b.assignedOperator));
+      if (activeSet.size > 0) {
+          const matched = dynOps.filter(op => activeSet.has(normOp(op)));
+          opsToShow = matched.length ? matched : Array.from(activeSet).sort((a, b) => a.localeCompare(b, "pt-BR"));
       }
   }
 
