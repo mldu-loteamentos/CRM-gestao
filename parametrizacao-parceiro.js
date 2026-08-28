@@ -439,24 +439,10 @@ const ParametrizacaoParceiroApp = {
     if (p) this.render();
   },
 
-  updateCreditorShare(value) {
-    const p = this.current();
-    if (!p) return;
-    p.creditor = p.creditor || {};
-    const raw = String(value).trim();
-    if (raw === "") p.creditor.sharePct = "";
-    else {
-      const n = Number(String(raw).replace(",", "."));
-      if (!Number.isFinite(n)) return;
-      p.creditor.sharePct = Math.max(0, Math.min(100, n));
-    }
-    this.persist();
-  },
-
   clearCreditor() {
     const p = this.current();
     if (!p) return;
-    p.creditor = { id: "", name: "", cpfCnpj: "", sharePct: (p.creditor && p.creditor.sharePct) || "" };
+    p.creditor = { id: "", name: "", cpfCnpj: "" };
     this.creditorQuery = "";
     this.creditorHits = [];
     this.persist();
@@ -488,39 +474,90 @@ const ParametrizacaoParceiroApp = {
     this._creditorTimer = setTimeout(() => this.runCreditorSearch(val), 280);
   },
 
+  normSearch(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  },
+
   mapCreditor(raw, fallbackId) {
     if (!raw) return null;
-    const id = raw.id || raw.creditorId || fallbackId || "";
-    const name = raw.name || raw.nome || raw.fantasyName || raw.corporateName || raw.companyName || "";
-    const cpfCnpj = raw.cpfCnpj || raw.cnpj || raw.cpf || raw.document || "";
+    let src = raw;
+    if (typeof raw.raw_data === "string") {
+      try { src = { ...JSON.parse(raw.raw_data), ...raw }; } catch (e) {}
+    }
+    const id = src.id || src.creditorId || fallbackId || "";
+    const name = src.name || src.nome || raw.name || raw.nome || src.fantasyName || src.tradeName
+      || src.corporateName || src.companyName || src.creditorName || "";
+    const cpfCnpj = src.cpfCnpj || src.cnpj || src.cpf || src.document || raw.cpfCnpj || "";
     if (!id && !name) return null;
     return { id: String(id), name: String(name), cpfCnpj: String(cpfCnpj) };
   },
 
+  creditorMatches(c, qRaw) {
+    const q = this.normSearch(qRaw);
+    const digits = String(qRaw || "").replace(/\D/g, "");
+    if (!q && digits.length < 3) return false;
+    const name = this.normSearch(c.name);
+    const doc = String(c.cpfCnpj || "").replace(/\D/g, "");
+    const id = String(c.id || "");
+    const terms = q.split(/\s+/).filter(Boolean);
+    const nameOk = terms.length && terms.every(t => name.includes(t));
+    const docOk = digits.length >= 3 && doc.includes(digits);
+    const idOk = q && id.toLowerCase().includes(q);
+    return nameOk || docOk || idOk;
+  },
+
   async loadFirebaseCreditors() {
-    if (this._creditorIndex) return this._creditorIndex;
+    if (this._creditorIndex && this._creditorIndex.length) return this._creditorIndex;
     const out = [];
-    if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDocs) {
-      this._creditorIndex = [];
-      return this._creditorIndex;
+    const seen = new Set();
+    const push = (mapped) => {
+      if (!mapped || mapped.id === "") return;
+      if (seen.has(mapped.id)) return;
+      seen.add(mapped.id);
+      out.push(mapped);
+    };
+
+    if (window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDocs) {
+      const { collection, getDocs } = window.firebaseCollections;
+      for (const col of ["sienge_creditors", "creditors"]) {
+        try {
+          const snap = await getDocs(collection(window.firebaseDb, col));
+          snap.forEach(d => push(this.mapCreditor(d.data(), d.id)));
+          if (out.length) break;
+        } catch (e) {}
+      }
     }
-    const { collection, getDocs } = window.firebaseCollections;
-    for (const col of ["sienge_creditors", "creditors"]) {
+
+    if (!out.length) {
       try {
-        const snap = await getDocs(collection(window.firebaseDb, col));
-        snap.forEach(d => {
-          const mapped = this.mapCreditor(d.data(), d.id);
-          if (mapped) out.push(mapped);
-        });
-        if (out.length) break;
-      } catch (e) {}
+        const headers = { Authorization: typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "" };
+        let offset = 0;
+        const limit = 200;
+        for (let page = 0; page < 50; page++) {
+          const res = await fetch(this.proxyUrl(`/sienge-proxy/creditors?limit=${limit}&offset=${offset}`), { headers });
+          if (!res.ok) break;
+          const json = await res.json();
+          const rows = json.results || json.resultSet || json.data || [];
+          if (!rows.length) break;
+          rows.forEach(r => push(this.mapCreditor(r)));
+          if (rows.length < limit) break;
+          offset += limit;
+        }
+      } catch (e) {
+        console.warn("[Parcerias] Falha ao carregar base de credores:", e);
+      }
     }
+
     this._creditorIndex = out;
     return out;
   },
 
   async runCreditorSearch(val) {
-    const q = String(val || "").trim().toLowerCase();
+    const q = String(val || "").trim();
     const digits = q.replace(/\D/g, "");
     const box = document.getElementById("pp-cred-sugg");
     if (q.length < 2 && digits.length < 3) {
@@ -529,42 +566,13 @@ const ParametrizacaoParceiroApp = {
       return;
     }
     this.creditorSearching = true;
-    if (box) box.innerHTML = `<div style="padding:8px 10px;font-size:0.78rem;color:#64748b;">Buscando credor...</div>`;
-    let hits = [];
+    const loading = this._creditorIndex && this._creditorIndex.length
+      ? "Buscando credor..."
+      : "Carregando base de credores...";
+    if (box) box.innerHTML = `<div style="padding:8px 10px;font-size:0.78rem;color:#64748b;">${loading}</div>`;
     const index = await this.loadFirebaseCreditors();
-    if (index.length) {
-      hits = index.filter(c => {
-        const name = String(c.name || "").toLowerCase();
-        const doc = String(c.cpfCnpj || "").replace(/\D/g, "");
-        return name.includes(q) || (digits.length >= 3 && doc.includes(digits)) || String(c.id).includes(q);
-      }).slice(0, 15);
-    }
-    if (!hits.length) {
-      try {
-        const headers = { Authorization: typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "" };
-        const tries = [];
-        if (q.length >= 2) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&name=${encodeURIComponent(val)}`));
-        if (digits.length === 11) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&cpf=${digits}`));
-        if (digits.length === 14) tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&cnpj=${digits}`));
-        if (digits.length >= 3 && digits.length !== 11 && digits.length !== 14) {
-          tries.push(this.proxyUrl(`/sienge-proxy/creditors?limit=20&id=${digits}`));
-        }
-        for (const url of tries) {
-          const res = await fetch(url, { headers });
-          if (!res.ok) continue;
-          const json = await res.json();
-          const rows = json.results || json.resultSet || json.data || [];
-          rows.forEach(r => {
-            const mapped = this.mapCreditor(r);
-            if (mapped && !hits.some(h => String(h.id) === String(mapped.id))) hits.push(mapped);
-          });
-          if (hits.length) break;
-        }
-      } catch (e) {
-        console.warn("[Parcerias] Busca de credor:", e);
-      }
-    }
-    this.creditorHits = hits.slice(0, 15);
+    const hits = index.filter(c => this.creditorMatches(c, q)).slice(0, 15);
+    this.creditorHits = hits;
     this.creditorSearching = false;
     if (box) box.innerHTML = this.creditorSuggHtml();
   },
@@ -829,9 +837,9 @@ const ParametrizacaoParceiroApp = {
 
         <div class="crm-card" style="padding:16px;">
           <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Credor (título a pagar)</h3>
-          <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque na base de credores por nome, CPF ou CNPJ. O percentual entra na geração do título a pagar.</p>
+          <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque o credor por nome, CPF ou CNPJ, como na consulta de clientes.</p>
           ${cred.id ? `
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
               <div>
                 <div style="font-weight:800;color:#065f46;">${this.esc(cred.name)}</div>
                 <div style="font-size:0.75rem;color:#047857;">ID ${this.esc(cred.id)} · ${this.esc(cred.cpfCnpj || "sem documento")}</div>
@@ -844,11 +852,6 @@ const ParametrizacaoParceiroApp = {
               style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
             <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
           `}
-          <label style="margin-top:12px;font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;max-width:220px;">Percentual do credor no título (%)
-            <input type="number" min="0" max="100" step="0.01" value="${cred.sharePct === 0 || cred.sharePct ? cred.sharePct : ""}"
-              placeholder="ex.: 44" onchange="ParametrizacaoParceiroApp.updateCreditorShare(this.value)"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-          </label>
         </div>
 
         <div class="crm-card" style="padding:16px;overflow:hidden;">

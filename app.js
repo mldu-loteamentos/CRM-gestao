@@ -1782,7 +1782,7 @@ async function initializeApplication() {
       return store;
   };
 
-  window.applyRemoteNotes = function(local, remote) {
+  window.applyRemoteNotes = function(local, remote, customerId) {
       const remoteList = window.stripExactTesteNotes(remote);
       const localList = window.stripExactTesteNotes(local);
       const remoteKeys = new Set(remoteList.map(n => window.occurrenceIdentity(n)));
@@ -1790,13 +1790,15 @@ async function initializeApplication() {
       const now = Date.now();
       const extras = [];
       const purgedIds = new Set(typeof window.getPurgedBoleto4868Identities === "function" ? window.getPurgedBoleto4868Identities() : []);
+      const drop = (n) => purgedIds.has(window.occurrenceIdentity(n))
+        || (typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerId));
       localList.forEach(n => {
           const k = window.occurrenceIdentity(n);
-          if (!k || remoteKeys.has(k) || purgedIds.has(k)) return;
+          if (!k || remoteKeys.has(k) || drop(n)) return;
           const ts = new Date(n.date).getTime();
           if (Number.isFinite(ts) && ts <= now && (now - ts) < graceMs) extras.push(n);
       });
-      return remoteList.filter(n => !purgedIds.has(window.occurrenceIdentity(n))).concat(extras);
+      return remoteList.filter(n => !drop(n)).concat(extras);
   };
 
   window.getCustomerNotesList = function(store, customerId) {
@@ -1928,7 +1930,7 @@ async function initializeApplication() {
                      for (const [key, val] of Object.entries(data)) {
                          const remote = Array.isArray(val) ? val : [];
                          const local = window.getCustomerNotesList(AppState.notes, key);
-                         AppState.notes[String(key)] = window.applyRemoteNotes(local, remote);
+                         AppState.notes[String(key)] = window.applyRemoteNotes(local, remote, key);
                          hasUpdates = true;
                      }
                  });
@@ -1999,7 +2001,7 @@ async function initializeApplication() {
                const notesToSave = window.stripExactTesteNotes(window.mergeOccurrenceLists(
                    window.getCustomerNotesList(AppState.notes, customerKey),
                    window.getCustomerNotesList(AppState.notes, customerId)
-               ));
+               )).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
                AppState.notes[customerKey] = notesToSave;
                if (!notesToSave.length) {
                    console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
@@ -2050,7 +2052,7 @@ async function initializeApplication() {
         if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const remote = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
         const local = window.getCustomerNotesList(AppState.notes, customerKey);
-        const merged = window.applyRemoteNotes(local, remote);
+        const merged = window.applyRemoteNotes(local, remote, customerKey);
         AppState.notes[customerKey] = merged;
         try {
           window._isFirebaseSyncing = true;
@@ -2761,9 +2763,16 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
 }
 
 window.nexAgingActionHtml = function(client) {
+  const special = (typeof window.nexAgingSpecialHtml === "function") ? window.nexAgingSpecialHtml(client) : "";
+  if (special) return special;
+  return getDelayBadgeHtml(Number(client && client.maxDaysDelay) || 0, !!(client && client.isZeroPaid));
+};
+
+window.nexAgingSpecialHtml = function(client) {
   if (!client) return "";
   const days = Number(client.maxDaysDelay) || 0;
-  const isZero = !!(client.isZeroPaid || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
+  const percKnownZero = client.percPaid != null && Number(client.percPaid) === 0;
+  const isZero = !!(client.isZeroPaid || percKnownZero || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
   const ccConfig = (typeof window.nexCcConfig === "function")
     ? window.nexCcConfig(client.costCenterId, client.unitName)
     : {};
@@ -2774,8 +2783,9 @@ window.nexAgingActionHtml = function(client) {
     window.nexHasLetter(client.customerId, client.saleId) ||
     (titleHint && window.nexHasLetter(client.customerId, titleHint))
   );
+  const suspensivaDias = Number(ccConfig.clausula_suspensiva_dias) || 30;
 
-  if (ccConfig.clausula_suspensiva_ativa && days >= (Number(ccConfig.clausula_suspensiva_dias) || 30)) {
+  if (ccConfig.clausula_suspensiva_ativa && days >= suspensivaDias) {
     return `
       <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Gerar termo de suspensão (PDF)">
         <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${days} dias - Suspender
@@ -2789,7 +2799,7 @@ window.nexAgingActionHtml = function(client) {
       </button>
     `;
   }
-  return getDelayBadgeHtml(days, isZero);
+  return "";
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
@@ -3563,7 +3573,7 @@ document.addEventListener("click", function(e) {
         unitName: bill.units || billUnity,
         unitId: `U-${bill.companyId || 2}-${billUnity.replace(/\s+/g, '')}`,
         subjudice: isSubjudiceStr,
-        percPaid: 0,
+        percPaid: null,
         assignedOperator: "LETÍCIA",
         appliedRule: "Atribuição Direta (Empresa 2)",
         overdueValue: 0,
@@ -3655,6 +3665,23 @@ document.addEventListener("click", function(e) {
       }
     }
   });
+
+  const salesForZero = (window.AppState && AppState.sales) || [];
+  if (salesForZero.length) {
+    Object.values(consolidated).forEach(c => {
+      const sale = salesForZero.find(s =>
+        String(s.receivableBillId) === String(c.saleId) ||
+        String(s.id) === String(c.saleId) ||
+        (c.billIds || []).some(id => {
+          const t = String(id || "").replace(/^B-/, "").split("-")[0];
+          return String(s.receivableBillId) === t || String(s.id) === t;
+        })
+      );
+      if (!sale || sale.percPaid == null) return;
+      c.percPaid = Number(sale.percPaid);
+      if (Number(sale.percPaid) === 0) c.isZeroPaid = true;
+    });
+  }
 
   // ---------------------------------------------------------
   // Nova Passagem: Atribuição Final de Operador Baseada na Régua
@@ -4382,8 +4409,9 @@ document.addEventListener("click", function(e) {
                           </span>`;
                       }
                   }
-                  if (client.isZeroPaid) {
-                      return window.nexAgingActionHtml(client);
+                  if (typeof window.nexAgingSpecialHtml === "function") {
+                      const nexSpecial = window.nexAgingSpecialHtml(client);
+                      if (nexSpecial) return nexSpecial;
                   }
                   return client.maxDaysDelay >= thresholdJuridico ? `
                   <button onclick="enviarParaJuridico(${client.customerId}, ${client.saleId})" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fca5a5; background-color: #fee2e2; color: #991b1b; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#fecaca'; this.style.borderColor='#f87171'" onmouseout="this.style.backgroundColor='#fee2e2'; this.style.borderColor='#fca5a5'" title="Clique para enviar ao Jurídico">
@@ -11517,8 +11545,9 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       accountSelect.innerHTML = '';
       usable.forEach(acc => {
         const option = document.createElement('option');
-        const value = acc.checkingAccountId || acc.accountNumber || acc.id;
+        const value = acc.checkingAccountId || acc.id || acc.accountNumber;
         option.value = value;
+        option.dataset.checkingAccountId = acc.checkingAccountId || acc.id || "";
         option.dataset.accountNumber = acc.accountNumber || "";
         option.textContent = `${acc.accountNumber || value} - ${acc.accountName || acc.name || 'Conta corrente'}`;
         accountSelect.appendChild(option);
@@ -11577,13 +11606,12 @@ window.submitReprocessBoleto = async function() {
   const accountSelectEl = document.getElementById('reprocess-account');
   const accountRaw = accountSelectEl ? accountSelectEl.value : "";
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
-  const accountNumberLabel = (selectedOpt && selectedOpt.dataset.accountNumber) || accountRaw;
+  const accountFromData = selectedOpt && selectedOpt.dataset.checkingAccountId;
   let account = NaN;
-  if (/^\d+$/.test(String(accountRaw).trim())) {
+  if (accountFromData && /^\d+$/.test(String(accountFromData).trim())) {
+    account = parseInt(String(accountFromData).trim(), 10);
+  } else if (/^\d+$/.test(String(accountRaw).trim())) {
     account = parseInt(String(accountRaw).trim(), 10);
-  } else {
-    const head = String(accountRaw || "").split(/[^\d]/).find(p => p.length >= 3);
-    account = head ? parseInt(head, 10) : NaN;
   }
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
@@ -11635,17 +11663,16 @@ window.submitReprocessBoleto = async function() {
     const installmentsArray = resolvedInstIds.map(id => ({ "installmentId": id }));
 
     const payload = {
-      "receivableBillId": currentReprocessBillId,
-      "companyId": companyId,
-      "checkingAccountId": account,
-      "accountNumber": accountNumberLabel || undefined,
-      "newDueDate": dueDate,
-      "interestPercentage": interest,
-      "finePercentage": fine,
-      "insurancepercentage": 0,
-      "correctAnnualInstallment": false,
-      "groupedInstalments": false,
-      "installments": installmentsArray
+      receivableBillId: Number(currentReprocessBillId),
+      companyId: Number(companyId),
+      checkingAccountId: Number(account),
+      newDueDate: dueDate,
+      interestPercentage: interest,
+      finePercentage: fine,
+      insurancePercentage: 0,
+      correctAnnualInstallment: false,
+      groupedInstalments: false,
+      installments: installmentsArray
     };
 
     console.log("[CRM Boleto] Payload enviado ao Sienge:", JSON.stringify(payload, null, 2));
@@ -16356,10 +16383,14 @@ window.isBoletoGeradoOccurrence = function(n) {
   return t.indexOf("BOLETO GERADO") !== -1 || r === "boleto gerado" || r === "checar pagamento";
 };
 
-window.isTitulo4868BoletoOccurrence = function(n) {
-  if (!n || !window.isBoletoGeradoOccurrence(n)) return false;
+window.isTitulo4868BoletoOccurrence = function(n, customerId) {
+  if (!n) return false;
   const sale = String(n.saleId != null ? n.saleId : (n.titulo || "")).trim();
-  return sale === "4868";
+  const cid = String(customerId != null ? customerId : (n.customerId || "")).trim();
+  if (sale !== "4868" && cid !== "5187") return false;
+  const t = String(n.text || "").replace(/\u00a0/g, " ").trim().toUpperCase().replace(/\s+/g, " ");
+  if (!t.includes("TESTE")) return false;
+  return t === "TESTE" || t.indexOf("BOLETO GERADO") !== -1 || !!n.checkPayment;
 };
 
 window.stripBoletoNotesTitulo4868FromState = function() {
@@ -16368,7 +16399,7 @@ window.stripBoletoNotesTitulo4868FromState = function() {
   Object.keys(AppState.notes).forEach(cid => {
     const list = AppState.notes[cid];
     if (!Array.isArray(list)) return;
-    const next = list.filter(x => !window.isTitulo4868BoletoOccurrence(x));
+    const next = list.filter(x => !window.isTitulo4868BoletoOccurrence(x, cid));
     n += list.length - next.length;
     AppState.notes[cid] = next;
   });
@@ -16414,7 +16445,7 @@ window.purgeBoletoNotesTitulo4868 = async function() {
       const list = AppState.notes[cid];
       if (!Array.isArray(list)) return;
       list.forEach(x => {
-        if (window.isTitulo4868BoletoOccurrence(x)) found.push(window.occurrenceIdentity(x));
+        if (window.isTitulo4868BoletoOccurrence(x, cid)) found.push(window.occurrenceIdentity(x));
       });
     });
   }
@@ -16437,9 +16468,9 @@ window.purgeBoletoNotesTitulo4868 = async function() {
       Object.keys(data).forEach(k => {
         if (!Array.isArray(data[k])) return;
         data[k].forEach(x => {
-          if (window.isTitulo4868BoletoOccurrence(x)) found.push(window.occurrenceIdentity(x));
+          if (window.isTitulo4868BoletoOccurrence(x, k)) found.push(window.occurrenceIdentity(x));
         });
-        const filtered = data[k].filter(x => !window.isTitulo4868BoletoOccurrence(x));
+        const filtered = data[k].filter(x => !window.isTitulo4868BoletoOccurrence(x, k));
         if (filtered.length !== data[k].length) {
           patch[k] = filtered;
           changed = true;
@@ -16457,37 +16488,34 @@ window.purgeBoletoNotesTitulo4868 = async function() {
 };
 
 window.ensureBoletoNotesTitulo4868Removed = async function() {
+  window.stripBoletoNotesTitulo4868FromState();
   window.stripPurgedBoleto4868Identities();
+  const flag = "crm_boleto_teste_4868_v4";
+  try {
+    if (localStorage.getItem(flag) === "1") {
+      if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
+      return 0;
+    }
+  } catch (e) {}
   if (window._boleto4868PurgePromise) return window._boleto4868PurgePromise;
   window._boleto4868PurgePromise = (async () => {
     try {
-    if (window.firebaseDb && window.firebaseCollections) {
-      try {
-        const { doc, getDoc, setDoc } = window.firebaseCollections;
-        const flagRef = doc(window.firebaseDb, "settings", "boleto_notes_purged_titulo_4868");
-        const snap = await getDoc(flagRef);
-        const remoteIds = (snap.exists() && snap.data() && snap.data().identities) || [];
-        if (snap.exists() && remoteIds.length) {
-          window.persistPurgedBoleto4868Identities(remoteIds);
-          window.stripPurgedBoleto4868Identities();
-          if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
-          return remoteIds.length;
-        }
-        const n = await window.purgeBoletoNotesTitulo4868();
-        const ids = window.getPurgedBoleto4868Identities();
-        if (ids.length) {
-          await setDoc(flagRef, { purgedAt: Date.now(), titulo: "4868", identities: ids });
-        } else {
-          window._boleto4868PurgePromise = null;
-        }
-        return n;
-      } catch (e) {
-        console.warn("[CRM] Purge boletos título 4868", e);
+      const n = await window.purgeBoletoNotesTitulo4868();
+      try { localStorage.setItem(flag, "1"); } catch (e) {}
+      if (window.firebaseDb && window.firebaseCollections) {
+        try {
+          const { doc, setDoc } = window.firebaseCollections;
+          await setDoc(doc(window.firebaseDb, "settings", "boleto_teste_purged_titulo_4868_v4"), {
+            purgedAt: Date.now(),
+            titulo: "4868",
+            identities: window.getPurgedBoleto4868Identities()
+          });
+        } catch (e) {}
       }
-    }
-    return window.purgeBoletoNotesTitulo4868();
+      if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
+      return n;
     } finally {
-      if (!window.getPurgedBoleto4868Identities().length) window._boleto4868PurgePromise = null;
+      window._boleto4868PurgePromise = null;
     }
   })();
   return window._boleto4868PurgePromise;
@@ -16621,11 +16649,16 @@ window.ensureAllNexCleared = async function() {
 
 window.nexClientIsZeroPaid = function(customerId, saleId) {
   const key = String(customerId) + "-" + String(saleId);
-  if (Array.isArray(window.zeroPaidList) && window.zeroPaidList.some(c => String(c.customerId) + "-" + String(c.saleId) === key)) return true;
-  if (Array.isArray(window.clientList)) {
-    const c = window.clientList.find(x => String(x.customerId) === String(customerId) && String(x.saleId) === String(saleId));
-    if (c && c.isZeroPaid) return true;
+  const lists = [window.zeroPaidList, window.clientList, window.rawClientList];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    const c = list.find(x => x && String(x.customerId) === String(customerId) && String(x.saleId) === String(saleId));
+    if (c && (c.isZeroPaid || (c.percPaid != null && Number(c.percPaid) === 0))) return true;
+    if (list === window.zeroPaidList && list.some(x => String(x.customerId) + "-" + String(x.saleId) === key)) return true;
   }
+  const sales = (window.AppState && AppState.sales) || [];
+  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  if (sale && sale.percPaid != null && Number(sale.percPaid) === 0) return true;
   return false;
 };
 
@@ -17306,22 +17339,30 @@ window.nexReguaDays = function() {
 window.nexCcConfig = function(costCenterId, unitName) {
   try {
     const configMap = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
-    let cc = configMap[costCenterId] || {};
-    if (!cc.clausula_suspensiva_ativa && unitName) {
-      const match = String(unitName).match(/^(\d{4,5})/);
-      if (match && configMap[match[1]]) cc = configMap[match[1]];
+    const ids = [];
+    const raw = costCenterId;
+    if (Array.isArray(raw)) raw.forEach(id => ids.push(String(id)));
+    else if (raw != null && String(raw).trim() !== "") ids.push(String(raw));
+    const unitMatch = String(unitName || "").match(/^(\d{4,5})/);
+    if (unitMatch) ids.push(unitMatch[1]);
+    for (const id of ids) {
+      if (configMap[id]) return configMap[id];
     }
-    return cc;
+    return {};
   } catch (e) {
     return {};
   }
 };
 
 window.nexHasLetter = function(customerId, saleId) {
-  return window.nexCollectAll().some(it =>
-    String(it.customerId) === String(customerId) &&
-    (String(it.titulo) === String(saleId) || String(it.saleId) === String(saleId))
-  );
+  const cid = String(customerId || "");
+  const sid = String(saleId || "").replace(/^B-/, "").split("-")[0];
+  if (!cid || !sid) return false;
+  return window.nexCollectAll().some(it => {
+    if (String(it.customerId) !== cid) return false;
+    const t = String(it.titulo || it.saleId || "").replace(/^B-/, "").split("-")[0];
+    return t && t === sid;
+  });
 };
 
 window.nexInFollowup = function(item) {
@@ -17451,12 +17492,25 @@ window.renderNexFollowup = function() {
   if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;
   const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
   const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
+  const fNexDe = document.getElementById("wesend-filter-nex-de")?.value || "";
+  const fNexAte = document.getElementById("wesend-filter-nex-ate")?.value || "";
+  const fObjeto = (document.getElementById("wesend-filter-objeto")?.value || "").trim().toUpperCase();
+  const fObjetoVazio = !!(document.getElementById("wesend-filter-objeto-vazio") && document.getElementById("wesend-filter-objeto-vazio").checked);
   const rows = window.nexCollectAll().filter(it => window.nexInFollowup(it));
   const filtered = rows.filter(it => {
     if (zeroOnly && !(it.zeroPaid || window.nexClientIsZeroPaid(it.customerId, it.titulo))) return false;
     if (fTitulo && !String(it.titulo || "").includes(fTitulo)) return false;
     const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
     if (fNome && !String(name).toLowerCase().includes(fNome)) return false;
+    const sent = window.nexParseIso(it.date || it.createdAt);
+    if (fNexDe && (!sent || sent < fNexDe)) return false;
+    if (fNexAte && (!sent || sent > fNexAte)) return false;
+    const hasObj = typeof window.nexHasTracking === "function" ? window.nexHasTracking(it) : !!(String(it.tracking || "").trim());
+    if (fObjetoVazio && hasObj) return false;
+    if (!fObjetoVazio && fObjeto) {
+      const tracking = String(it.tracking || "").trim().toUpperCase();
+      if (tracking.indexOf(fObjeto) === -1) return false;
+    }
     return true;
   });
   if (!filtered.length) {
@@ -17693,6 +17747,14 @@ window.clearWeSendSearch = function() {
     document.getElementById('wesend-filter-nome').value = '';
     document.getElementById('wesend-filter-telefone').value = '';
     document.getElementById('wesend-filter-email').value = '';
+    const nexDe = document.getElementById('wesend-filter-nex-de');
+    const nexAte = document.getElementById('wesend-filter-nex-ate');
+    const objeto = document.getElementById('wesend-filter-objeto');
+    const objetoVazio = document.getElementById('wesend-filter-objeto-vazio');
+    if (nexDe) nexDe.value = '';
+    if (nexAte) nexAte.value = '';
+    if (objeto) { objeto.value = ''; objeto.disabled = false; }
+    if (objetoVazio) objetoVazio.checked = false;
     loadWeSendTab();
 };
 

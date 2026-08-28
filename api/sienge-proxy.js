@@ -46,7 +46,16 @@ module.exports.config = {
   },
 };
 
-module.exports = function handler(req, res) {
+function collectRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+module.exports = async function handler(req, res) {
   const SIENGE_HOST = 'api.sienge.com.br';
   const SIENGE_PATH_PREFIX = '/mouraleite/public/api/v1';
 
@@ -58,7 +67,7 @@ module.exports = function handler(req, res) {
     return res.status(204).end();
   }
 
-  let targetPath = req.url.replace('/api/sienge-proxy', '');
+  let targetPath = String(req.url || '').replace('/api/sienge-proxy', '');
   
   if (targetPath.startsWith('/bulk-data/')) {
     targetPath = '/mouraleite/public/api' + targetPath;
@@ -72,6 +81,18 @@ module.exports = function handler(req, res) {
   delete proxyHeaders.referer;
   delete proxyHeaders.host;
   delete proxyHeaders.connection;
+  delete proxyHeaders['content-length'];
+  delete proxyHeaders['Content-Length'];
+  delete proxyHeaders['transfer-encoding'];
+  delete proxyHeaders['Transfer-Encoding'];
+  delete proxyHeaders['accept-encoding'];
+  delete proxyHeaders['content-encoding'];
+
+  const method = (req.method || 'GET').toUpperCase();
+  const body = (method === 'GET' || method === 'HEAD') ? Buffer.alloc(0) : await collectRawBody(req);
+  if (body.length) {
+    proxyHeaders['content-length'] = String(body.length);
+  }
 
   const options = {
     hostname: SIENGE_HOST,
@@ -122,6 +143,6 @@ module.exports = function handler(req, res) {
     res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: err.message });
   });
 
-  // Repassar o body original via stream
-  req.pipe(proxyReq);
+  if (body.length) proxyReq.write(body);
+  proxyReq.end();
 };

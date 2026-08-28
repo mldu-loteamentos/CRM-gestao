@@ -33,6 +33,25 @@ function _vcDaysSince(dateValue) {
     return Math.max(0, Math.floor((today - date) / (1000 * 60 * 60 * 24)));
 }
 
+function _vcTimestampToDateStr(val) {
+    if (!val) return '';
+    let d = null;
+    if (typeof val.toDate === 'function') {
+        d = val.toDate();
+    } else if (val instanceof Date) {
+        d = val;
+    } else if (typeof val === 'string') {
+        d = new Date(val);
+    } else if (typeof val.seconds === 'number') {
+        d = new Date(val.seconds * 1000);
+    }
+    if (!d || Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
 window.openVistoriaRecurrenceModal = function() {
     const modal = document.getElementById('vistoria-recurrence-modal');
     const input = document.getElementById('vistoria-recurrence-days');
@@ -514,6 +533,7 @@ window.VerificarConstrucaoApp = {
 
                 let statusLabel = 'Pendente de Vistoria';
                 let statusColor = 'color: #dc2626; font-weight: bold;';
+                let solicitadoHa = '';
 
                 if (hasConstruction) {
                     statusLabel = 'Construção Identificada (Dispensado)';
@@ -522,6 +542,12 @@ window.VerificarConstrucaoApp = {
                     if (vistoriaAtiva.status === 'aguardando_fotos') {
                         statusLabel = 'Link Enviado – Aguardando Fotos';
                         statusColor = 'color: #d97706; font-weight: 600;';
+                        const reqDate = _vcTimestampToDateStr(vistoriaAtiva.createdAt)
+                            || _vcTimestampToDateStr(vistoriaAtiva.requestedAt)
+                            || _vcTimestampToDateStr(vistoriaAtiva.updatedAt);
+                        const reqDays = reqDate ? _vcDaysSince(reqDate) : null;
+                        if (reqDays === 0) solicitadoHa = 'Solicitado hoje';
+                        else if (reqDays !== null) solicitadoHa = `Há ${reqDays} dia(s)`;
                     } else if (vistoriaAtiva.status === 'aguardando_validacao') {
                         statusLabel = 'Aguardando Validação';
                         statusColor = 'color: #7c3aed; font-weight: 600;';
@@ -563,7 +589,7 @@ window.VerificarConstrucaoApp = {
                     empreendimento, empLabel, unidade,
                     clienteName, titulo, tituloKey, contractNumberStr, realSaleIdStr,
                     parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
-                    statusLabel, statusColor, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys
+                    statusLabel, statusColor, solicitadoHa, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys
                 });
             });
 
@@ -665,7 +691,7 @@ window.VerificarConstrucaoApp = {
                         const rowBg = uIdx % 2 === 0 ? '#fff' : '#f9fafb';
                         const validAction = u.statusLabel === 'Aguardando Validação'
                             ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:5px 12px; font-size:0.78rem; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(45,107,62,0.35);">Validar Vistoria</button>`
-                            : `<span style="${u.statusColor}">${u.statusLabel}</span>`;
+                            : `<span style="${u.statusColor}">${u.statusLabel}</span>${u.solicitadoHa ? `<br><span style="color:#d97706; font-size:0.72rem; font-weight:600;">${u.solicitadoHa}</span>` : ''}`;
 
                         const valorFmt = u.valorVencido > 0
                             ? u.valorVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

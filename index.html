@@ -1089,7 +1089,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.518 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.519 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2857,6 +2857,21 @@ Atenciosamente,
 
         <!-- TAB 3: NOTIFICAÇÕES -->
         <section id="tab-wesend" class="tab-pane" style="display: none;">
+          <style>
+            #tab-wesend #wesend-filter-titulo,
+            #tab-wesend #wesend-filter-contrato,
+            #tab-wesend #wesend-filter-doc,
+            #tab-wesend #wesend-filter-emp,
+            #tab-wesend #wesend-filter-unidade,
+            #tab-wesend #wesend-filter-nome,
+            #tab-wesend #wesend-filter-telefone,
+            #tab-wesend #wesend-filter-email,
+            #tab-wesend #wesend-filter-nex-de,
+            #tab-wesend #wesend-filter-nex-ate,
+            #tab-wesend #wesend-filter-objeto {
+              border-color: #94a3b8 !important;
+            }
+          </style>
           <div class="crm-card" style="margin-bottom: 20px;">
             <div class="crm-card-header" style="background-color: #f3f4f6; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
               <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Filtros - Notificações</h3>
@@ -2910,6 +2925,26 @@ Atenciosamente,
                 <div class="form-group" style="grid-column: 3 / 4;">
                   <label>E-mail</label>
                   <input type="text" class="form-control" id="wesend-filter-email" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="loadWeSendTab()" autocomplete="off">
+                </div>
+
+                <!-- Linha 4: Follow-up NEX -->
+                <div class="form-group" style="grid-column: 1 / 2;">
+                  <label>Envio NEX (início)</label>
+                  <input type="date" class="form-control" id="wesend-filter-nex-de" onchange="if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();">
+                </div>
+                <div class="form-group" style="grid-column: 2 / 3;">
+                  <label>Envio NEX (fim)</label>
+                  <input type="date" class="form-control" id="wesend-filter-nex-ate" onchange="if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();">
+                </div>
+                <div class="form-group" style="grid-column: 3 / 4;">
+                  <label>Código do objeto</label>
+                  <input type="text" class="form-control" id="wesend-filter-objeto" placeholder="Ex: AA123456789BR" onkeydown="if(event.key==='Enter' || event.key==='Tab') { if(typeof window.renderNexFollowup==='function') window.renderNexFollowup(); }" oninput="this.value = this.value.toUpperCase(); if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();" autocomplete="off">
+                </div>
+                <div class="form-group" style="grid-column: 4 / 5;">
+                  <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:0.8rem;font-weight:600;color:#334155;line-height:1.3;">
+                    <input type="checkbox" id="wesend-filter-objeto-vazio" style="width:16px;height:16px;accent-color:var(--color-primary);" onchange="var el=document.getElementById('wesend-filter-objeto'); if(el) el.disabled=this.checked; if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();">
+                    Somente objeto vazio
+                  </label>
                 </div>
               </div>
             </div>
@@ -5848,34 +5883,34 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=518"></script>
-  <script defer src="sienge-api.js?v=518"></script>
-  <script defer src="azure-auth.js?v=518"></script>
-  <script defer src="app.js?v=518"></script>
-  <script defer src="home-dashboard.js?v=518"></script>
-  <script defer src="anexos.js?v=518"></script>
-  <script defer src="contas-pagar.js?v=518"></script>
-  <script defer src="config-tags.js?v=518"></script>
-  <script defer src="config-users.js?v=518"></script>
-  <script defer src="construcao.js?v=518"></script>
-  <script defer src="empresas.js?v=518"></script>
-  <script defer src="relacionamento.js?v=518"></script>
+  <script defer src="data.js?v=519"></script>
+  <script defer src="sienge-api.js?v=519"></script>
+  <script defer src="azure-auth.js?v=519"></script>
+  <script defer src="app.js?v=519"></script>
+  <script defer src="home-dashboard.js?v=519"></script>
+  <script defer src="anexos.js?v=519"></script>
+  <script defer src="contas-pagar.js?v=519"></script>
+  <script defer src="config-tags.js?v=519"></script>
+  <script defer src="config-users.js?v=519"></script>
+  <script defer src="construcao.js?v=519"></script>
+  <script defer src="empresas.js?v=519"></script>
+  <script defer src="relacionamento.js?v=519"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=518"></script>
-  <script defer src="marketing.js?v=518"></script>
-  <script defer src="plano-financeiro.js?v=518"></script>
-  <script defer src="prestacao-contas.js?v=518"></script>
-  <script defer src="fluxo-caixa.js?v=518"></script>
-  <script defer src="parametrizacao-parceiro.js?v=518"></script>
-  <script defer src="fiscal.js?v=518"></script>
-  <script defer src="indexadores.js?v=518"></script>
-  <script defer src="verificar-construcao.js?v=518"></script>
-  <script src="repactuacoes.js?v=518"></script>
+  <script defer src="centros-custo.js?v=519"></script>
+  <script defer src="marketing.js?v=519"></script>
+  <script defer src="plano-financeiro.js?v=519"></script>
+  <script defer src="prestacao-contas.js?v=519"></script>
+  <script defer src="fluxo-caixa.js?v=519"></script>
+  <script defer src="parametrizacao-parceiro.js?v=519"></script>
+  <script defer src="fiscal.js?v=519"></script>
+  <script defer src="indexadores.js?v=519"></script>
+  <script defer src="verificar-construcao.js?v=519"></script>
+  <script src="repactuacoes.js?v=519"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=518"></script>
+  <script defer src="dashboard-inadimplencia.js?v=519"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
