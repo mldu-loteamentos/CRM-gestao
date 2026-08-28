@@ -12114,7 +12114,9 @@ window.submitReprocessBoleto = async function() {
     };
 
     console.log("[CRM Boleto] Payload enviado ao Sienge:", JSON.stringify(payload, null, 2));
-    const result = await SiengeApiService.createOverdueBill(payload);
+    const result = await SiengeApiService.createOverdueBill(payload, (attempt, waitMs, total) => {
+      btn.innerHTML = `<div class="loading-spinner" style="width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 1s linear infinite; margin-right: 4px;"></div> Aguardando Sienge ${Math.round(waitMs / 1000)}s (${attempt}/${total})`;
+    });
     console.log("[CRM Boleto] Resposta Sienge:", result);
     
     const billId = currentReprocessBillId;
@@ -12196,7 +12198,12 @@ window.submitReprocessBoleto = async function() {
 
   } catch (e) {
     console.error("Erro ao gerar boleto:", e);
-    alert(`Erro ao gerar boleto: ${e.message}`);
+    btn.innerHTML = originalHtml;
+    btn.disabled = false;
+    const rate = e && (e.status === 429 || /429|rate limit/i.test(String(e.message || "")));
+    alert(rate
+      ? "O Sienge recusou a geração do boleto porque há muitas consultas agora. Espere cerca de 30 segundos e clique em Gerar de novo."
+      : `Erro ao gerar boleto: ${e.message}`);
   } finally {
     btn.innerHTML = originalHtml;
     btn.disabled = false;

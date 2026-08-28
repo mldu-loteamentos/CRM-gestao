@@ -13,36 +13,106 @@ const InvestimentoApp = {
   companyQuery: "",
   accountQuery: "",
   companyDropOpen: false,
+  accountDropOpen: false,
+  selectedAccountKeys: null,
+  filterCatalog: [],
+  catalogByCompany: {},
+  catalogLoading: false,
+  _catalogGen: 0,
   groupByCompany: true,
   collapsedCompanies: new Set(),
   collapsedAccounts: new Set(),
   cdiByMonth: {},
   kpis: { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 },
 
-  init() {
+  FILTER_KEY: "crm_investimento_periodo",
+
+  defaultStartDate() {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-    if (!this.startDate) {
-      this.startDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
-    }
-    if (!this.endDate) {
-      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      this.endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
+  },
+
+  defaultEndDate() {
+    const now = new Date();
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+  },
+
+  isIsoDate(v) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+  },
+
+  persistPeriod() {
+    try {
+      localStorage.setItem(this.FILTER_KEY, JSON.stringify({
+        startDate: this.startDate,
+        endDate: this.endDate,
+        selectedCompanyIds: this.selectedCompanyIds || [],
+        selectedAccountKeys: this.selectedAccountKeys
+      }));
+    } catch (e) { /* ignore quota */ }
+  },
+
+  restorePeriod() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(this.FILTER_KEY) || "null");
+      if (!saved || typeof saved !== "object") return;
+      if (this.isIsoDate(saved.startDate)) this.startDate = saved.startDate;
+      if (this.isIsoDate(saved.endDate)) this.endDate = saved.endDate;
+      if (Array.isArray(saved.selectedCompanyIds)) {
+        this.selectedCompanyIds = saved.selectedCompanyIds.map(String).filter(Boolean);
+      }
+      if (Array.isArray(saved.selectedAccountKeys)) {
+        this.selectedAccountKeys = saved.selectedAccountKeys.map(String).filter(Boolean);
+        this._hadSavedAccountKeys = true;
+      }
+    } catch (e) { /* ignore */ }
+  },
+
+  setStartDate(v) {
+    this.startDate = v;
+    this.persistPeriod();
+  },
+
+  setEndDate(v) {
+    this.endDate = v;
+    this.persistPeriod();
+  },
+
+  init() {
+    this.restorePeriod();
+    if (!this.isIsoDate(this.startDate)) this.startDate = this.defaultStartDate();
+    if (!this.isIsoDate(this.endDate)) this.endDate = this.defaultEndDate();
+    if (this.startDate && this.endDate && this.startDate > this.endDate) {
+      const tmp = this.startDate;
+      this.startDate = this.endDate;
+      this.endDate = tmp;
     }
     const geridas = this.geridasCompanies();
-    const allowed = new Set(geridas.map(c => c.id));
+    const allowed = new Set(geridas.map(c => String(c.id)));
     this.selectedCompanyIds = this.selectedCompanyIds.filter(id => allowed.has(String(id)));
     if (!this.selectedCompanyIds.length) this.selectedCompanyIds = geridas.map(c => String(c.id));
     if (!window._invDropBound) {
       window._invDropBound = true;
       document.addEventListener("mousedown", (e) => {
-        if (!InvestimentoApp.companyDropOpen) return;
-        if (e.target && e.target.closest && e.target.closest("#inv-emp-drop")) return;
-        InvestimentoApp.companyDropOpen = false;
-        InvestimentoApp.render();
+        const t = e.target;
+        const inEmp = t && t.closest && t.closest("#inv-emp-drop");
+        const inAcc = t && t.closest && t.closest("#inv-acc-drop");
+        let changed = false;
+        if (InvestimentoApp.companyDropOpen && !inEmp) {
+          InvestimentoApp.companyDropOpen = false;
+          changed = true;
+        }
+        if (InvestimentoApp.accountDropOpen && !inAcc) {
+          InvestimentoApp.accountDropOpen = false;
+          changed = true;
+        }
+        if (changed) InvestimentoApp.render();
       });
     }
     this.render();
+    this.refreshFilterCatalog();
   },
 
   empresasCustom() {
@@ -193,7 +263,10 @@ const InvestimentoApp = {
 
   catalogAccount(raw, companyId) {
     const type = raw && raw.accountType;
-    const typeDesc = type && typeof type === "object" ? (type.description || type.name || type.label || "") : type;
+    const typeId = type && typeof type === "object" ? type.id : (raw.accountTypeId || raw.accountKind || "");
+    const typeDesc = type && typeof type === "object"
+      ? (type.description || type.name || type.label || "")
+      : (type || raw.accountKind || raw.type || "");
     const accountNumber = String(
       raw.accountNumber ||
       raw.number ||
@@ -209,8 +282,40 @@ const InvestimentoApp = {
       accountNumber: accountNumber || accountName,
       accountName: accountName || accountNumber || "Conta",
       mask: raw.mask || raw.accountMask || raw.nickname || "",
-      accountType: typeDesc || type || raw.accountKind || raw.type || ""
+      accountType: type && typeof type === "object" ? type : typeDesc,
+      accountTypeId: typeId,
+      accountTypeLabel: typeDesc
     };
+  },
+
+  accKey(companyId, accountNumber, extra) {
+    return `${companyId}|${this.accIdentity(accountNumber, extra)}`;
+  },
+
+  siengeAccountType(acc) {
+    const type = acc && acc.accountType;
+    const id = String(
+      (type && typeof type === "object" && type.id) ||
+      acc.accountTypeId ||
+      ""
+    ).trim().toUpperCase();
+    const desc = String(
+      (type && typeof type === "object" && (type.description || type.name || type.label)) ||
+      acc.accountTypeLabel ||
+      (typeof type === "string" ? type : "") ||
+      acc.accountKind ||
+      acc.type ||
+      ""
+    ).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    return { id, desc };
+  },
+
+  isInvestmentAccount(acc) {
+    const { id, desc } = this.siengeAccountType(acc);
+    if (id === "I" || id === "A") return true;
+    if (/^INVEST/.test(desc) || desc.includes("INVESTIMENTO")) return true;
+    if (/^APLIC/.test(desc) || desc === "APPLICATION" || desc === "INVESTMENT") return true;
+    return false;
   },
 
   keysForAccount(acc) {
@@ -233,47 +338,92 @@ const InvestimentoApp = {
     return keys;
   },
 
-  accKey(companyId, accountNumber, extra) {
-    return `${companyId}|${this.accIdentity(accountNumber, extra)}`;
+  filterAccKey(acc) {
+    return this.accKey(acc.companyId, acc.accountNumber, acc);
   },
 
-  accTextBlob(acc) {
-    const type = acc && acc.accountType;
-    const typeBits = type && typeof type === "object"
-      ? [type.id, type.description, type.name, type.label]
-      : [type];
-    return [
-      acc && acc.accountNumber,
-      acc && acc.accountName,
-      acc && acc.name,
-      acc && acc.description,
-      acc && acc.nickname,
-      acc && acc.mask,
-      acc && acc.accountCode,
-      acc && acc.code,
-      ...typeBits,
-      acc && acc.accountKind,
-      acc && acc.type
-    ].map(x => String(x == null ? "" : x)).join(" ").toUpperCase();
+  async fetchCompanyInvestmentAccounts(id) {
+    const sid = String(id);
+    if (this.catalogByCompany[sid]) return this.catalogByCompany[sid];
+    let res = await SiengeApiService.getCheckingAccounts(sid, { allStatuses: true });
+    let list = (res && res.results) || [];
+    if (!list.length) {
+      res = await SiengeApiService.getCheckingAccounts(sid);
+      list = (res && res.results) || [];
+    }
+    const mapped = list
+      .map(a => this.catalogAccount(a, sid))
+      .filter(a => this.isInvestmentAccount(a));
+    const seen = new Set();
+    const unique = mapped.filter(a => {
+      const key = this.filterAccKey(a);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    unique.sort((a, b) => String(a.accountNumber).localeCompare(String(b.accountNumber), "pt-BR"));
+    this.catalogByCompany[sid] = unique;
+    return unique;
   },
 
-  isInvestmentAccount(acc) {
-    const blob = this.accTextBlob(acc);
-    if (/APLIC|INVEST|SAVING|POUPAN|APPLICATION|FUNDO|CDB|TESOURO|LCI|LCA|RDB|COMPROMISSADA|\bC\/I\b|C\/I\s|- C\/I|COMPR-/.test(blob)) return true;
-    const typeId = acc && acc.accountType && typeof acc.accountType === "object" ? String(acc.accountType.id || "").toUpperCase() : "";
-    if (typeId === "I" || typeId === "INV" || typeId === "INVESTMENT" || typeId === "2") return true;
-    return false;
+  syncSelectedAccountKeys() {
+    const available = this.filterCatalog.map(a => this.filterAccKey(a));
+    const availSet = new Set(available);
+    if (this.selectedAccountKeys == null) {
+      this.selectedAccountKeys = available;
+      return;
+    }
+    this.selectedAccountKeys = this.selectedAccountKeys.filter(k => availSet.has(k));
+  },
+
+  async refreshFilterCatalog() {
+    const gen = ++this._catalogGen;
+    const ids = (this.selectedCompanyIds || []).map(String);
+    if (!ids.length) {
+      this.filterCatalog = [];
+      this.selectedAccountKeys = [];
+      this.catalogLoading = false;
+      this.render();
+      return;
+    }
+    this.catalogLoading = true;
+    this.render();
+    try {
+      const chunks = await Promise.all(ids.map(id => this.fetchCompanyInvestmentAccounts(id)));
+      if (gen !== this._catalogGen) return;
+      this.filterCatalog = chunks.flat();
+      this.syncSelectedAccountKeys();
+      this.persistPeriod();
+    } catch (e) {
+      console.warn("[Investimento] Catálogo de contas:", e);
+    } finally {
+      if (gen === this._catalogGen) {
+        this.catalogLoading = false;
+        this.render();
+      }
+    }
+  },
+
+  movAmount(mov) {
+    const raw = Number(mov.bankMovementAmount);
+    if (!Number.isFinite(raw) || raw === 0) return 0;
+    const abs = Math.abs(raw);
+    const type = String(mov.bankMovementOperationType || mov.operationType || "").trim().toUpperCase();
+    if (type === "S" || type === "D" || type === "DEBITO" || type === "DEBIT") return -abs;
+    if (type === "E" || type === "C" || type === "CREDITO" || type === "CREDIT") return abs;
+    return raw;
   },
 
   classifyMovement(mov) {
-    const amount = Number(mov.bankMovementAmount) || 0;
+    const amount = this.movAmount(mov);
     const blob = [
-      mov.historic, mov.history, mov.origin, mov.originDescription,
-      mov.documentType, mov.documentIdentification, mov.observations, mov.note,
+      mov.historic, mov.history, mov.bankMovementHistoricName, mov.bankMovementOperationName,
+      mov.origin, mov.originDescription, mov.originId, mov.bankMovementOriginId,
+      mov.documentType, mov.documentIdentification, mov.documentIdentificationName, mov.observations, mov.note,
       ...((mov.financialCategories || []).map(c => `${c.financialCategoryName || ""} ${c.financialCategoryId || ""}`))
     ].join(" ").toUpperCase();
-    if (/TARIF|IOF|IRRF|DESPESA BANC|TAXA BANC/.test(blob)) return amount < 0 ? "tarifa" : "aporte";
-    if (/RENDIM|RENDTO|JUROS|RECEITA FINANCEIRA|RENDIMENTOS/.test(blob) && amount > 0) return "rendimento";
+    if (!amount) return "aporte";
+    if (/RENDIM|RENDTO|JUROS|RECEITA FINANCEIRA/.test(blob) && amount > 0) return "rendimento";
     if (amount >= 0) return "aporte";
     return "resgate";
   },
@@ -342,8 +492,17 @@ const InvestimentoApp = {
       this.render();
       return;
     }
+    if (this.catalogLoading) {
+      await this.refreshFilterCatalog();
+    }
+    if (!(this.selectedAccountKeys || []).length) {
+      this.error = "Selecione ao menos uma conta de investimento.";
+      this.render();
+      return;
+    }
     this.loading = true;
     this.error = "";
+    this.persistPeriod();
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
     await this.ensureCdi();
@@ -354,13 +513,7 @@ const InvestimentoApp = {
       const [balancesOpen, accountsChunks, movChunks, ...monthBalResults] = await Promise.all([
         SiengeApiService.getAccountBalances(openingDate, { showLast: true }),
         Promise.all(this.selectedCompanyIds.map(async id => {
-          let res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
-          let list = (res && res.results) || [];
-          if (!list.length) {
-            res = await SiengeApiService.getCheckingAccounts(id);
-            list = (res && res.results) || [];
-          }
-          return list.map(a => this.catalogAccount(a, id));
+          return this.fetchCompanyInvestmentAccounts(id);
         })),
         Promise.all(this.selectedCompanyIds.map(async id => {
           const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
@@ -376,10 +529,14 @@ const InvestimentoApp = {
       const balancesClose = balancesByDate[this.endDate] || balancesByDate[monthEndDates[monthEndDates.length - 1]] || [];
 
       let catalog = accountsChunks.flat();
-      if (this.onlyInvestment) catalog = catalog.filter(a => this.isInvestmentAccount(a));
+      const wantAcc = new Set(this.selectedAccountKeys || []);
+      if (wantAcc.size) catalog = catalog.filter(a => wantAcc.has(this.filterAccKey(a)));
       const seen = new Set();
       catalog = catalog.filter(a => {
-        const key = this.accKey(a.companyId, a.accountNumber, a);
+        const rawNum = String(a.accountNumber || "").trim().toUpperCase();
+        const key = rawNum
+          ? `${a.companyId}|${rawNum}`
+          : this.accKey(a.companyId, a.accountNumber, a);
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -443,7 +600,7 @@ const InvestimentoApp = {
           row = ensure({ companyId: mov.companyId, accountNumber: num, accountName: mov.accountName || num });
         }
         const kind = this.classifyMovement(mov);
-        const amount = Number(mov.bankMovementAmount) || 0;
+        const amount = this.movAmount(mov);
         const mk = String(mov.bankMovementDate || "").slice(0, 7);
         if (!row.months[mk]) row.months[mk] = this.emptyFlow();
         if (kind === "aporte") { row.aportes += amount; row.months[mk].aportes += amount; }
@@ -460,14 +617,16 @@ const InvestimentoApp = {
           row.months[mk] = f;
           const closeDate = monthEndDates[i];
           const closeApi = this.pickBalance(balancesByDate[closeDate] || [], row.accountNumber, row.companyId);
-          if (Math.abs(f.rendimento) < 0.01 && closeApi) {
+          const fromMov = run + f.aportes + f.resgates + f.tarifas + f.rendimento;
+          const hasMov = Math.abs(f.aportes) > 0.009 || Math.abs(f.resgates) > 0.009 || Math.abs(f.tarifas) > 0.009 || Math.abs(f.rendimento) > 0.009;
+          if (!hasMov && Math.abs(f.rendimento) < 0.01 && closeApi) {
             const implied = closeApi - run - f.aportes - f.resgates - f.tarifas;
             if (Math.abs(implied) > 0.01) {
               f.rendimento = implied;
               row.rendimentoFromBalance = true;
             }
           }
-          run = (closeApi || (run + f.aportes + f.resgates + f.tarifas + f.rendimento));
+          run = hasMov ? (run + f.aportes + f.resgates + f.tarifas + f.rendimento) : (closeApi || fromMov);
           f.closing = run;
         });
         row.aportes = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].aportes) || 0), 0);
@@ -475,7 +634,15 @@ const InvestimentoApp = {
         row.rendimento = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].rendimento) || 0), 0);
         row.tarifas = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].tarifas) || 0), 0);
         const closingApi = this.pickBalance(balancesClose, row.accountNumber, row.companyId);
-        row.closing = closingApi || run;
+        const last = this.months[this.months.length - 1];
+        const lastFlow = last && row.months[last];
+        const hasMov = lastFlow && (
+          Math.abs(lastFlow.aportes) > 0.009 ||
+          Math.abs(lastFlow.resgates) > 0.009 ||
+          Math.abs(lastFlow.tarifas) > 0.009 ||
+          Math.abs(lastFlow.rendimento) > 0.009
+        );
+        row.closing = hasMov ? run : (closingApi || run);
         row.variacao = row.closing - row.opening;
         return row;
       }).sort((a, b) => b.closing - a.closing);
@@ -529,6 +696,7 @@ const InvestimentoApp = {
   toggleCompanyDrop(ev) {
     if (ev) ev.stopPropagation();
     this.companyDropOpen = !this.companyDropOpen;
+    if (this.companyDropOpen) this.accountDropOpen = false;
     this.render();
   },
 
@@ -554,7 +722,7 @@ const InvestimentoApp = {
     });
     if (!filtered.length) return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma empresa com esse nome.</div>`;
     return filtered.map(c => {
-      const on = this.selectedCompanyIds.includes(c.id);
+      const on = this.selectedCompanyIds.includes(String(c.id));
       return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
         <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)" style="margin-top:3px;flex-shrink:0;">
         <span style="font-weight:${on ? 700 : 600};color:#334155;line-height:1.35;white-space:normal;">${this.esc(this.companyFullLabel(c))}</span>
@@ -567,7 +735,7 @@ const InvestimentoApp = {
     if (!companies.length) {
       return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
     }
-    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:420px;max-width:640px;" onmousedown="event.stopPropagation()">
+    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:280px;max-width:480px;" onmousedown="event.stopPropagation()">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas geridas pelo grupo</div>
       <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
         style="width:100%;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
@@ -591,27 +759,173 @@ const InvestimentoApp = {
     </div>`;
   },
 
+  accountDropLabel() {
+    if (!this.selectedCompanyIds.length) return "Selecione uma empresa";
+    if (this.catalogLoading) return "Carregando contas...";
+    const all = this.filterCatalog;
+    const n = (this.selectedAccountKeys || []).length;
+    if (!all.length) return "Nenhuma conta de investimento";
+    if (n === all.length) return `Todas (${n})`;
+    if (n === 1) {
+      const key = this.selectedAccountKeys[0];
+      const a = all.find(x => this.filterAccKey(x) === key);
+      if (a) return `${a.accountNumber} · ${a.accountName}`;
+    }
+    if (n === 0) return "Selecione contas";
+    return `${n} de ${all.length} contas`;
+  },
+
+  toggleAccountDrop(ev) {
+    if (ev) ev.stopPropagation();
+    if (!this.selectedCompanyIds.length) return;
+    this.accountDropOpen = !this.accountDropOpen;
+    if (this.accountDropOpen) this.companyDropOpen = false;
+    this.render();
+  },
+
+  filterAccountList(q) {
+    this.accountQuery = q || "";
+    const box = document.getElementById("inv-acc-list");
+    if (!box) return;
+    box.innerHTML = this.accountListHtml();
+  },
+
+  toggleFilterAccount(key, on) {
+    const k = String(key);
+    const cur = this.selectedAccountKeys || [];
+    if (on) {
+      if (!cur.includes(k)) this.selectedAccountKeys = cur.concat([k]);
+    } else {
+      this.selectedAccountKeys = cur.filter(x => x !== k);
+    }
+    this.accountDropOpen = true;
+    this.persistPeriod();
+    this.render();
+  },
+
+  selectAllFilterAccounts() {
+    this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
+    this.accountDropOpen = true;
+    this.persistPeriod();
+    this.render();
+  },
+
+  clearFilterAccounts() {
+    this.selectedAccountKeys = [];
+    this.accountDropOpen = true;
+    this.persistPeriod();
+    this.render();
+  },
+
+  accountListHtml() {
+    const q = (this.accountQuery || "").toLowerCase().trim();
+    const nq = this.normAcc(this.accountQuery);
+    const grouped = [];
+    const byCo = {};
+    this.filterCatalog.forEach(a => {
+      const blob = `${a.accountNumber} ${a.accountName} ${this.companyName(a.companyId)}`.toLowerCase();
+      if (q && !blob.includes(q) && !(nq && this.normAcc(a.accountNumber).includes(nq))) return;
+      const cid = String(a.companyId);
+      if (!byCo[cid]) {
+        byCo[cid] = [];
+        grouped.push(cid);
+      }
+      byCo[cid].push(a);
+    });
+    if (!this.filterCatalog.length) {
+      return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma conta tipo Investimento nas empresas selecionadas.</div>`;
+    }
+    if (!grouped.length) return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma conta com esse filtro.</div>`;
+    const showGroup = this.selectedCompanyIds.length > 1;
+    const want = new Set(this.selectedAccountKeys || []);
+    return grouped.map(cid => {
+      const rows = byCo[cid].map(a => {
+        const key = this.filterAccKey(a);
+        const on = want.has(key);
+        return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
+          <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleFilterAccount(decodeURIComponent('${encodeURIComponent(key)}'), this.checked)" style="margin-top:3px;flex-shrink:0;">
+          <span style="line-height:1.35;">
+            <span style="font-weight:${on ? 700 : 600};color:#0f172a;">${this.esc(a.accountNumber)}</span>
+            <span style="display:block;font-size:0.72rem;color:#64748b;">${this.esc(a.accountName)}</span>
+          </span>
+        </label>`;
+      }).join("");
+      if (!showGroup) return rows;
+      return `<div style="padding:6px 12px;background:#f8fafc;font-size:0.7rem;font-weight:800;color:#0f766e;border-bottom:1px solid #e2e8f0;">${this.esc(this.companyName(cid))}</div>${rows}`;
+    }).join("");
+  },
+
+  accountDropHtml() {
+    const disabled = !this.selectedCompanyIds.length;
+    return `<div id="inv-acc-drop" style="position:relative;flex:1;min-width:280px;max-width:420px;" onmousedown="event.stopPropagation()">
+      <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Contas de investimento</div>
+      <button type="button" onclick="InvestimentoApp.toggleAccountDrop(event)" ${disabled ? "disabled" : ""}
+        style="width:100%;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:${disabled ? "#f8fafc" : "#fff"};display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:${disabled ? "not-allowed" : "pointer"};font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
+        <span style="white-space:normal;line-height:1.3;">${this.esc(this.accountDropLabel())}</span>
+        <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;flex-shrink:0;"></i>
+      </button>
+      ${this.accountDropOpen && !disabled ? `
+        <div style="position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
+          <div style="display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllFilterAccounts()" style="flex:1;height:30px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Marcar todas</button>
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearFilterAccounts()" style="flex:1;height:30px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
+          </div>
+          <input id="inv-acc-search" placeholder="Buscar conta..." value="${this.esc(this.accountQuery)}"
+            onclick="event.stopPropagation()"
+            oninput="InvestimentoApp.filterAccountList(this.value)"
+            style="width:100%;height:32px;border:none;border-bottom:1px solid #e2e8f0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
+          <div id="inv-acc-list" style="max-height:280px;overflow:auto;">
+            ${this.catalogLoading ? `<div style="padding:10px;color:#64748b;font-size:0.78rem;">Carregando contas do cadastro...</div>` : this.accountListHtml()}
+          </div>
+        </div>` : ""}
+    </div>`;
+  },
+
   toggleCompany(id, on) {
     const sid = String(id);
     if (on) {
       if (!this.selectedCompanyIds.includes(sid)) this.selectedCompanyIds.push(sid);
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
+      this.selectedAccountKeys = (this.selectedAccountKeys || []).filter(k => String(k).split("|")[0] !== sid);
     }
     this.companyDropOpen = true;
+    this.persistPeriod();
     this.render();
+    this.refreshFilterCatalog().then(() => {
+      if (!on) return;
+      this.filterCatalog.forEach(a => {
+        if (String(a.companyId) !== sid) return;
+        const k = this.filterAccKey(a);
+        if (!(this.selectedAccountKeys || []).includes(k)) {
+          this.selectedAccountKeys = this.selectedAccountKeys || [];
+          this.selectedAccountKeys.push(k);
+        }
+      });
+      this.persistPeriod();
+      this.render();
+    });
   },
 
   selectAllGeridas() {
-    this.selectedCompanyIds = this.geridasCompanies().map(c => c.id);
+    this.selectedCompanyIds = this.geridasCompanies().map(c => String(c.id));
     this.companyDropOpen = true;
     this.groupByCompany = true;
+    this.persistPeriod();
     this.render();
+    this.refreshFilterCatalog().then(() => {
+      this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
+      this.persistPeriod();
+      this.render();
+    });
   },
 
   clearGeridas() {
     this.selectedCompanyIds = [];
+    this.selectedAccountKeys = [];
+    this.filterCatalog = [];
     this.companyDropOpen = true;
+    this.persistPeriod();
     this.render();
   },
 
@@ -641,8 +955,10 @@ const InvestimentoApp = {
   visibleAccounts() {
     const q = (this.accountQuery || "").toLowerCase().trim();
     const nq = this.normAcc(this.accountQuery);
-    if (!q) return this.accounts;
+    const want = new Set(this.selectedAccountKeys || []);
     return this.accounts.filter(r => {
+      if (want.size && !want.has(r.key) && !want.has(this.accKey(r.companyId, r.accountNumber, r))) return false;
+      if (!q) return true;
       const blob = `${r.accountNumber} ${r.accountName} ${r.companyName}`.toLowerCase();
       if (blob.includes(q)) return true;
       return !!(nq && this.normAcc(r.accountNumber).includes(nq));
@@ -716,7 +1032,15 @@ const InvestimentoApp = {
   render() {
     const root = document.getElementById("investimento-root");
     if (!root) return;
-    const k = this.kpis;
+    const k = this.accounts.length ? this.visibleAccounts().reduce((acc, r) => {
+      acc.opening += r.opening || 0;
+      acc.aportes += r.aportes || 0;
+      acc.resgates += r.resgates || 0;
+      acc.rendimento += r.rendimento || 0;
+      acc.tarifas += r.tarifas || 0;
+      acc.closing += r.closing || 0;
+      return acc;
+    }, { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 }) : this.kpis;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
         <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:12px 12px 0 0;">
@@ -734,22 +1058,18 @@ const InvestimentoApp = {
           <div style="padding:14px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
             ${this.companyDropHtml()}
             <label style="font-size:0.75rem;font-weight:700;color:#475569;">Início
-              <input type="date" value="${this.startDate}" onchange="InvestimentoApp.startDate=this.value"
+              <input type="date" value="${this.startDate}" onchange="InvestimentoApp.setStartDate(this.value)"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
             <label style="font-size:0.75rem;font-weight:700;color:#475569;">Fim
-              <input type="date" value="${this.endDate}" onchange="InvestimentoApp.endDate=this.value"
+              <input type="date" value="${this.endDate}" onchange="InvestimentoApp.setEndDate(this.value)"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Conta
-              <input type="search" id="inv-acc-search" placeholder="Nº ou nome da conta" value="${this.esc(this.accountQuery)}"
-                oninput="InvestimentoApp.accountQuery=this.value;InvestimentoApp._focusAcc=true;InvestimentoApp.render()"
-                style="display:block;height:34px;min-width:200px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
-            </label>
+            ${this.accountDropHtml()}
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
-            <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.accounts.length ? "" : "disabled"}
+            <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.visibleAccounts().length ? "" : "disabled"}
               style="height:34px;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> Exportar Excel
             </button>
@@ -758,7 +1078,7 @@ const InvestimentoApp = {
           <div style="padding:12px 16px 0;display:flex;gap:10px;flex-wrap:wrap;">
             ${this.kpiCard("Saldo inicial", k.opening, "#0f172a")}
             ${this.kpiCard("Entradas", k.aportes, "#105436")}
-            ${this.kpiCard("Saídas", k.resgates, "#b91c1c")}
+            ${this.kpiCard("Saídas", Math.abs(k.resgates), "#b91c1c")}
             ${this.kpiCard("Rendimento", k.rendimento, "#0369a1")}
             ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
@@ -768,8 +1088,7 @@ const InvestimentoApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
-    if (this._focusAcc) {
-      this._focusAcc = false;
+    if (this.accountDropOpen) {
       const a = document.getElementById("inv-acc-search");
       if (a) {
         a.focus();
@@ -867,7 +1186,10 @@ const InvestimentoApp = {
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#b91c1c;white-space:nowrap;">Saída</td>
           ${empty}
-          ${saidas.map(n => money(n)).join("")}
+          ${saidas.map(n => {
+            const v = Math.abs(Number(n) || 0);
+            return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${v ? "#b91c1c" : "#94a3b8"};font-weight:600;white-space:nowrap;">${this.fmt(v)}</td>`;
+          }).join("")}
         </tr>
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
@@ -945,7 +1267,8 @@ const InvestimentoApp = {
   },
 
   exportExcel() {
-    if (!this.accounts.length) {
+    const accounts = this.visibleAccounts();
+    if (!accounts.length) {
       alert("Consulte o período antes de exportar.");
       return;
     }
@@ -963,19 +1286,36 @@ const InvestimentoApp = {
       rows.push([empresa, conta, num, "Rendimento", "", ...months.map(mk => Number(find(mk).rendimento) || 0)]);
       rows.push([empresa, conta, num, "Saldo", Number(opening) || 0, ...months.map(mk => Number(find(mk).closing) || 0)]);
     };
-    push("Consolidado", "Empresas selecionadas", "", this.kpis.opening, this.consolidatedFlow());
+    push("Consolidado", "Empresas selecionadas", "", accounts.reduce((s, r) => s + (r.opening || 0), 0), (() => {
+      const keys = this.months;
+      let running = accounts.reduce((s, r) => s + (r.opening || 0), 0);
+      return keys.map(mk => {
+        const f = accounts.reduce((acc, r) => {
+          const m = (r.months && r.months[mk]) || this.emptyFlow();
+          acc.aportes += m.aportes || 0;
+          acc.resgates += m.resgates || 0;
+          acc.rendimento += m.rendimento || 0;
+          acc.tarifas += m.tarifas || 0;
+          return acc;
+        }, this.emptyFlow());
+        const opening = running;
+        const net = f.aportes + f.resgates + f.rendimento + f.tarifas;
+        running = opening + net;
+        return { month: mk, opening, ...f, closing: running };
+      });
+    })());
     if (this.groupByCompany && this.selectedCompanyIds.length > 1) {
-      const ids = [...new Set(this.accounts.map(a => String(a.companyId)))];
+      const ids = [...new Set(accounts.map(a => String(a.companyId)))];
       ids.sort((a, b) => this.companyName(a).localeCompare(this.companyName(b), "pt-BR"));
       ids.forEach(cid => {
-        const accs = this.companyAccounts(cid);
+        const accs = this.companyAccounts(cid, accounts);
         const agg = this.aggregateFlow(accs);
         const emp = this.companyName(cid);
         push(emp, "Total da empresa", "", agg.opening, agg.months);
         accs.forEach(r => push(emp, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
       });
     } else {
-      this.accounts.forEach(r => push(r.companyName, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
+      accounts.forEach(r => push(r.companyName, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();

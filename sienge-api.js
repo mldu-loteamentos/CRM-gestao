@@ -208,7 +208,10 @@ async function siengeFetch(endpoint) {
   });
 
   if (!response.ok) {
-    throw new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText}`);
+    const err = new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText}`);
+    err.status = response.status;
+    err.retryAfter = response.headers.get("Retry-After");
+    throw err;
   }
 
   const text = await response.text();
@@ -223,16 +226,31 @@ async function siengeFetch(endpoint) {
 // -----------------------------------------------
 // Fetch com retry automático em caso de HTTP 429
 // -----------------------------------------------
-async function siengeFetchWithRetry(endpoint, retries = 4) {
+function isSiengeRateLimitError(err) {
+  if (!err) return false;
+  if (err.status === 429) return true;
+  const m = String(err.message || "");
+  return m.includes("429") || /rate limit/i.test(m);
+}
+
+function siengeRateLimitWaitMs(attempt, retryAfter) {
+  const fromHeader = parseInt(retryAfter, 10);
+  if (Number.isFinite(fromHeader) && fromHeader > 0) {
+    return Math.min(Math.max(fromHeader * 1000, 2000), 45000);
+  }
+  return Math.min(4000 * Math.pow(2, attempt), 30000);
+}
+
+async function siengeFetchWithRetry(endpoint, retries = 6) {
   let lastError;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       return await siengeFetch(endpoint);
     } catch (err) {
       lastError = err;
-      if (err.message && err.message.includes('429') && attempt < retries - 1) {
-        const waitMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s, 16s
-        console.warn(`[Sienge] HTTP 429 — aguardando ${waitMs / 1000}s antes de tentar novamente (tentativa ${attempt + 2}/${retries})...`);
+      if (isSiengeRateLimitError(err) && attempt < retries - 1) {
+        const waitMs = siengeRateLimitWaitMs(attempt, err.retryAfter);
+        console.warn(`[Sienge] HTTP 429 — aguardando ${waitMs / 1000}s (tentativa ${attempt + 2}/${retries})...`);
         await new Promise(r => setTimeout(r, waitMs));
       } else {
         throw err;
@@ -245,7 +263,7 @@ async function siengeFetchWithRetry(endpoint, retries = 4) {
 // -----------------------------------------------
 // POST base com CORS handling
 // -----------------------------------------------
-async function siengePost(endpoint, payload, retries = 4) {
+async function siengePost(endpoint, payload, retries = 8, onRetry) {
   if (s_apiMode === "simulado") {
     throw new Error("Chamada de API em Modo Simulado. Use os métodos simulados.");
   }
@@ -273,25 +291,27 @@ async function siengePost(endpoint, payload, retries = 4) {
       });
 
       if (!response.ok) {
-        let errBody = '';
-        try { errBody = await response.text(); } catch(e){}
-        throw new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText} | ${errBody}`);
+        let errBody = "";
+        try { errBody = await response.text(); } catch (e) {}
+        const err = new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText} | ${errBody}`);
+        err.status = response.status;
+        err.retryAfter = response.headers.get("Retry-After");
+        throw err;
       }
 
-      // Se não retornar nada no body, retorna vazio
       const text = await response.text();
       if (!text) return {};
       try {
         return JSON.parse(text);
       } catch (err) {
-        // Sienge muitas vezes retorna um texto puro de sucesso, ex: "Cobrança gerada com sucesso"
         return { success: true, message: text };
       }
     } catch (err) {
       lastError = err;
-      if (err.message && err.message.includes('429') && attempt < retries - 1) {
-        const waitMs = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
-        console.warn(`[Sienge] HTTP 429 POST — aguardando ${waitMs / 1000}s antes de tentar novamente (tentativa ${attempt + 2}/${retries})...`);
+      if (isSiengeRateLimitError(err) && attempt < retries - 1) {
+        const waitMs = siengeRateLimitWaitMs(attempt, err.retryAfter);
+        console.warn(`[Sienge] HTTP 429 POST — aguardando ${waitMs / 1000}s (tentativa ${attempt + 2}/${retries})...`);
+        if (typeof onRetry === "function") onRetry(attempt + 2, waitMs, retries);
         await new Promise(r => setTimeout(r, waitMs));
       } else {
         throw err;
@@ -1511,7 +1531,19 @@ const SiengeApiService = {
     }
   },
 
-  // 20. Boleto / Linha Digitavel (payment-slip-notification)
+  // 20b. Dados bancários do credor (mesmo endpoint do assistente de contas a pagar)
+  async getCreditorBankInformations(creditorId) {
+    const id = String(creditorId || "").trim();
+    if (!id) return [];
+    if (s_apiMode === "simulado") return [];
+    try {
+      const list = await siengeFetchAllPages(`/creditors/${encodeURIComponent(id)}/bank-informations`, 100);
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      console.error("[Sienge] Erro ao obter dados bancários do credor:", e);
+      return [];
+    }
+  },
   async getPaymentSlipNotification(billReceivableId, installmentId) {
     if (s_apiMode === "simulado") {
       return { results: [] };
@@ -1526,7 +1558,8 @@ const SiengeApiService = {
     }
   },
 
-  // 21. Listar Contas Correntes (checking-accounts)
+  // Cadastro de contas (Caixa e bancos / Contas correntes).
+  // accountType.id: B Bancária, I Investimento, M Mútuo, C CAIXA, Q Cheque, E Estoque.
   async getCheckingAccounts(companyId, opts = {}) {
     if (s_apiMode === "simulado") {
       const all = (window.MOCK_DATA && window.MOCK_DATA.CHECKING_ACCOUNTS) || [{ accountNumber: "6538-2", accountName: "Conta Simulada", accountType: "CHECKING", companyId: 1 }];
@@ -1703,11 +1736,11 @@ const SiengeApiService = {
   },
 
   // 22. Criar Boleto (POST overdue-receivable-bill)
-  async createOverdueBill(payload) {
+  async createOverdueBill(payload, onRetry) {
     if (s_apiMode === "simulado") {
       return { success: true, message: "Modo Simulado: Boleto gerado com sucesso!" };
     }
-    return await siengePost('/overdue-receivable-bill', payload);
+    return await siengePost('/overdue-receivable-bill', payload, 8, typeof onRetry === "function" ? onRetry : undefined);
   },
 
   // 23. Anexos do Cliente

@@ -14,6 +14,8 @@ const ParametrizacaoParceiroApp = {
   creditorSearching: false,
   _creditorTimer: null,
   _creditorIndex: null,
+  _bankLoading: false,
+  expanded: null,
 
   obraFromCc(id) {
     const digits = String(id || "").replace(/\D/g, "");
@@ -104,7 +106,9 @@ const ParametrizacaoParceiroApp = {
       o.naAccounts = o.naAccounts || {};
       o.inAccounts = o.inAccounts || {};
     });
-    p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "" };
+    p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "", paymentDay: "", bankInfo: null };
+    p.creditor.paymentDay = p.creditor.paymentDay == null ? "" : p.creditor.paymentDay;
+    p.creditor.bankList = p.creditor.bankList || [];
     p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
     const first = p.obras[0];
     p.defaultPartnerShare = first ? first.defaultPartnerShare : (Number(p.defaultPartnerShare) || 0);
@@ -137,6 +141,7 @@ const ParametrizacaoParceiroApp = {
   setDetailTab(tab) {
     this.detailTab = tab || "geral";
     this.render();
+    if (this.detailTab === "credor") this.ensureCreditorBank();
   },
 
   partnerPct(part, key) {
@@ -346,11 +351,55 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
-  toggleExpand(id) {
+  toggleExpand(id, scope) {
+    this.closeNodeFoldMenu();
     this.expanded = this.expanded || new Set();
-    if (this.expanded.has(id)) this.expanded.delete(id);
-    else this.expanded.add(id);
+    const visao = this.dfcVisao();
+    const groups = (visao && visao.groups) || [];
+    const node = groups.find(g => String(g.id) === String(id));
+    const nextOpen = !this.expanded.has(id);
+    const apply = (nid) => {
+      if (nextOpen) this.expanded.add(String(nid));
+      else this.expanded.delete(String(nid));
+    };
+    if (scope === "level" && node) {
+      groups
+        .filter(g => String(g.parentId || "") === String(node.parentId || ""))
+        .forEach(g => apply(g.id));
+    } else {
+      apply(id);
+    }
     this.render();
+  },
+
+  closeNodeFoldMenu() {
+    const el = document.getElementById("pp-node-fold-menu");
+    if (el) el.remove();
+    if (this._foldMenuCloser) {
+      document.removeEventListener("click", this._foldMenuCloser);
+      this._foldMenuCloser = null;
+    }
+  },
+
+  openNodeFoldMenu(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeNodeFoldMenu();
+    this.expanded = this.expanded || new Set();
+    const expanded = this.expanded.has(String(id));
+    const menu = document.createElement("div");
+    menu.id = "pp-node-fold-menu";
+    menu.style.cssText = "position:fixed;z-index:9999;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,0.12);min-width:200px;padding:6px;";
+    const r = event.currentTarget.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + "px";
+    menu.style.left = r.left + "px";
+    menu.innerHTML = `
+      <button type="button" onclick="ParametrizacaoParceiroApp.toggleExpand('${id}', 'this')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? "Recolher apenas este" : "Expandir apenas este"}</button>
+      <button type="button" onclick="ParametrizacaoParceiroApp.toggleExpand('${id}', 'level')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? "Recolher o nível inteiro" : "Expandir o nível inteiro"}</button>
+    `;
+    document.body.appendChild(menu);
+    this._foldMenuCloser = () => this.closeNodeFoldMenu();
+    setTimeout(() => document.addEventListener("click", this._foldMenuCloser), 0);
   },
 
   proxyUrl(path) {
@@ -621,7 +670,7 @@ const ParametrizacaoParceiroApp = {
   clearCreditor() {
     const p = this.current();
     if (!p) return;
-    p.creditor = { id: "", name: "", cpfCnpj: "" };
+    p.creditor = { id: "", name: "", cpfCnpj: "", paymentDay: "", bankInfo: null, bankList: [] };
     this.creditorQuery = "";
     this.creditorHits = [];
     this.persist();
@@ -637,12 +686,109 @@ const ParametrizacaoParceiroApp = {
   pickCreditor(id, name, doc) {
     const p = this.current();
     if (!p) return;
-    p.creditor = p.creditor || {};
-    p.creditor.id = String(id || "");
-    p.creditor.name = String(name || "");
-    p.creditor.cpfCnpj = String(doc || "");
+    const day = p.creditor && p.creditor.paymentDay;
+    p.creditor = {
+      id: String(id || ""),
+      name: String(name || ""),
+      cpfCnpj: String(doc || ""),
+      paymentDay: day == null ? "" : day,
+      bankInfo: null,
+      bankList: [],
+      bankLoaded: false
+    };
     this.creditorQuery = "";
     this.creditorHits = [];
+    this.persist();
+    this.render();
+    this.ensureCreditorBank();
+  },
+
+  updatePaymentDay(value) {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = p.creditor || {};
+    const n = parseInt(String(value).trim(), 10);
+    if (!Number.isFinite(n) || n < 1 || n > 31) {
+      p.creditor.paymentDay = "";
+    } else {
+      p.creditor.paymentDay = n;
+    }
+    this.persist();
+  },
+
+  isDefaultBank(b) {
+    const f = b && b.defaultFlag;
+    return f === true || f === "S" || f === "s" || f === "Y" || f === "1" || f === 1;
+  },
+
+  accountTypeLabel(t) {
+    const s = String(t || "").toUpperCase();
+    if (t && typeof t === "object") return t.description || t.name || t.id || "";
+    if (s === "C" || s === "CHECKING") return "Conta corrente";
+    if (s === "P" || s === "SAVING" || s === "SAVINGS") return "Poupança";
+    if (s === "I" || s === "INVESTMENT") return "Investimento";
+    return t || "—";
+  },
+
+  async fetchCreditorBanks(creditorId) {
+    const id = String(creditorId || "").trim();
+    if (!id) return [];
+    if (typeof SiengeApiService !== "undefined" && typeof SiengeApiService.getCreditorBankInformations === "function") {
+      return SiengeApiService.getCreditorBankInformations(id);
+    }
+    const headers = { Authorization: typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "" };
+    const res = await fetch(this.proxyUrl(`/sienge-proxy/creditors/${encodeURIComponent(id)}/bank-informations?limit=200&offset=0`), { headers });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const list = json.results || json.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  async ensureCreditorBank() {
+    const p = this.current();
+    if (!p || !p.creditor || !p.creditor.id) return;
+    if (this._bankLoading) return;
+    if (p.creditor.bankLoaded) return;
+    this._bankLoading = true;
+    this.render();
+    try {
+      const list = await this.fetchCreditorBanks(p.creditor.id);
+      const cur = this.current();
+      if (!cur || !cur.creditor || String(cur.creditor.id) !== String(p.creditor.id)) return;
+      cur.creditor.bankList = list;
+      const chosenId = cur.creditor.bankId;
+      const picked = (chosenId && list.find(b => String(b.id) === String(chosenId)))
+        || list.find(b => this.isDefaultBank(b))
+        || list[0]
+        || null;
+      cur.creditor.bankInfo = picked;
+      cur.creditor.bankId = picked && picked.id != null ? picked.id : "";
+      cur.creditor.bankLoaded = true;
+      this.persist();
+    } catch (e) {
+      console.warn("[Parcerias] Dados bancários do credor:", e);
+      const cur = this.current();
+      if (cur && cur.creditor) cur.creditor.bankLoaded = true;
+    } finally {
+      this._bankLoading = false;
+      this.render();
+    }
+  },
+
+  refreshCreditorBank() {
+    const p = this.current();
+    if (!p || !p.creditor) return;
+    p.creditor.bankLoaded = false;
+    this.ensureCreditorBank();
+  },
+
+  selectCreditorBank(bankId) {
+    const p = this.current();
+    if (!p || !p.creditor) return;
+    const list = p.creditor.bankList || [];
+    const picked = list.find(b => String(b.id) === String(bankId)) || null;
+    p.creditor.bankId = picked && picked.id != null ? picked.id : "";
+    p.creditor.bankInfo = picked;
     this.persist();
     this.render();
   },
@@ -1070,10 +1216,27 @@ const ParametrizacaoParceiroApp = {
 
   credorTabHtml(p) {
     const cred = p.creditor || {};
+    const banks = cred.bankList || [];
+    const bank = cred.bankInfo || null;
+    const day = cred.paymentDay == null ? "" : cred.paymentDay;
+    const bankRow = (b) => {
+      const on = bank && String(b.id) === String(bank.id);
+      const acc = `${b.accountNumber || ""}${b.checkDigit ? "-" + b.checkDigit : ""}`;
+      return `<label style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border:1px solid ${on ? "#a7f3d0" : "#e2e8f0"};background:${on ? "#ecfdf5" : "#fff"};border-radius:8px;cursor:pointer;margin-bottom:8px;">
+        <input type="radio" name="pp-cred-bank" ${on ? "checked" : ""} onchange="ParametrizacaoParceiroApp.selectCreditorBank('${this.esc(String(b.id))}')" style="margin-top:3px;">
+        <span style="font-size:0.8rem;line-height:1.4;color:#334155;">
+          <strong>${this.esc(b.bank || "")} ${this.esc(b.nameOfBank || "")}</strong>
+          ${this.isDefaultBank(b) ? `<span style="margin-left:6px;font-size:0.65rem;font-weight:800;color:#105436;background:#d1fae5;padding:1px 6px;border-radius:99px;">Padrão Sienge</span>` : ""}
+          <span style="display:block;color:#64748b;">Ag. ${this.esc(b.agency || "—")} · Conta ${this.esc(acc)} · ${this.esc(this.accountTypeLabel(b.accountType))}</span>
+          <span style="display:block;color:#64748b;">Forma: ${this.esc(b.paymentForm || "—")} · Favorecido: ${this.esc(b.nameOfRecipient || cred.name || "—")}</span>
+          <span style="display:block;color:#64748b;">Doc.: ${this.esc(b.cpf || b.cnpj || cred.cpfCnpj || "—")}</span>
+        </span>
+      </label>`;
+    };
     return `
       <div class="crm-card" style="padding:16px;">
         <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Credor (título a pagar)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque o credor por nome, CPF ou CNPJ, como na consulta de clientes.</p>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque o credor por nome, CPF ou CNPJ, como na consulta de clientes. Os dados bancários vêm do cadastro do Sienge (mesmo GET do assistente de contas a pagar).</p>
         ${cred.id ? `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
             <div>
@@ -1081,6 +1244,21 @@ const ParametrizacaoParceiroApp = {
               <div style="font-size:0.75rem;color:#047857;">ID ${this.esc(cred.id)} · ${this.esc(cred.cpfCnpj || "sem documento")}</div>
             </div>
             <button type="button" onclick="ParametrizacaoParceiroApp.clearCreditor()" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;">Trocar</button>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:4px;margin-top:14px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia do pagamento
+            <input type="number" min="1" max="31" placeholder="1 a 31" value="${this.esc(day)}"
+              onchange="ParametrizacaoParceiroApp.updatePaymentDay(this.value)"
+              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            <span style="font-weight:500;color:#94a3b8;">Dia do mês em que o título a pagar será gerado.</span>
+          </label>
+          <div style="margin-top:16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <h4 style="margin:0;font-size:0.85rem;color:#0f172a;">Dados bancários do credor</h4>
+              <button type="button" class="btn btn-outline" onclick="ParametrizacaoParceiroApp.refreshCreditorBank()" style="height:28px;font-size:0.72rem;">Atualizar do Sienge</button>
+            </div>
+            ${this._bankLoading ? `<div style="font-size:0.78rem;color:#64748b;">Buscando GET /creditors/${this.esc(cred.id)}/bank-informations…</div>` : ""}
+            ${!this._bankLoading && !banks.length && cred.bankLoaded ? `<div style="font-size:0.78rem;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;">Nenhuma conta bancária cadastrada neste credor no Sienge.</div>` : ""}
+            ${banks.map(bankRow).join("")}
           </div>
         ` : `
           <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
@@ -1259,7 +1437,7 @@ const ParametrizacaoParceiroApp = {
     const visao = this.dfcVisao();
     const groups = visao.groups || [];
     const obra = this.currentObra(p);
-    this.expanded = this.expanded || new Set(groups.map(g => g.id));
+    this.expanded = this.expanded || new Set();
     const roots = groups.filter(g => !g.parentId && !this.isDfcHiddenForParceria(p, g));
     const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
     const def = obra ? obra.defaultPartnerShare : 0;
@@ -1295,7 +1473,7 @@ const ParametrizacaoParceiroApp = {
     const children = groups.filter(g => g.parentId === node.id && !this.isDfcHiddenForParceria(p, g));
     const accounts = node.accounts || [];
     const hasKids = children.length > 0 || accounts.length > 0;
-    const expanded = !this.expanded || this.expanded.has(node.id);
+    const expanded = this.expanded.has(String(node.id));
     const naSelf = !!(this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[node.id]);
     const ancestorNA = ancestors.some(a => this.currentObra(p) && this.currentObra(p).naNodes && this.currentObra(p).naNodes[a]);
     const stats = this.groupAccountStats(p, node.id);
@@ -1309,9 +1487,16 @@ const ParametrizacaoParceiroApp = {
     if (na) { bg = "#f8fafc"; borderLeft = "#cbd5e1"; }
 
     const chevron = hasKids
-      ? `<button type="button" onclick="ParametrizacaoParceiroApp.toggleExpand('${node.id}')" style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;">
-           <i data-lucide="${expanded ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>
-         </button>`
+      ? `<div style="display:flex;align-items:center;gap:0;position:relative;">
+           <button type="button" onclick="ParametrizacaoParceiroApp.toggleExpand('${node.id}', 'this')" title="Recolher / expandir este"
+             style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;">
+             <i data-lucide="${expanded ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>
+           </button>
+           <button type="button" onclick="ParametrizacaoParceiroApp.openNodeFoldMenu(event, '${node.id}')" title="Recolher este ou o nível inteiro"
+             style="background:none;border:none;cursor:pointer;padding:0 2px;color:#94a3b8;display:flex;align-items:center;">
+             <i data-lucide="chevrons-up-down" style="width:12px;height:12px;"></i>
+           </button>
+         </div>`
       : `<span style="width:14px;"></span>`;
 
     let html = `
