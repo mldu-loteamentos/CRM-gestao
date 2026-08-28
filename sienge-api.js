@@ -211,7 +211,13 @@ async function siengeFetch(endpoint) {
     throw new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText}`);
   }
 
-  return await response.json();
+  const text = await response.text();
+  if (!text || !String(text).trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error("Resposta inválida da API Sienge.");
+  }
 }
 
 // -----------------------------------------------
@@ -1561,57 +1567,138 @@ const SiengeApiService = {
     }
   },
 
-  // 22. Listar Contas Correntes Disponíveis pelo Centro de Custo
+  // 22. Listar Contas Correntes Disponíveis pelo Centro de Custo (aba Disponível)
+  parseCostCenterAvailableResponse(res) {
+    if (!res) return { idCompany: null, list: [] };
+    if (typeof res === "string") {
+      try { res = JSON.parse(res); } catch (e) { return { idCompany: null, list: [] }; }
+    }
+    const bags = [];
+    const pushBag = (arr) => { if (Array.isArray(arr)) bags.push(...arr); };
+    pushBag(res.availables);
+    pushBag(res.availableCheckingAccounts);
+    pushBag(res.checkingAccounts);
+    pushBag(res.accounts);
+    if (Array.isArray(res.results)) pushBag(res.results);
+    else if (res.results && typeof res.results === "object") {
+      pushBag(res.results.availables);
+      pushBag(res.results.checkingAccounts);
+    }
+    if (Array.isArray(res.data)) pushBag(res.data);
+    else if (res.data && typeof res.data === "object") pushBag(res.data.availables);
+
+    const seen = new Set();
+    const list = [];
+    bags.forEach(acc => {
+      if (acc == null) return;
+      if (typeof acc === "string" || typeof acc === "number") {
+        const accountNumber = String(acc).trim();
+        if (!accountNumber) return;
+        if (seen.has(accountNumber)) return;
+        seen.add(accountNumber);
+        list.push({ accountNumber, accountName: "Conta corrente", checkingAccountId: null, companyId: res.idCompany || res.companyId || null });
+        return;
+      }
+      if (typeof acc !== "object") return;
+      const nested = acc.checkingAccounts || acc.availables;
+      const rows = Array.isArray(nested) && nested.length ? nested : [acc];
+      rows.forEach(row => {
+        if (row == null) return;
+        if (typeof row === "string" || typeof row === "number") {
+          const accountNumber = String(row).trim();
+          if (!accountNumber || seen.has(accountNumber)) return;
+          seen.add(accountNumber);
+          list.push({ accountNumber, accountName: "Conta corrente", checkingAccountId: null, companyId: res.idCompany || res.companyId || null });
+          return;
+        }
+        if (typeof row !== "object") return;
+        const selected = row.selected;
+        if (selected === false || selected === "N" || selected === "n" || selected === 0 || selected === "false") return;
+        const accountNumber = String(row.accountNumber || row.number || row.account || row.account_number || "").trim();
+        const idCandidates = [row.checkingAccountId, row.idCheckingAccount, row.accountId, row.idAccount, row.bankAccountId];
+        let checkingAccountId = null;
+        for (let i = 0; i < idCandidates.length; i++) {
+          const rawId = idCandidates[i];
+          if (rawId == null || rawId === "") continue;
+          const s = String(rawId).trim();
+          if (/^\d+$/.test(s)) { checkingAccountId = Number(s); break; }
+        }
+        if (!accountNumber && !checkingAccountId) return;
+        const key = String(checkingAccountId || accountNumber);
+        if (seen.has(key)) return;
+        seen.add(key);
+        list.push({
+          ...row,
+          accountNumber,
+          accountName: row.accountName || row.name || row.description || "Conta corrente",
+          checkingAccountId,
+          companyId: row.companyId || row.idCompany || res.idCompany || res.companyId || null
+        });
+      });
+    });
+    return {
+      idCompany: res.idCompany || res.companyId || null,
+      list
+    };
+  },
+
   async getCostCenterAvailableAccounts(costCenterId) {
-    const ccMatch = String(costCenterId || "").match(/(\d{3,})/);
-    const id = ccMatch ? ccMatch[1] : costCenterId;
+    const ids = [];
+    const addId = (v) => {
+      const m = String(v || "").match(/(\d{3,})/);
+      const id = m ? m[1] : (v != null && v !== "" && v !== "N/D" && v !== "undefined" ? String(v).trim() : "");
+      if (id && id !== "N/D" && !ids.includes(id)) ids.push(id);
+    };
+    addId(costCenterId);
+    if (typeof window !== "undefined" && window.AppState) {
+      addId(window.AppState.currentCostCenterId);
+      const sale = (window.AppState.sales || []).find(s =>
+        String(s.id) === String(window.AppState.selectedSaleId) ||
+        String(s.receivableBillId) === String(window.AppState.selectedSaleId)
+      );
+      if (sale) {
+        addId(sale.costCenterId);
+        addId(sale.enterpriseId);
+      }
+      const bills = [
+        ...(window.AppState.defaultersBills || []),
+        ...(window.AppState.subjudiceBills || []),
+        ...(window.AppState.zeroPaidBills || [])
+      ];
+      const bill = bills.find(b =>
+        String(b.receivableBillId || b.billId) === String(window.AppState.currentReceivableBillId) ||
+        String(b.receivableBillId) === String(window.AppState.selectedSaleId)
+      );
+      if (bill) addId(bill.costCenterId || (bill.costCentersId && bill.costCentersId[0]));
+    }
+    if (typeof document !== "undefined") {
+      const ctx = document.getElementById("ctx-empreend-val");
+      if (ctx && ctx.textContent) addId(ctx.textContent);
+      const lot = document.getElementById("det-block-lot-span");
+      if (lot && lot.textContent) addId(lot.textContent);
+    }
+
     if (s_apiMode === "simulado") {
       return { idCompany: 1, availables: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }], results: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }] };
     }
-    if (!id || id === "N/D" || id === "undefined") return { results: [], availables: [] };
-    try {
-      const res = await siengeFetchWithRetry(`/cost-centers/${id}/available`);
-      const raw = [];
-      const push = (arr) => { if (Array.isArray(arr)) raw.push(...arr); };
-      push(res && res.availables);
-      push(res && res.results);
-      push(res && res.availableCheckingAccounts);
-      push(res && res.checkingAccounts);
-      const seen = new Set();
-      const list = [];
-      raw.forEach(acc => {
-        if (!acc || typeof acc !== "object") return;
-        const nested = acc.checkingAccounts || acc.availables;
-        const rows = Array.isArray(nested) && nested.length ? nested : [acc];
-        rows.forEach(row => {
-          if (!row || typeof row !== "object") return;
-          const accountNumber = String(row.accountNumber || row.number || row.account || "").trim();
-          const idCandidates = [row.checkingAccountId, row.idCheckingAccount, row.accountId, row.idAccount, row.bankAccountId, row.id];
-          let checkingAccountId = null;
-          for (let i = 0; i < idCandidates.length; i++) {
-            const raw = idCandidates[i];
-            if (raw == null || raw === "") continue;
-            const s = String(raw).trim();
-            if (/^\d+$/.test(s)) { checkingAccountId = Number(s); break; }
-          }
-          if (!accountNumber && !checkingAccountId) return;
-          const key = String(checkingAccountId || accountNumber);
-          if (seen.has(key)) return;
-          seen.add(key);
-          list.push({
-            ...row,
-            accountNumber,
-            accountName: row.accountName || row.name || row.description || "Conta corrente",
-            checkingAccountId,
-            companyId: row.companyId || row.idCompany || (res && (res.idCompany || res.companyId)) || null
-          });
-        });
-      });
-      return { ...(res || {}), idCompany: (res && (res.idCompany || res.companyId)) || null, availables: list, results: list };
-    } catch (e) {
-      console.error("[Sienge] Erro ao obter contas correntes disponíveis do CC:", e);
-      return { results: [], availables: [] };
+    if (!ids.length) return { results: [], availables: [] };
+
+    let lastRes = null;
+    for (const id of ids) {
+      try {
+        const res = await siengeFetchWithRetry(`/cost-centers/${id}/available`, 2);
+        lastRes = res;
+        const parsed = this.parseCostCenterAvailableResponse(res);
+        if (parsed.list.length) {
+          console.log("[Sienge] Contas do disponível do CC", id, parsed.list.map(a => a.accountNumber));
+          return { ...(res || {}), idCompany: parsed.idCompany, availables: parsed.list, results: parsed.list };
+        }
+      } catch (e) {
+        console.warn("[Sienge] Disponível do CC", id, e && e.message);
+      }
     }
+    const empty = this.parseCostCenterAvailableResponse(lastRes);
+    return { ...(lastRes || {}), idCompany: empty.idCompany, availables: [], results: [] };
   },
 
   // 22. Criar Boleto (POST overdue-receivable-bill)

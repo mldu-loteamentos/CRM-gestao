@@ -11,6 +11,7 @@ const InvestimentoApp = {
   months: [],
   expanded: new Set(),
   companyQuery: "",
+  accountQuery: "",
   companyDropOpen: false,
   groupByCompany: true,
   collapsedCompanies: new Set(),
@@ -181,11 +182,44 @@ const InvestimentoApp = {
     ).trim();
   },
 
+  accIdentity(accountNumber, extra) {
+    const raw = String(accountNumber || (extra && (extra.accountNumber || extra.account || extra.code)) || "").trim();
+    const digits = this.normAcc(raw);
+    if (digits) return digits;
+    if (raw) return raw.toUpperCase();
+    const fallback = extra && (extra.checkingAccountId || extra.idCheckingAccount || extra.id);
+    return fallback != null ? String(fallback) : "";
+  },
+
+  accKey(companyId, accountNumber, extra) {
+    return `${companyId}|${this.accIdentity(accountNumber, extra)}`;
+  },
+
+  accTextBlob(acc) {
+    const type = acc && acc.accountType;
+    const typeBits = type && typeof type === "object"
+      ? [type.id, type.description, type.name, type.label]
+      : [type];
+    return [
+      acc && acc.accountNumber,
+      acc && acc.accountName,
+      acc && acc.name,
+      acc && acc.description,
+      acc && acc.nickname,
+      acc && acc.mask,
+      acc && acc.accountCode,
+      acc && acc.code,
+      ...typeBits,
+      acc && acc.accountKind,
+      acc && acc.type
+    ].map(x => String(x == null ? "" : x)).join(" ").toUpperCase();
+  },
+
   isInvestmentAccount(acc) {
-    const type = String(acc.accountType || acc.type || acc.accountKind || "").toUpperCase();
-    const name = String(acc.accountName || acc.name || acc.description || "").toUpperCase();
-    if (/APLIC|INVEST|SAVING|POUPAN|APPLICATION|FUNDO/.test(type)) return true;
-    if (/APLIC|INVEST|CDB|FUNDO|POUPAN|TESOURO|LCI|LCA|RDB|COMPROMISSADA/.test(name)) return true;
+    const blob = this.accTextBlob(acc);
+    if (/APLIC|INVEST|SAVING|POUPAN|APPLICATION|FUNDO|CDB|TESOURO|LCI|LCA|RDB|COMPROMISSADA|\bC\/I\b|C\/I\s|- C\/I|COMPR-/.test(blob)) return true;
+    const typeId = acc && acc.accountType && typeof acc.accountType === "object" ? String(acc.accountType.id || "").toUpperCase() : "";
+    if (typeId === "I" || typeId === "INV" || typeId === "INVESTMENT" || typeId === "2") return true;
     return false;
   },
 
@@ -270,7 +304,7 @@ const InvestimentoApp = {
       const [balancesOpen, accountsChunks, movChunks, ...monthBalResults] = await Promise.all([
         SiengeApiService.getAccountBalances(openingDate, { showLast: true }),
         Promise.all(this.selectedCompanyIds.map(async id => {
-          const res = await SiengeApiService.getCheckingAccounts(id);
+          const res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
           return ((res && res.results) || []).map(a => ({ ...a, companyId: a.companyId || id }));
         })),
         Promise.all(this.selectedCompanyIds.map(async id => {
@@ -290,34 +324,35 @@ const InvestimentoApp = {
       if (this.onlyInvestment) catalog = catalog.filter(a => this.isInvestmentAccount(a));
       const seen = new Set();
       catalog = catalog.filter(a => {
-        const key = `${a.companyId}|${this.normAcc(a.accountNumber) || a.checkingAccountId || a.id}`;
+        const key = this.accKey(a.companyId, a.accountNumber, a);
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
 
-      const investKeys = new Set(catalog.map(a => `${a.companyId}|${this.normAcc(a.accountNumber)}`));
+      const investKeys = new Set(catalog.map(a => this.accKey(a.companyId, a.accountNumber, a)));
       const movements = movChunks.flat().filter(m => {
-        const num = this.normAcc(this.movAccount(m));
-        if (!num) return false;
+        const raw = this.movAccount(m);
+        const key = this.accKey(m.companyId, raw, m);
+        if (!this.accIdentity(raw, m)) return false;
         if (!catalog.length) return false;
         if (!this.onlyInvestment) {
           return this.selectedCompanyIds.includes(String(m.companyId));
         }
-        return investKeys.has(`${m.companyId}|${num}`) || [...investKeys].some(k => k.endsWith("|" + num));
+        return investKeys.has(key);
       });
 
       if (!catalog.length && this.onlyInvestment) {
         this.accounts = [];
         this.kpis = { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 };
-        this.error = "Nenhuma conta de investimento/aplicação identificada nas empresas selecionadas. Desmarque o filtro para ver todas as contas.";
+        this.error = "Nenhuma conta de investimento/aplicação identificada nas empresas selecionadas.";
         return;
       }
 
       const byAcc = new Map();
       const ensure = (acc) => {
-        const num = String(acc.accountNumber || "").trim();
-        const key = `${acc.companyId}|${this.normAcc(num)}`;
+        const num = String(acc.accountNumber || acc.accountName || acc.name || "").trim();
+        const key = this.accKey(acc.companyId, num, acc);
         if (!byAcc.has(key)) {
           const opening = this.pickBalance(balancesOpen, num, acc.companyId);
           const closingApi = this.pickBalance(balancesClose, num, acc.companyId);
@@ -326,7 +361,7 @@ const InvestimentoApp = {
             companyId: acc.companyId,
             companyName: this.companyName(acc.companyId),
             accountNumber: num,
-            accountName: acc.accountName || acc.name || "Conta",
+            accountName: acc.accountName || acc.name || acc.description || "Conta",
             accountType: acc.accountType || "",
             opening,
             closingApi,
@@ -345,7 +380,7 @@ const InvestimentoApp = {
 
       movements.forEach(mov => {
         const num = this.movAccount(mov);
-        const key = `${mov.companyId}|${this.normAcc(num)}`;
+        const key = this.accKey(mov.companyId, num, mov);
         let row = byAcc.get(key);
         if (!row) {
           row = ensure({ companyId: mov.companyId, accountNumber: num, accountName: mov.accountName || num });
@@ -389,6 +424,7 @@ const InvestimentoApp = {
       }).sort((a, b) => b.closing - a.closing);
 
       this.accounts = accounts;
+      this.collapsedAccounts = new Set(accounts.map(r => r.key));
       this.kpis = accounts.reduce((acc, r) => {
         acc.opening += r.opening;
         acc.aportes += r.aportes;
@@ -462,12 +498,9 @@ const InvestimentoApp = {
     if (!filtered.length) return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma empresa com esse nome.</div>`;
     return filtered.map(c => {
       const on = this.selectedCompanyIds.includes(c.id);
-      const usual = c.name && c.legalName && String(c.name).toUpperCase() !== String(c.legalName).toUpperCase()
-        ? `<span style="display:block;font-size:0.72rem;font-weight:600;color:#64748b;">${this.esc(c.name)}</span>`
-        : "";
       return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
         <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)" style="margin-top:3px;flex-shrink:0;">
-        <span style="font-weight:${on ? 700 : 600};color:#334155;line-height:1.35;white-space:normal;">${this.esc(this.companyFullLabel(c))}${usual}</span>
+        <span style="font-weight:${on ? 700 : 600};color:#334155;line-height:1.35;white-space:normal;">${this.esc(this.companyFullLabel(c))}</span>
       </label>`;
     }).join("");
   },
@@ -477,19 +510,15 @@ const InvestimentoApp = {
     if (!companies.length) {
       return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
     }
-    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:520px;max-width:760px;" onmousedown="event.stopPropagation()">
+    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:420px;max-width:640px;" onmousedown="event.stopPropagation()">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas geridas pelo grupo</div>
-      <div style="display:flex;gap:8px;align-items:stretch;">
-        <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
-          style="flex:1;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
-          <span style="white-space:normal;line-height:1.3;">${this.esc(this.companyDropLabel())}</span>
-          <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;flex-shrink:0;"></i>
-        </button>
-        <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="height:34px;padding:0 12px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;white-space:nowrap;">Marcar todas</button>
-        <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="height:34px;padding:0 12px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;white-space:nowrap;">Desmarcar todas</button>
-      </div>
+      <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
+        style="width:100%;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
+        <span style="white-space:normal;line-height:1.3;">${this.esc(this.companyDropLabel())}</span>
+        <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;flex-shrink:0;"></i>
+      </button>
       ${this.companyDropOpen ? `
-        <div style="position:absolute;left:0;right:0;top:58px;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
+        <div style="position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
           <div style="display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
             <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="flex:1;height:30px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Marcar todas</button>
             <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="flex:1;height:30px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
@@ -548,8 +577,19 @@ const InvestimentoApp = {
     this.render();
   },
 
-  companyAccounts(companyId) {
-    return this.accounts.filter(r => String(r.companyId) === String(companyId));
+  companyAccounts(companyId, list) {
+    return (list || this.accounts).filter(r => String(r.companyId) === String(companyId));
+  },
+
+  visibleAccounts() {
+    const q = (this.accountQuery || "").toLowerCase().trim();
+    const nq = this.normAcc(this.accountQuery);
+    if (!q) return this.accounts;
+    return this.accounts.filter(r => {
+      const blob = `${r.accountNumber} ${r.accountName} ${r.companyName}`.toLowerCase();
+      if (blob.includes(q)) return true;
+      return !!(nq && this.normAcc(r.accountNumber).includes(nq));
+    });
   },
 
   aggregateFlow(accs) {
@@ -644,9 +684,10 @@ const InvestimentoApp = {
               <input type="date" value="${this.endDate}" onchange="InvestimentoApp.endDate=this.value"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;align-items:center;gap:6px;height:34px;">
-              <input type="checkbox" ${this.onlyInvestment ? "checked" : ""} onchange="InvestimentoApp.onlyInvestment=this.checked">
-              Somente aplicação / investimento
+            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Conta
+              <input type="search" id="inv-acc-search" placeholder="Nº ou nome da conta" value="${this.esc(this.accountQuery)}"
+                oninput="InvestimentoApp.accountQuery=this.value;InvestimentoApp._focusAcc=true;InvestimentoApp.render()"
+                style="display:block;height:34px;min-width:200px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
@@ -670,6 +711,14 @@ const InvestimentoApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    if (this._focusAcc) {
+      this._focusAcc = false;
+      const a = document.getElementById("inv-acc-search");
+      if (a) {
+        a.focus();
+        try { a.setSelectionRange(a.value.length, a.value.length); } catch (e) {}
+      }
+    }
     if (this.companyDropOpen) {
       const s = document.getElementById("inv-emp-search");
       if (s) {
@@ -683,6 +732,32 @@ const InvestimentoApp = {
     if (!this.accounts.length) {
       return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:28px;text-align:center;color:#94a3b8;">Informe o período e clique em Consultar.</div>`;
     }
+    const accounts = this.visibleAccounts();
+    if (!accounts.length) {
+      return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:28px;text-align:center;color:#94a3b8;">Nenhuma conta com esse filtro.</div>`;
+    }
+    const visKpis = accounts.reduce((acc, r) => {
+      acc.opening += r.opening || 0;
+      return acc;
+    }, { opening: 0 });
+    const visFlow = (() => {
+      const keys = this.months;
+      let running = visKpis.opening;
+      return keys.map(mk => {
+        const f = accounts.reduce((acc, r) => {
+          const m = (r.months && r.months[mk]) || this.emptyFlow();
+          acc.aportes += m.aportes || 0;
+          acc.resgates += m.resgates || 0;
+          acc.rendimento += m.rendimento || 0;
+          acc.tarifas += m.tarifas || 0;
+          return acc;
+        }, this.emptyFlow());
+        const opening = running;
+        const net = f.aportes + f.resgates + f.rendimento + f.tarifas;
+        running = opening + net;
+        return { month: mk, opening, ...f, closing: running };
+      });
+    })();
     const months = this.months;
     const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;${extra || ""}">${label}</th>`;
     const money = (n, bold) => `<td style="padding:6px 8px;${this.cell(n, bold)}">${this.fmt(n)}</td>`;
@@ -749,14 +824,14 @@ const InvestimentoApp = {
         </tr>`;
     };
 
-    const consolidado = groupRows("Consolidado", "Empresas selecionadas", this.kpis.opening, this.consolidatedFlow(), true);
+    const consolidado = groupRows("Consolidado", "Empresas selecionadas", visKpis.opening, visFlow, true);
     let body = consolidado;
     const showGroup = this.groupByCompany && this.selectedCompanyIds.length > 1;
     if (showGroup) {
-      const ids = [...new Set(this.accounts.map(a => String(a.companyId)))];
+      const ids = [...new Set(accounts.map(a => String(a.companyId)))];
       ids.sort((a, b) => this.companyName(a).localeCompare(this.companyName(b), "pt-BR"));
       ids.forEach(cid => {
-        const accs = this.companyAccounts(cid);
+        const accs = this.companyAccounts(cid, accounts);
         if (!accs.length) return;
         const agg = this.aggregateFlow(accs);
         const closed = this.collapsedCompanies.has(String(cid));
@@ -778,7 +853,7 @@ const InvestimentoApp = {
         }
       });
     } else {
-      body += this.accounts.map(r =>
+      body += accounts.map(r =>
         groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key })
       ).join("");
     }

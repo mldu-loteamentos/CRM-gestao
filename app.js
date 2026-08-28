@@ -1757,6 +1757,7 @@ async function initializeApplication() {
 
   // Carregar dados armazenados localmente (SharePoint preambles & occurrences)
   AppState.preambles = JSON.parse(localStorage.getItem("crm_moura_preambles")) || window.MOCK_DATA.INITIAL_PREAMBLE_DATA;
+  if (typeof window.ensurePreamblesListLoaded === "function") window.ensurePreamblesListLoaded();
   
   // --- INICIO MIGRACAO FIREBASE NOTES ---
   window.getCustomerNoteChunkId = function(customerId) {
@@ -10519,7 +10520,9 @@ function generateAgreementPDF() {
   
   // Obter Preâmbulo dos Sócios baseado na unidade
   const unit = AppState.units[g_renegSale.unitId] || {};
-  const preambleText = AppState.preambles[unit.costCenterId] || "PREÃ‚MBULO NÃO CADASTRADO NO SHAREPOINT.";
+  const preambleText = (typeof window.getPreambleForContract === "function")
+    ? window.getPreambleForContract(unit, g_renegSale)
+    : (AppState.preambles[unit.costCenterId] || "PREÂMBULO NÃO CADASTRADO NO SHAREPOINT.");
   
   // Obter Cláusulas Editadas
   let textTemplate = formatDocPadraoMarkup(document.getElementById("reneg-clauses-editor").value);
@@ -10768,6 +10771,9 @@ async function showDistratoView(customer, sale, bills) {
 
   const permutaEl = document.getElementById("dist-permuta-toggle");
   if (permutaEl) permutaEl.checked = false;
+  if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
+  const loteWrapReset = document.getElementById("dist-permuta-lote-wrap");
+  if (loteWrapReset) loteWrapReset.style.display = "none";
   const iniciativaEl = document.getElementById("dist-iniciativa");
   if (iniciativaEl) iniciativaEl.value = "cliente";
   const nomeBen = document.getElementById("dist-bank-beneficiary-name");
@@ -11070,12 +11076,24 @@ function toggleDistratoPaymentFields() {
   if (pix) pix.style.display = type === "PIX" ? "flex" : "none";
 }
 
+window.syncDistratoPermutaUi = function() {
+  const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  const label = document.getElementById("dist-permuta-label");
+  if (label) {
+    label.style.background = on ? "#ea580c" : "#fff";
+    label.style.color = on ? "#fff" : "#9a3412";
+    label.style.borderColor = on ? "#c2410c" : "#fdba74";
+    label.title = on ? "Permuta ligada — clique para desligar" : "Ligar cálculo de permuta";
+  }
+};
+
 window.toggleDistratoPermuta = function() {
   const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
   const loteWrap = document.getElementById("dist-permuta-lote-wrap");
   if (loteWrap) loteWrap.style.display = on ? "block" : "none";
   const choiceEl = document.getElementById("dist-restitution-choice");
   if (choiceEl) choiceEl.value = on ? "permuta" : (choiceEl.value === "permuta" ? "lei" : choiceEl.value);
+  if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
   calculateDistrato();
 };
 
@@ -11245,7 +11263,9 @@ window.generateDistratoPDF = function generateDistratoPDF() {
   }
 
   const unit = AppState.units[g_distSale.unitId] || {};
-  const preambleText = AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.";
+  const preambleText = (typeof window.getPreambleForContract === "function")
+    ? window.getPreambleForContract(unit, g_distSale)
+    : (AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.");
 
   const distVal = (id) => {
     const el = document.getElementById(id);
@@ -11932,10 +11952,6 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
     };
 
     let accounts = await loadAccounts(currentReprocessCostCenterId);
-    if ((!accounts || accounts.length === 0) && AppState.currentCostCenterId && String(window.normalizeBoletoCostCenterId(AppState.currentCostCenterId)) !== String(currentReprocessCostCenterId)) {
-      accounts = await loadAccounts(AppState.currentCostCenterId);
-      if (accounts && accounts.length > 0) currentReprocessCostCenterId = window.normalizeBoletoCostCenterId(AppState.currentCostCenterId);
-    }
 
     const companyForLookup = currentReprocessCompanyId || AppState.currentCompanyId;
     if (accounts && accounts.length && companyForLookup && typeof SiengeApiService.getCheckingAccounts === "function") {
@@ -11983,7 +11999,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       });
       accountSelect.disabled = usable.length === 1;
     } else {
-      accountSelect.innerHTML = '<option value="">Conta disponível no Sienge não configurada. Consulte o time de tesouraria</option>';
+      accountSelect.innerHTML = `<option value="">Conta disponível no Sienge não configurada. Consulte o time de tesouraria${currentReprocessCostCenterId ? ` (CC ${currentReprocessCostCenterId})` : ""}</option>`;
       accountSelect.disabled = true;
     }
     if (typeof window.validateReprocessForm === 'function') {
@@ -18403,7 +18419,8 @@ function loadPreamblesConfigTab() {
   body.innerHTML = "";
   
   if (!AppState.preamblesList || AppState.preamblesList.length === 0) {
-    let saved = JSON.parse(localStorage.getItem('crm_moura_preambles_list'));
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem('crm_moura_preambles_list')); } catch (e) { saved = []; }
     if (!saved || saved.length === 0) {
       saved = [
         { id: 1, text: "EMPREENDIMENTOS IMOBILIÃRIOS CHÃCARA MOURA LEITE, inscrita no CNPJ sob o nº 01.610.787/0001-76, com endereço na Rua J. J. Esteves, 172, na cidade e comarca de Cerqueira César, Estado de São Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 208, fls. 287 a 289, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP.", responsibles: "RESPONSÃVEL 1: EMPREENDIMENTOS IMOBILIÃRIOS CHÃCARA MOURA LEITE", status: "Ativo" },
@@ -18419,19 +18436,22 @@ function loadPreamblesConfigTab() {
         { id: 13, text: "LALIM PARTICIPAÇÃ•ES LTDA., inscrita no CNPJ sob o n.º 42.361.370/0001-02, com sede e foro na cidade e comarca de Avaré, estado de São Paulo, na Rua Goiás n.º 1.548, centro, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 469, pag. 031/032, em 21/09/2021, no 2ª Tabelião de Notas e de Protesto de Letras e Títulos Avaré-SP, e ÃGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃRIOS LTDA, inscrita no CNPJ sob o n.º 41.209.367/0001-05, com sede e foro na cidade e comarca de São Paulo, Estado de São Paulo, na Rua Professor Atílio Innocenti n.º 474, Conjunto 508, Vila Nova Conceição, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 11.281, pag. 055 â€“ C.L - Primeiro Traslado, em 03/09/2021, no 9ª Tabelião de Notas São Paulo-SP.", responsibles: "RESPONSAVEL 1: LALIM PARTICIPAÇÃ•ES LTDA\nRESPONSAVEL 2:  ÃGUA DO BURRINHO EMPREENDIMENTOS IMOBILIÃRIOS LTDA", status: "Ativo" },
         { id: 14, text: "RESERVA DOS RAMOS SPE LTDA., pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº 57.600.844/0001-90, com sede nesta cidade de Tatuí-SP, a Rua Capitão Lisboa, 715, 4º andar, conj. 44, sala 16, com seus atos constitutivos arquivados na Junta Comercial do Estado de São Paulo-JUCESP, sob NIRE 35265136678, por seu representante legal abaixo assinado.", responsibles: "RESPONSAVEL 1: RESERVA DOS RAMOS SPE LTDA", status: "Ativo" }
       ];
-      localStorage.setItem('crm_moura_preambles_list', JSON.stringify(saved));
     }
     AppState.preamblesList = saved;
   }
+  if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
   
   AppState.preamblesList.forEach(p => {
     const statusText = p.status || "Ativo";
     const badgeClass = statusText === 'Ativo' ? "badge-success" : "badge-danger";
+    const ccs = (p.centrosCustoIds || []).join(", ") || "—";
+    const vinculo = p.empresaId ? `Emp. ${p.empresaId}<br><span style="font-size:0.75rem;color:#64748b;">CC ${ccs}</span>` : `CC ${ccs}`;
     
     const row = document.createElement("tr");
     row.innerHTML = `
       <td style="text-align: center;"><strong>${p.id}</strong></td>
       <td style="white-space: pre-wrap;">${p.text}</td>
+      <td style="text-align: center; font-size: 0.8rem;">${vinculo}</td>
       <td style="text-align: center;"><span class="badge ${badgeClass}">${statusText}</span></td>
       <td style="text-align: center;">
         <button class="btn btn-outline btn-sm" onclick="selectPreambleForEdit(${p.id})">
@@ -19225,7 +19245,8 @@ window.savePreamble = function() {
         responsibles: responsibles,
         status: status,
         empresaId: empresaId,
-        centrosCustoIds: centrosCustoIds
+        centrosCustoIds: centrosCustoIds,
+        updatedAt: Date.now()
       });
     } else {
       const p = AppState.preamblesList.find(x => x.id === currentEditId);
@@ -19235,6 +19256,7 @@ window.savePreamble = function() {
         p.status = status;
         p.empresaId = empresaId;
         p.centrosCustoIds = centrosCustoIds;
+        p.updatedAt = Date.now();
       } else {
         alert("Erro: Preâmbulo não encontrado para edição.");
         return;
@@ -19242,6 +19264,10 @@ window.savePreamble = function() {
     }
     
     localStorage.setItem("crm_moura_preambles_list", JSON.stringify(AppState.preamblesList));
+    if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
+    if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig(true).catch(() => {});
+    }
     
     cancelPreambleEdit();
     loadPreamblesConfigTab();
@@ -27261,8 +27287,100 @@ window.SYNC_KEYS = [
     "crm_moura_vistoria_recurrence_days",
     "crm_centros_custo_custom",
     "crm_centros_custo_tipos",
-    "crm_plano_visoes_v2"
+    "crm_plano_visoes_v2",
+    "crm_moura_preambles_list"
 ];
+
+window.preambleLinkScore = function(p) {
+  if (!p) return 0;
+  const n = Array.isArray(p.centrosCustoIds) ? p.centrosCustoIds.length : 0;
+  return n * 10 + (p.empresaId ? 3 : 0) + (p.updatedAt ? 1 : 0) + (p.text ? Math.min(2, String(p.text).length > 40 ? 1 : 0) : 0);
+};
+
+window.mergePreamblesList = function(localStr, cloudStr) {
+  let local = [];
+  let cloud = [];
+  try { local = JSON.parse(localStr || "[]") || []; } catch (e) { local = []; }
+  try { cloud = JSON.parse(cloudStr || "[]") || []; } catch (e) { cloud = []; }
+  if (!Array.isArray(local)) local = [];
+  if (!Array.isArray(cloud)) cloud = [];
+  const byId = new Map();
+  const mergeOne = (p) => {
+    if (!p || p.id == null) return;
+    const id = Number(p.id);
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, { ...p, id });
+      return;
+    }
+    const newer = Number(p.updatedAt || 0) >= Number(prev.updatedAt || 0) ? p : prev;
+    const older = newer === p ? prev : p;
+    const ccNew = Array.isArray(newer.centrosCustoIds) ? newer.centrosCustoIds : [];
+    const ccOld = Array.isArray(older.centrosCustoIds) ? older.centrosCustoIds : [];
+    byId.set(id, {
+      ...older,
+      ...newer,
+      id,
+      text: (newer.text && String(newer.text).length >= String(older.text || "").length) ? newer.text : (older.text || newer.text),
+      empresaId: newer.empresaId || older.empresaId || "",
+      centrosCustoIds: ccNew.length ? ccNew : ccOld,
+      responsibles: newer.responsibles || older.responsibles || "",
+      status: newer.status || older.status || "Ativo",
+      updatedAt: Math.max(Number(newer.updatedAt || 0), Number(older.updatedAt || 0))
+    });
+  };
+  cloud.forEach(mergeOne);
+  local.forEach(mergeOne);
+  return JSON.stringify([...byId.values()].sort((a, b) => Number(a.id) - Number(b.id)));
+};
+
+window.rebuildPreambleIndex = function() {
+  const map = {};
+  (AppState.preamblesList || []).forEach(p => {
+    (p.centrosCustoIds || []).forEach(cc => {
+      map[cc] = p.text;
+      map[String(cc)] = p.text;
+    });
+  });
+  AppState.preambles = Object.keys(map).length ? map : (AppState.preambles || {});
+};
+
+window.ensurePreamblesListLoaded = function() {
+  if (AppState.preamblesList && AppState.preamblesList.length) {
+    window.rebuildPreambleIndex();
+    return AppState.preamblesList;
+  }
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem("crm_moura_preambles_list") || "[]") || []; } catch (e) { saved = []; }
+  AppState.preamblesList = Array.isArray(saved) ? saved : [];
+  window.rebuildPreambleIndex();
+  return AppState.preamblesList;
+};
+
+window.getPreambleForContract = function(unit, sale) {
+  window.ensurePreamblesListLoaded();
+  const ccId = (unit && (unit.costCenterId || unit.enterpriseId))
+    || (sale && (sale.costCenterId || sale.enterpriseId))
+    || AppState.currentCostCenterId
+    || null;
+  const companyId = (sale && sale.companyId) || (unit && unit.companyId) || AppState.currentCompanyId || null;
+  const list = (AppState.preamblesList || []).filter(p => String(p.status || "Ativo").toLowerCase() !== "inativo");
+  const cc = ccId == null || ccId === "N/D" ? "" : String(ccId);
+  const hasCc = (p) => (p.centrosCustoIds || []).some(x => String(x) === cc);
+  let hit = null;
+  if (cc) {
+    if (companyId != null && companyId !== "") {
+      hit = list.find(p => hasCc(p) && String(p.empresaId) === String(companyId));
+    }
+    if (!hit) hit = list.find(p => hasCc(p));
+  }
+  if (!hit && companyId != null && companyId !== "") {
+    hit = list.find(p => String(p.empresaId) === String(companyId));
+  }
+  if (hit && hit.text) return hit.text;
+  if (cc && AppState.preambles && AppState.preambles[cc]) return AppState.preambles[cc];
+  return "PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO.";
+};
 
 window.planoVisoesAccountCount = function(str) {
   try {
@@ -27348,8 +27466,24 @@ window.syncGlobalConfigFromFirebase = async function() {
         
         if (globalData) {
             let changed = false;
+            (function syncPreamblesFromCloud() {
+                const k = "crm_moura_preambles_list";
+                const merged = window.mergePreamblesList(localStorage.getItem(k), globalData[k] || "[]");
+                if (merged && merged !== (localStorage.getItem(k) || "")) {
+                    _originalSetItem.call(localStorage, k, merged);
+                    changed = true;
+                }
+                try {
+                    AppState.preamblesList = JSON.parse(localStorage.getItem(k) || merged || "[]") || [];
+                    if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
+                } catch (e) {}
+                if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                    setTimeout(() => window.forceUploadLocalConfig(true), 1600);
+                }
+            })();
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
+                if (k === "crm_moura_preambles_list") return;
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
