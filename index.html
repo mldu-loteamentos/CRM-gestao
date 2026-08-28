@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=557">
+  <link rel="stylesheet" href="style.css?v=561">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -941,6 +941,19 @@
             </li>
           </ul>
         </li>
+        <!-- SOCIETÁRIO -->
+        <li class="nav-item nav-group" data-module="mod_societario">
+          <a onclick="toggleNavMenu(event, 'submenu-societario')" title="Societário">
+            <i data-lucide="git-fork"></i>
+            <span>Societário</span>
+            <i data-lucide="chevron-down" class="nav-chevron"></i>
+          </a>
+          <ul class="nav-submenu" id="submenu-societario" style="display: none;">
+            <li data-tab="estrutura-societaria" data-module="sub_soc_geral_estrutura_societaria_acessar">
+              <a onclick="switchTab('estrutura-societaria', 'Estrutura Societária')">Estrutura Societária</a>
+            </li>
+          </ul>
+        </li>
         <!-- 6 - COMERCIAL -->
         <li class="nav-item nav-group" data-module="mod_comercial">
           <a onclick="toggleNavMenu(event, 'submenu-comercial')" title="Comercial">
@@ -1092,7 +1105,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.557 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.561 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -1151,6 +1164,9 @@
       </section>
       <section id="tab-parametrizacao-parceiro" class="tab-pane" style="display: none;">
         <div id="parametrizacao-parceiro-root"></div>
+      </section>
+      <section id="tab-estrutura-societaria" class="tab-pane" style="display: none;">
+        <div id="estrutura-societaria-root"></div>
       </section>
       <section id="tab-fluxo-caixa" class="tab-pane" style="display: none;">
         <div id="fluxo-caixa-root"></div>
@@ -6082,35 +6098,36 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=557"></script>
-  <script defer src="sienge-api.js?v=557"></script>
-  <script defer src="azure-auth.js?v=557"></script>
-  <script defer src="app.js?v=557"></script>
-  <script defer src="home-dashboard.js?v=557"></script>
-  <script defer src="anexos.js?v=557"></script>
-  <script defer src="contas-pagar.js?v=557"></script>
-  <script defer src="config-tags.js?v=557"></script>
-  <script defer src="config-users.js?v=557"></script>
-  <script defer src="construcao.js?v=557"></script>
-  <script defer src="empresas.js?v=557"></script>
-  <script defer src="relacionamento.js?v=557"></script>
+  <script defer src="data.js?v=561"></script>
+  <script defer src="sienge-api.js?v=561"></script>
+  <script defer src="azure-auth.js?v=561"></script>
+  <script defer src="app.js?v=561"></script>
+  <script defer src="home-dashboard.js?v=561"></script>
+  <script defer src="anexos.js?v=561"></script>
+  <script defer src="contas-pagar.js?v=561"></script>
+  <script defer src="config-tags.js?v=561"></script>
+  <script defer src="config-users.js?v=561"></script>
+  <script defer src="construcao.js?v=561"></script>
+  <script defer src="empresas.js?v=561"></script>
+  <script defer src="relacionamento.js?v=561"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=557"></script>
-  <script defer src="marketing.js?v=557"></script>
-  <script defer src="plano-financeiro.js?v=557"></script>
-  <script defer src="prestacao-contas.js?v=557"></script>
-  <script defer src="fluxo-caixa.js?v=557"></script>
-  <script defer src="investimento.js?v=557"></script>
-  <script defer src="parametrizacao-parceiro.js?v=557"></script>
-  <script defer src="fiscal.js?v=557"></script>
-  <script defer src="indexadores.js?v=557"></script>
-  <script defer src="verificar-construcao.js?v=557"></script>
-  <script src="repactuacoes.js?v=557"></script>
+  <script defer src="centros-custo.js?v=561"></script>
+  <script defer src="marketing.js?v=561"></script>
+  <script defer src="plano-financeiro.js?v=561"></script>
+  <script defer src="prestacao-contas.js?v=561"></script>
+  <script defer src="fluxo-caixa.js?v=561"></script>
+  <script defer src="investimento.js?v=561"></script>
+  <script defer src="parametrizacao-parceiro.js?v=561"></script>
+  <script defer src="societario.js?v=561"></script>
+  <script defer src="fiscal.js?v=561"></script>
+  <script defer src="indexadores.js?v=561"></script>
+  <script defer src="verificar-construcao.js?v=561"></script>
+  <script src="repactuacoes.js?v=561"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=557"></script>
+  <script defer src="dashboard-inadimplencia.js?v=561"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

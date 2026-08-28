@@ -1145,6 +1145,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "fluxo-caixa": "Fluxo de Caixa",
     "investimento": "Investimento",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
+    "estrutura-societaria": "Estrutura Societária",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",
@@ -1183,6 +1184,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "fluxo-caixa": "git-branch",
     "investimento": "trending-up",
     "parametrizacao-parceiro": "handshake",
+    "estrutura-societaria": "git-fork",
     "plano-financeiro": "layout-list",
     "indexadores": "trending-up",
     "compromissario_prefeitura": "building",
@@ -1299,6 +1301,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof InvestimentoApp !== "undefined") InvestimentoApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
+  } else if (tabId === "estrutura-societaria") {
+    if (typeof SocietarioApp !== "undefined") SocietarioApp.init();
   }
 }
 
@@ -27774,6 +27778,51 @@ window.planoVisoesUpdatedAt = function(str) {
   } catch (e) { return 0; }
 };
 
+window.isCobrancaInternaSet = function(custom) {
+  if (!custom || typeof custom !== "object") return false;
+  const v = custom.cobranca_interna;
+  return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
+};
+
+window.mergeEmpresasCustom = function(localStr, cloudStr) {
+  let local = {};
+  let cloud = {};
+  try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
+  try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
+  const recs = {};
+  const ingest = (src) => {
+    Object.keys(src || {}).forEach(k => {
+      if (k === "_v2") return;
+      const item = src[k];
+      if (!item || typeof item !== "object") return;
+      const id = String(item.company_id != null ? item.company_id : k);
+      if (!id || id === "undefined") return;
+      const prev = recs[id];
+      if (!prev) {
+        recs[id] = { ...item, company_id: Number(item.company_id != null ? item.company_id : k) };
+        return;
+      }
+      const pT = Number(prev.updatedAt || 0);
+      const nT = Number(item.updatedAt || 0);
+      const newer = nT >= pT ? item : prev;
+      const older = newer === item ? prev : item;
+      const merged = { ...older, ...newer, company_id: Number(newer.company_id || older.company_id || id) };
+      if (window.isCobrancaInternaSet(newer)) {
+        merged.cobranca_interna = newer.cobranca_interna === true || newer.cobranca_interna === "1" || newer.cobranca_interna === 1 || newer.cobranca_interna === "true" ? 1 : 0;
+      } else if (window.isCobrancaInternaSet(older)) {
+        merged.cobranca_interna = older.cobranca_interna === true || older.cobranca_interna === "1" || older.cobranca_interna === 1 || older.cobranca_interna === "true" ? 1 : 0;
+      }
+      merged.updatedAt = Math.max(pT, nT);
+      recs[id] = merged;
+    });
+  };
+  ingest(cloud);
+  ingest(local);
+  const out = { _v2: true };
+  Object.keys(recs).forEach(id => { out[id] = recs[id]; });
+  return JSON.stringify(out);
+};
+
 window.mergePlanoVisoes = function(localStr, cloudStr) {
   const local = localStr || "";
   const cloud = cloudStr || "";
@@ -27862,6 +27911,17 @@ window.syncGlobalConfigFromFirebase = async function() {
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
                 if (k === "crm_moura_preambles_list") return;
+                if (k === "crm_empresas_custom") {
+                    const merged = window.mergeEmpresasCustom(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -27946,6 +28006,9 @@ window.forceUploadLocalConfig = async function(silent = true) {
             payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
           } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
             payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
+          }
+          if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
+            payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
           }
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
@@ -28102,6 +28165,9 @@ localStorage.setItem = function(key, value) {
                         payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
                       } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
                         payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
+                      }
+                      if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
+                        payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
                       }
                     } catch (mergeErr) {}
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });

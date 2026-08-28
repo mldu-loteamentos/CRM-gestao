@@ -59,19 +59,21 @@ const EmpresasApp = {
         if (localCustom) customData = JSON.parse(localCustom);
       } catch(e) {}
 
-      // Força a mesclagem usando uma flag _v2 para garantir que todos os novos defaults entrem
-      if (!customData["_v2"]) {
-          customData = { ...customData, ...defaultCustom };
-          localStorage.setItem('crm_empresas_custom', JSON.stringify(customData));
-      }
-
-      const map = {};
-      Object.values(customData).forEach(item => {
-        if (item.company_id) {
-           map[item.company_id] = item;
+      Object.keys(defaultCustom).forEach(k => {
+        if (k === "_v2") return;
+        if (!customData[k] || typeof customData[k] !== "object") {
+          customData[k] = defaultCustom[k];
+        } else {
+          const cur = customData[k];
+          const def = defaultCustom[k];
+          if (!cur.nome_usual && def.nome_usual) cur.nome_usual = def.nome_usual;
+          if (cur.percentual_mldu == null && def.percentual_mldu != null) cur.percentual_mldu = def.percentual_mldu;
+          if (!this.isCobrancaInternaSet(cur) && this.isCobrancaInternaSet(def)) cur.cobranca_interna = def.cobranca_interna;
         }
       });
-      EmpresasState.customFields = map;
+      customData._v2 = true;
+      this.hydrateCustomFields(customData, true);
+      this.persistCustomMap();
 
       let comps = [];
       try {
@@ -114,9 +116,41 @@ const EmpresasApp = {
     this.render();
   },
 
+  customOf(id) {
+    const cf = EmpresasState.customFields || {};
+    return cf[id] || cf[String(id)] || cf[Number(id)] || null;
+  },
+
+  hydrateCustomFields(parsed, preferMemory) {
+    let fromLs = parsed;
+    if (!fromLs || typeof fromLs !== "object") {
+      try { fromLs = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}; } catch (e) { fromLs = {}; }
+    }
+    if (window.mergeEmpresasCustom) {
+      const memStore = { _v2: true };
+      if (preferMemory) {
+        Object.values(EmpresasState.customFields || {}).forEach(item => {
+          if (item && typeof item === "object" && item.company_id != null) memStore[String(item.company_id)] = item;
+        });
+      }
+      fromLs = JSON.parse(window.mergeEmpresasCustom(JSON.stringify(memStore), JSON.stringify(fromLs)));
+    }
+    const map = {};
+    Object.keys(fromLs).forEach(k => {
+      if (k === "_v2") return;
+      const item = fromLs[k];
+      if (!item || typeof item !== "object") return;
+      const id = Number(item.company_id != null ? item.company_id : k);
+      if (!Number.isFinite(id)) return;
+      map[id] = { ...item, company_id: id };
+    });
+    EmpresasState.customFields = map;
+  },
+
   async saveInline(companyId, field, value) {
-    const custom = EmpresasState.customFields[companyId] || {
-      company_id: companyId,
+    const id = Number(companyId);
+    const custom = this.customOf(id) || {
+      company_id: id,
       nome_usual: '',
       percentual_mldu: 0,
       consolidacao_padrao: 0,
@@ -134,21 +168,20 @@ const EmpresasApp = {
         window.AppState.defaultersLoaded = false;
       }
     }
+    custom.company_id = id;
+    custom.updatedAt = Date.now();
 
-    EmpresasState.customFields[companyId] = custom;
-    const toStore = { _v2: true };
-    Object.keys(EmpresasState.customFields).forEach(k => {
-      if (k === "_v2") return;
-      toStore[k] = EmpresasState.customFields[k];
-    });
-    localStorage.setItem('crm_empresas_custom', JSON.stringify(toStore));
+    EmpresasState.customFields[id] = custom;
+    this.persistCustomMap();
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
     if (typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
+    if (document.getElementById("empresas-content")) this.render();
 
     try {
       if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna') {
-        const checkbox = document.getElementById(`chk-${field}-${companyId}`);
+        const checkbox = document.getElementById(`chk-${field}-${id}`);
         if (checkbox) {
+            checkbox.checked = !!value;
             checkbox.closest('td').style.backgroundColor = value ? '#e8f5e9' : 'transparent';
         }
       }
@@ -176,10 +209,10 @@ const EmpresasApp = {
       return;
     }
 
-    let filteredCompanies = EmpresasState.companies;
+    let filteredCompanies = EmpresasState.companies.slice().sort((a, b) => Number(a.id) - Number(b.id));
     if (EmpresasState.filterManagedOnly) {
-      filteredCompanies = EmpresasState.companies.filter(c => {
-        const custom = EmpresasState.customFields[c.id];
+      filteredCompanies = filteredCompanies.filter(c => {
+        const custom = this.customOf(c.id);
         return custom && custom.gerida_pelo_grupo === 1;
       });
     }
@@ -345,7 +378,7 @@ const EmpresasApp = {
     }
 
     filteredCompanies.forEach(company => {
-      const custom = EmpresasState.customFields[company.id] || {};
+      const custom = this.customOf(company.id) || {};
       const usualName = custom.nome_usual || '';
       const percMldu = custom.percentual_mldu || 0;
       
@@ -409,59 +442,51 @@ const EmpresasApp = {
 
   persistCustomMap() {
     const toStore = { _v2: true };
-    Object.keys(EmpresasState.customFields).forEach(k => {
-      if (k === "_v2") return;
-      toStore[k] = EmpresasState.customFields[k];
+    Object.values(EmpresasState.customFields || {}).forEach(item => {
+      if (!item || typeof item !== "object" || item.company_id == null) return;
+      toStore[String(item.company_id)] = item;
     });
     localStorage.setItem("crm_empresas_custom", JSON.stringify(toStore));
   },
 
   afterCompaniesFetched(comps, fromNetwork) {
     const list = Array.isArray(comps) ? comps : [];
-    EmpresasState.companies = list;
-    let custom = {};
-    try { custom = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}; } catch (e) { custom = {}; }
+    EmpresasState.companies = list.slice().sort((a, b) => Number(a.id) - Number(b.id));
+    this.hydrateCustomFields(null, true);
     let changed = false;
     list.forEach(c => {
-      const id = String(c.id);
-      if (!custom[id] || typeof custom[id] !== "object") {
-        custom[id] = {
-          company_id: Number(c.id),
+      const id = Number(c.id);
+      let rec = this.customOf(id);
+      if (!rec) {
+        rec = {
+          company_id: id,
           nome_usual: "",
           percentual_mldu: 0,
           consolidacao_padrao: 0,
           gerida_pelo_grupo: 0
         };
+        EmpresasState.customFields[id] = rec;
         changed = true;
       }
-      custom[id].company_id = Number(c.id);
-      if (!this.isCobrancaInternaSet(custom[id])) {
-        if (!custom[id].nova_empresa) {
-          custom[id].nova_empresa = 1;
-          changed = true;
-        }
+      rec.company_id = id;
+      if (!this.isCobrancaInternaSet(rec) && !rec.nova_empresa) {
+        rec.nova_empresa = 1;
+        changed = true;
       }
     });
     if (changed) {
-      EmpresasState.customFields = {};
-      Object.values(custom).forEach(item => {
-        if (item && typeof item === "object" && item.company_id != null) EmpresasState.customFields[item.company_id] = item;
-      });
       this.persistCustomMap();
       if (fromNetwork && window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
-    } else {
-      Object.values(custom).forEach(item => {
-        if (item && typeof item === "object" && item.company_id != null) EmpresasState.customFields[item.company_id] = item;
-      });
     }
     this.renderFilaPrompt();
+    if (document.getElementById("empresas-content")) this.render();
   },
 
   pendingCobrancaCompanies() {
     const companies = EmpresasState.companies.length
       ? EmpresasState.companies
       : (() => { try { return JSON.parse(localStorage.getItem("crm_companies_data") || "[]"); } catch (e) { return []; } })();
-    return (companies || []).filter(c => !this.isCobrancaInternaSet(EmpresasState.customFields[c.id]));
+    return (companies || []).filter(c => !this.isCobrancaInternaSet(this.customOf(c.id)));
   },
 
   companyLabel(c) {
@@ -494,8 +519,9 @@ const EmpresasApp = {
   },
 
   answerCobrancaInterna(companyId, isInternal) {
-    const custom = EmpresasState.customFields[companyId] || {
-      company_id: companyId,
+    const id = Number(companyId);
+    const custom = this.customOf(id) || {
+      company_id: id,
       nome_usual: "",
       percentual_mldu: 0,
       consolidacao_padrao: 0,
@@ -503,8 +529,9 @@ const EmpresasApp = {
     };
     custom.cobranca_interna = isInternal ? 1 : 0;
     delete custom.nova_empresa;
-    EmpresasState.customFields[companyId] = custom;
-    this.saveInline(companyId, "cobranca_interna", isInternal);
+    custom.updatedAt = Date.now();
+    EmpresasState.customFields[id] = custom;
+    this.saveInline(id, "cobranca_interna", isInternal);
     this.renderFilaPrompt();
     if (isInternal && window.AppState) {
       window.AppState.dashboardRendered = false;
@@ -547,7 +574,8 @@ function initEmpresasModule() {
   `;
   
   if (window.lucide) window.lucide.createIcons();
-  
+
+  EmpresasApp.hydrateCustomFields(null, true);
   if (EmpresasState.companies.length > 0) {
     EmpresasApp.render();
   } else {

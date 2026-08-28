@@ -81,6 +81,10 @@ const ConfigUsersApp = {
       submodules: [{ name: "Geral", key: "sub_fiscal_geral", actions: [{ id: "fiscal", label: "Fiscal / Contábil" }] }]
     },
     {
+      name: "Societário", icon: "git-fork", key: "mod_societario",
+      submodules: [{ name: "Geral", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Estrutura Societária" }] }]
+    },
+    {
       name: "Comercial", icon: "store", key: "mod_comercial",
       submodules: [{ name: "Geral", key: "sub_com_geral", actions: [
         { id: "dashboard", label: "Dashboard" },

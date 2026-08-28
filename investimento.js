@@ -404,26 +404,39 @@ const InvestimentoApp = {
     }
   },
 
-  movAmount(mov) {
-    const raw = Number(mov.bankMovementAmount);
-    if (!Number.isFinite(raw) || raw === 0) return 0;
-    const abs = Math.abs(raw);
-    const type = String(mov.bankMovementOperationType || mov.operationType || "").trim().toUpperCase();
-    if (type === "S" || type === "D" || type === "DEBITO" || type === "DEBIT") return -abs;
-    if (type === "E" || type === "C" || type === "CREDITO" || type === "CREDIT") return abs;
-    return raw;
-  },
-
-  classifyMovement(mov) {
-    const amount = this.movAmount(mov);
+  classifyByHistoric(mov) {
     const blob = [
       mov.historic, mov.history, mov.bankMovementHistoricName, mov.bankMovementOperationName,
       mov.origin, mov.originDescription, mov.originId, mov.bankMovementOriginId,
       mov.documentType, mov.documentIdentification, mov.documentIdentificationName, mov.observations, mov.note,
       ...((mov.financialCategories || []).map(c => `${c.financialCategoryName || ""} ${c.financialCategoryId || ""}`))
-    ].join(" ").toUpperCase();
+    ].join(" ").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (/IRRF|\bIOF\b|TARIFA|IMPOSTO DE RENDA|\bIR SOBRE/.test(blob)) return "tarifas";
+    if (/RENDIM|RENDTO|\bJUROS\b|RECEITA FINANCEIRA/.test(blob)) return "rendimento";
+    if (/RESGATE/.test(blob)) return "resgate";
+    if (/APLICA|APORTE/.test(blob)) return "aporte";
+    return "";
+  },
+
+  movAmount(mov) {
+    const raw = Number(mov.bankMovementAmount);
+    if (!Number.isFinite(raw) || raw === 0) return 0;
+    const abs = Math.abs(raw);
+    const hint = this.classifyByHistoric(mov);
+    if (hint === "resgate" || hint === "tarifas") return -abs;
+    if (hint === "aporte" || hint === "rendimento") return abs;
+    const type = String(mov.bankMovementOperationType || mov.operationType || mov.bankMovementOperationName || "")
+      .trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (/^(S|D)$/.test(type) || /DEBITO|DEBIT|^SAIDA$/.test(type) || type.includes("SAIDA")) return -abs;
+    if (/^(E|C)$/.test(type) || /CREDITO|CREDIT|^ENTRADA$/.test(type) || type.includes("ENTRADA")) return abs;
+    return raw;
+  },
+
+  classifyMovement(mov) {
+    const hint = this.classifyByHistoric(mov);
+    if (hint) return hint;
+    const amount = this.movAmount(mov);
     if (!amount) return "aporte";
-    if (/RENDIM|RENDTO|JUROS|RECEITA FINANCEIRA/.test(blob) && amount > 0) return "rendimento";
     if (amount >= 0) return "aporte";
     return "resgate";
   },
@@ -506,27 +519,18 @@ const InvestimentoApp = {
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
     await this.ensureCdi();
-    const openingDate = this.addDaysIso(this.startDate, -1);
-    const monthEndDates = this.months.map(mk => this.clampDate(this.lastDayOfMonth(mk), this.endDate));
+    const histStart = this.addDaysIso(this.startDate, -730);
     try {
-      const uniqueBalDates = [...new Set(monthEndDates)];
-      const [balancesOpen, accountsChunks, movChunks, ...monthBalResults] = await Promise.all([
-        SiengeApiService.getAccountBalances(openingDate, { showLast: true }),
+      const [accountsChunks, movChunks] = await Promise.all([
+        Promise.all(this.selectedCompanyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
         Promise.all(this.selectedCompanyIds.map(async id => {
-          return this.fetchCompanyInvestmentAccounts(id);
-        })),
-        Promise.all(this.selectedCompanyIds.map(async id => {
-          const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
+          const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
             selectionType: "M",
             companyId: id
           });
           return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
-        })),
-        ...uniqueBalDates.map(d => SiengeApiService.getAccountBalances(d, { showLast: true }).then(b => [d, b]).catch(() => [d, []]))
+        }))
       ]);
-      const balancesByDate = {};
-      monthBalResults.forEach(([d, b]) => { balancesByDate[d] = b; });
-      const balancesClose = balancesByDate[this.endDate] || balancesByDate[monthEndDates[monthEndDates.length - 1]] || [];
 
       let catalog = accountsChunks.flat();
       const wantAcc = new Set(this.selectedAccountKeys || []);
@@ -568,8 +572,6 @@ const InvestimentoApp = {
         const num = String(acc.accountNumber || acc.accountName || acc.name || "").trim();
         const key = this.accKey(acc.companyId, num, acc);
         if (!byAcc.has(key)) {
-          const opening = this.pickBalance(balancesOpen, num, acc.companyId);
-          const closingApi = this.pickBalance(balancesClose, num, acc.companyId);
           byAcc.set(key, {
             key,
             companyId: acc.companyId,
@@ -577,8 +579,8 @@ const InvestimentoApp = {
             accountNumber: num,
             accountName: acc.accountName || acc.name || acc.description || "Conta",
             accountType: acc.accountType || "",
-            opening,
-            closingApi,
+            opening: 0,
+            closingApi: 0,
             aportes: 0,
             resgates: 0,
             rendimento: 0,
@@ -601,6 +603,11 @@ const InvestimentoApp = {
         }
         const kind = this.classifyMovement(mov);
         const amount = this.movAmount(mov);
+        const day = String(mov.bankMovementDate || "").slice(0, 10);
+        if (day && day < this.startDate) {
+          row.opening += amount;
+          return;
+        }
         const mk = String(mov.bankMovementDate || "").slice(0, 7);
         if (!row.months[mk]) row.months[mk] = this.emptyFlow();
         if (kind === "aporte") { row.aportes += amount; row.months[mk].aportes += amount; }
@@ -612,37 +619,17 @@ const InvestimentoApp = {
 
       const accounts = [...byAcc.values()].map(row => {
         let run = row.opening;
-        this.months.forEach((mk, i) => {
+        this.months.forEach(mk => {
           const f = row.months[mk] || this.emptyFlow();
           row.months[mk] = f;
-          const closeDate = monthEndDates[i];
-          const closeApi = this.pickBalance(balancesByDate[closeDate] || [], row.accountNumber, row.companyId);
-          const fromMov = run + f.aportes + f.resgates + f.tarifas + f.rendimento;
-          const hasMov = Math.abs(f.aportes) > 0.009 || Math.abs(f.resgates) > 0.009 || Math.abs(f.tarifas) > 0.009 || Math.abs(f.rendimento) > 0.009;
-          if (!hasMov && Math.abs(f.rendimento) < 0.01 && closeApi) {
-            const implied = closeApi - run - f.aportes - f.resgates - f.tarifas;
-            if (Math.abs(implied) > 0.01) {
-              f.rendimento = implied;
-              row.rendimentoFromBalance = true;
-            }
-          }
-          run = hasMov ? (run + f.aportes + f.resgates + f.tarifas + f.rendimento) : (closeApi || fromMov);
+          run = run + f.aportes + f.resgates + f.tarifas + f.rendimento;
           f.closing = run;
         });
         row.aportes = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].aportes) || 0), 0);
         row.resgates = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].resgates) || 0), 0);
         row.rendimento = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].rendimento) || 0), 0);
         row.tarifas = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].tarifas) || 0), 0);
-        const closingApi = this.pickBalance(balancesClose, row.accountNumber, row.companyId);
-        const last = this.months[this.months.length - 1];
-        const lastFlow = last && row.months[last];
-        const hasMov = lastFlow && (
-          Math.abs(lastFlow.aportes) > 0.009 ||
-          Math.abs(lastFlow.resgates) > 0.009 ||
-          Math.abs(lastFlow.tarifas) > 0.009 ||
-          Math.abs(lastFlow.rendimento) > 0.009
-        );
-        row.closing = hasMov ? run : (closingApi || run);
+        row.closing = run;
         row.variacao = row.closing - row.opening;
         return row;
       }).sort((a, b) => b.closing - a.closing);
@@ -1078,7 +1065,7 @@ const InvestimentoApp = {
           <div style="padding:12px 16px 0;display:flex;gap:10px;flex-wrap:wrap;">
             ${this.kpiCard("Saldo inicial", k.opening, "#0f172a")}
             ${this.kpiCard("Entradas", k.aportes, "#105436")}
-            ${this.kpiCard("Saídas", Math.abs(k.resgates), "#b91c1c")}
+            ${this.kpiCard("Saídas", Math.abs(k.resgates) + Math.abs(k.tarifas), "#b91c1c")}
             ${this.kpiCard("Rendimento", k.rendimento, "#0369a1")}
             ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
