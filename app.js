@@ -2760,6 +2760,38 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
   `;
 }
 
+window.nexAgingActionHtml = function(client) {
+  if (!client) return "";
+  const days = Number(client.maxDaysDelay) || 0;
+  const isZero = !!(client.isZeroPaid || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
+  const ccConfig = (typeof window.nexCcConfig === "function")
+    ? window.nexCcConfig(client.costCenterId, client.unitName)
+    : {};
+  const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31 };
+  const zeroDays = Number(regua.zero) || 31;
+  const titleHint = String((client.billIds && client.billIds[0]) || client.saleId || "").replace(/^B-/, "").split("-")[0];
+  const hasNex = typeof window.nexHasLetter === "function" && (
+    window.nexHasLetter(client.customerId, client.saleId) ||
+    (titleHint && window.nexHasLetter(client.customerId, titleHint))
+  );
+
+  if (ccConfig.clausula_suspensiva_ativa && days >= (Number(ccConfig.clausula_suspensiva_dias) || 30)) {
+    return `
+      <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Gerar termo de suspensão (PDF)">
+        <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${days} dias - Suspender
+      </button>
+    `;
+  }
+  if (isZero && days >= zeroDays && !ccConfig.clausula_suspensiva_ativa && !hasNex) {
+    return `
+      <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Abrir Notificações — elegíveis 0% pago (régua: ${zeroDays} dias)">
+        <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${days} dias - Enviar Nex
+      </button>
+    `;
+  }
+  return getDelayBadgeHtml(days, isZero);
+};
+
 window.canonicalJudicialPhaseName = function(fase) {
   return String(fase == null ? '' : fase).trim().replace(/^\d+(?:\.\d+)*\.?\s+/, '');
 };
@@ -4351,7 +4383,7 @@ document.addEventListener("click", function(e) {
                       }
                   }
                   if (client.isZeroPaid) {
-                      return getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
+                      return window.nexAgingActionHtml(client);
                   }
                   return client.maxDaysDelay >= thresholdJuridico ? `
                   <button onclick="enviarParaJuridico(${client.customerId}, ${client.saleId})" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fca5a5; background-color: #fee2e2; color: #991b1b; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#fecaca'; this.style.borderColor='#f87171'" onmouseout="this.style.backgroundColor='#fee2e2'; this.style.borderColor='#fca5a5'" title="Clique para enviar ao Jurídico">
@@ -14676,30 +14708,9 @@ async function _loadZeroPaidTab_Impl() {
     rowClass += " table-row-hover";
     row.className = rowClass.trim();
 
-    let delayBadge = getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
-    const ccConfig = (typeof window.nexCcConfig === "function")
-      ? window.nexCcConfig(client.costCenterId, client.unitName)
-      : {};
-    const zeroDays = (typeof window.nexReguaDays === "function" ? window.nexReguaDays().zero : 31);
-    const titleHint = String((client.billIds && client.billIds[0]) || "").replace(/^B-/, "").split("-")[0];
-    const hasNex = typeof window.nexHasLetter === "function" && (
-      window.nexHasLetter(client.customerId, client.saleId) ||
-      (titleHint && window.nexHasLetter(client.customerId, titleHint))
-    );
-
-    if (ccConfig.clausula_suspensiva_ativa && client.maxDaysDelay >= (ccConfig.clausula_suspensiva_dias || 30)) {
-      delayBadge = `
-        <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2);" onmouseover="this.style.background='#c2410c';this.style.boxShadow='0 4px 6px rgba(234, 88, 12, 0.3)';" onmouseout="this.style.background='#ea580c';this.style.boxShadow='0 2px 4px rgba(234, 88, 12, 0.2)';" title="Gerar termo de suspensão (PDF)">
-          <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Suspender
-        </button>
-      `;
-    } else if (!ccConfig.clausula_suspensiva_ativa && client.isZeroPaid && client.maxDaysDelay >= zeroDays && !hasNex) {
-      delayBadge = `
-        <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(234, 179, 8, 0.2);" onmouseover="this.style.background='#ca8a04';this.style.boxShadow='0 4px 6px rgba(234, 179, 8, 0.3)';" onmouseout="this.style.background='#eab308';this.style.boxShadow='0 2px 4px rgba(234, 179, 8, 0.2)';" title="Abrir Notificações — elegíveis 0% pago">
-          <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${client.maxDaysDelay} dias - Enviar Nex
-        </button>
-      `;
-    }
+    let delayBadge = (typeof window.nexAgingActionHtml === "function")
+      ? window.nexAgingActionHtml(client)
+      : getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
     
     row.innerHTML = `
       <td style="text-align: center;"><span>${client.companyId}</span></td>
@@ -15127,9 +15138,9 @@ async function loadWeSendTab() {
     grouped[key].billCount += (trueBillCount > 0 ? trueBillCount : 1);
     if (bill.daysDelay > grouped[key].maxDaysDelay) grouped[key].maxDaysDelay = bill.daysDelay;
     if (hasUnpaidSinal(bill)) grouped[key].isZeroPaid = true;
+    if (sale && sale.percPaid != null && Number(sale.percPaid) === 0) grouped[key].isZeroPaid = true;
   });
 
-  const zpLoaded = Array.isArray(window.zeroPaidList) && window.zeroPaidList.length > 0;
   const zpSet = new Set((window.zeroPaidList || []).map(c => String(c.customerId) + "-" + String(c.saleId)));
   const filaByKey = {};
   (window.clientList || []).forEach(c => {
@@ -15143,9 +15154,10 @@ async function loadWeSendTab() {
   });
   Object.values(grouped).forEach(item => {
     const key = String(item.customerId) + "-" + String(item.saleId);
-    if (zpLoaded) item.isZeroPaid = zpSet.has(key);
+    if (zpSet.has(key)) item.isZeroPaid = true;
     const fila = filaByKey[key];
     if (fila) {
+      if (fila.isZeroPaid) item.isZeroPaid = true;
       item.assignedOperator = fila.assignedOperator || item.assignedOperator;
       item.lastContactDate = fila.lastContactDate || item.lastContactDate;
       item.companyId = fila.companyId || item.companyId;
@@ -16821,7 +16833,6 @@ window.renderNexHistory = async function() {
     return;
   }
   const sorted = [...items].sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
-  const opts = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join("");
   root.innerHTML = `
     <div style="font-size:0.8rem;color:#166534;font-weight:700;margin-bottom:8px;">Título ${items[0].titulo || tituloAtual}</div>
     <div class="table-container" style="box-shadow:none;overflow:auto;">
@@ -16846,7 +16857,6 @@ window.renderNexHistory = async function() {
           ${sorted.map(it => {
             const valid = window.nexIsLegallyValid(it);
             const entregue = window.nexIsEntregue(it.status);
-            const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (entregue ? "ENTREGUE" : (it.status || "")) ? "selected" : ""}>${s}</option>`).join("");
             const author = window.shortOperatorName(it.author);
             const moraIso = entregue && it.deliveredAt ? window.nexAddDays(it.deliveredAt, 30) : "";
             const left = moraIso ? window.nexDaysBetween(window.nexTodayIso(), moraIso) : null;
@@ -16882,13 +16892,7 @@ window.renderNexHistory = async function() {
                   Consultar
                 </button>
               </td>
-              <td>
-                <select onchange="window.updateNexStatus('${it.id}', this.value)"
-                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:200px;">
-                  <option value="">Selecionar...</option>
-                  ${sel}
-                </select>
-              </td>
+              <td>${window.nexStatusSelectHtml(it)}</td>
               <td>
                 ${entregue ? `<input type="date" value="${window.nexParseIso(it.deliveredAt)}" onchange="window.updateNexDeliveredAt('${it.id}', this.value)"
                   style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;">` : "—"}
@@ -16911,7 +16915,7 @@ window.renderNexHistory = async function() {
         </tbody>
       </table>
     </div>
-    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Status <strong>ENTREGUE</strong> exige a data da entrega e o PDF do <strong>AR Digital</strong>. Sem o AR a NEX não tem validade jurídica. Se o cliente pagou depois do envio, a carta perde validade e o AR deixa de ser exigido.</p>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">O <strong>status da carta</strong> só libera depois de informar o <strong>objeto de rastreio</strong> e anexar o <strong>AR Digital</strong> (mesmo comportamento do Follow-up). ENTREGUE também pede a data da entrega. Se o cliente pagou depois do envio, a carta perde validade.</p>
   `;
   const lostAny = sorted.some(it => window.nexLostValidityByPayment(it).lost);
   if (lostAny) {
@@ -16928,6 +16932,40 @@ window.nexFindItem = function(id) {
   return { key, items, item: items.find(x => String(x.id) === String(id)), customerId, saleId };
 };
 
+window.nexHasTracking = function(item) {
+  const t = String((item && item.tracking) || "").trim().toUpperCase();
+  return !!(t && t !== "AA123456789BR");
+};
+
+window.nexHasArDigital = function(item) {
+  return !!(item && item.arDigital && (item.arDigital.dataUrl || item.arDigital.fileName));
+};
+
+window.nexCanSetStatus = function(item) {
+  return window.nexHasTracking(item) && window.nexHasArDigital(item);
+};
+
+window.nexRefreshViews = function() {
+  if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+};
+
+window.nexStatusSelectHtml = function(item, extraStyle) {
+  const can = window.nexCanSetStatus(item);
+  const current = window.nexIsEntregue(item && item.status) ? "ENTREGUE" : String((item && item.status) || "");
+  const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === current ? "selected" : ""}>${s}</option>`).join("");
+  const title = can
+    ? "Status da carta"
+    : "Preencha o objeto de rastreio e anexe o AR Digital para liberar o status da carta";
+  const style = "height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:200px;" +
+    (can ? "" : "background:#f1f5f9;color:#64748b;cursor:not-allowed;") +
+    (extraStyle || "");
+  return `<select ${can ? "" : "disabled"} title="${title.replace(/"/g, "&quot;")}" onchange="window.updateNexStatus('${item.id}', this.value)" style="${style}">
+    <option value="">Selecionar...</option>
+    ${sel}
+  </select>`;
+};
+
 window.updateNexTracking = async function(id, value) {
   let ctx = window.nexFindItem(id);
   if (!ctx.item) ctx = await window.nexResolveItem(id);
@@ -16935,28 +16973,23 @@ window.updateNexTracking = async function(id, value) {
   ctx.item.tracking = String(value || "").trim().toUpperCase();
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
-  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+  window.nexRefreshViews();
 };
 
 window.updateNexStatus = async function(id, value) {
   let ctx = window.nexFindItem(id);
   if (!ctx.item) ctx = await window.nexResolveItem(id);
   if (!ctx.item) return;
-  if (window.nexIsEntregue(value) && !ctx.item.arDigital && !window.nexLostValidityByPayment(ctx.item).lost) {
-    const ok = await window.uploadNexAr(id, true);
-    if (!ok) {
-      if (typeof window.renderNexHistory === "function") window.renderNexHistory();
-      if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
-      return;
-    }
-    ctx = window.nexFindItem(id).item ? window.nexFindItem(id) : await window.nexResolveItem(id);
+  if (value && !window.nexCanSetStatus(ctx.item)) {
+    alert("Preencha o objeto de rastreio e anexe o AR Digital antes de alterar o status da carta.");
+    window.nexRefreshViews();
+    return;
   }
   ctx.item.status = window.nexIsEntregue(value) ? "ENTREGUE" : value;
   if (!window.nexIsEntregue(ctx.item.status)) ctx.item.deliveredAt = "";
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
-  window.renderNexHistory();
-  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+  window.nexRefreshViews();
 };
 
 window.updateNexDeliveredAt = async function(id, value) {
@@ -17086,7 +17119,7 @@ window.uploadNexAr = function(id, required) {
     input.onchange = async () => {
       const file = input.files && input.files[0];
       if (!file) {
-        if (required) alert("É obrigatório anexar o PDF do AR Digital para concluir a entrega. A NEX permanece sem validade jurídica.");
+        if (required) alert("É obrigatório anexar o PDF do AR Digital. Sem o AR a NEX permanece sem validade jurídica.");
         resolve(false);
         return;
       }
@@ -17228,12 +17261,46 @@ window.updateNexEligibleHelp = function() {
   }
 };
 
+window.nexTimelineNodeText = function(n) {
+  if (!n) return "";
+  let acoes = window.TimelineAcoesList;
+  if (!acoes || !acoes.length) {
+    try { acoes = JSON.parse(localStorage.getItem("crm_moura_timeline_acoes") || "[]") || []; } catch (e) { acoes = []; }
+  }
+  const acaoObj = (acoes || []).find(a => a && a.id === n.acao);
+  return [n.label, n.nome, n.acao, n.explicacao, acaoObj && acaoObj.label].filter(Boolean).join(" ");
+};
+
+window.nexFindReguaNode = function(kind) {
+  let nodes = window.TimelineState;
+  if (!nodes || !nodes.length) {
+    try { nodes = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]"); } catch (e) { nodes = []; }
+  }
+  const norm = (n) => String(window.nexTimelineNodeText(n) || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (kind === "zero") {
+    return (nodes || []).find(n => {
+      const t = norm(n);
+      return t.indexOf("nex") !== -1 && (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t));
+    }) || (nodes || []).find(n => /0%\s*pago/.test(norm(n)));
+  }
+  return (nodes || []).find(n => {
+    const t = norm(n);
+    if (t.indexOf("nex") === -1) return false;
+    if (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t)) return false;
+    return true;
+  });
+};
+
 window.nexReguaDays = function() {
-  const nodes = window.TimelineState || [];
-  const byDias = (n) => Number(n && n.dias);
-  const n31 = nodes.find(n => /0%\s*pago|nex\s*0/i.test(String(n.label || n.nome || n.acao || ""))) || nodes.find(n => byDias(n) === 31);
-  const n61 = nodes.find(n => /nex/i.test(String(n.label || n.nome || n.acao || "")) && byDias(n) >= 50) || nodes.find(n => byDias(n) === 61);
-  return { zero: (n31 && byDias(n31)) || 31, standard: (n61 && byDias(n61)) || 61 };
+  const zeroNode = window.nexFindReguaNode("zero");
+  const stdNode = window.nexFindReguaNode("standard");
+  return {
+    zero: Number(zeroNode && zeroNode.dias) || 31,
+    standard: Number(stdNode && stdNode.dias) || 61
+  };
 };
 
 window.nexCcConfig = function(costCenterId, unitName) {
@@ -17402,7 +17469,6 @@ window.renderNexFollowup = function() {
     const unitLabel = window.nexUnitLabelForSale(it.customerId, it.titulo, it);
     const author = window.shortOperatorName(it.author);
     const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
-    const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (window.nexIsEntregue(it.status) ? "ENTREGUE" : (it.status || "")) ? "selected" : ""}>${s}</option>`).join("");
     const arCell = it.arDigital
       ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
       : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`;
@@ -17415,7 +17481,7 @@ window.renderNexFollowup = function() {
       <td>${window.nexFmtBr(it.date || it.createdAt)}</td>
       <td onclick="event.stopPropagation()"><input value="${trackingVal.replace(/"/g, "&quot;")}" placeholder="informe nº objeto" onchange="window.updateNexTrackingFollowup('${it.id}', this.value)" style="width:160px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;"></td>
       <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" onclick="window.openNexCorreios('${it.id}')" style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.75rem;font-weight:700;">Consultar</button></td>
-      <td onclick="event.stopPropagation()"><select onchange="window.updateNexStatus('${it.id}', this.value)" style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:180px;"><option value="">Selecionar...</option>${sel}</select></td>
+      <td onclick="event.stopPropagation()">${window.nexStatusSelectHtml(it)}</td>
       <td style="text-align:center;" onclick="event.stopPropagation()">${arCell}</td>
       <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
       <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button></td>
@@ -17429,6 +17495,7 @@ window.updateNexTrackingFollowup = async function(id, value) {
   ctx.item.tracking = String(value || "").trim().toUpperCase();
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
+  window.nexRefreshViews();
 };
 
 window.nexEmpNameForSale = function(saleId) {
