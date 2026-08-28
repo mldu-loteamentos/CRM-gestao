@@ -1400,23 +1400,31 @@ const SiengeApiService = {
     }
   },
 
-  // 15. Saldo Devedor Detalhado do Cliente (Bulk Data)
-  async getCustomerDebtBalance(billReceivableId) {
+  // 15. Saldo Devedor Detalhado do Cliente (Bulk Data) — VP por parcela
+  async getCustomerDebtBalance(billReceivableId, opts = {}) {
+    const billId = billReceivableId || opts.billReceivableId;
+    const companyId = opts.companyId;
+    const startDueDate = opts.startDueDate || "2000-01-01";
+    const endDueDate = opts.endDueDate || "2045-12-31";
     if (s_apiMode === "simulado") {
+      const base = Number(billId) || 1000;
       return {
-        data: [{
-          billReceivableId: Number(billReceivableId),
-          presentValue: 75000.00,
-          totalAmount: 95000.00,
-          interestAmount: 12000.00,
-          fineAmount: 8000.00
-        }]
+        data: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
+          billReceivableId: Number(billId),
+          installmentId: n,
+          installmentNumber: n,
+          dueDate: `2026-${String(n).padStart(2, "0")}-10`,
+          originalValue: 12000 + n * 150,
+          currentBalance: 12000 + n * 150,
+          presentValue: 11800 + n * 140
+        }))
       };
     }
+    if (!billId) return { data: [] };
     try {
-      const endYear = new Date().getFullYear() + 24;
-      const endDueDate = `${endYear}-01-01`;
-      const res = await siengeFetchWithRetry(`/bulk-data/v1/customer-debt-balance?startDueDate=1996-01-01&endDueDate=${endDueDate}&billReceivableId=${billReceivableId}&calculatePresentValue=true&includeAdministrativeRateAmount=false&includeInsuranceAmount=false&correctAnnualInstallment=false&includeReceiptsByAdvanceRebate=false&includeConditionalDiscountValid=false&calculateAdditionsUserInformation=false&calculateAdditionsValue=true`);
+      let url = `/bulk-data/v1/customer-debt-balance?startDueDate=${encodeURIComponent(startDueDate)}&endDueDate=${encodeURIComponent(endDueDate)}&billReceivableId=${encodeURIComponent(billId)}&calculatePresentValue=true&includeAdministrativeRateAmount=false&includeInsuranceAmount=false&correctAnnualInstallment=false&includeReceiptsByAdvanceRebate=false&includeConditionalDiscountValid=false&calculateAdditionsUserInformation=false&calculateAdditionsValue=true`;
+      if (companyId != null && companyId !== "") url += `&companyId=${encodeURIComponent(companyId)}`;
+      const res = await siengeFetchWithRetry(url);
       return res;
     } catch (e) {
       console.error("[Sienge] Erro ao obter saldo devedor do cliente:", e);

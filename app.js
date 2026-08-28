@@ -2253,6 +2253,11 @@ async function initializeApplication() {
           window._isFirebaseSyncing = false;
         }
         if (window.renderJudicialTimeline) window.renderJudicialTimeline();
+        if (String(AppState.selectedCustomerId) === customerKey && typeof syncCobrancaJudicialTabs === "function") {
+          const originIsSubjudice = (window.activeAppTab || sessionStorage.getItem("currentTab")) === "subjudice";
+          const opType = AppState.currentUser ? AppState.currentUser.operator_type : "";
+          syncCobrancaJudicialTabs(originIsSubjudice, opType === "advogado");
+        }
       }, error => console.error('[Firebase RT] Erro nas etapas judiciais do cliente ativo:', error));
     };
 
@@ -5298,6 +5303,61 @@ window.showScoreDetailsModal = function() {
    // Legacy - score agora é integrado como tab, nao precisa de modal
 };
 
+function isSubjudiceFlag(v) {
+  return v === "S" || v === true || v === "s" || v === 1 || v === "1";
+}
+
+/** Contrato/cliente marcado como sub judice (Sienge, fila, histórico ou nota judicial ativa). */
+function isRecordSubjudice(customerId, saleId, saleObj) {
+  if (saleObj && isSubjudiceFlag(saleObj.subjudice)) return true;
+  const cid = String(customerId || "");
+  const sid = String(saleId || "");
+  if (!cid) return false;
+
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  const billIsSub = (b) => String(b.customerId) === cid && isSubjudiceFlag(b.subjudice);
+  if (sid) {
+    if (bills.some((b) => billIsSub(b) && (
+      String(b.saleId) === sid || String(b.receivableBillId) === sid || String(b.realSaleId) === sid
+    ))) return true;
+  }
+  if (bills.some(billIsSub)) return true;
+
+  const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+  if (sales.some((s) => String(s.customerId) === cid && isSubjudiceFlag(s.subjudice) && (
+    !sid || String(s.id) === sid || String(s.receivableBillId) === sid
+  ))) return true;
+
+  if (window._subjudiceList && window._subjudiceList.some((c) => String(c.customerId) === cid)) return true;
+
+  try {
+    const hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}");
+    const mem = hist[customerId] || hist[cid];
+    if (mem && !mem.exitDate) return true;
+  } catch (e) { /* ignore */ }
+
+  const notes = typeof window.getCustomerNotesList === "function"
+    ? window.getCustomerNotesList(AppState.judNotes, cid)
+    : ((typeof AppState !== "undefined" && AppState.judNotes && (AppState.judNotes[cid] || AppState.judNotes[customerId])) || []);
+  if (notes && notes.some((n) => n.type === "Judicial" && n.status !== "Cancelada" && n.fase !== "Nota Interna")) {
+    return true;
+  }
+  return false;
+}
+
+function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
+  const clientSub = isRecordSubjudice(
+    AppState.selectedCustomerId,
+    AppState.selectedSaleId || AppState.selectedContractId,
+    saleObj
+  );
+  const show = !!(originIsSubjudice || isAdvogado || clientSub);
+  const cobrancaJudicialBtn = document.getElementById("btn-tab-cobranca-judicial");
+  if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "inline-flex" : "none";
+  const anexosJuridicoBtn = document.getElementById("btn-anexos-juridico");
+  if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "flex" : "none";
+}
+
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   AppState.selectedCustomerId = customerId;
   AppState.selectedContractId = saleId || null;
@@ -5427,16 +5487,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
     extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluído pelo requisito)
   }
   
-  // Abas exclusivas do Judiciário
-  const cobrancaJudicialBtn = document.getElementById('btn-tab-cobranca-judicial');
-  if (cobrancaJudicialBtn) {
-    cobrancaJudicialBtn.style.display = (isSubjudice || isAdvogado) ? 'inline-flex' : 'none';
-  }
-  
-  const anexosJuridicoBtn = document.getElementById('btn-anexos-juridico');
-  if (anexosJuridicoBtn) {
-    anexosJuridicoBtn.style.display = (isSubjudice || isAdvogado) ? 'flex' : 'none';
-  }
+  // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
+  syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
 
   if (isSubjudice) {
     switchCustomerTab('tab-cobranca-judicial');
@@ -5606,6 +5658,7 @@ function formatCpfCnpj(val) {
   document.getElementById("current-page-title").innerHTML = `<i data-lucide="user"></i> Ficha do Cliente: ${customerId} - ${customer.name}${headerSubtypesHtml}`;
   const subAlertSpan = document.getElementById("ctx-subjudice-alert");
   if (subAlertSpan) subAlertSpan.innerHTML = subjudiceAlertHtml;
+  syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
   // Reset context bar — dados do contrato são populados mais tarde (após blockLotFromName)
   const ctxBar = document.getElementById('client-context-bar');
   if (ctxBar) { ctxBar.style.display = 'none'; }
@@ -6144,6 +6197,8 @@ function formatCpfCnpj(val) {
   if (!sale && (!saleId || saleId === '')) {
     sale = sales[0] || null;
   }
+
+  syncCobrancaJudicialTabs(isSubjudice, isAdvogado, sale);
 
   // Guardar contra sale null
   if (!sale) {
@@ -10771,6 +10826,9 @@ async function showDistratoView(customer, sale, bills) {
 
   const permutaEl = document.getElementById("dist-permuta-toggle");
   if (permutaEl) permutaEl.checked = false;
+  window._distPermutaState = { contracts: [], installments: [], selection: null };
+  const loteHidden = document.getElementById("dist-novo-lote");
+  if (loteHidden) loteHidden.value = "";
   if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
   const loteWrapReset = document.getElementById("dist-permuta-lote-wrap");
   if (loteWrapReset) loteWrapReset.style.display = "none";
@@ -11063,8 +11121,13 @@ window.handleDistratoChoiceChange = function() {
     instQty,
     refundInstallment,
     extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros },
-    isPermuta
+    isPermuta,
+    permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
   };
+  if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
+  if (document.querySelector(".dist-permuta-inst-check") && typeof window.onDistratoPermutaInstToggle === "function") {
+    window.onDistratoPermutaInstToggle();
+  }
 }
 
 function toggleDistratoPaymentFields() {
@@ -11087,6 +11150,285 @@ window.syncDistratoPermutaUi = function() {
   }
 };
 
+function flattenCustomerDebtBalance(res) {
+  const data = (res && (res.data || res.results)) || [];
+  const rows = [];
+  data.forEach((item) => {
+    if (!item) return;
+    if (Array.isArray(item.installments) && item.installments.length) {
+      item.installments.forEach((inst) => rows.push({ ...inst, billReceivableId: inst.billReceivableId || item.billReceivableId }));
+      return;
+    }
+    if (item.installmentId != null || item.installmentNumber != null || item.dueDate || item.presentValue != null) {
+      rows.push(item);
+    }
+  });
+  return rows;
+}
+
+function distPermutaInstVp(inst) {
+  const n = Number(
+    inst.presentValue != null ? inst.presentValue
+      : (inst.presentValueAmount != null ? inst.presentValueAmount
+        : (inst.correctedPresentValue != null ? inst.correctedPresentValue
+          : (inst.currentBalance != null ? inst.currentBalance : inst.originalValue)))
+  );
+  return Number.isFinite(n) ? n : 0;
+}
+
+function distPermutaInstOpen(inst) {
+  const bal = Number(inst.currentBalance != null ? inst.currentBalance : (inst.balanceDue != null ? inst.balanceDue : distPermutaInstVp(inst)));
+  if (bal <= 0.009) return false;
+  const sit = String(inst.situation || inst.status || inst.installmentSituation || "").toLowerCase();
+  if (sit.includes("quit") || sit.includes("pago") || sit.includes("paid")) return false;
+  return true;
+}
+
+function distPermutaFmt(v) {
+  return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function distPermutaTargetRefund() {
+  if (AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet != null) {
+    return Number(AppState.currentDistratoResult.refundNet) || 0;
+  }
+  const totalPaid = (g_distSale && g_distSale.calculatedTotalPaid) || 0;
+  return totalPaid * 0.9;
+}
+
+window.syncDistratoPermutaAbatimentoUi = function() {
+  const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  const hasContract = !!(document.getElementById("dist-permuta-contract") && document.getElementById("dist-permuta-contract").value);
+  const parcelasWrap = document.getElementById("dist-permuta-parcelas-wrap");
+  if (parcelasWrap) parcelasWrap.style.display = on ? "block" : "none";
+  const scheduleWrap = document.getElementById("dist-refund-schedule-wrap");
+  const estimateWrap = document.getElementById("dist-refund-estimate-wrap");
+  const payBlock = document.getElementById("dist-payment-block");
+  const hideBank = on && hasContract;
+  if (scheduleWrap) scheduleWrap.style.display = hideBank ? "none" : "flex";
+  if (estimateWrap) estimateWrap.style.display = hideBank ? "none" : "block";
+  if (payBlock) payBlock.style.display = hideBank ? "none" : "";
+  const metaEl = document.getElementById("dist-permuta-meta");
+  if (metaEl) metaEl.textContent = distPermutaFmt(distPermutaTargetRefund());
+};
+
+window.loadDistratoPermutaContracts = async function() {
+  const selectEl = document.getElementById("dist-permuta-contract");
+  if (!selectEl || !g_distCustomer) return;
+  const customerId = g_distCustomer.id || g_distCustomer.customerId;
+  const currentIds = new Set(
+    [g_distSale && g_distSale.receivableBillId, g_distSale && g_distSale.id]
+      .filter((v) => v != null && String(v) !== "")
+      .map((v) => String(v).replace(/^B-/, "").split("-")[0])
+  );
+  selectEl.innerHTML = `<option value="">Carregando contratos...</option>`;
+  selectEl.disabled = true;
+  try {
+    const [sales, billsRes] = await Promise.all([
+      (typeof SiengeApiService !== "undefined" && SiengeApiService.getSales)
+        ? SiengeApiService.getSales(customerId).catch(() => [])
+        : Promise.resolve([]),
+      (typeof SiengeApiService !== "undefined" && SiengeApiService.getReceivableBills)
+        ? SiengeApiService.getReceivableBills(customerId).catch(() => ({ results: [] }))
+        : Promise.resolve({ results: [] })
+    ]);
+    const saleList = Array.isArray(sales) ? sales : [];
+    if (saleList.length && window.AppState) {
+      AppState.sales = AppState.sales || [];
+      saleList.forEach((s) => {
+        if (!AppState.sales.find((x) => String(x.id) === String(s.id))) AppState.sales.push(s);
+      });
+    }
+    let bills = (billsRes && billsRes.results) || [];
+    if (!bills.length && saleList.length) {
+      bills = saleList.map((s) => ({
+        receivableBillId: s.receivableBillId || s.id,
+        id: s.id,
+        documentId: "CT",
+        companyId: s.companyId,
+        units: s.unitId || s.unitName,
+        situation: s.status,
+        payOffDate: s.status === "Quitado" ? s.lastPaymentDate : null
+      }));
+    }
+    const ctBills = bills.filter((b) => {
+      const doc = String(b.documentId || b.documentType || "").trim().toUpperCase();
+      return !doc || doc === "CT";
+    });
+    const pool = (ctBills.length ? ctBills : bills).filter((b) => {
+      const billId = String(b.receivableBillId || b.id || "").replace(/^B-/, "").split("-")[0];
+      if (currentIds.has(billId)) return false;
+      if (b.payOffDate || b.payoffDate) return false;
+      const sit = String(b.situation || b.status || "").toLowerCase();
+      if (sit.includes("distrat") || sit.includes("cancel") || sit.includes("quitad")) return false;
+      const sale = saleList.find((s) => String(s.receivableBillId) === String(billId) || String(s.id) === String(billId));
+      if (sale && (sale.status === "Distratado" || sale.status === "Quitado" || sale.active === false)) return false;
+      return true;
+    });
+    const options = pool.map((b) => {
+      const billId = String(b.receivableBillId || b.id || "").replace(/^B-/, "").split("-")[0];
+      const sale = saleList.find((s) => String(s.receivableBillId) === String(billId) || String(s.id) === String(billId));
+      const unit = b.units || b.unitName || (sale && (sale.unitName || sale.unitId)) || "N/D";
+      const companyId = b.companyId || (sale && sale.companyId) || (g_distSale && g_distSale.companyId) || "";
+      const label = `Título ${billId} · ${unit}`;
+      return { billId, companyId, unit, label };
+    });
+    window._distPermutaState = window._distPermutaState || {};
+    window._distPermutaState.contracts = options;
+    if (!options.length) {
+      selectEl.innerHTML = `<option value="">Nenhum outro contrato CT ativo</option>`;
+      selectEl.disabled = true;
+      const body = document.getElementById("dist-permuta-parcelas-body");
+      if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Este cliente não possui outro contrato ativo para abatimento.</div>`;
+      return;
+    }
+    selectEl.innerHTML = `<option value="">Selecione o contrato do cliente...</option>` + options.map((o) =>
+      `<option value="${o.billId}" data-company="${o.companyId}" data-unit="${String(o.unit).replace(/"/g, "&quot;")}">${o.label}</option>`
+    ).join("");
+    selectEl.disabled = false;
+  } catch (e) {
+    console.error("Erro ao listar contratos para permuta:", e);
+    selectEl.innerHTML = `<option value="">Erro ao buscar contratos</option>`;
+    selectEl.disabled = false;
+  }
+};
+
+window.onDistratoPermutaContractChange = async function() {
+  const selectEl = document.getElementById("dist-permuta-contract");
+  const loteEl = document.getElementById("dist-novo-lote");
+  const body = document.getElementById("dist-permuta-parcelas-body");
+  const billId = selectEl ? selectEl.value : "";
+  const opt = selectEl && selectEl.selectedOptions && selectEl.selectedOptions[0];
+  const unit = opt ? (opt.getAttribute("data-unit") || "") : "";
+  const companyId = opt ? (opt.getAttribute("data-company") || "") : "";
+  if (loteEl) loteEl.value = unit ? `título ${billId} (${unit})` : "";
+  window._distPermutaState = window._distPermutaState || {};
+  window._distPermutaState.selection = null;
+  window._distPermutaState.installments = [];
+  if (!billId) {
+    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+    window.syncDistratoPermutaAbatimentoUi();
+    calculateDistrato();
+    return;
+  }
+  if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Buscando parcelas a valor presente no Sienge...</div>`;
+  try {
+    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
+    const rows = flattenCustomerDebtBalance(res)
+      .filter(distPermutaInstOpen)
+      .map((inst) => {
+        const due = inst.dueDate || inst.due || "";
+        return {
+          id: inst.installmentId || inst.installmentNumber || inst.id,
+          number: inst.installmentNumber || inst.installmentId || inst.id,
+          due,
+          original: Number(inst.originalValue || inst.value || 0) || 0,
+          balance: Number(inst.currentBalance != null ? inst.currentBalance : inst.originalValue) || 0,
+          vp: distPermutaInstVp(inst)
+        };
+      })
+      .filter((r) => r.vp > 0.009)
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    window._distPermutaState.installments = rows;
+    window._distPermutaState.billId = billId;
+    window._distPermutaState.unit = unit;
+    if (!rows.length) {
+      body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
+    } else {
+      const fmtDate = (d) => {
+        const iso = String(d || "").slice(0, 10);
+        const p = iso.split("-");
+        return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (d || "—");
+      };
+      body.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+          <thead>
+            <tr style="background:#9a3412;color:#fff;">
+              <th style="padding:8px;width:36px;text-align:center;"></th>
+              <th style="padding:8px;text-align:left;">Parcela</th>
+              <th style="padding:8px;text-align:center;">Vencimento</th>
+              <th style="padding:8px;text-align:right;">Saldo</th>
+              <th style="padding:8px;text-align:right;">Valor presente</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r, i) => `
+              <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
+                <td style="padding:6px;text-align:center;">
+                  <input type="checkbox" class="dist-permuta-inst-check" data-idx="${i}" onchange="onDistratoPermutaInstToggle()">
+                </td>
+                <td style="padding:6px;font-weight:700;">${r.number}</td>
+                <td style="padding:6px;text-align:center;">${fmtDate(r.due)}</td>
+                <td style="padding:6px;text-align:right;">${distPermutaFmt(r.balance)}</td>
+                <td style="padding:6px;text-align:right;font-weight:800;color:#1d4ed8;">${distPermutaFmt(r.vp)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>`;
+    }
+  } catch (e) {
+    console.error("Erro ao carregar VP da permuta:", e);
+    if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#b91c1c;font-size:0.85rem;">Não foi possível obter o valor presente deste contrato.</div>`;
+  }
+  window.syncDistratoPermutaAbatimentoUi();
+  window.onDistratoPermutaInstToggle();
+};
+
+window.onDistratoPermutaInstToggle = function() {
+  const rows = (window._distPermutaState && window._distPermutaState.installments) || [];
+  const checks = document.querySelectorAll(".dist-permuta-inst-check");
+  const selected = [];
+  checks.forEach((chk) => {
+    if (!chk.checked) return;
+    const inst = rows[Number(chk.getAttribute("data-idx"))];
+    if (inst) selected.push(inst);
+  });
+  const sum = selected.reduce((acc, r) => acc + (Number(r.vp) || 0), 0);
+  const target = distPermutaTargetRefund();
+  const diff = target - sum;
+  const selEl = document.getElementById("dist-permuta-selecionado");
+  const saldoEl = document.getElementById("dist-permuta-saldo");
+  const metaEl = document.getElementById("dist-permuta-meta");
+  if (metaEl) metaEl.textContent = distPermutaFmt(target);
+  if (selEl) selEl.textContent = distPermutaFmt(sum);
+  if (saldoEl) {
+    if (diff > 0.009) {
+      saldoEl.style.color = "#9a3412";
+      saldoEl.textContent = "Falta: " + distPermutaFmt(diff);
+    } else {
+      saldoEl.style.color = "#166534";
+      saldoEl.textContent = (Math.abs(diff) <= 0.009 ? "Cobriu a restituição" : "Excedente: " + distPermutaFmt(Math.abs(diff)));
+    }
+  }
+  window._distPermutaState = window._distPermutaState || {};
+  window._distPermutaState.selection = {
+    billId: window._distPermutaState.billId,
+    unit: window._distPermutaState.unit,
+    installments: selected,
+    selectedVp: sum,
+    target
+  };
+  if (AppState.currentDistratoResult) AppState.currentDistratoResult.permutaAbatimento = window._distPermutaState.selection;
+};
+
+window.marcarParcelasPermutaAteRestituicao = function() {
+  const rows = (window._distPermutaState && window._distPermutaState.installments) || [];
+  const target = distPermutaTargetRefund();
+  const checks = document.querySelectorAll(".dist-permuta-inst-check");
+  let acc = 0;
+  checks.forEach((chk, i) => {
+    const inst = rows[i];
+    if (!inst) { chk.checked = false; return; }
+    if (acc + 0.009 < target) {
+      chk.checked = true;
+      acc += Number(inst.vp) || 0;
+    } else {
+      chk.checked = false;
+    }
+  });
+  window.onDistratoPermutaInstToggle();
+};
+
 window.toggleDistratoPermuta = function() {
   const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
   const loteWrap = document.getElementById("dist-permuta-lote-wrap");
@@ -11094,6 +11436,21 @@ window.toggleDistratoPermuta = function() {
   const choiceEl = document.getElementById("dist-restitution-choice");
   if (choiceEl) choiceEl.value = on ? "permuta" : (choiceEl.value === "permuta" ? "lei" : choiceEl.value);
   if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
+  if (on) {
+    window.loadDistratoPermutaContracts();
+  } else {
+    const selectEl = document.getElementById("dist-permuta-contract");
+    if (selectEl) {
+      selectEl.innerHTML = `<option value="">Selecione o contrato do cliente...</option>`;
+      selectEl.value = "";
+    }
+    const loteEl = document.getElementById("dist-novo-lote");
+    if (loteEl) loteEl.value = "";
+    window._distPermutaState = { contracts: [], installments: [], selection: null };
+    const body = document.getElementById("dist-permuta-parcelas-body");
+    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+  }
+  if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
   calculateDistrato();
 };
 
@@ -11262,10 +11619,15 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     return;
   }
 
-  const unit = AppState.units[g_distSale.unitId] || {};
-  const preambleText = (typeof window.getPreambleForContract === "function")
-    ? window.getPreambleForContract(unit, g_distSale)
-    : (AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.");
+  const unit = (AppState.units && g_distSale.unitId && AppState.units[g_distSale.unitId]) || {};
+  let preambleText = "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.";
+  try {
+    preambleText = (typeof window.getPreambleForContract === "function")
+      ? window.getPreambleForContract(unit, g_distSale)
+      : ((AppState.preambles && AppState.preambles[unit.costCenterId]) || preambleText);
+  } catch (e) {
+    console.warn("Preâmbulo do distrato indisponível:", e);
+  }
 
   const distVal = (id) => {
     const el = document.getElementById(id);
@@ -11330,7 +11692,14 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     const valorFmt = valorLiq.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const valorPago = results.totalPaid || 0;
     const valorMulta = results.penalty || 0;
-    const cpfCnpj = (typeof maskCpfCnpj === 'function') ? maskCpfCnpj(g_distCustomer.cpfCnpj) : (g_distCustomer.cpfCnpj || '');
+    const cpfCnpj = (typeof formatCpfCnpj === "function")
+      ? formatCpfCnpj(g_distCustomer.cpfCnpj)
+      : (function (val) {
+          const clean = String(val || "").replace(/\D/g, "");
+          if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+          if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+          return val || "";
+        })(g_distCustomer.cpfCnpj);
     const instQty = results.instQty || Number(document.getElementById('dist-restitution-installments')?.value) || 1;
     const instVal = results.refundInstallment || 0;
     const hasRestituicao = !isPermuta && Number(valorLiq) > 0.009;
@@ -11345,7 +11714,9 @@ window.generateDistratoPDF = function generateDistratoPDF() {
       hasPagamentoBancario: isPermuta ? !hasNovoLote : hasRestituicao,
       iniciativa
     });
-    const filled = applyDistratoTemplateVars(formatDocPadraoMarkup(clausesReady), {
+    const filled = applyDistratoTemplateVars(
+      (typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup : (x) => String(x || ""))(clausesReady),
+      {
       QUADRA: unit.block || unit.quadra || '____',
       LOTE: unit.lot || unit.lote || '____',
       TITULO: g_distSale.receivableBillId || g_distSale.id || '____',
@@ -11435,7 +11806,7 @@ window.generateDistratoPDF = function generateDistratoPDF() {
           <td style="padding: 5px; text-align: right; color: red;">- R$ ${results.fruition.toFixed(2)}</td>
         </tr>
         
-        ${Object.entries(results.extraDebits).map(([key, val]) => {
+        ${Object.entries(results.extraDebits || {}).map(([key, val]) => {
           if (val === 0) return "";
           const nameMap = {
             taxaAssoc: "Taxa Associativa",
