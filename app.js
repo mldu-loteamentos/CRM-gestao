@@ -114,6 +114,7 @@ window.updateOperatorTabsUI = function() {
 document.addEventListener("DOMContentLoaded", () => {
     window.updateOperatorTabsUI();
     setTimeout(() => {
+      if (typeof window.ensureAllNexCleared === "function") window.ensureAllNexCleared();
       if (typeof window.ensureNexTodayPurged === "function") window.ensureNexTodayPurged();
       if (typeof window.ensureNexTitulo12753Removed === "function") window.ensureNexTitulo12753Removed();
     }, 1500);
@@ -1910,6 +1911,11 @@ async function initializeApplication() {
                          hasUpdates = true;
                      }
                  });
+                 if (typeof window.stripNexNotesFromState === "function") {
+                     try {
+                         if (localStorage.getItem("crm_nex_cleared_all_v20260828") === "1" && window.stripNexNotesFromState()) hasUpdates = true;
+                     } catch (e) {}
+                 }
                  if (hasUpdates) {
                      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
                  }
@@ -8611,9 +8617,9 @@ function renderCustomerOccurrences() {
     }
     if (isNexLocked) {
       card.style.setProperty('position', 'relative', 'important');
-      card.style.setProperty('background-color', '#eff6ff', 'important');
-      card.style.setProperty('border', '1px solid #bfdbfe', 'important');
-      card.style.setProperty('border-left', '4px solid #2563eb', 'important');
+      card.style.setProperty('background-color', '#fef2f2', 'important');
+      card.style.setProperty('border', '1px solid #fecaca', 'important');
+      card.style.setProperty('border-left', '4px solid #ef4444', 'important');
       card.style.cursor = 'pointer';
     }
     
@@ -15050,6 +15056,7 @@ async function loadWeSendTab() {
         customerId: bill.customerId,
         customerName: customer.name,
         saleId: bill.saleId,
+        companyId: bill.companyId || "",
         unitId: (sale && sale.unitId) || ("U-" + bill.companyId + "-" + (unitName ? String(unitName).replace(/\s+/g, "") : "ND")),
         costCenterId: (bill.costCentersId && bill.costCentersId.length > 0)
           ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId)
@@ -15059,25 +15066,42 @@ async function loadWeSendTab() {
         isZeroPaid: false,
         maxDaysDelay: 0,
         totalOverdue: 0,
+        billCount: 0,
         billIds: []
       };
     }
     grouped[key].totalOverdue += (Number(bill.value) || 0) + (Number(bill.interest) || 0) + (Number(bill.fine) || 0);
     grouped[key].billIds.push(bill.id);
+    const trueBillCount = bill.totalInstallmentsCount || ((bill.defaulterInstallments && bill.defaulterInstallments.length > 0) ? bill.defaulterInstallments.length : 1);
+    grouped[key].billCount += (trueBillCount > 0 ? trueBillCount : 1);
     if (bill.daysDelay > grouped[key].maxDaysDelay) grouped[key].maxDaysDelay = bill.daysDelay;
     if (hasUnpaidSinal(bill)) grouped[key].isZeroPaid = true;
   });
 
   const zpLoaded = Array.isArray(window.zeroPaidList) && window.zeroPaidList.length > 0;
   const zpSet = new Set((window.zeroPaidList || []).map(c => String(c.customerId) + "-" + String(c.saleId)));
+  const filaByKey = {};
+  (window.clientList || []).forEach(c => {
+    if (!c) return;
+    filaByKey[String(c.customerId) + "-" + String(c.saleId)] = c;
+  });
+  (window.zeroPaidList || []).forEach(c => {
+    if (!c) return;
+    const k = String(c.customerId) + "-" + String(c.saleId);
+    if (!filaByKey[k]) filaByKey[k] = c;
+  });
   Object.values(grouped).forEach(item => {
     const key = String(item.customerId) + "-" + String(item.saleId);
     if (zpLoaded) item.isZeroPaid = zpSet.has(key);
-    const zp = (window.zeroPaidList || []).find(c => String(c.customerId) === String(item.customerId) && String(c.saleId) === String(item.saleId));
-    if (zp) {
-      item.assignedOperator = zp.assignedOperator;
-      item.lastContactDate = zp.lastContactDate;
-      item.companyId = zp.companyId || item.companyId;
+    const fila = filaByKey[key];
+    if (fila) {
+      item.assignedOperator = fila.assignedOperator || item.assignedOperator;
+      item.lastContactDate = fila.lastContactDate || item.lastContactDate;
+      item.companyId = fila.companyId || item.companyId;
+      item.unitName = fila.unitName || item.unitName;
+      item.costCenterId = fila.costCenterId || item.costCenterId;
+      if (fila.billCount != null) item.billCount = fila.billCount;
+      if (fila.overdueValue != null) item.totalOverdue = fila.overdueValue;
     }
   });
 
@@ -15133,7 +15157,7 @@ async function loadWeSendTab() {
     const hasNex = window.nexHasLetter(item.customerId, item.saleId);
     if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex) {
       zeroList.push(item);
-    } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex) {
+    } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex && window.nexCrossed61AfterCutoff(item.maxDaysDelay)) {
       d61List.push(item);
     }
   });
@@ -15158,11 +15182,13 @@ async function loadWeSendTab() {
     body.innerHTML = items.map(item => {
       const name = String(item.customerName || "").replace(/</g, "&lt;");
       const titleNum = String((item.billIds && item.billIds[0]) || item.saleId || "").replace(/^B-/, "").split("-")[0];
-      const unitLabel = ((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(item.costCenterId) : "") || item.unitName || empLabel(item) || "N/D").replace(/</g, "&lt;");
+      const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(item.costCenterId) : (item.costCenterId || "");
+      const unitLabel = String((ccId ? ccId + " - " : "") + (item.unitName || "N/D")).replace(/</g, "&lt;");
       const op = item.assignedOperator || "NÃO ATRIBUÍDO";
       const opStyle = typeof getOperatorBadgeStyle === "function" ? getOperatorBadgeStyle(op) : "";
       const delayHtml = typeof getDelayBadgeHtml === "function" ? getDelayBadgeHtml(item.maxDaysDelay, !!asZero) : (item.maxDaysDelay + " dias");
       const val = Number(item.totalOverdue || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const vencidas = item.billCount != null ? item.billCount : (item.billIds ? item.billIds.length : 0);
       const cid = item.customerId;
       const sid = item.saleId;
       const rowClass = asZero ? "table-row-hover zero-paid-highlight" : "table-row-hover";
@@ -15174,8 +15200,8 @@ async function loadWeSendTab() {
         "<td style=\"white-space:nowrap;\">" + unitLabel + "</td>" +
         "<td style=\"text-align:center;white-space:nowrap;\"><span class=\"badge\" style=\"" + opStyle + "\">" + String(op).replace(/</g, "&lt;") + "</span></td>" +
         "<td style=\"text-align:center;white-space:nowrap;\">" + delayHtml + "</td>" +
-        "<td style=\"text-align:center;\">" + (item.billIds ? item.billIds.length : 0) + "</td>" +
-        "<td>R$ " + val + "</td>" +
+        "<td style=\"text-align:center;\">" + vencidas + "</td>" +
+        "<td>" + val + "</td>" +
         "<td style=\"text-align:center;white-space:nowrap;\">" + lastContactOf(item) + "</td>" +
         "<td style=\"text-align:center;white-space:nowrap;\">" +
           "<button class=\"btn btn-primary btn-sm\" onclick=\"window.openCustomerNexTab('" + cid + "','" + sid + "','" + sid + "','" + panel + "')\" style=\"padding:2px 6px;font-size:0.7rem;line-height:1.2;\"><i data-lucide=\"eye\" style=\"width:14px;height:14px;margin-right:2px;vertical-align:middle;\"></i> Detalhes</button>" +
@@ -15185,6 +15211,8 @@ async function loadWeSendTab() {
 
   fillBody("wesend-zero-body", zeroList, "chk-wesend-zero", "elegiveis-zero", true);
   fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
+  const cutoffInput = document.getElementById("nex-61-cutoff");
+  if (cutoffInput) cutoffInput.value = window.getNex61Cutoff();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
   const restorePanel = sessionStorage.getItem("wesendActivePanel") || sessionStorage.getItem("wesendReturnPanel");
   if (restorePanel && typeof window.switchWesendPanel === "function") window.switchWesendPanel(restorePanel);
@@ -16294,6 +16322,151 @@ window.ensureNexTitulo12753Removed = async function() {
   return window._nexTitulo12753Promise;
 };
 
+window.stripNexNotesFromState = function() {
+  if (!AppState.notes) return 0;
+  let n = 0;
+  Object.keys(AppState.notes).forEach(cid => {
+    const list = AppState.notes[cid];
+    if (!Array.isArray(list)) return;
+    const next = list.filter(x => !(x && (x.nexLocked || String(x.canal || "").toUpperCase() === "NEX")));
+    n += list.length - next.length;
+    AppState.notes[cid] = next;
+  });
+  return n;
+};
+
+window.removeNexOccurrenceNote = function(customerId, nexId) {
+  if (!customerId || !AppState.notes) return;
+  const list = AppState.notes[customerId];
+  if (!Array.isArray(list)) return;
+  AppState.notes[customerId] = list.filter(x => !(x && x.nexLocked && String(x.nexId) === String(nexId)));
+  if (window.saveNotesToFirebase) window.saveNotesToFirebase(customerId);
+  else try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  if (typeof renderCustomerOccurrences === "function" && String(AppState.selectedCustomerId) === String(customerId)) {
+    renderCustomerOccurrences();
+  }
+};
+
+window.purgeAllNexOccurrenceNotes = async function() {
+  window.stripNexNotesFromState();
+  try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  if (!(window.firebaseDb && window.firebaseCollections)) return;
+  try {
+    const { collection, getDocs, setDoc } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "customer_notes_shards"));
+    const patchByRef = [];
+    for (const d of snap.docs) {
+      const data = d.data() || {};
+      const patch = {};
+      let changed = false;
+      Object.keys(data).forEach(k => {
+        if (!Array.isArray(data[k])) return;
+        const filtered = data[k].filter(n => !(n && (n.nexLocked || String(n.canal || "").toUpperCase() === "NEX")));
+        if (filtered.length !== data[k].length) {
+          patch[k] = filtered;
+          changed = true;
+        }
+      });
+      if (changed) patchByRef.push({ ref: d.ref, patch });
+    }
+    for (const item of patchByRef) await setDoc(item.ref, item.patch, { merge: true });
+  } catch (e) {
+    console.warn("[NEX] Falha ao limpar notas de NEX", e);
+  }
+};
+
+window.ensureAllNexCleared = async function() {
+  const flag = "crm_nex_cleared_all_v20260828";
+  try {
+    if (localStorage.getItem(flag) === "1") {
+      await window.purgeNexItems(() => true, { localOnly: true });
+      window.stripNexNotesFromState();
+      return 0;
+    }
+  } catch (e) {}
+  if (window._nexClearAllPromise) return window._nexClearAllPromise;
+  window._nexClearAllPromise = (async () => {
+    const run = async () => {
+      const n = await window.purgeNexItems(() => true);
+      await window.purgeAllNexOccurrenceNotes();
+      return n;
+    };
+    if (window.firebaseDb && window.firebaseCollections) {
+      try {
+        const { doc, getDoc, setDoc } = window.firebaseCollections;
+        const flagRef = doc(window.firebaseDb, "settings", "nex_cleared_all_20260828");
+        const snap = await getDoc(flagRef);
+        if (snap.exists()) {
+          await window.purgeNexItems(() => true, { localOnly: true });
+          window.stripNexNotesFromState();
+          try { localStorage.setItem(flag, "1"); } catch (e) {}
+          return 0;
+        }
+        const n = await run();
+        await setDoc(flagRef, { purgedAt: Date.now() });
+        try { localStorage.setItem(flag, "1"); } catch (e) {}
+        if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+        return n;
+      } catch (e) {
+        console.warn("[NEX] Limpeza geral", e);
+      }
+    }
+    const n = await run();
+    try { localStorage.setItem(flag, "1"); } catch (e) {}
+    return n;
+  })();
+  return window._nexClearAllPromise;
+};
+
+window.nexClientIsZeroPaid = function(customerId, saleId) {
+  const key = String(customerId) + "-" + String(saleId);
+  if (Array.isArray(window.zeroPaidList) && window.zeroPaidList.some(c => String(c.customerId) + "-" + String(c.saleId) === key)) return true;
+  if (Array.isArray(window.clientList)) {
+    const c = window.clientList.find(x => String(x.customerId) === String(customerId) && String(x.saleId) === String(saleId));
+    if (c && c.isZeroPaid) return true;
+  }
+  return false;
+};
+
+window.getNexFollowupZeroOnly = function() {
+  try { return localStorage.getItem("crm_nex_followup_zero_only") === "1"; } catch (e) { return false; }
+};
+
+window.setNexFollowupZeroOnly = function(on) {
+  try { localStorage.setItem("crm_nex_followup_zero_only", on ? "1" : "0"); } catch (e) {}
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+};
+
+window.getNex61Cutoff = function() {
+  try {
+    const v = localStorage.getItem("crm_nex_61_cutoff");
+    if (v) return v;
+  } catch (e) {}
+  const today = window.nexTodayIso();
+  try { localStorage.setItem("crm_nex_61_cutoff", today); } catch (e) {}
+  return today;
+};
+
+window.setNex61Cutoff = function(iso) {
+  const v = window.nexParseIso(iso) || window.nexTodayIso();
+  try { localStorage.setItem("crm_nex_61_cutoff", v); } catch (e) {}
+  if (typeof window.loadWeSendTab === "function") window.loadWeSendTab();
+};
+
+window.nexReached61Iso = function(maxDaysDelay) {
+  const extra = Math.max(0, Number(maxDaysDelay || 0) - 61);
+  const today = window.nexTodayIso();
+  const d = new Date(today + "T12:00:00");
+  d.setDate(d.getDate() - extra);
+  return window.nexParseIso(d.toISOString());
+};
+
+window.nexCrossed61AfterCutoff = function(maxDaysDelay) {
+  const cutoff = window.getNex61Cutoff();
+  const reached = window.nexReached61Iso(maxDaysDelay);
+  return !!(reached && cutoff && reached >= cutoff);
+};
+
 window.ensureNexTodayPurged = async function() {
   try {
     if (localStorage.getItem("crm_nex_purged_2026-08-27") === "1") return 0;
@@ -16325,6 +16498,7 @@ window.ensureNexTodayPurged = async function() {
 };
 
 window.loadNexHistory = async function(customerId, saleId) {
+  await window.ensureAllNexCleared();
   await window.ensureNexTodayPurged();
   await window.ensureNexTitulo12753Removed();
   customerId = customerId || (AppState && AppState.selectedCustomerId);
@@ -16601,14 +16775,30 @@ window.updateNexDeliveredAt = async function(id, value) {
   window.renderNexHistory();
 };
 
-window.deleteNexItem = async function(id) {
-  const ctx = window.nexFindItem(id);
+window.deleteNexItem = async function(id, opts) {
+  const ctx = window.nexFindItem(id) || {};
   if (!id) return;
-  if (!confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return;
+  if (!(opts && opts.silent) && !confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return;
   await window.purgeNexItems((it) => String(it.id) === String(id));
-  const next = (ctx.items || []).filter(x => String(x.id) !== String(id));
-  await window.saveNexHistory(ctx.customerId, ctx.saleId, next);
-  window.renderNexHistory();
+  if (ctx.customerId) {
+    const next = (ctx.items || []).filter(x => String(x.id) !== String(id));
+    await window.saveNexHistory(ctx.customerId, ctx.saleId, next);
+    window.removeNexOccurrenceNote(ctx.customerId, id);
+  }
+  if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+};
+
+window.deleteNexFollowupSelected = async function() {
+  const chks = Array.from(document.querySelectorAll(".chk-nex-followup:checked"));
+  if (!chks.length) {
+    alert("Selecione ao menos uma NEX para excluir.");
+    return;
+  }
+  if (!confirm("Excluir " + chks.length + " NEX selecionada(s)? Esta ação não pode ser desfeita.")) return;
+  for (const chk of chks) {
+    await window.deleteNexItem(chk.getAttribute("data-nex-id"), { silent: true });
+  }
 };
 
 window.viewNexPdf = async function(id) {
@@ -16704,7 +16894,7 @@ window.nexOccurrenceText = function(item) {
   return "NEX do título " + (item.titulo || "—") +
     "\nData de envio: " + window.nexFmtBr(item.date || item.createdAt) +
     "\nStatus da carta: " + status +
-    (item.tracking ? "\nObjeto: " + item.tracking : "") +
+    "\nObjeto: " + (item.tracking || "não informado") +
     (item.arDigital ? "\nAR Digital: anexado" : "\nAR Digital: não anexado") +
     "\nValidade jurídica: " + (valid.ok ? "Válida" : (lost.lost ? "Perdeu validade por pagamento posterior" : "Sem validade")) +
     "\n" + valid.reason;
@@ -16820,18 +17010,22 @@ window.switchWesendPanel = function(panel) {
 window.renderNexFollowup = function() {
   const body = document.getElementById("nex-followup-body");
   if (!body) return;
+  const zeroOnlyChk = document.getElementById("nex-followup-zero-only");
+  const zeroOnly = window.getNexFollowupZeroOnly();
+  if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;
   const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
   const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
   const rows = window.nexCollectAll().filter(it => window.nexInFollowup(it));
   const customers = AppState.customers || {};
   const filtered = rows.filter(it => {
+    if (zeroOnly && !(it.zeroPaid || window.nexClientIsZeroPaid(it.customerId, it.titulo))) return false;
     if (fTitulo && !String(it.titulo || "").includes(fTitulo)) return false;
     const name = (customers[it.customerId] && customers[it.customerId].name) || "";
     if (fNome && !name.toLowerCase().includes(fNome)) return false;
     return true;
   });
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(it => {
@@ -16844,6 +17038,7 @@ window.renderNexFollowup = function() {
       ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
       : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`;
     return `<tr class="nex-followup-row" data-customer-id="${it.customerId}" data-sale-id="${it.titulo}" style="cursor:pointer;" onclick="window.openCustomerNexTab('${it.customerId}','${it.titulo}','${it.titulo}','followup')">
+      <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" class="chk-nex-followup" data-nex-id="${it.id}"></td>
       <td><strong>${(cust.name || ("Cliente #" + it.customerId)).replace(/</g, "&lt;")}</strong></td>
       <td>${String(emp).replace(/</g, "&lt;")}</td>
       <td style="font-weight:700;">${it.titulo || "—"}</td>
@@ -16853,6 +17048,7 @@ window.renderNexFollowup = function() {
       <td onclick="event.stopPropagation()"><select onchange="window.updateNexStatus('${it.id}', this.value)" style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:180px;"><option value="">Selecionar...</option>${sel}</select></td>
       <td style="text-align:center;" onclick="event.stopPropagation()">${arCell}</td>
       <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
+      <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button></td>
     </tr>`;
   }).join("");
 };
@@ -16918,7 +17114,8 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             status: "",
             html: docHtml,
             titulo: String((AppState && (AppState.currentReceivableBillId || AppState.selectedTitulo)) || saleId || ""),
-            customerId: String(customerId || "")
+            customerId: String(customerId || ""),
+            zeroPaid: window.nexClientIsZeroPaid(customerId, saleId)
         };
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
         window.syncNexOccurrenceNote(customerId, rec);
@@ -17016,7 +17213,8 @@ window.gerarDocumentosFisicosNEXEmMassa = async function(selector) {
             status: "",
             html: docHtml,
             titulo: String(saleId || ""),
-            customerId: String(customerId || "")
+            customerId: String(customerId || ""),
+            zeroPaid: !!(chk.classList.contains("chk-wesend-zero") || window.nexClientIsZeroPaid(customerId, saleId))
         };
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
         window.syncNexOccurrenceNote(customerId, rec);

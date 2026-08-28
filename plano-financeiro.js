@@ -981,7 +981,7 @@ const PlanoFinanceiroApp = {
     if (node.type === 'resultado') { bg = '#fff'; borderLeft = '#eab308'; icon = 'file-text'; }
     if (node.type === 'formula') { bg = '#ecfdf5'; borderLeft = '#105436'; icon = 'calculator'; }
 
-    const dropEvents = node.type === 'resultado' ? `ondragover="PlanoFinanceiroApp.onDragOver(event)" ondrop="PlanoFinanceiroApp.onDropGroup(event, '${node.id}')"` : '';
+    const dropEvents = node.type === 'resultado' ? `ondragover="PlanoFinanceiroApp.onDragOver(event)" ondragleave="PlanoFinanceiroApp.onDragLeave(event)" ondrop="PlanoFinanceiroApp.onDropGroup(event, '${node.id}')"` : '';
     const canAddChild = node.type !== 'resultado' && node.type !== 'formula';
 
     let html = `
@@ -1017,14 +1017,16 @@ const PlanoFinanceiroApp = {
       }
 
       if (node.type === 'resultado' && node.accounts && node.accounts.length > 0) {
-        html += `<div style="margin-left:${marginLeft + 28}px; margin-top:5px; margin-bottom:10px; display:flex; flex-direction:column; gap:4px; padding-left:10px; border-left:2px solid #e2e8f0;">`;
+        html += `<div style="margin-left:${marginLeft + 28}px; margin-top:5px; margin-bottom:10px; display:flex; flex-direction:column; gap:4px; padding-left:10px; border-left:2px solid #e2e8f0;" ondragover="PlanoFinanceiroApp.onDragOver(event)" ondrop="PlanoFinanceiroApp.onDropGroup(event, '${node.id}')">`;
         node.accounts.forEach(accId => {
           const c = this.categories.find(cat => String(cat.id) === String(accId));
           const name = c ? c.name : 'Conta não encontrada';
           html += `
-            <div style="background:#f8fafc; border:1px solid #cbd5e1; padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; justify-content:space-between; align-items:center;">
-              <div><strong style="color:#0f172a;">${accId}</strong> <span style="color:#64748b;">${name}</span></div>
-              <button onclick="PlanoFinanceiroApp.removeAccountFromGroup('${node.id}', '${accId}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:1rem;line-height:1;">&times;</button>
+            <div draggable="true" ondragstart="PlanoFinanceiroApp.onDragStart(event, '${accId}', '${node.id}')" ondragend="PlanoFinanceiroApp.onDragEnd()"
+                 title="Arraste para outro grupo amarelo"
+                 style="background:#f8fafc; border:1px solid #cbd5e1; padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; justify-content:space-between; align-items:center; cursor:grab;">
+              <div style="pointer-events:none;"><strong style="color:#0f172a;">${accId}</strong> <span style="color:#64748b;">${name}</span></div>
+              <button onmousedown="event.stopPropagation()" onclick="event.stopPropagation(); PlanoFinanceiroApp.removeAccountFromGroup('${node.id}', '${accId}')" title="Remover deste grupo" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:1rem;line-height:1;">&times;</button>
             </div>
           `;
         });
@@ -1179,19 +1181,50 @@ const PlanoFinanceiroApp = {
     this.renderBoard();
   },
 
-  onDragStart(e, accId) {
+  onDragStart(e, accId, fromGroupId) {
     this.draggedAccountId = String(accId);
+    this.draggedFromGroupId = fromGroupId ? String(fromGroupId) : null;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', accId);
+    if (e.currentTarget && e.currentTarget.style) e.currentTarget.style.opacity = '0.45';
+  },
+
+  onDragEnd() {
+    this.clearDropHighlights();
+    this.draggedAccountId = this.draggedAccountId || null;
   },
 
   onDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    const el = e.currentTarget;
+    if (el && el.style) {
+      el.style.outline = '2px solid #105436';
+      el.style.outlineOffset = '1px';
+      el.style.backgroundColor = '#ecfdf5';
+    }
+  },
+
+  onDragLeave(e) {
+    const el = e.currentTarget;
+    if (el && el.style) {
+      el.style.outline = '';
+      el.style.backgroundColor = '';
+    }
+  },
+
+  clearDropHighlights() {
+    document.querySelectorAll('#pf-dfc-tree [style*="outline"]').forEach(el => {
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+      el.style.backgroundColor = '';
+      el.style.opacity = '';
+    });
   },
 
   onDropUnassigned(e) {
     e.preventDefault();
+    this.clearDropHighlights();
     if (!this.draggedAccountId || !this.selectedVisaoId) return;
     const v = this.getVisao();
     if (!v) return;
@@ -1200,20 +1233,25 @@ const PlanoFinanceiroApp = {
       if(g.accounts) g.accounts = g.accounts.filter(a => String(a) !== this.draggedAccountId);
     });
     
+    this.draggedAccountId = null;
+    this.draggedFromGroupId = null;
     this.saveToStorage();
     this.renderBoard();
   },
 
   onDropGroup(e, groupId) {
     e.preventDefault();
-    // Stop propagation so it doesn't trigger parent dropzones if any
     e.stopPropagation();
+    this.clearDropHighlights();
 
     if (!this.draggedAccountId || !this.selectedVisaoId) return;
     const v = this.getVisao();
     if (!v) return;
+    if (this.draggedFromGroupId && String(this.draggedFromGroupId) === String(groupId)) {
+      this.draggedAccountId = null;
+      return;
+    }
     
-    // Remove from anywhere else
     v.groups.forEach(g => {
       if(g.accounts) g.accounts = g.accounts.filter(a => String(a) !== this.draggedAccountId);
     });
@@ -1222,9 +1260,12 @@ const PlanoFinanceiroApp = {
     if (group && group.type === 'resultado') {
       if(!group.accounts) group.accounts = [];
       group.accounts.push(this.draggedAccountId);
-      group.accounts.sort((a,b) => a.localeCompare(b));
+      group.accounts.sort((a,b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+      group.expanded = true;
     }
     
+    this.draggedAccountId = null;
+    this.draggedFromGroupId = null;
     this.saveToStorage();
     this.renderBoard();
   }
