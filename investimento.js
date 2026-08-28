@@ -14,15 +14,18 @@ const InvestimentoApp = {
 
   init() {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    if (!this.startDate) this.startDate = `${y}-${m}-01`;
-    if (!this.endDate) {
-      const last = new Date(y, now.getMonth() + 1, 0).getDate();
-      this.endDate = `${y}-${m}-${String(last).padStart(2, "0")}`;
+    const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    if (!this.startDate) {
+      this.startDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`;
     }
-    const cons = this.consolidacaoCompanies();
-    if (!this.selectedCompanyIds.length) this.selectedCompanyIds = cons.map(c => String(c.id));
+    if (!this.endDate) {
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      this.endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+    }
+    const geridas = this.geridasCompanies();
+    const allowed = new Set(geridas.map(c => c.id));
+    this.selectedCompanyIds = this.selectedCompanyIds.filter(id => allowed.has(String(id)));
+    if (!this.selectedCompanyIds.length) this.selectedCompanyIds = geridas.map(c => String(c.id));
     this.render();
   },
 
@@ -33,26 +36,30 @@ const InvestimentoApp = {
     } catch (e) { return {}; }
   },
 
-  consolidacaoCompanies() {
+  geridasCompanies() {
     const all = (window.AppState && AppState.companies) || [];
     const custom = this.empresasCustom();
-    const marked = all.filter(c => {
+    return all.filter(c => {
       const cfg = custom[c.id] || custom[String(c.id)] || {};
-      return Number(cfg.consolidacao_padrao) === 1;
-    });
-    const source = marked.length ? marked : all;
-    return source.map(c => {
+      return Number(cfg.gerida_pelo_grupo) === 1;
+    }).map(c => {
       const cfg = custom[c.id] || custom[String(c.id)] || {};
       return {
         id: String(c.id),
-        name: cfg.nome_usual || c.name || `Empresa ${c.id}`,
-        pct: Number(cfg.percentual_mldu) || 0
+        name: cfg.nome_usual || c.name || `Empresa ${c.id}`
       };
     });
   },
 
+  consolidacaoCompanies() {
+    return this.geridasCompanies();
+  },
+
   companyName(id) {
-    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
+    const custom = this.empresasCustom();
+    const cfg = custom[id] || custom[String(id)] || {};
+    if (cfg.nome_usual) return cfg.nome_usual;
+    const c = ((window.AppState && AppState.companies) || []).find(x => String(x.id) === String(id));
     return (c && c.name) || `Empresa ${id}`;
   },
 
@@ -84,6 +91,16 @@ const InvestimentoApp = {
       cur.setMonth(cur.getMonth() + 1);
     }
     return keys;
+  },
+
+  lastDayOfMonth(ym) {
+    const [y, m] = String(ym).split("-").map(Number);
+    const d = new Date(y, m, 0);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  },
+
+  clampDate(iso, maxIso) {
+    return iso > maxIso ? maxIso : iso;
   },
 
   monthLabel(key) {
@@ -160,10 +177,11 @@ const InvestimentoApp = {
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
     const openingDate = this.addDaysIso(this.startDate, -1);
+    const monthEndDates = this.months.map(mk => this.clampDate(this.lastDayOfMonth(mk), this.endDate));
     try {
-      const [balancesOpen, balancesClose, accountsChunks, movChunks] = await Promise.all([
+      const uniqueBalDates = [...new Set(monthEndDates)];
+      const [balancesOpen, accountsChunks, movChunks, ...monthBalResults] = await Promise.all([
         SiengeApiService.getAccountBalances(openingDate, { showLast: true }),
-        SiengeApiService.getAccountBalances(this.endDate, { showLast: true }),
         Promise.all(this.selectedCompanyIds.map(async id => {
           const res = await SiengeApiService.getCheckingAccounts(id);
           return ((res && res.results) || []).map(a => ({ ...a, companyId: a.companyId || id }));
@@ -174,8 +192,12 @@ const InvestimentoApp = {
             companyId: id
           });
           return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
-        }))
+        })),
+        ...uniqueBalDates.map(d => SiengeApiService.getAccountBalances(d, { showLast: true }).then(b => [d, b]).catch(() => [d, []]))
       ]);
+      const balancesByDate = {};
+      monthBalResults.forEach(([d, b]) => { balancesByDate[d] = b; });
+      const balancesClose = balancesByDate[this.endDate] || balancesByDate[monthEndDates[monthEndDates.length - 1]] || [];
 
       let catalog = accountsChunks.flat();
       if (this.onlyInvestment) catalog = catalog.filter(a => this.isInvestmentAccount(a));
@@ -253,16 +275,29 @@ const InvestimentoApp = {
       });
 
       const accounts = [...byAcc.values()].map(row => {
-        const net = row.aportes + row.resgates + row.rendimento + row.tarifas;
-        const closingCalc = row.opening + net;
-        const closing = row.closingApi || closingCalc;
-        const implied = closing - row.opening - row.aportes - row.resgates - row.tarifas;
-        if (Math.abs(row.rendimento) < 0.01 && Math.abs(implied) > 0.01) {
-          row.rendimento = implied;
-          row.rendimentoFromBalance = true;
-        }
-        row.closing = closing;
-        row.variacao = closing - row.opening;
+        let run = row.opening;
+        this.months.forEach((mk, i) => {
+          const f = row.months[mk] || this.emptyFlow();
+          row.months[mk] = f;
+          const closeDate = monthEndDates[i];
+          const closeApi = this.pickBalance(balancesByDate[closeDate] || [], row.accountNumber, row.companyId);
+          if (Math.abs(f.rendimento) < 0.01 && closeApi) {
+            const implied = closeApi - run - f.aportes - f.resgates - f.tarifas;
+            if (Math.abs(implied) > 0.01) {
+              f.rendimento = implied;
+              row.rendimentoFromBalance = true;
+            }
+          }
+          run = (closeApi || (run + f.aportes + f.resgates + f.tarifas + f.rendimento));
+          f.closing = run;
+        });
+        row.aportes = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].aportes) || 0), 0);
+        row.resgates = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].resgates) || 0), 0);
+        row.rendimento = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].rendimento) || 0), 0);
+        row.tarifas = this.months.reduce((s, mk) => s + ((row.months[mk] && row.months[mk].tarifas) || 0), 0);
+        const closingApi = this.pickBalance(balancesClose, row.accountNumber, row.companyId);
+        row.closing = closingApi || run;
+        row.variacao = row.closing - row.opening;
         return row;
       }).sort((a, b) => b.closing - a.closing);
 
@@ -302,6 +337,16 @@ const InvestimentoApp = {
     }
   },
 
+  selectAllGeridas() {
+    this.selectedCompanyIds = this.geridasCompanies().map(c => c.id);
+    this.render();
+  },
+
+  clearGeridas() {
+    this.selectedCompanyIds = [];
+    this.render();
+  },
+
   cell(n, bold) {
     const color = n < 0 ? "#b91c1c" : (n > 0 ? "#105436" : "#94a3b8");
     return `text-align:right;font-variant-numeric:tabular-nums;color:${color};font-weight:${bold ? 800 : 600};white-space:nowrap;`;
@@ -321,6 +366,25 @@ const InvestimentoApp = {
       const f = (row.months && row.months[mk]) || this.emptyFlow();
       const opening = running;
       const net = (f.aportes || 0) + (f.resgates || 0) + (f.rendimento || 0) + (f.tarifas || 0);
+      running = f.closing != null ? f.closing : (opening + net);
+      return { month: mk, opening, ...f, closing: running };
+    });
+  },
+
+  consolidatedFlow() {
+    const keys = this.months;
+    let running = this.kpis.opening;
+    return keys.map(mk => {
+      const f = this.accounts.reduce((acc, r) => {
+        const m = (r.months && r.months[mk]) || this.emptyFlow();
+        acc.aportes += m.aportes || 0;
+        acc.resgates += m.resgates || 0;
+        acc.rendimento += m.rendimento || 0;
+        acc.tarifas += m.tarifas || 0;
+        return acc;
+      }, this.emptyFlow());
+      const opening = running;
+      const net = f.aportes + f.resgates + f.rendimento + f.tarifas;
       running = opening + net;
       return { month: mk, opening, ...f, closing: running };
     });
@@ -329,7 +393,7 @@ const InvestimentoApp = {
   render() {
     const root = document.getElementById("investimento-root");
     if (!root) return;
-    const companies = this.consolidacaoCompanies();
+    const companies = this.geridasCompanies();
     const k = this.kpis;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
@@ -340,7 +404,7 @@ const InvestimentoApp = {
             </div>
             <div>
               <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Investimento</h2>
-              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Saldos Sienge · movimento de caixa e banco · contas de aplicação</p>
+              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Aplicações das empresas geridas pelo grupo · fluxo mês a mês</p>
             </div>
           </div>
         </div>
@@ -361,25 +425,31 @@ const InvestimentoApp = {
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
-            <div style="flex:1;min-width:240px;">
-              <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas</div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <div style="flex:1;min-width:280px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+                <div style="font-size:0.75rem;font-weight:700;color:#475569;">Empresas geridas pelo grupo</div>
+                <div style="display:flex;gap:8px;">
+                  <button type="button" onclick="InvestimentoApp.selectAllGeridas()" style="border:none;background:none;color:#105436;font-size:0.72rem;font-weight:700;cursor:pointer;">Todas</button>
+                  <button type="button" onclick="InvestimentoApp.clearGeridas()" style="border:none;background:none;color:#64748b;font-size:0.72rem;font-weight:700;cursor:pointer;">Limpar</button>
+                </div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:88px;overflow:auto;">
                 ${companies.map(c => `
-                  <label style="font-size:0.75rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:99px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                  <label style="font-size:0.75rem;background:${this.selectedCompanyIds.includes(c.id) ? "#ecfdf5" : "#f8fafc"};border:1px solid ${this.selectedCompanyIds.includes(c.id) ? "#86efac" : "#e2e8f0"};border-radius:99px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
                     <input type="checkbox" ${this.selectedCompanyIds.includes(c.id) ? "checked" : ""}
                       onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)">
                     ${this.esc(c.name)}
-                  </label>`).join("") || `<span style="color:#94a3b8;font-size:0.8rem;">Nenhuma empresa carregada.</span>`}
+                  </label>`).join("") || `<span style="color:#b45309;font-size:0.8rem;">Nenhuma empresa marcada como “Gerida pelo grupo” no cadastro de empresas.</span>`}
               </div>
             </div>
           </div>
           ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}
           <div style="padding:12px 16px 0;display:flex;gap:10px;flex-wrap:wrap;">
             ${this.kpiCard("Saldo inicial", k.opening, "#0f172a")}
-            ${this.kpiCard("Aportes", k.aportes, "#105436")}
-            ${this.kpiCard("Resgates", k.resgates, "#b91c1c")}
-            ${this.kpiCard("Rendimento da aplicação", k.rendimento, "#0369a1")}
-            ${this.kpiCard("Saldo final", k.closing, "#0f172a")}
+            ${this.kpiCard("Entradas", k.aportes, "#105436")}
+            ${this.kpiCard("Saídas", k.resgates, "#b91c1c")}
+            ${this.kpiCard("Rendimento", k.rendimento, "#0369a1")}
+            ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
           <div style="flex:1;overflow:auto;padding:12px 16px;">
             ${this.loading ? `<div style="text-align:center;padding:40px;color:#64748b;">Carregando saldos e movimentos das contas de investimento...</div>` : this.tableHtml()}
@@ -393,6 +463,31 @@ const InvestimentoApp = {
     if (!this.accounts.length) {
       return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:28px;text-align:center;color:#94a3b8;">Informe o período e clique em Consultar.</div>`;
     }
+    const flow = this.consolidatedFlow();
+    const flowBody = `
+      <tr style="background:#f8fafc;">
+        <td style="padding:8px 12px;font-weight:800;color:#0f172a;">Saldo inicial</td>
+        <td style="padding:8px 10px;${this.cell(0)}">—</td>
+        <td style="padding:8px 10px;${this.cell(0)}">—</td>
+        <td style="padding:8px 10px;${this.cell(0)}">—</td>
+        <td style="padding:8px 10px;${this.cell(this.kpis.opening, true)}">${this.fmt(this.kpis.opening)}</td>
+      </tr>
+      ${flow.map(f => `
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:8px 12px;font-weight:700;color:#334155;">${this.monthLabel(f.month)}</td>
+          <td style="padding:8px 10px;${this.cell(f.aportes)}">${this.fmt(f.aportes)}</td>
+          <td style="padding:8px 10px;${this.cell(f.resgates)}">${this.fmt(f.resgates)}</td>
+          <td style="padding:8px 10px;${this.cell(f.rendimento)}">${this.fmt(f.rendimento)}</td>
+          <td style="padding:8px 10px;${this.cell(f.closing, true)}">${this.fmt(f.closing)}</td>
+        </tr>`).join("")}
+      <tr style="background:#ecfdf5;">
+        <td style="padding:8px 12px;font-weight:800;color:#105436;">Total do período</td>
+        <td style="padding:8px 10px;${this.cell(this.kpis.aportes)}">${this.fmt(this.kpis.aportes)}</td>
+        <td style="padding:8px 10px;${this.cell(this.kpis.resgates)}">${this.fmt(this.kpis.resgates)}</td>
+        <td style="padding:8px 10px;${this.cell(this.kpis.rendimento)}">${this.fmt(this.kpis.rendimento)}</td>
+        <td style="padding:8px 10px;${this.cell(this.kpis.closing, true)}">${this.fmt(this.kpis.closing)}</td>
+      </tr>`;
+
     const rows = this.accounts.map(r => {
       const open = this.expanded.has(r.key);
       const chevron = `<button type="button" onclick="InvestimentoApp.toggle('${this.esc(r.key)}')" style="border:none;background:none;cursor:pointer;padding:0 4px 0 0;color:#64748b;"><i data-lucide="${open ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i></button>`;
@@ -404,7 +499,6 @@ const InvestimentoApp = {
           <td style="padding:6px 10px;${this.cell(f.resgates)}">${this.fmt(f.resgates)}</td>
           <td style="padding:6px 10px;${this.cell(f.rendimento)}">${this.fmt(f.rendimento)}</td>
           <td style="padding:6px 10px;${this.cell(f.closing, true)}">${this.fmt(f.closing)}</td>
-          <td></td>
         </tr>`).join("") : "";
       return `
         <tr style="background:#fff;border-bottom:1px solid #f1f5f9;">
@@ -417,22 +511,37 @@ const InvestimentoApp = {
           <td style="padding:8px 10px;${this.cell(r.resgates)}">${this.fmt(r.resgates)}</td>
           <td style="padding:8px 10px;${this.cell(r.rendimento)}">${this.fmt(r.rendimento)}${r.rendimentoFromBalance ? `<div style="font-size:0.65rem;color:#64748b;font-weight:500;">pelo saldo</div>` : ""}</td>
           <td style="padding:8px 10px;${this.cell(r.closing, true)}">${this.fmt(r.closing)}</td>
-          <td style="padding:8px 10px;${this.cell(r.variacao, true)}">${this.fmt(r.variacao)}</td>
         </tr>
         ${flowRows}`;
     }).join("");
+
     return `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;margin-bottom:14px;">
+        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">Fluxo consolidado — entradas, saídas e saldo acumulado</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
+          <thead>
+            <tr style="background:#f8fafc;">
+              <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;">Mês</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Entradas</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saídas</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Rendimento</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo acumulado</th>
+            </tr>
+          </thead>
+          <tbody>${flowBody}</tbody>
+        </table>
+      </div>
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
+        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">Por conta (clique para ver o fluxo mensal)</div>
         <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:860px;">
           <thead>
-            <tr style="background:#f8fafc;position:sticky;top:0;z-index:1;">
+            <tr style="background:#f8fafc;">
               <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;">Conta</th>
               <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo inicial</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Aportes</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Resgates</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Entradas</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saídas</th>
               <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Rendimento</th>
               <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo final</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Variação</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

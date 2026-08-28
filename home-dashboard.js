@@ -186,7 +186,9 @@
 
   unfinishedYesterday(opName) {
     let cache = {};
-    try { cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {}; } catch (e) { cache = {}; }
+    try {
+      cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
+    } catch (e) { cache = {}; }
     const today = new Date().toISOString().split('T')[0];
     const prefixes = [opName, this.normalizeOperatorKey(opName)];
     let latest = null;
@@ -256,6 +258,112 @@
     return groups;
   },
 
+  escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  },
+
+  localDateStr(dateObj) {
+    if (typeof window.localDateStr === 'function') return window.localDateStr(dateObj);
+    const d = dateObj instanceof Date ? dateObj : new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  },
+
+  weekMondayStr(dateObj) {
+    const d = dateObj instanceof Date ? new Date(dateObj) : new Date();
+    const day = d.getDay();
+    const offset = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + offset);
+    d.setHours(0, 0, 0, 0);
+    return this.localDateStr(d);
+  },
+
+  getTodayWorkStats() {
+    const user = this.getViewUser();
+    const opName = user?.sienge_user || user?.name || '';
+    const today = this.localDateStr();
+    const notes = (window.AppState && AppState.notes) || {};
+    let ativo = 0;
+    let receptivo = 0;
+    Object.values(notes).forEach(list => {
+      (list || []).forEach(n => {
+        const nd = String(n.date || '').slice(0, 10);
+        if (nd !== today) return;
+        if (n.status === 'Cancelada') return;
+        if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
+          if (!window.occurrenceAuthorMatchesOperator(n.author, opName)) return;
+        }
+        const ini = String(n.iniciativa || '').toLowerCase();
+        if (ini === 'receptivo') receptivo++;
+        else if (ini === 'ativo') ativo++;
+      });
+    });
+
+    let filaTotal = 0;
+    let filaDone = 0;
+    try {
+      const cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
+      const prefixes = [opName, this.normalizeOperatorKey(opName)];
+      Object.keys(cache).forEach(k => {
+        const d = k.split('_').pop();
+        if (d !== today) return;
+        const head = k.slice(0, k.length - d.length - 1);
+        const ok = prefixes.some(p => this.normalizeOperatorKey(head) === this.normalizeOperatorKey(p)
+          || this.normalizeOperatorKey(head).includes(this.normalizeOperatorKey(p).split(' ')[0]));
+        if (!ok) return;
+        const queue = cache[k] || [];
+        filaTotal = Math.max(filaTotal, queue.length);
+        filaDone = queue.filter(item => {
+          const occs = (window.AppState && AppState.notes && AppState.notes[item.customerId]) || [];
+          return occs.some(n => {
+            const nd = String(n.date || '').slice(0, 10);
+            if (nd !== today) return false;
+            if (n.status === 'Cancelada') return false;
+            if (n.saleId && String(n.saleId) !== String(item.saleId)) return false;
+            return true;
+          }) || item.isResolved;
+        }).length;
+      });
+    } catch (e) {}
+
+    const capacity = 25;
+    return { ativo, receptivo, filaTotal: filaTotal || capacity, filaDone, capacity };
+  },
+
+  getWeekBarrigaCount() {
+    const user = this.getViewUser();
+    const opName = user?.sienge_user || user?.name || '';
+    const monday = this.weekMondayStr();
+    let count = 0;
+    try {
+      const data = JSON.parse(localStorage.getItem('crm_barriga_seals') || '{}') || {};
+      Object.keys(data).forEach(k => {
+        if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
+          if (!window.occurrenceAuthorMatchesOperator(k, opName) && this.normalizeOperatorKey(k) !== this.normalizeOperatorKey(opName)) return;
+        } else if (this.normalizeOperatorKey(k) !== this.normalizeOperatorKey(opName)) return;
+        (data[k] || []).forEach(d => {
+          if (String(d) >= monday) count++;
+        });
+      });
+    } catch (e) {}
+    return count;
+  },
+
+  uniqueInsightClients(items) {
+    const seen = new Set();
+    const out = [];
+    (items || []).forEach(c => {
+      const id = String(c.customerId || '');
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push(c);
+    });
+    return out;
+  },
+
   renderInsights() {
     const box = document.getElementById('home-op-insights-container');
     if (!box) return;
@@ -270,19 +378,78 @@
       return;
     }
     const firstName = (user?.name || 'Operador').split(' ')[0].toUpperCase();
+    const openIdx = this._insightOpenIdx;
+    const stats = this.getTodayWorkStats();
+    const seals = this.getWeekBarrigaCount();
+    const bar = (val, max, color) => {
+      const pct = max > 0 ? Math.min(100, Math.round((val / max) * 100)) : 0;
+      return `<div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:${color};border-radius:99px;"></div>
+      </div>`;
+    };
     box.style.display = 'block';
     box.innerHTML = `
-      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
-        <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
-          <i data-lucide="lightbulb" style="width:18px;color:#ca8a04;"></i>
-          <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Insights importantes — ${firstName}</h3>
+      <style>@media (max-width: 900px) { #home-op-insights-container .home-insights-layout { grid-template-columns: 1fr !important; } }</style>
+      <div class="home-insights-layout" style="display:grid; grid-template-columns: minmax(0,1.4fr) minmax(240px,0.7fr); gap:16px; align-items:stretch;">
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+          <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
+            <i data-lucide="lightbulb" style="width:18px;color:#ca8a04;"></i>
+            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Insights importantes — ${firstName}</h3>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; padding:14px;">
+            ${groups.map((g, i) => {
+              const open = openIdx === i;
+              const clients = this.uniqueInsightClients(g.items);
+              return `<div>
+                <button type="button" onclick="window.openHomeInsight(${i})" style="width:100%; text-align:left; border:1px solid ${open ? '#f59e0b' : '#e2e8f0'}; background:${open ? '#fef3c7' : '#fffbeb'}; border-radius:8px; padding:10px 12px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#854d0e;">
+                  ${this.escHtml(g.label)}
+                </button>
+                ${open ? `
+                  <div style="margin-top:6px; border:1px solid #fde68a; background:#fff; border-radius:8px; padding:8px 10px; max-height:280px; overflow:auto;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                      <span style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">${clients.length} cliente(s)</span>
+                      <button type="button" onclick="window.closeHomeInsightList()" style="border:none; background:#f1f5f9; border-radius:6px; padding:4px 8px; font-size:0.75rem; font-weight:700; cursor:pointer; color:#334155;">Voltar</button>
+                    </div>
+                    ${clients.length ? clients.map(c => `
+                      <button type="button" onclick="window.openHomeInsightClient(${Number(c.customerId)}, ${JSON.stringify(String(c.saleId || ''))})" style="display:block; width:100%; text-align:left; border:none; background:transparent; padding:7px 4px; cursor:pointer; font-size:0.84rem; font-weight:600; color:#105436; border-bottom:1px solid #f1f5f9;">
+                        ${this.escHtml(c.customerName || ('Cliente ' + c.customerId))}
+                        <span style="display:block; font-size:0.7rem; font-weight:500; color:#94a3b8;">Título ${this.escHtml(this.displayedTitle(c) || c.saleId || '')}</span>
+                      </button>`).join('') : `<div style="padding:8px; font-size:0.8rem; color:#64748b;">Nenhum cliente listado.</div>`}
+                  </div>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:8px; padding:14px;">
-          ${groups.map((g, i) => {
-            return `<button type="button" onclick="window.openHomeInsight(${i})" style="text-align:left; border:1px solid #e2e8f0; background:#fffbeb; border-radius:8px; padding:10px 12px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#854d0e;">
-              ${g.label}
-            </button>`;
-          }).join('')}
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+          <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
+            <i data-lucide="activity" style="width:18px;color:#105436;"></i>
+            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Resumo do dia</h3>
+          </div>
+          <div style="padding:16px; display:flex; flex-direction:column; gap:16px;">
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
+                <span>Fila do dia</span><span>${stats.filaDone}/${stats.capacity}</span>
+              </div>
+              ${bar(stats.filaDone, stats.capacity, '#105436')}
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
+                <span>Ativo</span><span>${stats.ativo}</span>
+              </div>
+              ${bar(stats.ativo, stats.capacity, '#2563eb')}
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
+                <span>Receptivo</span><span>${stats.receptivo}</span>
+              </div>
+              ${bar(stats.receptivo, stats.capacity, '#7c3aed')}
+            </div>
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px; text-align:center;">
+              <div style="font-size:0.7rem; font-weight:800; color:#166534; letter-spacing:0.04em; text-transform:uppercase;">Selos Seu Barriga</div>
+              <div style="font-size:2rem; font-weight:800; color:#166534; line-height:1.1; margin:4px 0;">${seals}</div>
+              <div style="font-size:0.75rem; color:#15803d;">ganhos nesta semana</div>
+            </div>
+          </div>
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
@@ -1246,16 +1413,26 @@ window.openHomeInsight = function(idx) {
   const groups = HomeDashboard._insightGroups || [];
   const g = groups[idx];
   if (!g) return;
-  const keys = new Set((g.items || []).map(c => String(c.customerId) + '-' + String(c.saleId)));
-  window.homeInsightFilter = { keys: keys, label: g.label };
-  const banner = document.getElementById('home-insight-banner');
-  const txt = document.getElementById('home-insight-banner-text');
-  if (banner && txt) {
-    banner.style.display = 'flex';
-    txt.textContent = 'Insight: ' + g.label;
+  HomeDashboard._insightOpenIdx = HomeDashboard._insightOpenIdx === idx ? null : idx;
+  HomeDashboard.renderInsights();
+};
+
+window.closeHomeInsightList = function() {
+  HomeDashboard._insightOpenIdx = null;
+  HomeDashboard.renderInsights();
+};
+
+window.openHomeInsightClient = async function(customerId, saleId) {
+  window._homeInsightReturn = true;
+  const btnBack = document.getElementById('btn-back-to-list');
+  const textBack = document.getElementById('text-back-to-list');
+  if (textBack) textBack.innerText = 'Voltar para Insights';
+  if (btnBack) {
+    btnBack.onclick = function() { goBackToDashboard(); };
   }
-  if (typeof switchTab === 'function') switchTab('dashboard', 'Fila de Cobrança');
-  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
+  if (typeof viewCustomerCard === 'function') {
+    await viewCustomerCard(customerId, saleId);
+  }
 };
 
 window.clearHomeInsightFilter = function() {

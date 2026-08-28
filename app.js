@@ -51,21 +51,38 @@ if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
 
 // getDynamicOperators was removed from here because it is defined at the end of the file.
 
-window.updateOperatorTabsUI = function() {
+window.updateOperatorTabsUI = function(useActualData = true) {
   const dynOps = window.getDynamicOperators();
   
+  let opsToShow = dynOps;
+  if (useActualData) {
+      const allBills = [
+        ...(window.AppState && window.AppState.defaultersBills ? window.AppState.defaultersBills : []),
+        ...(window.AppState && window.AppState.subjudiceBills ? window.AppState.subjudiceBills : []),
+        ...(window.AppState && window.AppState.zeroPaidBills ? window.AppState.zeroPaidBills : [])
+      ];
+      if (allBills.length > 0) {
+          let activeSet = new Set();
+          allBills.forEach(b => {
+              if (b.assignedOperator && b.assignedOperator !== "NÃO ATRIBUÍDO" && b.assignedOperator !== "TODOS" && b.assignedOperator !== "OUTROS") {
+                  activeSet.add(b.assignedOperator.toUpperCase().trim());
+              }
+          });
+          opsToShow = dynOps.filter(op => activeSet.has(op.toUpperCase().trim()));
+      }
+  }
+
   const filaTabs = document.getElementById("operator-tabs-container");
   if (filaTabs) {
-     // Remover botões de operador existentes
      const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
      existingOpBtns.forEach(btn => btn.remove());
      
-     // Criar e inserir novos botões no início
      let opBtnsHtml = `<button class="operator-tab-btn active" data-operator="TODOS">TODOS</button>`;
-     dynOps.forEach(op => {
+     opsToShow.forEach(op => {
          opBtnsHtml += `<button class="operator-tab-btn" data-operator="${op}">${op}</button>`;
      });
      opBtnsHtml += `<button class="operator-tab-btn" data-operator="NÃO ATRIBUÍDO">NÃO ATRIBUÍDO</button>`;
+     opBtnsHtml += `<button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>`;
      
      filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
   }
@@ -3472,6 +3489,10 @@ document.addEventListener("click", function(e) {
               }
           }
 
+          if (typeof window.updateOperatorTabsUI === 'function') {
+              window.updateOperatorTabsUI(true);
+          }
+
           if (typeof renderRulesSettingsTable === 'function') {
             renderRulesSettingsTable();
           }
@@ -5007,7 +5028,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof renderAgendaCalendar === 'function') {
          renderAgendaCalendar();
          if (window.selectedAgendaDate && typeof loadAgendaDayTasks === 'function') {
-            loadAgendaDayTasks(window.selectedAgendaDate.toISOString().split("T")[0]);
+            loadAgendaDayTasks(window.localDateStr(window.selectedAgendaDate || selectedAgendaDate));
          }
       }
     };
@@ -8603,6 +8624,18 @@ function formatCpfCnpj(val) {
 }
 
 function goBackToDashboard() {
+  if (window._homeInsightReturn) {
+    window._homeInsightReturn = false;
+    document.getElementById("view-customer-details").style.display = "none";
+    const viewReneg = document.getElementById("view-renegotiation");
+    if (viewReneg) viewReneg.style.display = "none";
+    const viewDistrato = document.getElementById("view-distrato");
+    if (viewDistrato) viewDistrato.style.display = "none";
+    const textBack = document.getElementById("text-back-to-list");
+    if (textBack) textBack.innerText = "Voltar para Lista";
+    switchTab("construcao-home", "Home");
+    return;
+  }
   if (window._mapaJuridicoReturn) {
     window._mapaJuridicoReturn = false;
     document.getElementById("view-customer-details").style.display = "none";
@@ -11023,7 +11056,23 @@ function valorPorExtensoBRL(valor) {
 
 function isLegacyDistratoClauses(text) {
   const s = String(text || '').trim();
-  return s.length < 280 && /As partes acordam na rescisão do contrato de compra e venda/i.test(s);
+  if (s.length < 280 && /As partes acordam na rescisão do contrato de compra e venda/i.test(s)) return true;
+  if (!/\{\{#SE_RESTITUICAO\}\}/.test(s) && (/Parágrafo Primeiro: Nos termos previstos no caput/i.test(s) || /NOVO_LOTE/i.test(s))) return true;
+  return false;
+}
+
+function applyDistratoConditionals(text, flags) {
+  let s = String(text || '');
+  const blocks = [
+    ['SE_RESTITUICAO', !!flags.hasRestituicao],
+    ['SE_SEM_RESTITUICAO', !flags.hasRestituicao],
+    ['SE_NOVO_LOTE', !!flags.hasNovoLote]
+  ];
+  blocks.forEach(([name, keep]) => {
+    const re = new RegExp('\\{\\{#' + name + '\\}\\}([\\s\\S]*?)\\{\\{/' + name + '\\}\\}', 'g');
+    s = s.replace(re, (_, inner) => keep ? String(inner).replace(/^\n+|\n+$/g, '') : '');
+  });
+  return s.replace(/\n{3,}/g, '\n\n');
 }
 
 function applyDistratoTemplateVars(text, map) {
@@ -11100,7 +11149,15 @@ function generateDistratoPDF() {
     const valorLiq = results.refundNet || 0;
     const valorFmt = valorLiq.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const cpfCnpj = (typeof maskCpfCnpj === 'function') ? maskCpfCnpj(g_distCustomer.cpfCnpj) : (g_distCustomer.cpfCnpj || '');
-    const filled = applyDistratoTemplateVars(formatDocPadraoMarkup(clauses), {
+    const instQty = results.instQty || Number(document.getElementById('dist-restitution-installments')?.value) || 1;
+    const instVal = results.refundInstallment || 0;
+    const hasRestituicao = Number(valorLiq) > 0.009;
+    const novoLoteRaw = (document.getElementById('dist-novo-lote')?.value || '').trim();
+    let clausesReady = applyDistratoConditionals(clauses, {
+      hasRestituicao,
+      hasNovoLote: !!(novoLoteRaw && novoLoteRaw !== '____')
+    });
+    const filled = applyDistratoTemplateVars(formatDocPadraoMarkup(clausesReady), {
       QUADRA: unit.block || unit.quadra || '____',
       LOTE: unit.lot || unit.lote || '____',
       TITULO: g_distSale.receivableBillId || g_distSale.id || '____',
@@ -11124,8 +11181,16 @@ function generateDistratoPDF() {
       AREA_LOTE_EXTENSO: areaExt,
       VALOR_RESTITUICAO: valorFmt,
       VALOR_RESTITUICAO_EXTENSO: valorPorExtensoBRL(valorLiq),
+      QTD_PARCELAS_RESTITUICAO: String(instQty),
+      QTD_PARCELAS_RESTITUICAO_EXTENSO: numeroPorExtenso(instQty),
+      VALOR_PARCELA_RESTITUICAO: instVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      VALOR_PARCELA_RESTITUICAO_EXTENSO: valorPorExtensoBRL(instVal),
+      FORMA_PAGAMENTO: payType === 'TED' ? 'TED' : 'PIX',
+      BENEFICIARIO: beneficiaryName || '____',
+      CPF_BENEFICIARIO: beneficiaryCpf || '____',
+      DADOS_PAGAMENTO: payInfoHtml || '',
       PERCENTUAL_RETENCAO: pctRetencao,
-      NOVO_LOTE: '____',
+      NOVO_LOTE: novoLoteRaw || '____',
       DATA_HOJE_EXTENSO: dateExt,
       DATA_ATUAL_EXTENSO: dateExt,
       TESTEMUNHA_1_NOME: t.test1Nome || '________________',
@@ -12265,8 +12330,8 @@ async function renderAgendaCalendar() {
   }
   
   const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
-  const selectedStr = selectedAgendaDate.toISOString().split("T")[0];
+  const todayStr = window.localDateStr(today);
+  const selectedStr = window.localDateStr(selectedAgendaDate);
   
   // Feriados Nacionais e de SP (Exemplo para 2026)
   const holidays = {
@@ -12284,7 +12349,7 @@ async function renderAgendaCalendar() {
     "2026-12-25": "Natal"
   };
   
-  const selectedOperator = document.getElementById("agenda-operator-select")?.value || "Todos";
+  const selectedOperator = window.AgendaSelectedOperator || document.getElementById("agenda-operator-select")?.value || "Todos";
   const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
   const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
   const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
@@ -12294,7 +12359,7 @@ async function renderAgendaCalendar() {
 
   for (let day = 1; day <= totalDays; day++) {
     const cellDate = new Date(year, month, day);
-    const cellDateStr = cellDate.toISOString().split("T")[0];
+    const cellDateStr = window.localDateStr(cellDate);
     
     const cell = document.createElement("div");
     cell.className = "calendar-day-cell";
@@ -12324,7 +12389,7 @@ async function renderAgendaCalendar() {
       const custId = Number(custIdStr);
       const customer = customers[custId];
       occList.forEach(occ => {
-        if (occ.promiseDate === cellDateStr && occ.promiseStatus === "Pendente" && occ.status !== "Cancelada") {
+        if (window.promiseDateKey(occ.promiseDate) === cellDateStr && occ.promiseStatus === "Pendente" && occ.status !== "Cancelada") {
            // Apply Filters
            if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
            if (typeFilter !== "todas") {
@@ -12362,6 +12427,7 @@ async function renderAgendaCalendar() {
     
     cell.onclick = () => {
       selectedAgendaDate = cellDate;
+      window.selectedAgendaDate = cellDate;
       document.querySelectorAll(".calendar-day-cell").forEach(c => c.classList.remove("selected"));
       cell.classList.add("selected");
       loadAgendaDayTasks(cellDateStr);
@@ -12418,6 +12484,29 @@ window.isHoliday = function(dateObj) {
     return false;
 };
 
+window.localDateStr = function(dateObj) {
+    const d = dateObj instanceof Date ? dateObj : new Date();
+    if (Number.isNaN(d.getTime())) {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+window.promiseDateKey = function(value) {
+    return String(value || '').slice(0, 10);
+};
+
+window.recordBarrigaSeal = function(operator, dateStr) {
+    try {
+        const data = JSON.parse(localStorage.getItem('crm_barriga_seals') || '{}') || {};
+        const op = String(operator || 'unknown');
+        if (!data[op]) data[op] = [];
+        if (!data[op].includes(dateStr)) data[op].push(dateStr);
+        localStorage.setItem('crm_barriga_seals', JSON.stringify(data));
+    } catch (e) {}
+};
+
 window.getActiveQueueDate = function() {
     let current = new Date();
     if (current.getHours() >= 18) {
@@ -12426,38 +12515,31 @@ window.getActiveQueueDate = function() {
     while (current.getDay() === 0 || current.getDay() === 6 || window.isHoliday(current)) {
         current.setDate(current.getDate() + 1);
     }
-    const yy = current.getFullYear();
-    const mm = String(current.getMonth() + 1).padStart(2, '0');
-    const dd = String(current.getDate()).padStart(2, '0');
-    return `${yy}-${mm}-${dd}`;
+    return window.localDateStr(current);
 };
 
 window.generateDailyQueue = async function(selectedOperator, dateStr) {
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = window.localDateStr ? window.localDateStr() : new Date().toISOString().split("T")[0];
+  const dateKey = window.promiseDateKey ? window.promiseDateKey(dateStr) : dateStr;
+  const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === 'function'
+      ? window.occurrenceAuthorMatchesOperator(a, b)
+      : String(a) === String(b);
   
   if (!window._dailyQueueCache) {
       try {
-          window._dailyQueueCache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v2') || '{}');
-          if (!localStorage.getItem('crm_queue_v3_migrated_final')) {
-              Object.keys(window._dailyQueueCache).forEach(k => {
-                  if (k.endsWith(`_${todayStr}`)) {
-                      delete window._dailyQueueCache[k];
-                  }
-              });
-              localStorage.setItem('crm_queue_v3_migrated_final', 'true');
-              localStorage.setItem('crm_daily_queue_cache_v2', JSON.stringify(window._dailyQueueCache));
-          }
+          window._dailyQueueCache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || '{}');
+          if (!window._dailyQueueCache || typeof window._dailyQueueCache !== 'object') window._dailyQueueCache = {};
       } catch(e) {
           window._dailyQueueCache = {};
       }
   }
-  const cacheKey = `${selectedOperator}_${dateStr}`;
+  const cacheKey = `${selectedOperator}_${dateKey}`;
   const applyTouchedFilter = (queue) => {
       queue.forEach(item => {
          let exclude = false;
          const notes = (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, item.customerId) : (AppState.notes[item.customerId] || []));
          notes.forEach(n => {
-           if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
+           if ((window.promiseDateKey(n.promiseDate) >= dateKey) && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) {
                   exclude = true;
               }
@@ -12478,14 +12560,19 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
 
   // Permitir visualização da fila para hoje e dias futuros
-  if (dateStr < todayStr) return [];
+  if (dateKey < todayStr) return [];
   if (selectedOperator === "Todos") return []; 
 
-  const opConfig = (AppState.rules && AppState.rules.filaConfig) 
-                    ? (AppState.rules.filaConfig[selectedOperator] || AppState.rules.filaConfig["Todos"]) 
-                    : null;
-                    
-  if (!opConfig) return [];
+  const defaultFilaConfig = {
+    capacity: 25, r1: 50, r2: 20, r3: 10, r4: 10, r5: 10, r6: 0, r7: 0, paymentDays: 15
+  };
+  const configs = (AppState.rules && AppState.rules.filaConfig) ? AppState.rules.filaConfig : {};
+  let opConfig = configs[selectedOperator] || configs["Todos"] || null;
+  if (!opConfig) {
+      const matchKey = Object.keys(configs).find(k => k !== "Todos" && opMatch(k, selectedOperator));
+      if (matchKey) opConfig = configs[matchKey];
+  }
+  if (!opConfig) opConfig = defaultFilaConfig;
   
   const capacity = opConfig.capacity || 25;
   const r1_pct = (opConfig.r1 || 50) / 100;
@@ -12502,24 +12589,12 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
     subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
   } catch(e) {}
   
-  let scheduledCount = 0;
-  Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
-    occList.forEach(occ => {
-      if (occ.promiseDate === dateStr && occ.status !== "Cancelada" && window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) {
-         scheduledCount++;
-      }
-    });
-  });
-
-  let remainingSlots = capacity - scheduledCount;
-  if (remainingSlots <= 0) return [];
-
   let leftoverSaleIds = new Set();
   let latestPrevDate = null;
   Object.keys(window._dailyQueueCache).forEach(k => {
      if (k.startsWith(selectedOperator + "_")) {
          const kDate = k.substring(selectedOperator.length + 1);
-         if (kDate < dateStr) {
+         if (kDate < dateKey) {
              if (!latestPrevDate || kDate > latestPrevDate) {
                  latestPrevDate = kDate;
              }
@@ -12534,7 +12609,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
          let exclude = false;
          const notes = AppState.notes[item.customerId] || [];
          notes.forEach(n => {
-           if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
+           if ((window.promiseDateKey(n.promiseDate) >= dateKey) && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
               if (!n.saleId || String(n.saleId) === String(item.saleId)) exclude = true;
            }
            if (n.date && n.date >= latestPrevDate && n.author && n.author.toLowerCase().includes(selectedOperator.toLowerCase())) {
@@ -12547,13 +12622,14 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       });
   }
 
-  let pool = (window.clientList || []).filter(item => item.assignedOperator === selectedOperator);
+  let sourceList = (window.rawClientList && window.rawClientList.length) ? window.rawClientList : (window.clientList || []);
+  let pool = sourceList.filter(item => opMatch(item.assignedOperator, selectedOperator));
 
   pool = pool.filter(item => {
      let exclude = false;
      const notes = AppState.notes[item.customerId] || [];
      notes.forEach(n => {
-       if (n.promiseDate >= dateStr && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
+       if ((window.promiseDateKey(n.promiseDate) >= dateKey) && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
           if (!n.saleId || String(n.saleId) === String(item.saleId)) {
               exclude = true;
           }
@@ -12680,84 +12756,102 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   // Sort descending by score
   scoredPool.sort((a, b) => b.sortScore - a.sortScore);
   
-  // Pick unique clients up to remainingSlots, filtering out those with active valid boletos
-  const selectedQueue = [];
-  const selectedIds = new Set();
-  
-  let poolIndex = 0;
-  while (poolIndex < scoredPool.length && selectedQueue.length < remainingSlots) {
-      let batch = [];
-      while (poolIndex < scoredPool.length && batch.length < 5) {
-          const item = scoredPool[poolIndex];
-          if (!selectedIds.has(item.customerId)) {
-              batch.push(item);
-              selectedIds.add(item.customerId);
-          }
-          poolIndex++;
-      }
-      
-      if (batch.length === 0) break;
-      
-      const validationResults = await Promise.all(batch.map(async (item) => {
-          let temBoletoValido = false;
-          
-          // OTIMIZAÇÃO: Checar o cache de pagamentos recentes (Bulk Data) ANTES de chamar a API lenta
-          if (window.advFilters && window.advFilters.paidMap && item.billIds && paymentDays > 0) {
-              item.billIds.forEach(bid => {
-                  if (window.advFilters.paidMap.has(String(bid))) {
-                      const diffDays = window.advFilters.paidMap.get(String(bid));
-                      if (diffDays <= paymentDays && diffDays >= 0) {
-                          temBoletoValido = true;
-                      }
-                  }
-              });
-          }
+  const inspectCache = new Map();
+  const inspectItem = async (item) => {
+      const ik = String(item.customerId) + '-' + String(item.saleId);
+      if (inspectCache.has(ik)) return inspectCache.get(ik);
 
-          if (!temBoletoValido) {
-              try {
-                  let currentSale = (AppState.sales || []).find(s => String(s.id) === String(item.saleId) || String(s.receivableBillId) === String(item.saleId));
-                  let realCustomerId = currentSale && currentSale.customerId ? currentSale.customerId : item.customerId;
-                  
-                  const data = await SiengeApiService.getCustomerFinancialStatements(realCustomerId);
-                  if (data && data.results && data.results.length > 0) {
-                      const billsReceivable = data.results[0].billsReceivable || [];
-                      let billIdToMatch = currentSale ? (currentSale.receivableBillId || item.saleId) : item.saleId;
-                      const currentBill = billsReceivable.find(b => String(b.billReceivableId) === String(billIdToMatch) || String(b.receivableBillId) === String(billIdToMatch) || String(b.billReceivableId) === String(item.saleId));
-                      
-                      if (currentBill && currentBill.installments) {
-                          for (let inst of currentBill.installments) {
-                              const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
-                              
-                              if (inst.generatedBillet === true && !isPaid && inst.dueDate) {
-                                  const dueDateObj = new Date(inst.dueDate + 'T12:00:00');
-                                  const today = new Date();
-                                  today.setHours(0,0,0,0);
-                                  const dueAtMidnight = new Date(dueDateObj);
-                                  dueAtMidnight.setHours(0,0,0,0);
-                                  if (dueAtMidnight >= today) {
-                                      temBoletoValido = true;
-                                      break;
-                                  }
-                              }
+      let recentPayment = false;
+      let temBoletoValido = false;
+
+      if (window.advFilters && window.advFilters.paidMap && item.billIds && paymentDays > 0) {
+          item.billIds.forEach(bid => {
+              if (window.advFilters.paidMap.has(String(bid))) {
+                  const diffDays = window.advFilters.paidMap.get(String(bid));
+                  if (diffDays <= paymentDays && diffDays >= 0) {
+                      recentPayment = true;
+                  }
+              }
+          });
+      }
+
+      try {
+          let currentSale = (AppState.sales || []).find(s => String(s.id) === String(item.saleId) || String(s.receivableBillId) === String(item.saleId));
+          let realCustomerId = currentSale && currentSale.customerId ? currentSale.customerId : item.customerId;
+          const data = await SiengeApiService.getCustomerFinancialStatements(realCustomerId);
+          if (data && data.results && data.results.length > 0) {
+              const billsReceivable = data.results[0].billsReceivable || [];
+              let billIdToMatch = currentSale ? (currentSale.receivableBillId || item.saleId) : item.saleId;
+              const currentBill = billsReceivable.find(b => String(b.billReceivableId) === String(billIdToMatch) || String(b.receivableBillId) === String(billIdToMatch) || String(b.billReceivableId) === String(item.saleId));
+
+              if (currentBill && currentBill.installments) {
+                  for (let inst of currentBill.installments) {
+                      const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
+                      if (inst.generatedBillet === true && !isPaid && inst.dueDate) {
+                          const dueDateObj = new Date(inst.dueDate + 'T12:00:00');
+                          const today = new Date();
+                          today.setHours(0,0,0,0);
+                          const dueAtMidnight = new Date(dueDateObj);
+                          dueAtMidnight.setHours(0,0,0,0);
+                          if (dueAtMidnight >= today) {
+                              temBoletoValido = true;
+                              break;
                           }
                       }
                   }
-              } catch (e) {
-                  console.error("Erro ao verificar boleto na fila", e);
               }
           }
-          return { item, temBoletoValido };
-      }));
-      
-      for (const res of validationResults) {
-          if (!res.temBoletoValido && selectedQueue.length < remainingSlots) {
-              selectedQueue.push(res.item);
-          }
+      } catch (e) {
+          console.error("Erro ao verificar boleto na fila", e);
       }
-      
-      // Pequeno delay entre lotes para evitar 429 - Too Many Requests na API
-      await new Promise(resolve => setTimeout(resolve, 500));
-  }
+
+      const result = { item, recentPayment, temBoletoValido };
+      inspectCache.set(ik, result);
+      return result;
+  };
+
+  const shouldForceReturn = (item) => {
+      const skipped = skippedIds.has(item.customerId + '-' + item.saleId);
+      return (Number(item.billCount) || 0) >= 2 || (Number(item.maxDaysDelay) || 0) >= 60 || skipped;
+  };
+
+  const acceptItem = (res, mode) => {
+      const force = shouldForceReturn(res.item);
+      if (res.recentPayment && !force && !mode.allowRecent) return false;
+      if (res.temBoletoValido && !force && !mode.allowBoleto) return false;
+      return true;
+  };
+
+  const selectedQueue = [];
+  const selectedIds = new Set();
+
+  const fillQueue = async (mode) => {
+      let poolIndex = 0;
+      while (poolIndex < scoredPool.length && selectedQueue.length < capacity) {
+          let batch = [];
+          while (poolIndex < scoredPool.length && batch.length < 5) {
+              const item = scoredPool[poolIndex++];
+              if (selectedIds.has(item.customerId)) continue;
+              batch.push(item);
+          }
+          if (batch.length === 0) break;
+
+          const validationResults = await Promise.all(batch.map(inspectItem));
+          for (const res of validationResults) {
+              if (selectedIds.has(res.item.customerId)) continue;
+              if (selectedQueue.length >= capacity) break;
+              if (acceptItem(res, mode)) {
+                  selectedIds.add(res.item.customerId);
+                  selectedQueue.push(res.item);
+              }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+      }
+  };
+
+  await fillQueue({ allowRecent: false, allowBoleto: false });
+  if (selectedQueue.length < capacity) await fillQueue({ allowRecent: true, allowBoleto: false });
+  if (selectedQueue.length < capacity) await fillQueue({ allowRecent: true, allowBoleto: true });
 
   let queueEntryDates = {};
   try {
@@ -12820,7 +12914,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   
   window._dailyQueueCache[cacheKey] = resultQueue;
-  localStorage.setItem('crm_daily_queue_cache_v2', JSON.stringify(window._dailyQueueCache));
+  localStorage.setItem('crm_daily_queue_cache_v3', JSON.stringify(window._dailyQueueCache));
   return applyTouchedFilter(resultQueue);
 };
 
@@ -12901,7 +12995,7 @@ window.fireConfetti = function() {
 };
 
   window.agendaItemsCache = window.agendaItemsCache || {};
-  const cacheKey = dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
+  const cacheKey = "v2|" + dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
 
   if (window.agendaItemsCache[cacheKey]) {
       dayItems = [...window.agendaItemsCache[cacheKey]];
@@ -12958,7 +13052,6 @@ window.fireConfetti = function() {
       Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
         const custId = Number(custIdStr);
         const customer = customers[custId];
-        if (!customer) return;
         
         const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) ? window.MOCK_DATA.SALES : [];
         let sale = salesList.find(s => String(s.customerId) === String(custId));
@@ -12968,7 +13061,7 @@ window.fireConfetti = function() {
         const unit = AppState.units[sale.unitId] || { block: "N/D", lot: "N/D" };
         
         occList.forEach((occ, index) => {
-          if (occ.promiseDate === dateStr && occ.status !== "Cancelada") {
+          if (window.promiseDateKey(occ.promiseDate) === dateStr && occ.status !== "Cancelada") {
             
             // Aplicação dos Filtros
             if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
@@ -13010,7 +13103,7 @@ window.fireConfetti = function() {
             }
             
             if (searchFilter) {
-               const custName = customer.name.toLowerCase();
+               const custName = (customer && customer.name ? customer.name : '').toLowerCase();
                const titleInfo = occSaleId.toString().toLowerCase();
                const recBillInfo = (finalSale.receivableBillId || "").toString().toLowerCase();
                const unitInfo = cleanUnit.toString().toLowerCase();
@@ -13027,19 +13120,19 @@ window.fireConfetti = function() {
             const diffTime = Math.abs(new Date() - occDate);
             const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-            const cpfRaw = customer.cpf || customer.cnpj || '';
+            const cpfRaw = (customer && (customer.cpf || customer.cnpj)) || '';
             const cpfMasked = cpfRaw ? cpfRaw.replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
 
             dayItems.push({
               customerId: custId,
-              customerName: customer.name,
+              customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + custId),
               cpf: cpfMasked,
               saleId: (finalSale && finalSale.receivableBillId) ? finalSale.receivableBillId : occSaleId,
               unitId: displayUnit,
               promiseDate: occ.promiseDate,
               promiseStatus: occ.promiseStatus,
               reminder: occ.reminder || "Retorno de Cobrança",
-              text: occ.text,
+              text: occ.text || "",
               date: occ.date,
               daysAgo: daysAgo,
               occIndex: index,
@@ -13118,7 +13211,10 @@ window.fireConfetti = function() {
           table.parentNode.insertBefore(successDiv, table);
           
           // Show confetti!
-          const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : new Date().toISOString().split('T')[0];
+          const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
+          if (typeof window.recordBarrigaSeal === 'function') {
+              window.recordBarrigaSeal(selectedOperator, todayStr);
+          }
           const firedDate = localStorage.getItem('confettiFiredDate');
           
           if (firedDate !== todayStr) {
@@ -13159,8 +13255,9 @@ window.fireConfetti = function() {
     if (item.promiseStatus === "Cumprido") statusColor = "var(--color-success)";
     if (item.promiseStatus === "Quebrado") statusColor = "var(--color-danger)";
 
-    const shortText = item.text.length > 50 ? item.text.substring(0, 50) + "..." : item.text;
-    const safeText = item.text.replace(/"/g, '&quot;');
+    const itemText = item.text || "";
+    const shortText = itemText.length > 50 ? itemText.substring(0, 50) + "..." : itemText;
+    const safeText = itemText.replace(/"/g, '&quot;');
     const tooltipText = `Detalhes do Atendimento:\n\nLembrete: ${item.reminder}\n\nResumo:\n${safeText}`;
 
     let actionHtml = '';
@@ -14317,7 +14414,7 @@ window.toggleAgendaTaskStatus = function(customerId, occDateStr, checked) {
     localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
     updateSidebarAgendaBadge();
     
-    const dateStr = selectedAgendaDate.toISOString().split("T")[0];
+    const dateStr = window.localDateStr(selectedAgendaDate);
     loadAgendaDayTasks(dateStr);
     renderAgendaCalendar();
     loadDashboardData(); // Atualiza KPIs e dashboard
@@ -14362,9 +14459,9 @@ window.setAgendaOperator = function(op) {
   renderAgendaCalendar();
   if (window.renderAgendaAlerts) window.renderAgendaAlerts(false);
   if (selectedAgendaDate) {
-    loadAgendaDayTasks(selectedAgendaDate.toISOString().split("T")[0]);
+    loadAgendaDayTasks(window.localDateStr(selectedAgendaDate));
   } else {
-    loadAgendaDayTasks(new Date().toISOString().split("T")[0]);
+    loadAgendaDayTasks(window.localDateStr(new Date()));
   }
 };
 
@@ -14372,7 +14469,7 @@ function updateSidebarAgendaBadge() {
   const badgeEl = document.getElementById("agenda-badge");
   if (!badgeEl) return;
   
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = window.localDateStr ? window.localDateStr() : new Date().toISOString().split("T")[0];
   let todayCount = 0;
   
   Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
@@ -21045,7 +21142,7 @@ function previewDocPadrao(tipo) {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
     const clauses = document.getElementById('doc-distrato-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(clauses)}</div>`;
+    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(String(clauses).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, ''))}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
