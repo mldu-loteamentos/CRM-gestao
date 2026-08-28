@@ -1510,14 +1510,44 @@ const SiengeApiService = {
 
   // 22. Listar Contas Correntes Disponíveis pelo Centro de Custo
   async getCostCenterAvailableAccounts(costCenterId) {
+    const ccMatch = String(costCenterId || "").match(/(\d{3,})/);
+    const id = ccMatch ? ccMatch[1] : costCenterId;
     if (s_apiMode === "simulado") {
-      return { availables: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }], results: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }] };
+      return { idCompany: 1, availables: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }], results: [{ checkingAccountId: 1, accountNumber: "99363-5", accountName: "C/C (MLDU) - ITAU" }] };
     }
-    if (!costCenterId || costCenterId === "N/D" || costCenterId === "undefined") return { results: [], availables: [] };
+    if (!id || id === "N/D" || id === "undefined") return { results: [], availables: [] };
     try {
-      const res = await siengeFetchWithRetry(`/cost-centers/${costCenterId}/available`);
-      const list = (res && (res.availables || res.results)) || [];
-      return { ...(res || {}), availables: list, results: list };
+      const res = await siengeFetchWithRetry(`/cost-centers/${id}/available`);
+      const raw = [];
+      const push = (arr) => { if (Array.isArray(arr)) raw.push(...arr); };
+      push(res && res.availables);
+      push(res && res.results);
+      push(res && res.availableCheckingAccounts);
+      push(res && res.checkingAccounts);
+      const seen = new Set();
+      const list = [];
+      raw.forEach(acc => {
+        if (!acc || typeof acc !== "object") return;
+        const nested = acc.checkingAccounts || acc.availables;
+        const rows = Array.isArray(nested) && nested.length ? nested : [acc];
+        rows.forEach(row => {
+          if (!row || typeof row !== "object") return;
+          const accountNumber = String(row.accountNumber || row.number || row.account || "").trim();
+          const checkingAccountId = row.checkingAccountId || row.idCheckingAccount || row.accountId || null;
+          if (!accountNumber && !checkingAccountId) return;
+          const key = String(checkingAccountId || accountNumber);
+          if (seen.has(key)) return;
+          seen.add(key);
+          list.push({
+            ...row,
+            accountNumber,
+            accountName: row.accountName || row.name || row.description || "Conta corrente",
+            checkingAccountId,
+            companyId: row.companyId || row.idCompany || (res && (res.idCompany || res.companyId)) || null
+          });
+        });
+      });
+      return { ...(res || {}), idCompany: (res && (res.idCompany || res.companyId)) || null, availables: list, results: list };
     } catch (e) {
       console.error("[Sienge] Erro ao obter contas correntes disponíveis do CC:", e);
       return { results: [], availables: [] };

@@ -1,5 +1,10 @@
 // MÓDULO: CONFIGURAÇÕES > USUÁRIOS E PERFIS
 
+window.isOperadorCobrancaProfile = function(name) {
+  const n = String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n.includes("OPERADOR COBRANCA");
+};
+
 const ConfigUsersApp = {
   
   users: [
@@ -145,9 +150,28 @@ const ConfigUsersApp = {
       ];
       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
     }
+
+    this.seedBackOfficePermsFromCobranca();
     
     // Aqui no futuro poderia fazer um fetch para a API de usuários
     this.render();
+  },
+
+  seedBackOfficePermsFromCobranca() {
+    const cob = this.profiles.find(p => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n === "OPERADOR COBRANCA";
+    });
+    const back = this.profiles.find(p => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
+    });
+    if (!cob || !back) return;
+    if (localStorage.getItem(`crm_perms_${back.id}`)) return;
+    const src = localStorage.getItem(`crm_perms_${cob.id}`)
+      || localStorage.getItem("crm_perms_operador_cobrança")
+      || localStorage.getItem("crm_perms_operador_cobranca");
+    if (src) localStorage.setItem(`crm_perms_${back.id}`, src);
   },
 
   addProfile() {
@@ -162,6 +186,9 @@ const ConfigUsersApp = {
 
        this.profiles.push({ id: id, name: profileName.trim().toUpperCase() });
        localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
+       if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
+         this.seedBackOfficePermsFromCobranca();
+       }
        this.selectedProfile = id;
        this.render();
     }
@@ -451,11 +478,11 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="const isOp = this.value.toUpperCase() === 'OPERADOR COBRANÇA'; document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="const isOp = window.isOperadorCobrancaProfile(this.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
-               <div id="umodal-operator-type-container" style="flex: 1; display: ${user && user.profile_name && user.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : (!user ? 'block' : 'none')};">
+               <div id="umodal-operator-type-container" style="flex: 1; display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Tipo de Operador</label>
                   <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      <option value="interno" ${user && user.operator_type === 'interno' ? 'selected' : ''}>Interno</option>
@@ -492,7 +519,7 @@ const ConfigUsersApp = {
                   Responsável por Checar Construção
                </label>
                
-               <div id="umodal-resend-billet-container" style="display: ${user && user.profile_name && user.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' ? 'block' : (!user ? 'block' : 'none')};">
+               <div id="umodal-resend-billet-container" style="display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
                    <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
                       <input type="checkbox" id="umodal-resend-billet" ${user && user.resend_billet ? 'checked' : ''} style="margin-right: 8px; width: 16px; height: 16px;">
                       Responsável por reenviar boleto de cliente
@@ -586,7 +613,7 @@ const ConfigUsersApp = {
               user.sienge_user = sienge;
               user.phone = phone;
               user.profile_name = profileName;
-              user.operator_type = profileName.toUpperCase().includes('OPERADOR') ? operatorType : null;
+              user.operator_type = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR') ? operatorType : null;
               user.adv_companies = user.operator_type === 'advogado' ? advCompanies : [];
               user.adv_cities = user.operator_type === 'advogado' ? advCities : [];
               user.adv_cost_centers = user.operator_type === 'advogado' ? advCostCenters : [];
@@ -607,7 +634,7 @@ const ConfigUsersApp = {
              sienge_user: sienge,
              phone: phone,
              profile_name: profileName,
-             operator_type: profileName.toUpperCase().includes('OPERADOR') ? operatorType : null,
+             operator_type: window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR') ? operatorType : null,
              adv_companies: operatorType === 'advogado' ? advCompanies : [],
              adv_cities: operatorType === 'advogado' ? advCities : [],
              adv_cost_centers: operatorType === 'advogado' ? advCostCenters : [],
@@ -655,7 +682,7 @@ const ConfigUsersApp = {
           <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.phone || '-'}</td>
           <td style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.85rem;">
              ${u.profile_name}
-             ${(u.operator_type && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÇA') ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : (u.operator_type === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
+             ${(u.operator_type && window.isOperadorCobrancaProfile(u.profile_name)) ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : (u.operator_type === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
           </td>
           <td style="padding: 16px 15px;">${statusBadge}</td>
           <td style="padding: 16px 15px;">

@@ -113,6 +113,10 @@ window.updateOperatorTabsUI = function() {
 
 document.addEventListener("DOMContentLoaded", () => {
     window.updateOperatorTabsUI();
+    setTimeout(() => {
+      if (typeof window.ensureNexTodayPurged === "function") window.ensureNexTodayPurged();
+      if (typeof window.ensureNexTitulo12753Removed === "function") window.ensureNexTitulo12753Removed();
+    }, 1500);
 });
 
 // Estado Geral da Aplicação
@@ -801,8 +805,8 @@ window.applyDynamicCityRules = function() {
         operator: "OUTROS"
       };
     } else {
-      // Atualizar descricao sem o prefixo "Cidade: " caso já exista
       AppState.rules[ruleId].desc = city;
+      // Nunca alterar operadores de cidade já cadastrada (ajuste manual prevalece).
     }
   });
 
@@ -2181,7 +2185,10 @@ async function initializeApplication() {
     
     // Auto-filtrar a Agenda se for Operador
     const u = AppState.currentUser;
-    if (u && ((u.profile_name && (u.profile_name.toUpperCase() === "OPERADOR COBRANÇA" || u.profile_name.toUpperCase() === "OPERADOR" || u.profile_name.toUpperCase() === "OPERADOR COBRANCA")) || u.role === "OPERADOR")) {
+    const profileNorm = u && u.profile_name
+      ? String(u.profile_name).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      : "";
+    if (u && (profileNorm.includes("OPERADOR COBRANCA") || profileNorm === "OPERADOR" || u.role === "OPERADOR")) {
       const safeNameForOp = u.name || "";
       const opName = u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : safeNameForOp.toUpperCase();
       if (typeof window.setAgendaOperator === 'function') {
@@ -11105,11 +11112,21 @@ window.downloadBoletoPdf = async function(billId, instId, btnElement) {
 let currentReprocessBillId = null;
 let currentReprocessInstId = null;
 let currentReprocessCostCenterId = null;
+let currentReprocessCompanyId = null;
 let currentReprocessSource = 'avulso';
 
+window.normalizeBoletoCostCenterId = function(passed) {
+  if (passed == null || passed === "" || passed === "N/D" || passed === "undefined") return null;
+  const m = String(passed).match(/(\d{3,})/);
+  return m ? m[1] : String(passed);
+};
+
 window.resolveBoletoCostCenterId = function(passed) {
-  if (passed != null && passed !== "" && passed !== "N/D" && passed !== "undefined") return passed;
-  if (AppState.currentCostCenterId && AppState.currentCostCenterId !== "N/D") return AppState.currentCostCenterId;
+  const fromPassed = window.normalizeBoletoCostCenterId(passed);
+  if (fromPassed) return fromPassed;
+  if (AppState.currentCostCenterId && AppState.currentCostCenterId !== "N/D") {
+    return window.normalizeBoletoCostCenterId(AppState.currentCostCenterId);
+  }
   const sale = (AppState.sales || []).find(s =>
     String(s.id) === String(AppState.selectedSaleId) ||
     String(s.receivableBillId) === String(AppState.selectedSaleId) ||
@@ -11117,7 +11134,7 @@ window.resolveBoletoCostCenterId = function(passed) {
   );
   if (sale) {
     const unit = AppState.units && sale.unitId ? AppState.units[sale.unitId] : null;
-    return (unit && unit.costCenterId) || sale.costCenterId || sale.enterpriseId || null;
+    return window.normalizeBoletoCostCenterId((unit && unit.costCenterId) || sale.costCenterId || sale.enterpriseId || null);
   }
   return null;
 };
@@ -11126,6 +11143,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   currentReprocessBillId = billId;
   currentReprocessInstId = instId;
   currentReprocessCostCenterId = window.resolveBoletoCostCenterId(costCenterId);
+  currentReprocessCompanyId = AppState.currentCompanyId || null;
   currentReprocessSource = source;
 
   const modal = document.getElementById('modal-reprocessar-boleto');
@@ -11195,25 +11213,30 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   try {
     const loadAccounts = async (ccId) => {
       const data = await SiengeApiService.getCostCenterAvailableAccounts(ccId);
+      if (data && (data.idCompany || data.companyId)) {
+        currentReprocessCompanyId = data.idCompany || data.companyId;
+      }
       return (data && (data.availables || data.results)) || [];
     };
 
     let accounts = await loadAccounts(currentReprocessCostCenterId);
-    if ((!accounts || accounts.length === 0) && AppState.currentCostCenterId && String(AppState.currentCostCenterId) !== String(currentReprocessCostCenterId)) {
+    if ((!accounts || accounts.length === 0) && AppState.currentCostCenterId && String(window.normalizeBoletoCostCenterId(AppState.currentCostCenterId)) !== String(currentReprocessCostCenterId)) {
       accounts = await loadAccounts(AppState.currentCostCenterId);
-      if (accounts && accounts.length > 0) currentReprocessCostCenterId = AppState.currentCostCenterId;
+      if (accounts && accounts.length > 0) currentReprocessCostCenterId = window.normalizeBoletoCostCenterId(AppState.currentCostCenterId);
     }
 
-    const withId = (accounts || []).filter(acc => acc.checkingAccountId || acc.id);
-    if (withId.length > 0) {
+    const usable = (accounts || []).filter(acc => acc.accountNumber || acc.checkingAccountId || acc.id);
+    if (usable.length > 0) {
       accountSelect.innerHTML = '';
-      withId.forEach(acc => {
+      usable.forEach(acc => {
         const option = document.createElement('option');
-        option.value = acc.checkingAccountId || acc.id;
-        option.textContent = `${acc.accountNumber || acc.checkingAccountId || acc.id} - ${acc.accountName || 'Conta corrente'}`;
+        const value = acc.checkingAccountId || acc.accountNumber || acc.id;
+        option.value = value;
+        option.dataset.accountNumber = acc.accountNumber || "";
+        option.textContent = `${acc.accountNumber || value} - ${acc.accountName || acc.name || 'Conta corrente'}`;
         accountSelect.appendChild(option);
       });
-      accountSelect.disabled = withId.length === 1;
+      accountSelect.disabled = usable.length === 1;
     } else {
       accountSelect.innerHTML = '<option value="">Conta disponível no Sienge não configurada. Consulte o time de tesouraria</option>';
       accountSelect.disabled = true;
@@ -11265,8 +11288,17 @@ window.validateReprocessForm = function() {
 window.submitReprocessBoleto = async function() {
   if (!currentReprocessBillId || currentReprocessInstId === null) return;
 
-  const accountRaw = document.getElementById('reprocess-account').value;
-  const account = parseInt(String(accountRaw || "").replace(/\D/g, ""), 10);
+  const accountSelectEl = document.getElementById('reprocess-account');
+  const accountRaw = accountSelectEl ? accountSelectEl.value : "";
+  const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
+  const accountNumberLabel = (selectedOpt && selectedOpt.dataset.accountNumber) || accountRaw;
+  let account = NaN;
+  if (/^\d+$/.test(String(accountRaw).trim())) {
+    account = parseInt(String(accountRaw).trim(), 10);
+  } else {
+    const head = String(accountRaw || "").split(/[^\d]/).find(p => p.length >= 3);
+    account = head ? parseInt(head, 10) : NaN;
+  }
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
@@ -11290,7 +11322,7 @@ window.submitReprocessBoleto = async function() {
     // O payload original pede companyId. Se não temos ele fácil no AppState,
     // podemos ter que buscar ou assumir. Na Moura Leite, geralmente é 2 ou 1.
     // Vamos buscar o companyId de AppState.customers se possível, ou passar fixo 2 se falhar.
-    let companyId = AppState.currentCompanyId || 2;
+    let companyId = currentReprocessCompanyId || AppState.currentCompanyId || 2;
     const sale = (AppState.sales || []).find(s =>
       String(s.id) === String(AppState.selectedSaleId) ||
       String(s.saleId) === String(AppState.selectedSaleId) ||
@@ -11320,6 +11352,7 @@ window.submitReprocessBoleto = async function() {
       "receivableBillId": currentReprocessBillId,
       "companyId": companyId,
       "checkingAccountId": account,
+      "accountNumber": accountNumberLabel || undefined,
       "newDueDate": dueDate,
       "interestPercentage": interest,
       "finePercentage": fine,
@@ -15030,9 +15063,10 @@ function triggerWeSendNotification(saleId, name) {
   loadWeSendTab();
 }
 
-window.generateSingleNEXHtml = async function(customerId, saleId) {
+window.generateSingleNEXHtml = async function(customerId, saleId, letterKind) {
     customerId = customerId || (typeof AppState !== 'undefined' && AppState.selectedCustomerId) || sessionStorage.getItem('currentCustomerId');
     saleId = saleId || (typeof AppState !== 'undefined' && (AppState.selectedSaleId || AppState.selectedTitulo)) || sessionStorage.getItem('currentSaleId');
+    letterKind = String(letterKind || "nex").toLowerCase() === "cec" ? "cec" : "nex";
 
     const isBlankAddr = (v) => !v || v === 'N/D' || String(v).trim() === '' || /não cadastrado/i.test(String(v));
     const formatAddrFromList = (addresses) => {
@@ -15523,15 +15557,35 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             </tbody>
         </table>`;
 
-    const templateStr = localStorage.getItem('crm_docpadrao_carta');
+    let dataEntregaNex = "";
+    let dataConstituicaoMora = "";
+    if (letterKind === "cec" && typeof window.loadNexHistory === "function") {
+        try {
+            const hist = await window.loadNexHistory(customerId, saleId);
+            const ready = typeof window.nexCecReadyItem === "function" ? window.nexCecReadyItem(hist) : null;
+            if (ready) {
+                dataEntregaNex = window.nexFmtBr(ready.deliveredAt);
+                dataConstituicaoMora = window.nexFmtBr(window.nexAddDays(ready.deliveredAt, 30));
+            }
+        } catch (e) {}
+    }
+
+    const templateStr = localStorage.getItem(letterKind === "cec" ? "crm_docpadrao_cec" : "crm_docpadrao_carta");
     let docHtml = '';
     
     let t = {};
     if (templateStr) {
         try { t = JSON.parse(templateStr); } catch(e){}
     }
-    let corpo = t['doc-carta-corpo'] || (document.getElementById('doc-carta-corpo') ? document.getElementById('doc-carta-corpo').value : '');
-    let assunto = t['doc-carta-assunto'] || (document.getElementById('doc-carta-assunto') ? document.getElementById('doc-carta-assunto').value : 'NOTIFICAÇÃO EXTRAJUDICIAL');
+    let corpo = "";
+    let assunto = "NOTIFICAÇÃO EXTRAJUDICIAL";
+    if (letterKind === "cec") {
+        corpo = t["doc-cec-corpo"] || (document.getElementById("doc-cec-corpo") ? document.getElementById("doc-cec-corpo").value : "");
+        assunto = t["doc-cec-assunto"] || (document.getElementById("doc-cec-assunto") ? document.getElementById("doc-cec-assunto").value : "COMUNICAÇÃO DE EFETIVAÇÃO DE CANCELAMENTO");
+    } else {
+        corpo = t["doc-carta-corpo"] || (document.getElementById("doc-carta-corpo") ? document.getElementById("doc-carta-corpo").value : "");
+        assunto = t["doc-carta-assunto"] || (document.getElementById("doc-carta-assunto") ? document.getElementById("doc-carta-assunto").value : "NOTIFICAÇÃO EXTRAJUDICIAL");
+    }
     
     if (corpo) {
             corpo = formatDocPadraoMarkup(corpo);
@@ -15593,6 +15647,9 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
             
             corpo = corpo.replace(/{{TABELA_PARCELAS}}/g, tableHtml);
             corpo = corpo.replace(/{{VALOR_DIVIDA}}/g, totGeral.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}));
+            corpo = corpo.replace(/{{DATA_ENTREGA_NEX}}/g, dataEntregaNex || "___");
+            corpo = corpo.replace(/{{DATA_CONSTITUICAO_MORA}}/g, dataConstituicaoMora || "___");
+            corpo = corpo.replace(/{{DATA_PRAZO_MANIFESTACAO}}/g, dataConstituicaoMora || "___");
 
             if (nexPlural) {
                 corpo = corpo.replace(/Vossa Senhoria/g, 'Vossas Senhorias');
@@ -15646,7 +15703,7 @@ window.generateSingleNEXHtml = async function(customerId, saleId) {
                 ${addressStr.toUpperCase()}
             </p>
 
-            <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">NOTIFICAÇÃO EXTRAJUDICIAL</h3>
+            <h3 style="text-align: center; font-weight: bold; text-decoration: underline; margin-bottom: 2rem; color: #000;">${letterKind === "cec" ? "COMUNICAÇÃO DE EFETIVAÇÃO DE CANCELAMENTO" : "NOTIFICAÇÃO EXTRAJUDICIAL"}</h3>
 
             <p style="text-indent: 2em; margin-bottom: 1.5rem;">
                 <strong>${(empName || companyName || costCenter.name || '').toUpperCase()}</strong> (“Notificante”), inscrita no CNPJ/ME sob o nº ${costCenter.cnpj || "____"}, com sede social na ${costCenter.address || "____"}, vem, com o devido respeito, à presença de ${vossa} dizer que a notificante celebrara com ${notifWord} o contrato de compromisso de compra e venda firmado em ${formattedSaleDate || "___"}, correspondente a quadra e lote <strong>${unidadeDisplay || formatUName || '___'}</strong>, no Loteamento <strong>${(empName || '').toUpperCase()}</strong>, mediante o pagamento de prestações mensais, corrigidas anualmente pelo índice acordado em contrato.
@@ -15685,7 +15742,7 @@ window.NEX_STATUS_OPTIONS = [
   "Ausente",
   "Desconhecido",
   "End. insuficiente",
-  "Entregue",
+  "ENTREGUE",
   "Falecido",
   "Mudou-se",
   "Não existe nº indicador",
@@ -15758,6 +15815,43 @@ window.nexFmtBr = function(d) {
   return iso ? iso.split("-").reverse().join("/") : "—";
 };
 
+window.nexAddDays = function(iso, days) {
+  const s = window.nexParseIso(iso);
+  if (!s) return "";
+  const parts = s.split("-").map(Number);
+  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+  dt.setDate(dt.getDate() + Number(days || 0));
+  const pad = n => String(n).padStart(2, "0");
+  return dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+};
+
+window.nexIsEntregue = function(status) {
+  return String(status || "").trim().toUpperCase() === "ENTREGUE";
+};
+
+window.nexTodayIso = function() {
+  const dt = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+};
+
+window.nexDaysBetween = function(fromIso, toIso) {
+  const a = window.nexParseIso(fromIso);
+  const b = window.nexParseIso(toIso);
+  if (!a || !b) return null;
+  const pa = a.split("-").map(Number);
+  const pb = b.split("-").map(Number);
+  const da = new Date(pa[0], pa[1] - 1, pa[2]);
+  const db = new Date(pb[0], pb[1] - 1, pb[2]);
+  return Math.round((db.getTime() - da.getTime()) / 86400000);
+};
+
+window.nexIsItemFromDate = function(it, isoDate) {
+  const target = window.nexParseIso(isoDate);
+  if (!target || !it) return false;
+  return window.nexParseIso(it.date) === target || window.nexParseIso(it.createdAt) === target;
+};
+
 window.nexCurrentUserName = function() {
   const u = (window.AppState && AppState.currentUser) || {};
   return u.name || u.email || "Operador";
@@ -15788,12 +15882,43 @@ window.nexPaymentDatesAfter = function(isoDate) {
 };
 
 window.nexIsLegallyValid = function(item) {
-  if (!item || String(item.status || "") !== "Entregue") return { ok: false, reason: "Somente a opção Entregue tem validade jurídica." };
-  const pays = window.nexPaymentDatesAfter(item.date || item.createdAt);
-  if (pays.length) {
-    return { ok: false, reason: "Cliente pagou parcela depois da data da NEX (" + window.nexFmtBr(pays[0]) + "). Sem validade jurídica." };
+  if (!item || !window.nexIsEntregue(item.status)) {
+    return { ok: false, reason: "Somente o status ENTREGUE inicia o prazo de 30 dias." };
   }
-  return { ok: true, reason: "Constituído em mora (entregue, sem pagamento posterior)." };
+  const delivered = window.nexParseIso(item.deliveredAt);
+  if (!delivered) {
+    return { ok: false, reason: "Informe a data em que a carta foi ENTREGUE." };
+  }
+  const gen = window.nexParseIso(item.date || item.createdAt);
+  const paysGen = gen ? window.nexPaymentDatesAfter(gen) : [];
+  const paysDel = window.nexPaymentDatesAfter(delivered);
+  if (paysGen.length || paysDel.length) {
+    const pay = paysGen[0] || paysDel[0];
+    return { ok: false, reason: "Cliente pagou parcela depois da NEX ou da entrega (" + window.nexFmtBr(pay) + "). Sem validade jurídica." };
+  }
+  const moraIso = window.nexAddDays(delivered, 30);
+  const today = window.nexTodayIso();
+  if (today < moraIso) {
+    const left = window.nexDaysBetween(today, moraIso);
+    return { ok: false, reason: "Prazo de 30 dias para manifestação em curso. Mora em " + window.nexFmtBr(moraIso) + " (faltam " + left + " dia" + (left === 1 ? "" : "s") + ")." };
+  }
+  return { ok: true, reason: "Rito cumprido: ENTREGUE em " + window.nexFmtBr(delivered) + ", 30 dias sem regularização, constituído em mora em " + window.nexFmtBr(moraIso) + "." };
+};
+
+window.nexCecReadyItem = function(items) {
+  return (items || []).find(it => window.nexIsLegallyValid(it).ok) || null;
+};
+
+window.syncCecButton = function(items) {
+  const btn = document.getElementById("btn-gerar-cec");
+  if (!btn) return;
+  const ready = window.nexCecReadyItem(items);
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? "1" : "0.45";
+  btn.style.cursor = ready ? "pointer" : "not-allowed";
+  btn.title = ready
+    ? "Gerar Comunicação de Efetivação de Cancelamento"
+    : "Libera só depois de ENTREGUE, data da entrega, 30 dias sem manifestação e sem pagamento de parcela após a NEX.";
 };
 
 window.nexValidInLast90Days = function(items) {
@@ -15809,7 +15934,131 @@ window.nexValidInLast90Days = function(items) {
   }) || null;
 };
 
+window.purgeNexItems = async function(shouldRemove, opts) {
+  const drop = (it, key) => !!(it && shouldRemove(it, key));
+  const localOnly = !!(opts && opts.localOnly);
+  let removed = 0;
+  try {
+    const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
+    Object.keys(bag).forEach(k => {
+      const rows = Array.isArray(bag[k]) ? bag[k] : [];
+      const next = rows.filter(it => !drop(it, k));
+      removed += rows.length - next.length;
+      bag[k] = next;
+    });
+    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+  } catch (e) {}
+  if (window._nexHistory) {
+    Object.keys(window._nexHistory).forEach(k => {
+      const rows = Array.isArray(window._nexHistory[k]) ? window._nexHistory[k] : [];
+      window._nexHistory[k] = rows.filter(it => !drop(it, k));
+    });
+  }
+  if (!localOnly && window.firebaseDb && window.firebaseCollections) {
+    try {
+      const { collection, getDocs, doc, setDoc, deleteDoc } = window.firebaseCollections;
+      const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
+      for (const d of snap.docs) {
+        const data = d.data() || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        const next = items.filter(it => !drop(it, d.id));
+        if (next.length === items.length) continue;
+        removed += items.length - next.length;
+        if (!next.length) {
+          if (deleteDoc) await deleteDoc(d.ref);
+          else await setDoc(doc(window.firebaseDb, "nex_letters", d.id), { ...data, items: [], updatedAt: Date.now() }, { merge: true });
+        } else {
+          await setDoc(doc(window.firebaseDb, "nex_letters", d.id), { ...data, items: next, updatedAt: Date.now() }, { merge: true });
+        }
+      }
+    } catch (e) {
+      console.warn("[NEX] Falha ao apagar NEX", e);
+    }
+  }
+  return removed;
+};
+
+window.purgeNexGeneratedOnDates = async function(dates) {
+  const targets = new Set((dates || []).map(d => window.nexParseIso(d)).filter(Boolean));
+  if (!targets.size) return 0;
+  return window.purgeNexItems((it) => targets.has(window.nexParseIso(it.date || it.createdAt)));
+};
+
+window.nexTituloFromKey = function(key) {
+  const s = String(key || "");
+  const i = s.indexOf("_");
+  return i >= 0 ? s.slice(i + 1) : s;
+};
+
+window.ensureNexTitulo12753Removed = async function() {
+  const flag = "crm_nex_removed_titulo_12753_v2";
+  try {
+    if (localStorage.getItem(flag) === "1") return 0;
+  } catch (e) {}
+  if (window._nexTitulo12753Promise) return window._nexTitulo12753Promise;
+  window._nexTitulo12753Promise = (async () => {
+    const is12753 = (it, key) => {
+      const titulo = String((it && (it.titulo || it.saleId)) || window.nexTituloFromKey(key) || "");
+      return titulo === "12753";
+    };
+    if (window.firebaseDb && window.firebaseCollections) {
+      try {
+        const { doc, getDoc, setDoc } = window.firebaseCollections;
+        const flagRef = doc(window.firebaseDb, "settings", "nex_removed_titulo_12753");
+        const snap = await getDoc(flagRef);
+        if (snap.exists()) {
+          await window.purgeNexItems(is12753, { localOnly: true });
+          try { localStorage.setItem(flag, "1"); } catch (e) {}
+          return 0;
+        }
+        const n = await window.purgeNexItems(is12753);
+        await setDoc(flagRef, { purgedAt: Date.now(), titulo: "12753" });
+        try { localStorage.setItem(flag, "1"); } catch (e) {}
+        return n;
+      } catch (e) {
+        console.warn("[NEX] Purge título 12753", e);
+      }
+    }
+    const n = await window.purgeNexItems(is12753);
+    try { localStorage.setItem(flag, "1"); } catch (e) {}
+    return n;
+  })();
+  return window._nexTitulo12753Promise;
+};
+
+window.ensureNexTodayPurged = async function() {
+  try {
+    if (localStorage.getItem("crm_nex_purged_2026-08-27") === "1") return 0;
+  } catch (e) {}
+  if (window._nexPurgePromise) return window._nexPurgePromise;
+  window._nexPurgePromise = (async () => {
+    if (window.firebaseDb && window.firebaseCollections) {
+      try {
+        const { doc, getDoc, setDoc } = window.firebaseCollections;
+        const flagRef = doc(window.firebaseDb, "settings", "nex_purged_2026-08-27");
+        const snap = await getDoc(flagRef);
+        if (snap.exists()) {
+          try { localStorage.setItem("crm_nex_purged_2026-08-27", "1"); } catch (e) {}
+          return 0;
+        }
+        const n = await window.purgeNexGeneratedOnDates(["2026-08-27"]);
+        await setDoc(flagRef, { purgedAt: Date.now(), date: "2026-08-27" });
+        try { localStorage.setItem("crm_nex_purged_2026-08-27", "1"); } catch (e) {}
+        return n;
+      } catch (e) {
+        console.warn("[NEX] Purge de hoje", e);
+      }
+    }
+    const n = await window.purgeNexGeneratedOnDates(["2026-08-27"]);
+    try { localStorage.setItem("crm_nex_purged_2026-08-27", "1"); } catch (e) {}
+    return n;
+  })();
+  return window._nexPurgePromise;
+};
+
 window.loadNexHistory = async function(customerId, saleId) {
+  await window.ensureNexTodayPurged();
+  await window.ensureNexTitulo12753Removed();
   customerId = customerId || (AppState && AppState.selectedCustomerId);
   const titulo = window.nexCanonicalTitulo(saleId);
   const candidates = window.nexCandidateIds(saleId);
@@ -15860,6 +16109,7 @@ window.loadNexHistory = async function(customerId, saleId) {
   }
   const merged = window.nexMergeItems(lists).map(it => ({
     ...it,
+    status: window.nexIsEntregue(it.status) ? "ENTREGUE" : (it.status || ""),
     titulo: it.titulo || titulo,
     customerId: String(it.customerId || customerId)
   }));
@@ -15884,14 +16134,19 @@ window.saveNexHistory = async function(customerId, saleId, items) {
   } catch (e) {}
   if (window.firebaseDb && window.firebaseCollections) {
     try {
-      const { doc, setDoc } = window.firebaseCollections;
-      await setDoc(doc(window.firebaseDb, "nex_letters", key), {
-        customerId: String(customerId),
-        saleId: String(titulo),
-        titulo: String(titulo),
-        items,
-        updatedAt: Date.now()
-      }, { merge: true });
+      const { doc, setDoc, deleteDoc } = window.firebaseCollections;
+      const ref = doc(window.firebaseDb, "nex_letters", key);
+      if (!items.length && deleteDoc) {
+        await deleteDoc(ref);
+      } else {
+        await setDoc(ref, {
+          customerId: String(customerId),
+          saleId: String(titulo),
+          titulo: String(titulo),
+          items,
+          updatedAt: Date.now()
+        }, { merge: true });
+      }
     } catch (e) {
       console.warn("[NEX] Falha ao salvar histórico", e);
     }
@@ -15913,10 +16168,12 @@ window.renderNexHistory = async function() {
   const saleId = window.nexCanonicalTitulo();
   if (!customerId || !saleId) {
     root.innerHTML = `<div style="padding:20px;color:#94a3b8;text-align:center;">Abra um contrato para ver as NEX.</div>`;
+    window.syncCecButton([]);
     return;
   }
   const items = await window.loadNexHistory(customerId, saleId);
   const tituloAtual = AppState.currentReceivableBillId || AppState.selectedTitulo || saleId;
+  window.syncCecButton(items);
   if (!items.length) {
     root.innerHTML = `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:30px;text-align:center;color:#64748b;">
       <i data-lucide="inbox" style="width:48px;height:48px;color:#94a3b8;margin-bottom:12px;"></i>
@@ -15931,7 +16188,7 @@ window.renderNexHistory = async function() {
   root.innerHTML = `
     <div style="font-size:0.8rem;color:#166534;font-weight:700;margin-bottom:8px;">Título ${items[0].titulo || tituloAtual}</div>
     <div class="table-container" style="box-shadow:none;overflow:auto;">
-      <table class="ficha-hist-table" style="min-width:980px;">
+      <table class="ficha-hist-table" style="min-width:1280px;">
         <thead>
           <tr>
             <th>Título</th>
@@ -15942,14 +16199,24 @@ window.renderNexHistory = async function() {
             <th>Objeto de rastreio</th>
             <th style="text-align:center;">Correios</th>
             <th>Status da carta</th>
+            <th>Data da entrega</th>
+            <th>Prazo 30 dias</th>
             <th>Validade jurídica</th>
+            <th style="text-align:center;">Excluir</th>
           </tr>
         </thead>
         <tbody>
           ${sorted.map(it => {
             const valid = window.nexIsLegallyValid(it);
-            const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (it.status || "") ? "selected" : ""}>${s}</option>`).join("");
+            const entregue = window.nexIsEntregue(it.status);
+            const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (entregue ? "ENTREGUE" : (it.status || "")) ? "selected" : ""}>${s}</option>`).join("");
             const author = window.shortOperatorName(it.author);
+            const moraIso = entregue && it.deliveredAt ? window.nexAddDays(it.deliveredAt, 30) : "";
+            const left = moraIso ? window.nexDaysBetween(window.nexTodayIso(), moraIso) : null;
+            let prazoTxt = "—";
+            if (entregue && !it.deliveredAt) prazoTxt = "Informe a entrega";
+            else if (moraIso && left !== null && left > 0) prazoTxt = "Faltam " + left + " dia" + (left === 1 ? "" : "s");
+            else if (moraIso && left !== null && left <= 0) prazoTxt = "Mora em " + window.nexFmtBr(moraIso);
             return `<tr>
               <td style="font-weight:700;white-space:nowrap;">${(it.titulo || tituloAtual || "—")}</td>
               <td style="white-space:nowrap;font-weight:500;">${window.nexFmtBr(it.date || it.createdAt)}</td>
@@ -15980,16 +16247,27 @@ window.renderNexHistory = async function() {
                 </select>
               </td>
               <td>
+                ${entregue ? `<input type="date" value="${window.nexParseIso(it.deliveredAt)}" onchange="window.updateNexDeliveredAt('${it.id}', this.value)"
+                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;">` : "—"}
+              </td>
+              <td style="white-space:nowrap;font-size:0.78rem;color:#475569;">${prazoTxt}</td>
+              <td>
                 <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
                   ${valid.ok ? "Válida" : "Sem validade"}
                 </span>
+              </td>
+              <td style="text-align:center;">
+                <button type="button" title="Excluir esta NEX" onclick="window.deleteNexItem('${it.id}')"
+                  style="border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.75rem;font-weight:700;display:inline-flex;align-items:center;gap:4px;">
+                  <i data-lucide="trash-2" style="width:14px;height:16px;"></i> Excluir
+                </button>
               </td>
             </tr>`;
           }).join("")}
         </tbody>
       </table>
     </div>
-    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Somente <strong>Entregue</strong> gera validade jurídica. Pagamento de parcela depois da NEX também tira a validade. Nova NEX só é bloqueada se já houver mora válida nos últimos 90 dias.</p>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Status <strong>ENTREGUE</strong> exige a data da entrega. A partir dela o cliente tem 30 dias para se manifestar. Só depois disso, e sem pagamento de parcela após a NEX ou a entrega, o documento tem validade jurídica e libera <strong>Gerar CEC</strong>.</p>
   `;
   if (window.lucide) lucide.createIcons();
 };
@@ -16012,8 +16290,27 @@ window.updateNexTracking = async function(id, value) {
 window.updateNexStatus = async function(id, value) {
   const ctx = window.nexFindItem(id);
   if (!ctx.item) return;
-  ctx.item.status = value;
+  ctx.item.status = window.nexIsEntregue(value) ? "ENTREGUE" : value;
+  if (!window.nexIsEntregue(ctx.item.status)) ctx.item.deliveredAt = "";
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.renderNexHistory();
+};
+
+window.updateNexDeliveredAt = async function(id, value) {
+  const ctx = window.nexFindItem(id);
+  if (!ctx.item) return;
+  ctx.item.deliveredAt = window.nexParseIso(value);
+  await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.renderNexHistory();
+};
+
+window.deleteNexItem = async function(id) {
+  const ctx = window.nexFindItem(id);
+  if (!id) return;
+  if (!confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return;
+  await window.purgeNexItems((it) => String(it.id) === String(id));
+  const next = (ctx.items || []).filter(x => String(x.id) !== String(id));
+  await window.saveNexHistory(ctx.customerId, ctx.saleId, next);
   window.renderNexHistory();
 };
 
@@ -16089,6 +16386,42 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
         if (btn && oldHtml) {
             btn.innerHTML = oldHtml;
             btn.disabled = false;
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+};
+
+window.gerarDocumentoFisicoCEC = async function(customerId, saleId) {
+    customerId = customerId || (typeof AppState !== 'undefined' && AppState.selectedCustomerId);
+    saleId = saleId || (typeof window.nexCanonicalTitulo === "function" && window.nexCanonicalTitulo()) || (AppState && (AppState.currentReceivableBillId || AppState.selectedTitulo || AppState.selectedSaleId));
+    const existing = await window.loadNexHistory(customerId, saleId);
+    const ready = window.nexCecReadyItem(existing);
+    if (!ready) {
+        alert("A CEC só pode ser gerada depois do rito da NEX: status ENTREGUE, data da entrega, 30 dias sem manifestação e sem pagamento de parcela após a NEX ou a entrega.");
+        window.syncCecButton(existing);
+        return;
+    }
+    const btn = document.getElementById("btn-gerar-cec") || document.activeElement;
+    let oldHtml = null;
+    if (btn && btn.tagName === "BUTTON") {
+        oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Gerando...';
+        btn.disabled = true;
+        if (window.lucide) lucide.createIcons();
+    }
+    try {
+        const docHtml = await window.generateSingleNEXHtml(customerId, saleId, "cec");
+        document.getElementById("pdf-modal-title").textContent = "Comunicação de Efetivação de Cancelamento";
+        document.getElementById("pdf-document-content").innerHTML = docHtml;
+        document.getElementById("pdf-view-overlay").classList.add("active");
+        if (window.lucide) lucide.createIcons();
+    } catch (e) {
+        console.error("[CEC] Falha ao gerar documento", e);
+        alert("Não foi possível gerar a CEC. Tente novamente.");
+    } finally {
+        if (btn && oldHtml) {
+            btn.innerHTML = oldHtml;
+            window.syncCecButton(existing);
             if (window.lucide) lucide.createIcons();
         }
     }
@@ -16357,34 +16690,8 @@ function renderRulesSettingsTable() {
     });
   }
   
-  // Forçar configuração v2 de Cidades (Operadores)
-  if (!localStorage.getItem("crm_moura_cidades_v2")) {
-     const defaultCities = {
-         "ARAÇARIGUAMA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
-         "AVARÉ": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
-         "BOITUVA": ["LETICIA OLIVEIRA", "THAIANE CORDEIRO", "LUCELIA JUSTO"],
-         "BOTUCATU": ["MICHELLE PEREIRA"],
-         "CERQUEIRA CÉSAR": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
-         "FARTURA": ["LETICIA OLIVEIRA", "LUCELIA JUSTO"],
-         "ITATINGA": ["MICHELLE VIEIRA"],
-         "PIRAJU": ["MICHELLE VIEIRA"],
-         "TAGUAI": ["MICHELLE VIEIRA"],
-         "TATUÍ": ["MICHELLE VIEIRA"]
-     };
-     Object.keys(AppState.rules).forEach(k => {
-         if (String(k).startsWith("CID_")) {
-             const rule = AppState.rules[k];
-             const cityName = rule.desc ? String(rule.desc).toUpperCase() : "";
-             if (defaultCities[cityName]) {
-                 rule.operator = defaultCities[cityName];
-             } else {
-                 rule.operator = [];
-             }
-         }
-     });
-     localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
-     localStorage.setItem("crm_moura_cidades_v2", "true");
-  }
+  // Atribuição por cidade é só manual. Nunca reaplicar listas padrão.
+  try { localStorage.setItem("crm_moura_cidades_v2", "true"); } catch (e) {}
   
   const sortedRules = Object.values(AppState.rules)
     .filter(r => r.id && String(r.id).startsWith("CID_"))
@@ -16513,6 +16820,12 @@ function renderRulesSettingsTable() {
   setTimeout(() => lucide.createIcons(), 50);
 }
 
+window.markCityAssignmentManual = function(ruleId) {
+  if (!AppState.rules || !AppState.rules[ruleId]) return;
+  AppState.rules[ruleId].manual = true;
+  AppState.rules[ruleId].opsUpdatedAt = Date.now();
+};
+
 window.addOperatorToRule = function(ruleId, op) {
   if (!op || !AppState.rules || !AppState.rules[ruleId]) return;
   
@@ -16530,6 +16843,7 @@ window.addOperatorToRule = function(ruleId, op) {
     }
     AppState.rules[ruleId].operator = currentOps;
   }
+  window.markCityAssignmentManual(ruleId);
   
   window.updateOperatorSummary();
   renderRulesSettingsTable();
@@ -16553,6 +16867,7 @@ window.removeOperatorFromRule = function(ruleId, op) {
   } else {
     AppState.rules[ruleId].operator = currentOps;
   }
+  window.markCityAssignmentManual(ruleId);
   
   window.updateOperatorSummary();
   renderRulesSettingsTable();
@@ -19091,6 +19406,7 @@ async function saveDocPadrao(tipo) {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
     carta: ['doc-carta-assunto', 'doc-carta-corpo'],
+    cec: ['doc-cec-assunto', 'doc-cec-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
@@ -19137,6 +19453,7 @@ function previewDocPadrao(tipo) {
     reneg: 'Termo de Acordo',
     boleto: 'Boleto de Cobrança',
     carta: 'Carta de Cobrança',
+    cec: 'Comunicação de Efetivação de Cancelamento',
     suspensao: 'Suspensão de Contrato',
     distrato: 'Distrato / Rescisão',
   };
@@ -19156,6 +19473,10 @@ function previewDocPadrao(tipo) {
   } else if (tipo === 'carta') {
     const assunto = document.getElementById('doc-carta-assunto')?.value || '';
     const corpo = document.getElementById('doc-carta-corpo')?.value || '';
+    content = `<h2 style="text-align:center;">${assunto}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(corpo)}</div>`;
+  } else if (tipo === 'cec') {
+    const assunto = document.getElementById('doc-cec-assunto')?.value || '';
+    const corpo = document.getElementById('doc-cec-corpo')?.value || '';
     content = `<h2 style="text-align:center;">${assunto}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(corpo)}</div>`;
   } else if (tipo === 'suspensao') {
     const ref = document.getElementById('doc-suspensao-ref')?.value || '';
@@ -19177,11 +19498,12 @@ function previewDocPadrao(tipo) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'suspensao', 'distrato'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
     carta: ['doc-carta-assunto', 'doc-carta-corpo'],
+    cec: ['doc-cec-assunto', 'doc-cec-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
   };
@@ -25033,6 +25355,49 @@ window.SYNC_KEYS = [
     "crm_centros_custo_tipos"
 ];
 
+window.cityOpsLooksForcedDefault = function(op) {
+  const arr = (Array.isArray(op) ? op : (op ? [op] : []))
+    .map(s => String(s || "").toUpperCase().trim())
+    .filter(o => o && o !== "OUTROS" && o !== "NÃO ATRIBUÍDO" && o !== "SEM CARTEIRA INADIMPLENTE")
+    .sort();
+  const seeds = [
+    ["LETICIA OLIVEIRA", "LUCELIA JUSTO", "THAIANE CORDEIRO"],
+    ["LETICIA OLIVEIRA", "LUCELIA JUSTO"]
+  ];
+  return seeds.some(s => s.length === arr.length && s.every((n, i) => n === arr[i]));
+};
+
+window.mergeCityAssignmentRules = function(localStr, cloudStr) {
+  let local = {};
+  let cloud = {};
+  try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
+  try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
+  const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
+  const merged = {};
+  keys.forEach(key => {
+    if (!String(key).startsWith("CID_")) {
+      merged[key] = cloud[key] !== undefined ? cloud[key] : local[key];
+      return;
+    }
+    const l = local[key];
+    const c = cloud[key];
+    if (!l) { merged[key] = c; return; }
+    if (!c) { merged[key] = l; return; }
+    const lT = Number(l.opsUpdatedAt || 0);
+    const cT = Number(c.opsUpdatedAt || 0);
+    let pick = c;
+    if (lT > cT) pick = l;
+    else if (cT > lT) pick = c;
+    else if (l.manual && !c.manual) pick = l;
+    else if (c.manual && !l.manual) pick = c;
+    else if (window.cityOpsLooksForcedDefault(c.operator) && !window.cityOpsLooksForcedDefault(l.operator)) pick = l;
+    else if (window.cityOpsLooksForcedDefault(l.operator) && !window.cityOpsLooksForcedDefault(c.operator)) pick = c;
+    else pick = l.manual ? l : c;
+    merged[key] = { ...c, ...l, ...pick, operator: pick.operator };
+  });
+  return JSON.stringify(merged);
+};
+
 // Função que baixa configurações na inicialização
 window.syncGlobalConfigFromFirebase = async function() {
     try {
@@ -25046,6 +25411,18 @@ window.syncGlobalConfigFromFirebase = async function() {
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
+                    if (k === "crm_moura_rules") {
+                        const merged = window.mergeCityAssignmentRules(localStorage.getItem(k), globalData[k]);
+                        if (merged !== localStorage.getItem(k)) {
+                            _originalSetItem.call(localStorage, k, merged);
+                            try { AppState.rules = JSON.parse(merged); } catch (e) {}
+                            changed = true;
+                        }
+                        if (merged !== globalData[k] && window.forceUploadLocalConfig) {
+                            setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                        }
+                        return;
+                    }
                     if (k === "crm_moura_judiciais") {
                         try {
                             const localArr = JSON.parse(localStorage.getItem(k) || "[]");
