@@ -345,28 +345,55 @@ function runLocalPrepaymentSimulation(saleId, installmentsToPay) {
 const SiengeApiService = {
 
   // 1. Empresas
-  async getCompanies() {
+  async getCompanies(forceRefresh = false) {
     if (s_apiMode === "simulado") {
       return window.MOCK_DATA.COMPANIES;
     }
     const cacheKey = 'crm_companies_data';
+    const cacheAtKey = 'crm_companies_sync_at';
     let cachedData = [];
+    let lastSync = 0;
     try {
-        const cachedRaw = localStorage.getItem(cacheKey);
-        if (cachedRaw) cachedData = JSON.parse(cachedRaw);
-    } catch(e) {}
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw) cachedData = JSON.parse(cachedRaw);
+      lastSync = Number(localStorage.getItem(cacheAtKey) || 0);
+    } catch (e) {}
+
+    const now = new Date();
+    const targetSync = new Date();
+    targetSync.setHours(8, 0, 0, 0);
+    if (now < targetSync) targetSync.setDate(targetSync.getDate() - 1);
+    const useCache = !forceRefresh && cachedData.length > 0 && lastSync >= targetSync.getTime();
+    if (useCache) {
+      if (window.EmpresasApp && typeof EmpresasApp.afterCompaniesFetched === "function") {
+        EmpresasApp.afterCompaniesFetched(cachedData, false);
+      }
+      return cachedData;
+    }
 
     try {
-    const list = await siengeFetchWithRetry("/companies?limit=200", 2);
-        const array = list && list.results ? list.results : list;
-        if (array && array.length > 0) {
-            try { localStorage.setItem(cacheKey, JSON.stringify(array)); } catch(e){}
-            return array;
+      const list = await siengeFetchWithRetry("/companies?limit=200", 2);
+      const array = list && list.results ? list.results : list;
+      if (array && array.length > 0) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(array));
+          localStorage.setItem(cacheAtKey, String(Date.now()));
+        } catch (e) {}
+        if (window.EmpresasApp && typeof EmpresasApp.afterCompaniesFetched === "function") {
+          EmpresasApp.afterCompaniesFetched(array, true);
         }
-        return cachedData;
+        return array;
+      }
+      if (window.EmpresasApp && typeof EmpresasApp.afterCompaniesFetched === "function" && cachedData.length) {
+        EmpresasApp.afterCompaniesFetched(cachedData, false);
+      }
+      return cachedData;
     } catch (e) {
-        console.warn("[Sienge] Erro ao buscar empresas (provável limite de API), usando cache local:", e);
-        return cachedData;
+      console.warn("[Sienge] Erro ao buscar empresas (provável limite de API), usando cache local:", e);
+      if (window.EmpresasApp && typeof EmpresasApp.afterCompaniesFetched === "function" && cachedData.length) {
+        EmpresasApp.afterCompaniesFetched(cachedData, false);
+      }
+      return cachedData;
     }
   },
 

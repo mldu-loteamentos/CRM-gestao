@@ -88,7 +88,7 @@ const EmpresasApp = {
       }
       
       comps.sort((a, b) => a.id - b.id);
-      EmpresasState.companies = comps;
+      this.afterCompaniesFetched(comps, true);
       
     } catch (e) {
       console.error(e);
@@ -136,7 +136,14 @@ const EmpresasApp = {
     }
 
     EmpresasState.customFields[companyId] = custom;
-    localStorage.setItem('crm_empresas_custom', JSON.stringify(EmpresasState.customFields));
+    const toStore = { _v2: true };
+    Object.keys(EmpresasState.customFields).forEach(k => {
+      if (k === "_v2") return;
+      toStore[k] = EmpresasState.customFields[k];
+    });
+    localStorage.setItem('crm_empresas_custom', JSON.stringify(toStore));
+    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+    if (typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
 
     try {
       if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna') {
@@ -392,6 +399,133 @@ const EmpresasApp = {
 
     contentDiv.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
+  },
+
+  isCobrancaInternaSet(custom) {
+    if (!custom || typeof custom !== "object") return false;
+    const v = custom.cobranca_interna;
+    return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1";
+  },
+
+  persistCustomMap() {
+    const toStore = { _v2: true };
+    Object.keys(EmpresasState.customFields).forEach(k => {
+      if (k === "_v2") return;
+      toStore[k] = EmpresasState.customFields[k];
+    });
+    localStorage.setItem("crm_empresas_custom", JSON.stringify(toStore));
+  },
+
+  afterCompaniesFetched(comps, fromNetwork) {
+    const list = Array.isArray(comps) ? comps : [];
+    EmpresasState.companies = list;
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}; } catch (e) { custom = {}; }
+    let changed = false;
+    list.forEach(c => {
+      const id = String(c.id);
+      if (!custom[id] || typeof custom[id] !== "object") {
+        custom[id] = {
+          company_id: Number(c.id),
+          nome_usual: "",
+          percentual_mldu: 0,
+          consolidacao_padrao: 0,
+          gerida_pelo_grupo: 0
+        };
+        changed = true;
+      }
+      custom[id].company_id = Number(c.id);
+      if (!this.isCobrancaInternaSet(custom[id])) {
+        if (!custom[id].nova_empresa) {
+          custom[id].nova_empresa = 1;
+          changed = true;
+        }
+      }
+    });
+    if (changed) {
+      EmpresasState.customFields = {};
+      Object.values(custom).forEach(item => {
+        if (item && typeof item === "object" && item.company_id != null) EmpresasState.customFields[item.company_id] = item;
+      });
+      this.persistCustomMap();
+      if (fromNetwork && window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+    } else {
+      Object.values(custom).forEach(item => {
+        if (item && typeof item === "object" && item.company_id != null) EmpresasState.customFields[item.company_id] = item;
+      });
+    }
+    this.renderFilaPrompt();
+  },
+
+  pendingCobrancaCompanies() {
+    const companies = EmpresasState.companies.length
+      ? EmpresasState.companies
+      : (() => { try { return JSON.parse(localStorage.getItem("crm_companies_data") || "[]"); } catch (e) { return []; } })();
+    return (companies || []).filter(c => !this.isCobrancaInternaSet(EmpresasState.customFields[c.id]));
+  },
+
+  companyLabel(c) {
+    return (c && (c.name || c.tradeName || c.corporateName)) || `Empresa ${c && c.id}`;
+  },
+
+  renderFilaPrompt() {
+    const host = document.getElementById("fila-new-companies-banner");
+    if (!host) return;
+    const pending = this.pendingCobrancaCompanies();
+    if (!pending.length) {
+      host.style.display = "none";
+      host.innerHTML = "";
+      return;
+    }
+    host.style.display = "block";
+    host.innerHTML = pending.map(c => {
+      const name = this.companyLabel(c);
+      return `<div style="margin-bottom:10px;padding:12px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="font-size:0.85rem;font-weight:600;line-height:1.4;">
+          Nova empresa no Sienge: <strong>${c.id} — ${name}</strong><br>
+          <span style="font-weight:500;">A cobrança desta empresa será interna?</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="EmpresasApp.answerCobrancaInterna(${c.id}, true)">Sim, interna</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="EmpresasApp.answerCobrancaInterna(${c.id}, false)">Não</button>
+        </div>
+      </div>`;
+    }).join("");
+  },
+
+  answerCobrancaInterna(companyId, isInternal) {
+    const custom = EmpresasState.customFields[companyId] || {
+      company_id: companyId,
+      nome_usual: "",
+      percentual_mldu: 0,
+      consolidacao_padrao: 0,
+      gerida_pelo_grupo: 0
+    };
+    custom.cobranca_interna = isInternal ? 1 : 0;
+    delete custom.nova_empresa;
+    EmpresasState.customFields[companyId] = custom;
+    this.saveInline(companyId, "cobranca_interna", isInternal);
+    this.renderFilaPrompt();
+    if (isInternal && window.AppState) {
+      window.AppState.dashboardRendered = false;
+      window.AppState.defaultersLoaded = false;
+    }
+  },
+
+  async syncCompaniesDaily(force) {
+    if (window.SiengeApiService && typeof SiengeApiService.getCompanies === "function") {
+      await SiengeApiService.getCompanies(!!force);
+    } else {
+      await this.loadData();
+    }
+    if (!window._companySyncIv) {
+      window._companySyncIv = setInterval(() => {
+        const now = new Date();
+        if (now.getHours() === 8 && now.getMinutes() < 3) {
+          SiengeApiService.getCompanies(false).catch(() => {});
+        }
+      }, 60000);
+    }
   }
 };
 
@@ -426,3 +560,5 @@ document.addEventListener('tabChanged', (e) => {
     initEmpresasModule();
   }
 });
+
+window.EmpresasApp = EmpresasApp;

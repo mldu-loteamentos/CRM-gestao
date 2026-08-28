@@ -1750,6 +1750,9 @@ async function initializeApplication() {
   if (window.syncGlobalConfigFromFirebase) {
       await window.syncGlobalConfigFromFirebase();
   }
+  if (window.EmpresasApp && typeof EmpresasApp.syncCompaniesDaily === "function") {
+      EmpresasApp.syncCompaniesDaily(false).catch(() => {});
+  }
 
 
   // Carregar dados armazenados localmente (SharePoint preambles & occurrences)
@@ -24927,6 +24930,12 @@ setTimeout(() => {
         window.startCustomerBackgroundSync();
     }
 }, 1000);
+
+setTimeout(() => {
+    if (window.EmpresasApp && typeof EmpresasApp.syncCompaniesDaily === "function") {
+        EmpresasApp.syncCompaniesDaily(false).catch(() => {});
+    }
+}, 1800);
 
 // Iniciar o carregamento da agenda do operador em background
 setTimeout(() => {

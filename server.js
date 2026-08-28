@@ -872,6 +872,5 @@ function setupDailyCreditorSync() {
   console.log(`⏱️ Agendador de Sincronização de Credores iniciado (Agendado para as ${String(TARGET_HOUR).padStart(2, '0')}:${String(TARGET_MINUTE).padStart(2, '0')}).`);
 }
 
-// Inicia o agendador
 setupDailyCreditorSync();
 
