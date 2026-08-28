@@ -8599,6 +8599,20 @@ function formatCpfCnpj(val) {
 }
 
 function goBackToDashboard() {
+  if (window._mapaJuridicoReturn) {
+    window._mapaJuridicoReturn = false;
+    document.getElementById("view-customer-details").style.display = "none";
+    const viewReneg = document.getElementById("view-renegotiation");
+    if (viewReneg) viewReneg.style.display = "none";
+    const viewDistrato = document.getElementById("view-distrato");
+    if (viewDistrato) viewDistrato.style.display = "none";
+    const overlay = document.getElementById("mapa-juridico-overlay");
+    if (overlay) {
+      overlay.style.display = "flex";
+      window.activeAppTab = "subjudice";
+      return;
+    }
+  }
   // Expand sidebar automatically when going back to dashboard
   const sidebar = document.querySelector(".sidebar");
   const mainContent = document.querySelector(".main-content");
@@ -27930,6 +27944,183 @@ window.testarZerarFila = function() {
     }
 };
 
+window.closeMapaJuridico = function() {
+  window._mapaJuridicoReturn = false;
+  const overlay = document.getElementById("mapa-juridico-overlay");
+  if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+};
+
+window.mapaJuridicoShowMap = function() {
+  const mapView = document.getElementById("mapa-juridico-view-map");
+  const phaseView = document.getElementById("mapa-juridico-view-phase");
+  if (mapView) mapView.style.display = "block";
+  if (phaseView) phaseView.style.display = "none";
+};
+
+window.mapaJuridicoShowPhase = function(prefix, compId) {
+  const cache = window._mapaJuridicoCache;
+  if (!cache) return;
+  const key = (compId ? ("c:" + compId + "|") : "g|") + String(prefix);
+  const bucket = cache.byKey[key] || cache.byKey["g|" + String(prefix)] || { name: "Fase", clients: [] };
+  const mapView = document.getElementById("mapa-juridico-view-map");
+  const phaseView = document.getElementById("mapa-juridico-view-phase");
+  const titleEl = document.getElementById("mapa-juridico-phase-title");
+  const bodyEl = document.getElementById("mapa-juridico-phase-body");
+  if (!phaseView || !bodyEl) return;
+  if (mapView) mapView.style.display = "none";
+  phaseView.style.display = "block";
+  if (titleEl) {
+    const scope = bucket.scopeName ? (" · " + bucket.scopeName) : "";
+    titleEl.textContent = (bucket.prefix ? bucket.prefix + " — " : "") + (bucket.name || "Fase") + scope;
+  }
+  const clients = (bucket.clients || []).slice().sort((a, b) => {
+    const va = (a.overdueValue || 0) + (a.overdueCharges || 0);
+    const vb = (b.overdueValue || 0) + (b.overdueCharges || 0);
+    return vb - va;
+  });
+  if (!clients.length) {
+    bodyEl.innerHTML = `<div style="padding:32px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa.</div>`;
+    return;
+  }
+  const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  bodyEl.innerHTML = `
+    <table class="custom-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Título</th>
+          <th>Unidade</th>
+          <th style="text-align:center;">Aging</th>
+          <th style="text-align:right;">R$ Atualizado</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clients.map(c => {
+          const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/, "").split("-")[0];
+          const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
+          const val = (c.overdueValue || 0) + (c.overdueCharges || 0);
+          const name = String(c.customerName || "").replace(/</g, "&lt;");
+          return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
+            <td style="font-weight:700;text-transform:uppercase;color:#105436;">${name}</td>
+            <td>${title || "—"}</td>
+            <td>${String(unit).replace(/</g, "&lt;")}</td>
+            <td style="text-align:center;">${c.maxDaysDelay || 0}</td>
+            <td style="text-align:right;font-weight:700;">${fmt(val)}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+};
+
+window.mapaJuridicoOpenClient = async function(customerId, saleId) {
+  window._mapaJuridicoReturn = true;
+  const overlay = document.getElementById("mapa-juridico-overlay");
+  if (overlay) overlay.style.display = "none";
+  if (typeof viewCustomerCard === "function") {
+    await viewCustomerCard(customerId, saleId);
+  }
+};
+
+window.exportMapaJuridicoPDF = async function() {
+  const parts = window._mapaJuridicoPdfHtml;
+  if (!parts) {
+    alert("Abra o mapa jurídico antes de gerar o PDF.");
+    return;
+  }
+  const btn = document.getElementById("btn-mapa-juridico-pdf");
+  const old = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = "Gerando PDF...";
+  }
+  let container1 = null;
+  let container2 = null;
+  try {
+    const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 40)));
+    container1 = document.createElement("div");
+    container1.style.cssText = parts.style1;
+    container1.innerHTML = parts.page1;
+    container2 = document.createElement("div");
+    container2.style.cssText = parts.style2;
+    container2.innerHTML = parts.page2;
+    document.body.appendChild(container1);
+    await yieldUI();
+    const canvasOpts = { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", logging: false };
+    const fitPage = (pdf, imgData) => {
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const props = pdf.getImageProperties(imgData);
+      const ratio = props.width / props.height;
+      let w = pdfWidth;
+      let h = pdfWidth / ratio;
+      if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
+      pdf.addImage(imgData, "JPEG", (pdfWidth - w) / 2, 0, w, h);
+    };
+    const canvas1 = await html2canvas(container1, canvasOpts);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("l", "mm", "a4");
+    fitPage(pdf, canvas1.toDataURL("image/jpeg", 0.92));
+    if (container1.parentNode) document.body.removeChild(container1);
+    container1 = null;
+    await yieldUI();
+    document.body.appendChild(container2);
+    await yieldUI();
+    const canvas2 = await html2canvas(container2, canvasOpts);
+    pdf.addPage();
+    fitPage(pdf, canvas2.toDataURL("image/jpeg", 0.92));
+    if (container2.parentNode) document.body.removeChild(container2);
+    container2 = null;
+    pdf.save("Mapa_Juridico_SubJudice.pdf");
+  } catch (e) {
+    console.error("Erro ao gerar PDF do mapa jurídico:", e);
+    alert("Ocorreu um erro ao gerar o PDF.");
+    if (container1 && container1.parentNode) document.body.removeChild(container1);
+    if (container2 && container2.parentNode) document.body.removeChild(container2);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = old || "Gerar PDF";
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+};
+
+window.showMapaJuridicoOverlay = function(ui) {
+  window.closeMapaJuridico();
+  const overlay = document.createElement("div");
+  overlay.id = "mapa-juridico-overlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
+  overlay.innerHTML = `
+    <div style="flex-shrink:0;display:flex;align-items:center;gap:12px;padding:12px 18px;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
+      <button type="button" class="btn btn-secondary" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="x" style="width:16px;"></i> Fechar
+      </button>
+      <div style="flex:1;">
+        <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Mapa Jurídico — Sub Judice</div>
+        <div style="font-size:0.75rem;color:#64748b;">${ui.nowLabel || ""}</div>
+      </div>
+      <button type="button" id="btn-mapa-juridico-pdf" class="btn btn-primary" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="file-down" style="width:16px;"></i> Gerar PDF
+      </button>
+    </div>
+    <div style="flex:1;overflow:auto;padding:16px 18px 28px;">
+      <div id="mapa-juridico-view-map">${ui.mapHtml}</div>
+      <div id="mapa-juridico-view-phase" style="display:none;">
+        <button type="button" class="btn btn-secondary" onclick="mapaJuridicoShowMap()" style="margin-bottom:12px;display:inline-flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:16px;"></i> Voltar ao mapa
+        </button>
+        <h2 id="mapa-juridico-phase-title" style="margin:0 0 12px;font-size:1.1rem;color:#0f172a;"></h2>
+        <div id="mapa-juridico-phase-body"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  if (window.lucide) lucide.createIcons();
+};
+
+window.openMapaJuridico = function() {
+  return window.gerarMapaJuridicoPDF();
+};
+
 window.gerarMapaJuridicoPDF = async function() {
     if (!window._subjudiceList || window._subjudiceList.length === 0) {
         alert("Não há clientes no Sub Judice para gerar o mapa.");
@@ -28001,25 +28192,21 @@ window.gerarMapaJuridicoPDF = async function() {
 
         const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-        const buildTimelineHtml = (title, list, isGeneral = false) => {
+        const buildTimelineHtml = (title, list, isGeneral = false, compId = "") => {
             const agg = {};
             Object.values(nameMap).forEach(v => {
-                agg[v.prefix] = { ...v, count: 0, value: 0 };
+                agg[v.prefix] = { ...v, count: 0, value: 0, clients: [] };
             });
             list.forEach(client => {
-                const cid = String(client.customerId);
-                const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
-                const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
-                let fase = "Sem Fase";
-                if (validJudNotes.length > 0) {
-                    validJudNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
-                    fase = validJudNotes[0].fase;
-                }
-                const info = nameMap[fase] || nameMap["Sem Fase"];
+                const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
+                    ? window.getClientJudicialPhaseInfo(client)
+                    : { fase: "Sem Fase", faseLabel: "Sem Fase" };
+                const mapped = nameMap[phaseInfo.fase] || nameMap[phaseInfo.faseLabel] || nameMap["Sem Fase"];
                 const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
-                if (agg[info.prefix]) {
-                    agg[info.prefix].count += (client.billIds ? client.billIds.length : 1);
-                    agg[info.prefix].value += value;
+                if (agg[mapped.prefix]) {
+                    agg[mapped.prefix].count += (client.billIds ? client.billIds.length : 1);
+                    agg[mapped.prefix].value += value;
+                    agg[mapped.prefix].clients.push(client);
                 }
             });
             const sortedAgg = Object.values(agg).sort((a, b) => a.order - b.order);
@@ -28095,10 +28282,28 @@ window.gerarMapaJuridicoPDF = async function() {
             return `Empresa ${compId}`;
         };
 
-        const generalResult = buildTimelineHtml("Visão Geral", generalList, true);
+        const generalResult = buildTimelineHtml("Visão Geral", generalList, true, "");
         let timelinesHtml = generalResult.html;
+        const byKey = {};
+        const interactiveBlocks = [];
+        const registerAgg = (agg, scopeId, scopeName) => {
+            (agg || []).forEach(item => {
+                const key = (scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix);
+                byKey[key] = {
+                    prefix: item.prefix,
+                    name: item.name,
+                    scopeName: scopeName || "",
+                    clients: item.clients || []
+                };
+            });
+        };
+        registerAgg(generalResult.agg, "", "Visão Geral");
+        interactiveBlocks.push({ title: "Visão Geral", compId: "", items: generalResult.agg });
         sortedCompanies.forEach(compId => {
-            timelinesHtml += buildTimelineHtml(usualCompanyName(compId), companyGroups[compId], false).html;
+            const companyResult = buildTimelineHtml(usualCompanyName(compId), companyGroups[compId], false, compId);
+            timelinesHtml += companyResult.html;
+            registerAgg(companyResult.agg, compId, usualCompanyName(compId));
+            interactiveBlocks.push({ title: usualCompanyName(compId), compId: String(compId), items: companyResult.agg });
         });
 
         const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
@@ -28495,44 +28700,71 @@ window.gerarMapaJuridicoPDF = async function() {
             </div>
         `;
 
-        document.body.appendChild(container1);
-        await yieldUI();
-
-        const canvasOpts = { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", logging: false };
-        const fitPage = (pdf, imgData) => {
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = pdf.internal.pageSize.getHeight();
-            const props = pdf.getImageProperties(imgData);
-            const ratio = props.width / props.height;
-            let w = pdfWidth;
-            let h = pdfWidth / ratio;
-            if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
-            pdf.addImage(imgData, "JPEG", (pdfWidth - w) / 2, 0, w, h);
+        window._mapaJuridicoCache = { byKey };
+        window._mapaJuridicoPdfHtml = {
+            page1: container1.innerHTML,
+            page2: container2.innerHTML,
+            style1: "position:absolute;top:-9999px;left:-9999px;width:1122px;height:793px;background:#fff;padding:14px 18px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;display:flex;flex-direction:column;",
+            style2: "position:absolute;top:-9999px;left:-9999px;width:1122px;min-height:793px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;padding:20px 30px;box-sizing:border-box;"
         };
 
-        const canvas1 = await html2canvas(container1, canvasOpts);
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF("l", "mm", "a4");
-        fitPage(pdf, canvas1.toDataURL("image/jpeg", 0.92));
-        if (container1.parentNode) document.body.removeChild(container1);
-        container1 = null;
-        await yieldUI();
+        const fmtMoneyUi = (val) => (Number(val) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        const phaseCards = (items, compId) => `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${items.map(item => {
+                    const active = item.count > 0;
+                    const cidArg = compId ? `'${String(compId).replace(/'/g, "\\'")}'` : "''";
+                    return `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})"
+                        style="border:${active ? '1.5px solid #065f46' : '1px solid #e2e8f0'};background:${active ? '#fff' : '#f8fafc'};border-radius:8px;padding:10px 10px 8px;min-width:92px;cursor:pointer;text-align:left;">
+                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                            <span style="background:${active ? '#065f46' : '#475569'};color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;">${item.prefix}</span>
+                            <span style="font-size:11px;font-weight:700;color:#334155;line-height:1.2;">${esc(item.name)}</span>
+                        </div>
+                        <div style="font-size:16px;font-weight:800;color:#0f172a;">${item.count}</div>
+                        <div style="font-size:11px;font-weight:700;color:${active ? '#ef4444' : '#94a3b8'};">${fmtMoneyUi(item.value)}</div>
+                    </button>`;
+                }).join("")}
+            </div>`;
+        const stagesHtml = interactiveBlocks.map(block => `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+                <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:10px;">${esc(block.title)}</div>
+                ${phaseCards(block.items, block.compId)}
+            </div>`).join("");
 
-        document.body.appendChild(container2);
-        await yieldUI();
-        const canvas2 = await html2canvas(container2, canvasOpts);
-        pdf.addPage();
-        fitPage(pdf, canvas2.toDataURL("image/jpeg", 0.92));
-        if (container2.parentNode) document.body.removeChild(container2);
-        container2 = null;
+        const mapHtml = `
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+                ${kpiBox('#fee2e2','#ef4444', svgAlert, 'VALOR EM ATRASO', fmtInt(totalValue))}
+                ${kpiBox('#fef3c7','#f59e0b', svgUsers, 'CLIENTES EM ATRASO', totalClients)}
+                ${kpiBox('#dcfce7','#10b981', svgFile, 'TÍTULOS VENCIDOS', totalTitles)}
+                ${kpiBox('#e0f2fe','#3b82f6', svgClock, 'ATRASO MÉDIO', avgDelay + ' dias')}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+                ${quadro('Por empresa', companyTable)}
+                ${quadro('Jurídico — 2º dia útil (12 meses) × hoje', chartBody)}
+                ${quadro('Empreendimento — fechamento × movimento do mês', empFlowTable)}
+                ${quadro('Top 10 clientes — entrou / saiu no mês', clientMoveTable)}
+            </div>
+            <div style="margin:16px 0 8px;font-size:13px;font-weight:800;color:#0f172a;">Fases processuais</div>
+            <p style="margin:0 0 10px;font-size:12px;color:#64748b;">Clique em uma fase para ver os contratos. Clique no cliente para abrir a ficha.</p>
+            ${stagesHtml}
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:8px;">
+                <div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;">Legenda</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                    ${generalResult.agg.map(item => `
+                        <div style="display:flex;align-items:center;background:#f1f5f9;padding:4px 8px;border-radius:4px;font-size:11px;border:1px solid #e2e8f0;">
+                            <span style="background:${item.count > 0 ? '#065f46' : '#475569'};color:white;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:8px;margin-right:6px;">${item.prefix}</span>
+                            <span style="font-weight:700;color:#334155;margin-right:4px;">${esc(item.name)}</span>
+                            <span style="color:#64748b;font-size:10px;">(${item.days} d)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
 
-        pdf.save("Mapa_Juridico_SubJudice.pdf");
+        window.showMapaJuridicoOverlay({ nowLabel, mapHtml });
         restoreBtn();
     } catch (e) {
         console.error("Erro ao gerar mapa jurídico:", e);
-        alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
-        if (container1 && container1.parentNode) document.body.removeChild(container1);
-        if (container2 && container2.parentNode) document.body.removeChild(container2);
+        alert("Ocorreu um erro ao abrir o mapa jurídico. Verifique o console.");
         restoreBtn();
     }
 };
