@@ -761,20 +761,20 @@ const ConfigUsersApp = {
          const subDisabledAttr = (isAdmin || subIsBlockedByParent) ? 'disabled' : '';
          const subOpacity = subIsBlockedByParent ? '0.5' : '1';
 
-         const actionsHtml = sub.actions.map(act => {
-            const permKeyAcc = `${sub.key}_${act.id}_acessar`;
-            const permKeyVis = `${sub.key}_${act.id}_visualizar`;
-            const permKeyEdi = `${sub.key}_${act.id}_editar`;
-
-            const chkAcc = savedPerms[permKeyAcc] ? 'checked' : '';
-            const chkVis = savedPerms[permKeyVis] ? 'checked' : '';
-            const chkEdi = savedPerms[permKeyEdi] ? 'checked' : '';
-            
-            const actIsBlockedByParent = !isAdmin && (!savedPerms[mod.key] || !savedPerms[sub.key]);
-            const actDisabledAttr = (isAdmin || actIsBlockedByParent) ? 'disabled' : '';
-            const actOpacity = actIsBlockedByParent ? '0.5' : '1';
-
-            return `
+         const actionsHtml = (() => {
+            const regular = [];
+            const regras = [];
+            sub.actions.forEach(act => {
+              const permKeyAcc = `${sub.key}_${act.id}_acessar`;
+              const permKeyVis = `${sub.key}_${act.id}_visualizar`;
+              const permKeyEdi = `${sub.key}_${act.id}_editar`;
+              const chkAcc = savedPerms[permKeyAcc] ? 'checked' : '';
+              const chkVis = savedPerms[permKeyVis] ? 'checked' : '';
+              const chkEdi = savedPerms[permKeyEdi] ? 'checked' : '';
+              const actIsBlockedByParent = !isAdmin && (!savedPerms[mod.key] || !savedPerms[sub.key]);
+              const actDisabledAttr = (isAdmin || actIsBlockedByParent) ? 'disabled' : '';
+              const actOpacity = actIsBlockedByParent ? '0.5' : '1';
+              const tile = `
                <div style="background: #f8f9fa; border: 1px solid #e8eaed; padding: 12px 16px; border-radius: 8px; flex: 1; min-width: 280px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); opacity: ${actOpacity};">
                   <div style="font-weight: 600; color: #202124; margin-bottom: 10px; font-size: 0.9rem; border-bottom: 1px solid #e8eaed; padding-bottom: 6px;">${act.label}</div>
                   <div style="display: flex; gap: 12px; font-size: 0.8rem;">
@@ -788,9 +788,17 @@ const ConfigUsersApp = {
                         <input type="checkbox" class="profile-perm-checkbox" data-level="action" data-parent-sub="${sub.key}" data-key="${permKeyEdi}" ${chkEdi} ${actDisabledAttr} style="accent-color: #105436;"> Editar
                      </label>
                   </div>
-               </div>
-            `;
-         }).join('');
+               </div>`;
+              if (act.id === "regras_negociacao" || act.id === "regras_cobranca") regras.push(tile);
+              else regular.push(tile);
+            });
+            const regrasBlock = regras.length ? `
+              <div style="flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 16px; padding-top: 8px; border-top: 1px dashed #cbd5e1;">
+                <div style="flex: 1 1 100%; font-size: 0.75rem; font-weight: 700; color: #105436; letter-spacing: 0.04em; text-transform: uppercase;">Regras</div>
+                ${regras.join("")}
+              </div>` : "";
+            return regular.join("") + regrasBlock;
+         })();
 
          return `
             <details style="margin-bottom: 12px; border: 1px solid #e8eaed; border-radius: 8px; background: #fff; overflow: hidden;">

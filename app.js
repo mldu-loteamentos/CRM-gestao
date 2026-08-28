@@ -1043,6 +1043,14 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
+  if (tabId === 'regras-cobranca' && typeof window.hasFinCrAction === 'function' && !window.hasFinCrAction('regras_cobranca', 'acessar')) {
+    alert('Sem permissão para acessar Regras de Cobrança.');
+    return;
+  }
+  if (tabId === 'regras-negociacao' && typeof window.hasFinCrAction === 'function' && !window.hasFinCrAction('regras_negociacao', 'acessar')) {
+    alert('Sem permissão para acessar Regras de Negociação.');
+    return;
+  }
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
 
@@ -1059,7 +1067,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   document.querySelectorAll(".multi-select-content").forEach(el => el.classList.remove("show"));
 
   // Mostrar aba solicitada
-  const activePane = document.getElementById(`tab-${tabId}`);
+  const paneId = tabId === "regras-negociacao" ? "tab-regras-cobranca" : `tab-${tabId}`;
+  const activePane = document.getElementById(paneId);
   if (activePane) {
     activePane.style.display = "block";
     if (tabId === 'relacionamento_gestao') {
@@ -1191,6 +1200,13 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     }
   } else if (tabId === "regras-negociacao") {
     loadRegrasNegociacao();
+    if (typeof window.switchRegrasTab === "function") window.switchRegrasTab("regra-negociacao");
+    if (typeof window.initializeNegotiationRules === "function") window.initializeNegotiationRules();
+    if (typeof window.applyRulesModulePermissions === "function") window.applyRulesModulePermissions();
+  } else if (tabId === "regras-cobranca") {
+    renderRulesSettingsTable();
+    if (typeof window.switchRegrasTab === "function") window.switchRegrasTab("regra-regua");
+    if (typeof window.applyRulesModulePermissions === "function") window.applyRulesModulePermissions();
   } else if (tabId === "agenda") {
     loadAgendaTab(showLoader);
     if(typeof renderAgendaAlerts === 'function') renderAgendaAlerts();
@@ -1241,8 +1257,6 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     lucide.createIcons();
   } else if (tabId === "upload-kmz") {
     loadKMZList();
-  } else if (tabId === "regras-cobranca") {
-    renderRulesSettingsTable();
   } else if (tabId === "construcao-marketing" || tabId === "marketing-eventos") {
     if (typeof MarketingApp !== "undefined") MarketingApp.init();
   } else if (tabId === "marketing-budget") {
@@ -1503,7 +1517,7 @@ window.applyPermissions = function(profileName) {
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
         const cbAlias = (modKey === 'sub_fin_cb_fluxo_caixa_acessar' || modKey === 'sub_fin_cb_caixa_banco_acessar') && perms.sub_fin_cb === true;
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias) {
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -1542,6 +1556,143 @@ window.applyPermissions = function(profileName) {
     });
   }
 }
+
+window.isCrmSuperAdmin = function() {
+  const u = window.AppState && AppState.currentUser;
+  if (!u) return false;
+  if (u.profile_name && String(u.profile_name).toUpperCase() === "ADMINISTRADOR") return true;
+  const email = String(u.email || "").toLowerCase();
+  return email === "israel@mouraleite.com.br" || email === "admin@mouraleite.com.br";
+};
+
+window.permCoversMenuKey = function(perms, modKey) {
+  if (!perms || !modKey) return false;
+  if (perms[modKey] === true) return true;
+  if (!String(modKey).endsWith("_acessar")) return false;
+  const stem = String(modKey).slice(0, -"_acessar".length);
+  return perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true;
+};
+
+window.hasCrmPerm = function(key) {
+  if (window.isCrmSuperAdmin()) return true;
+  const u = window.AppState && AppState.currentUser;
+  if (u && Array.isArray(u.permissions) && u.permissions.includes(key)) return true;
+  try {
+    let crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
+    const profileName = u && u.profile_name ? String(u.profile_name).trim().toUpperCase() : "";
+    const matched = crmProfiles.find(p => p.name === profileName);
+    const profileId = matched ? matched.id : (profileName.toLowerCase().replace(/\s+/g, "_") || "");
+    if (!profileId) return false;
+    const perms = JSON.parse(localStorage.getItem("crm_perms_" + profileId) || "{}") || {};
+    return perms[key] === true;
+  } catch (e) {
+    return false;
+  }
+};
+
+window.hasFinCrAction = function(actionId, flag) {
+  const base = "sub_fin_cr_" + actionId;
+  if (window.hasCrmPerm(base + "_" + flag)) return true;
+  if (flag === "visualizar" && window.hasCrmPerm(base + "_editar")) return true;
+  if (flag === "acessar" && (window.hasCrmPerm(base + "_visualizar") || window.hasCrmPerm(base + "_editar"))) return true;
+  return false;
+};
+
+window.setRulesSectionMode = function(root, canView, canEdit) {
+  if (!root) return;
+  root.querySelectorAll("input, select, textarea, button").forEach(el => {
+    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config") return;
+    if (el.closest && el.closest("#regras-tabs-menu")) return;
+    el.disabled = !canEdit;
+    el.style.pointerEvents = canEdit ? "" : "none";
+  });
+  if (!canView) {
+    if (!root.dataset.origDisplay) root.dataset.origDisplay = root.style.display || "block";
+    root.style.display = "none";
+  } else if (root.style.display === "none" && root.classList.contains("regra-tab-content")) {
+    // visibilidade da aba ativa é controlada pelo switchRegrasTab
+  }
+};
+
+window.applyRulesModulePermissions = function() {
+  const canAccCob = window.hasFinCrAction("regras_cobranca", "acessar");
+  const canViewCob = window.hasFinCrAction("regras_cobranca", "visualizar");
+  const canEditCob = window.hasFinCrAction("regras_cobranca", "editar");
+  const canAccNeg = window.hasFinCrAction("regras_negociacao", "acessar");
+  const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
+  const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
+
+  ["regua", "judiciais", "atribuicao", "fila"].forEach(id => {
+    const btn = document.getElementById("btn-regra-" + id);
+    if (btn) btn.style.display = canAccCob ? "" : "none";
+  });
+  const btnNeg = document.getElementById("btn-regra-negociacao");
+  if (btnNeg) btnNeg.style.display = canAccNeg ? "" : "none";
+
+  window.setRulesSectionMode(document.getElementById("content-regra-regua"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-judiciais"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-negociacao"), canViewNeg, canEditNeg);
+
+  const btnSaveCob = document.getElementById("btn-save-rules-config");
+  if (btnSaveCob) btnSaveCob.disabled = !canEditCob;
+  const btnSaveNeg = document.getElementById("btn-save-negociacao-config");
+  if (btnSaveNeg) btnSaveNeg.disabled = !canEditNeg;
+  const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
+  if (btnFila) btnFila.disabled = !canEditCob;
+
+  let hint = document.getElementById("regras-perm-hint");
+  if (!hint) {
+    const menu = document.getElementById("regras-tabs-menu");
+    if (menu && menu.parentNode) {
+      hint = document.createElement("div");
+      hint.id = "regras-perm-hint";
+      hint.style.cssText = "width:100%;padding:10px 12px;margin:8px 0 0;border-radius:8px;background:#fef3c7;color:#92400e;font-size:0.85rem;display:none;";
+      menu.parentNode.insertBefore(hint, menu.nextSibling);
+    }
+  }
+  if (hint) {
+    const viewOnly = (canViewCob && !canEditCob && canAccCob) || (canViewNeg && !canEditNeg && canAccNeg);
+    const noView = (canAccCob && !canViewCob) || (canAccNeg && !canViewNeg);
+    if (noView) {
+      hint.style.display = "block";
+      hint.textContent = "Você pode acessar esta área, mas não tem permissão para visualizar o conteúdo das regras.";
+    } else if (viewOnly) {
+      hint.style.display = "block";
+      hint.textContent = "Modo visualização: o conteúdo está visível. Só quem tem o flag Editar consegue alterar e salvar.";
+    } else {
+      hint.style.display = "none";
+    }
+  }
+};
+
+window.switchRegrasTab = function(tabId) {
+  const isNeg = tabId === "regra-negociacao";
+  if (isNeg && !window.hasFinCrAction("regras_negociacao", "acessar")) {
+    alert("Sem permissão para acessar Regras de Negociação.");
+    return;
+  }
+  if (!isNeg && !window.hasFinCrAction("regras_cobranca", "acessar")) {
+    alert("Sem permissão para acessar Regras de Cobrança.");
+    return;
+  }
+  document.querySelectorAll("#regras-tabs-menu .customer-tab-btn").forEach(btn => btn.classList.remove("active"));
+  const btn = document.getElementById("btn-" + tabId);
+  if (btn) btn.classList.add("active");
+  document.querySelectorAll(".regra-tab-content").forEach(content => content.style.display = "none");
+  const content = document.getElementById("content-" + tabId);
+  if (content) {
+    const canView = isNeg
+      ? window.hasFinCrAction("regras_negociacao", "visualizar")
+      : window.hasFinCrAction("regras_cobranca", "visualizar");
+    content.style.display = canView ? "block" : "none";
+  }
+  if (tabId === "regra-fila" && typeof window.populateFilaOperators === "function") {
+    window.populateFilaOperators();
+  }
+  window.applyRulesModulePermissions();
+};
 
 // ----------------------------------------------------
 // 4. INICIALIZAÇÃO DA APLICAÇÃO E DADOS
@@ -5167,6 +5318,10 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
     if (typeof renderJudicialTimeline === 'function') {
       renderJudicialTimeline();
     }
+  } else if (AppState.openNexTabAfterLoad) {
+    AppState.openNexTabAfterLoad = false;
+    switchCustomerTab('tab-notificacoes');
+    if (typeof window.renderNexHistory === 'function') window.renderNexHistory();
   } else {
     switchCustomerTab('tab-contrato');
   }
@@ -8416,6 +8571,7 @@ function renderCustomerOccurrences() {
   
   if (!window.currentHistoryFilters.includes('Todos')) {
     list = list.filter(occ => {
+      if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") return true;
       const isCancelled = occ.status === 'Cancelada';
       if (isCancelled && window.currentHistoryFilters.includes('Cancelado')) return true;
       if (!isCancelled && window.currentHistoryFilters.includes(occ.promiseStatus)) return true;
@@ -8443,6 +8599,7 @@ function renderCustomerOccurrences() {
       card.style.opacity = "0.7";
     }
 
+    const isNexLocked = !!occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX";
     let isNotaInterna = false;
     if (occ.canal && (occ.canal === 'Nota Interna' || occ.canal === 'Nota interna')) {
       isNotaInterna = true;
@@ -8451,6 +8608,13 @@ function renderCustomerOccurrences() {
       card.style.setProperty('border', '1px solid #fde68a', 'important');
       card.style.setProperty('border-left', '4px solid #f59e0b', 'important');
       card.style.setProperty('box-shadow', '2px 2px 6px rgba(0,0,0,0.05)', 'important');
+    }
+    if (isNexLocked) {
+      card.style.setProperty('position', 'relative', 'important');
+      card.style.setProperty('background-color', '#eff6ff', 'important');
+      card.style.setProperty('border', '1px solid #bfdbfe', 'important');
+      card.style.setProperty('border-left', '4px solid #2563eb', 'important');
+      card.style.cursor = 'pointer';
     }
     
     // Tags visuais
@@ -8461,6 +8625,7 @@ function renderCustomerOccurrences() {
       else if (occ.canal.toLowerCase() === 'e-mail' || occ.canal.toLowerCase() === 'email') canalIcon = 'mail';
       else if (occ.canal.toLowerCase() === 'presencial') canalIcon = 'user';
       else if (isNotaInterna) canalIcon = 'sticky-note';
+      else if (isNexLocked) canalIcon = 'mail';
       tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: var(--color-text-muted);"><i data-lucide="${canalIcon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.canal}</span>`;
     }
     if (occ.iniciativa) {
@@ -8535,7 +8700,13 @@ function renderCustomerOccurrences() {
       const isAuthor = currentUser && (occ.author === currentUser || currentUser === "Operador"); // mock fallback
       
       let btns = [];
-      if (isWithin24h && isAuthor) {
+      if (isNexLocked) {
+          btns.push(`
+            <button class="btn btn-outline btn-sm" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px;" onclick="event.stopPropagation(); if (typeof switchCustomerTab === 'function') switchCustomerTab('tab-notificacoes');">
+              <i data-lucide="mail" style="width:10px; height:10px;"></i> Abrir Notificações
+            </button>
+          `);
+      } else if (isWithin24h && isAuthor) {
           btns.push(`
             <button class="btn btn-outline btn-sm" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px;" onclick="editOccurrenceReal(${AppState.selectedCustomerId}, '${occ.date}')">
               <i data-lucide="edit-3" style="width:10px; height:10px;"></i> Editar
@@ -8636,6 +8807,12 @@ function renderCustomerOccurrences() {
       </div>
       ${replyInputHtml}
     `;
+    if (isNexLocked) {
+      card.addEventListener("click", function(e) {
+        if (e.target.closest("button, select, textarea, a, input")) return;
+        if (typeof switchCustomerTab === "function") switchCustomerTab("tab-notificacoes");
+      });
+    }
     timeline.appendChild(card);
   });
   
@@ -9417,6 +9594,11 @@ window.errataOccurrence = function(customerId, occDate) {
   const list = AppState.notes[customerId] || [];
   const occ = list.find(x => x.date === occDate);
   if (!occ) return;
+  if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") {
+    alert("A ocorrência da NEX não pode ser alterada. Abra a aba Notificações para gerenciar a carta.");
+    if (typeof switchCustomerTab === "function") switchCustomerTab("tab-notificacoes");
+    return;
+  }
   
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
@@ -9446,6 +9628,11 @@ window.editOccurrenceReal = function(customerId, occDate) {
   const list = AppState.notes[customerId] || [];
   const occ = list.find(x => x.date === occDate);
   if (!occ) return;
+  if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") {
+    alert("A ocorrência da NEX não pode ser editada. Abra a aba Notificações para gerenciar a carta.");
+    if (typeof switchCustomerTab === "function") switchCustomerTab("tab-notificacoes");
+    return;
+  }
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
@@ -9479,6 +9666,10 @@ window.cancelOccurrence = function(customerId, occDate) {
   const list = AppState.notes[customerId] || [];
   const occ = list.find(x => x.date === occDate);
   if (!occ) return;
+  if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") {
+    alert("A ocorrência da NEX não pode ser excluída. Gerencie a carta na aba Notificações.");
+    return;
+  }
   
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
@@ -14809,7 +15000,6 @@ window.toggleSimulateAll = function(checked) {
 // 10. WE SEND - MÓDULO EXTRAJUDICIAL >= 61 DIAS
 // ----------------------------------------------------
 async function loadWeSendTab() {
-  // Usar cache do AppState; no modo real só faz nova chamada se necessário
   const bills = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS
     : (AppState.defaultersLoaded
@@ -14823,153 +15013,161 @@ async function loadWeSendTab() {
   const sales = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.SALES
     : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
-  
-  // Pre-load customer details in parallel to avoid undefined lookups (only in simulated mode)
+
   if (getSiengeApiMode() === "simulado") {
     const customerIds = [...bills.map(b => b.customerId), ...sales.map(s => s.customerId)];
     await preloadCustomers(customerIds);
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
+  const costCenters = AppState.cachedCostCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
+  const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31, standard: 61 };
 
-  // Filtrar títulos de acordo com a régua: 31 dias se 0% pago, 61 dias caso contrário
-  const overdueEligible = bills.filter(b => {
-    if (b.slipStatus !== "Vencido") return false;
-    const sale = sales.find(s => String(s.receivableBillId) === String(b.saleId) || String(s.id) === String(b.saleId));
-    if (!sale) return false;
-    const isZeroPaid = (sale.percPaid === undefined || sale.percPaid === 0);
-    return isZeroPaid ? b.daysDelay >= 31 : b.daysDelay >= 61;
+  const findSale = (saleId) => sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const hasUnpaidSinal = (bill) => (bill.defaulterInstallments || []).some(inst => {
+    const condition = (inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || "").trim().toUpperCase();
+    return condition === "SI" || condition === "SINAL" || condition === "PU";
   });
-  
-  const body = document.getElementById("wesend-table-body");
-  if (!body) return;
-  body.innerHTML = "";
+  const resolveCc = (item) => {
+    const unit = (AppState.units && AppState.units[item.unitId]) || {};
+    const ccId = unit.costCenterId || item.costCenterId;
+    return costCenters.find(cc => String(cc.id) === String(ccId)) || {};
+  };
+  const empLabel = (item) => {
+    const unit = (AppState.units && AppState.units[item.unitId]) || {};
+    const cc = resolveCc(item);
+    const q = unit.block != null ? " (Q: " + unit.block + ", L: " + unit.lot + ")" : "";
+    return (cc.name || item.unitName || unit.name || "N/D") + (cc.name && q ? q : "");
+  };
 
-  const chkAll = document.getElementById("chk-wesend-all");
-  if (chkAll) chkAll.checked = false;
-
-  if (overdueEligible.length === 0) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum título qualificado para notificação.</td></tr>`;
-    return;
-  }
-
-  // Agrupar por venda do cliente
   const grouped = {};
-  overdueEligible.forEach(bill => {
-    const key = `${bill.customerId}-${bill.saleId}`;
+  (bills || []).filter(b => b.slipStatus === "Vencido").forEach(bill => {
+    const key = bill.customerId + "-" + bill.saleId;
+    const sale = findSale(bill.saleId);
     if (!grouped[key]) {
-      const customer = customers[bill.customerId] || { name: bill.clientName || `Cliente #${bill.customerId}` };
-      const sale = sales.find(s => String(s.receivableBillId) === String(bill.saleId) || String(s.id) === String(bill.saleId)) || {
-        id: bill.saleId,
-        unitId: `U-${bill.companyId}-${bill.units ? bill.units.replace(/\s+/g, '') : 'ND'}`,
-        status: "Ativo"
-      };
-      if (!customer || !sale) return;
-      
+      const customer = customers[bill.customerId] || { name: bill.clientName || ("Cliente #" + bill.customerId) };
+      const unitName = bill.units || bill.unityName || "";
       grouped[key] = {
         customerId: bill.customerId,
         customerName: customer.name,
         saleId: bill.saleId,
-        unitId: sale.unitId,
+        unitId: (sale && sale.unitId) || ("U-" + bill.companyId + "-" + (unitName ? String(unitName).replace(/\s+/g, "") : "ND")),
+        costCenterId: (bill.costCentersId && bill.costCentersId.length > 0)
+          ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId)
+          : (bill.costCenterId || null),
+        unitName: unitName,
+        percPaid: sale && sale.percPaid != null ? sale.percPaid : 0,
+        isZeroPaid: false,
         maxDaysDelay: 0,
         totalOverdue: 0,
         billIds: []
       };
     }
-    grouped[key].totalOverdue += (bill.value + bill.interest + bill.fine);
+    grouped[key].totalOverdue += (Number(bill.value) || 0) + (Number(bill.interest) || 0) + (Number(bill.fine) || 0);
     grouped[key].billIds.push(bill.id);
-    if (bill.daysDelay > grouped[key].maxDaysDelay) {
-      grouped[key].maxDaysDelay = bill.daysDelay;
-    }
+    if (bill.daysDelay > grouped[key].maxDaysDelay) grouped[key].maxDaysDelay = bill.daysDelay;
+    if (hasUnpaidSinal(bill)) grouped[key].isZeroPaid = true;
   });
 
-  const fTitulo = document.getElementById('wesend-filter-titulo')?.value || '';
-  const fContrato = document.getElementById('wesend-filter-contrato')?.value || '';
-  const fDoc = (document.getElementById('wesend-filter-doc')?.value || '').replace(/\D/g, '');
-  const fEmp = document.getElementById('wesend-filter-emp')?.value || '';
-  const fUnidade = document.getElementById('wesend-filter-unidade')?.value || '';
-  const fNome = (document.getElementById('wesend-filter-nome')?.value || '').toLowerCase();
-  const fTelefone = (document.getElementById('wesend-filter-telefone')?.value || '').replace(/\D/g, '');
-  const fEmail = (document.getElementById('wesend-filter-email')?.value || '').toLowerCase();
+  Object.values(grouped).forEach(item => {
+    const sale = findSale(item.saleId);
+    const perc = sale && sale.percPaid != null ? Number(sale.percPaid) : null;
+    if (!(perc > 0)) item.isZeroPaid = true;
+  });
 
-  const empSelect = document.getElementById('wesend-filter-emp');
-  if (empSelect && empSelect.options.length <= 1 && window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) {
-      window.MOCK_DATA.COST_CENTERS.forEach(cc => {
-          const opt = document.createElement('option');
-          opt.value = cc.id;
-          opt.textContent = cc.name;
-          empSelect.appendChild(opt);
-      });
+  const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
+  const fContrato = document.getElementById("wesend-filter-contrato")?.value || "";
+  const fDoc = (document.getElementById("wesend-filter-doc")?.value || "").replace(/\D/g, "");
+  const fEmp = document.getElementById("wesend-filter-emp")?.value || "";
+  const fUnidade = document.getElementById("wesend-filter-unidade")?.value || "";
+  const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
+  const fTelefone = (document.getElementById("wesend-filter-telefone")?.value || "").replace(/\D/g, "");
+  const fEmail = (document.getElementById("wesend-filter-email")?.value || "").toLowerCase();
+
+  const empSelect = document.getElementById("wesend-filter-emp");
+  if (empSelect && empSelect.options.length <= 1 && costCenters.length) {
+    costCenters.forEach(cc => {
+      const opt = document.createElement("option");
+      opt.value = cc.id;
+      opt.textContent = cc.name;
+      empSelect.appendChild(opt);
+    });
   }
 
-  let finalItems = Object.values(grouped);
-  finalItems = finalItems.filter(item => {
-    const unit = AppState.units[item.unitId] || {};
-    const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
+  const matchesFilters = (item) => {
+    const unit = (AppState.units && AppState.units[item.unitId]) || {};
+    const costCenter = resolveCc(item);
     const customer = customers[item.customerId] || {};
-    
-    if (fTitulo && !item.billIds.some(id => String(id).includes(fTitulo))) return false;
+    if (fTitulo && !item.billIds.some(id => String(id).includes(fTitulo)) && !String(item.saleId).includes(fTitulo)) return false;
     if (fContrato && !String(item.saleId).includes(fContrato)) return false;
     if (fDoc) {
-      const doc = (customer.cpfCnpj || customer.cpf || '').replace(/\D/g, '');
+      const doc = (customer.cpfCnpj || customer.cpf || "").replace(/\D/g, "");
       if (!doc.includes(fDoc)) return false;
     }
-    if (fEmp && String(costCenter.id) !== String(fEmp)) return false;
+    if (fEmp && String(costCenter.id || item.costCenterId) !== String(fEmp)) return false;
     if (fUnidade && String(unit.id) !== String(fUnidade)) return false;
-    if (fNome && !(item.customerName || '').toLowerCase().includes(fNome)) return false;
+    if (fNome && !(item.customerName || "").toLowerCase().includes(fNome)) return false;
     if (fTelefone) {
-      const phones = ((customer.phones || []).map(p => (p.number||'').replace(/\D/g, '')).join(' ') + ' ' + (customer.phone||'').replace(/\D/g, ''));
+      const phones = ((customer.phones || []).map(p => (p.number || "").replace(/\D/g, "")).join(" ") + " " + (customer.phone || "").replace(/\D/g, ""));
       if (!phones.includes(fTelefone)) return false;
     }
     if (fEmail) {
-      const emails = ((customer.emails || []).map(e => e.email).join(' ') + ' ' + (customer.email||'')).toLowerCase();
+      const emails = ((customer.emails || []).map(e => e.email).join(" ") + " " + (customer.email || "")).toLowerCase();
       if (!emails.includes(fEmail)) return false;
     }
     return true;
+  };
+
+  const allItems = Object.values(grouped).filter(matchesFilters);
+  const zeroList = [];
+  const d61List = [];
+  allItems.forEach(item => {
+    const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
+    const suspensiva = !!cc.clausula_suspensiva_ativa;
+    const hasNex = window.nexHasLetter(item.customerId, item.saleId);
+    if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex) {
+      zeroList.push(item);
+    } else if (item.maxDaysDelay >= regua.standard && !hasNex) {
+      d61List.push(item);
+    }
   });
 
-  if (finalItems.length === 0) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum título encontrado com os filtros informados.</td></tr>`;
-    return;
-  }
+  const fillBody = (bodyId, items, chkClass) => {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--color-text-muted);">Nenhum cliente neste critério.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(item => {
+      const name = String(item.customerName || "").replace(/</g, "&lt;");
+      const emp = String(empLabel(item)).replace(/</g, "&lt;");
+      return "<tr class=\"table-row-hover\" style=\"cursor:pointer;\" onclick=\"window.openCustomerNexTab('" + item.customerId + "','" + item.saleId + "','" + item.saleId + "')\">" +
+        "<td style=\"text-align:center;\" onclick=\"event.stopPropagation()\"><input type=\"checkbox\" class=\"" + chkClass + "\" data-sale-id=\"" + item.saleId + "\" data-customer-id=\"" + item.customerId + "\" style=\"width:16px;height:16px;cursor:pointer;\"></td>" +
+        "<td><strong>" + name + "</strong></td>" +
+        "<td><strong>" + emp + "</strong></td>" +
+        "<td>Título / Contrato #" + item.saleId + "</td>" +
+        "<td><span class=\"badge badge-danger\">" + item.maxDaysDelay + " dias</span></td>" +
+        "<td><strong>R$ " + Number(item.totalOverdue).toLocaleString("pt-BR") + "</strong></td>" +
+        "</tr>";
+    }).join("");
+  };
 
-  finalItems.forEach(item => {
-    const unit = AppState.units[item.unitId] || {};
-    const costCenter = window.MOCK_DATA.COST_CENTERS.find(cc => cc.id === unit.costCenterId) || {};
-    
-    // Status do disparo salvo localmente
-    const statusKey = `crm_wesend_status_${item.saleId}`;
-    const currentStatus = localStorage.getItem(statusKey) || "Pendente";
-    
-    let statusClass = "badge-secondary";
-    if (currentStatus === "Enviado") statusClass = "badge-info";
-    else if (currentStatus === "Assinado Digitalmente ICP-Brasil") statusClass = "badge-success";
-
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td style="text-align: center; vertical-align: middle;">
-        <input type="checkbox" class="chk-wesend-row" data-sale-id="${item.saleId}" data-customer-id="${item.customerId}" style="width: 16px; height: 16px; cursor: pointer;">
-      </td>
-      <td><strong>${item.customerName}</strong></td>
-      <td><strong>${costCenter.name || 'N/D'}</strong> (Q: ${unit.block}, L: ${unit.lot})</td>
-      <td>Contrato #${item.saleId}</td>
-      <td><span class="badge badge-danger">${item.maxDaysDelay} dias</span></td>
-      <td><strong>R$ ${item.totalOverdue.toLocaleString('pt-BR')}</strong></td>
-      <td><span class="badge ${statusClass}">${currentStatus}</span></td>
-    `;
-    body.appendChild(row);
-  });
-
-  lucide.createIcons();
+  fillBody("wesend-zero-body", zeroList, "chk-wesend-zero");
+  fillBody("wesend-61-body", d61List, "chk-wesend-61");
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+  if (window.lucide) lucide.createIcons();
 }
+window.loadWeSendTab = loadWeSendTab;
 
-window.toggleWeSendSelectAll = function(checked) {
-  document.querySelectorAll(".chk-wesend-row").forEach(chk => {
+window.toggleWeSendSelectAll = function(checked, selector) {
+  const sel = selector || ".chk-wesend-zero, .chk-wesend-61";
+  document.querySelectorAll(sel).forEach(chk => {
     chk.checked = checked;
   });
 };
 
 window.exportWeSendToExcel = async function() {
-  const chks = document.querySelectorAll(".chk-wesend-row:checked");
+  const chks = document.querySelectorAll(".chk-wesend-zero:checked, .chk-wesend-61:checked");
   if (chks.length === 0) {
     alert("Nenhum contrato selecionado para exportação.");
     return;
@@ -15881,20 +16079,57 @@ window.nexPaymentDatesAfter = function(isoDate) {
   return dates;
 };
 
+window.nexReceiptDatesForSale = function(saleId) {
+  const dates = [];
+  const addFrom = (arr) => {
+    (arr || []).forEach(b => {
+      if (String(b.saleId) !== String(saleId) && String(b.receivableBillId) !== String(saleId) && String(b.id) !== String(saleId)) return;
+      const d = window.nexParseIso(b.receiptDate || b.payOffDate || b.paymentDate);
+      if (d) dates.push(d);
+      (b.receipts || []).forEach(r => {
+        const d2 = window.nexParseIso(r.receiptDate || r.date);
+        if (d2) dates.push(d2);
+      });
+    });
+  };
+  addFrom(AppState.defaultersBills);
+  addFrom(AppState.paidBills);
+  return dates;
+};
+
+window.nexLostValidityByPayment = function(item) {
+  if (!item) return { lost: false };
+  const gen = window.nexParseIso(item.date || item.createdAt);
+  if (!gen) return { lost: false };
+  const sameFicha = String((AppState && AppState.selectedCustomerId) || "") === String(item.customerId || "")
+    && [AppState.selectedSaleId, AppState.selectedTitulo, AppState.currentReceivableBillId].some(v => v != null && String(v) === String(item.titulo || ""));
+  let pays = [];
+  if (sameFicha && typeof window.nexPaymentDatesAfter === "function") {
+    pays = window.nexPaymentDatesAfter(gen).slice();
+    const delivered = window.nexParseIso(item.deliveredAt);
+    if (delivered) pays = pays.concat(window.nexPaymentDatesAfter(delivered));
+  }
+  const salePays = window.nexReceiptDatesForSale(item.titulo || item.saleId).filter(d => d > gen);
+  pays = pays.concat(salePays);
+  pays = pays.filter(Boolean).sort();
+  if (pays.length) return { lost: true, pay: pays[0] };
+  return { lost: false };
+};
+
 window.nexIsLegallyValid = function(item) {
+  const lost = window.nexLostValidityByPayment(item);
+  if (lost.lost) {
+    return { ok: false, lostByPayment: true, reason: "Cliente pagou parcela depois do envio da NEX (" + window.nexFmtBr(lost.pay) + "). Carta sem validade jurídica." };
+  }
   if (!item || !window.nexIsEntregue(item.status)) {
     return { ok: false, reason: "Somente o status ENTREGUE inicia o prazo de 30 dias." };
+  }
+  if (!item.arDigital) {
+    return { ok: false, reason: "Anexe o PDF do AR Digital para concluir a entrega. Sem o AR a NEX não tem validade jurídica." };
   }
   const delivered = window.nexParseIso(item.deliveredAt);
   if (!delivered) {
     return { ok: false, reason: "Informe a data em que a carta foi ENTREGUE." };
-  }
-  const gen = window.nexParseIso(item.date || item.createdAt);
-  const paysGen = gen ? window.nexPaymentDatesAfter(gen) : [];
-  const paysDel = window.nexPaymentDatesAfter(delivered);
-  if (paysGen.length || paysDel.length) {
-    const pay = paysGen[0] || paysDel[0];
-    return { ok: false, reason: "Cliente pagou parcela depois da NEX ou da entrega (" + window.nexFmtBr(pay) + "). Sem validade jurídica." };
   }
   const moraIso = window.nexAddDays(delivered, 30);
   const today = window.nexTodayIso();
@@ -15902,7 +16137,7 @@ window.nexIsLegallyValid = function(item) {
     const left = window.nexDaysBetween(today, moraIso);
     return { ok: false, reason: "Prazo de 30 dias para manifestação em curso. Mora em " + window.nexFmtBr(moraIso) + " (faltam " + left + " dia" + (left === 1 ? "" : "s") + ")." };
   }
-  return { ok: true, reason: "Rito cumprido: ENTREGUE em " + window.nexFmtBr(delivered) + ", 30 dias sem regularização, constituído em mora em " + window.nexFmtBr(moraIso) + "." };
+  return { ok: true, reason: "Rito cumprido: ENTREGUE em " + window.nexFmtBr(delivered) + ", AR Digital anexado, 30 dias sem regularização, constituído em mora em " + window.nexFmtBr(moraIso) + "." };
 };
 
 window.nexCecReadyItem = function(items) {
@@ -16202,6 +16437,7 @@ window.renderNexHistory = async function() {
             <th>Data da entrega</th>
             <th>Prazo 30 dias</th>
             <th>Validade jurídica</th>
+            <th>AR Digital</th>
             <th style="text-align:center;">Excluir</th>
           </tr>
         </thead>
@@ -16217,21 +16453,28 @@ window.renderNexHistory = async function() {
             if (entregue && !it.deliveredAt) prazoTxt = "Informe a entrega";
             else if (moraIso && left !== null && left > 0) prazoTxt = "Faltam " + left + " dia" + (left === 1 ? "" : "s");
             else if (moraIso && left !== null && left <= 0) prazoTxt = "Mora em " + window.nexFmtBr(moraIso);
+            const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
+            const lostPay = window.nexLostValidityByPayment(it);
+            const arCell = lostPay.lost
+              ? "—"
+              : (it.arDigital
+                ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
+                : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`);
             return `<tr>
               <td style="font-weight:700;white-space:nowrap;">${(it.titulo || tituloAtual || "—")}</td>
               <td style="white-space:nowrap;font-weight:500;">${window.nexFmtBr(it.date || it.createdAt)}</td>
               <td>${author.replace(/</g, "&lt;")}</td>
               <td>${(it.letterType || "Notificação Extrajudicial").replace(/</g, "&lt;")}</td>
               <td style="text-align:center;">
-                <button type="button" title="Visualizar NEX desta data" onclick="window.viewNexPdf('${it.id}')"
+                <button type="button" title="Visualizar e imprimir esta NEX" onclick="window.viewNexPdf('${it.id}')"
                   style="border:none;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 8px;cursor:pointer;">
                   <i data-lucide="file-text" style="width:16px;height:16px;"></i>
                 </button>
               </td>
               <td>
-                <input value="${(it.tracking || "").replace(/"/g, "&quot;")}" placeholder="AA123456789BR"
+                <input value="${trackingVal.replace(/"/g, "&quot;")}" placeholder="informe nº objeto"
                   onchange="window.updateNexTracking('${it.id}', this.value)"
-                  style="width:150px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
+                  style="width:170px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
               </td>
               <td style="text-align:center;">
                 <button type="button" title="Copiar objeto e abrir Correios" onclick="window.openNexCorreios('${it.id}')"
@@ -16253,9 +16496,10 @@ window.renderNexHistory = async function() {
               <td style="white-space:nowrap;font-size:0.78rem;color:#475569;">${prazoTxt}</td>
               <td>
                 <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
-                  ${valid.ok ? "Válida" : "Sem validade"}
+                  ${valid.lostByPayment ? "Perdeu validade (pagamento)" : (valid.ok ? "Válida" : "Sem validade")}
                 </span>
               </td>
+              <td style="text-align:center;white-space:nowrap;">${arCell}</td>
               <td style="text-align:center;">
                 <button type="button" title="Excluir esta NEX" onclick="window.deleteNexItem('${it.id}')"
                   style="border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.75rem;font-weight:700;display:inline-flex;align-items:center;gap:4px;">
@@ -16267,8 +16511,12 @@ window.renderNexHistory = async function() {
         </tbody>
       </table>
     </div>
-    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Status <strong>ENTREGUE</strong> exige a data da entrega. A partir dela o cliente tem 30 dias para se manifestar. Só depois disso, e sem pagamento de parcela após a NEX ou a entrega, o documento tem validade jurídica e libera <strong>Gerar CEC</strong>.</p>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">Status <strong>ENTREGUE</strong> exige a data da entrega e o PDF do <strong>AR Digital</strong>. Sem o AR a NEX não tem validade jurídica. Se o cliente pagou depois do envio, a carta perde validade e o AR deixa de ser exigido.</p>
   `;
+  const lostAny = sorted.some(it => window.nexLostValidityByPayment(it).lost);
+  if (lostAny) {
+    root.insertAdjacentHTML("afterbegin", `<div style="margin-bottom:10px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;font-weight:600;">Esta NEX perdeu validade jurídica porque houve pagamento de parcela depois da data de envio.</div>`);
+  }
   if (window.lucide) lucide.createIcons();
 };
 
@@ -16281,19 +16529,34 @@ window.nexFindItem = function(id) {
 };
 
 window.updateNexTracking = async function(id, value) {
-  const ctx = window.nexFindItem(id);
+  let ctx = window.nexFindItem(id);
+  if (!ctx.item) ctx = await window.nexResolveItem(id);
   if (!ctx.item) return;
   ctx.item.tracking = String(value || "").trim().toUpperCase();
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
 };
 
 window.updateNexStatus = async function(id, value) {
-  const ctx = window.nexFindItem(id);
+  let ctx = window.nexFindItem(id);
+  if (!ctx.item) ctx = await window.nexResolveItem(id);
   if (!ctx.item) return;
+  if (window.nexIsEntregue(value) && !ctx.item.arDigital && !window.nexLostValidityByPayment(ctx.item).lost) {
+    const ok = await window.uploadNexAr(id, true);
+    if (!ok) {
+      if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+      if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+      return;
+    }
+    ctx = window.nexFindItem(id).item ? window.nexFindItem(id) : await window.nexResolveItem(id);
+  }
   ctx.item.status = window.nexIsEntregue(value) ? "ENTREGUE" : value;
   if (!window.nexIsEntregue(ctx.item.status)) ctx.item.deliveredAt = "";
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
   window.renderNexHistory();
+  if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
 };
 
 window.updateNexDeliveredAt = async function(id, value) {
@@ -16301,6 +16564,7 @@ window.updateNexDeliveredAt = async function(id, value) {
   if (!ctx.item) return;
   ctx.item.deliveredAt = window.nexParseIso(value);
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
   window.renderNexHistory();
 };
 
@@ -16314,8 +16578,9 @@ window.deleteNexItem = async function(id) {
   window.renderNexHistory();
 };
 
-window.viewNexPdf = function(id) {
-  const ctx = window.nexFindItem(id);
+window.viewNexPdf = async function(id) {
+  let ctx = window.nexFindItem(id);
+  if (!ctx.item) ctx = await window.nexResolveItem(id);
   if (!ctx.item || !ctx.item.html) {
     alert("Não há PDF armazenado desta NEX. Gere novamente se precisar do documento.");
     return;
@@ -16329,8 +16594,232 @@ window.viewNexPdf = function(id) {
   if (window.lucide) lucide.createIcons();
 };
 
+window.nexCollectAll = function() {
+  let bag = {};
+  try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+  const items = [];
+  Object.keys(bag).forEach(k => {
+    (Array.isArray(bag[k]) ? bag[k] : []).forEach(it => {
+      if (!it) return;
+      const parts = String(k).split("_");
+      items.push({
+        ...it,
+        customerId: String(it.customerId || parts[0] || ""),
+        titulo: String(it.titulo || parts.slice(1).join("_") || ""),
+        _key: k
+      });
+    });
+  });
+  return items;
+};
+
+window.nexResolveItem = async function(id) {
+  const local = window.nexFindItem(id);
+  if (local && local.item) return local;
+  const all = window.nexCollectAll();
+  const found = all.find(x => String(x.id) === String(id));
+  if (!found) return { item: null, items: [], customerId: "", saleId: "" };
+  const items = await window.loadNexHistory(found.customerId, found.titulo);
+  const item = (items || []).find(x => String(x.id) === String(id)) || found;
+  return { item, items: items || [found], customerId: found.customerId, saleId: found.titulo };
+};
+
+window.uploadNexAr = function(id, required) {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/pdf,application/octet-stream,.pdf";
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) {
+        if (required) alert("É obrigatório anexar o PDF do AR Digital para concluir a entrega. A NEX permanece sem validade jurídica.");
+        resolve(false);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const ctx = (window.nexFindItem(id).item ? window.nexFindItem(id) : await window.nexResolveItem(id));
+        if (!ctx.item) { resolve(false); return; }
+        ctx.item.arDigital = { fileName: file.name, dataUrl: String(reader.result || ""), uploadedAt: Date.now() };
+        await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+        window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
+        if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+        if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+        resolve(true);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  });
+};
+
+window.viewNexAr = async function(id) {
+  let ctx = window.nexFindItem(id);
+  if (!ctx.item) ctx = await window.nexResolveItem(id);
+  if (!ctx.item || !ctx.item.arDigital || !ctx.item.arDigital.dataUrl) {
+    alert("Não há AR Digital anexado nesta NEX.");
+    return;
+  }
+  const w = window.open();
+  if (w) w.document.write('<iframe src="' + ctx.item.arDigital.dataUrl + '" style="width:100%;height:100%;border:0"></iframe>');
+};
+
+window.nexOccurrenceText = function(item) {
+  const valid = window.nexIsLegallyValid(item);
+  const lost = window.nexLostValidityByPayment(item);
+  const status = item.status || "Pendente de consulta";
+  return "NEX do título " + (item.titulo || "—") +
+    "\nData de envio: " + window.nexFmtBr(item.date || item.createdAt) +
+    "\nStatus da carta: " + status +
+    (item.tracking ? "\nObjeto: " + item.tracking : "") +
+    (item.arDigital ? "\nAR Digital: anexado" : "\nAR Digital: não anexado") +
+    "\nValidade jurídica: " + (valid.ok ? "Válida" : (lost.lost ? "Perdeu validade por pagamento posterior" : "Sem validade")) +
+    "\n" + valid.reason;
+};
+
+window.syncNexOccurrenceNote = function(customerId, item) {
+  if (!customerId || !item) return;
+  if (!AppState.notes) AppState.notes = {};
+  const list = AppState.notes[customerId] || (AppState.notes[customerId] = []);
+  let occ = list.find(x => x.nexLocked && String(x.nexId) === String(item.id));
+  const payload = {
+    date: occ ? occ.date : (item.createdAt || new Date().toISOString()),
+    author: item.author || window.nexCurrentUserName(),
+    canal: "NEX",
+    iniciativa: "Ativo",
+    text: window.nexOccurrenceText(item),
+    nexLocked: true,
+    nexId: item.id,
+    saleId: item.titulo || item.saleId,
+    promiseStatus: null
+  };
+  if (occ) Object.assign(occ, payload);
+  else list.unshift(payload);
+  if (window.saveNotesToFirebase) window.saveNotesToFirebase(customerId);
+  else try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  if (typeof renderCustomerOccurrences === "function" && String(AppState.selectedCustomerId) === String(customerId)) {
+    renderCustomerOccurrences();
+  }
+};
+
+window.openCustomerNexTab = async function(customerId, saleId, titulo) {
+  AppState.openNexTabAfterLoad = true;
+  if (typeof viewCustomerCard === "function") {
+    await viewCustomerCard(customerId, saleId, titulo || saleId);
+  }
+};
+
+window.nexReguaDays = function() {
+  const nodes = window.TimelineState || [];
+  const byDias = (n) => Number(n && n.dias);
+  const n31 = nodes.find(n => /0%\s*pago|nex\s*0/i.test(String(n.label || n.nome || n.acao || ""))) || nodes.find(n => byDias(n) === 31);
+  const n61 = nodes.find(n => /nex/i.test(String(n.label || n.nome || n.acao || "")) && byDias(n) >= 50) || nodes.find(n => byDias(n) === 61);
+  return { zero: (n31 && byDias(n31)) || 31, standard: (n61 && byDias(n61)) || 61 };
+};
+
+window.nexCcConfig = function(costCenterId, unitName) {
+  try {
+    const configMap = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
+    let cc = configMap[costCenterId] || {};
+    if (!cc.clausula_suspensiva_ativa && unitName) {
+      const match = String(unitName).match(/^(\d{4,5})/);
+      if (match && configMap[match[1]]) cc = configMap[match[1]];
+    }
+    return cc;
+  } catch (e) {
+    return {};
+  }
+};
+
+window.nexHasLetter = function(customerId, saleId) {
+  return window.nexCollectAll().some(it =>
+    String(it.customerId) === String(customerId) &&
+    (String(it.titulo) === String(saleId) || String(it.saleId) === String(saleId))
+  );
+};
+
+window.nexInFollowup = function(item) {
+  if (!item) return false;
+  if (window.nexLostValidityByPayment(item).lost) return false;
+  const sent = window.nexParseIso(item.date || item.createdAt);
+  const days = sent ? window.nexDaysBetween(sent, window.nexTodayIso()) : 999;
+  const pendingConsult = !item.tracking || !item.status;
+  const inDeadline = days != null && days <= 10;
+  return inDeadline || pendingConsult;
+};
+
+window.switchWesendPanel = function(panel) {
+  const follow = document.getElementById("wesend-panel-followup");
+  const eleg = document.getElementById("wesend-panel-elegiveis");
+  const b1 = document.getElementById("btn-wesend-followup");
+  const b2 = document.getElementById("btn-wesend-elegiveis");
+  if (follow) follow.style.display = panel === "followup" ? "block" : "none";
+  if (eleg) eleg.style.display = panel === "elegiveis" ? "block" : "none";
+  if (b1) b1.classList.toggle("active", panel === "followup");
+  if (b2) b2.classList.toggle("active", panel === "elegiveis");
+};
+
+window.renderNexFollowup = function() {
+  const body = document.getElementById("nex-followup-body");
+  if (!body) return;
+  const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
+  const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
+  const rows = window.nexCollectAll().filter(it => window.nexInFollowup(it));
+  const customers = AppState.customers || {};
+  const filtered = rows.filter(it => {
+    if (fTitulo && !String(it.titulo || "").includes(fTitulo)) return false;
+    const name = (customers[it.customerId] && customers[it.customerId].name) || "";
+    if (fNome && !name.toLowerCase().includes(fNome)) return false;
+    return true;
+  });
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(it => {
+    const valid = window.nexIsLegallyValid(it);
+    const cust = customers[it.customerId] || {};
+    const emp = window.nexEmpNameForSale(it.titulo) || "—";
+    const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
+    const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (window.nexIsEntregue(it.status) ? "ENTREGUE" : (it.status || "")) ? "selected" : ""}>${s}</option>`).join("");
+    const arCell = it.arDigital
+      ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
+      : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`;
+    return `<tr class="nex-followup-row" data-customer-id="${it.customerId}" data-sale-id="${it.titulo}" style="cursor:pointer;" onclick="window.openCustomerNexTab('${it.customerId}','${it.titulo}','${it.titulo}')">
+      <td><strong>${(cust.name || ("Cliente #" + it.customerId)).replace(/</g, "&lt;")}</strong></td>
+      <td>${String(emp).replace(/</g, "&lt;")}</td>
+      <td style="font-weight:700;">${it.titulo || "—"}</td>
+      <td>${window.nexFmtBr(it.date || it.createdAt)}</td>
+      <td onclick="event.stopPropagation()"><input value="${trackingVal.replace(/"/g, "&quot;")}" placeholder="informe nº objeto" onchange="window.updateNexTrackingFollowup('${it.id}', this.value)" style="width:160px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;"></td>
+      <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" onclick="window.openNexCorreios('${it.id}')" style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.75rem;font-weight:700;">Consultar</button></td>
+      <td onclick="event.stopPropagation()"><select onchange="window.updateNexStatus('${it.id}', this.value)" style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:180px;"><option value="">Selecionar...</option>${sel}</select></td>
+      <td style="text-align:center;" onclick="event.stopPropagation()">${arCell}</td>
+      <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
+    </tr>`;
+  }).join("");
+};
+
+window.updateNexTrackingFollowup = async function(id, value) {
+  const ctx = await window.nexResolveItem(id);
+  if (!ctx.item) return;
+  ctx.item.tracking = String(value || "").trim().toUpperCase();
+  await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+  window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
+};
+
+window.nexEmpNameForSale = function(saleId) {
+  const sales = (getSiengeApiMode() === "simulado" ? (window.MOCK_DATA && window.MOCK_DATA.SALES) : AppState.sales) || [];
+  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const unit = sale && AppState.units ? AppState.units[sale.unitId] : null;
+  const ccId = unit && unit.costCenterId;
+  const ccs = (AppState.cachedCostCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || []);
+  const cc = ccs.find(c => String(c.id) === String(ccId));
+  return (cc && cc.name) || (unit && unit.name) || "";
+};
+
 window.openNexCorreios = async function(id) {
-  const ctx = window.nexFindItem(id);
+  let ctx = window.nexFindItem(id);
+  if (!ctx.item) ctx = await window.nexResolveItem(id);
   const code = ctx.item && String(ctx.item.tracking || "").replace(/\s+/g, "").toUpperCase();
   if (!code) {
     alert("Preencha o número do objeto de rastreio antes de consultar os Correios.");
@@ -16360,9 +16849,6 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             return;
         }
         const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
-        document.getElementById("pdf-modal-title").textContent = "Notificação Extrajudicial";
-        document.getElementById("pdf-document-content").innerHTML = docHtml;
-        document.getElementById("pdf-view-overlay").classList.add("active");
         const now = new Date();
         const rec = {
             id: "nex_" + Date.now(),
@@ -16377,7 +16863,9 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             customerId: String(customerId || "")
         };
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
+        window.syncNexOccurrenceNote(customerId, rec);
         if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+        if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
         if (window.lucide) lucide.createIcons();
     } catch (e) {
         console.error('[NEX] Falha ao gerar documento', e);
@@ -16427,8 +16915,9 @@ window.gerarDocumentoFisicoCEC = async function(customerId, saleId) {
     }
 };
 
-window.gerarDocumentosFisicosNEXEmMassa = async function() {
-    const checkboxes = document.querySelectorAll(".chk-wesend-row:checked");
+window.gerarDocumentosFisicosNEXEmMassa = async function(selector) {
+    const root = selector || ".chk-wesend-zero, .chk-wesend-61";
+    const checkboxes = document.querySelectorAll(root + ":checked");
     if (checkboxes.length === 0) {
         alert("Selecione pelo menos um cliente para gerar as notificações.");
         return;
@@ -16439,28 +16928,54 @@ window.gerarDocumentosFisicosNEXEmMassa = async function() {
     if (btn && btn.tagName === 'BUTTON') {
         oldHtml = btn.innerHTML;
         btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 16px; height: 16px;"></i> Gerando...';
+        btn.disabled = true;
         if (window.lucide) lucide.createIcons();
     }
 
     try {
     let fullHtml = '';
+    let generated = 0;
+    let skipped = 0;
     for (let i = 0; i < checkboxes.length; i++) {
         const chk = checkboxes[i];
         const saleId = chk.getAttribute('data-sale-id');
         const customerId = chk.getAttribute('data-customer-id');
-        const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
-        
-        fullHtml += docHtml;
-        
-        if (i < checkboxes.length - 1) {
-            fullHtml += '<div style="page-break-after: always; height: 1px;"></div>';
+        const existing = await window.loadNexHistory(customerId, saleId);
+        const blocked = window.nexValidInLast90Days(existing);
+        if (blocked) {
+            skipped++;
+            continue;
         }
+        const docHtml = await window.generateSingleNEXHtml(customerId, saleId);
+        const now = new Date();
+        const rec = {
+            id: "nex_" + Date.now() + "_" + i,
+            date: window.nexParseIso(now.toISOString()),
+            createdAt: now.toISOString(),
+            author: window.nexCurrentUserName(),
+            letterType: "Notificação Extrajudicial",
+            tracking: "",
+            status: "",
+            html: docHtml,
+            titulo: String(saleId || ""),
+            customerId: String(customerId || "")
+        };
+        await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
+        window.syncNexOccurrenceNote(customerId, rec);
+        if (generated > 0) fullHtml += '<div style="page-break-after: always; height: 1px;"></div>';
+        fullHtml += docHtml;
+        generated++;
+    }
+    if (!generated) {
+        alert(skipped ? "Nenhuma NEX gerada: os selecionados já possuem NEX válida nos últimos 90 dias." : "Não foi possível gerar as NEX em lote.");
+        return;
     }
     
     document.getElementById("pdf-modal-title").textContent = "Notificações Extrajudiciais (Lote)";
     document.getElementById("pdf-document-content").innerHTML = fullHtml;
     document.getElementById("pdf-view-overlay").classList.add("active");
     if (window.lucide) lucide.createIcons();
+    if (typeof loadWeSendTab === "function") loadWeSendTab();
     } catch (e) {
         console.error('[NEX] Falha ao gerar lote', e);
         alert('Não foi possível gerar as NEX em lote. Tente novamente.');
@@ -16827,6 +17342,10 @@ window.markCityAssignmentManual = function(ruleId) {
 };
 
 window.addOperatorToRule = function(ruleId, op) {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    alert("Sem permissão para editar Regras de Cobrança.");
+    return;
+  }
   if (!op || !AppState.rules || !AppState.rules[ruleId]) return;
   
   if (op === "NÃO ATRIBUÍDO" || op === "SEM CARTEIRA INADIMPLENTE") {
@@ -16853,6 +17372,10 @@ window.addOperatorToRule = function(ruleId, op) {
 };
 
 window.removeOperatorFromRule = function(ruleId, op) {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    alert("Sem permissão para editar Regras de Cobrança.");
+    return;
+  }
   if (!AppState.rules || !AppState.rules[ruleId]) return;
   
   let currentOps = AppState.rules[ruleId].operator;
@@ -16973,7 +17496,9 @@ function checkAdminPermissions() {
   }
   
   const btnSaveRules = document.getElementById("btn-save-rules-config");
-  if (btnSaveRules) {
+  if (btnSaveRules && typeof window.hasFinCrAction === "function") {
+    btnSaveRules.disabled = !window.hasFinCrAction("regras_cobranca", "editar");
+  } else if (btnSaveRules) {
     btnSaveRules.disabled = !isCurrentAdmin;
   }
   
@@ -17583,6 +18108,10 @@ window.sortFilaCircles = function() {
 };
 
 window.saveFilaConfig = function() {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    alert("Sem permissão para editar Regras de Cobrança.");
+    return;
+  }
   const op = document.getElementById("fila-config-operator")?.value || "Todos";
   
   // Validar campos vazios (null)
@@ -17631,6 +18160,10 @@ window.saveFilaConfig = function() {
 };
 
 window.addNegotiationRule = function(profile, rule = {}) {
+    if (!window._seedingNegotiationRules && typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
+        alert("Sem permissão para editar Regras de Negociação.");
+        return;
+    }
     const container = document.getElementById('rules-container-' + profile);
     if (!container) return;
 
@@ -17707,6 +18240,10 @@ window.addNegotiationRule = function(profile, rule = {}) {
 };
 
 window.removeNegotiationRule = function(btn) {
+    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
+        alert("Sem permissão para editar Regras de Negociação.");
+        return;
+    }
     const row = btn.closest('.negotiation-rule-row');
     if (row) {
         row.remove();
@@ -17742,6 +18279,7 @@ window.saveNegotiationRules = function() {
 };
 
 window.initializeNegotiationRules = function() {
+    window._seedingNegotiationRules = true;
     const savedRulesJSON = localStorage.getItem("crm_moura_negotiation_rules");
     let savedRules = null;
     if (savedRulesJSON) {
@@ -17763,6 +18301,7 @@ window.initializeNegotiationRules = function() {
             window.addNegotiationRule(profile);
         }
     });
+    window._seedingNegotiationRules = false;
 };
 
 setTimeout(() => {
@@ -17771,40 +18310,45 @@ setTimeout(() => {
     }
 }, 1000);
 
-window.saveRulesConfig = function() {
-  const containers = document.querySelectorAll(".rule-operator-container");
-  containers.forEach(container => {
-    // Note: AppState.rules is already updated via addOperatorToRule/removeOperatorFromRule
-  });
-  
-  localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
-  
-  const params = {
-    email: document.getElementById("rule-param-email")?.value || 5,
-    whatsapp: document.getElementById("rule-param-whatsapp")?.value || 10,
-    carta: document.getElementById("rule-param-carta")?.value || 30,
-    renegSinal: document.getElementById("rule-param-sinal")?.value || 30,
-    renegParcelas: document.getElementById("rule-param-parcelas")?.value || 12,
-    renegTaxa: document.getElementById("rule-param-taxa")?.value || 3.0
-  };
-  localStorage.setItem("crm_moura_rules_params", JSON.stringify(params));
-  
-  if (window.TimelineState) {
-    localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+window.saveRulesConfig = function(scope) {
+  const canEditCob = typeof window.hasFinCrAction !== "function" || window.hasFinCrAction("regras_cobranca", "editar");
+  const canEditNeg = typeof window.hasFinCrAction !== "function" || window.hasFinCrAction("regras_negociacao", "editar");
+  const onlyNeg = scope === "negociacao";
+  if (onlyNeg && !canEditNeg) {
+    alert("Sem permissão para editar Regras de Negociação.");
+    return;
   }
-  
-  if (window.EtapasJudiciaisState) {
-    // Atualizar os dias digitados antes de salvar
-    window.EtapasJudiciaisState.forEach(etapa => {
-      const input = document.getElementById(`jud-etapa-${etapa.id}`);
-      if (input) etapa.dias = input.value;
-      const nameInput = document.getElementById(`jud-etapa-name-${etapa.id}`);
-      if (nameInput) etapa.nome = nameInput.value;
-    });
-    localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+  if (!onlyNeg && !canEditCob && !canEditNeg) {
+    alert("Sem permissão para editar estas regras.");
+    return;
   }
-  
-  if (window.saveNegotiationRules) {
+
+  if (canEditCob && !onlyNeg) {
+    localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
+    const params = {
+      email: document.getElementById("rule-param-email")?.value || 5,
+      whatsapp: document.getElementById("rule-param-whatsapp")?.value || 10,
+      carta: document.getElementById("rule-param-carta")?.value || 30,
+      renegSinal: document.getElementById("rule-param-sinal")?.value || 30,
+      renegParcelas: document.getElementById("rule-param-parcelas")?.value || 12,
+      renegTaxa: document.getElementById("rule-param-taxa")?.value || 3.0
+    };
+    localStorage.setItem("crm_moura_rules_params", JSON.stringify(params));
+    if (window.TimelineState) {
+      localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+    }
+    if (window.EtapasJudiciaisState) {
+      window.EtapasJudiciaisState.forEach(etapa => {
+        const input = document.getElementById(`jud-etapa-${etapa.id}`);
+        if (input) etapa.dias = input.value;
+        const nameInput = document.getElementById(`jud-etapa-name-${etapa.id}`);
+        if (nameInput) etapa.nome = nameInput.value;
+      });
+      localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+    }
+  }
+
+  if (canEditNeg && window.saveNegotiationRules) {
       window.saveNegotiationRules();
   }
   
