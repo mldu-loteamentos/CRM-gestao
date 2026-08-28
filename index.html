@@ -1089,7 +1089,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.516 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.517 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2939,13 +2939,14 @@ Atenciosamente,
               </button>
             </div>
             <div class="table-container" style="overflow:auto;">
-              <table class="custom-table ficha-hist-table" style="min-width:1360px;">
+              <table class="custom-table ficha-hist-table" style="min-width:1480px;">
                 <thead>
                   <tr>
                     <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-nex-followup')"></th>
                     <th>Cliente</th>
-                    <th>Empreendimento</th>
                     <th>Título</th>
+                    <th>Unidade</th>
+                    <th>Quem fez</th>
                     <th>Data da NEX</th>
                     <th>Objeto de rastreio</th>
                     <th style="text-align:center;">Correios</th>
@@ -2961,12 +2962,13 @@ Atenciosamente,
           </div>
 
           <div id="wesend-panel-zero" style="display:none; margin-top: 1.2rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
               <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Elegíveis 0% pago</h3>
               <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-zero')">
                 <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
               </button>
             </div>
+            <p id="nex-help-zero" style="font-size:0.85rem; color:var(--color-text-muted); margin:0 0 12px; line-height:1.45;"></p>
             <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
               <table class="custom-table" id="wesend-zero-table">
                 <thead>
@@ -2990,12 +2992,13 @@ Atenciosamente,
           </div>
 
           <div id="wesend-panel-61" style="display:none; margin-top: 1.2rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
               <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Demais clientes elegíveis</h3>
               <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-61')">
                 <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
               </button>
             </div>
+            <p id="nex-help-61" style="font-size:0.85rem; color:var(--color-text-muted); margin:0 0 12px; line-height:1.45;"></p>
             <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
               <table class="custom-table" id="wesend-61-table">
                 <thead>
@@ -5315,17 +5318,17 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
 
         <div class="form-group">
           <label for="reprocess-duedate" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Novo Vencimento</label>
-          <input type="date" id="reprocess-duedate" class="form-control">
+          <input type="date" id="reprocess-duedate" class="form-control" readonly tabindex="-1" style="background:#f1f5f9;cursor:not-allowed;">
         </div>
 
         <div style="display: flex; gap: 15px;">
           <div class="form-group" style="flex: 1;">
             <label for="reprocess-fine" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Multa (%)</label>
-            <input type="number" id="reprocess-fine" class="form-control" step="0.01" value="2.00">
+            <input type="number" id="reprocess-fine" class="form-control" step="0.01" value="2.00" readonly tabindex="-1" style="background:#f1f5f9;cursor:not-allowed;">
           </div>
           <div class="form-group" style="flex: 1;">
             <label for="reprocess-interest" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Juros (%)</label>
-            <input type="number" id="reprocess-interest" class="form-control" step="0.01" value="1.00">
+            <input type="number" id="reprocess-interest" class="form-control" step="0.01" value="1.00" readonly tabindex="-1" style="background:#f1f5f9;cursor:not-allowed;">
           </div>
         </div>
 
@@ -5366,13 +5369,12 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
             </div>
 
             <div class="form-group">
-              <label for="reprocess-reminder" style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Lembrete <span style="color: var(--color-danger);">*</span></label>
-              <select id="reprocess-reminder" class="form-control" onchange="validateReprocessForm()">
-                <option value="">Selecione...</option>
-                <option value="Ligar">Ligar</option>
-                <option value="Mandar mensagem">Mandar mensagem</option>
-                <option value="Mandar e-mail">Mandar e-mail</option>
-                <option value="Enviar carta">Enviar carta</option>
+              <label style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); margin-bottom: 5px; display: block;">Lembrete</label>
+              <div style="padding: 8px 10px; border-radius: 6px; background: #ecfeff; border: 1px solid #a5f3fc; color: #0e7490; font-size: 0.82rem; font-weight: 700;">
+                Checar pagamento (automático em D+1 do vencimento do boleto)
+              </div>
+              <select id="reprocess-reminder" class="form-control" style="display:none;">
+                <option value="Checar pagamento" selected>Checar pagamento</option>
               </select>
             </div>
           </div>
@@ -5845,34 +5847,34 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=516"></script>
-  <script defer src="sienge-api.js?v=516"></script>
-  <script defer src="azure-auth.js?v=516"></script>
-  <script defer src="app.js?v=516"></script>
-  <script defer src="home-dashboard.js?v=516"></script>
-  <script defer src="anexos.js?v=516"></script>
-  <script defer src="contas-pagar.js?v=516"></script>
-  <script defer src="config-tags.js?v=516"></script>
-  <script defer src="config-users.js?v=516"></script>
-  <script defer src="construcao.js?v=516"></script>
-  <script defer src="empresas.js?v=516"></script>
-  <script defer src="relacionamento.js?v=516"></script>
+  <script defer src="data.js?v=517"></script>
+  <script defer src="sienge-api.js?v=517"></script>
+  <script defer src="azure-auth.js?v=517"></script>
+  <script defer src="app.js?v=517"></script>
+  <script defer src="home-dashboard.js?v=517"></script>
+  <script defer src="anexos.js?v=517"></script>
+  <script defer src="contas-pagar.js?v=517"></script>
+  <script defer src="config-tags.js?v=517"></script>
+  <script defer src="config-users.js?v=517"></script>
+  <script defer src="construcao.js?v=517"></script>
+  <script defer src="empresas.js?v=517"></script>
+  <script defer src="relacionamento.js?v=517"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=516"></script>
-  <script defer src="marketing.js?v=516"></script>
-  <script defer src="plano-financeiro.js?v=516"></script>
-  <script defer src="prestacao-contas.js?v=516"></script>
-  <script defer src="fluxo-caixa.js?v=516"></script>
-  <script defer src="parametrizacao-parceiro.js?v=516"></script>
-  <script defer src="fiscal.js?v=516"></script>
-  <script defer src="indexadores.js?v=516"></script>
-  <script defer src="verificar-construcao.js?v=516"></script>
-  <script src="repactuacoes.js?v=516"></script>
+  <script defer src="centros-custo.js?v=517"></script>
+  <script defer src="marketing.js?v=517"></script>
+  <script defer src="plano-financeiro.js?v=517"></script>
+  <script defer src="prestacao-contas.js?v=517"></script>
+  <script defer src="fluxo-caixa.js?v=517"></script>
+  <script defer src="parametrizacao-parceiro.js?v=517"></script>
+  <script defer src="fiscal.js?v=517"></script>
+  <script defer src="indexadores.js?v=517"></script>
+  <script defer src="verificar-construcao.js?v=517"></script>
+  <script src="repactuacoes.js?v=517"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=516"></script>
+  <script defer src="dashboard-inadimplencia.js?v=517"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

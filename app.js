@@ -117,6 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof window.ensureAllNexCleared === "function") window.ensureAllNexCleared();
       if (typeof window.ensureNexTodayPurged === "function") window.ensureNexTodayPurged();
       if (typeof window.ensureNexTitulo12753Removed === "function") window.ensureNexTitulo12753Removed();
+      if (typeof window.ensureBoletoNotesTitulo4868Removed === "function") window.ensureBoletoNotesTitulo4868Removed();
     }, 1500);
 });
 
@@ -1788,13 +1789,14 @@ async function initializeApplication() {
       const graceMs = 120000;
       const now = Date.now();
       const extras = [];
+      const purgedIds = new Set(typeof window.getPurgedBoleto4868Identities === "function" ? window.getPurgedBoleto4868Identities() : []);
       localList.forEach(n => {
           const k = window.occurrenceIdentity(n);
-          if (!k || remoteKeys.has(k)) return;
+          if (!k || remoteKeys.has(k) || purgedIds.has(k)) return;
           const ts = new Date(n.date).getTime();
-          if (Number.isFinite(ts) && (now - ts) < graceMs) extras.push(n);
+          if (Number.isFinite(ts) && ts <= now && (now - ts) < graceMs) extras.push(n);
       });
-      return remoteList.concat(extras);
+      return remoteList.filter(n => !purgedIds.has(window.occurrenceIdentity(n))).concat(extras);
   };
 
   window.getCustomerNotesList = function(store, customerId) {
@@ -1969,6 +1971,9 @@ async function initializeApplication() {
                  }
                  
                  console.log("[Firebase RT] Carga inicial unificada concluída com sucesso!");
+                 if (typeof window.ensureBoletoNotesTitulo4868Removed === "function") {
+                   window.ensureBoletoNotesTitulo4868Removed();
+                 }
                  
                  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
                  if (typeof updateDashboardHeader === 'function') updateDashboardHeader();
@@ -8461,27 +8466,6 @@ function formatCpfCnpj(val) {
       alert("Nenhuma parcela selecionada.");
       return;
     }
-    const reminderSelect = document.getElementById("note-reminder-select");
-    if (reminderSelect && reminderSelect.value !== "Boleto gerado" && reminderSelect.value !== "Boleto Gerado") {
-      alert("O lembrete será alterado para 'Boleto gerado' para acompanhar o pagamento.");
-      
-      // Adiciona a opção se não existir
-      let optionExists = false;
-      for (let i = 0; i < reminderSelect.options.length; i++) {
-        if (reminderSelect.options[i].value.toLowerCase() === "boleto gerado") {
-          optionExists = true;
-          reminderSelect.value = reminderSelect.options[i].value;
-          break;
-        }
-      }
-      if (!optionExists) {
-        const newOption = document.createElement("option");
-        newOption.value = "Boleto gerado";
-        newOption.text = "Boleto gerado";
-        reminderSelect.appendChild(newOption);
-        reminderSelect.value = "Boleto gerado";
-      }
-    }
 
     const instIds = typeof window.resolvePromisedInstallmentIds === "function"
       ? window.resolvePromisedInstallmentIds(AppState.selectedPromisedInstallments)
@@ -8620,6 +8604,11 @@ function renderCustomerOccurrences() {
     }
 
     const isNexLocked = !!occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX";
+    const isCheckPay = typeof window.isCheckPaymentOccurrence === "function" && window.isCheckPaymentOccurrence(occ);
+    const todayIsoOcc = new Date().toISOString().slice(0, 10);
+    const checkIso = occ.checkPaymentDate || occ.promiseDate || "";
+    const checkPayWaiting = isCheckPay && occ.status !== "Cancelada" && occ.promiseStatus !== "Cumprido" && occ.promiseStatus !== "Quebrado" && checkIso && checkIso > todayIsoOcc;
+    const checkPayDue = isCheckPay && occ.status !== "Cancelada" && occ.promiseStatus === "Pendente" && checkIso && checkIso <= todayIsoOcc;
     let isNotaInterna = false;
     if (occ.canal && (occ.canal === 'Nota Interna' || occ.canal === 'Nota interna')) {
       isNotaInterna = true;
@@ -8635,6 +8624,17 @@ function renderCustomerOccurrences() {
       card.style.setProperty('border', '1px solid #fecaca', 'important');
       card.style.setProperty('border-left', '4px solid #ef4444', 'important');
       card.style.cursor = 'pointer';
+    } else if (checkPayWaiting) {
+      card.style.setProperty('position', 'relative', 'important');
+      card.style.setProperty('background-color', '#ecfeff', 'important');
+      card.style.setProperty('border', '1px solid #67e8f9', 'important');
+      card.style.setProperty('border-left', '4px solid #0891b2', 'important');
+      card.style.setProperty('box-shadow', '0 0 0 1px rgba(8,145,178,0.12)', 'important');
+    } else if (checkPayDue) {
+      card.style.setProperty('position', 'relative', 'important');
+      card.style.setProperty('background-color', '#fff7ed', 'important');
+      card.style.setProperty('border', '1px solid #fdba74', 'important');
+      card.style.setProperty('border-left', '4px solid #ea580c', 'important');
     }
     
     // Tags visuais
@@ -8652,6 +8652,12 @@ function renderCustomerOccurrences() {
       const icon = occ.iniciativa === 'Ativo' ? 'arrow-right' : 'arrow-left';
       const color = occ.iniciativa === 'Ativo' ? 'var(--color-primary)' : 'var(--color-danger)';
       tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${color}; font-weight: 600;"><i data-lucide="${icon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.iniciativa}</span>`;
+    }
+    if (isCheckPay && occ.status !== "Cancelada") {
+      const checkLabel = checkIso ? new Date(checkIso + 'T12:00:00').toLocaleDateString('pt-BR') : '';
+      const tagBg = checkPayDue ? '#ffedd5' : '#cffafe';
+      const tagColor = checkPayDue ? '#c2410c' : '#0e7490';
+      tagsHtml += `<span style="background: ${tagBg}; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${tagColor}; font-weight: 700;"><i data-lucide="banknote" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${checkPayDue ? 'Checar pagamento' : 'Aguardando checagem'}${checkLabel ? ' · ' + checkLabel : ''}</span>`;
     }
     // if (occ.saleId) {
     //   tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: #475569; font-weight: 600;"><i data-lucide="tag" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>Tít: ${occ.saleId}</span>`;
@@ -8694,9 +8700,10 @@ function renderCustomerOccurrences() {
         `;
       }
       
+      const promiseLabel = isCheckPay ? "Checar pagamento" : "Promessa";
       promiseInlineHtml = `
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size:0.75rem; font-weight:700;">Promessa: ${pdStr}</span>
+          <span style="font-size:0.75rem; font-weight:700;">${promiseLabel}: ${pdStr}</span>
           ${statusHtml}
         </div>
       `;
@@ -9697,8 +9704,9 @@ window.cancelOccurrence = function(customerId, occDate) {
       return;
   }
   
-  if (occ.reminder && occ.reminder.toLowerCase() === "boleto gerado") {
-      alert("Não é possível excluir uma ocorrência que possui um boleto gerado.");
+  const remLower = String(occ.reminder || "").toLowerCase();
+  if (occ.checkPayment || remLower === "boleto gerado" || remLower === "checar pagamento") {
+      alert("Não é possível excluir uma ocorrência com boleto gerado / checagem de pagamento.");
       return;
   }
   
@@ -11350,6 +11358,24 @@ window.resolveBoletoCostCenterId = function(passed) {
   return null;
 };
 
+window.addDaysIso = function(iso, days) {
+  if (!iso) return "";
+  const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+  if (isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + (Number(days) || 0));
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+window.isCheckPaymentOccurrence = function(occ) {
+  if (!occ) return false;
+  if (occ.checkPayment) return true;
+  const r = String(occ.reminder || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return r === "checar pagamento" || r.indexOf("checar pagamento") !== -1;
+};
+
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
   currentReprocessBillId = billId;
   currentReprocessInstId = instId;
@@ -11367,14 +11393,25 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   accountSelect.innerHTML = '<option value="">Carregando contas...</option>';
   accountSelect.disabled = true;
   
-  // Vencimento pro dia de hoje
   const hoje = new Date();
   const yyyy = hoje.getFullYear();
   const mm = String(hoje.getMonth() + 1).padStart(2, '0');
   const dd = String(hoje.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}-${mm}-${dd}`;
-  dueDateInput.value = todayStr;
-  dueDateInput.min = todayStr; // Nao permite data retroativa
+
+  const simDateEl = document.getElementById("simulador-data");
+  const noteDateEl = document.getElementById("note-promise-date");
+  let dueFromPrev = "";
+  if (source === "ocorrencia" && noteDateEl && noteDateEl.value) {
+    dueFromPrev = noteDateEl.value;
+  } else if (simDateEl && simDateEl.value) {
+    dueFromPrev = simDateEl.value;
+  } else if (noteDateEl && noteDateEl.value) {
+    dueFromPrev = noteDateEl.value;
+  }
+  dueDateInput.value = dueFromPrev || todayStr;
+  dueDateInput.readOnly = true;
+  dueDateInput.removeAttribute("min");
 
   const simTaxaSelect = document.getElementById("simulador-taxa");
   let taxaMultiplier = 1;
@@ -11384,13 +11421,20 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   const defaultMulta = (2.00 * taxaMultiplier).toFixed(2);
   const defaultJuros = (1.00 * taxaMultiplier).toFixed(2);
 
-  document.getElementById('reprocess-fine').value = defaultMulta;
-  document.getElementById('reprocess-interest').value = defaultJuros;
+  const fineEl = document.getElementById('reprocess-fine');
+  const interestEl = document.getElementById('reprocess-interest');
+  if (fineEl) {
+    fineEl.value = defaultMulta;
+    fineEl.readOnly = true;
+  }
+  if (interestEl) {
+    interestEl.value = defaultJuros;
+    interestEl.readOnly = true;
+  }
 
   // Tenta puxar valores da aba de ocorrências se já estiverem preenchidos
   const mainTextEl = document.getElementById('note-text');
   const mainCanalEl = document.getElementById('note-canal');
-  const mainRemEl = document.getElementById('note-reminder-select');
   const mainInicEl = document.querySelector('input[name="note-iniciativa"]:checked');
 
   const textEl = document.getElementById('reprocess-text');
@@ -11400,7 +11444,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   if (canalEl) canalEl.value = mainCanalEl && mainCanalEl.value ? mainCanalEl.value : '';
   
   const remEl = document.getElementById('reprocess-reminder');
-  if (remEl) remEl.value = mainRemEl && mainRemEl.value ? mainRemEl.value : '';
+  if (remEl) remEl.value = "Checar pagamento";
   
   const inis = document.querySelectorAll('input[name="reprocess-iniciativa"]');
   inis.forEach(r => r.checked = false);
@@ -11409,7 +11453,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
     if (matchingIni) matchingIni.checked = true;
   }
 
-  const hasMainOcorrenciaCompleted = mainTextEl && mainTextEl.value && mainCanalEl && mainCanalEl.value && mainRemEl && mainRemEl.value && mainInicEl;
+  const hasMainOcorrenciaCompleted = mainTextEl && mainTextEl.value && mainCanalEl && mainCanalEl.value && mainInicEl;
   const promessaSection = document.getElementById('reprocess-promessa-section');
   if (promessaSection) {
      promessaSection.style.display = hasMainOcorrenciaCompleted ? 'none' : 'block';
@@ -11478,12 +11522,11 @@ window.validateReprocessForm = function() {
   const canal = document.getElementById('reprocess-canal')?.value;
   const iniciativa = document.querySelector('input[name="reprocess-iniciativa"]:checked');
   const text = document.getElementById('reprocess-text')?.value.trim();
-  const reminder = document.getElementById('reprocess-reminder')?.value;
   
   const btn = document.getElementById('btn-submit-reprocess');
   if (!btn) return;
   
-  const isPromessaValid = isPromessaHidden || (canal && iniciativa && text && reminder);
+  const isPromessaValid = isPromessaHidden || (canal && iniciativa && text);
 
   if (account && dueDate && isPromessaValid) {
     btn.disabled = false;
@@ -11577,7 +11620,9 @@ window.submitReprocessBoleto = async function() {
     const result = await SiengeApiService.createOverdueBill(payload);
     
     const parcelasLog = Array.isArray(currentReprocessInstId) ? currentReprocessInstId.join(", ") : currentReprocessInstId;
-    const boletoText = `Boleto gerado. Parcelas Originais ID: ${parcelasLog} | Novo Vencimento: ${dueDate} | Multa: ${fine}% | Juros: ${interest}%`;
+    const checkDate = window.addDaysIso(dueDate, 1);
+    const checkDateBr = checkDate ? new Date(checkDate + "T12:00:00").toLocaleDateString("pt-BR") : "";
+    const boletoText = `Boleto gerado. Parcelas Originais ID: ${parcelasLog} | Novo Vencimento: ${dueDate} | Multa: ${fine}% | Juros: ${interest}% | Lembrete automático: Checar pagamento em ${checkDateBr} (D+1)`;
 
     const promessaSection = document.getElementById('reprocess-promessa-section');
     const isPromessaHidden = promessaSection && promessaSection.style.display === 'none';
@@ -11585,34 +11630,34 @@ window.submitReprocessBoleto = async function() {
     let userText = '';
     let canal = '';
     let iniciativa = '';
-    let reminder = '';
 
     if (isPromessaHidden) {
       userText = (document.getElementById('note-text')?.value || '').trim().toUpperCase();
       canal = document.getElementById('note-canal')?.value || '';
       const mainInicEl = document.querySelector('input[name="note-iniciativa"]:checked');
       iniciativa = mainInicEl ? mainInicEl.value : '';
-      reminder = document.getElementById('note-reminder-select')?.value || '';
     } else {
       userText = (document.getElementById('reprocess-text')?.value || '').trim().toUpperCase();
       canal = document.getElementById('reprocess-canal')?.value || '';
       const iniEl = document.querySelector('input[name="reprocess-iniciativa"]:checked');
       iniciativa = iniEl ? iniEl.value : '';
-      reminder = document.getElementById('reprocess-reminder')?.value || '';
     }
 
     const finalPromessaText = userText ? `${userText}\n[SISTEMA]: ${boletoText}` : `[SISTEMA]: ${boletoText}`;
 
-    // Gera ocorrência com promessa preenchida pelo operador no modal
+    // Gera ocorrência com lembrete automático de checagem (banco confirma no D+1)
     const occurrence = {
       id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `prom_${Date.now()}-${Math.random().toString(36).slice(2)}`,
       date: new Date().toISOString(),
       author: AppState.currentUser ? AppState.currentUser.name : (window.LOGGED_USER_NAME || "Operador"),
       saleId: AppState.selectedSaleId || null,
       text: finalPromessaText,
-      promiseDate: dueDate,
+      boletoDueDate: dueDate,
+      checkPaymentDate: checkDate,
+      promiseDate: checkDate,
       promiseStatus: 'Pendente',
-      reminder: reminder,
+      reminder: "Checar pagamento",
+      checkPayment: true,
       canal: canal,
       iniciativa: iniciativa,
       pastTexts: []
@@ -11626,7 +11671,7 @@ window.submitReprocessBoleto = async function() {
     if (window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId);
     if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
 
-    alert("Boleto gerado e Promessa registrada com sucesso!");
+    alert("Boleto gerado. Lembrete automático 'Checar pagamento' agendado para D+1 do vencimento.");
     closeReprocessModal();
     
     // Atualiza listagem
@@ -15217,6 +15262,7 @@ async function loadWeSendTab() {
 
   fillBody("wesend-zero-body", zeroList, "chk-wesend-zero", "elegiveis-zero", true);
   fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
+  if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
   const restorePanel = sessionStorage.getItem("wesendActivePanel") || sessionStorage.getItem("wesendReturnPanel");
   if (restorePanel && typeof window.switchWesendPanel === "function") window.switchWesendPanel(restorePanel);
@@ -16290,6 +16336,151 @@ window.nexTituloFromKey = function(key) {
   return i >= 0 ? s.slice(i + 1) : s;
 };
 
+window.isBoletoGeradoOccurrence = function(n) {
+  if (!n) return false;
+  if (n.checkPayment) return true;
+  const t = String(n.text || "").toUpperCase();
+  const r = String(n.reminder || "").toLowerCase();
+  return t.indexOf("BOLETO GERADO") !== -1 || r === "boleto gerado" || r === "checar pagamento";
+};
+
+window.isTitulo4868BoletoOccurrence = function(n) {
+  if (!n || !window.isBoletoGeradoOccurrence(n)) return false;
+  const sale = String(n.saleId != null ? n.saleId : (n.titulo || "")).trim();
+  return sale === "4868";
+};
+
+window.stripBoletoNotesTitulo4868FromState = function() {
+  if (!AppState.notes) return 0;
+  let n = 0;
+  Object.keys(AppState.notes).forEach(cid => {
+    const list = AppState.notes[cid];
+    if (!Array.isArray(list)) return;
+    const next = list.filter(x => !window.isTitulo4868BoletoOccurrence(x));
+    n += list.length - next.length;
+    AppState.notes[cid] = next;
+  });
+  return n;
+};
+
+window.getPurgedBoleto4868Identities = function() {
+  try {
+    const arr = JSON.parse(localStorage.getItem("crm_boleto_4868_identities") || "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+window.persistPurgedBoleto4868Identities = function(ids) {
+  const uniq = Array.from(new Set([].concat(window.getPurgedBoleto4868Identities(), ids || []).filter(Boolean)));
+  try { localStorage.setItem("crm_boleto_4868_identities", JSON.stringify(uniq)); } catch (e) {}
+  return uniq;
+};
+
+window.stripPurgedBoleto4868Identities = function() {
+  const ids = new Set(window.getPurgedBoleto4868Identities());
+  if (!ids.size || !AppState.notes) return 0;
+  let n = 0;
+  Object.keys(AppState.notes).forEach(cid => {
+    const list = AppState.notes[cid];
+    if (!Array.isArray(list)) return;
+    const next = list.filter(x => !ids.has(window.occurrenceIdentity(x)));
+    n += list.length - next.length;
+    AppState.notes[cid] = next;
+  });
+  if (n) {
+    try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  }
+  return n;
+};
+
+window.purgeBoletoNotesTitulo4868 = async function() {
+  const found = [];
+  if (AppState.notes) {
+    Object.keys(AppState.notes).forEach(cid => {
+      const list = AppState.notes[cid];
+      if (!Array.isArray(list)) return;
+      list.forEach(x => {
+        if (window.isTitulo4868BoletoOccurrence(x)) found.push(window.occurrenceIdentity(x));
+      });
+    });
+  }
+  window.stripBoletoNotesTitulo4868FromState();
+  try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
+  if (typeof updateSidebarAgendaBadge === "function") updateSidebarAgendaBadge();
+  if (!(window.firebaseDb && window.firebaseCollections)) {
+    window.persistPurgedBoleto4868Identities(found);
+    return found.length;
+  }
+  try {
+    const { collection, getDocs, setDoc } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "customer_notes_shards"));
+    const patchByRef = [];
+    for (const d of snap.docs) {
+      const data = d.data() || {};
+      const patch = {};
+      let changed = false;
+      Object.keys(data).forEach(k => {
+        if (!Array.isArray(data[k])) return;
+        data[k].forEach(x => {
+          if (window.isTitulo4868BoletoOccurrence(x)) found.push(window.occurrenceIdentity(x));
+        });
+        const filtered = data[k].filter(x => !window.isTitulo4868BoletoOccurrence(x));
+        if (filtered.length !== data[k].length) {
+          patch[k] = filtered;
+          changed = true;
+        }
+      });
+      if (changed) patchByRef.push({ ref: d.ref, patch });
+    }
+    for (const item of patchByRef) await setDoc(item.ref, item.patch, { merge: true });
+  } catch (e) {
+    console.warn("[CRM] Falha ao limpar boletos gerados do título 4868", e);
+  }
+  window.persistPurgedBoleto4868Identities(found);
+  window.stripPurgedBoleto4868Identities();
+  return found.length;
+};
+
+window.ensureBoletoNotesTitulo4868Removed = async function() {
+  window.stripPurgedBoleto4868Identities();
+  if (window._boleto4868PurgePromise) return window._boleto4868PurgePromise;
+  window._boleto4868PurgePromise = (async () => {
+    try {
+    if (window.firebaseDb && window.firebaseCollections) {
+      try {
+        const { doc, getDoc, setDoc } = window.firebaseCollections;
+        const flagRef = doc(window.firebaseDb, "settings", "boleto_notes_purged_titulo_4868");
+        const snap = await getDoc(flagRef);
+        const remoteIds = (snap.exists() && snap.data() && snap.data().identities) || [];
+        if (snap.exists() && remoteIds.length) {
+          window.persistPurgedBoleto4868Identities(remoteIds);
+          window.stripPurgedBoleto4868Identities();
+          if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
+          return remoteIds.length;
+        }
+        const n = await window.purgeBoletoNotesTitulo4868();
+        const ids = window.getPurgedBoleto4868Identities();
+        if (ids.length) {
+          await setDoc(flagRef, { purgedAt: Date.now(), titulo: "4868", identities: ids });
+        } else {
+          window._boleto4868PurgePromise = null;
+        }
+        return n;
+      } catch (e) {
+        console.warn("[CRM] Purge boletos título 4868", e);
+      }
+    }
+    return window.purgeBoletoNotesTitulo4868();
+    } finally {
+      if (!window.getPurgedBoleto4868Identities().length) window._boleto4868PurgePromise = null;
+    }
+  })();
+  return window._boleto4868PurgePromise;
+};
+
 window.ensureNexTitulo12753Removed = async function() {
   const flag = "crm_nex_removed_titulo_12753_v2";
   try {
@@ -16991,6 +17182,52 @@ window.bindWesendFichaBack = function(panel) {
   };
 };
 
+window.nexListSuspensivaRules = function() {
+  let configMap = {};
+  try { configMap = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+  const ccs = (AppState && AppState.cachedCostCenters) || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
+  const rows = [];
+  Object.keys(configMap).forEach(id => {
+    const cfg = configMap[id];
+    if (!cfg || !cfg.clausula_suspensiva_ativa) return;
+    const meta = ccs.find(c => String(c.id) === String(id));
+    const name = (meta && meta.name) || cfg.name || "";
+    rows.push({
+      id: String(id),
+      name: name,
+      dias: Number(cfg.clausula_suspensiva_dias) || 30
+    });
+  });
+  rows.sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  return rows;
+};
+
+window.updateNexEligibleHelp = function() {
+  const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31, standard: 61 };
+  const zeroDays = Number(regua.zero) || 31;
+  const stdDays = Number(regua.standard) || 61;
+  const rules = (typeof window.nexListSuspensivaRules === "function") ? window.nexListSuspensivaRules() : [];
+  const esc = (s) => String(s || "").replace(/</g, "&lt;");
+
+  const zeroEl = document.getElementById("nex-help-zero");
+  if (zeroEl) {
+    let suspensivaTxt = "Nenhum empreendimento está com cláusula suspensiva ativa no cadastro de centros de custo.";
+    if (rules.length) {
+      const items = rules.map(r => {
+        const label = r.name ? (r.id + " — " + r.name) : r.id;
+        return "<strong>" + esc(label) + "</strong>: a partir de <strong>" + r.dias + " dias</strong>";
+      }).join("; ");
+      suspensivaTxt = "Empreendimentos com cláusula suspensiva (não entram nesta lista; seguem o fluxo de suspender): " + items + ".";
+    }
+    zeroEl.innerHTML = "Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>" + zeroDays + " dias</strong> (prazo da régua de cobrança), <strong>sem cláusula suspensiva</strong> e ainda <strong>sem NEX gerada</strong>. " + suspensivaTxt;
+  }
+
+  const d61El = document.getElementById("nex-help-61");
+  if (d61El) {
+    d61El.innerHTML = "Entram nesta lista os demais clientes (já houve algum pagamento), com atraso a partir de <strong>" + stdDays + " dias</strong> conforme a <strong>régua de cobrança</strong>, e ainda <strong>sem NEX gerada</strong>. Se o prazo da régua mudar, esta lista acompanha o novo valor automaticamente.";
+  }
+};
+
 window.nexReguaDays = function() {
   const nodes = window.TimelineState || [];
   const byDias = (n) => Number(n && n.dias);
@@ -17051,6 +17288,92 @@ window.switchWesendPanel = function(panel) {
   if (b1) b1.classList.toggle("active", panel === "followup");
   if (b2) b2.classList.toggle("active", panel === "elegiveis-zero");
   if (b3) b3.classList.toggle("active", panel === "elegiveis-61");
+  if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
+};
+
+window.nexFindFilaClient = function(customerId, saleId) {
+  const cid = String(customerId || "");
+  const sid = String(saleId || "").replace(/^B-/, "").split("-")[0];
+  const lists = [window.clientList, window.rawClientList, window.zeroPaidList].filter(Array.isArray);
+  const saleMatch = (c) => {
+    if (!sid) return true;
+    if (String(c.saleId) === sid || String(c.receivableBillId) === sid) return true;
+    const bills = c.billIds || [];
+    return bills.some(id => String(id) === sid || String(id).replace(/^B-/, "").split("-")[0] === sid);
+  };
+  for (let i = 0; i < lists.length; i++) {
+    const hit = lists[i].find(c => String(c.customerId) === cid && saleMatch(c));
+    if (hit) return hit;
+  }
+  for (let i = 0; i < lists.length; i++) {
+    const hit = lists[i].find(c => String(c.customerId) === cid);
+    if (hit) return hit;
+  }
+  return null;
+};
+
+window.nexIsPlaceholderName = function(name) {
+  const n = String(name || "").trim();
+  if (!n) return true;
+  return /^cliente\s*#/i.test(n) || /^cliente sienge/i.test(n) || /^desconhecido$/i.test(n);
+};
+
+window.nexResolveCustomerName = function(customerId, saleId, item) {
+  const fromItem = item && (item.customerName || item.clientName);
+  if (fromItem && !window.nexIsPlaceholderName(fromItem)) return fromItem;
+  const cid = String(customerId || (item && item.customerId) || "");
+  const customers = (AppState && AppState.customers) || {};
+  const cached = customers[cid] || customers[Number(cid)];
+  if (cached && cached.name && !window.nexIsPlaceholderName(cached.name)) return cached.name;
+  const fila = window.nexFindFilaClient(cid, saleId || (item && item.titulo));
+  if (fila && (fila.customerName || fila.name) && !window.nexIsPlaceholderName(fila.customerName || fila.name)) {
+    return fila.customerName || fila.name;
+  }
+  const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
+    ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
+    : (AppState && AppState.sales)) || [];
+  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  if (sale && (sale.customerName || sale.clientName) && !window.nexIsPlaceholderName(sale.customerName || sale.clientName)) {
+    return sale.customerName || sale.clientName;
+  }
+  const det = document.getElementById("det-name");
+  if (det && det.textContent && String(AppState.selectedCustomerId) === cid) {
+    const t = det.textContent.trim();
+    if (t && !window.nexIsPlaceholderName(t)) return t;
+  }
+  return fromItem || (cid ? ("Cliente #" + cid) : "—");
+};
+
+window.nexUnitLabelForSale = function(customerId, saleId, item) {
+  if (item && item.unitLabel && item.unitLabel !== "—" && item.unitLabel !== "N/D") return item.unitLabel;
+  const fila = window.nexFindFilaClient(customerId, saleId || (item && item.titulo));
+  if (fila) {
+    const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(fila.costCenterId) : (fila.costCenterId || "");
+    if (fila.unitName || ccId) return String((ccId ? ccId + " - " : "") + (fila.unitName || "N/D"));
+  }
+  const emp = typeof window.nexEmpNameForSale === "function" ? window.nexEmpNameForSale(saleId || (item && item.titulo)) : "";
+  const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
+    ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
+    : (AppState && AppState.sales)) || [];
+  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const unit = sale && AppState.units ? AppState.units[sale.unitId] : null;
+  const ccId = (unit && unit.costCenterId) || (sale && (sale.costCenterId || sale.enterpriseId)) || "";
+  const unitName = (unit && (unit.name || unit.units)) || (sale && (sale.unitName || sale.units || sale.unityName)) || "";
+  if (ccId && unitName) return ccId + " - " + unitName;
+  if (emp) return emp;
+  if (ccId) return String(ccId);
+  if (unitName) return unitName;
+  return "—";
+};
+
+window.nexStampLetterMeta = function(rec, customerId, saleId) {
+  if (!rec) return rec;
+  rec.customerId = String(customerId || rec.customerId || "");
+  rec.titulo = String(rec.titulo || saleId || "");
+  rec.customerName = window.nexResolveCustomerName(customerId, saleId, rec);
+  rec.unitLabel = window.nexUnitLabelForSale(customerId, saleId, rec);
+  rec.author = rec.author || window.nexCurrentUserName();
+  return rec;
 };
 
 window.renderNexFollowup = function() {
@@ -17062,22 +17385,22 @@ window.renderNexFollowup = function() {
   const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
   const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
   const rows = window.nexCollectAll().filter(it => window.nexInFollowup(it));
-  const customers = AppState.customers || {};
   const filtered = rows.filter(it => {
     if (zeroOnly && !(it.zeroPaid || window.nexClientIsZeroPaid(it.customerId, it.titulo))) return false;
     if (fTitulo && !String(it.titulo || "").includes(fTitulo)) return false;
-    const name = (customers[it.customerId] && customers[it.customerId].name) || "";
-    if (fNome && !name.toLowerCase().includes(fNome)) return false;
+    const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
+    if (fNome && !String(name).toLowerCase().includes(fNome)) return false;
     return true;
   });
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(it => {
     const valid = window.nexIsLegallyValid(it);
-    const cust = customers[it.customerId] || {};
-    const emp = window.nexEmpNameForSale(it.titulo) || "—";
+    const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
+    const unitLabel = window.nexUnitLabelForSale(it.customerId, it.titulo, it);
+    const author = window.shortOperatorName(it.author);
     const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
     const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (window.nexIsEntregue(it.status) ? "ENTREGUE" : (it.status || "")) ? "selected" : ""}>${s}</option>`).join("");
     const arCell = it.arDigital
@@ -17085,9 +17408,10 @@ window.renderNexFollowup = function() {
       : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`;
     return `<tr class="nex-followup-row" data-customer-id="${it.customerId}" data-sale-id="${it.titulo}" style="cursor:pointer;" onclick="window.openCustomerNexTab('${it.customerId}','${it.titulo}','${it.titulo}','followup')">
       <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" class="chk-nex-followup" data-nex-id="${it.id}"></td>
-      <td><strong>${(cust.name || ("Cliente #" + it.customerId)).replace(/</g, "&lt;")}</strong></td>
-      <td>${String(emp).replace(/</g, "&lt;")}</td>
+      <td style="white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;" title="${String(name).replace(/"/g, "&quot;")}"><strong>${String(name).replace(/</g, "&lt;")}</strong></td>
       <td style="font-weight:700;">${it.titulo || "—"}</td>
+      <td style="white-space:nowrap;">${String(unitLabel).replace(/</g, "&lt;")}</td>
+      <td style="white-space:nowrap;">${String(author).replace(/</g, "&lt;")}</td>
       <td>${window.nexFmtBr(it.date || it.createdAt)}</td>
       <td onclick="event.stopPropagation()"><input value="${trackingVal.replace(/"/g, "&quot;")}" placeholder="informe nº objeto" onchange="window.updateNexTrackingFollowup('${it.id}', this.value)" style="width:160px;height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;"></td>
       <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" onclick="window.openNexCorreios('${it.id}')" style="border:1px solid #facc15;background:#fefce8;color:#854d0e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.75rem;font-weight:700;">Consultar</button></td>
@@ -17163,6 +17487,7 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
             customerId: String(customerId || ""),
             zeroPaid: window.nexClientIsZeroPaid(customerId, saleId)
         };
+        window.nexStampLetterMeta(rec, customerId, saleId);
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
         window.syncNexOccurrenceNote(customerId, rec);
         if (typeof window.renderNexHistory === "function") window.renderNexHistory();
@@ -17262,6 +17587,7 @@ window.gerarDocumentosFisicosNEXEmMassa = async function(selector) {
             customerId: String(customerId || ""),
             zeroPaid: !!(chk.classList.contains("chk-wesend-zero") || window.nexClientIsZeroPaid(customerId, saleId))
         };
+        window.nexStampLetterMeta(rec, customerId, saleId);
         await window.saveNexHistory(customerId, saleId, (existing || []).concat(rec));
         window.syncNexOccurrenceNote(customerId, rec);
         if (generated > 0) fullHtml += '<div style="page-break-after: always; height: 1px;"></div>';
