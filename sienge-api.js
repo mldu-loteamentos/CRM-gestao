@@ -1527,16 +1527,17 @@ const SiengeApiService = {
   },
 
   // 21. Listar Contas Correntes (checking-accounts)
-  async getCheckingAccounts(companyId) {
+  async getCheckingAccounts(companyId, opts = {}) {
     if (s_apiMode === "simulado") {
       const all = (window.MOCK_DATA && window.MOCK_DATA.CHECKING_ACCOUNTS) || [{ accountNumber: "6538-2", accountName: "Conta Simulada", accountType: "CHECKING", companyId: 1 }];
       if (!companyId) return { results: all };
       return { results: all.filter(a => String(a.companyId) === String(companyId)) };
     }
     try {
-      const q = companyId
-        ? `/checking-accounts?companyId=${companyId}&accountStatus=ENABLED`
-        : `/checking-accounts?accountStatus=ENABLED`;
+      const params = [];
+      if (companyId) params.push(`companyId=${companyId}`);
+      if (!opts.allStatuses) params.push("accountStatus=ENABLED");
+      const q = `/checking-accounts${params.length ? "?" + params.join("&") : ""}`;
       const list = await siengeFetchAllPages(q, 100);
       return { results: list };
     } catch (e) {

@@ -191,6 +191,48 @@ const InvestimentoApp = {
     return fallback != null ? String(fallback) : "";
   },
 
+  catalogAccount(raw, companyId) {
+    const type = raw && raw.accountType;
+    const typeDesc = type && typeof type === "object" ? (type.description || type.name || type.label || "") : type;
+    const accountNumber = String(
+      raw.accountNumber ||
+      raw.number ||
+      raw.bankAccountNumber ||
+      raw.checkingAccountNumber ||
+      raw.code ||
+      ""
+    ).trim();
+    const accountName = String(raw.accountName || raw.name || raw.description || "").trim();
+    return {
+      ...raw,
+      companyId: raw.companyId || raw.idCompany || companyId,
+      accountNumber: accountNumber || accountName,
+      accountName: accountName || accountNumber || "Conta",
+      mask: raw.mask || raw.accountMask || raw.nickname || "",
+      accountType: typeDesc || type || raw.accountKind || raw.type || ""
+    };
+  },
+
+  keysForAccount(acc) {
+    const cid = acc.companyId;
+    const keys = new Set();
+    [
+      acc.accountNumber,
+      acc.accountName,
+      acc.code,
+      acc.mask,
+      acc.checkingAccountId,
+      acc.idCheckingAccount,
+      acc.id
+    ].forEach(v => {
+      const id = this.accIdentity(v, acc);
+      if (id) keys.add(`${cid}|${id}`);
+    });
+    const sid = acc.checkingAccountId || acc.idCheckingAccount || acc.id;
+    if (sid != null && sid !== "") keys.add(`${cid}|id:${sid}`);
+    return keys;
+  },
+
   accKey(companyId, accountNumber, extra) {
     return `${companyId}|${this.accIdentity(accountNumber, extra)}`;
   },
@@ -237,10 +279,18 @@ const InvestimentoApp = {
   },
 
   pickBalance(list, accountNumber, companyId) {
-    const want = this.normAcc(accountNumber);
+    const wantDigits = this.normAcc(accountNumber);
+    const wantRaw = String(accountNumber || "").trim().toUpperCase();
     const rows = (list || []).filter(b => {
-      const num = this.normAcc(b.accountNumber || b.number);
-      if (want && num && want !== num) return false;
+      const raw = String(b.accountNumber || b.number || "").trim();
+      const num = this.normAcc(raw);
+      if (wantDigits) {
+        if (num && wantDigits !== num) return false;
+        if (!num && raw && raw.toUpperCase() !== wantRaw) return false;
+      } else if (wantRaw) {
+        if (raw && raw.toUpperCase() !== wantRaw) return false;
+        if (!raw) return false;
+      }
       if (companyId && b.companyId != null && String(b.companyId) !== String(companyId)) return false;
       return true;
     });
@@ -304,8 +354,13 @@ const InvestimentoApp = {
       const [balancesOpen, accountsChunks, movChunks, ...monthBalResults] = await Promise.all([
         SiengeApiService.getAccountBalances(openingDate, { showLast: true }),
         Promise.all(this.selectedCompanyIds.map(async id => {
-          const res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
-          return ((res && res.results) || []).map(a => ({ ...a, companyId: a.companyId || id }));
+          let res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
+          let list = (res && res.results) || [];
+          if (!list.length) {
+            res = await SiengeApiService.getCheckingAccounts(id);
+            list = (res && res.results) || [];
+          }
+          return list.map(a => this.catalogAccount(a, id));
         })),
         Promise.all(this.selectedCompanyIds.map(async id => {
           const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
@@ -330,16 +385,18 @@ const InvestimentoApp = {
         return true;
       });
 
-      const investKeys = new Set(catalog.map(a => this.accKey(a.companyId, a.accountNumber, a)));
+      const investKeys = new Set();
+      catalog.forEach(a => this.keysForAccount(a).forEach(k => investKeys.add(k)));
       const movements = movChunks.flat().filter(m => {
         const raw = this.movAccount(m);
         const key = this.accKey(m.companyId, raw, m);
-        if (!this.accIdentity(raw, m)) return false;
+        const idKey = m.checkingAccountId != null ? `${m.companyId}|id:${m.checkingAccountId}` : "";
+        if (!this.accIdentity(raw, m) && !idKey) return false;
         if (!catalog.length) return false;
         if (!this.onlyInvestment) {
           return this.selectedCompanyIds.includes(String(m.companyId));
         }
-        return investKeys.has(key);
+        return investKeys.has(key) || (idKey && investKeys.has(idKey));
       });
 
       if (!catalog.length && this.onlyInvestment) {
