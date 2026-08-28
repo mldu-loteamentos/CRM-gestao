@@ -118,12 +118,41 @@
     return /LUCELIA/i.test(blob);
   },
 
+  isTerceirizadaOrAdvogado(user) {
+    const t = String(user?.operator_type || '').toLowerCase();
+    if (t === 'externo' || t === 'advogado' || t === 'apoio_juridico') return true;
+    const p = String(user?.profile_name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (p.includes('TERCEIR') || p.includes('ADVOGAD')) return true;
+    return false;
+  },
+
   isInternoCobrancaUser(user) {
     if (!user) return false;
     if (this.isBackOfficeUser(user)) return false;
+    if (this.isTerceirizadaOrAdvogado(user)) return false;
     const p = String(user.profile_name || '').toUpperCase();
-    const t = String(user.operator_type || 'interno');
-    return p.includes('OPERADOR') && t === 'interno';
+    if (!p.includes('OPERADOR')) return false;
+    const t = String(user.operator_type || '').toLowerCase();
+    if (t) return t === 'interno';
+    return p.includes('COBRAN');
+  },
+
+  clientsOfOperator(user, all) {
+    const list = all || [];
+    const keys = [user?.sienge_user, user?.name].filter(Boolean);
+    return list.filter(c => keys.some(k => {
+      if (this.normalizeOperatorKey(c.assignedOperator) === this.normalizeOperatorKey(k)) return true;
+      if (typeof window.occurrenceAuthorMatchesOperator === 'function') {
+        return window.occurrenceAuthorMatchesOperator(c.assignedOperator, k);
+      }
+      return false;
+    }));
+  },
+
+  sprintOperatorLabel(user) {
+    const parts = String(user?.name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0] + ' ' + parts[parts.length - 1]).toUpperCase();
+    return String(user?.name || user?.sienge_user || 'Operador').split(' ')[0].toUpperCase();
   },
 
   clientKey(c) {
@@ -281,29 +310,79 @@
     return this.localDateStr(d);
   },
 
-  getTodayWorkStats() {
-    const user = this.getViewUser();
-    const opName = user?.sienge_user || user?.name || '';
-    const today = this.localDateStr();
-    const notes = (window.AppState && AppState.notes) || {};
-    let ativo = 0;
-    let receptivo = 0;
-    Object.values(notes).forEach(list => {
-      (list || []).forEach(n => {
-        const nd = String(n.date || '').slice(0, 10);
-        if (nd !== today) return;
-        if (n.status === 'Cancelada') return;
-        if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
-          if (!window.occurrenceAuthorMatchesOperator(n.author, opName)) return;
-        }
-        const ini = String(n.iniciativa || '').toLowerCase();
-        if (ini === 'receptivo') receptivo++;
-        else if (ini === 'ativo') ativo++;
+  noteLocalDay(n) {
+    const raw = n && n.date;
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return this.localDateStr(d);
+    return String(raw).slice(0, 10);
+  },
+
+  isInternalNote(n) {
+    const canal = String(n.canal || n.fase || '').toLowerCase();
+    if (canal.includes('nota interna') || canal.includes('nota-interna')) return true;
+    const ini = String(n.iniciativa || '').toLowerCase();
+    return !ini;
+  },
+
+  weekdaysInRange(fromStr, toStr) {
+    let n = 0;
+    const d = new Date(fromStr + 'T12:00:00');
+    const end = new Date(toStr + 'T12:00:00');
+    while (d <= end) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) n++;
+      d.setDate(d.getDate() + 1);
+    }
+    return Math.max(1, n);
+  },
+
+  forEachOperatorNote(opName, fn) {
+    const stores = [
+      (window.AppState && AppState.notes) || {},
+      (window.AppState && AppState.judNotes) || {}
+    ];
+    stores.forEach(store => {
+      Object.values(store).forEach(list => {
+        (list || []).forEach(n => {
+          if (!n || n.status === 'Cancelada') return;
+          if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
+            if (!window.occurrenceAuthorMatchesOperator(n.author, opName)) return;
+          }
+          fn(n);
+        });
       });
     });
+  },
 
+  countNotesBetween(fromStr, toStr) {
+    const user = this.getViewUser();
+    const opName = user?.sienge_user || user?.name || '';
+    let ativo = 0;
+    let receptivo = 0;
+    let internas = 0;
+    this.forEachOperatorNote(opName, n => {
+      const nd = this.noteLocalDay(n);
+      if (!nd || nd < fromStr || nd > toStr) return;
+      if (this.isInternalNote(n)) {
+        internas++;
+        return;
+      }
+      const ini = String(n.iniciativa || '').toLowerCase();
+      if (ini === 'receptivo') receptivo++;
+      else if (ini === 'ativo') ativo++;
+      else internas++;
+    });
+    return { ativo, receptivo, internas, total: ativo + receptivo + internas };
+  },
+
+  getTodayWorkStats() {
+    const today = this.localDateStr();
+    const counts = this.countNotesBetween(today, today);
     let filaTotal = 0;
     let filaDone = 0;
+    const user = this.getViewUser();
+    const opName = user?.sienge_user || user?.name || '';
     try {
       const cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
       const prefixes = [opName, this.normalizeOperatorKey(opName)];
@@ -317,39 +396,68 @@
         const queue = cache[k] || [];
         filaTotal = Math.max(filaTotal, queue.length);
         filaDone = queue.filter(item => {
-          const occs = (window.AppState && AppState.notes && AppState.notes[item.customerId]) || [];
-          return occs.some(n => {
-            const nd = String(n.date || '').slice(0, 10);
+          const lists = [
+            (window.AppState && AppState.notes && AppState.notes[item.customerId]) || [],
+            (window.AppState && AppState.judNotes && AppState.judNotes[item.customerId]) || []
+          ];
+          return item.isResolved || lists.some(occs => occs.some(n => {
+            const nd = this.noteLocalDay(n);
             if (nd !== today) return false;
             if (n.status === 'Cancelada') return false;
             if (n.saleId && String(n.saleId) !== String(item.saleId)) return false;
+            if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
+              if (!window.occurrenceAuthorMatchesOperator(n.author, opName)) return false;
+            }
             return true;
-          }) || item.isResolved;
+          }));
         }).length;
       });
     } catch (e) {}
-
     const capacity = 25;
-    return { ativo, receptivo, filaTotal: filaTotal || capacity, filaDone, capacity };
+    return { ...counts, filaTotal: filaTotal || capacity, filaDone, capacity };
   },
 
-  getWeekBarrigaCount() {
+  getPeriodSummaries() {
+    const today = this.localDateStr();
+    const monday = this.weekMondayStr();
+    const monthStart = today.slice(0, 8) + '01';
+    const day = this.getTodayWorkStats();
+    const week = this.countNotesBetween(monday, today);
+    const month = this.countNotesBetween(monthStart, today);
+    week.capacity = 25 * this.weekdaysInRange(monday, today);
+    month.capacity = 25 * this.weekdaysInRange(monthStart, today);
+    week.filaDone = week.total;
+    month.filaDone = month.total;
+    return { day, week, month };
+  },
+
+  getBarrigaCounts() {
     const user = this.getViewUser();
     const opName = user?.sienge_user || user?.name || '';
+    const today = this.localDateStr();
     const monday = this.weekMondayStr();
-    let count = 0;
+    const monthStart = today.slice(0, 8) + '01';
+    const out = { day: 0, week: 0, month: 0 };
     try {
       const data = JSON.parse(localStorage.getItem('crm_barriga_seals') || '{}') || {};
       Object.keys(data).forEach(k => {
-        if (opName && typeof window.occurrenceAuthorMatchesOperator === 'function') {
-          if (!window.occurrenceAuthorMatchesOperator(k, opName) && this.normalizeOperatorKey(k) !== this.normalizeOperatorKey(opName)) return;
-        } else if (this.normalizeOperatorKey(k) !== this.normalizeOperatorKey(opName)) return;
+        const matches = opName && typeof window.occurrenceAuthorMatchesOperator === 'function'
+          ? (window.occurrenceAuthorMatchesOperator(k, opName) || this.normalizeOperatorKey(k) === this.normalizeOperatorKey(opName))
+          : this.normalizeOperatorKey(k) === this.normalizeOperatorKey(opName);
+        if (!matches) return;
         (data[k] || []).forEach(d => {
-          if (String(d) >= monday) count++;
+          const ds = String(d);
+          if (ds === today) out.day++;
+          if (ds >= monday) out.week++;
+          if (ds >= monthStart) out.month++;
         });
       });
     } catch (e) {}
-    return count;
+    return out;
+  },
+
+  getWeekBarrigaCount() {
+    return this.getBarrigaCounts().week;
   },
 
   uniqueInsightClients(items) {
@@ -379,33 +487,54 @@
     }
     const firstName = (user?.name || 'Operador').split(' ')[0].toUpperCase();
     const openIdx = this._insightOpenIdx;
-    const stats = this.getTodayWorkStats();
-    const seals = this.getWeekBarrigaCount();
+    const periods = this.getPeriodSummaries();
+    const seals = this.getBarrigaCounts();
     const bar = (val, max, color) => {
       const pct = max > 0 ? Math.min(100, Math.round((val / max) * 100)) : 0;
       return `<div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
         <div style="height:100%;width:${pct}%;background:${color};border-radius:99px;"></div>
       </div>`;
     };
+    const metric = (label, val, max, color) => `
+      <div style="margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; font-size:0.75rem; font-weight:700; color:#334155; margin-bottom:4px;">
+          <span>${label}</span><span>${val}${max != null ? '/' + max : ''}</span>
+        </div>
+        ${bar(val, max || Math.max(val, 1), color)}
+      </div>`;
+    const periodBlock = (title, s, showFila) => `
+      <div style="flex:1;min-width:120px;">
+        <div style="font-size:0.7rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:8px;">${title}</div>
+        ${showFila ? metric('Fila', s.filaDone, s.capacity, '#105436') : ''}
+        ${metric('Ativo', s.ativo, s.capacity, '#2563eb')}
+        ${metric('Receptivo', s.receptivo, s.capacity, '#7c3aed')}
+        ${metric('Notas internas', s.internas, s.capacity, '#64748b')}
+        <div style="font-size:0.72rem;font-weight:700;color:#0f172a;">Total: ${s.total}</div>
+      </div>`;
+    const sealCell = (label, n) => `
+      <div style="flex:1;text-align:center;">
+        <div style="font-size:1.35rem;font-weight:800;color:${n ? '#166534' : '#94a3b8'};line-height:1.1;">${n === 0 ? '😕 0' : n}</div>
+        <div style="font-size:0.68rem;color:#64748b;font-weight:600;">${label}</div>
+      </div>`;
     box.style.display = 'block';
     box.innerHTML = `
       <style>@media (max-width: 900px) { #home-op-insights-container .home-insights-layout { grid-template-columns: 1fr !important; } }</style>
-      <div class="home-insights-layout" style="display:grid; grid-template-columns: minmax(0,1.4fr) minmax(240px,0.7fr); gap:16px; align-items:stretch;">
+      <div class="home-insights-layout" style="display:grid; grid-template-columns: minmax(0,1.15fr) minmax(280px,0.85fr); gap:16px; align-items:start;">
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
-          <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
+          <div style="background:#f8fafc; padding:12px 16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
             <i data-lucide="lightbulb" style="width:18px;color:#ca8a04;"></i>
             <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Insights importantes — ${firstName}</h3>
           </div>
-          <div style="display:flex; flex-direction:column; gap:8px; padding:14px;">
+          <div style="display:flex; flex-direction:column; gap:8px; padding:12px; max-height:340px; overflow:auto;">
             ${groups.map((g, i) => {
               const open = openIdx === i;
               const clients = this.uniqueInsightClients(g.items);
               return `<div>
-                <button type="button" onclick="window.openHomeInsight(${i})" style="width:100%; text-align:left; border:1px solid ${open ? '#f59e0b' : '#e2e8f0'}; background:${open ? '#fef3c7' : '#fffbeb'}; border-radius:8px; padding:10px 12px; cursor:pointer; font-size:0.88rem; font-weight:700; color:#854d0e;">
+                <button type="button" onclick="window.openHomeInsight(${i})" style="width:100%; text-align:left; border:1px solid ${open ? '#f59e0b' : '#e2e8f0'}; background:${open ? '#fef3c7' : '#fffbeb'}; border-radius:8px; padding:8px 12px; cursor:pointer; font-size:0.84rem; font-weight:700; color:#854d0e;">
                   ${this.escHtml(g.label)}
                 </button>
                 ${open ? `
-                  <div style="margin-top:6px; border:1px solid #fde68a; background:#fff; border-radius:8px; padding:8px 10px; max-height:280px; overflow:auto;">
+                  <div style="margin-top:6px; border:1px solid #fde68a; background:#fff; border-radius:8px; padding:8px 10px; max-height:180px; overflow:auto;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                       <span style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">${clients.length} cliente(s)</span>
                       <button type="button" onclick="window.closeHomeInsightList()" style="border:none; background:#f1f5f9; border-radius:6px; padding:4px 8px; font-size:0.75rem; font-weight:700; cursor:pointer; color:#334155;">Voltar</button>
@@ -421,33 +550,23 @@
           </div>
         </div>
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
-          <div style="background:#f8fafc; padding:14px 18px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
+          <div style="background:#f8fafc; padding:12px 16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
             <i data-lucide="activity" style="width:18px;color:#105436;"></i>
-            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Resumo do dia</h3>
+            <h3 style="margin:0;font-size:1.05rem;color:#1e293b;">Resumo</h3>
           </div>
-          <div style="padding:16px; display:flex; flex-direction:column; gap:16px;">
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
-                <span>Fila do dia</span><span>${stats.filaDone}/${stats.capacity}</span>
-              </div>
-              ${bar(stats.filaDone, stats.capacity, '#105436')}
+          <div style="padding:14px;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              ${periodBlock('Dia', periods.day, true)}
+              ${periodBlock('Semana', periods.week, false)}
+              ${periodBlock('Mês', periods.month, false)}
             </div>
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
-                <span>Ativo</span><span>${stats.ativo}</span>
+            <div style="margin-top:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; font-weight:800; color:#166534; letter-spacing:0.04em; text-align:center; margin-bottom:8px;">Selos Ganhos</div>
+              <div style="display:flex; gap:8px;">
+                ${sealCell('hoje', seals.day)}
+                ${sealCell('semana', seals.week)}
+                ${sealCell('mês', seals.month)}
               </div>
-              ${bar(stats.ativo, stats.capacity, '#2563eb')}
-            </div>
-            <div>
-              <div style="display:flex; justify-content:space-between; font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">
-                <span>Receptivo</span><span>${stats.receptivo}</span>
-              </div>
-              ${bar(stats.receptivo, stats.capacity, '#7c3aed')}
-            </div>
-            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px; text-align:center;">
-              <div style="font-size:0.7rem; font-weight:800; color:#166534; letter-spacing:0.04em; text-transform:uppercase;">Selos Seu Barriga</div>
-              <div style="font-size:2rem; font-weight:800; color:#166534; line-height:1.1; margin:4px 0;">${seals}</div>
-              <div style="font-size:0.75rem; color:#15803d;">ganhos nesta semana</div>
             </div>
           </div>
         </div>
@@ -1447,20 +1566,19 @@ window.buildSprintOperatorSummaries = function() {
   const users = hd.getOperatorUsers();
   const all = window.rawClientList || [];
   const lines = [];
+  const seen = new Set();
   users.filter(u => hd.isInternoCobrancaUser(u)).forEach(u => {
-    const opKey = hd.normalizeOperatorKey(u.sienge_user || u.name);
-    const mine = all.filter(c => hd.normalizeOperatorKey(c.assignedOperator) === opKey);
-    const groups = hd.collectInsightGroups(mine, u).filter(g => !g.hideIfEmpty || (g.count != null ? g.count : g.items.length) > 0);
+    const id = String(u.id || u.email || u.sienge_user || u.name);
+    if (seen.has(id)) return;
+    seen.add(id);
+    const mine = hd.clientsOfOperator(u, all);
+    if (!mine.length) return;
+    const groups = hd.collectInsightGroups(mine, u).filter(g => {
+      const n = g.count != null ? g.count : (g.items || []).length;
+      return n > 0;
+    });
     if (!groups.length) return;
-    const first = (u.name || u.sienge_user || 'Operador').split(' ')[0].toUpperCase();
-    lines.push('*' + first + '*');
-    groups.forEach(g => lines.push('• ' + g.label));
-  });
-  users.filter(u => hd.isBackOfficeUser(u)).forEach(u => {
-    const groups = hd.collectInsightGroups(all, u).filter(g => !g.hideIfEmpty || (g.count != null ? g.count : g.items.length) > 0);
-    if (!groups.length) return;
-    const first = (u.name || u.sienge_user || 'Operador').split(' ')[0].toUpperCase();
-    lines.push('*' + first + '*');
+    lines.push('*' + hd.sprintOperatorLabel(u) + '*');
     groups.forEach(g => lines.push('• ' + g.label));
   });
   return lines.join('\n');

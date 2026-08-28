@@ -28089,9 +28089,46 @@ window.mapaJuridicoClientMatches = function(c) {
   return true;
 };
 
+window.mapaJuridicoEmpLabel = function(ccId) {
+  const id = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(ccId) : String(ccId || "N/D");
+  const rawName = (typeof getCostCenterName === "function" ? getCostCenterName(ccId) : "") || "";
+  const clean = String(rawName).replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, "").trim();
+  const label = String(rawName).trim().toUpperCase().startsWith(String(id).toUpperCase())
+    ? rawName
+    : `${id} - ${clean || rawName || "N/D"}`;
+  return String(label).toUpperCase();
+};
+
+window.mapaJuridicoFillEmpSelect = function() {
+  const sel = document.getElementById("mapa-filtro-emp");
+  const cache = window._mapaJuridicoCache;
+  if (!sel || !cache) return;
+  const f = window._mapaJuridicoFilters || {};
+  const list = (cache.generalList || []).filter(c => !f.company || String(c.companyId) === String(f.company));
+  const map = {};
+  list.forEach(c => {
+    const ccId = String((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D");
+    if (!map[ccId]) map[ccId] = window.mapaJuridicoEmpLabel(c.costCenterId);
+  });
+  const opts = Object.keys(map).map(id => ({ id, name: map[id] }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+  if (f.emp && !opts.some(o => String(o.id) === String(f.emp))) {
+    window._mapaJuridicoFilters.emp = "";
+  }
+  const current = window._mapaJuridicoFilters.emp || "";
+  sel.innerHTML = `<option value="">Todos</option>` + opts.map(o =>
+    `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`
+  ).join("");
+  sel.value = current;
+};
+
 window.mapaJuridicoSetFilter = function(key, val) {
   if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
   window._mapaJuridicoFilters[key] = val;
+  if (key === "company") {
+    window._mapaJuridicoFilters.emp = "";
+    window.mapaJuridicoFillEmpSelect();
+  }
   const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
   if (nWrap) nWrap.style.display = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "inline-flex" : "none";
   window.mapaJuridicoRenderStages();
@@ -28119,38 +28156,63 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
     const vb = (b.overdueValue || 0) + (b.overdueCharges || 0);
     return vb - va;
   });
+  const subEl = document.getElementById("mapa-juridico-phase-sub");
+  if (subEl) subEl.textContent = clients.length + (clients.length === 1 ? " título" : " títulos") + " nesta etapa";
   if (!clients.length) {
-    bodyEl.innerHTML = `<div style="padding:32px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa com os filtros atuais.</div>`;
+    bodyEl.innerHTML = `<div style="padding:40px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa com os filtros atuais.</div>`;
     return;
   }
   const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const phasePrazoHtml = (client) => {
+    const info = (typeof window.getClientJudicialPhaseInfo === "function") ? window.getClientJudicialPhaseInfo(client) : null;
+    if (!info || !info.prazo) return '<span style="color:#94a3b8;">—</span>';
+    const parts = String(info.prazo).split("-");
+    const label = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : info.prazo;
+    let style = "font-weight:600;font-size:0.75rem;padding:2px 6px;border-radius:4px;";
+    if (Number.isFinite(info.daysLeft)) {
+      if (info.daysLeft < 0) style += "color:#7f1d1d;background:#fef2f2;border:1px solid #fecaca;";
+      else if (info.daysLeft <= 7) style += "color:#854d0e;background:#fefce8;border:1px solid #fef08a;";
+    }
+    return `<span style="${style}">${label}</span>`;
+  };
   bodyEl.innerHTML = `
-    <table class="custom-table" style="width:100%;">
-      <thead>
-        <tr>
-          <th>Cliente</th>
-          <th>Título</th>
-          <th>Unidade</th>
-          <th style="text-align:center;">Aging</th>
-          <th style="text-align:right;">R$ Atualizado</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${clients.map(c => {
-          const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/, "").split("-")[0];
-          const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
-          const val = (c.overdueValue || 0) + (c.overdueCharges || 0);
-          const name = String(c.customerName || "").replace(/</g, "&lt;");
-          return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
-            <td style="font-weight:700;text-transform:uppercase;color:#105436;">${name}</td>
-            <td>${title || "—"}</td>
-            <td>${String(unit).replace(/</g, "&lt;")}</td>
-            <td style="text-align:center;">${c.maxDaysDelay || 0}</td>
-            <td style="text-align:right;font-weight:700;">${fmt(val)}</td>
-          </tr>`;
-        }).join("")}
-      </tbody>
-    </table>`;
+    <div class="table-container" style="margin:0;max-height:calc(100vh - 280px);overflow-y:auto;">
+      <style>
+        #mapa-juridico-phase-table th { font-size: 0.75rem !important; padding: 6px 10px !important; }
+        #mapa-juridico-phase-table td { font-size: 0.8rem !important; padding: 4px 10px !important; }
+      </style>
+      <table class="custom-table" id="mapa-juridico-phase-table">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Título</th>
+            <th>Unidade</th>
+            <th style="text-align:center;">Aging</th>
+            <th style="text-align:center;">Vencidas</th>
+            <th style="text-align:center;">Prazo etapa</th>
+            <th style="text-align:right;">R$ Atualizado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${clients.map(c => {
+            const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/, "").split("-")[0];
+            const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
+            const val = (c.overdueValue || 0) + (c.overdueCharges || 0);
+            const name = String(c.customerName || "").replace(/</g, "&lt;");
+            const aging = (typeof getDelayBadgeHtml === "function") ? getDelayBadgeHtml(c.maxDaysDelay) : (c.maxDaysDelay || 0);
+            return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
+              <td style="white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;" title="${name}">${name}</td>
+              <td>${title || "—"}</td>
+              <td style="white-space:nowrap;">${String(unit).replace(/</g, "&lt;")}</td>
+              <td style="text-align:center;white-space:nowrap;">${aging}</td>
+              <td style="text-align:center;">${c.billCount || (c.billIds ? c.billIds.length : 1)}</td>
+              <td style="text-align:center;white-space:nowrap;">${phasePrazoHtml(c)}</td>
+              <td style="text-align:right;font-weight:700;white-space:nowrap;">${fmt(val)}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>`;
 };
 
 window.mapaJuridicoRenderStages = function() {
