@@ -1092,7 +1092,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.524 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.525 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2522,17 +2522,13 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
           <div class="search-filter-panel" style="margin-top: 1.5rem;">
             <div style="display: flex; gap: 15px; width: 100%; align-items: center; justify-content: space-between;">
               <div style="display: flex; gap: 15px; align-items: center; flex: 1;">
-                <div class="search-box-wrapper" style="flex: 1; max-width: 550px;">
+                <div class="search-box-wrapper" style="flex: 1;">
                   <input type="text" id="dashboard-search-input" class="search-input"
                     placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;">
                   <i data-lucide="search" class="search-icon"></i>
                 </div>
-                <button id="btn-refresh-dashboard" class="btn btn-primary"
-                  style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; white-space: nowrap;">
-                  <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar Fila
-                </button>
               </div>
-              <div style="display: flex; align-items: center; justify-content: flex-end; padding-right: 5px;">
+              <div style="display: flex; align-items: center; justify-content: flex-end; padding-right: 5px; white-space: nowrap;">
                 <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right;"></span>
               </div>
             </div>
@@ -2548,6 +2544,9 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   <button class="operator-tab-btn" data-operator="MICHELLE">MICHELLE</button>
                   <button class="operator-tab-btn" data-operator="NÃO COBRAR">NÃO COBRAR</button>
                   <button class="operator-tab-btn" data-operator="OUTROS">OUTROS</button>
+                  <button id="btn-refresh-dashboard" class="btn btn-primary" style="margin-left: 8px; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; color: white; white-space: nowrap;">
+                    <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar Fila
+                  </button>
                   <button id="btn-adv-filters" class="adv-filter-trigger" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; margin-left: 8px; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600;">
                     <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados 
                     <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
@@ -5981,35 +5980,35 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=524"></script>
-  <script defer src="sienge-api.js?v=524"></script>
-  <script defer src="azure-auth.js?v=524"></script>
-  <script defer src="app.js?v=524"></script>
-  <script defer src="home-dashboard.js?v=524"></script>
-  <script defer src="anexos.js?v=524"></script>
-  <script defer src="contas-pagar.js?v=524"></script>
-  <script defer src="config-tags.js?v=524"></script>
-  <script defer src="config-users.js?v=524"></script>
-  <script defer src="construcao.js?v=524"></script>
-  <script defer src="empresas.js?v=524"></script>
-  <script defer src="relacionamento.js?v=524"></script>
+  <script defer src="data.js?v=525"></script>
+  <script defer src="sienge-api.js?v=525"></script>
+  <script defer src="azure-auth.js?v=525"></script>
+  <script defer src="app.js?v=525"></script>
+  <script defer src="home-dashboard.js?v=525"></script>
+  <script defer src="anexos.js?v=525"></script>
+  <script defer src="contas-pagar.js?v=525"></script>
+  <script defer src="config-tags.js?v=525"></script>
+  <script defer src="config-users.js?v=525"></script>
+  <script defer src="construcao.js?v=525"></script>
+  <script defer src="empresas.js?v=525"></script>
+  <script defer src="relacionamento.js?v=525"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=524"></script>
-  <script defer src="marketing.js?v=524"></script>
-  <script defer src="plano-financeiro.js?v=524"></script>
-  <script defer src="prestacao-contas.js?v=524"></script>
-  <script defer src="fluxo-caixa.js?v=524"></script>
-  <script defer src="investimento.js?v=524"></script>
-  <script defer src="parametrizacao-parceiro.js?v=524"></script>
-  <script defer src="fiscal.js?v=524"></script>
-  <script defer src="indexadores.js?v=524"></script>
-  <script defer src="verificar-construcao.js?v=524"></script>
-  <script src="repactuacoes.js?v=524"></script>
+  <script defer src="centros-custo.js?v=525"></script>
+  <script defer src="marketing.js?v=525"></script>
+  <script defer src="plano-financeiro.js?v=525"></script>
+  <script defer src="prestacao-contas.js?v=525"></script>
+  <script defer src="fluxo-caixa.js?v=525"></script>
+  <script defer src="investimento.js?v=525"></script>
+  <script defer src="parametrizacao-parceiro.js?v=525"></script>
+  <script defer src="fiscal.js?v=525"></script>
+  <script defer src="indexadores.js?v=525"></script>
+  <script defer src="verificar-construcao.js?v=525"></script>
+  <script src="repactuacoes.js?v=525"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=524"></script>
+  <script defer src="dashboard-inadimplencia.js?v=525"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

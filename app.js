@@ -11718,14 +11718,10 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
       accountSelect.innerHTML = '';
       usable.forEach(acc => {
         const option = document.createElement('option');
-        const numericId = (acc.checkingAccountId || acc.id);
-        const value = (numericId != null && /^\d+$/.test(String(numericId).trim()))
-          ? String(numericId).trim()
-          : (acc.accountNumber || "");
-        option.value = value;
-        option.dataset.checkingAccountId = (numericId != null && /^\d+$/.test(String(numericId).trim())) ? String(numericId).trim() : "";
-        option.dataset.accountNumber = acc.accountNumber || "";
-        option.textContent = `${acc.accountNumber || value} - ${acc.accountName || acc.name || 'Conta corrente'}`;
+        const accountNumber = String(acc.accountNumber || acc.checkingAccountId || acc.id || "").trim();
+        option.value = accountNumber;
+        option.dataset.accountNumber = accountNumber;
+        option.textContent = `${acc.accountNumber || accountNumber} - ${acc.accountName || acc.name || 'Conta corrente'}`;
         accountSelect.appendChild(option);
       });
       accountSelect.disabled = usable.length === 1;
@@ -11780,39 +11776,14 @@ window.submitReprocessBoleto = async function() {
   if (!currentReprocessBillId || currentReprocessInstId === null) return;
 
   const accountSelectEl = document.getElementById('reprocess-account');
-  const accountRaw = accountSelectEl ? accountSelectEl.value : "";
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
-  const accountFromData = selectedOpt && selectedOpt.dataset.checkingAccountId;
-  const parseAccId = (raw) => {
-    const s = String(raw == null ? "" : raw).trim();
-    return /^\d+$/.test(s) ? parseInt(s, 10) : NaN;
-  };
-  let account = parseAccId(accountFromData);
-  if (!Number.isFinite(account) || account <= 0) account = parseAccId(accountRaw);
-  if (!Number.isFinite(account) || account <= 0) {
-    const accountNumber = (selectedOpt && selectedOpt.dataset.accountNumber) || accountRaw;
-    const companyIdGuess = currentReprocessCompanyId || AppState.currentCompanyId;
-    if (accountNumber && companyIdGuess) {
-      try {
-        const caData = await SiengeApiService.getCheckingAccounts(companyIdGuess);
-        const catalog = (caData && caData.results) || [];
-        const norm = (s) => String(s || "").replace(/\D/g, "");
-        const match = catalog.find(row => {
-          const num = String(row.accountNumber || row.number || "").trim();
-          return num === String(accountNumber).trim() || (norm(num) && norm(num) === norm(accountNumber));
-        });
-        account = parseAccId(match && (match.id || match.checkingAccountId || match.idCheckingAccount));
-      } catch (e) {
-        console.warn("[CRM Boleto] Falha ao resolver ID da conta corrente:", e);
-      }
-    }
-  }
+  const account = String((selectedOpt && selectedOpt.dataset.accountNumber) || (accountSelectEl && accountSelectEl.value) || "").trim();
   const dueDate = document.getElementById('reprocess-duedate').value;
   const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
   const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
 
-  if (!Number.isFinite(account) || account <= 0) {
-    alert("Não foi possível identificar o código da conta corrente no Sienge. Selecione novamente a conta Itaú e tente de novo.");
+  if (!account) {
+    alert("Selecione uma conta corrente.");
     return;
   }
   if (!dueDate) {
@@ -11859,11 +11830,11 @@ window.submitReprocessBoleto = async function() {
     const payload = {
       receivableBillId: Number(currentReprocessBillId),
       companyId: Number(companyId),
-      checkingAccountId: Number(account),
+      checkingAccountId: account,
       newDueDate: dueDate,
       interestPercentage: interest,
       finePercentage: fine,
-      insurancePercentage: 0,
+      insurancepercentage: 0,
       correctAnnualInstallment: false,
       groupedInstalments: false,
       installments: installmentsArray
@@ -27954,6 +27925,8 @@ window.closeMapaJuridico = function() {
   if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
 };
 
+window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
+
 window.mapaJuridicoShowMap = function() {
   const mapView = document.getElementById("mapa-juridico-view-map");
   const phaseView = document.getElementById("mapa-juridico-view-phase");
@@ -27961,11 +27934,43 @@ window.mapaJuridicoShowMap = function() {
   if (phaseView) phaseView.style.display = "none";
 };
 
+window.mapaJuridicoClientMatches = function(c) {
+  const f = window._mapaJuridicoFilters || {};
+  if (f.company && String(c.companyId) !== String(f.company)) return false;
+  const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
+  if (f.emp && String(cc) !== String(f.emp)) return false;
+  if (!f.prazo) return true;
+  const info = (typeof window.getClientJudicialPhaseInfo === "function")
+    ? window.getClientJudicialPhaseInfo(c)
+    : { daysLeft: null, status: "SEM_PRAZO", prazo: null };
+  if (f.prazo === "VENCIDOS") return info.status === "VENCIDO" || (Number.isFinite(info.daysLeft) && info.daysLeft < 0);
+  if (f.prazo === "MES") {
+    if (!info.prazo) return false;
+    const p = new Date(info.prazo);
+    const t = new Date();
+    return p.getMonth() === t.getMonth() && p.getFullYear() === t.getFullYear();
+  }
+  if (f.prazo === "N_DIAS") {
+    const n = parseInt(f.nDias, 10);
+    return Number.isFinite(n) && n >= 0 && Number.isFinite(info.daysLeft) && info.daysLeft >= 0 && info.daysLeft <= n;
+  }
+  return true;
+};
+
+window.mapaJuridicoSetFilter = function(key, val) {
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
+  window._mapaJuridicoFilters[key] = val;
+  const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
+  if (nWrap) nWrap.style.display = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "inline-flex" : "none";
+  window.mapaJuridicoRenderStages();
+  window.mapaJuridicoShowMap();
+};
+
 window.mapaJuridicoShowPhase = function(prefix, compId) {
   const cache = window._mapaJuridicoCache;
   if (!cache) return;
   const key = (compId ? ("c:" + compId + "|") : "g|") + String(prefix);
-  const bucket = cache.byKey[key] || cache.byKey["g|" + String(prefix)] || { name: "Fase", clients: [] };
+  const bucket = (cache.byKey && (cache.byKey[key] || cache.byKey["g|" + String(prefix)])) || { name: "Fase", clients: [] };
   const mapView = document.getElementById("mapa-juridico-view-map");
   const phaseView = document.getElementById("mapa-juridico-view-phase");
   const titleEl = document.getElementById("mapa-juridico-phase-title");
@@ -27977,13 +27982,13 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
     const scope = bucket.scopeName ? (" · " + bucket.scopeName) : "";
     titleEl.textContent = (bucket.prefix ? bucket.prefix + " — " : "") + (bucket.name || "Fase") + scope;
   }
-  const clients = (bucket.clients || []).slice().sort((a, b) => {
+  const clients = (bucket.clients || []).filter(c => window.mapaJuridicoClientMatches(c)).slice().sort((a, b) => {
     const va = (a.overdueValue || 0) + (a.overdueCharges || 0);
     const vb = (b.overdueValue || 0) + (b.overdueCharges || 0);
     return vb - va;
   });
   if (!clients.length) {
-    bodyEl.innerHTML = `<div style="padding:32px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa.</div>`;
+    bodyEl.innerHTML = `<div style="padding:32px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa com os filtros atuais.</div>`;
     return;
   }
   const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -28014,6 +28019,103 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
         }).join("")}
       </tbody>
     </table>`;
+};
+
+window.mapaJuridicoRenderStages = function() {
+  const root = document.getElementById("mapa-juridico-stages-root");
+  const cache = window._mapaJuridicoCache;
+  if (!root || !cache || !cache.nameMap) return;
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  const fmtBRL = (val) => (Number(val) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const filtered = (cache.generalList || []).filter(c => window.mapaJuridicoClientMatches(c));
+  const nameMap = cache.nameMap;
+  const aggOf = (list) => {
+    const agg = {};
+    Object.values(nameMap).forEach(v => { agg[v.prefix] = { ...v, count: 0, value: 0, clients: [] }; });
+    list.forEach(client => {
+      const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
+        ? window.getClientJudicialPhaseInfo(client)
+        : { fase: "Sem Fase", faseLabel: "Sem Fase" };
+      const mapped = nameMap[phaseInfo.fase] || nameMap[phaseInfo.faseLabel] || nameMap["Sem Fase"];
+      const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
+      if (agg[mapped.prefix]) {
+        agg[mapped.prefix].count += (client.billIds ? client.billIds.length : 1);
+        agg[mapped.prefix].value += value;
+        agg[mapped.prefix].clients.push(client);
+      }
+    });
+    return Object.values(agg).sort((a, b) => a.order - b.order);
+  };
+  const byKey = {};
+  const register = (agg, scopeId, scopeName) => {
+    (agg || []).forEach(item => {
+      byKey[(scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix)] = {
+        prefix: item.prefix, name: item.name, scopeName: scopeName || "", clients: item.clients || []
+      };
+    });
+  };
+  const generalAgg = aggOf(filtered);
+  register(generalAgg, "", "Visão Geral");
+  const blocks = [{ title: "Visão Geral", compId: "", items: generalAgg }];
+  const f = window._mapaJuridicoFilters || {};
+  (cache.sortedCompanies || []).forEach(compId => {
+    if (f.company && String(compId) !== String(f.company)) return;
+    const list = filtered.filter(c => String(c.companyId) === String(compId));
+    if (!list.length) return;
+    const items = aggOf(list);
+    register(items, compId, cache.companyNames[compId] || ("Empresa " + compId));
+    blocks.push({ title: cache.companyNames[compId] || ("Empresa " + compId), compId: String(compId), items });
+  });
+  cache.byKey = byKey;
+
+  const timeline = (items, compId) => {
+    const cidArg = compId ? `'${String(compId).replace(/'/g, "\\'")}'` : "''";
+    return `<div style="display:flex;flex-wrap:nowrap;gap:2px;align-items:center;width:100%;padding-top:12px;overflow-x:auto;">
+      ${items.map((item, idx) => {
+        const active = item.count > 0;
+        const card = active
+          ? `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${esc(item.name)}"
+              style="background:#fff;border:1.5px solid #065f46;border-radius:6px;width:56px;padding:12px 2px 4px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05);position:relative;flex-shrink:0;cursor:pointer;">
+              <div style="background:#065f46;color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9px;position:absolute;top:-10px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
+              <div style="color:#64748b;font-size:8px;text-transform:uppercase;font-weight:700;">Tít.</div>
+              <div style="font-size:13px;font-weight:900;color:#0f172a;">${item.count}</div>
+              <div style="height:1px;background:#e2e8f0;margin:4px 2px;"></div>
+              <div style="color:#ef4444;font-size:9px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtBRL(item.value)}</div>
+            </button>`
+          : `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${esc(item.name)}"
+              style="background:#fff;border:1px solid #e2e8f0;border-radius:4px;width:20px;padding:8px 1px 3px;text-align:center;position:relative;flex-shrink:0;opacity:0.65;cursor:pointer;">
+              <div style="background:#475569;color:#fff;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:7px;position:absolute;top:-7px;left:50%;transform:translateX(-50%);border:1px solid #fff;">${item.prefix}</div>
+              <div style="font-size:9px;font-weight:900;color:#475569;">0</div>
+            </button>`;
+        const arrow = idx < items.length - 1
+          ? `<div style="display:flex;align-items:center;justify-content:center;flex:1;min-width:6px;">
+              <div style="width:100%;height:1.5px;background:#cbd5e1;position:relative;">
+                <div style="position:absolute;right:-2px;top:-2.5px;width:0;height:0;border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:4px solid #cbd5e1;"></div>
+              </div>
+            </div>` : "";
+        return card + arrow;
+      }).join("")}
+    </div>`;
+  };
+
+  root.innerHTML = `
+    <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase para ver os contratos. Clique no cliente para abrir a ficha.</p>
+    ${blocks.map(block => `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px 16px;margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;">${esc(block.title)}</div>
+        ${timeline(block.items, block.compId)}
+      </div>`).join("") || `<div style="padding:28px;text-align:center;color:#94a3b8;">Nenhum título com os filtros atuais.</div>`}
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:8px;">
+      <div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;">Legenda</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        ${generalAgg.map(item => `
+          <div style="display:flex;align-items:center;background:#f1f5f9;padding:4px 8px;border-radius:4px;font-size:11px;border:1px solid #e2e8f0;">
+            <span style="background:${item.count > 0 ? "#065f46" : "#475569"};color:white;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:8px;margin-right:6px;">${item.prefix}</span>
+            <span style="font-weight:700;color:#334155;margin-right:4px;">${esc(item.name)}</span>
+            <span style="color:#64748b;font-size:10px;">(${item.days} d)</span>
+          </div>`).join("")}
+      </div>
+    </div>`;
 };
 
 window.mapaJuridicoOpenClient = async function(customerId, saleId) {
@@ -28091,24 +28193,56 @@ window.exportMapaJuridicoPDF = async function() {
 
 window.showMapaJuridicoOverlay = function(ui) {
   window.closeMapaJuridico();
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "" };
   const overlay = document.createElement("div");
   overlay.id = "mapa-juridico-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
+  const sel = "height:32px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;background:#fff;min-width:160px;";
   overlay.innerHTML = `
-    <div style="flex-shrink:0;display:flex;align-items:center;gap:12px;padding:12px 18px;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
-      <button type="button" class="btn btn-secondary" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;">
-        <i data-lucide="x" style="width:16px;"></i> Fechar
-      </button>
-      <div style="flex:1;">
-        <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Mapa Jurídico — Sub Judice</div>
-        <div style="font-size:0.75rem;color:#64748b;">${ui.nowLabel || ""}</div>
+    <div style="flex-shrink:0;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 8px;">
+        <button type="button" class="btn btn-secondary" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;">
+          <i data-lucide="x" style="width:16px;"></i> Fechar
+        </button>
+        <div style="flex:1;">
+          <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">Mapa Jurídico — Fases processuais</div>
+          <div style="font-size:0.75rem;color:#64748b;">${ui.nowLabel || ""}</div>
+        </div>
+        <button type="button" id="btn-mapa-juridico-pdf" class="btn btn-primary" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;">
+          <i data-lucide="file-down" style="width:16px;"></i> Gerar PDF
+        </button>
       </div>
-      <button type="button" id="btn-mapa-juridico-pdf" class="btn btn-primary" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;">
-        <i data-lucide="file-down" style="width:16px;"></i> Gerar PDF
-      </button>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:0 18px 12px;">
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empresa
+          <select id="mapa-filtro-empresa" onchange="mapaJuridicoSetFilter('company', this.value)" style="display:block;${sel}">
+            <option value="">Todas</option>
+            ${(ui.companyOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
+          </select>
+        </label>
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empreendimento
+          <select id="mapa-filtro-emp" onchange="mapaJuridicoSetFilter('emp', this.value)" style="display:block;${sel}min-width:220px;">
+            <option value="">Todos</option>
+            ${(ui.empOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
+          </select>
+        </label>
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Prazo da etapa
+          <select id="mapa-filtro-prazo" onchange="mapaJuridicoSetFilter('prazo', this.value)" style="display:block;${sel}">
+            <option value="">Todos</option>
+            <option value="VENCIDOS">Etapas vencidas</option>
+            <option value="MES">Vencem este mês</option>
+            <option value="N_DIAS">Vencem em N dias</option>
+          </select>
+        </label>
+        <label id="mapa-juridico-ndias-wrap" style="display:none;font-size:0.7rem;font-weight:700;color:#64748b;align-items:center;gap:6px;">N dias
+          <input type="number" min="1" value="7" onchange="mapaJuridicoSetFilter('nDias', this.value)"
+            style="height:32px;width:72px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
+        </label>
+      </div>
     </div>
     <div style="flex:1;overflow:auto;padding:16px 18px 28px;">
-      <div id="mapa-juridico-view-map">${ui.mapHtml}</div>
+      <div id="mapa-juridico-view-map">
+        <div id="mapa-juridico-stages-root"></div>
+      </div>
       <div id="mapa-juridico-view-phase" style="display:none;">
         <button type="button" class="btn btn-secondary" onclick="mapaJuridicoShowMap()" style="margin-bottom:12px;display:inline-flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:16px;"></i> Voltar ao mapa
@@ -28119,6 +28253,7 @@ window.showMapaJuridicoOverlay = function(ui) {
     </div>`;
   document.body.appendChild(overlay);
   if (window.lucide) lucide.createIcons();
+  window.mapaJuridicoRenderStages();
 };
 
 window.openMapaJuridico = function() {
@@ -28704,7 +28839,25 @@ window.gerarMapaJuridicoPDF = async function() {
             </div>
         `;
 
-        window._mapaJuridicoCache = { byKey };
+        const companyNames = {};
+        sortedCompanies.forEach(id => { companyNames[id] = usualCompanyName(id); });
+        const empOptionsMap = {};
+        generalList.forEach(c => {
+            const ccId = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D";
+            if (!empOptionsMap[ccId]) empOptionsMap[ccId] = empLabel(c.costCenterId);
+        });
+        const empOptions = Object.keys(empOptionsMap).map(id => ({ id, name: empOptionsMap[id] }))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+        const companyOptions = sortedCompanies.map(id => ({ id, name: companyNames[id] }));
+
+        window._mapaJuridicoCache = {
+            byKey,
+            generalList,
+            nameMap,
+            companyGroups,
+            sortedCompanies,
+            companyNames
+        };
         window._mapaJuridicoPdfHtml = {
             page1: container1.innerHTML,
             page2: container2.innerHTML,
@@ -28712,59 +28865,7 @@ window.gerarMapaJuridicoPDF = async function() {
             style2: "position:absolute;top:-9999px;left:-9999px;width:1122px;min-height:793px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;padding:20px 30px;box-sizing:border-box;"
         };
 
-        const fmtMoneyUi = (val) => (Number(val) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-        const phaseCards = (items, compId) => `
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                ${items.map(item => {
-                    const active = item.count > 0;
-                    const cidArg = compId ? `'${String(compId).replace(/'/g, "\\'")}'` : "''";
-                    return `<button type="button" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})"
-                        style="border:${active ? '1.5px solid #065f46' : '1px solid #e2e8f0'};background:${active ? '#fff' : '#f8fafc'};border-radius:8px;padding:10px 10px 8px;min-width:92px;cursor:pointer;text-align:left;">
-                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                            <span style="background:${active ? '#065f46' : '#475569'};color:#fff;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;">${item.prefix}</span>
-                            <span style="font-size:11px;font-weight:700;color:#334155;line-height:1.2;">${esc(item.name)}</span>
-                        </div>
-                        <div style="font-size:16px;font-weight:800;color:#0f172a;">${item.count}</div>
-                        <div style="font-size:11px;font-weight:700;color:${active ? '#ef4444' : '#94a3b8'};">${fmtMoneyUi(item.value)}</div>
-                    </button>`;
-                }).join("")}
-            </div>`;
-        const stagesHtml = interactiveBlocks.map(block => `
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:10px;">
-                <div style="font-size:12px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:10px;">${esc(block.title)}</div>
-                ${phaseCards(block.items, block.compId)}
-            </div>`).join("");
-
-        const mapHtml = `
-            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-                ${kpiBox('#fee2e2','#ef4444', svgAlert, 'VALOR EM ATRASO', fmtInt(totalValue))}
-                ${kpiBox('#fef3c7','#f59e0b', svgUsers, 'CLIENTES EM ATRASO', totalClients)}
-                ${kpiBox('#dcfce7','#10b981', svgFile, 'TÍTULOS VENCIDOS', totalTitles)}
-                ${kpiBox('#e0f2fe','#3b82f6', svgClock, 'ATRASO MÉDIO', avgDelay + ' dias')}
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-                ${quadro('Por empresa', companyTable)}
-                ${quadro('Jurídico — 2º dia útil (12 meses) × hoje', chartBody)}
-                ${quadro('Empreendimento — fechamento × movimento do mês', empFlowTable)}
-                ${quadro('Top 10 clientes — entrou / saiu no mês', clientMoveTable)}
-            </div>
-            <div style="margin:16px 0 8px;font-size:13px;font-weight:800;color:#0f172a;">Fases processuais</div>
-            <p style="margin:0 0 10px;font-size:12px;color:#64748b;">Clique em uma fase para ver os contratos. Clique no cliente para abrir a ficha.</p>
-            ${stagesHtml}
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:8px;">
-                <div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:8px;text-transform:uppercase;">Legenda</div>
-                <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                    ${generalResult.agg.map(item => `
-                        <div style="display:flex;align-items:center;background:#f1f5f9;padding:4px 8px;border-radius:4px;font-size:11px;border:1px solid #e2e8f0;">
-                            <span style="background:${item.count > 0 ? '#065f46' : '#475569'};color:white;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:8px;margin-right:6px;">${item.prefix}</span>
-                            <span style="font-weight:700;color:#334155;margin-right:4px;">${esc(item.name)}</span>
-                            <span style="color:#64748b;font-size:10px;">(${item.days} d)</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>`;
-
-        window.showMapaJuridicoOverlay({ nowLabel, mapHtml });
+        window.showMapaJuridicoOverlay({ nowLabel, companyOptions, empOptions });
         restoreBtn();
     } catch (e) {
         console.error("Erro ao gerar mapa jurídico:", e);
