@@ -11,6 +11,11 @@ const InvestimentoApp = {
   months: [],
   expanded: new Set(),
   companyQuery: "",
+  companyDropOpen: false,
+  groupByCompany: true,
+  collapsedCompanies: new Set(),
+  collapsedAccounts: new Set(),
+  cdiByMonth: {},
   kpis: { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 },
 
   init() {
@@ -27,29 +32,79 @@ const InvestimentoApp = {
     const allowed = new Set(geridas.map(c => c.id));
     this.selectedCompanyIds = this.selectedCompanyIds.filter(id => allowed.has(String(id)));
     if (!this.selectedCompanyIds.length) this.selectedCompanyIds = geridas.map(c => String(c.id));
+    if (!window._invDropBound) {
+      window._invDropBound = true;
+      document.addEventListener("click", (e) => {
+        if (!InvestimentoApp.companyDropOpen) return;
+        if (e.target && e.target.closest && e.target.closest("#inv-emp-drop")) return;
+        InvestimentoApp.companyDropOpen = false;
+        InvestimentoApp.render();
+      });
+    }
     this.render();
   },
 
   empresasCustom() {
+    let fromLs = {};
     try {
-      if (typeof EmpresasState !== "undefined" && EmpresasState.customFields) return EmpresasState.customFields;
-      return JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
-    } catch (e) { return {}; }
+      fromLs = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+    } catch (e) { fromLs = {}; }
+    let fromState = {};
+    if (typeof EmpresasState !== "undefined" && EmpresasState.customFields && typeof EmpresasState.customFields === "object") {
+      fromState = EmpresasState.customFields;
+    }
+    const merged = {};
+    const put = (item) => {
+      if (!item || typeof item !== "object" || item.company_id == null) return;
+      merged[item.company_id] = item;
+      merged[String(item.company_id)] = item;
+    };
+    Object.values(fromLs).forEach(put);
+    Object.values(fromState).forEach(put);
+    Object.keys(fromLs).forEach(k => {
+      if (k === "_v2") return;
+      const item = fromLs[k];
+      if (item && typeof item === "object") {
+        merged[k] = Object.assign({}, merged[k] || {}, item);
+        put(merged[k]);
+      }
+    });
+    Object.keys(fromState).forEach(k => {
+      const item = fromState[k];
+      if (item && typeof item === "object") {
+        merged[k] = Object.assign({}, merged[k] || {}, item);
+        put(merged[k]);
+      }
+    });
+    return merged;
+  },
+
+  isGeridaFlag(cfg) {
+    if (!cfg) return false;
+    const v = cfg.gerida_pelo_grupo != null ? cfg.gerida_pelo_grupo : cfg.gerida_grupo;
+    return v === 1 || v === true || v === "1" || Number(v) === 1;
   },
 
   geridasCompanies() {
-    const all = (window.AppState && AppState.companies) || [];
     const custom = this.empresasCustom();
-    return all.filter(c => {
+    const all = (window.AppState && AppState.companies) || [];
+    const seen = new Set();
+    const out = [];
+    const add = (id, name) => {
+      const sid = String(id);
+      if (!sid || seen.has(sid)) return;
+      seen.add(sid);
+      out.push({ id: sid, name: name || `Empresa ${sid}` });
+    };
+    all.forEach(c => {
       const cfg = custom[c.id] || custom[String(c.id)] || {};
-      return Number(cfg.gerida_pelo_grupo) === 1;
-    }).map(c => {
-      const cfg = custom[c.id] || custom[String(c.id)] || {};
-      return {
-        id: String(c.id),
-        name: cfg.nome_usual || c.name || `Empresa ${c.id}`
-      };
+      if (this.isGeridaFlag(cfg)) add(c.id, cfg.nome_usual || c.name);
     });
+    Object.values(custom).forEach(cfg => {
+      if (!cfg || typeof cfg !== "object" || cfg.company_id == null) return;
+      if (this.isGeridaFlag(cfg)) add(cfg.company_id, cfg.nome_usual);
+    });
+    return out.sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   consolidacaoCompanies() {
@@ -162,6 +217,34 @@ const InvestimentoApp = {
     return { aportes: 0, resgates: 0, rendimento: 0, tarifas: 0 };
   },
 
+  async ensureCdi() {
+    if (this.cdiByMonth && Object.keys(this.cdiByMonth).length) return;
+    this.cdiByMonth = {};
+    try {
+      const res = await fetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.4391/dados?formato=json");
+      if (!res.ok) return;
+      const json = await res.json();
+      (json || []).forEach(r => {
+        const parts = String(r.data || "").split("/");
+        if (parts.length !== 3) return;
+        const key = `${parts[2]}-${parts[1]}`;
+        this.cdiByMonth[key] = Number(String(r.valor).replace(",", ".")) || 0;
+      });
+    } catch (e) {
+      console.warn("[Investimento] CDI BCB 4391:", e);
+    }
+  },
+
+  cdiTip(rendimento, opening, mk) {
+    const cdi = Number(this.cdiByMonth[mk]) || 0;
+    const yld = opening > 0.009 ? (Number(rendimento) / opening) * 100 : null;
+    if (yld == null && !cdi) return "CDI do mês indisponível";
+    if (yld == null) return `CDI ${cdi.toFixed(2).replace(".", ",")}% a.m.`;
+    if (!cdi) return `Rendimento ${yld.toFixed(2).replace(".", ",")}% no mês · CDI indisponível`;
+    const pct = (yld / cdi) * 100;
+    return `Rendimento ${yld.toFixed(2).replace(".", ",")}% no mês · CDI ${cdi.toFixed(2).replace(".", ",")}% a.m. · ${pct.toFixed(0)}% do CDI`;
+  },
+
   async load() {
     if (!this.startDate || !this.endDate) {
       this.error = "Informe o período.";
@@ -177,6 +260,7 @@ const InvestimentoApp = {
     this.error = "";
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
+    await this.ensureCdi();
     const openingDate = this.addDaysIso(this.startDate, -1);
     const monthEndDates = this.months.map(mk => this.clampDate(this.lastDayOfMonth(mk), this.endDate));
     try {
@@ -329,6 +413,27 @@ const InvestimentoApp = {
     this.render();
   },
 
+  allCompaniesSelected() {
+    const all = this.geridasCompanies();
+    return all.length > 0 && this.selectedCompanyIds.length === all.length;
+  },
+
+  companyDropLabel() {
+    const all = this.geridasCompanies();
+    const n = this.selectedCompanyIds.length;
+    if (!all.length) return "Nenhuma empresa gerida";
+    if (n === all.length) return `Todas (${n})`;
+    if (n === 1) return this.companyName(this.selectedCompanyIds[0]);
+    if (n === 0) return "Selecione empresas";
+    return `${n} empresas`;
+  },
+
+  toggleCompanyDrop(ev) {
+    if (ev) ev.stopPropagation();
+    this.companyDropOpen = !this.companyDropOpen;
+    this.render();
+  },
+
   filterCompanyList(q) {
     this.companyQuery = q || "";
     const box = document.getElementById("inv-emp-list");
@@ -353,6 +458,35 @@ const InvestimentoApp = {
     }).join("");
   },
 
+  companyDropHtml() {
+    const companies = this.geridasCompanies();
+    if (!companies.length) {
+      return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
+    }
+    return `<div id="inv-emp-drop" style="position:relative;min-width:280px;max-width:360px;">
+      <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas geridas pelo grupo</div>
+      <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
+        style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;">
+        <span>${this.esc(this.companyDropLabel())}</span>
+        <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;"></i>
+      </button>
+      ${this.companyDropOpen ? `
+        <div style="position:absolute;left:0;right:0;top:54px;z-index:30;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
+          <div style="display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="flex:1;height:28px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;">Marcar todas</button>
+            <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="flex:1;height:28px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.72rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
+          </div>
+          <input id="inv-emp-search" placeholder="Buscar empresa..." value="${this.esc(this.companyQuery)}"
+            onclick="event.stopPropagation()"
+            oninput="InvestimentoApp.filterCompanyList(this.value)"
+            style="width:100%;height:32px;border:none;border-bottom:1px solid #e2e8f0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
+          <div id="inv-emp-list" style="max-height:220px;overflow:auto;">
+            ${this.companyListHtml()}
+          </div>
+        </div>` : ""}
+    </div>`;
+  },
+
   toggleCompany(id, on) {
     const sid = String(id);
     if (on) {
@@ -360,20 +494,65 @@ const InvestimentoApp = {
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
-    const countEl = document.getElementById("inv-emp-count");
-    if (countEl) countEl.textContent = `${this.selectedCompanyIds.length}/${this.geridasCompanies().length}`;
-    const box = document.getElementById("inv-emp-list");
-    if (box) box.innerHTML = this.companyListHtml();
+    this.companyDropOpen = true;
+    this.render();
   },
 
   selectAllGeridas() {
     this.selectedCompanyIds = this.geridasCompanies().map(c => c.id);
+    this.companyDropOpen = true;
+    this.groupByCompany = true;
     this.render();
   },
 
   clearGeridas() {
     this.selectedCompanyIds = [];
+    this.companyDropOpen = true;
     this.render();
+  },
+
+  toggleGroupByCompany() {
+    this.groupByCompany = !this.groupByCompany;
+    this.render();
+  },
+
+  toggleCompanyCollapse(id) {
+    const s = String(id);
+    if (this.collapsedCompanies.has(s)) this.collapsedCompanies.delete(s);
+    else this.collapsedCompanies.add(s);
+    this.render();
+  },
+
+  toggleAccountCollapse(key) {
+    const s = String(key);
+    if (this.collapsedAccounts.has(s)) this.collapsedAccounts.delete(s);
+    else this.collapsedAccounts.add(s);
+    this.render();
+  },
+
+  companyAccounts(companyId) {
+    return this.accounts.filter(r => String(r.companyId) === String(companyId));
+  },
+
+  aggregateFlow(accs) {
+    const keys = this.months;
+    const opening = accs.reduce((s, r) => s + (Number(r.opening) || 0), 0);
+    let running = opening;
+    const months = keys.map(mk => {
+      const f = accs.reduce((acc, r) => {
+        const m = (r.months && r.months[mk]) || this.emptyFlow();
+        acc.aportes += m.aportes || 0;
+        acc.resgates += m.resgates || 0;
+        acc.rendimento += m.rendimento || 0;
+        acc.tarifas += m.tarifas || 0;
+        return acc;
+      }, this.emptyFlow());
+      const monthOpening = running;
+      const net = f.aportes + f.resgates + f.rendimento + f.tarifas;
+      running = monthOpening + net;
+      return { month: mk, opening: monthOpening, ...f, closing: running };
+    });
+    return { opening, months };
   },
 
   cell(n, bold) {
@@ -439,6 +618,7 @@ const InvestimentoApp = {
         </div>
         <div style="flex:1;min-height:0;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;display:flex;flex-direction:column;">
           <div style="padding:14px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+            ${this.companyDropHtml()}
             <label style="font-size:0.75rem;font-weight:700;color:#475569;">Início
               <input type="date" value="${this.startDate}" onchange="InvestimentoApp.startDate=this.value"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
@@ -454,26 +634,10 @@ const InvestimentoApp = {
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
-            <div style="flex:1;min-width:280px;max-width:360px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
-                <span style="display:inline-flex;align-items:center;gap:6px;background:#e8f5ee;color:#105436;border:1px solid #86efac;border-radius:99px;padding:3px 10px;font-size:0.7rem;font-weight:800;letter-spacing:0.2px;">
-                  Gerida pelo grupo
-                </span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span id="inv-emp-count" style="font-size:0.72rem;color:#64748b;font-weight:700;">${this.selectedCompanyIds.length}/${companies.length}</span>
-                  <button type="button" onclick="InvestimentoApp.selectAllGeridas()" style="border:none;background:none;color:#105436;font-size:0.72rem;font-weight:700;cursor:pointer;">Todas</button>
-                  <button type="button" onclick="InvestimentoApp.clearGeridas()" style="border:none;background:none;color:#64748b;font-size:0.72rem;font-weight:700;cursor:pointer;">Limpar</button>
-                </div>
-              </div>
-              ${companies.length ? `
-                <input id="inv-emp-search" placeholder="Buscar empresa..." value="${this.esc(this.companyQuery)}"
-                  oninput="InvestimentoApp.filterCompanyList(this.value)"
-                  style="width:100%;height:32px;border:1px solid #e2e8f0;border-radius:6px 6px 0 0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
-                <div id="inv-emp-list" style="max-height:168px;overflow:auto;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;background:#fff;">
-                  ${this.companyListHtml()}
-                </div>
-              ` : `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`}
-            </div>
+            <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.accounts.length ? "" : "disabled"}
+              style="height:34px;display:inline-flex;align-items:center;gap:6px;">
+              <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> Exportar Excel
+            </button>
           </div>
           ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}
           <div style="padding:12px 16px 0;display:flex;gap:10px;flex-wrap:wrap;">

@@ -10762,9 +10762,9 @@ async function showDistratoView(customer, sale, bills) {
   const iniciativaEl = document.getElementById("dist-iniciativa");
   if (iniciativaEl) iniciativaEl.value = "cliente";
   const nomeBen = document.getElementById("dist-bank-beneficiary-name");
-  if (nomeBen && !nomeBen.value && customer) nomeBen.value = customer.name || "";
+  if (nomeBen) nomeBen.value = (customer && customer.name) || "";
   const cpfBen = document.getElementById("dist-bank-cpf");
-  if (cpfBen && !cpfBen.value && customer) cpfBen.value = customer.cpfCnpj || "";
+  if (cpfBen) cpfBen.value = (customer && customer.cpfCnpj) || "";
 
   populateDistratoWitnessSelects();
   calculateDistrato();
@@ -11149,9 +11149,13 @@ function isLegacyDistratoClauses(text) {
 function applyDistratoConditionals(text, flags) {
   let s = String(text || '');
   const blocks = [
+    ['SE_PERMUTA', !!flags.hasPermuta],
     ['SE_RESTITUICAO', !!flags.hasRestituicao],
-    ['SE_SEM_RESTITUICAO', !flags.hasRestituicao],
-    ['SE_NOVO_LOTE', !!flags.hasNovoLote]
+    ['SE_SEM_RESTITUICAO', !!flags.hasSemRestituicao],
+    ['SE_NOVO_LOTE', !!flags.hasNovoLote],
+    ['SE_PAGAMENTO_BANCARIO', !!flags.hasPagamentoBancario],
+    ['SE_INICIATIVA_CLIENTE', flags.iniciativa !== 'empresa'],
+    ['SE_INICIATIVA_EMPRESA', flags.iniciativa === 'empresa']
   ];
   blocks.forEach(([name, keep]) => {
     const re = new RegExp('\\{\\{#' + name + '\\}\\}([\\s\\S]*?)\\{\\{/' + name + '\\}\\}', 'g');
@@ -11169,16 +11173,64 @@ function applyDistratoTemplateVars(text, map) {
   return s;
 }
 
-function generateDistratoPDF() {
+function upgradeDistratoClauses(text) {
+  let s = String(text || '');
+  if (!/\{\{#SE_PERMUTA\}\}/.test(s)) {
+    const permutaBlock = `{{#SE_PERMUTA}}
+5.1. Fica ajustado que, por mera liberalidade da PROMITENTE VENDEDORA, o valor negociado para restituição corresponderá a 90% (noventa por cento) do montante total efetivamente pago pelo PROMITENTE COMPRADOR no contrato distratado, o qual totaliza {{VALOR_PAGO}} ({{VALOR_PAGO_EXTENSO}}), após retenção de 10% (dez por cento) a título de multa ({{VALOR_MULTA}}), resultando no valor de {{VALOR_RESTITUICAO}} ({{VALOR_RESTITUICAO_EXTENSO}}).
+{{#SE_NOVO_LOTE}}
+5.2. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas vincendas do contrato de compromisso de compra e venda mantido pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referente ao lote {{NOVO_LOTE}}.
+{{/SE_NOVO_LOTE}}
+{{#SE_PAGAMENTO_BANCARIO}}
+5.2. O valor será restituído em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}
+{{/SE_PAGAMENTO_BANCARIO}}
+{{/SE_PERMUTA}}
+`;
+    if (/\{\{\/SE_RESTITUICAO\}\}/.test(s)) {
+      s = s.replace(/\{\{\/SE_RESTITUICAO\}\}/, '{{/SE_RESTITUICAO}}\n' + permutaBlock);
+    } else {
+      s += '\n' + permutaBlock;
+    }
+  }
+  if (!/\{\{#SE_INICIATIVA_CLIENTE\}\}/.test(s) && /CLÁUSULA SEGUNDA/i.test(s)) {
+    s = s.replace(
+      /2\.1\. O\(A\) PROMITENTE COMPRADOR\(A\), por razões de ordem estritamente pessoal[\s\S]*?deste instrumento\./,
+      `{{#SE_INICIATIVA_CLIENTE}}
+2.1. O(A) PROMITENTE COMPRADOR(A), por razões de ordem estritamente pessoal e de forma unilateral, manifesta neste ato sua inequívoca decisão de rescindir o compromisso de compra e venda mencionado na Cláusula Primeira.
+2.2. A PROMITENTE VENDEDORA, embora seu interesse fosse pela manutenção do contrato, concorda com o pedido de rescisão formulado pelo(a) PROMITENTE COMPRADOR(A), formalizando o término da relação contratual por meio deste instrumento.
+{{/SE_INICIATIVA_CLIENTE}}
+{{#SE_INICIATIVA_EMPRESA}}
+2.1. A PROMITENTE VENDEDORA, no exercício de sua faculdade contratual e por iniciativa própria, manifesta neste ato a decisão de rescindir o compromisso de compra e venda mencionado na Cláusula Primeira.
+2.2. O(A) PROMITENTE COMPRADOR(A) concorda com a rescisão formulada pela PROMITENTE VENDEDORA, formalizando o término da relação contratual por meio deste instrumento.
+{{/SE_INICIATIVA_EMPRESA}}`
+    );
+  }
+  return s;
+}
+
+window.generateDistratoPDF = function generateDistratoPDF() {
+  try {
   const results = AppState.currentDistratoResult;
-  if (!results) return;
+  if (!results) {
+    alert("Calcule o distrato antes de gerar o termo.");
+    return;
+  }
+  if (!g_distSale || !g_distCustomer) {
+    alert("Abra o simulador de distrato a partir de um contrato.");
+    return;
+  }
+
+  const isPermuta = !!(results.isPermuta || (document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked));
+  const comissaoEl = document.getElementById("dist-comissao");
+  const comissaoAplicavel = comissaoEl && !comissaoEl.disabled && !isPermuta;
 
   // Validação: Contratos emitidos até 31/12/2018 precisam de comissão informada (maior que 0)
-  const saleDate = new Date(g_distSale.saleDate + 'T12:00:00'); // Evitar problemas de fuso
+  const rawSaleDate = g_distSale.saleDate ? String(g_distSale.saleDate).slice(0, 10) : "";
+  const saleDate = rawSaleDate ? new Date(rawSaleDate + "T12:00:00") : null;
   const dataLimite = new Date("2018-12-31T23:59:59");
-  const comissaoInfo = results.extraDebits.comissao || 0;
+  const comissaoInfo = (results.extraDebits && results.extraDebits.comissao) || 0;
   
-  if (saleDate <= dataLimite && comissaoInfo <= 0) {
+  if (comissaoAplicavel && saleDate && !isNaN(saleDate.getTime()) && saleDate <= dataLimite && comissaoInfo <= 0) {
     alert("Preencha a comissão deste contrato.");
     return;
   }
@@ -11186,23 +11238,31 @@ function generateDistratoPDF() {
   const unit = AppState.units[g_distSale.unitId] || {};
   const preambleText = AppState.preambles[unit.costCenterId] || "PREÂMBULO DO EMPREENDIMENTO IMOBILIÁRIO.";
 
+  const distVal = (id) => {
+    const el = document.getElementById(id);
+    return el ? String(el.value || "").trim() : "";
+  };
+
   // Dados Bancários
-  const payType = document.getElementById("dist-bank-transfer-type").value;
-  const beneficiaryName = document.getElementById("dist-bank-beneficiary-name").value || g_distCustomer.name;
-  const beneficiaryCpf = document.getElementById("dist-bank-cpf").value || g_distCustomer.cpfCnpj;
+  const payType = distVal("dist-bank-transfer-type") || "PIX";
+  const beneficiaryName = distVal("dist-bank-beneficiary-name") || (g_distCustomer.name || "");
+  const beneficiaryCpf = distVal("dist-bank-cpf") || (g_distCustomer.cpfCnpj || "");
 
   let payInfoHtml = "";
   if (payType === "TED") {
-    const bank = document.getElementById("dist-bank-name").value || "N/D";
-    const agency = document.getElementById("dist-bank-agency").value || "N/D";
-    const account = document.getElementById("dist-bank-account").value || "N/D";
-    const digit = document.getElementById("dist-bank-digit").value || "";
-    payInfoHtml = `TED Bancário: Banco ${bank} | Agência: ${agency} | Conta: ${account}-${digit}`;
+    const bank = distVal("dist-bank-name") || "N/D";
+    const agency = distVal("dist-bank-agency") || "N/D";
+    const account = distVal("dist-bank-account") || "N/D";
+    const digit = distVal("dist-bank-digit") || "";
+    payInfoHtml = `TED Bancário: Banco ${bank} | Agência: ${agency} | Conta: ${account}${digit ? "-" + digit : ""}`;
   } else {
-    const pixType = document.getElementById("dist-bank-pix-type").value;
-    const pixKey = document.getElementById("dist-bank-pix-key").value || "N/D";
+    const pixType = distVal("dist-bank-pix-type") || "CPF/CNPJ";
+    const pixKey = distVal("dist-bank-pix-key") || "N/D";
     payInfoHtml = `PIX: Chave (${pixType}) - ${pixKey}`;
   }
+
+  const w1 = getDistratoWitnessBySelect("dist-testemunha-1");
+  const w2 = getDistratoWitnessBySelect("dist-testemunha-2");
 
   let t = {};
   try { t = JSON.parse(localStorage.getItem('crm_docpadrao_distrato') || '{}'); } catch (e) {}
@@ -11210,12 +11270,18 @@ function generateDistratoPDF() {
   const clausesEl = document.getElementById('doc-distrato-clauses');
   const pctEl = document.getElementById('doc-distrato-pct');
   const docTitle = (titleEl && titleEl.value) || t['doc-distrato-title'] || 'INSTRUMENTO PARTICULAR DE DISTRATO DE COMPROMISSO DE COMPRA E VENDA';
-  let clauses = (t['doc-distrato-clauses'] && !isLegacyDistratoClauses(t['doc-distrato-clauses']))
-    ? t['doc-distrato-clauses']
-    : (clausesEl && clausesEl.value) || '';
+  let clauses = "";
+  if (clausesEl && clausesEl.value && !isLegacyDistratoClauses(clausesEl.value)) {
+    clauses = clausesEl.value;
+  } else if (t['doc-distrato-clauses'] && !isLegacyDistratoClauses(t['doc-distrato-clauses'])) {
+    clauses = t['doc-distrato-clauses'];
+  } else if (clausesEl && clausesEl.value) {
+    clauses = clausesEl.value;
+  }
+  clauses = upgradeDistratoClauses(clauses);
   const pctRetencao = (pctEl && pctEl.value) || t['doc-distrato-pct'] || results.restitutionPct || '';
 
-  const useLegalTemplate = clauses && !isLegacyDistratoClauses(clauses);
+  const useLegalTemplate = !!(clauses && String(clauses).length > 80);
   let docHtml = '';
 
   if (useLegalTemplate) {
@@ -11228,19 +11294,27 @@ function generateDistratoPDF() {
       ? (numeroPorExtenso(areaNum) + ' metros quadrados')
       : '____';
     const saleDateStr = g_distSale.saleDate
-      ? new Date(g_distSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR')
+      ? new Date(String(g_distSale.saleDate).slice(0, 10) + 'T12:00:00').toLocaleDateString('pt-BR')
       : '____';
     const dateExt = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
     const valorLiq = results.refundNet || 0;
     const valorFmt = valorLiq.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const valorPago = results.totalPaid || 0;
+    const valorMulta = results.penalty || 0;
     const cpfCnpj = (typeof maskCpfCnpj === 'function') ? maskCpfCnpj(g_distCustomer.cpfCnpj) : (g_distCustomer.cpfCnpj || '');
     const instQty = results.instQty || Number(document.getElementById('dist-restitution-installments')?.value) || 1;
     const instVal = results.refundInstallment || 0;
-    const hasRestituicao = Number(valorLiq) > 0.009;
-    const novoLoteRaw = (document.getElementById('dist-novo-lote')?.value || '').trim();
+    const hasRestituicao = !isPermuta && Number(valorLiq) > 0.009;
+    const iniciativa = distVal("dist-iniciativa") || "cliente";
+    const novoLoteRaw = distVal("dist-novo-lote");
+    const hasNovoLote = !!(novoLoteRaw && novoLoteRaw !== '____');
     let clausesReady = applyDistratoConditionals(clauses, {
+      hasPermuta: isPermuta,
       hasRestituicao,
-      hasNovoLote: !!(novoLoteRaw && novoLoteRaw !== '____')
+      hasSemRestituicao: !isPermuta && !hasRestituicao,
+      hasNovoLote,
+      hasPagamentoBancario: isPermuta ? !hasNovoLote : hasRestituicao,
+      iniciativa
     });
     const filled = applyDistratoTemplateVars(formatDocPadraoMarkup(clausesReady), {
       QUADRA: unit.block || unit.quadra || '____',
@@ -11266,6 +11340,9 @@ function generateDistratoPDF() {
       AREA_LOTE_EXTENSO: areaExt,
       VALOR_RESTITUICAO: valorFmt,
       VALOR_RESTITUICAO_EXTENSO: valorPorExtensoBRL(valorLiq),
+      VALOR_PAGO: valorPago.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      VALOR_PAGO_EXTENSO: valorPorExtensoBRL(valorPago),
+      VALOR_MULTA: valorMulta.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
       QTD_PARCELAS_RESTITUICAO: String(instQty),
       QTD_PARCELAS_RESTITUICAO_EXTENSO: numeroPorExtenso(instQty),
       VALOR_PARCELA_RESTITUICAO: instVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -11278,10 +11355,10 @@ function generateDistratoPDF() {
       NOVO_LOTE: novoLoteRaw || '____',
       DATA_HOJE_EXTENSO: dateExt,
       DATA_ATUAL_EXTENSO: dateExt,
-      TESTEMUNHA_1_NOME: t.test1Nome || '________________',
-      TESTEMUNHA_1_RG: t.test1Rg || '________________',
-      TESTEMUNHA_2_NOME: t.test2Nome || '________________',
-      TESTEMUNHA_2_RG: t.test2Rg || '________________',
+      TESTEMUNHA_1_NOME: w1.nome || t.test1Nome || '________________',
+      TESTEMUNHA_1_RG: w1.cpf || t.test1Rg || '________________',
+      TESTEMUNHA_2_NOME: w2.nome || t.test2Nome || '________________',
+      TESTEMUNHA_2_RG: w2.cpf || t.test2Rg || '________________',
       PREAMBULO: preambleText
     });
     docHtml = `
@@ -11385,7 +11462,11 @@ function generateDistratoPDF() {
   document.getElementById("pdf-modal-title").textContent = "Termo de Rescisão e Distrato - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
-  lucide.createIcons();
+  try { if (window.lucide) lucide.createIcons(); } catch (e) {}
+  } catch (err) {
+    console.error("Erro ao gerar termo de distrato", err);
+    alert("Não foi possível gerar o termo de distrato. Verifique o modelo em Documentos Padrões e tente de novo.");
+  }
 }
 
 window.generateDemonstrativoDistratoPDF = function() {

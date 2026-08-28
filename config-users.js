@@ -541,6 +541,20 @@ const ConfigUsersApp = {
                       Responsável por reenviar boleto de cliente
                    </label>
                </div>
+               <label style="display: flex; align-items: center; font-weight: 600; color: #5f6368; font-size: 0.85rem; cursor: pointer;">
+                  <input type="checkbox" id="umodal-assina-testemunha" ${user && user.assina_testemunha ? 'checked' : ''} onchange="document.getElementById('umodal-witness-docs').style.display = this.checked ? 'flex' : 'none';" style="margin-right: 8px; width: 16px; height: 16px;">
+                  Assina documentos como testemunha
+               </label>
+            </div>
+            <div id="umodal-witness-docs" style="margin-bottom: 16px; display: ${user && user.assina_testemunha ? 'flex' : 'none'}; gap: 16px;">
+               <div style="flex: 1;">
+                  <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">CPF (testemunha)</label>
+                  <input type="text" id="umodal-doc-cpf" value="${user ? (user.doc_cpf || user.cpf || '') : ''}" placeholder="000.000.000-00" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;">
+               </div>
+               <div style="flex: 1;">
+                  <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">RG (opcional)</label>
+                  <input type="text" id="umodal-doc-rg" value="${user ? (user.doc_rg || user.rg || '') : ''}" placeholder="RG" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;">
+               </div>
             </div>
 
             <div id="umodal-const-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && user.check_construction ? 'block' : 'none'};">
@@ -615,6 +629,9 @@ const ConfigUsersApp = {
       const constCities = Array.from(document.querySelectorAll('input[name="umodal-const-cities"]:checked')).map(el => el.value);
 
       const resendBillet = document.getElementById('umodal-resend-billet') ? document.getElementById('umodal-resend-billet').checked : false;
+      const assinaTestemunha = document.getElementById('umodal-assina-testemunha') ? document.getElementById('umodal-assina-testemunha').checked : false;
+      const docCpf = document.getElementById('umodal-doc-cpf') ? document.getElementById('umodal-doc-cpf').value.trim() : '';
+      const docRg = document.getElementById('umodal-doc-rg') ? document.getElementById('umodal-doc-rg').value.trim() : '';
 
       if (!name || !email) {
           alert("Nome e E-mail são obrigatórios.");
@@ -640,6 +657,9 @@ const ConfigUsersApp = {
               user.manager_email = managerEmail;
               user.badge_color = badgeColor;
               user.resend_billet = resendBillet;
+              user.assina_testemunha = assinaTestemunha;
+              user.doc_cpf = docCpf;
+              user.doc_rg = docRg;
           }
       } else {
           const newId = this.users.length ? Math.max(...this.users.map(u => u.id)) + 1 : 1;
@@ -661,6 +681,9 @@ const ConfigUsersApp = {
              manager_email: managerEmail,
              badge_color: badgeColor,
              resend_billet: resendBillet,
+             assina_testemunha: assinaTestemunha,
+             doc_cpf: docCpf,
+             doc_rg: docRg,
              status: "PENDENTE"
           });
       }

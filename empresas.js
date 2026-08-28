@@ -6,6 +6,18 @@ const EmpresasState = {
   selectedFilterId: null
 };
 
+try {
+  const raw = localStorage.getItem("crm_empresas_custom");
+  if (raw) {
+    const data = JSON.parse(raw);
+    const map = {};
+    Object.values(data).forEach(item => {
+      if (item && typeof item === "object" && item.company_id != null) map[item.company_id] = item;
+    });
+    if (Object.keys(map).length) EmpresasState.customFields = map;
+  }
+} catch (e) {}
+
 const EmpresasApp = {
   async loadData() {
     EmpresasState.loading = true;

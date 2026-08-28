@@ -64,6 +64,21 @@ const ParametrizacaoParceiroApp = {
     return String((p && p.kind) || "parceria") === "sociedade";
   },
 
+  /** Grupos DFC que não entram no rateio de parceria (nem os nós internos). */
+  PARCERIA_HIDDEN_DFC_ITEMS: [2, 6, 7, 8, 10, 11, 12],
+
+  dfcItemNumber(node) {
+    const s = String((node && (node.code || node.codigo || node.name || node.nome)) || "").trim();
+    const m = s.match(/^(\d{1,2})\b/);
+    return m ? parseInt(m[1], 10) : null;
+  },
+
+  isDfcHiddenForParceria(p, node) {
+    if (this.isSociedade(p) || !node) return false;
+    const n = this.dfcItemNumber(node);
+    return n != null && this.PARCERIA_HIDDEN_DFC_ITEMS.includes(n);
+  },
+
   normalizeItem(p) {
     if (!p) return p;
     p.kind = p.kind === "sociedade" ? "sociedade" : "parceria";
@@ -1057,7 +1072,7 @@ const ParametrizacaoParceiroApp = {
     const groups = visao.groups || [];
     const obra = this.currentObra(p);
     this.expanded = this.expanded || new Set(groups.map(g => g.id));
-    const roots = groups.filter(g => !g.parentId);
+    const roots = groups.filter(g => !g.parentId && !this.isDfcHiddenForParceria(p, g));
     const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
     const def = obra ? obra.defaultPartnerShare : 0;
     return `
@@ -1088,7 +1103,7 @@ const ParametrizacaoParceiroApp = {
   },
 
   dfcNodeRows(p, node, groups, level, ancestors) {
-    const children = groups.filter(g => g.parentId === node.id);
+    const children = groups.filter(g => g.parentId === node.id && !this.isDfcHiddenForParceria(p, g));
     const accounts = node.accounts || [];
     const hasKids = children.length > 0 || accounts.length > 0;
     const expanded = !this.expanded || this.expanded.has(node.id);
