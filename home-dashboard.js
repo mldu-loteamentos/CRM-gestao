@@ -213,6 +213,12 @@
     }
   },
 
+  queueCacheItems(entry) {
+    if (!entry) return [];
+    if (Array.isArray(entry)) return entry;
+    return Array.isArray(entry.items) ? entry.items : [];
+  },
+
   unfinishedYesterday(opName) {
     let cache = {};
     try {
@@ -234,7 +240,7 @@
       }
     });
     if (!latestKey) return [];
-    const queue = cache[latestKey] || [];
+    const queue = this.queueCacheItems(cache[latestKey]);
     return queue.filter(item => {
       const notes = (window.AppState && AppState.notes && AppState.notes[item.customerId]) || [];
       let done = false;
@@ -393,7 +399,7 @@
         const ok = prefixes.some(p => this.normalizeOperatorKey(head) === this.normalizeOperatorKey(p)
           || this.normalizeOperatorKey(head).includes(this.normalizeOperatorKey(p).split(' ')[0]));
         if (!ok) return;
-        const queue = cache[k] || [];
+        const queue = this.queueCacheItems(cache[k]);
         filaTotal = Math.max(filaTotal, queue.length);
         filaDone = queue.filter(item => {
           const lists = [
@@ -554,14 +560,6 @@
               ${periodBlock('Semana', periods.week, false)}
               ${periodBlock('Mês', periods.month, false)}
             </div>
-            <div style="margin-top:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; font-weight:800; color:#166534; letter-spacing:0.04em; text-align:center; margin-bottom:8px;">Selos Ganhos</div>
-              <div style="display:flex; gap:8px;">
-                ${sealCell('hoje', seals.day)}
-                ${sealCell('semana', seals.week)}
-                ${sealCell('mês', seals.month)}
-              </div>
-            </div>
           </div>
         </div>
       </div>`;
@@ -608,15 +606,17 @@
          document.getElementById('home-op-load-data-container').style.display = 'block';
          document.getElementById('home-op-grids-container').style.display = 'none';
          document.getElementById('home-op-lembretes-container').style.display = 'none';
+         const charts0 = document.getElementById('home-op-charts-container');
+         if (charts0) charts0.style.display = 'none';
          const ins0 = document.getElementById('home-op-insights-container');
          if (ins0) ins0.style.display = 'none';
       } else {
          document.getElementById('home-op-load-data-container').style.display = 'none';
          document.getElementById('home-op-grids-container').style.display = 'grid';
-         document.getElementById('home-op-lembretes-container').style.display = 'block';
+         document.getElementById('home-op-lembretes-container').style.display = 'none';
          
          this.renderGrids();
-         this.renderLembretes();
+         this.renderCityCharts();
          this.renderInsights();
          
          setTimeout(() => { this.speak(true, false); }, 2000);
@@ -842,6 +842,124 @@
     if(window.lucide) window.lucide.createIcons();
   },
 
+  clientCity(c) {
+    const ccId = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId;
+    const ccName = (typeof getCostCenterName === 'function' ? getCostCenterName(c.costCenterId) : '') || c.unitName || '';
+    const city = (typeof window.extractCityFromCostCenter === 'function')
+      ? window.extractCityFromCostCenter(ccId || c.costCenterId, ccName)
+      : '';
+    return String(city || 'SEM CIDADE').toUpperCase();
+  },
+
+  clientOverdueValue(c) {
+    return (Number(c.overdueValue) || 0) + (Number(c.overdueCharges) || 0);
+  },
+
+  stackedBarSvg(categories, series, colors) {
+    const W = 520, H = 220, padL = 44, padR = 10, padT = 12, padB = 36;
+    const totals = categories.map((_, i) => series.reduce((s, row) => s + (row.values[i] || 0), 0));
+    const max = Math.max(...totals, 1);
+    const n = Math.max(categories.length, 1);
+    const gap = 16;
+    const barW = Math.min(56, (W - padL - padR - gap * (n - 1)) / n);
+    let bars = '';
+    categories.forEach((cat, i) => {
+      const x = padL + i * ((W - padL - padR) / n) + (((W - padL - padR) / n) - barW) / 2;
+      let y = H - padB;
+      series.forEach((row, si) => {
+        const v = row.values[i] || 0;
+        const h = (v / max) * (H - padT - padB);
+        if (h < 0.5) return;
+        y -= h;
+        bars += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colors[si % colors.length]}" rx="2"><title>${this.escHtml(row.name)} · ${cat}: ${this.fmtChart(v)}</title></rect>`;
+      });
+    });
+    const labels = categories.map((cat, i) => {
+      const x = padL + i * ((W - padL - padR) / n) + ((W - padL - padR) / n) / 2;
+      return `<text x="${x}" y="${H - 12}" text-anchor="middle" font-size="10" fill="#64748b">${this.escHtml(cat)}</text>`;
+    }).join('');
+    const ticks = [0, 0.5, 1].map(p => {
+      const y = H - padB - p * (H - padT - padB);
+      return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="#94a3b8">${this.fmtChart(max * p)}</text>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:220px;display:block;">${ticks}${bars}${labels}</svg>`;
+  },
+
+  fmtChart(n) {
+    const v = Number(n) || 0;
+    if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1).replace('.', ',') + ' mi';
+    if (Math.abs(v) >= 1000) return (v / 1000).toFixed(0) + ' mil';
+    return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  },
+
+  renderCityCharts() {
+    const box = document.getElementById('home-op-charts-container');
+    if (!box) return;
+    const mine = this.getMyClients().filter(c => (Number(c.maxDaysDelay) || 0) >= 31);
+    if (!mine.length) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const colors = ['#105436', '#2563eb', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#db2777', '#4f46e5', '#64748b', '#b45309'];
+    const cityTotals = {};
+    mine.forEach(c => {
+      const city = this.clientCity(c);
+      cityTotals[city] = (cityTotals[city] || 0) + this.clientOverdueValue(c);
+    });
+    const topCities = Object.keys(cityTotals).sort((a, b) => cityTotals[b] - cityTotals[a]).slice(0, 8);
+    const cityOf = (c) => {
+      const city = this.clientCity(c);
+      return topCities.includes(city) ? city : 'OUTRAS';
+    };
+    const cities = topCities.includes('OUTRAS') ? topCities : (Object.keys(cityTotals).length > 8 ? topCities.concat('OUTRAS') : topCities);
+    const palette = cities.map((_, i) => colors[i % colors.length]);
+
+    const agingCats = ['31-60', '61-90', '91-120', '120+'];
+    const agingIdx = (d) => {
+      if (d <= 60) return 0;
+      if (d <= 90) return 1;
+      if (d <= 120) return 2;
+      return 3;
+    };
+    const agingSeries = cities.map(city => ({ name: city, values: [0, 0, 0, 0] }));
+    mine.forEach(c => {
+      const i = agingIdx(Number(c.maxDaysDelay) || 0);
+      const row = agingSeries.find(s => s.name === cityOf(c));
+      if (row) row.values[i] += this.clientOverdueValue(c);
+    });
+
+    const splitCats = ['31 a 90 dias', 'Acima de 90'];
+    const splitSeries = cities.map(city => ({ name: city, values: [0, 0] }));
+    mine.forEach(c => {
+      const i = (Number(c.maxDaysDelay) || 0) > 90 ? 1 : 0;
+      const row = splitSeries.find(s => s.name === cityOf(c));
+      if (row) row.values[i] += this.clientOverdueValue(c);
+    });
+
+    const legend = cities.map((city, i) =>
+      `<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.72rem;color:#475569;margin-right:10px;">
+        <span style="width:9px;height:9px;border-radius:2px;background:${palette[i]};display:inline-block;"></span>${this.escHtml(city)}
+      </span>`
+    ).join('');
+    const card = (title, cats, series) => `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <div style="background:#f8fafc;padding:15px 20px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px;">
+          <i data-lucide="bar-chart-3" style="width:20px;color:#105436;"></i>
+          <h3 style="margin:0;font-size:1.1rem;color:#1e293b;">${title}</h3>
+        </div>
+        <div style="padding:12px 14px 8px;">
+          ${this.stackedBarSvg(cats, series, palette)}
+          <div style="margin-top:8px;line-height:1.8;">${legend}</div>
+        </div>
+      </div>`;
+    box.style.display = 'grid';
+    box.innerHTML = card('Valor em atraso 31+ · por faixa e cidade', agingCats, agingSeries)
+      + card('Valor em atraso 31+ · 31–90 × acima de 90', splitCats, splitSeries);
+    if (window.lucide) lucide.createIcons();
+  },
+
   renderLembretes() {
     const list = document.getElementById('home-op-lembretes-list');
     
@@ -891,6 +1009,31 @@
     } else {
         list.innerHTML = '<div style="text-align: center; padding: 20px; color: #94a3b8;">Erro ao carregar lembretes.</div>';
     }
+  },
+
+  buildCoachPhrases(opName) {
+    const phrases = [];
+    const user = this.getViewUser();
+    const mine = this.getMyClients();
+    const groups = this.collectInsightGroups(mine, user);
+    groups.forEach(g => {
+      const n = g.count != null ? g.count : (g.items || []).length;
+      if (n > 0) phrases.push(`${opName}, ${g.label}. Isso pede ação hoje! 💡`);
+    });
+    const today = this.localDateStr();
+    const notes = this.countNotesBetween(today, today);
+    const reais = (notes.ativo || 0) + (notes.receptivo || 0);
+    if (reais === 0) {
+      phrases.push(`${opName}, ainda não vi ocorrência de cobrança sua hoje. Bora registrar um contato ativo! 📞`);
+    } else if (reais < 8) {
+      phrases.push(`${opName}, você registrou ${reais} ocorrência(s) hoje (${notes.ativo} ativo / ${notes.receptivo} receptivo). Ainda dá pra acelerar! 📝`);
+    } else {
+      phrases.push(`${opName}, já tem ${reais} ocorrências hoje (${notes.ativo} ativo / ${notes.receptivo} receptivo). Mandou bem — mantém o ritmo! 💪`);
+    }
+    if (notes.internas > reais && notes.ativo === 0) {
+      phrases.push(`${opName}, tem nota interna, mas falta ocorrência de cobrança com o cliente. Liga e registra! ☎️`);
+    }
+    return phrases;
   },
 
   async speak(includeFeedback = false, isClick = false, isNewSelection = false) {
@@ -1419,11 +1562,20 @@
     const hour = new Date().getHours();
     let timeGreeting = hour < 12 ? 'Bom dia' : (hour < 18 ? 'Boa tarde' : 'Boa noite');
     
+    const coachPhrases = this.buildCoachPhrases(opName);
     const rand = Math.random();
     let finalMsg = '';
 
-    // 20% Saudação
-    if (rand < 0.20) {
+    // Ao abrir a home, prioriza insight e ocorrência
+    if (includeFeedback && coachPhrases.length && rand < 0.55) {
+        finalMsg = coachPhrases[Math.floor(Math.random() * coachPhrases.length)];
+    }
+    // 18% Insights / ocorrências
+    else if (rand < 0.18 && coachPhrases.length) {
+        finalMsg = coachPhrases[Math.floor(Math.random() * coachPhrases.length)];
+    }
+    // 15% Saudação
+    else if (rand < 0.33) {
         const dayOfWeek = new Date().getDay();
         if (dayOfWeek === 1) finalMsg = `Oii ${opName}! Eu sou o ${petName}. Estava morrendo de saudades de você no fim de semana! 🥰`;
         else if (dayOfWeek === 5) {
@@ -1438,7 +1590,7 @@
         else finalMsg = `${timeGreeting}, ${opName}! Eu sou o ${petName} e adoro trabalhar com você! 🥰`;
     }
     // 10% Clima
-    else if (rand < 0.30) {
+    else if (rand < 0.43) {
         try {
             const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-22.8833&longitude=-48.4417&current=temperature_2m,weather_code&timezone=America%2FSao_Paulo');
             if (res.ok) {
@@ -1463,7 +1615,7 @@
         } catch(e) {}
         if (!finalMsg) finalMsg = `Ei ${opName}, o clima está ótimo para fecharmos bons negócios hoje! 🚀`;
     }
-    // 40% Análise de Cliente Problemático
+    // 27% Análise de Cliente Problemático
     else if (rand < 0.70 && window.rawClientList) {
         const myClients = this.getMyClients();
         if (myClients.length > 0) {

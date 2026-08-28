@@ -12568,8 +12568,14 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       }
   }
   const cacheKey = `${selectedOperator}_${dateKey}`;
+  const unwrapQueueCache = (entry) => {
+    if (!entry) return [];
+    if (Array.isArray(entry)) return entry;
+    return Array.isArray(entry.items) ? entry.items : [];
+  };
+
   const applyTouchedFilter = (queue) => {
-      queue.forEach(item => {
+      (queue || []).forEach(item => {
          let exclude = false;
          const notes = (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, item.customerId) : (AppState.notes[item.customerId] || []));
          notes.forEach(n => {
@@ -12589,10 +12595,6 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       return queue;
   };
 
-  if (window._dailyQueueCache[cacheKey]) {
-      return applyTouchedFilter(window._dailyQueueCache[cacheKey]);
-  }
-
   // Permitir visualização da fila para hoje e dias futuros
   if (dateKey < todayStr) return [];
   if (selectedOperator === "Todos") return []; 
@@ -12608,7 +12610,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   if (!opConfig) opConfig = defaultFilaConfig;
   
-  const capacity = opConfig.capacity || 25;
+  const capacity = Number(opConfig.capacity) || 25;
   const r1_pct = (opConfig.r1 || 50) / 100;
   const r2_pct = (opConfig.r2 || 20) / 100;
   const r3_pct = (opConfig.r3 || 10) / 100;
@@ -12617,6 +12619,24 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const r6_pct = (opConfig.r6 || 0) / 100;
   const r7_pct = (opConfig.r7 || 0) / 100;
   const paymentDays = opConfig.paymentDays !== undefined ? opConfig.paymentDays : 15;
+  const configSig = [capacity, opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0, paymentDays].join('|');
+
+  const cachedEntry = window._dailyQueueCache[cacheKey];
+  const cachedItems = unwrapQueueCache(cachedEntry);
+  const cacheFresh = cachedItems.length > 0
+    && cachedItems.length <= capacity
+    && cachedItems.every(i => i && i.isFila)
+    && (!cachedEntry || Array.isArray(cachedEntry) || !cachedEntry.sig || cachedEntry.sig === configSig);
+  if (cacheFresh) {
+      return applyTouchedFilter(cachedItems.slice(0, capacity));
+  }
+
+  const leftoverFromCache = (entry) => {
+    const items = unwrapQueueCache(entry).filter(i => i && i.isFila);
+    return items
+      .sort((a, b) => (Number(b.filaScore) || 0) - (Number(a.filaScore) || 0))
+      .slice(0, capacity);
+  };
 
   let subjudiceMemory = {};
   try {
@@ -12638,8 +12658,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
 
   if (latestPrevDate) {
       const prevKey = `${selectedOperator}_${latestPrevDate}`;
-      const prevQueue = window._dailyQueueCache[prevKey] || [];
-      prevQueue.forEach(item => {
+      leftoverFromCache(window._dailyQueueCache[prevKey]).forEach(item => {
          let exclude = false;
          const notes = AppState.notes[item.customerId] || [];
          notes.forEach(n => {
@@ -12782,7 +12801,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
     return {
       ...item,
       filaScore: Math.round(finalScore),
-      sortScore: isLeftover ? 999999 : Math.round(finalScore),
+      sortScore: isLeftover ? (100000 + Math.round(finalScore)) : Math.round(finalScore),
       filaReason: reasons.slice(0, 2).join(" + ")
     };
   });
@@ -12947,9 +12966,9 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       localStorage.setItem('crm_queue_entry_dates', JSON.stringify(queueEntryDates));
   }
   
-  window._dailyQueueCache[cacheKey] = resultQueue;
+  window._dailyQueueCache[cacheKey] = { sig: configSig, items: resultQueue.slice(0, capacity) };
   localStorage.setItem('crm_daily_queue_cache_v3', JSON.stringify(window._dailyQueueCache));
-  return applyTouchedFilter(resultQueue);
+  return applyTouchedFilter(resultQueue.slice(0, capacity));
 };
 
 async function loadAgendaDayTasks(dateStr) {
@@ -13029,7 +13048,7 @@ window.fireConfetti = function() {
 };
 
   window.agendaItemsCache = window.agendaItemsCache || {};
-  const cacheKey = "v2|" + dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
+  const cacheKey = "v3|" + dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
 
   if (window.agendaItemsCache[cacheKey]) {
       dayItems = [...window.agendaItemsCache[cacheKey]];
@@ -13157,6 +13176,10 @@ window.fireConfetti = function() {
             const cpfRaw = (customer && (customer.cpf || customer.cnpj)) || '';
             const cpfMasked = cpfRaw ? cpfRaw.replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
 
+            const bulkTxt = String(occ.text || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const isBulkMsg = bulkTxt.includes('ENCAMINHADA UMA MENSAGEM DE COBRANCA');
+            if (isBulkMsg) return;
+
             dayItems.push({
               customerId: custId,
               customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + custId),
@@ -13177,9 +13200,15 @@ window.fireConfetti = function() {
       });
       
       if (window.generateDailyQueue) {
-        if (dateStr === window.getActiveQueueDate()) {
+        if (dateStr === window.getActiveQueueDate() && selectedOperator !== "Todos") {
             const queueItems = await window.generateDailyQueue(selectedOperator, dateStr);
-            dayItems.push(...queueItems);
+            const inQueue = new Set((queueItems || []).map(q => String(q.customerId) + '|' + String(q.saleId)));
+            dayItems = dayItems.filter(n => {
+              const k = String(n.customerId) + '|' + String(n.saleId);
+              if (inQueue.has(k) || inQueue.has(String(n.customerId) + '|' + String(n.saleId))) return false;
+              return n.promiseStatus === "Pendente";
+            });
+            dayItems = [...(queueItems || []), ...dayItems];
         }
       }
       
@@ -13198,6 +13227,7 @@ window.fireConfetti = function() {
   
   const originalItems = window.agendaItemsCache[cacheKey] || [];
   const unresolvedItems = originalItems.filter(item => {
+      if (!item.isFila) return false;
       if (item.isResolved) return false;
       if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
       return true;
@@ -19303,6 +19333,11 @@ window.saveFilaConfig = function() {
   };
   
   localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
+  try {
+    window._dailyQueueCache = {};
+    localStorage.removeItem('crm_daily_queue_cache_v3');
+    window.agendaItemsCache = {};
+  } catch (e) {}
   alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso!`);
 };
 

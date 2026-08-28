@@ -1092,7 +1092,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.531 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.532 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -1647,9 +1647,16 @@ As partes acima qualificadas, doravante denominadas individualmente como “Part
 1.1. Por força do “Instrumento Particular de Compromisso de Venda e Compra” firmado em {{DATA_CONTRATO}}, o(a) PROMITENTE COMPRADOR(A) tornou-se titular dos direitos aquisitivos do lote {{LOTE}}, quadra {{QUADRA}}, com área de {{AREA_LOTE}}, localizado no Loteamento {{EMPREENDIMENTO}}, na cidade de {{CIDADE_LOTEAMENTO}}, doravante denominado “Imóvel”.
 
 **CLÁUSULA SEGUNDA – DA DECISÃO DE DISTRATAR**
+{{#SE_INICIATIVA_CLIENTE}}
 2.1. O(A) PROMITENTE COMPRADOR(A), por razões de ordem estritamente pessoal e de forma unilateral, manifesta neste ato sua inequívoca decisão de rescindir o compromisso de compra e venda mencionado na Cláusula Primeira.
 
 2.2. A PROMITENTE VENDEDORA, embora seu interesse fosse pela manutenção do contrato, concorda com o pedido de rescisão formulado pelo(a) PROMITENTE COMPRADOR(A), formalizando o término da relação contratual por meio deste instrumento.
+{{/SE_INICIATIVA_CLIENTE}}
+{{#SE_INICIATIVA_EMPRESA}}
+2.1. A PROMITENTE VENDEDORA, no exercício de sua faculdade contratual e por iniciativa própria, manifesta neste ato a decisão de rescindir o compromisso de compra e venda mencionado na Cláusula Primeira.
+
+2.2. O(A) PROMITENTE COMPRADOR(A) concorda com a rescisão formulada pela PROMITENTE VENDEDORA, formalizando o término da relação contratual por meio deste instrumento.
+{{/SE_INICIATIVA_EMPRESA}}
 
 **CLÁUSULA TERCEIRA – DA VALIDADE E HOMOLOGAÇÃO DO ACORDO**
 3.1. O presente distrato constitui título executivo extrajudicial, nos termos do art. 784, III, do Código de Processo Civil, tornando-se plenamente válido e eficaz a partir da data de sua assinatura, obrigando as Partes, seus herdeiros e sucessores ao seu fiel cumprimento.
@@ -1668,6 +1675,16 @@ As partes acima qualificadas, doravante denominadas individualmente como “Part
 {{#SE_RESTITUICAO}}
 5.1. Por liberalidade, a PROMITENTE VENDEDORA restituirá aos PROMITENTES COMPRADORES o valor de {{VALOR_RESTITUICAO}} ({{VALOR_RESTITUICAO_EXTENSO}}), em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), com o primeiro pagamento ocorrendo em até 30 (trinta) dias úteis após a data de assinatura deste instrumento e as demais a cada 30 (trinta) dias após o pagamento da anterior. O pagamento ocorrerá via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}} Com a quitação integral, os PROMITENTES COMPRADORES concedem ampla e geral quitação à PROMITENTE VENDEDORA, para nada mais pleitear em função do presente distrato e do Compromisso ora rescindido, a qualquer tempo e a que título for.
 {{/SE_RESTITUICAO}}
+{{#SE_PERMUTA}}
+5.1. Fica ajustado que, por mera liberalidade da PROMITENTE VENDEDORA, o valor negociado para restituição corresponderá a 90% (noventa por cento) do montante total efetivamente pago pelo PROMITENTE COMPRADOR no contrato distratado, o qual totaliza {{VALOR_PAGO}} ({{VALOR_PAGO_EXTENSO}}), após retenção de 10% (dez por cento) a título de multa ({{VALOR_MULTA}}), resultando no valor de {{VALOR_RESTITUICAO}} ({{VALOR_RESTITUICAO_EXTENSO}}).
+{{#SE_NOVO_LOTE}}
+5.2. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas vincendas do contrato de compromisso de compra e venda mantido pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referente ao lote {{NOVO_LOTE}}.
+{{/SE_NOVO_LOTE}}
+{{#SE_PAGAMENTO_BANCARIO}}
+5.2. O valor será restituído em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}
+{{/SE_PAGAMENTO_BANCARIO}}
+5.3. Com a realização da restituição na forma ora ajustada, o PROMITENTE COMPRADOR confere à PROMITENTE VENDEDORA plena, geral, irrevogável e irretratável quitação, nada mais podendo reclamar, a qualquer tempo e a qualquer título, em razão do contrato ora distratado e deste instrumento.
+{{/SE_PERMUTA}}
 
 5.2. O PROMITENTE COMPRADOR restitui o imóvel juntamente com eventuais benfeitorias nele existentes, como poste de luz e cavalete de água, renunciando, neste ato, de forma expressa, irretratável e irrevogável, a qualquer direito de retenção, indenização ou reembolso relativos às referidas benfeitorias.
 Em contrapartida, a PROMITENTE VENDEDORA recebe tais benfeitorias sem impor qualquer custo, ônus ou cobrança ao PROMITENTE COMPRADOR, concedendo-se as partes, mutuamente, plena, rasa e definitiva quitação quanto a este item específico.
@@ -1777,6 +1794,16 @@ CPF: {{TESTEMUNHA_1_RG}}                                                        
                 <div class="var-pill" onclick="copyVar(this)">{{/SE_RESTITUICAO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{#SE_SEM_RESTITUICAO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{/SE_SEM_RESTITUICAO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{#SE_PERMUTA}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{/SE_PERMUTA}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{#SE_INICIATIVA_CLIENTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{/SE_INICIATIVA_CLIENTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{#SE_INICIATIVA_EMPRESA}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{/SE_INICIATIVA_EMPRESA}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{#SE_PAGAMENTO_BANCARIO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{/SE_PAGAMENTO_BANCARIO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_PAGO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_MULTA}}</div>
 
                 <div class="var-pill-group-title">Outros / Credor</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_HOJE_EXTENSO}}</div>
@@ -5972,35 +5999,35 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=531"></script>
-  <script defer src="sienge-api.js?v=531"></script>
-  <script defer src="azure-auth.js?v=531"></script>
-  <script defer src="app.js?v=531"></script>
-  <script defer src="home-dashboard.js?v=531"></script>
-  <script defer src="anexos.js?v=531"></script>
-  <script defer src="contas-pagar.js?v=531"></script>
-  <script defer src="config-tags.js?v=531"></script>
-  <script defer src="config-users.js?v=531"></script>
-  <script defer src="construcao.js?v=531"></script>
-  <script defer src="empresas.js?v=531"></script>
-  <script defer src="relacionamento.js?v=531"></script>
+  <script defer src="data.js?v=532"></script>
+  <script defer src="sienge-api.js?v=532"></script>
+  <script defer src="azure-auth.js?v=532"></script>
+  <script defer src="app.js?v=532"></script>
+  <script defer src="home-dashboard.js?v=532"></script>
+  <script defer src="anexos.js?v=532"></script>
+  <script defer src="contas-pagar.js?v=532"></script>
+  <script defer src="config-tags.js?v=532"></script>
+  <script defer src="config-users.js?v=532"></script>
+  <script defer src="construcao.js?v=532"></script>
+  <script defer src="empresas.js?v=532"></script>
+  <script defer src="relacionamento.js?v=532"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=531"></script>
-  <script defer src="marketing.js?v=531"></script>
-  <script defer src="plano-financeiro.js?v=531"></script>
-  <script defer src="prestacao-contas.js?v=531"></script>
-  <script defer src="fluxo-caixa.js?v=531"></script>
-  <script defer src="investimento.js?v=531"></script>
-  <script defer src="parametrizacao-parceiro.js?v=531"></script>
-  <script defer src="fiscal.js?v=531"></script>
-  <script defer src="indexadores.js?v=531"></script>
-  <script defer src="verificar-construcao.js?v=531"></script>
-  <script src="repactuacoes.js?v=531"></script>
+  <script defer src="centros-custo.js?v=532"></script>
+  <script defer src="marketing.js?v=532"></script>
+  <script defer src="plano-financeiro.js?v=532"></script>
+  <script defer src="prestacao-contas.js?v=532"></script>
+  <script defer src="fluxo-caixa.js?v=532"></script>
+  <script defer src="investimento.js?v=532"></script>
+  <script defer src="parametrizacao-parceiro.js?v=532"></script>
+  <script defer src="fiscal.js?v=532"></script>
+  <script defer src="indexadores.js?v=532"></script>
+  <script defer src="verificar-construcao.js?v=532"></script>
+  <script src="repactuacoes.js?v=532"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=531"></script>
+  <script defer src="dashboard-inadimplencia.js?v=532"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
