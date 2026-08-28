@@ -16985,16 +16985,20 @@ window.nexRefreshViews = function() {
 
 window.nexStatusSelectHtml = function(item, extraStyle) {
   const can = window.nexCanSetStatus(item);
-  const current = window.nexIsEntregue(item && item.status) ? "ENTREGUE" : String((item && item.status) || "");
-  const sel = window.NEX_STATUS_OPTIONS.map(s => `<option value="${s}" ${s === current ? "selected" : ""}>${s}</option>`).join("");
+  const raw = window.nexIsEntregue(item && item.status) ? "ENTREGUE" : String((item && item.status) || "").trim();
+  const current = can ? raw : "";
+  const sel = window.NEX_STATUS_OPTIONS.map(s => {
+    const on = can && s === current;
+    return `<option value="${s}" ${on ? "selected" : ""}>${s}</option>`;
+  }).join("");
   const title = can
     ? "Status da carta"
     : "Preencha o objeto de rastreio e anexe o AR Digital para liberar o status da carta";
   const style = "height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;max-width:200px;" +
     (can ? "" : "background:#f1f5f9;color:#64748b;cursor:not-allowed;") +
     (extraStyle || "");
-  return `<select ${can ? "" : "disabled"} title="${title.replace(/"/g, "&quot;")}" onchange="window.updateNexStatus('${item.id}', this.value)" style="${style}">
-    <option value="">Selecionar...</option>
+  return `<select ${can ? "" : "disabled"} autocomplete="off" title="${title.replace(/"/g, "&quot;")}" onchange="window.updateNexStatus('${item.id}', this.value)" style="${style}">
+    <option value="" ${current ? "" : "selected"}></option>
     ${sel}
   </select>`;
 };
