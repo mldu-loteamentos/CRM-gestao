@@ -5,6 +5,7 @@ const ParametrizacaoParceiroApp = {
   items: [],
   selectedId: null,
   selectedObraCode: "",
+  detailTab: "geral",
   categories: [],
   ccSearch: "",
   loadingCats: false,
@@ -113,6 +114,11 @@ const ParametrizacaoParceiroApp = {
   selectObra(code) {
     this.selectedObraCode = String(code || "");
     this.ccSearch = "";
+    this.render();
+  },
+
+  setDetailTab(tab) {
+    this.detailTab = tab || "geral";
     this.render();
   },
 
@@ -352,6 +358,7 @@ const ParametrizacaoParceiroApp = {
     const seed = this.seedCostCenters(obra, p.companyId, ccId);
     p.obras.push(this.makeObra(obra, share, seed));
     this.selectedObraCode = obra;
+    this.detailTab = "centros";
     this.persist();
     this.render();
   },
@@ -413,6 +420,7 @@ const ParametrizacaoParceiroApp = {
     this.selectedObraCode = p && p.obras[0] ? p.obras[0].code : "";
     this.creditorQuery = "";
     this.creditorHits = [];
+    this.detailTab = "geral";
     this.render();
   },
 
@@ -799,94 +807,142 @@ const ParametrizacaoParceiroApp = {
   detailHtml(p) {
     const obra = this.currentObra(p);
     const inAccount = ((obra && obra.costCenters) || []).filter(c => c.inAccount);
-    const cred = p.creditor || {};
     const sociedade = this.isSociedade(p);
+    const tab = this.detailTab || "geral";
+    const nObras = (p.obras || []).length;
+    const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
+    const credOk = !!(p.creditor && p.creditor.id);
+    const btn = (id, label, extra) =>
+      `<button type="button" class="customer-tab-btn ${tab === id ? "active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')">${label}${extra || ""}</button>`;
+    let body = "";
+    if (tab === "credor") body = this.credorTabHtml(p);
+    else if (tab === "obras") body = this.obrasTabHtml(p, obra, sociedade);
+    else if (tab === "centros") body = obra ? this.obraDetailHtml(p, obra, inAccount) : this.needObraHtml();
+    else if (tab === "rateio") body = (obra || sociedade) ? this.matrixHtml(p) : this.needObraHtml();
+    else body = this.geralTabHtml(p, sociedade);
     return `
-      <div style="display:flex;flex-direction:column;gap:14px;">
-        <div class="crm-card" style="padding:16px;overflow:hidden;">
-          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
+      <div style="display:flex;flex-direction:column;gap:0;min-width:0;">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px;">
+          <div>
+            <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Empresa ${this.esc(p.companyId)}</div>
+            <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${this.esc(p.companyName)}</div>
+            <div style="font-size:0.78rem;color:#64748b;margin-top:2px;">${this.esc(p.partnerName)} · ${sociedade ? "Sociedade" : "Parceria"}</div>
+          </div>
+        </div>
+        <div class="ficha-tabs-menu" style="margin-bottom:14px;">
+          ${btn("geral", "Geral")}
+          ${btn("credor", "Credor", credOk ? ` <span style="opacity:0.85;font-size:0.7rem;">✓</span>` : "")}
+          ${btn("obras", "Obras", nObras ? ` <span style="opacity:0.85;font-size:0.7rem;">${nObras}</span>` : "")}
+          ${btn("centros", "Centros de custo", nCc ? ` <span style="opacity:0.85;font-size:0.7rem;">${nCc}</span>` : "")}
+          ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC")}
+        </div>
+        ${body}
+      </div>
+    `;
+  },
+
+  needObraHtml() {
+    return `<div class="crm-card" style="padding:28px;text-align:center;color:#64748b;">
+      Inclua uma obra na aba <strong>Obras</strong> para configurar centros de custo e rateio.
+      <div style="margin-top:12px;"><button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.setDetailTab('obras')">Ir para Obras</button></div>
+    </div>`;
+  },
+
+  obraChipsHtml(p, sociedade) {
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+      ${(p.obras || []).map(o => {
+        const on = String(o.code) === String(this.selectedObraCode);
+        const label = sociedade ? ("Obra " + o.code) : ("Obra " + o.code + " · " + o.defaultPartnerShare + "%");
+        return `<button type="button" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"
+          style="border:1.5px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};border-radius:999px;padding:6px 12px;font-size:0.78rem;font-weight:800;cursor:pointer;">
+          ${this.esc(label)}
+        </button>`;
+      }).join("") || `<span style="font-size:0.78rem;color:#94a3b8;">Nenhuma obra ainda. Inclua pelo centro de custo.</span>`}
+    </div>`;
+  },
+
+  geralTabHtml(p, sociedade) {
+    return `
+      <div class="crm-card" style="padding:16px;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Dados gerais</h3>
+            <p style="margin:0;font-size:0.78rem;color:#64748b;">Nome do parceiro e o tipo da prestação de contas.</p>
+          </div>
+          <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeCurrent()" style="color:#dc2626;border-color:#fecaca;">Excluir</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px;min-width:0;">
+          <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;min-width:0;">Parceiro / sócio
+            <input value="${this.esc(p.partnerName)}" onchange="ParametrizacaoParceiroApp.updateField('partnerName', this.value)"
+              style="width:100%;max-width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
+          </label>
+          <div>
+            <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Tipo</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#e2e8f0" : "#105436"};background:${sociedade ? "#fff" : "#e8f5ee"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
+                <input type="radio" name="pp-kind" ${sociedade ? "" : "checked"} onchange="ParametrizacaoParceiroApp.updateField('kind','parceria')"> Parceria
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#105436" : "#e2e8f0"};background:${sociedade ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
+                <input type="radio" name="pp-kind" ${sociedade ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','sociedade')"> Sociedade
+              </label>
+            </div>
+            <p style="margin:8px 0 0;font-size:0.78rem;color:#64748b;line-height:1.4;">
+              ${sociedade
+                ? "Sociedade: não aplica rateio. Tudo que ocorre na SPE é de responsabilidade dos sócios, com distribuição de lucro."
+                : "Parceria: cada centro de custo pode ter rateio próprio. Percentuais são definidos por obra, não neste cadastro inicial."}
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  credorTabHtml(p) {
+    const cred = p.creditor || {};
+    return `
+      <div class="crm-card" style="padding:16px;">
+        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Credor (título a pagar)</h3>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque o credor por nome, CPF ou CNPJ, como na consulta de clientes.</p>
+        ${cred.id ? `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
             <div>
-              <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Empresa ${this.esc(p.companyId)}</div>
-              <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${this.esc(p.companyName)}</div>
+              <div style="font-weight:800;color:#065f46;">${this.esc(cred.name)}</div>
+              <div style="font-size:0.75rem;color:#047857;">ID ${this.esc(cred.id)} · ${this.esc(cred.cpfCnpj || "sem documento")}</div>
             </div>
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeCurrent()" style="color:#dc2626;border-color:#fecaca;">Excluir</button>
+            <button type="button" onclick="ParametrizacaoParceiroApp.clearCreditor()" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;">Trocar</button>
           </div>
-          <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px;min-width:0;">
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;min-width:0;">Parceiro / sócio
-              <input value="${this.esc(p.partnerName)}" onchange="ParametrizacaoParceiroApp.updateField('partnerName', this.value)"
-                style="width:100%;max-width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
-            </label>
-            <div>
-              <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Tipo</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#e2e8f0" : "#105436"};background:${sociedade ? "#fff" : "#e8f5ee"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
-                  <input type="radio" name="pp-kind" ${sociedade ? "" : "checked"} onchange="ParametrizacaoParceiroApp.updateField('kind','parceria')"> Parceria
-                </label>
-                <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#105436" : "#e2e8f0"};background:${sociedade ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
-                  <input type="radio" name="pp-kind" ${sociedade ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','sociedade')"> Sociedade
-                </label>
-              </div>
-              <p style="margin:8px 0 0;font-size:0.78rem;color:#64748b;line-height:1.4;">
-                ${sociedade
-                  ? "Sociedade: não aplica rateio. Tudo que ocorre na SPE é de responsabilidade dos sócios, com distribuição de lucro."
-                  : "Parceria: cada centro de custo pode ter rateio próprio. Percentuais são definidos por obra, não neste cadastro inicial."}
-              </p>
-            </div>
-          </div>
-        </div>
+        ` : `
+          <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
+            oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
+            style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+          <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
+        `}
+      </div>
+    `;
+  },
 
-        <div class="crm-card" style="padding:16px;">
-          <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Credor (título a pagar)</h3>
-          <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Busque o credor por nome, CPF ou CNPJ, como na consulta de clientes.</p>
-          ${cred.id ? `
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
-              <div>
-                <div style="font-weight:800;color:#065f46;">${this.esc(cred.name)}</div>
-                <div style="font-size:0.75rem;color:#047857;">ID ${this.esc(cred.id)} · ${this.esc(cred.cpfCnpj || "sem documento")}</div>
-              </div>
-              <button type="button" onclick="ParametrizacaoParceiroApp.clearCreditor()" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;">Trocar</button>
-            </div>
-          ` : `
-            <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
-              oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
-              style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-            <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
-          `}
+  obrasTabHtml(p, obra, sociedade) {
+    return `
+      <div class="crm-card" style="padding:16px;overflow:hidden;">
+        <h3 style="margin:0 0 8px;font-size:0.95rem;color:var(--color-primary);">Obras deste terrenista</h3>
+        ${this.obraChipsHtml(p, sociedade)}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
+          <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Adicionar obra (C.C.)
+            <input id="pp-add-obra-cc" placeholder="Ex.: 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
+          </label>
+          ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;width:140px;">Rateio desta obra (%)
+            <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="${obra ? obra.defaultPartnerShare : 50}" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
+          </label>`}
+          <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;font-size:0.78rem;">Incluir obra</button>
         </div>
-
-        <div class="crm-card" style="padding:16px;overflow:hidden;">
-          <h3 style="margin:0 0 8px;font-size:0.95rem;color:var(--color-primary);">Obras deste terrenista</h3>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
-            ${(p.obras || []).map(o => {
-              const on = String(o.code) === String(this.selectedObraCode);
-              const label = sociedade ? ("Obra " + o.code) : ("Obra " + o.code + " · " + o.defaultPartnerShare + "%");
-              return `<button type="button" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"
-                style="border:1.5px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};border-radius:999px;padding:6px 12px;font-size:0.78rem;font-weight:800;cursor:pointer;">
-                ${this.esc(label)}
-              </button>`;
-            }).join("") || `<span style="font-size:0.78rem;color:#94a3b8;">Nenhuma obra ainda. Inclua pelo centro de custo.</span>`}
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
-            <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Adicionar obra (C.C.)
-              <input id="pp-add-obra-cc" placeholder="Ex.: 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
-            </label>
-            ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;width:140px;">Rateio desta obra (%)
-              <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="${obra ? obra.defaultPartnerShare : 50}" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
-            </label>`}
-            <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;font-size:0.78rem;">Incluir obra</button>
-          </div>
-          ${sociedade ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px;">
-            <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Duplicar rateio da obra ${this.esc(obra && obra.code)} para
-              <input id="pp-dup-obra" placeholder="134 ou 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
-            </label>
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;font-size:0.78rem;">Duplicar parametrização</button>
-            ${p.obras.length > 1 ? `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button>` : ""}
-          </div>`}
-          ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
-        </div>
-
-        ${obra ? this.obraDetailHtml(p, obra, inAccount) : ""}
-        ${(obra || sociedade) ? this.matrixHtml(p) : ""}
+        ${sociedade ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px;">
+          <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Duplicar rateio da obra ${this.esc(obra && obra.code)} para
+            <input id="pp-dup-obra" placeholder="134 ou 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
+          </label>
+          <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;font-size:0.78rem;">Duplicar parametrização</button>
+          ${p.obras.length > 1 ? `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button>` : ""}
+        </div>`}
+        ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
       </div>
     `;
   },
@@ -895,6 +951,7 @@ const ParametrizacaoParceiroApp = {
     const sociedade = this.isSociedade(p);
     return `
       <div class="crm-card" style="padding:16px;overflow:hidden;">
+        ${this.obraChipsHtml(p, sociedade)}
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
           <div>
             <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Centros de custo da obra ${this.esc(obra.code)}</h3>
@@ -1004,6 +1061,8 @@ const ParametrizacaoParceiroApp = {
     const body = roots.map(n => this.dfcNodeRows(p, n, groups, 0, [])).join("");
     const def = obra ? obra.defaultPartnerShare : 0;
     return `
+      <div>
+        ${this.obraChipsHtml(p, false)}
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:360px;">
         <div style="padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
           <div>
@@ -1023,6 +1082,7 @@ const ParametrizacaoParceiroApp = {
         <div style="flex:1;overflow:auto;padding:15px;background:#fff;">
           ${body || `<div style="text-align:center;color:#94a3b8;padding:28px;font-size:0.85rem;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</div>`}
         </div>
+      </div>
       </div>
     `;
   },

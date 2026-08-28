@@ -10,6 +10,7 @@ const InvestimentoApp = {
   accounts: [],
   months: [],
   expanded: new Set(),
+  companyQuery: "",
   kpis: { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 },
 
   init() {
@@ -328,13 +329,36 @@ const InvestimentoApp = {
     this.render();
   },
 
-  toggleCompany(id, on) {
+  filterCompanyList(q) {
+    this.companyQuery = q || "";
+    const box = document.getElementById("inv-emp-list");
+    if (!box) return;
+    box.innerHTML = this.companyListHtml();
+  },
+
+  companyListHtml() {
+    const companies = this.geridasCompanies();
+    const q = (this.companyQuery || "").toLowerCase().trim();
+    const filtered = companies.filter(c => {
+      if (!q) return true;
+      return String(c.name).toLowerCase().includes(q) || String(c.id).includes(q);
+    });
+    if (!filtered.length) return `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhuma empresa com esse nome.</div>`;
+    return filtered.map(c => {
+      const on = this.selectedCompanyIds.includes(c.id);
+      return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:0.8rem;background:${on ? "#ecfdf5" : "#fff"};">
+        <input type="checkbox" ${on ? "checked" : ""} onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)">
+        <span style="font-weight:${on ? 700 : 500};color:#334155;">${this.esc(c.name)}</span>
+      </label>`;
+    }).join("");
+  },
     const sid = String(id);
     if (on) {
       if (!this.selectedCompanyIds.includes(sid)) this.selectedCompanyIds.push(sid);
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
+    this.render();
   },
 
   selectAllGeridas() {
@@ -425,22 +449,25 @@ const InvestimentoApp = {
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
-            <div style="flex:1;min-width:280px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
-                <div style="font-size:0.75rem;font-weight:700;color:#475569;">Empresas geridas pelo grupo</div>
-                <div style="display:flex;gap:8px;">
+            <div style="flex:1;min-width:280px;max-width:360px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                <span style="display:inline-flex;align-items:center;gap:6px;background:#e8f5ee;color:#105436;border:1px solid #86efac;border-radius:99px;padding:3px 10px;font-size:0.7rem;font-weight:800;letter-spacing:0.2px;">
+                  Gerida pelo grupo
+                </span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span id="inv-emp-count" style="font-size:0.72rem;color:#64748b;font-weight:700;">${this.selectedCompanyIds.length}/${companies.length}</span>
                   <button type="button" onclick="InvestimentoApp.selectAllGeridas()" style="border:none;background:none;color:#105436;font-size:0.72rem;font-weight:700;cursor:pointer;">Todas</button>
                   <button type="button" onclick="InvestimentoApp.clearGeridas()" style="border:none;background:none;color:#64748b;font-size:0.72rem;font-weight:700;cursor:pointer;">Limpar</button>
                 </div>
               </div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:88px;overflow:auto;">
-                ${companies.map(c => `
-                  <label style="font-size:0.75rem;background:${this.selectedCompanyIds.includes(c.id) ? "#ecfdf5" : "#f8fafc"};border:1px solid ${this.selectedCompanyIds.includes(c.id) ? "#86efac" : "#e2e8f0"};border-radius:99px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                    <input type="checkbox" ${this.selectedCompanyIds.includes(c.id) ? "checked" : ""}
-                      onchange="InvestimentoApp.toggleCompany('${c.id}', this.checked)">
-                    ${this.esc(c.name)}
-                  </label>`).join("") || `<span style="color:#b45309;font-size:0.8rem;">Nenhuma empresa marcada como “Gerida pelo grupo” no cadastro de empresas.</span>`}
-              </div>
+              ${companies.length ? `
+                <input id="inv-emp-search" placeholder="Buscar empresa..." value="${this.esc(this.companyQuery)}"
+                  oninput="InvestimentoApp.filterCompanyList(this.value)"
+                  style="width:100%;height:32px;border:1px solid #e2e8f0;border-radius:6px 6px 0 0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
+                <div id="inv-emp-list" style="max-height:168px;overflow:auto;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;background:#fff;">
+                  ${this.companyListHtml()}
+                </div>
+              ` : `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`}
             </div>
           </div>
           ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}
@@ -463,88 +490,69 @@ const InvestimentoApp = {
     if (!this.accounts.length) {
       return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:28px;text-align:center;color:#94a3b8;">Informe o período e clique em Consultar.</div>`;
     }
-    const flow = this.consolidatedFlow();
-    const flowBody = `
-      <tr style="background:#f8fafc;">
-        <td style="padding:8px 12px;font-weight:800;color:#0f172a;">Saldo inicial</td>
-        <td style="padding:8px 10px;${this.cell(0)}">—</td>
-        <td style="padding:8px 10px;${this.cell(0)}">—</td>
-        <td style="padding:8px 10px;${this.cell(0)}">—</td>
-        <td style="padding:8px 10px;${this.cell(this.kpis.opening, true)}">${this.fmt(this.kpis.opening)}</td>
-      </tr>
-      ${flow.map(f => `
-        <tr style="border-bottom:1px solid #f1f5f9;">
-          <td style="padding:8px 12px;font-weight:700;color:#334155;">${this.monthLabel(f.month)}</td>
-          <td style="padding:8px 10px;${this.cell(f.aportes)}">${this.fmt(f.aportes)}</td>
-          <td style="padding:8px 10px;${this.cell(f.resgates)}">${this.fmt(f.resgates)}</td>
-          <td style="padding:8px 10px;${this.cell(f.rendimento)}">${this.fmt(f.rendimento)}</td>
-          <td style="padding:8px 10px;${this.cell(f.closing, true)}">${this.fmt(f.closing)}</td>
-        </tr>`).join("")}
-      <tr style="background:#ecfdf5;">
-        <td style="padding:8px 12px;font-weight:800;color:#105436;">Total do período</td>
-        <td style="padding:8px 10px;${this.cell(this.kpis.aportes)}">${this.fmt(this.kpis.aportes)}</td>
-        <td style="padding:8px 10px;${this.cell(this.kpis.resgates)}">${this.fmt(this.kpis.resgates)}</td>
-        <td style="padding:8px 10px;${this.cell(this.kpis.rendimento)}">${this.fmt(this.kpis.rendimento)}</td>
-        <td style="padding:8px 10px;${this.cell(this.kpis.closing, true)}">${this.fmt(this.kpis.closing)}</td>
-      </tr>`;
+    const months = this.months;
+    const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;${extra || ""}">${label}</th>`;
+    const money = (n, bold) => `<td style="padding:6px 8px;${this.cell(n, bold)}">${this.fmt(n)}</td>`;
+    const empty = `<td style="padding:6px 8px;text-align:right;color:#cbd5e1;">—</td>`;
 
-    const rows = this.accounts.map(r => {
-      const open = this.expanded.has(r.key);
-      const chevron = `<button type="button" onclick="InvestimentoApp.toggle('${this.esc(r.key)}')" style="border:none;background:none;cursor:pointer;padding:0 4px 0 0;color:#64748b;"><i data-lucide="${open ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i></button>`;
-      const flowRows = open ? this.monthFlowOf(r).map(f => `
-        <tr style="background:#f8fafc;">
-          <td style="padding:6px 12px 6px 42px;color:#64748b;font-size:0.78rem;">${this.monthLabel(f.month)}</td>
-          <td style="padding:6px 10px;${this.cell(f.opening)}">${this.fmt(f.opening)}</td>
-          <td style="padding:6px 10px;${this.cell(f.aportes)}">${this.fmt(f.aportes)}</td>
-          <td style="padding:6px 10px;${this.cell(f.resgates)}">${this.fmt(f.resgates)}</td>
-          <td style="padding:6px 10px;${this.cell(f.rendimento)}">${this.fmt(f.rendimento)}</td>
-          <td style="padding:6px 10px;${this.cell(f.closing, true)}">${this.fmt(f.closing)}</td>
-        </tr>`).join("") : "";
+    const groupRows = (label, sub, opening, monthFlow, isTotal) => {
+      const bgHead = isTotal ? "#ecfdf5" : "#f8fafc";
+      const entradas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).aportes || 0);
+      const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
+      const rends = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).rendimento || 0);
+      const saldos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).closing || 0);
+      const rowspan = 4;
+      const sticky = "position:sticky;left:0;z-index:1;";
       return `
-        <tr style="background:#fff;border-bottom:1px solid #f1f5f9;">
-          <td style="padding:8px 12px;">
-            ${chevron}<span style="font-weight:700;color:#0f172a;">${this.esc(r.accountNumber)}</span>
-            <div style="font-size:0.72rem;color:#64748b;padding-left:22px;">${this.esc(r.accountName)} · ${this.esc(r.companyName)}</div>
+        <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
+          <td rowspan="${rowspan}" style="padding:8px 10px;vertical-align:top;min-width:180px;max-width:240px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
+            <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
+            ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
           </td>
-          <td style="padding:8px 10px;${this.cell(r.opening)}">${this.fmt(r.opening)}</td>
-          <td style="padding:8px 10px;${this.cell(r.aportes)}">${this.fmt(r.aportes)}</td>
-          <td style="padding:8px 10px;${this.cell(r.resgates)}">${this.fmt(r.resgates)}</td>
-          <td style="padding:8px 10px;${this.cell(r.rendimento)}">${this.fmt(r.rendimento)}${r.rendimentoFromBalance ? `<div style="font-size:0.65rem;color:#64748b;font-weight:500;">pelo saldo</div>` : ""}</td>
-          <td style="padding:8px 10px;${this.cell(r.closing, true)}">${this.fmt(r.closing)}</td>
+          <td style="padding:6px 10px;font-weight:700;color:#105436;white-space:nowrap;">Entrada</td>
+          ${empty}
+          ${entradas.map(n => money(n)).join("")}
         </tr>
-        ${flowRows}`;
-    }).join("");
+        <tr style="background:#fff;">
+          <td style="padding:6px 10px;font-weight:700;color:#b91c1c;white-space:nowrap;">Saída</td>
+          ${empty}
+          ${saidas.map(n => money(n)).join("")}
+        </tr>
+        <tr style="background:#fff;">
+          <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
+          ${empty}
+          ${rends.map(n => money(n)).join("")}
+        </tr>
+        <tr style="background:${isTotal ? "#d1fae5" : "#f1f5f9"};">
+          <td style="padding:6px 10px;font-weight:800;color:#0f172a;white-space:nowrap;">Saldo</td>
+          ${money(opening, true)}
+          ${saldos.map(n => money(n, true)).join("")}
+        </tr>`;
+    };
+
+    const consolidado = groupRows("Consolidado", "Empresas selecionadas", this.kpis.opening, this.consolidatedFlow(), true);
+    const contas = this.accounts.map(r =>
+      groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false)
+    ).join("");
 
     return `
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;margin-bottom:14px;">
-        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">Fluxo consolidado — entradas, saídas e saldo acumulado</div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
-          <thead>
-            <tr style="background:#f8fafc;">
-              <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;">Mês</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Entradas</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saídas</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Rendimento</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo acumulado</th>
-            </tr>
-          </thead>
-          <tbody>${flowBody}</tbody>
-        </table>
-      </div>
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
-        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">Por conta (clique para ver o fluxo mensal)</div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:860px;">
+        <div style="padding:10px 12px;font-size:0.82rem;font-weight:800;color:#0f172a;border-bottom:1px solid #e2e8f0;">
+          Kardex — conta × movimento · saldo inicial e meses
+        </div>
+        <table class="custom-table" style="width:max-content;min-width:100%;border-collapse:collapse;font-size:0.78rem;">
           <thead>
-            <tr style="background:#f8fafc;">
-              <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;">Conta</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo inicial</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Entradas</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saídas</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Rendimento</th>
-              <th style="padding:8px 10px;text-align:right;border-bottom:2px solid #e2e8f0;">Saldo final</th>
+            <tr>
+              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;position:sticky;left:0;z-index:2;">Conta</th>
+              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;">Movimento</th>
+              ${th("Saldo inicial")}
+              ${months.map(mk => th(this.monthLabel(mk))).join("")}
             </tr>
           </thead>
-          <tbody>${rows}</tbody>
+          <tbody>
+            ${consolidado}
+            ${contas}
+          </tbody>
         </table>
       </div>`;
   }
