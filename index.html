@@ -1092,7 +1092,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.511 &nbsp;&middot;&nbsp; 28/08/2026
+            v1.0.512 &nbsp;&middot;&nbsp; 28/08/2026
           </span>
         </div>
       </div>
@@ -2917,19 +2917,11 @@ Atenciosamente,
               </div>
             </div>
           </div>
-          <div class="search-filter-panel"
-            style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-            <div>
-              <h2>Notificações</h2>
-              <p style="font-size: 0.9rem; color: var(--color-text-muted);">
-                Follow-up das NEX enviadas e listas de clientes elegíveis para gerar a carta (0% pago / 61 dias).
-              </p>
-            </div>
-          </div>
 
           <div class="customer-tabs-menu" style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 8px;">
             <button type="button" class="customer-tab-btn active" id="btn-wesend-followup" onclick="window.switchWesendPanel('followup')">Follow-up de NEX</button>
-            <button type="button" class="customer-tab-btn" id="btn-wesend-elegiveis" onclick="window.switchWesendPanel('elegiveis')">Clientes elegíveis</button>
+            <button type="button" class="customer-tab-btn" id="btn-wesend-zero" onclick="window.switchWesendPanel('elegiveis-zero')">Elegíveis 0% pago</button>
+            <button type="button" class="customer-tab-btn" id="btn-wesend-61" onclick="window.switchWesendPanel('elegiveis-61')">Demais clientes elegíveis</button>
           </div>
 
           <div id="wesend-panel-followup" style="margin-top: 1.2rem;">
@@ -2957,63 +2949,61 @@ Atenciosamente,
             </div>
           </div>
 
-          <div id="wesend-panel-elegiveis" style="display:none; margin-top: 1.2rem;">
-            <div class="crm-card" style="padding:16px; margin-bottom:18px;">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-                <div>
-                  <h3 style="margin:0 0 4px; font-size:1rem; color:var(--color-primary);">NEX 0% pago — 31 dias</h3>
-                  <p style="margin:0; font-size:0.82rem; color:#64748b;">Clientes sem receita, com atraso da régua (31 dias) e <strong>sem cláusula suspensiva</strong> (ex.: centro 16103 fica de fora).</p>
-                </div>
-                <div style="display:flex; gap:8px;">
-                  <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-zero')">
-                    <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
-                  </button>
-                </div>
-              </div>
-              <div class="table-container" style="margin-top:12px;">
-                <table class="custom-table">
-                  <thead>
-                    <tr>
-                      <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-wesend-zero')"></th>
-                      <th>Cliente</th>
-                      <th>Empreendimento</th>
-                      <th>Título / Contrato</th>
-                      <th>Dias em atraso</th>
-                      <th>Valor em atraso</th>
-                    </tr>
-                  </thead>
-                  <tbody id="wesend-zero-body"></tbody>
-                </table>
-              </div>
+          <div id="wesend-panel-zero" style="display:none; margin-top: 1.2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+              <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Elegíveis 0% pago</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-zero')">
+                <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
+              </button>
             </div>
+            <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
+              <table class="custom-table" id="wesend-zero-table">
+                <thead>
+                  <tr>
+                    <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-wesend-zero')"></th>
+                    <th style="width:1%;text-align:center;">ID</th>
+                    <th>Cliente</th>
+                    <th>TÍTULO</th>
+                    <th>Unidade</th>
+                    <th style="text-align:center;">Operador</th>
+                    <th style="text-align:center;">Dias em Atraso (Aging)</th>
+                    <th style="text-align:center;">Vencidas</th>
+                    <th>R$ Atualizado</th>
+                    <th style="text-align:center;">Último Contato</th>
+                    <th style="text-align:center;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="wesend-zero-body"></tbody>
+              </table>
+            </div>
+          </div>
 
-            <div class="crm-card" style="padding:16px;">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-                <div>
-                  <h3 style="margin:0 0 4px; font-size:1rem; color:var(--color-primary);">NEX 61 dias — sem carta enviada</h3>
-                  <p style="margin:0; font-size:0.82rem; color:#64748b;">Clientes no prazo da régua (61 dias) que ainda não possuem NEX neste título.</p>
-                </div>
-                <div style="display:flex; gap:8px;">
-                  <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-61')">
-                    <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
-                  </button>
-                </div>
-              </div>
-              <div class="table-container" style="margin-top:12px;">
-                <table class="custom-table">
-                  <thead>
-                    <tr>
-                      <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-wesend-61')"></th>
-                      <th>Cliente</th>
-                      <th>Empreendimento</th>
-                      <th>Título / Contrato</th>
-                      <th>Dias em atraso</th>
-                      <th>Valor em atraso</th>
-                    </tr>
-                  </thead>
-                  <tbody id="wesend-61-body"></tbody>
-                </table>
-              </div>
+          <div id="wesend-panel-61" style="display:none; margin-top: 1.2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+              <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Demais clientes elegíveis</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-61')">
+                <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
+              </button>
+            </div>
+            <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
+              <table class="custom-table" id="wesend-61-table">
+                <thead>
+                  <tr>
+                    <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-wesend-61')"></th>
+                    <th style="width:1%;text-align:center;">ID</th>
+                    <th>Cliente</th>
+                    <th>TÍTULO</th>
+                    <th>Unidade</th>
+                    <th style="text-align:center;">Operador</th>
+                    <th style="text-align:center;">Dias em Atraso (Aging)</th>
+                    <th style="text-align:center;">Vencidas</th>
+                    <th>R$ Atualizado</th>
+                    <th style="text-align:center;">Último Contato</th>
+                    <th style="text-align:center;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="wesend-61-body"></tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -5844,34 +5834,34 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=511"></script>
-  <script defer src="sienge-api.js?v=511"></script>
-  <script defer src="azure-auth.js?v=511"></script>
-  <script defer src="app.js?v=511"></script>
-  <script defer src="home-dashboard.js?v=511"></script>
-  <script defer src="anexos.js?v=511"></script>
-  <script defer src="contas-pagar.js?v=511"></script>
-  <script defer src="config-tags.js?v=511"></script>
-  <script defer src="config-users.js?v=511"></script>
-  <script defer src="construcao.js?v=511"></script>
-  <script defer src="empresas.js?v=511"></script>
-  <script defer src="relacionamento.js?v=511"></script>
+  <script defer src="data.js?v=512"></script>
+  <script defer src="sienge-api.js?v=512"></script>
+  <script defer src="azure-auth.js?v=512"></script>
+  <script defer src="app.js?v=512"></script>
+  <script defer src="home-dashboard.js?v=512"></script>
+  <script defer src="anexos.js?v=512"></script>
+  <script defer src="contas-pagar.js?v=512"></script>
+  <script defer src="config-tags.js?v=512"></script>
+  <script defer src="config-users.js?v=512"></script>
+  <script defer src="construcao.js?v=512"></script>
+  <script defer src="empresas.js?v=512"></script>
+  <script defer src="relacionamento.js?v=512"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=511"></script>
-  <script defer src="marketing.js?v=511"></script>
-  <script defer src="plano-financeiro.js?v=511"></script>
-  <script defer src="prestacao-contas.js?v=511"></script>
-  <script defer src="fluxo-caixa.js?v=511"></script>
-  <script defer src="parametrizacao-parceiro.js?v=511"></script>
-  <script defer src="fiscal.js?v=511"></script>
-  <script defer src="indexadores.js?v=511"></script>
-  <script defer src="verificar-construcao.js?v=511"></script>
-  <script src="repactuacoes.js?v=511"></script>
+  <script defer src="centros-custo.js?v=512"></script>
+  <script defer src="marketing.js?v=512"></script>
+  <script defer src="plano-financeiro.js?v=512"></script>
+  <script defer src="prestacao-contas.js?v=512"></script>
+  <script defer src="fluxo-caixa.js?v=512"></script>
+  <script defer src="parametrizacao-parceiro.js?v=512"></script>
+  <script defer src="fiscal.js?v=512"></script>
+  <script defer src="indexadores.js?v=512"></script>
+  <script defer src="verificar-construcao.js?v=512"></script>
+  <script src="repactuacoes.js?v=512"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=511"></script>
+  <script defer src="dashboard-inadimplencia.js?v=512"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

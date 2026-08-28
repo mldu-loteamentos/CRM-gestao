@@ -844,6 +844,7 @@ const PlanoFinanceiroApp = {
   renderBoard() {
     const v = this.getVisao();
     if (!v) return;
+    this.alignMisplacedN1Children(v);
 
     // 1. Descobrir contas Sienge já atribuídas
     const assignedIds = new Set();
@@ -914,7 +915,7 @@ const PlanoFinanceiroApp = {
     // 3. Render Tree
     const treeContainer = document.getElementById('pf-dfc-tree');
     if (treeContainer) {
-      const roots = v.groups.filter(g => !g.parentId);
+      const roots = v.groups.filter(g => !g.parentId).sort((a, b) => this.compareNodeNames(a.name, b.name));
       treeContainer.innerHTML = roots.map(r => this.renderNodeHtml(r, v.groups, 0)).join('');
     }
 
@@ -922,13 +923,58 @@ const PlanoFinanceiroApp = {
     if (window.lucide) lucide.createIcons();
   },
 
+  compareNodeNames(a, b) {
+    const na = String(a || '').match(/\d+/g) || [];
+    const nb = String(b || '').match(/\d+/g) || [];
+    const len = Math.max(na.length, nb.length);
+    for (let i = 0; i < len; i++) {
+      const va = parseInt(na[i] || '0', 10);
+      const vb = parseInt(nb[i] || '0', 10);
+      if (va !== vb) return va - vb;
+    }
+    return String(a || '').localeCompare(String(b || ''), 'pt-BR');
+  },
+
+  inferChildType(parent, siblings) {
+    if (!parent) return 'total_n1';
+    if (parent.type === 'formula') return null;
+    if (parent.type === 'resultado') return null;
+    if (parent.type === 'totalizadora') return 'resultado';
+    if (parent.type === 'total_n1') {
+      const nRes = (siblings || []).filter(s => s.type === 'resultado').length;
+      const nTot = (siblings || []).filter(s => s.type === 'totalizadora').length;
+      if (nRes >= nTot) return 'resultado';
+      return nTot > 0 ? 'totalizadora' : 'resultado';
+    }
+    return 'resultado';
+  },
+
+  alignMisplacedN1Children(v) {
+    if (!v || !Array.isArray(v.groups)) return;
+    let changed = false;
+    v.groups.forEach(g => {
+      if (!g.parentId) return;
+      const parent = v.groups.find(p => p.id === g.parentId);
+      if (!parent || parent.type !== 'total_n1') return;
+      const hasKids = v.groups.some(c => c.parentId === g.id);
+      const siblings = v.groups.filter(x => x.parentId === g.parentId);
+      const nRes = siblings.filter(x => x.type === 'resultado').length;
+      if (g.type === 'totalizadora' && !hasKids && nRes > 0) {
+        g.type = 'resultado';
+        if (!Array.isArray(g.accounts)) g.accounts = [];
+        changed = true;
+      }
+    });
+    if (changed) this.saveToStorage({ silent: true });
+  },
+
   renderNodeHtml(node, allGroups, level) {
-    const children = allGroups.filter(g => g.parentId === node.id);
+    const children = allGroups.filter(g => g.parentId === node.id).sort((a, b) => this.compareNodeNames(a.name, b.name));
     const marginLeft = level * 20;
     const isExpanded = node.expanded !== false;
     const expandIcon = isExpanded ? 'chevron-down' : 'chevron-right';
+    const hasContent = children.length > 0 || (node.accounts && node.accounts.length > 0);
 
-    // Cores por tipo
     let bg = '#fff', borderLeft = '#cbd5e1', icon = 'folder';
     if (node.type === 'total_n1') { bg = '#f8fafc'; borderLeft = '#0f766e'; icon = 'layers'; }
     if (node.type === 'totalizadora') { bg = '#fff'; borderLeft = '#3b82f6'; icon = 'folder-open'; }
@@ -936,20 +982,30 @@ const PlanoFinanceiroApp = {
     if (node.type === 'formula') { bg = '#ecfdf5'; borderLeft = '#105436'; icon = 'calculator'; }
 
     const dropEvents = node.type === 'resultado' ? `ondragover="PlanoFinanceiroApp.onDragOver(event)" ondrop="PlanoFinanceiroApp.onDropGroup(event, '${node.id}')"` : '';
+    const canAddChild = node.type !== 'resultado' && node.type !== 'formula';
 
     let html = `
       <div style="margin-left:${marginLeft}px; margin-bottom:5px;">
         <div style="background:${bg}; border:1px solid #e2e8f0; border-left:4px solid ${borderLeft}; border-radius:6px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 1px 2px rgba(0,0,0,0.02);" ${dropEvents}>
           
           <div style="display:flex; align-items:center; gap:8px; flex:1;">
-            ${(children.length > 0 || node.type !== 'resultado') ? `<button onclick="PlanoFinanceiroApp.toggleNode('${node.id}')" style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;"><i data-lucide="${expandIcon}" style="width:14px;height:14px;"></i></button>` : '<span style="width:14px;"></span>'}
+            <div style="display:flex;align-items:center;gap:0;position:relative;">
+              <button type="button" onclick="PlanoFinanceiroApp.toggleNode('${node.id}', 'this')" title="Recolher / expandir este"
+                style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;opacity:${hasContent ? 1 : 0.35};">
+                <i data-lucide="${expandIcon}" style="width:14px;height:14px;"></i>
+              </button>
+              <button type="button" onclick="PlanoFinanceiroApp.openNodeFoldMenu(event, '${node.id}')" title="Recolher este ou o nível inteiro"
+                style="background:none;border:none;cursor:pointer;padding:0 2px;color:#94a3b8;display:flex;align-items:center;">
+                <i data-lucide="chevrons-up-down" style="width:12px;height:12px;"></i>
+              </button>
+            </div>
             
             <i data-lucide="${icon}" style="width:14px;height:14px;color:${borderLeft};"></i>
             <span style="font-weight:${node.type==='total_n1'?'700':'600'}; font-size:0.85rem; color:#1e293b; cursor:pointer;" onclick="PlanoFinanceiroApp.editNodeName('${node.id}')">${node.name}</span>
           </div>
           
           <div style="display:flex; align-items:center; gap:5px;">
-            ${(node.type !== 'resultado' && node.type !== 'formula') ? `<button onclick="PlanoFinanceiroApp.addNode('${node.id}')" title="Adicionar Sub-nível" style="background:none;border:none;color:#10b981;cursor:pointer;padding:2px;"><i data-lucide="plus-circle" style="width:14px;height:14px;"></i></button>` : ''}
+            ${canAddChild ? `<button onclick="PlanoFinanceiroApp.addNode('${node.id}')" title="Adicionar Sub-nível" style="background:none;border:none;color:#10b981;cursor:pointer;padding:2px;"><i data-lucide="plus-circle" style="width:14px;height:14px;"></i></button>` : ''}
             <button onclick="PlanoFinanceiroApp.deleteNode('${node.id}')" title="Excluir" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
           </div>
         </div>
@@ -980,10 +1036,51 @@ const PlanoFinanceiroApp = {
     return html;
   },
 
-  toggleNode(id) {
+  toggleNode(id, scope) {
+    this.closeNodeFoldMenu();
     const v = this.getVisao();
     const node = v.groups.find(g => g.id === id);
-    if(node) { node.expanded = !node.expanded; this.saveToStorage(); this.renderBoard(); }
+    if (!node) return;
+    const next = !(node.expanded !== false);
+    if (scope === 'level') {
+      v.groups.filter(g => String(g.parentId || '') === String(node.parentId || '')).forEach(g => { g.expanded = next; });
+    } else {
+      node.expanded = next;
+    }
+    this.saveToStorage();
+    this.renderBoard();
+  },
+
+  closeNodeFoldMenu() {
+    const el = document.getElementById('pf-node-fold-menu');
+    if (el) el.remove();
+    if (this._foldMenuCloser) {
+      document.removeEventListener('click', this._foldMenuCloser);
+      this._foldMenuCloser = null;
+    }
+  },
+
+  openNodeFoldMenu(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeNodeFoldMenu();
+    const v = this.getVisao();
+    const node = v.groups.find(g => g.id === id);
+    if (!node) return;
+    const expanded = node.expanded !== false;
+    const menu = document.createElement('div');
+    menu.id = 'pf-node-fold-menu';
+    menu.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,0.12);min-width:200px;padding:6px;';
+    const r = event.currentTarget.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.left = r.left + 'px';
+    menu.innerHTML = `
+      <button type="button" onclick="PlanoFinanceiroApp.toggleNode('${id}', 'this')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? 'Recolher apenas este' : 'Expandir apenas este'}</button>
+      <button type="button" onclick="PlanoFinanceiroApp.toggleNode('${id}', 'level')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? 'Recolher o nível inteiro' : 'Expandir o nível inteiro'}</button>
+    `;
+    document.body.appendChild(menu);
+    this._foldMenuCloser = () => this.closeNodeFoldMenu();
+    setTimeout(() => document.addEventListener('click', this._foldMenuCloser), 0);
   },
 
   editNodeName(id) {
@@ -997,26 +1094,28 @@ const PlanoFinanceiroApp = {
     const v = this.getVisao();
     if(!v) return;
 
-    let type = 'total_n1';
-    if(parentId) {
-      const parent = v.groups.find(g => g.id === parentId);
-      if (!parent || parent.type === 'formula') return;
-      if(parent.type === 'total_n1') type = 'totalizadora';
-      else if(parent.type === 'totalizadora') type = 'resultado';
-    }
+    const parent = parentId ? v.groups.find(g => g.id === parentId) : null;
+    const siblings = v.groups.filter(g => String(g.parentId || '') === String(parentId || ''));
+    const type = parentId ? this.inferChildType(parent, siblings) : 'total_n1';
+    if (!type) return;
 
-    const typeLabels = { 'total_n1':'Total Nível 1', 'totalizadora':'Totalizadora', 'resultado':'Resultado (Dropzone)' };
+    const typeLabels = { 'total_n1':'Total Nível 1', 'totalizadora':'Totalizadora', 'resultado':'Resultado (contas Sienge)' };
     const n = prompt(`Nome do novo nó (${typeLabels[type]}):`);
     if(!n || !n.trim()) return;
 
-    v.groups.push({
+    const newNode = {
       id: 'n_' + Date.now(),
       name: n.trim(),
       type: type,
-      parentId: parentId,
+      parentId: parentId || null,
       accounts: type === 'resultado' ? [] : undefined,
       expanded: true
-    });
+    };
+    const insertAt = v.groups.findIndex(g => String(g.parentId || '') === String(parentId || '') && this.compareNodeNames(newNode.name, g.name) < 0);
+    const lastSib = [...v.groups].map((g, i) => ({ g, i })).filter(x => String(x.g.parentId || '') === String(parentId || '')).pop();
+    if (insertAt >= 0) v.groups.splice(insertAt, 0, newNode);
+    else if (lastSib) v.groups.splice(lastSib.i + 1, 0, newNode);
+    else v.groups.push(newNode);
     this.saveToStorage();
     this.renderBoard();
   },

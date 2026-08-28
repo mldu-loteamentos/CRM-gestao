@@ -15068,10 +15068,17 @@ async function loadWeSendTab() {
     if (hasUnpaidSinal(bill)) grouped[key].isZeroPaid = true;
   });
 
+  const zpLoaded = Array.isArray(window.zeroPaidList) && window.zeroPaidList.length > 0;
+  const zpSet = new Set((window.zeroPaidList || []).map(c => String(c.customerId) + "-" + String(c.saleId)));
   Object.values(grouped).forEach(item => {
-    const sale = findSale(item.saleId);
-    const perc = sale && sale.percPaid != null ? Number(sale.percPaid) : null;
-    if (!(perc > 0)) item.isZeroPaid = true;
+    const key = String(item.customerId) + "-" + String(item.saleId);
+    if (zpLoaded) item.isZeroPaid = zpSet.has(key);
+    const zp = (window.zeroPaidList || []).find(c => String(c.customerId) === String(item.customerId) && String(c.saleId) === String(item.saleId));
+    if (zp) {
+      item.assignedOperator = zp.assignedOperator;
+      item.lastContactDate = zp.lastContactDate;
+      item.companyId = zp.companyId || item.companyId;
+    }
   });
 
   const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
@@ -15126,35 +15133,61 @@ async function loadWeSendTab() {
     const hasNex = window.nexHasLetter(item.customerId, item.saleId);
     if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex) {
       zeroList.push(item);
-    } else if (item.maxDaysDelay >= regua.standard && !hasNex) {
+    } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex) {
       d61List.push(item);
     }
   });
+  zeroList.sort((a, b) => (b.maxDaysDelay || 0) - (a.maxDaysDelay || 0));
+  d61List.sort((a, b) => (b.maxDaysDelay || 0) - (a.maxDaysDelay || 0));
 
-  const fillBody = (bodyId, items, chkClass) => {
+  const lastContactOf = (item) => {
+    if (item.lastContactDate && item.lastContactDate !== "Sem contato") return item.lastContactDate;
+    const notesNormal = (AppState.notes && AppState.notes[item.customerId]) || [];
+    const notesJud = (AppState.judNotes && AppState.judNotes[item.customerId]) || [];
+    const customerNotes = [...notesNormal, ...notesJud];
+    return customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString("pt-BR") : "Sem Contato";
+  };
+
+  const fillBody = (bodyId, items, chkClass, panel, asZero) => {
     const body = document.getElementById(bodyId);
     if (!body) return;
     if (!items.length) {
-      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--color-text-muted);">Nenhum cliente neste critério.</td></tr>';
+      body.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--color-text-muted);">Nenhum cliente neste critério.</td></tr>';
       return;
     }
     body.innerHTML = items.map(item => {
       const name = String(item.customerName || "").replace(/</g, "&lt;");
-      const emp = String(empLabel(item)).replace(/</g, "&lt;");
-      return "<tr class=\"table-row-hover\" style=\"cursor:pointer;\" onclick=\"window.openCustomerNexTab('" + item.customerId + "','" + item.saleId + "','" + item.saleId + "')\">" +
-        "<td style=\"text-align:center;\" onclick=\"event.stopPropagation()\"><input type=\"checkbox\" class=\"" + chkClass + "\" data-sale-id=\"" + item.saleId + "\" data-customer-id=\"" + item.customerId + "\" style=\"width:16px;height:16px;cursor:pointer;\"></td>" +
-        "<td><strong>" + name + "</strong></td>" +
-        "<td><strong>" + emp + "</strong></td>" +
-        "<td>Título / Contrato #" + item.saleId + "</td>" +
-        "<td><span class=\"badge badge-danger\">" + item.maxDaysDelay + " dias</span></td>" +
-        "<td><strong>R$ " + Number(item.totalOverdue).toLocaleString("pt-BR") + "</strong></td>" +
-        "</tr>";
+      const titleNum = String((item.billIds && item.billIds[0]) || item.saleId || "").replace(/^B-/, "").split("-")[0];
+      const unitLabel = ((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(item.costCenterId) : "") || item.unitName || empLabel(item) || "N/D").replace(/</g, "&lt;");
+      const op = item.assignedOperator || "NÃO ATRIBUÍDO";
+      const opStyle = typeof getOperatorBadgeStyle === "function" ? getOperatorBadgeStyle(op) : "";
+      const delayHtml = typeof getDelayBadgeHtml === "function" ? getDelayBadgeHtml(item.maxDaysDelay, !!asZero) : (item.maxDaysDelay + " dias");
+      const val = Number(item.totalOverdue || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cid = item.customerId;
+      const sid = item.saleId;
+      const rowClass = asZero ? "table-row-hover zero-paid-highlight" : "table-row-hover";
+      return "<tr class=\"" + rowClass + "\">" +
+        "<td style=\"text-align:center;\"><input type=\"checkbox\" class=\"" + chkClass + "\" data-sale-id=\"" + sid + "\" data-customer-id=\"" + cid + "\" style=\"width:16px;height:16px;cursor:pointer;\"></td>" +
+        "<td style=\"text-align:center;\">" + (item.companyId || "") + "</td>" +
+        "<td style=\"white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;\" title=\"" + name.replace(/"/g, "&quot;") + "\"><strong>" + name + "</strong></td>" +
+        "<td>" + titleNum + "</td>" +
+        "<td style=\"white-space:nowrap;\">" + unitLabel + "</td>" +
+        "<td style=\"text-align:center;white-space:nowrap;\"><span class=\"badge\" style=\"" + opStyle + "\">" + String(op).replace(/</g, "&lt;") + "</span></td>" +
+        "<td style=\"text-align:center;white-space:nowrap;\">" + delayHtml + "</td>" +
+        "<td style=\"text-align:center;\">" + (item.billIds ? item.billIds.length : 0) + "</td>" +
+        "<td>R$ " + val + "</td>" +
+        "<td style=\"text-align:center;white-space:nowrap;\">" + lastContactOf(item) + "</td>" +
+        "<td style=\"text-align:center;white-space:nowrap;\">" +
+          "<button class=\"btn btn-primary btn-sm\" onclick=\"window.openCustomerNexTab('" + cid + "','" + sid + "','" + sid + "','" + panel + "')\" style=\"padding:2px 6px;font-size:0.7rem;line-height:1.2;\"><i data-lucide=\"eye\" style=\"width:14px;height:14px;margin-right:2px;vertical-align:middle;\"></i> Detalhes</button>" +
+        "</td></tr>";
     }).join("");
   };
 
-  fillBody("wesend-zero-body", zeroList, "chk-wesend-zero");
-  fillBody("wesend-61-body", d61List, "chk-wesend-61");
+  fillBody("wesend-zero-body", zeroList, "chk-wesend-zero", "elegiveis-zero", true);
+  fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+  const restorePanel = sessionStorage.getItem("wesendActivePanel") || sessionStorage.getItem("wesendReturnPanel");
+  if (restorePanel && typeof window.switchWesendPanel === "function") window.switchWesendPanel(restorePanel);
   if (window.lucide) lucide.createIcons();
 }
 window.loadWeSendTab = loadWeSendTab;
@@ -16702,11 +16735,30 @@ window.syncNexOccurrenceNote = function(customerId, item) {
   }
 };
 
-window.openCustomerNexTab = async function(customerId, saleId, titulo) {
+window.openCustomerNexTab = async function(customerId, saleId, titulo, fromPanel) {
   AppState.openNexTabAfterLoad = true;
+  const panel = fromPanel || window.wesendActivePanel || sessionStorage.getItem("wesendActivePanel") || "elegiveis-zero";
+  sessionStorage.setItem("wesendReturnPanel", panel);
+  sessionStorage.setItem("wesendActivePanel", panel);
   if (typeof viewCustomerCard === "function") {
     await viewCustomerCard(customerId, saleId, titulo || saleId);
   }
+  if (typeof window.bindWesendFichaBack === "function") window.bindWesendFichaBack(panel);
+};
+
+window.bindWesendFichaBack = function(panel) {
+  const btnBack = document.getElementById("btn-back-to-list");
+  const textBack = document.getElementById("text-back-to-list");
+  const target = panel || sessionStorage.getItem("wesendReturnPanel") || "elegiveis-zero";
+  if (textBack) textBack.innerText = "Voltar para Notificações";
+  if (!btnBack) return;
+  btnBack.onclick = function() {
+    if (textBack) textBack.innerText = "Voltar para Lista";
+    btnBack.onclick = function() { goBackToDashboard(); };
+    document.getElementById("view-customer-details").style.display = "none";
+    sessionStorage.setItem("wesendActivePanel", target);
+    if (typeof switchTab === "function") switchTab("wesend", "Notificações");
+  };
 };
 
 window.nexReguaDays = function() {
@@ -16749,14 +16801,20 @@ window.nexInFollowup = function(item) {
 };
 
 window.switchWesendPanel = function(panel) {
+  window.wesendActivePanel = panel;
+  sessionStorage.setItem("wesendActivePanel", panel);
   const follow = document.getElementById("wesend-panel-followup");
-  const eleg = document.getElementById("wesend-panel-elegiveis");
+  const zero = document.getElementById("wesend-panel-zero");
+  const d61 = document.getElementById("wesend-panel-61");
   const b1 = document.getElementById("btn-wesend-followup");
-  const b2 = document.getElementById("btn-wesend-elegiveis");
+  const b2 = document.getElementById("btn-wesend-zero");
+  const b3 = document.getElementById("btn-wesend-61");
   if (follow) follow.style.display = panel === "followup" ? "block" : "none";
-  if (eleg) eleg.style.display = panel === "elegiveis" ? "block" : "none";
+  if (zero) zero.style.display = panel === "elegiveis-zero" ? "block" : "none";
+  if (d61) d61.style.display = panel === "elegiveis-61" ? "block" : "none";
   if (b1) b1.classList.toggle("active", panel === "followup");
-  if (b2) b2.classList.toggle("active", panel === "elegiveis");
+  if (b2) b2.classList.toggle("active", panel === "elegiveis-zero");
+  if (b3) b3.classList.toggle("active", panel === "elegiveis-61");
 };
 
 window.renderNexFollowup = function() {
@@ -16785,7 +16843,7 @@ window.renderNexFollowup = function() {
     const arCell = it.arDigital
       ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
       : `<button type="button" onclick="event.stopPropagation(); window.uploadNexAr('${it.id}')" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Anexar AR</button>`;
-    return `<tr class="nex-followup-row" data-customer-id="${it.customerId}" data-sale-id="${it.titulo}" style="cursor:pointer;" onclick="window.openCustomerNexTab('${it.customerId}','${it.titulo}','${it.titulo}')">
+    return `<tr class="nex-followup-row" data-customer-id="${it.customerId}" data-sale-id="${it.titulo}" style="cursor:pointer;" onclick="window.openCustomerNexTab('${it.customerId}','${it.titulo}','${it.titulo}','followup')">
       <td><strong>${(cust.name || ("Cliente #" + it.customerId)).replace(/</g, "&lt;")}</strong></td>
       <td>${String(emp).replace(/</g, "&lt;")}</td>
       <td style="font-weight:700;">${it.titulo || "—"}</td>
