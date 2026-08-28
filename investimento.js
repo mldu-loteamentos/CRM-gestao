@@ -352,13 +352,18 @@ const InvestimentoApp = {
       </label>`;
     }).join("");
   },
+
+  toggleCompany(id, on) {
     const sid = String(id);
     if (on) {
       if (!this.selectedCompanyIds.includes(sid)) this.selectedCompanyIds.push(sid);
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
-    this.render();
+    const countEl = document.getElementById("inv-emp-count");
+    if (countEl) countEl.textContent = `${this.selectedCompanyIds.length}/${this.geridasCompanies().length}`;
+    const box = document.getElementById("inv-emp-list");
+    if (box) box.innerHTML = this.companyListHtml();
   },
 
   selectAllGeridas() {

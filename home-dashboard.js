@@ -488,7 +488,6 @@
     const firstName = (user?.name || 'Operador').split(' ')[0].toUpperCase();
     const openIdx = this._insightOpenIdx;
     const periods = this.getPeriodSummaries();
-    const seals = this.getBarrigaCounts();
     const bar = (val, max, color) => {
       const pct = max > 0 ? Math.min(100, Math.round((val / max) * 100)) : 0;
       return `<div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
@@ -511,15 +510,10 @@
         ${metric('Notas internas', s.internas, s.capacity, '#64748b')}
         <div style="font-size:0.72rem;font-weight:700;color:#0f172a;">Total: ${s.total}</div>
       </div>`;
-    const sealCell = (label, n) => `
-      <div style="flex:1;text-align:center;">
-        <div style="font-size:1.35rem;font-weight:800;color:${n ? '#166534' : '#94a3b8'};line-height:1.1;">${n === 0 ? '😕 0' : n}</div>
-        <div style="font-size:0.68rem;color:#64748b;font-weight:600;">${label}</div>
-      </div>`;
     box.style.display = 'block';
     box.innerHTML = `
       <style>@media (max-width: 900px) { #home-op-insights-container .home-insights-layout { grid-template-columns: 1fr !important; } }</style>
-      <div class="home-insights-layout" style="display:grid; grid-template-columns: minmax(0,1.15fr) minmax(280px,0.85fr); gap:16px; align-items:start;">
+      <div class="home-insights-layout" style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; align-items:stretch;">
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
           <div style="background:#f8fafc; padding:12px 16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:8px;">
             <i data-lucide="lightbulb" style="width:18px;color:#ca8a04;"></i>
