@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=577">
+  <link rel="stylesheet" href="style.css?v=580">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1105,7 +1105,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.577 &nbsp;&middot;&nbsp; 29/08/2026
+            v1.0.580 &nbsp;&middot;&nbsp; 29/08/2026
           </span>
         </div>
       </div>
@@ -5410,7 +5410,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                   <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
                     <div>
                       <div style="font-size: 0.85rem; font-weight: 800; color: #9a3412;">Parcelas a valor presente para abater</div>
-                      <div id="dist-permuta-parcelas-hint" style="font-size: 0.75rem; color: #9a3412; opacity: 0.85; margin-top: 2px;">Marque parcelas do contrato escolhido até cobrir a restituição.</div>
+                      <div id="dist-permuta-parcelas-hint" style="font-size: 0.75rem; color: #9a3412; opacity: 0.85; margin-top: 2px;">O saldo devedor presente do título é vencidas atualizadas + a vencer com desconto comercial. A restituição negociada é o valor a devolver no distrato — são contas diferentes.</div>
                     </div>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="marcarParcelasPermutaAteRestituicao()" style="background:#ea580c;border:none;color:#fff;font-weight:700;padding:6px 10px;border-radius:6px;cursor:pointer;">Marcar até a restituição</button>
                   </div>
@@ -5418,7 +5418,8 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                     <div style="padding: 16px; color: #94a3b8; text-align: center; font-size: 0.85rem;">Selecione um contrato para carregar as parcelas.</div>
                   </div>
                   <div id="dist-permuta-parcelas-totais" style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 0.85rem; font-weight: 700;">
-                    <span>Restituição: <span id="dist-permuta-meta">R$ 0,00</span></span>
+                    <span>Restituição (distrato): <span id="dist-permuta-meta">R$ 0,00</span></span>
+                    <span>Saldo presente do título: <span id="dist-permuta-sd-presente">R$ 0,00</span></span>
                     <span>Selecionado VP: <span id="dist-permuta-selecionado">R$ 0,00</span></span>
                     <span id="dist-permuta-saldo" style="color: #9a3412;">Falta: R$ 0,00</span>
                   </div>
@@ -6101,36 +6102,36 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=577"></script>
-  <script defer src="sienge-api.js?v=577"></script>
-  <script defer src="azure-auth.js?v=577"></script>
-  <script defer src="app.js?v=577"></script>
-  <script defer src="home-dashboard.js?v=577"></script>
-  <script defer src="anexos.js?v=577"></script>
-  <script defer src="contas-pagar.js?v=577"></script>
-  <script defer src="config-tags.js?v=577"></script>
-  <script defer src="config-users.js?v=577"></script>
-  <script defer src="construcao.js?v=577"></script>
-  <script defer src="empresas.js?v=577"></script>
-  <script defer src="relacionamento.js?v=577"></script>
+  <script defer src="data.js?v=580"></script>
+  <script defer src="sienge-api.js?v=580"></script>
+  <script defer src="azure-auth.js?v=580"></script>
+  <script defer src="app.js?v=580"></script>
+  <script defer src="home-dashboard.js?v=580"></script>
+  <script defer src="anexos.js?v=580"></script>
+  <script defer src="contas-pagar.js?v=580"></script>
+  <script defer src="config-tags.js?v=580"></script>
+  <script defer src="config-users.js?v=580"></script>
+  <script defer src="construcao.js?v=580"></script>
+  <script defer src="empresas.js?v=580"></script>
+  <script defer src="relacionamento.js?v=580"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=577"></script>
-  <script defer src="marketing.js?v=577"></script>
-  <script defer src="plano-financeiro.js?v=577"></script>
-  <script defer src="prestacao-contas.js?v=577"></script>
-  <script defer src="fluxo-caixa.js?v=577"></script>
-  <script defer src="investimento.js?v=577"></script>
-  <script defer src="parametrizacao-parceiro.js?v=577"></script>
-  <script defer src="societario.js?v=577"></script>
-  <script defer src="fiscal.js?v=577"></script>
-  <script defer src="indexadores.js?v=577"></script>
-  <script defer src="verificar-construcao.js?v=577"></script>
-  <script src="repactuacoes.js?v=577"></script>
+  <script defer src="centros-custo.js?v=580"></script>
+  <script defer src="marketing.js?v=580"></script>
+  <script defer src="plano-financeiro.js?v=580"></script>
+  <script defer src="prestacao-contas.js?v=580"></script>
+  <script defer src="fluxo-caixa.js?v=580"></script>
+  <script defer src="investimento.js?v=580"></script>
+  <script defer src="parametrizacao-parceiro.js?v=580"></script>
+  <script defer src="societario.js?v=580"></script>
+  <script defer src="fiscal.js?v=580"></script>
+  <script defer src="indexadores.js?v=580"></script>
+  <script defer src="verificar-construcao.js?v=580"></script>
+  <script src="repactuacoes.js?v=580"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=577"></script>
+  <script defer src="dashboard-inadimplencia.js?v=580"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

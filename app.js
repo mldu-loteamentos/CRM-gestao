@@ -11362,14 +11362,39 @@ function flattenCustomerDebtBalance(res) {
   return rows;
 }
 
+function distPermutaIsOverdue(inst) {
+  const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return false;
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return due < today;
+}
+
 function distPermutaInstVp(inst) {
-  const n = Number(
+  const original = Number(inst.originalValue != null ? inst.originalValue : inst.value) || 0;
+  const additions = Number(
+    inst.additionsValue != null ? inst.additionsValue
+      : (inst.additionValue != null ? inst.additionValue
+        : (inst.interestValue != null ? inst.interestValue : inst.additionalValue))
+  ) || 0;
+  const updated = Number(
+    inst.updatedValue != null ? inst.updatedValue
+      : (inst.correctedValue != null ? inst.correctedValue
+        : (inst.currentBalance != null ? inst.currentBalance : (original + additions)))
+  ) || 0;
+  const apiPv = Number(
     inst.presentValue != null ? inst.presentValue
       : (inst.presentValueAmount != null ? inst.presentValueAmount
-        : (inst.correctedPresentValue != null ? inst.correctedPresentValue
-          : (inst.currentBalance != null ? inst.currentBalance : inst.originalValue)))
+        : inst.correctedPresentValue)
   );
-  return Number.isFinite(n) ? n : 0;
+  if (distPermutaIsOverdue(inst)) {
+    if (Number.isFinite(apiPv) && apiPv > 0.009) return apiPv;
+    const byAdd = original + additions;
+    if (byAdd > 0.009) return byAdd;
+    return Number.isFinite(updated) ? updated : 0;
+  }
+  if (Number.isFinite(apiPv) && apiPv > 0.009) return apiPv;
+  return Number.isFinite(updated) ? updated : 0;
 }
 
 function distPermutaInstOpen(inst) {
@@ -11514,13 +11539,15 @@ window.onDistratoPermutaContractChange = async function() {
       .filter(distPermutaInstOpen)
       .map((inst) => {
         const due = inst.dueDate || inst.due || "";
+        const original = Number(inst.originalValue || inst.value || 0) || 0;
         return {
           id: inst.installmentId || inst.installmentNumber || inst.id,
           number: inst.installmentNumber || inst.installmentId || inst.id,
           due,
-          original: Number(inst.originalValue || inst.value || 0) || 0,
-          balance: Number(inst.currentBalance != null ? inst.currentBalance : inst.originalValue) || 0,
-          vp: distPermutaInstVp(inst)
+          original,
+          balance: Number(inst.currentBalance != null ? inst.currentBalance : original) || 0,
+          vp: distPermutaInstVp(inst),
+          overdue: distPermutaIsOverdue(inst)
         };
       })
       .filter((r) => r.vp > 0.009)
@@ -11528,6 +11555,13 @@ window.onDistratoPermutaContractChange = async function() {
     window._distPermutaState.installments = rows;
     window._distPermutaState.billId = billId;
     window._distPermutaState.unit = unit;
+    const vencidas = rows.filter((r) => r.overdue);
+    const aVencer = rows.filter((r) => !r.overdue);
+    const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    window._distPermutaState.saldoPresente = sumVenc + sumFut;
+    window._distPermutaState.vencidasAtualizado = sumVenc;
+    window._distPermutaState.aVencerVp = sumFut;
     if (!rows.length) {
       body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
     } else {
@@ -11536,29 +11570,53 @@ window.onDistratoPermutaContractChange = async function() {
         const p = iso.split("-");
         return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (d || "—");
       };
+      const rowHtml = (r, i) => `
+        <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
+          <td style="padding:6px;text-align:center;">
+            <input type="checkbox" class="dist-permuta-inst-check" data-idx="${i}" onchange="onDistratoPermutaInstToggle()">
+          </td>
+          <td style="padding:6px;font-weight:700;">${r.number}</td>
+          <td style="padding:6px;text-align:center;">${fmtDate(r.due)}</td>
+          <td style="padding:6px;text-align:right;">${distPermutaFmt(r.original || r.balance)}</td>
+          <td style="padding:6px;text-align:right;font-weight:800;color:${r.overdue ? "#9a3412" : "#1d4ed8"};">${distPermutaFmt(r.vp)}</td>
+        </tr>`;
+      const section = (title, list) => {
+        if (!list.length) return "";
+        const total = list.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+        const idxs = list.map((r) => rows.indexOf(r));
+        return `
+          <tr style="background:#fff7ed;">
+            <td colspan="5" style="padding:8px 8px 4px;font-size:0.72rem;font-weight:800;color:#9a3412;text-transform:uppercase;">${title}</td>
+          </tr>
+          ${list.map((r, k) => rowHtml(r, idxs[k])).join("")}
+          <tr style="background:#ffedd5;">
+            <td colspan="4" style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">Totais</td>
+            <td style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">${distPermutaFmt(total)}</td>
+          </tr>`;
+      };
       body.innerHTML = `
+        <div style="padding:10px 12px;background:#fff;border-bottom:1px solid #fed7aa;">
+          <div style="font-size:0.78rem;font-weight:800;color:#9a3412;">Saldo devedor presente deste título</div>
+          <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${distPermutaFmt(window._distPermutaState.saldoPresente)}</div>
+          <div style="font-size:0.72rem;color:#9a3412;margin-top:2px;">Vencidas atualizadas ${distPermutaFmt(sumVenc)} + a vencer a VP ${distPermutaFmt(sumFut)}</div>
+        </div>
         <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
           <thead>
             <tr style="background:#9a3412;color:#fff;">
               <th style="padding:8px;width:36px;text-align:center;"></th>
               <th style="padding:8px;text-align:left;">Parcela</th>
               <th style="padding:8px;text-align:center;">Vencimento</th>
-              <th style="padding:8px;text-align:right;">Saldo</th>
+              <th style="padding:8px;text-align:right;">Valor original</th>
               <th style="padding:8px;text-align:right;">Valor presente</th>
             </tr>
           </thead>
           <tbody>
-            ${rows.map((r, i) => `
-              <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
-                <td style="padding:6px;text-align:center;">
-                  <input type="checkbox" class="dist-permuta-inst-check" data-idx="${i}" onchange="onDistratoPermutaInstToggle()">
-                </td>
-                <td style="padding:6px;font-weight:700;">${r.number}</td>
-                <td style="padding:6px;text-align:center;">${fmtDate(r.due)}</td>
-                <td style="padding:6px;text-align:right;">${distPermutaFmt(r.balance)}</td>
-                <td style="padding:6px;text-align:right;font-weight:800;color:#1d4ed8;">${distPermutaFmt(r.vp)}</td>
-              </tr>
-            `).join("")}
+            ${section("Valores a pagar (vencidas) — valor atualizado", vencidas)}
+            ${section("Valores a pagar (a vencer) — desconto comercial", aVencer)}
+            <tr style="background:#9a3412;color:#fff;">
+              <td colspan="4" style="padding:8px;text-align:right;font-weight:800;">Total saldo devedor presente</td>
+              <td style="padding:8px;text-align:right;font-weight:800;">${distPermutaFmt(window._distPermutaState.saldoPresente)}</td>
+            </tr>
           </tbody>
         </table>`;
     }
@@ -11585,6 +11643,9 @@ window.onDistratoPermutaInstToggle = function() {
   const selEl = document.getElementById("dist-permuta-selecionado");
   const saldoEl = document.getElementById("dist-permuta-saldo");
   const metaEl = document.getElementById("dist-permuta-meta");
+  const sdEl = document.getElementById("dist-permuta-sd-presente");
+  const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
+  if (sdEl) sdEl.textContent = distPermutaFmt(saldoPresente);
   if (metaEl) metaEl.textContent = distPermutaFmt(target);
   if (selEl) selEl.textContent = distPermutaFmt(sum);
   if (saldoEl) {
@@ -11594,6 +11655,10 @@ window.onDistratoPermutaInstToggle = function() {
     } else {
       saldoEl.style.color = "#166534";
       saldoEl.textContent = (Math.abs(diff) <= 0.009 ? "Cobriu a restituição" : "Excedente: " + distPermutaFmt(Math.abs(diff)));
+    }
+    if (saldoPresente > 0.009 && target > saldoPresente + 0.009) {
+      saldoEl.style.color = "#9a3412";
+      saldoEl.textContent = "Este título tem saldo presente de " + distPermutaFmt(saldoPresente) + " e não cobre a restituição de " + distPermutaFmt(target);
     }
   }
   window._distPermutaState = window._distPermutaState || {};
@@ -11612,8 +11677,8 @@ window.marcarParcelasPermutaAteRestituicao = function() {
   const target = distPermutaTargetRefund();
   const checks = document.querySelectorAll(".dist-permuta-inst-check");
   let acc = 0;
-  checks.forEach((chk, i) => {
-    const inst = rows[i];
+  checks.forEach((chk) => {
+    const inst = rows[Number(chk.getAttribute("data-idx"))];
     if (!inst) { chk.checked = false; return; }
     if (acc + 0.009 < target) {
       chk.checked = true;
@@ -29299,13 +29364,14 @@ window.mapaJuridicoFormatDoc = function(c) {
   const clean = String(raw || "").replace(/\D/g, "");
   if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
   if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
-  return raw ? String(raw) : "sem documento";
+  return raw ? String(raw) : "";
 };
 
 window.mapaJuridicoClientLabel = function(c) {
   const id = c.customerId != null ? c.customerId : "";
   const name = String(c.customerName || "Cliente").trim().toUpperCase();
-  return id + " - " + name + " - " + window.mapaJuridicoFormatDoc(c);
+  const doc = window.mapaJuridicoFormatDoc(c);
+  return doc ? (id + " - " + name + " - " + doc) : (id + " - " + name);
 };
 
 window.mapaJuridicoUniqueClients = function() {
@@ -29380,8 +29446,141 @@ window.mapaJuridicoPickClient = function(id) {
   window.mapaJuridicoSetFilter("customerId", sid);
 };
 
-window.mapaJuridicoShowPhase = function(prefix, compId) {
-  window._mapaJuridicoLastPhase = { prefix, compId };
+window.mapaJuridicoBillIdOf = function(c) {
+  return String((c && c.billIds && c.billIds[0]) || (c && c.saleId) || "").replace(/^B-/, "").split("-")[0];
+};
+
+window.mapaJuridicoFlattenStatements = function(res) {
+  const raw = (res && (res.results || res.data)) || [];
+  const out = [];
+  raw.forEach(item => {
+    if (!item) return;
+    if (Array.isArray(item.billsReceivable) && item.billsReceivable.length) {
+      item.billsReceivable.forEach(b => out.push(b));
+      return;
+    }
+    if (Array.isArray(item.bills) && item.bills.length) {
+      item.bills.forEach(b => out.push(b));
+      return;
+    }
+    if (item.installments || item.billReceivableId || item.receivableBillId) out.push(item);
+  });
+  return out;
+};
+
+window.mapaJuridicoKpisFromInstallments = function(installments) {
+  const todayIso = new Date().toISOString().split("T")[0];
+  let kpiVencidas = 0, kpiVencidasOriginal = 0, kpiQtdVencidas = 0;
+  let kpiAVencer = 0, kpiQtdAVencer = 0;
+  let kpiPago = 0, kpiQtdPagas = 0, kpiAcrescimo = 0, kpiDesconto = 0, kpiLiquido = 0;
+  (installments || []).forEach(inst => {
+    const cb = Number(inst.currentBalance || 0);
+    const ov = Number(inst.originalValue || inst.value || 0);
+    const due = String(inst.dueDate || "").slice(0, 10);
+    if (cb > 0.009) {
+      if (due && due < todayIso) {
+        kpiVencidas += cb;
+        kpiVencidasOriginal += ov;
+        kpiQtdVencidas++;
+      } else {
+        kpiAVencer += cb;
+        kpiQtdAVencer++;
+      }
+    }
+    (inst.receipts || []).forEach(rec => {
+      const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
+      if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") return;
+      kpiPago += Number(rec.receiptValue || 0);
+      kpiAcrescimo += Number(rec.additionalValue || 0);
+      kpiDesconto += Number(rec.discountValue || 0);
+      kpiLiquido += Number(rec.netReceiptValue || 0);
+      kpiQtdPagas++;
+    });
+  });
+  if (kpiLiquido <= 0.009 && kpiPago > 0) kpiLiquido = Math.max(0, kpiPago - kpiDesconto);
+  const recebido = Math.max(0, kpiPago - kpiDesconto);
+  const kpiTotalContrato = recebido + kpiVencidasOriginal + kpiAVencer;
+  const kpiTotalQtd = kpiQtdPagas + kpiQtdVencidas + kpiQtdAVencer;
+  const percPaid = kpiTotalContrato > 0.009 ? Math.max(0, Math.min(100, (recebido / kpiTotalContrato) * 100)) : 0;
+  return {
+    kpiVencidas, kpiVencidasOriginal, kpiQtdVencidas, kpiAVencer, kpiQtdAVencer,
+    kpiPago, kpiQtdPagas, kpiAcrescimo, kpiDesconto, kpiLiquido, recebido,
+    kpiTotalContrato, kpiTotalQtd, percPaid
+  };
+};
+
+window.mapaJuridicoEnsureStatements = function(customerId) {
+  const key = String(customerId || "");
+  if (!key) return Promise.resolve([]);
+  window._mapaJuridicoFsCache = window._mapaJuridicoFsCache || {};
+  if (!window._mapaJuridicoFsCache[key]) {
+    window._mapaJuridicoFsCache[key] = (window.SiengeApiService && SiengeApiService.getCustomerFinancialStatements)
+      ? SiengeApiService.getCustomerFinancialStatements(key)
+          .then(res => window.mapaJuridicoFlattenStatements(res))
+          .catch(() => [])
+      : Promise.resolve([]);
+  }
+  return window._mapaJuridicoFsCache[key];
+};
+
+window.mapaJuridicoParseQuitacao = function(data) {
+  if (!data) return null;
+  if (data.results && data.results.length && data.results[0].totalCurrentDebitBalanceValue != null) {
+    return Number(data.results[0].totalCurrentDebitBalanceValue);
+  }
+  if (data.totalCurrentDebitBalanceValue != null) return Number(data.totalCurrentDebitBalanceValue);
+  if (data.presentValue != null) return Number(data.presentValue);
+  return null;
+};
+
+window.mapaJuridicoLoadTitleFinance = async function(client) {
+  const billId = window.mapaJuridicoBillIdOf(client);
+  const customerId = client && client.customerId;
+  let installments = [];
+  try {
+    const bills = await window.mapaJuridicoEnsureStatements(customerId);
+    const db = (bills || []).find(row =>
+      String(row.billReceivableId) === String(billId) || String(row.receivableBillId) === String(billId)
+    );
+    installments = (db && db.installments) || [];
+  } catch (e) {}
+  if ((!installments || !installments.length) && billId && window.SiengeApiService && SiengeApiService.getBillInstallments) {
+    try {
+      const inst = await SiengeApiService.getBillInstallments(billId);
+      installments = Array.isArray(inst) ? inst : (inst.results || []);
+    } catch (e) {}
+  }
+  const kpis = window.mapaJuridicoKpisFromInstallments(installments);
+  let quitacao = null;
+  let quitParc = kpis.kpiQtdVencidas + kpis.kpiQtdAVencer;
+  let doc = (client && (client.cpfCnpj || client.document || client.cpf)) || "";
+  if (!doc && window.AppState && AppState.customers) {
+    const cust = AppState.customers[customerId] || AppState.customers[String(customerId)];
+    if (cust) doc = cust.cpfCnpj || cust.document || "";
+  }
+  const cleanDoc = String(doc).replace(/\D/g, "");
+  if (billId && window.SiengeApiService && SiengeApiService.getTotalCurrentDebitBalance && cleanDoc.length >= 11) {
+    try {
+      const data = await SiengeApiService.getTotalCurrentDebitBalance(cleanDoc, billId);
+      quitacao = window.mapaJuridicoParseQuitacao(data);
+    } catch (e) {}
+  }
+  if ((quitacao == null || !Number.isFinite(quitacao)) && billId && window.SiengeApiService && SiengeApiService.getCustomerDebtBalance) {
+    try {
+      const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId: client.companyId });
+      const rows = (typeof flattenCustomerDebtBalance === "function" ? flattenCustomerDebtBalance(res) : [])
+        .filter(typeof distPermutaInstOpen === "function" ? distPermutaInstOpen : () => true);
+      quitacao = rows.reduce((s, inst) => s + (typeof distPermutaInstVp === "function" ? distPermutaInstVp(inst) : 0), 0);
+      if (rows.length) quitParc = rows.length;
+    } catch (e) {}
+  }
+  if (quitacao == null || !Number.isFinite(Number(quitacao))) {
+    quitacao = (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
+  }
+  return Object.assign({}, kpis, { quitacao: Number(quitacao) || 0, quitParc });
+};
+
+window.mapaJuridicoShowPhase = async function(prefix, compId) {
   const cache = window._mapaJuridicoCache;
   if (!cache) return;
   const key = (compId ? ("c:" + compId + "|") : "g|") + String(prefix);
@@ -29391,23 +29590,55 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
   const titleEl = document.getElementById("mapa-juridico-phase-title");
   const bodyEl = document.getElementById("mapa-juridico-phase-body");
   if (!phaseView || !bodyEl) return;
-  if (mapView) mapView.style.display = "none";
-  phaseView.style.display = "block";
-  if (titleEl) {
-    const scope = bucket.scopeName ? (" · " + bucket.scopeName) : "";
-    titleEl.textContent = (bucket.prefix ? bucket.prefix + " — " : "") + (bucket.name || "Fase") + scope;
-  }
   const clients = (bucket.clients || []).filter(c => window.mapaJuridicoClientMatches(c)).slice().sort((a, b) => {
     const va = (a.overdueValue || 0) + (a.overdueCharges || 0);
     const vb = (b.overdueValue || 0) + (b.overdueCharges || 0);
     return vb - va;
   });
-  const subEl = document.getElementById("mapa-juridico-phase-sub");
-  if (subEl) subEl.textContent = clients.length + (clients.length === 1 ? " título" : " títulos") + " nesta etapa";
   if (!clients.length) {
-    bodyEl.innerHTML = `<div style="padding:40px;text-align:center;color:#64748b;">Nenhum contrato nesta etapa com os filtros atuais.</div>`;
+    if (phaseView && phaseView.style.display !== "none") window.mapaJuridicoShowMap();
     return;
   }
+  window._mapaJuridicoLastPhase = { prefix, compId };
+  if (mapView) mapView.style.display = "none";
+  phaseView.style.display = "block";
+  const mappedMeta = (cache.nameMap && Object.values(cache.nameMap).find(v => String(v.prefix) === String(prefix))) || {};
+  const days = Number(bucket.days != null ? bucket.days : mappedMeta.days) || 0;
+  const descricao = String(bucket.descricao || mappedMeta.descricao || "").trim();
+  if (titleEl) {
+    const scope = bucket.scopeName ? (" · " + bucket.scopeName) : "";
+    titleEl.textContent = (bucket.prefix ? bucket.prefix + " — " : "") + (bucket.name || "Fase") + scope;
+  }
+  let infoBtn = document.getElementById("mapa-juridico-phase-info");
+  if (!infoBtn && titleEl && titleEl.parentNode) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;align-items:center;gap:8px;";
+    titleEl.parentNode.insertBefore(wrap, titleEl);
+    wrap.appendChild(titleEl);
+    infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.id = "mapa-juridico-phase-info";
+    infoBtn.setAttribute("aria-label", "Sobre esta fase");
+    infoBtn.textContent = "i";
+    infoBtn.style.cssText = "width:22px;height:22px;border-radius:50%;border:1.5px solid #105436;background:#fff;color:#105436;font-weight:800;font-size:0.78rem;font-style:italic;font-family:Georgia,serif;cursor:help;line-height:1;padding:0;flex-shrink:0;";
+    wrap.appendChild(infoBtn);
+  }
+  if (infoBtn) {
+    const faseNome = bucket.name || "Fase";
+    const tip = (descricao ? descricao : "Etapa processual do mapa jurídico.")
+      + (days ? ("\n\nTempo médio desta fase: " + days + " dias.") : "\n\nTempo médio desta fase não cadastrado.");
+    infoBtn.title = tip;
+    infoBtn.style.display = "inline-flex";
+    infoBtn.style.alignItems = "center";
+    infoBtn.style.justifyContent = "center";
+    infoBtn.onclick = function(ev) {
+      ev.stopPropagation();
+      alert("Fase: " + faseNome + "\n\n" + tip);
+    };
+  }
+  const subEl = document.getElementById("mapa-juridico-phase-sub");
+  if (subEl) subEl.textContent = clients.length + (clients.length === 1 ? " título" : " títulos") + " nesta etapa";
+  const loadToken = (window._mapaJuridicoPhaseLoadToken = (window._mapaJuridicoPhaseLoadToken || 0) + 1);
   const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const formatPrazoEtapa = (prazo) => {
     if (!prazo) return "";
@@ -29440,45 +29671,35 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
     }
     return `<span style="${style}">${label}</span>`;
   };
-  const moneyOf = (client) => {
-    const sales = (window.AppState && AppState.sales) || [];
-    const sale = (typeof window.matchZeroPaidSale === "function")
-      ? window.matchZeroPaidSale(client, sales)
-      : sales.find(s =>
-          (client.realSaleId && String(s.id) === String(client.realSaleId)) ||
-          String(s.id) === String(client.saleId) ||
-          String(s.receivableBillId) === String(client.saleId)
-        );
-    const contract = Number((sale && (sale.updatedContractValue || sale.contractValue || sale.value || sale.totalSellingValue)) || 0);
-    let perc = client.percPaid != null ? Number(client.percPaid) : (sale && sale.percPaid != null ? Number(sale.percPaid) : null);
-    if (perc != null && perc > 1) perc = perc / 100;
-    const overdue = (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
-    let paid = 0;
-    if (sale && sale.outstandingBalance != null && contract > 0) {
-      paid = Math.max(0, contract - Number(sale.outstandingBalance));
-    } else if (perc != null && contract > 0) {
-      paid = contract * perc;
-    }
-    const remaining = (sale && sale.outstandingBalance != null)
-      ? Math.max(0, Number(sale.outstandingBalance))
-      : (contract > 0 ? Math.max(0, contract - paid) : overdue);
-    const future = Math.max(0, remaining - (Number(client.overdueValue) || 0));
-    const present = overdue + (future * 0.85);
-    return { paid, remaining, present, overdue };
+  const moneyStack = (parc, value, color, sub) =>
+    `<div style="text-align:right;line-height:1.25;min-width:110px;">
+      <div style="font-size:0.65rem;color:#64748b;font-weight:700;">${parc} parc.</div>
+      <div style="font-weight:800;color:${color};white-space:nowrap;">${fmt(value)}</div>
+      ${sub ? `<div style="font-size:0.6rem;color:#94a3b8;white-space:nowrap;">${sub}</div>` : ""}
+    </div>`;
+  const percBar = (pct) => {
+    const p = Math.round(Number(pct) || 0);
+    return `<div style="min-width:96px;">
+      <div style="font-size:0.72rem;font-weight:800;color:#0f172a;margin-bottom:4px;">${p}%</div>
+      <div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
+        <div style="width:${p}%;height:100%;background:linear-gradient(90deg,#dc2626,#f59e0b,#eab308);"></div>
+      </div>
+    </div>`;
   };
-  bodyEl.innerHTML = `
+  const renderTable = (finByIdx) => {
+    bodyEl.innerHTML = `
     <div class="table-container" style="margin:0;max-height:calc(100vh - 280px);overflow:auto;border:1px solid rgba(16,84,54,0.12);border-radius:8px;">
       <style>
-        #mapa-juridico-phase-table { width:100%; min-width:1180px; border-collapse:collapse; }
+        #mapa-juridico-phase-table { width:100%; min-width:1480px; border-collapse:collapse; }
         #mapa-juridico-phase-table thead th {
           position: sticky; top: 0; z-index: 2;
           background: #105436 !important; color: #fff !important;
-          font-size: 0.72rem !important; font-weight: 700; letter-spacing: 0.3px;
-          text-transform: uppercase; padding: 10px 10px !important;
+          font-size: 0.68rem !important; font-weight: 700; letter-spacing: 0.3px;
+          text-transform: uppercase; padding: 10px 8px !important;
           border-bottom: 2px solid #0b3d27; white-space: nowrap;
         }
         #mapa-juridico-phase-table tbody td {
-          font-size: 0.8rem !important; padding: 8px 10px !important;
+          font-size: 0.78rem !important; padding: 8px 8px !important;
           border-bottom: 1px solid #e2e8f0; color: #1e293b; vertical-align: middle;
         }
         #mapa-juridico-phase-table tbody tr:nth-child(even) { background: #f4f6f4; }
@@ -29493,34 +29714,46 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
             <th style="text-align:center;">Aging</th>
             <th style="text-align:center;">Vencidas</th>
             <th style="text-align:center;">Prazo etapa</th>
-            <th style="text-align:right;">Pago até agora</th>
-            <th style="text-align:right;">Quanto falta</th>
-            <th style="text-align:right;">Valor presente</th>
-            <th style="text-align:right;">R$ Atualizado</th>
+            <th style="text-align:right;">Valores pago</th>
+            <th style="text-align:right;">Valores a vencer</th>
+            <th style="text-align:right;">Valores vencidos</th>
+            <th style="text-align:right;">Total do contrato</th>
+            <th style="text-align:center;">% pago</th>
+            <th style="text-align:right;">Valor para quitação</th>
             <th style="text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${clients.map(c => {
-            const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/, "").split("-")[0];
+          ${clients.map((c, idx) => {
+            const title = window.mapaJuridicoBillIdOf(c);
             const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
             const name = String(c.customerName || "").replace(/</g, "&lt;");
             const aging = (typeof getDelayBadgeHtml === "function") ? getDelayBadgeHtml(c.maxDaysDelay) : (c.maxDaysDelay || 0);
-            const money = moneyOf(c);
             const unitEsc = String(c.unitName || "").replace(/"/g, "&quot;");
             const cc = String(typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")).replace(/"/g, "&quot;");
             const nameEsc = String(c.customerName || "").replace(/"/g, "&quot;");
+            const fin = finByIdx && finByIdx[idx];
+            const wait = '<span style="color:#94a3b8;">…</span>';
+            const paidCell = fin ? moneyStack(fin.kpiQtdPagas, fin.recebido, "#105436", "Líq. recebido") : wait;
+            const futureCell = fin ? moneyStack(fin.kpiQtdAVencer, fin.kpiAVencer, "#1976d2", "") : wait;
+            const overdueCell = fin ? moneyStack(fin.kpiQtdVencidas, fin.kpiVencidas, "#e65100", "Orig. " + fmt(fin.kpiVencidasOriginal)) : wait;
+            const totalCell = fin ? moneyStack(fin.kpiTotalQtd, fin.kpiTotalContrato, "#105436", "") : wait;
+            const barCell = fin ? percBar(fin.percPaid) : wait;
+            const quitCell = fin ? moneyStack(fin.quitParc, fin.quitacao, "#105436", "VP") : wait;
+            const vencidasCount = fin ? fin.kpiQtdVencidas : (c.billCount || (c.billIds ? c.billIds.length : "…"));
             return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
               <td style="white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;font-weight:600;" title="${name}">${name}</td>
               <td style="font-weight:700;color:#105436;">${title || "—"}</td>
               <td style="white-space:nowrap;">${String(unit).replace(/</g, "&lt;")}</td>
               <td style="text-align:center;white-space:nowrap;">${aging}</td>
-              <td style="text-align:center;">${c.billCount || (c.billIds ? c.billIds.length : 1)}</td>
+              <td style="text-align:center;">${vencidasCount}</td>
               <td style="text-align:center;white-space:nowrap;">${phasePrazoHtml(c)}</td>
-              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#105436;">${fmt(money.paid)}</td>
-              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#b45309;">${fmt(money.remaining)}</td>
-              <td style="text-align:right;white-space:nowrap;font-weight:700;color:#1d4ed8;">${fmt(money.present)}</td>
-              <td style="text-align:right;font-weight:800;white-space:nowrap;color:#0f172a;">${fmt(money.overdue)}</td>
+              <td style="text-align:right;">${paidCell}</td>
+              <td style="text-align:right;">${futureCell}</td>
+              <td style="text-align:right;">${overdueCell}</td>
+              <td style="text-align:right;">${totalCell}</td>
+              <td style="text-align:center;">${barCell}</td>
+              <td style="text-align:right;">${quitCell}</td>
               <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation()">
                 <button type="button" class="btn btn-secondary btn-sm" data-customer-id="${c.customerId}" data-title="${title}" data-name="${nameEsc}" data-unit="${unitEsc}" data-cc="${cc}" onclick="event.stopPropagation();visualizarExtratoDireto(this)" style="padding:3px 8px;font-size:0.7rem;line-height:1.2;background:#ea580c;border:none;color:#fff;border-radius:4px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
                   <i data-lucide="file-text" style="width:14px;height:14px;"></i> Extrato
@@ -29531,7 +29764,16 @@ window.mapaJuridicoShowPhase = function(prefix, compId) {
         </tbody>
       </table>
     </div>`;
-  if (window.lucide) lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
+  };
+  renderTable(null);
+  try {
+    const finances = await Promise.all(clients.map(c => window.mapaJuridicoLoadTitleFinance(c)));
+    if (loadToken !== window._mapaJuridicoPhaseLoadToken) return;
+    renderTable(finances);
+  } catch (e) {
+    console.error("Erro ao carregar valores da fase do mapa jurídico:", e);
+  }
 };
 
 window.mapaJuridicoRenderStages = function() {
@@ -29563,7 +29805,8 @@ window.mapaJuridicoRenderStages = function() {
   const register = (agg, scopeId, scopeName) => {
     (agg || []).forEach(item => {
       byKey[(scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix)] = {
-        prefix: item.prefix, name: item.name, scopeName: scopeName || "", clients: item.clients || []
+        prefix: item.prefix, name: item.name, scopeName: scopeName || "", clients: item.clients || [],
+        days: item.days || 0, descricao: item.descricao || item.explicacao || ""
       };
     });
   };
@@ -29596,12 +29839,12 @@ window.mapaJuridicoRenderStages = function() {
               <div style="height:1px;background:#d1fae5;margin:4px 4px;"></div>
               <div style="color:#dc2626;font-size:9px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtBRL(item.value)}</div>
             </button>`
-          : `<button type="button" class="mapa-fase-vazia" onclick="mapaJuridicoShowPhase('${item.prefix}', ${cidArg})" title="${tip}"
-              style="background:#f8fafc;border:1.5px dashed #94a3b8;border-radius:8px;flex:0.7 1 0;min-width:40px;min-height:52px;padding:16px 4px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:pointer;">
+          : `<div class="mapa-fase-vazia" title="${tip} · sem títulos nesta etapa"
+              style="background:#f8fafc;border:1.5px dashed #94a3b8;border-radius:8px;flex:0.7 1 0;min-width:40px;min-height:52px;padding:16px 4px 8px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;cursor:default;">
               <div style="background:#64748b;color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:9px;position:absolute;top:-10px;left:50%;transform:translateX(-50%);border:2px solid #fff;">${item.prefix}</div>
               <div style="color:#94a3b8;font-size:8px;text-transform:uppercase;font-weight:700;">Tít.</div>
               <div style="font-size:14px;font-weight:800;color:#94a3b8;line-height:1.15;">0</div>
-            </button>`;
+            </div>`;
         const arrow = idx < items.length - 1
           ? `<div style="flex:0 0 16px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:16px;font-weight:700;line-height:1;">›</div>` : "";
         return card + arrow;
@@ -29816,7 +30059,11 @@ window.showMapaJuridicoOverlay = function(ui) {
           </button>
           <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px;">
             <div>
-              <h2 id="mapa-juridico-phase-title" style="margin:0;font-size:1.1rem;font-weight:700;color:var(--color-primary);"></h2>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <h2 id="mapa-juridico-phase-title" style="margin:0;font-size:1.1rem;font-weight:700;color:var(--color-primary);"></h2>
+                <button type="button" id="mapa-juridico-phase-info" title="" aria-label="Sobre esta fase"
+                  style="display:none;width:22px;height:22px;border-radius:50%;border:1.5px solid #105436;background:#fff;color:#105436;font-weight:800;font-size:0.78rem;font-style:italic;font-family:Georgia,serif;cursor:help;line-height:1;padding:0;flex-shrink:0;">i</button>
+              </div>
               <div id="mapa-juridico-phase-sub" style="margin-top:4px;font-size:0.8rem;color:#64748b;"></div>
             </div>
           </div>
