@@ -896,6 +896,11 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
   const usersStr = localStorage.getItem('crm_users');
   const users = usersStr ? JSON.parse(usersStr) : [];
   
+  if (requiredType === 'apoio_juridico') {
+      const picked = pickApoioJuridicoOperatorName(customerId);
+      if (picked) return picked;
+      return defaultOp;
+  }
   if (requiredType === 'advogado') {
       const advOps = users.filter(u => u.operator_type === 'advogado' && u.status !== 'INATIVO');
       if (advOps.length > 0) {
@@ -950,12 +955,9 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
         }
         
         if (requiredType === 'apoio_juridico') {
-            // Se não encontrou Apoio Jurídico na regra da cidade, pega o primeiro global como fallback
-            const apoioGlobal = users.find(u => u.operator_type === 'apoio_juridico' && u.status !== 'INATIVO');
-            if (apoioGlobal) {
-                return apoioGlobal.sienge_user ? apoioGlobal.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : apoioGlobal.name.toUpperCase();
-            }
-            return defaultOp; // Se não tem Apoio Jurídico no sistema, fica não atribuído
+            const apoioPicked = pickApoioJuridicoOperatorName(customerId);
+            if (apoioPicked) return apoioPicked;
+            return defaultOp;
         }
         
         candidateOps = cityOps.filter(o => o !== "NÃO ATRIBUÍDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃO COBRAR" && o !== "OUTROS");
@@ -996,6 +998,189 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     return candidateOps[0];
   }
   return defaultOp;
+}
+
+window.APOIO_JURIDICO_RETORNO_DIAS = 90;
+
+function formatOperatorUserName(u) {
+  if (!u) return "";
+  if (u.sienge_user) return String(u.sienge_user).toUpperCase().replace(/\./g, " ").trim();
+  return String(u.name || "").toUpperCase().trim();
+}
+
+function pickApoioJuridicoOperatorName(customerId) {
+  let users = [];
+  try {
+    users = JSON.parse(localStorage.getItem("crm_users") || "[]") || [];
+  } catch (e) {
+    users = [];
+  }
+  const ops = users.filter(u => u && u.operator_type === "apoio_juridico" && u.status !== "INATIVO");
+  const names = ops.map(formatOperatorUserName).filter(Boolean);
+  if (names.length === 0) return null;
+  if (names.length === 1 || !customerId) return names[0];
+  let hash = 0;
+  const strId = String(customerId);
+  for (let i = 0; i < strId.length; i++) hash = Math.imul(31, hash) + strId.charCodeAt(i) | 0;
+  return names[Math.abs(hash) % names.length];
+}
+
+function getInstallmentConditionCode(inst) {
+  if (!inst) return "";
+  const raw = [
+    inst.conditionType,
+    inst.paymentConditionType,
+    inst.installmentType,
+    inst.typeName,
+    inst.receiptType,
+    inst.conditionId,
+    inst.condition,
+    inst.type
+  ].map(v => String(v == null ? "" : v).trim()).find(v => v) || "";
+  return raw.toUpperCase();
+}
+
+function isAgreementInstallmentType(code) {
+  const c = String(code || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!c) return false;
+  const token = c.split(/[\s\-_\/]/)[0];
+  if (token === "SA") return true;
+  if (/^A\d+$/.test(token)) return true;
+  if (c.includes("SINAL DE ACORDO")) return true;
+  if (c.includes("PARCELA ACORDO")) return true;
+  return false;
+}
+
+function billHasOverdueAgreementInstallment(bill) {
+  const installments = (bill && bill.defaulterInstallments) || [];
+  return installments.some(inst => isAgreementInstallmentType(getInstallmentConditionCode(inst)));
+}
+
+function getSubjudiceMemoryRecord(memory, customerId) {
+  if (!memory || customerId == null) return null;
+  return memory[customerId] || memory[String(customerId)] || memory[Number(customerId)] || null;
+}
+
+function daysSinceSubjudiceExit(memory, customerId) {
+  const mem = getSubjudiceMemoryRecord(memory, customerId);
+  if (!mem || !mem.exitDate) return null;
+  const ed = parseSafeDate(mem.exitDate);
+  if (!ed || Number.isNaN(ed.getTime()) || ed.getTime() === 0) return null;
+  const now = new Date();
+  const start = Date.UTC(ed.getUTCFullYear(), ed.getUTCMonth(), ed.getUTCDate());
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today - start) / (1000 * 60 * 60 * 24));
+}
+
+function isRetornoPosJuridico(memory, customerId) {
+  const days = daysSinceSubjudiceExit(memory, customerId);
+  if (days == null || days < 0) return false;
+  return days <= (window.APOIO_JURIDICO_RETORNO_DIAS || 90);
+}
+
+function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
+  if (getSiengeApiMode() === "simulado") return;
+
+  const timelineNodes = window.TimelineState || JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]");
+  const nodeTerceirizada = timelineNodes.find(n => n.acao === "cob_terceirizada");
+  const nodeJuridico = timelineNodes.find(n => n.acao === "juridico");
+  const threshTerceirizada = nodeTerceirizada ? nodeTerceirizada.dias : 31;
+  const threshJuridico = nodeJuridico ? nodeJuridico.dias : 151;
+
+  let users = [];
+  try {
+    users = JSON.parse(localStorage.getItem("crm_users") || "[]") || [];
+  } catch (e) {
+    users = [];
+  }
+  const advogados = users.filter(u => u.operator_type === "advogado" && u.status !== "INATIVO");
+
+  Object.keys(consolidated).forEach(key => {
+    const c = consolidated[key];
+
+    let requiredType = "interno";
+    let ruleSuffix = requiredType.toUpperCase();
+
+    if (c.subjudice === "S") {
+      requiredType = "advogado";
+      ruleSuffix = "JURÍDICO";
+    } else if (c.hasOverdueAgreement) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "APOIO_JURIDICO / ACORDO";
+    } else if (isRetornoPosJuridico(subjudiceMemory, c.customerId)) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "APOIO_JURIDICO / RETORNO 90D";
+    } else if (c.isZeroPaid) {
+      requiredType = "interno_absoluto";
+      ruleSuffix = "INTERNO_ABSOLUTO";
+    } else if (c.maxDaysDelay >= threshJuridico) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "APOIO_JURIDICO";
+    } else if (c.maxDaysDelay >= threshTerceirizada) {
+      requiredType = "externo";
+      ruleSuffix = "EXTERNO";
+    }
+
+    let idCCusto = c.costCenterId;
+    let city = "";
+    if (idCCusto) {
+      let ccName = "";
+      if (AppState.cachedCostCenters) {
+        const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
+        if (ccObj) ccName = ccObj.name || "";
+      }
+      if (ccName.includes("-")) {
+        city = ccName.split("-")[0].trim().toUpperCase();
+      } else {
+        city = ccName.trim().toUpperCase();
+      }
+      if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
+        city = "ARAÇARIGUAMA";
+      }
+    }
+
+    if (requiredType === "advogado") {
+      let matchedAdv = null;
+      for (const adv of advogados) {
+        const advCcs = adv.adv_cost_centers || [];
+        const advCities = adv.adv_cities || [];
+        const advComps = adv.adv_companies || [];
+        let match = false;
+        if (idCCusto && advCcs.includes(String(idCCusto))) match = true;
+        if (city && advCities.includes(city)) match = true;
+        if (idCCusto && advComps.includes(String(idCCusto).charAt(0))) match = true;
+        if (match) {
+          matchedAdv = adv;
+          break;
+        }
+      }
+
+      if (matchedAdv) {
+        c.assignedOperator = formatOperatorUserName(matchedAdv);
+        c.appliedRule = "RÉGUA - JURÍDICO";
+      } else if (city) {
+        const ruleId = "CID_" + city.replace(/\s+/g, "_");
+        c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, "fallback");
+        c.appliedRule = "RÉGUA (JURÍDICO SEM ADV) - " + city;
+      } else {
+        c.assignedOperator = "NÃO ATRIBUÍDO";
+        c.appliedRule = "RÉGUA (JURÍDICO SEM ADV)";
+      }
+      return;
+    }
+
+    if (city) {
+      const ruleId = "CID_" + city.replace(/\s+/g, "_");
+      c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, requiredType);
+      c.appliedRule = "RÉGUA (" + ruleSuffix + ") - " + city;
+    } else if (requiredType === "apoio_juridico") {
+      c.assignedOperator = pickApoioJuridicoOperatorName(c.customerId) || "NÃO ATRIBUÍDO";
+      c.appliedRule = "RÉGUA (" + ruleSuffix + ")";
+    } else {
+      c.assignedOperator = "NÃO ATRIBUÍDO";
+      c.appliedRule = "REGRA PADRÃO";
+    }
+  });
 }
 
 // ----------------------------------------------------
@@ -3597,11 +3782,13 @@ document.addEventListener("click", function(e) {
     let isSubjudiceStr = bill.subjudice === "S" || bill.subjudice === true ? "S" : "N";
 
     let hasUnpaidSinal = false;
+    let hasAgreementOverdue = false;
     if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
       hasUnpaidSinal = bill.defaulterInstallments.some(inst => {
-        const condition = (inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || '').trim().toUpperCase();
+        const condition = getInstallmentConditionCode(inst);
         return condition === 'SI' || condition === 'SINAL' || condition === 'PU';
       });
+      hasAgreementOverdue = billHasOverdueAgreementInstallment(bill);
     }
 
 
@@ -3628,6 +3815,7 @@ document.addEventListener("click", function(e) {
         billCount: 0,
         billIds: [],
         isZeroPaid: false,
+        hasOverdueAgreement: false,
         oldestDueDateMs: null,
         dueDay: null
       };
@@ -3696,6 +3884,9 @@ document.addEventListener("click", function(e) {
     if (hasUnpaidSinal) {
       consolidated[key].isZeroPaid = true;
     }
+    if (hasAgreementOverdue) {
+      consolidated[key].hasOverdueAgreement = true;
+    }
 
     consolidated[key].overdueValue += billVal;
     consolidated[key].overdueCharges += (interestVal + fineVal);
@@ -3727,98 +3918,6 @@ document.addEventListener("click", function(e) {
       c.percPaid = Number(sale.percPaid);
       if (Number(sale.percPaid) === 0) c.isZeroPaid = true;
     });
-  }
-
-  // ---------------------------------------------------------
-  // Nova Passagem: Atribuição Final de Operador Baseada na Régua
-  // ---------------------------------------------------------
-  if (getSiengeApiMode() !== "simulado") {
-      const timelineNodes = window.TimelineState || JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]");
-      const nodeTerceirizada = timelineNodes.find(n => n.acao === 'cob_terceirizada');
-      const nodeJuridico = timelineNodes.find(n => n.acao === 'juridico');
-      const threshTerceirizada = nodeTerceirizada ? nodeTerceirizada.dias : 31;
-      const threshJuridico = nodeJuridico ? nodeJuridico.dias : 151;
-      
-      const usersStr = localStorage.getItem('crm_users');
-      const users = usersStr ? JSON.parse(usersStr) : [];
-      const advogados = users.filter(u => u.operator_type === 'advogado' && u.status !== 'INATIVO');
-
-      Object.keys(consolidated).forEach(key => {
-         const c = consolidated[key];
-         
-         let requiredType = 'interno';
-         if (c.isZeroPaid) {
-             requiredType = 'interno_absoluto'; // 0% Pago tem prioridade máxima, sempre interno
-         } else if (c.subjudice === "S") {
-             requiredType = 'advogado';
-         } else if (c.maxDaysDelay >= threshJuridico) {
-             requiredType = 'apoio_juridico'; // Corrigido para Apoio Jurídico (intermédio para quem tem >151 e não é Sub Judice S)
-         } else if (c.maxDaysDelay >= threshTerceirizada) {
-             requiredType = 'externo';
-         }
-
-         let idCCusto = c.costCenterId;
-         let city = "";
-         if (idCCusto) {
-            let ccName = "";
-            if (AppState.cachedCostCenters) {
-               const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
-               if (ccObj) ccName = ccObj.name || "";
-            }
-            if (ccName.includes('-')) {
-                city = ccName.split('-')[0].trim().toUpperCase();
-            } else {
-                city = ccName.trim().toUpperCase();
-            }
-            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-               city = "ARAÇARIGUAMA";
-            }
-         }
-
-         if (requiredType === 'advogado') {
-             let matchedAdv = null;
-             for (const adv of advogados) {
-                 const advCcs = adv.adv_cost_centers || [];
-                 const advCities = adv.adv_cities || [];
-                 const advComps = adv.adv_companies || [];
-                 
-                 let match = false;
-                 if (idCCusto && advCcs.includes(String(idCCusto))) match = true;
-                 if (city && advCities.includes(city)) match = true;
-                 // Note: we can't easily get company from here unless we check Sienge ID or bill format, but cost centers/cities are the main ones.
-                 // We will match if company is checked as well, if we can derive it. (Company ID is the first digit of cost center typically, e.g. 1, 2, 3)
-                 if (idCCusto && advComps.includes(String(idCCusto).charAt(0))) match = true;
-                 
-                 if (match) {
-                     matchedAdv = adv;
-                     break;
-                 }
-             }
-
-             if (matchedAdv) {
-                 c.assignedOperator = (matchedAdv.sienge_user ? matchedAdv.sienge_user.toUpperCase().replace(/\\./g, ' ').trim() : matchedAdv.name.toUpperCase());
-                 c.appliedRule = "RÉGUA - JURÍDICO";
-             } else {
-                 if (city) {
-                    const ruleId = "CID_" + city.replace(/\s+/g, '_');
-                    c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, "fallback");
-                    c.appliedRule = "RÉGUA (JURÍDICO SEM ADV) - " + city;
-                 } else {
-                    c.assignedOperator = "NÃO ATRIBUÍDO";
-                    c.appliedRule = "RÉGUA (JURÍDICO SEM ADV)";
-                 }
-             }
-         } else {
-             if (city) {
-                const ruleId = "CID_" + city.replace(/\s+/g, '_');
-                c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, requiredType);
-                c.appliedRule = "RÉGUA (" + requiredType.toUpperCase() + ") - " + city;
-             } else {
-                c.assignedOperator = "NÃO ATRIBUÍDO";
-                c.appliedRule = "REGRA PADRÃO";
-             }
-         }
-      });
   }
 
   // --- INICIO HOTFIX ---
@@ -3931,6 +4030,8 @@ document.addEventListener("click", function(e) {
   });
 
   localStorage.setItem('subjudiceHistory', JSON.stringify(subjudiceMemory));
+
+  applyCollectionOperatorRegua(consolidated, subjudiceMemory);
 
   // 1. Calcular Carga de Trabalho por Operador (Workload)
   const workload = {};
@@ -27629,13 +27730,13 @@ window.getDynamicOperators = function(type = 'all') {
     ];
     if (users.length === 0) users = fallbackUsers;
     
-    // Filtrar APENAS usuários com perfil exato "OPERADOR COBRANÇA" e que estejam ativos
     let ops = users.filter(u => {
         if (!u.profile_name) return false;
-        const prof = u.profile_name.trim().toUpperCase();
-        // Somente perfil exato de cobrança
-        if (prof !== "OPERADOR COBRANÇA") return false;
-        // Não é inativo
+        if (typeof window.isOperadorCobrancaProfile === "function") {
+            if (!window.isOperadorCobrancaProfile(u.profile_name)) return false;
+        } else if (u.profile_name.trim().toUpperCase() !== "OPERADOR COBRANÇA") {
+            return false;
+        }
         if (u.status === "INATIVO") return false;
         return true;
     });

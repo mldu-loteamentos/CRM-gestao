@@ -297,7 +297,7 @@ const ParametrizacaoParceiroApp = {
       return;
     }
     this.persist();
-    this.render();
+    this.renderKeepScroll();
   },
 
   setSubtreeNA(nodeId, out) {
@@ -324,7 +324,7 @@ const ParametrizacaoParceiroApp = {
       });
     }
     this.persist();
-    this.render();
+    this.renderKeepScroll();
   },
 
   includeSubtree(nodeId) {
@@ -338,7 +338,7 @@ const ParametrizacaoParceiroApp = {
       delete obra.naAccounts[id];
     });
     this.persist();
-    this.render();
+    this.renderKeepScroll();
   },
 
   excludeSubtreeExceptions(nodeId) {
@@ -348,7 +348,7 @@ const ParametrizacaoParceiroApp = {
     obra.inAccounts = obra.inAccounts || {};
     this.subtreeAccountIds(nodeId).forEach(id => delete obra.inAccounts[id]);
     this.persist();
-    this.render();
+    this.renderKeepScroll();
   },
 
   toggleExpand(id, scope) {
@@ -357,7 +357,8 @@ const ParametrizacaoParceiroApp = {
     const visao = this.dfcVisao();
     const groups = (visao && visao.groups) || [];
     const node = groups.find(g => String(g.id) === String(id));
-    const nextOpen = !this.expanded.has(id);
+    const sid = String(id);
+    const nextOpen = !this.expanded.has(sid);
     const apply = (nid) => {
       if (nextOpen) this.expanded.add(String(nid));
       else this.expanded.delete(String(nid));
@@ -369,7 +370,7 @@ const ParametrizacaoParceiroApp = {
     } else {
       apply(id);
     }
-    this.render();
+    this.renderKeepScroll();
   },
 
   closeNodeFoldMenu() {
@@ -1040,6 +1041,39 @@ const ParametrizacaoParceiroApp = {
     return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
   },
 
+  captureScroll() {
+    const ids = ["pp-tree-scroll", "pp-detail-scroll", "pp-list"];
+    const pos = {};
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) pos[id] = el.scrollTop;
+    });
+    const main = document.querySelector(".main-content");
+    if (main) pos.main = main.scrollTop;
+    pos.win = window.scrollY || document.documentElement.scrollTop || 0;
+    return pos;
+  },
+
+  restoreScroll(pos) {
+    if (!pos) return;
+    const apply = () => {
+      ["pp-tree-scroll", "pp-detail-scroll", "pp-list"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && pos[id] != null) el.scrollTop = pos[id];
+      });
+      const main = document.querySelector(".main-content");
+      if (main && pos.main != null) main.scrollTop = pos.main;
+      if (pos.win != null) window.scrollTo(0, pos.win);
+    };
+    apply();
+    requestAnimationFrame(apply);
+  },
+
+  renderKeepScroll() {
+    this._keepScrollPos = this.captureScroll();
+    this.render();
+  },
+
   render() {
     const root = document.getElementById("parametrizacao-parceiro-root");
     if (!root) return;
@@ -1067,13 +1101,18 @@ const ParametrizacaoParceiroApp = {
             </div>
             <div id="pp-list" style="flex:1;overflow:auto;padding:10px;">${this.listHtml()}</div>
           </div>
-          <div style="flex:1;overflow:auto;padding:16px 18px;min-width:0;">
+          <div id="pp-detail-scroll" style="flex:1;overflow:auto;padding:16px 18px;min-width:0;">
             ${this.selectedId === "__new__" ? this.newFormHtml() : (p ? this.detailHtml(p) : this.emptyHtml())}
           </div>
         </div>
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+    if (this._keepScrollPos) {
+      const pos = this._keepScrollPos;
+      this._keepScrollPos = null;
+      this.restoreScroll(pos);
+    }
   },
 
   emptyHtml() {
@@ -1461,7 +1500,7 @@ const ParametrizacaoParceiroApp = {
             Usar padrão em todas
           </button>
         </div>
-        <div style="flex:1;overflow:auto;padding:15px;background:#fff;">
+        <div id="pp-tree-scroll" style="flex:1;overflow:auto;padding:15px;background:#fff;">
           ${body || `<div style="text-align:center;color:#94a3b8;padding:28px;font-size:0.85rem;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</div>`}
         </div>
       </div>
