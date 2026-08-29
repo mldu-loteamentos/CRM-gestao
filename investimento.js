@@ -133,7 +133,7 @@ const InvestimentoApp = {
       window._invDropBound = true;
       document.addEventListener("mousedown", (e) => {
         const t = e.target;
-        const inEmp = t && t.closest && t.closest("#inv-emp-drop");
+        const inEmp = t && t.closest && t.closest("#inv-emp");
         const inAcc = t && t.closest && t.closest("#inv-acc-drop");
         let changed = false;
         if (InvestimentoApp.companyDropOpen && !inEmp) {
@@ -616,19 +616,62 @@ const InvestimentoApp = {
     return { aportes: 0, resgates: 0, rendimento: 0, tarifas: 0 };
   },
 
+  monthKeyFromBcbDate(data) {
+    const s = String(data || "").trim();
+    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (br) return `${br[3]}-${String(br[2]).padStart(2, "0")}`;
+    const iso = s.match(/^(\d{4})-(\d{1,2})/);
+    if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}`;
+    return "";
+  },
+
+  ingestCdiRows(rows) {
+    this.cdiByMonth = this.cdiByMonth || {};
+    (rows || []).forEach(r => {
+      const key = this.monthKeyFromBcbDate(r && r.data);
+      if (!key) return;
+      const n = Number(String(r.valor == null ? "" : r.valor).replace(",", ".").replace("%", ""));
+      if (Number.isFinite(n) && n !== 0) this.cdiByMonth[key] = n;
+    });
+  },
+
+  async fetchCdiSeries() {
+    const months = this.months || [];
+    let dataInicial = "01/01/2018";
+    let dataFinal = "";
+    if (months.length) {
+      const [ys, ms] = months[0].split("-");
+      const [ye, me] = months[months.length - 1].split("-");
+      dataInicial = `01/${ms}/${ys}`;
+      const last = new Date(Number(ye), Number(me), 0);
+      dataFinal = `${String(last.getDate()).padStart(2, "0")}/${String(last.getMonth() + 1).padStart(2, "0")}/${last.getFullYear()}`;
+    }
+    const q = `code=4391&dataInicial=${encodeURIComponent(dataInicial)}${dataFinal ? `&dataFinal=${encodeURIComponent(dataFinal)}` : ""}`;
+    const urls = [
+      `/api/bcb-sgs?${q}`,
+      `https://api.bcb.gov.br/dados/serie/bcdata.sgs.4391/dados?formato=json&dataInicial=${encodeURIComponent(dataInicial)}${dataFinal ? `&dataFinal=${encodeURIComponent(dataFinal)}` : ""}`
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const json = await res.json();
+        if (Array.isArray(json) && json.length) return json;
+      } catch (e) {
+        console.warn("[Investimento] CDI fetch", url, e);
+      }
+    }
+    return [];
+  },
+
   async ensureCdi() {
-    if (this.cdiByMonth && Object.keys(this.cdiByMonth).length) return;
-    this.cdiByMonth = {};
+    this.cdiByMonth = this.cdiByMonth || {};
+    const needed = this.months || [];
+    const missing = needed.filter(mk => !(Number(this.cdiByMonth[mk]) > 0));
+    if (needed.length && !missing.length) return;
     try {
-      const res = await fetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.4391/dados?formato=json");
-      if (!res.ok) return;
-      const json = await res.json();
-      (json || []).forEach(r => {
-        const parts = String(r.data || "").split("/");
-        if (parts.length !== 3) return;
-        const key = `${parts[2]}-${parts[1]}`;
-        this.cdiByMonth[key] = Number(String(r.valor).replace(",", ".")) || 0;
-      });
+      const json = await this.fetchCdiSeries();
+      this.ingestCdiRows(json);
     } catch (e) {
       console.warn("[Investimento] CDI BCB 4391:", e);
     }
@@ -933,7 +976,7 @@ const InvestimentoApp = {
     const all = this.geridasCompanies();
     const n = this.selectedCompanyIds.length;
     if (!all.length) return "Nenhuma empresa gerida";
-    if (n === all.length) return `Todas (${n})`;
+    if (n === all.length) return "Todos";
     if (n === 1) {
       const c = all.find(x => String(x.id) === String(this.selectedCompanyIds[0]));
       return c ? this.companyFullLabel(c) : this.companyName(this.selectedCompanyIds[0]);
@@ -953,12 +996,36 @@ const InvestimentoApp = {
     this.companyQuery = q || "";
     const box = document.getElementById("inv-emp-list");
     if (!box) return;
+    if (window.MlEmpresaFilter) {
+      box.innerHTML = MlEmpresaFilter.listHtml({
+        id: "inv-emp",
+        items: this.companyFilterItems(),
+        selectedIds: this.selectedCompanyIds,
+        query: this.companyQuery
+      });
+      return;
+    }
     box.innerHTML = this.companyListHtml();
   },
 
   companyFullLabel(c) {
-    const legal = (c && (c.legalName || c.name)) || "";
+    const legal = String((c && (c.legalName || c.name)) || "").toUpperCase();
     return `${c.id} - ${legal}`;
+  }
+
+  companyFilterItems() {
+    return this.geridasCompanies().map(c => ({ id: String(c.id), label: this.companyFullLabel(c) }));
+  }
+
+  bindCompanyFilter() {
+    if (!window.MlEmpresaFilter) return;
+    MlEmpresaFilter.bind("inv-emp", {
+      toggleOpen: () => this.toggleCompanyDrop(),
+      setQuery: (q) => this.filterCompanyList(q),
+      toggleId: (id, on) => this.toggleCompany(id, on),
+      selectAll: () => this.selectAllGeridas(),
+      selectNone: () => this.clearGeridas()
+    });
   },
 
   companyListHtml() {
@@ -984,28 +1051,19 @@ const InvestimentoApp = {
     if (!companies.length) {
       return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
     }
-    return `<div id="inv-emp-drop" style="position:relative;flex:1;min-width:280px;max-width:480px;" onmousedown="event.stopPropagation()">
-      <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas geridas pelo grupo</div>
-      <button type="button" onclick="InvestimentoApp.toggleCompanyDrop(event)"
-        style="width:100%;min-height:34px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#0f172a;text-align:left;gap:8px;">
-        <span style="white-space:normal;line-height:1.3;">${this.esc(this.companyDropLabel())}</span>
-        <i data-lucide="chevron-down" style="width:16px;height:16px;color:#64748b;flex-shrink:0;"></i>
-      </button>
-      ${this.companyDropOpen ? `
-        <div style="position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);overflow:hidden;">
-          <div style="display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
-            <button type="button" onclick="event.stopPropagation();InvestimentoApp.selectAllGeridas()" style="flex:1;height:30px;border:1px solid #86efac;background:#ecfdf5;color:#105436;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Marcar todas</button>
-            <button type="button" onclick="event.stopPropagation();InvestimentoApp.clearGeridas()" style="flex:1;height:30px;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;font-size:0.75rem;font-weight:800;cursor:pointer;">Desmarcar todas</button>
-          </div>
-          <input id="inv-emp-search" placeholder="Buscar por ID ou nome..." value="${this.esc(this.companyQuery)}"
-            onclick="event.stopPropagation()"
-            oninput="InvestimentoApp.filterCompanyList(this.value)"
-            style="width:100%;height:32px;border:none;border-bottom:1px solid #e2e8f0;padding:0 10px;box-sizing:border-box;font-size:0.8rem;">
-          <div id="inv-emp-list" style="max-height:280px;overflow:auto;">
-            ${this.companyListHtml()}
-          </div>
-        </div>` : ""}
-    </div>`;
+    this.bindCompanyFilter();
+    if (window.MlEmpresaFilter) {
+      return MlEmpresaFilter.html({
+        id: "inv-emp",
+        label: "Empresas geridas pelo grupo",
+        items: this.companyFilterItems(),
+        selectedIds: this.selectedCompanyIds,
+        open: this.companyDropOpen,
+        query: this.companyQuery,
+        emptyMeansAll: false
+      });
+    }
+    return `<div id="inv-emp">${this.companyListHtml()}</div>`;
   },
 
   accountDropLabel() {
@@ -1485,7 +1543,7 @@ const InvestimentoApp = {
             ${this.kpiCard("Rendimento", k.rendimento, "#0369a1")}
             ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
-          <div style="flex:1;overflow:auto;padding:12px 16px;">
+          <div style="flex:1;min-height:0;overflow:hidden;padding:12px 16px;display:flex;flex-direction:column;">
             ${this.loading ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 16px;color:var(--color-text-muted);">
               <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
               <span style="font-weight:500;">Carregando saldos e movimentos das contas de investimento...</span>
@@ -1585,11 +1643,13 @@ const InvestimentoApp = {
             </div>
           </div>
         </td>`;
+      const movTd = (html, color, bg, extra) =>
+        `<td style="padding:6px 10px;font-weight:700;color:${color};white-space:nowrap;${stickyMov}background:${bg};box-shadow:2px 0 0 #e2e8f0;${extra || ""}">${html}</td>`;
       const saldos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).closing || 0);
       if (collapsed) {
         return `<tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
-          <td style="padding:6px 10px;font-weight:800;color:#0f172a;">Saldo</td>
+          ${movTd("Saldo", "#0f172a", bgHead, "font-weight:800;")}
           ${clickTd(opening, "opening", "", source, { bold: true })}
           ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
         </tr>`;
@@ -1598,30 +1658,31 @@ const InvestimentoApp = {
       const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
       const impostos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).tarifas || 0);
       const rends = months.map(mk => monthFlow.find(f => f.month === mk) || { rendimento: 0, opening: 0, month: mk });
+      const saldoBg = isTotal ? "#d1fae5" : "#f1f5f9";
       return `
         <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
-          <td style="padding:6px 10px;font-weight:700;color:#105436;white-space:nowrap;">Entrada</td>
+          ${movTd("Entrada", "#105436", bgHead)}
           ${empty}
           ${entradas.map((n, i) => clickTd(n, "aporte", months[i], source, { color: "#105436" })).join("")}
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:6px 10px;font-weight:700;color:#b91c1c;white-space:nowrap;">Saída</td>
+          ${movTd("Saída", "#b91c1c", "#fff")}
           ${empty}
           ${saidas.map((n, i) => clickTd(n, "resgate", months[i], source, { abs: true })).join("")}
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
+          ${movTd("Rendimento", "#0369a1", "#fff")}
           ${empty}
           ${rends.map(f => clickTd(f.rendimento || 0, "rendimento", f.month, source, { color: "#0369a1", title: this.cdiTip(f.rendimento || 0, f.opening || 0, f.month) + " — clique para ver lançamentos" })).join("")}
         </tr>
         <tr style="background:#fff7ed;">
-          <td style="padding:6px 10px;font-weight:700;color:#9a3412;white-space:nowrap;">Imposto retido</td>
+          ${movTd("Imposto retido", "#9a3412", "#fff7ed")}
           ${empty}
           ${impostos.map((n, i) => clickTd(n, "tarifas", months[i], source, { abs: true })).join("")}
         </tr>
-        <tr style="background:${isTotal ? "#d1fae5" : "#f1f5f9"};">
-          <td style="padding:6px 10px;font-weight:800;color:#0f172a;white-space:nowrap;">Saldo</td>
+        <tr style="background:${saldoBg};">
+          ${movTd("Saldo", "#0f172a", saldoBg, "font-weight:800;")}
           ${clickTd(opening, "opening", "", source, { bold: true })}
           ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
         </tr>`;
@@ -1663,10 +1724,10 @@ const InvestimentoApp = {
 
     const canGroup = this.selectedCompanyIds.length > 1;
     return `
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
-        <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:0.82rem;font-weight:800;color:#0f172a;">Kardex — conta × movimento · saldo inicial e meses</div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;display:flex;flex-direction:column;height:100%;min-height:0;">
+        <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:nowrap;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+          <div style="font-size:0.82rem;font-weight:800;color:#0f172a;white-space:nowrap;">Kardex — conta × movimento · saldo inicial e meses</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;white-space:nowrap;">
             ${canGroup ? `<label style="font-size:0.75rem;font-weight:700;color:#334155;display:flex;align-items:center;gap:6px;cursor:pointer;">
               <input type="checkbox" ${this.groupByCompany ? "checked" : ""} onchange="InvestimentoApp.toggleGroupByCompany()">
               Agrupar por empresa
@@ -1674,11 +1735,12 @@ const InvestimentoApp = {
             <span style="font-size:0.7rem;color:#64748b;">Clique em um valor para ver os lançamentos</span>
           </div>
         </div>
-        <table class="custom-table" style="width:max-content;min-width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <div class="crm-scroll-table" style="flex:1;max-height:none;">
+        <table class="custom-table" style="width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:0.78rem;">
           <thead>
             <tr>
-              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;position:sticky;left:0;z-index:2;">Conta</th>
-              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;">Movimento</th>
+              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;white-space:nowrap;position:sticky;top:0;left:0;z-index:6;min-width:${colConta}px;width:${colConta}px;">Conta</th>
+              <th style="padding:8px 10px;text-align:left;background:#105436;color:#fff;font-size:0.72rem;white-space:nowrap;position:sticky;top:0;left:${colConta}px;z-index:5;min-width:${colMov}px;width:${colMov}px;">Movimento</th>
               ${th("Saldo inicial")}
               ${months.map(mk => th(this.monthLabel(mk))).join("")}
             </tr>
@@ -1687,6 +1749,7 @@ const InvestimentoApp = {
             ${body}
           </tbody>
         </table>
+        </div>
       </div>`;
   },
 
@@ -1733,13 +1796,14 @@ const InvestimentoApp = {
       return aoa.length - 1;
     };
 
-    const titleR = pushRow(["Kardex — conta × movimento\nsaldo inicial e meses"]);
+    const titleR = pushRow(["Kardex — conta × movimento · saldo inicial e meses"]);
     merges.push({ s: { r: titleR, c: 0 }, e: { r: titleR, c: colCount - 1 } });
-    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: true } });
+    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: false, horizontal: "left" } });
 
-    const subR = pushRow([`Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")}\nempresas geridas pelo grupo`]);
+    const periodTxt = `Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")} · empresas geridas pelo grupo`;
+    const subR = pushRow([periodTxt]);
     merges.push({ s: { r: subR, c: 0 }, e: { r: subR, c: colCount - 1 } });
-    mark(subR, 0, { font: font({ sz: 9, color: { rgb: "D1FAE5" } }), fill: fill("105436") });
+    mark(subR, 0, { font: font({ sz: 9, color: { rgb: "D1FAE5" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: false } });
 
     pushRow([]);
     const kpiLabelR = pushRow(["Saldo inicial", "Entradas", "Saídas", "Imposto retido", "Rendimento", "Saldo acumulado"]);
@@ -1785,11 +1849,11 @@ const InvestimentoApp = {
       border
     });
 
-    const wrapRows = new Set([titleR, subR]);
+    const wrapRows = new Set();
     const rowHeights = {};
     const setRowH = (r, hpt) => { rowHeights[r] = Math.max(rowHeights[r] || 0, hpt); };
-    setRowH(titleR, 26);
-    setRowH(subR, 22);
+    setRowH(titleR, 22);
+    setRowH(subR, 18);
     setRowH(kpiLabelR, 14);
     setRowH(kpiValR, 18);
     const pushBlock = (label, sub, opening, monthFlow, kind) => {
@@ -1879,6 +1943,15 @@ const InvestimentoApp = {
       }
     });
     const wb = XLSX.utils.book_new();
+    const freezeY = headR + 1;
+    ws["!views"] = [{
+      state: "frozen",
+      xSplit: 2,
+      ySplit: freezeY,
+      topLeftCell: XLSX.utils.encode_cell({ r: freezeY, c: 2 }),
+      activePane: "bottomRight"
+    }];
+    ws["!freeze"] = { xSplit: 2, ySplit: freezeY, topLeftCell: XLSX.utils.encode_cell({ r: freezeY, c: 2 }), activePane: "bottomRight" };
     XLSX.utils.book_append_sheet(wb, ws, "Kardex");
     const stamp = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `investimento_kardex_${stamp}.xlsx`);

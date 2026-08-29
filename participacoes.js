@@ -54,15 +54,29 @@ const ParticipacoesApp = {
     this.loadCompanies();
   },
 
+  async fetchJson(path) {
+    const res = await fetch(this.apiUrl(path));
+    const text = await res.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      throw new Error("A API não devolveu JSON (a pasta de prestações não foi lida). No computador use o servidor local (node server.js). No site, publique esta versão para ativar /api/participacoes.");
+    }
+    if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+    return data;
+  },
+
   async loadCompanies() {
     this.loading = true;
     this.error = "";
     this.render();
     try {
-      const res = await fetch(this.apiUrl("/api/participacoes/companies"));
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao listar pastas");
+      const data = await this.fetchJson("/api/participacoes/companies");
       this.companies = data.companies || [];
+      if (data.missingRoot) {
+        this.error = "Pasta PRESTAÇÃO DE CONTAS não encontrada. Coloque os PDFs em projeto-cobranca/PRESTAÇÃO DE CONTAS (ou PRESTACAO DE CONTAS), com subpastas no formato 1 - NOME DA EMPRESA.";
+      }
       if (!this.companyId && this.companies.length) this.companyId = this.companies[0].companyId;
       if (this.companyId) await this.loadFiles();
     } catch (e) {
@@ -77,9 +91,7 @@ const ParticipacoesApp = {
     this.loading = true;
     this.render();
     try {
-      const res = await fetch(this.apiUrl("/api/participacoes/files?companyId=" + encodeURIComponent(this.companyId)));
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao listar PDFs");
+      const data = await this.fetchJson("/api/participacoes/files?companyId=" + encodeURIComponent(this.companyId));
       this.files = data.files || [];
       if (this.fileName && !this.files.some((f) => f.name === this.fileName)) this.fileName = "";
       if (!this.fileName && this.files.length) this.fileName = this.files[0].name;
@@ -326,7 +338,7 @@ const ParticipacoesApp = {
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
           <div>
             <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">Participações — Prestação de contas (Ellenco)</div>
-            <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">PDFs da pasta do projeto, pasta da empresa = ID do CRM. Análise das despesas pagas para achar cobrança a mais e desvios.</div>
+            <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">A abertura da tela lê a pasta <strong>PRESTAÇÃO DE CONTAS</strong> (subpasta <strong>ID - NOME</strong> e o PDF mais recente). Análise das despesas pagas para achar cobrança a mais e desvios.</div>
           </div>
           <label class="btn btn-secondary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
             <i data-lucide="upload" style="width:16px;"></i> Enviar PDF

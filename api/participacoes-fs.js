@@ -1,10 +1,53 @@
 const fs = require("fs");
 const path = require("path");
 
+function candidateRoots(projectDir) {
+  const env = process.env.PRESTACAO_CONTAS_DIR;
+  const list = [
+    env,
+    path.join(projectDir, "PRESTAÇÃO DE CONTAS"),
+    path.join(projectDir, "PRESTACAO DE CONTAS"),
+    projectDir,
+    path.join(projectDir, ".."),
+    process.cwd()
+  ].filter(Boolean);
+  const seen = new Set();
+  return list.filter((p) => {
+    const n = path.resolve(p);
+    if (seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+}
+
 function prestacaoRoot(projectDir) {
-  const names = fs.readdirSync(projectDir);
-  const hit = names.find((n) => /PRESTA/i.test(n) && /CONTAS/i.test(n));
-  return path.join(projectDir, hit || "PRESTAÇÃO DE CONTAS");
+  const dirs = candidateRoots(projectDir);
+  for (const dir of dirs) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      const st = fs.statSync(dir);
+      if (st.isDirectory() && /PRESTA/i.test(path.basename(dir)) && /CONTAS/i.test(path.basename(dir))) {
+        return dir;
+      }
+      const names = fs.readdirSync(dir);
+      const hit = names.find((n) => {
+        try {
+          return fs.statSync(path.join(dir, n)).isDirectory() && /PRESTA/i.test(n) && /CONTAS/i.test(n);
+        } catch (e) {
+          return false;
+        }
+      });
+      if (hit) return path.join(dir, hit);
+    } catch (e) {}
+  }
+  return path.join(projectDir, "PRESTAÇÃO DE CONTAS");
+}
+
+function parseCompanyFolderName(name) {
+  const s = String(name || "").trim();
+  const m = s.match(/^(\d+)\s*[-–_.]\s*(.+)$/) || s.match(/^(\d+)\s+(.+)$/) || s.match(/^(\d+)$/);
+  if (!m) return null;
+  return { companyId: String(Number(m[1])), label: (m[2] || s).trim() || s };
 }
 
 function safeJoinRoot(root, ...parts) {
@@ -18,20 +61,17 @@ function safeJoinRoot(root, ...parts) {
 
 function listCompanyFolders(projectDir) {
   const root = prestacaoRoot(projectDir);
-  if (!fs.existsSync(root)) return { root, companies: [] };
+  if (!fs.existsSync(root)) return { root, companies: [], missingRoot: true };
   const companies = fs.readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => {
-      const m = String(d.name).match(/^(\d+)\s*[-–]\s*(.+)$/);
-      return {
-        folder: d.name,
-        companyId: m ? String(Number(m[1])) : "",
-        label: m ? m[2].trim() : d.name
-      };
+      const parsed = parseCompanyFolderName(d.name);
+      if (!parsed) return null;
+      return { folder: d.name, companyId: parsed.companyId, label: parsed.label };
     })
-    .filter((c) => c.companyId)
+    .filter(Boolean)
     .sort((a, b) => Number(a.companyId) - Number(b.companyId));
-  return { root, companies };
+  return { root, companies, missingRoot: false };
 }
 
 function listPdfFiles(projectDir, companyId) {

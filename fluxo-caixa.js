@@ -5,6 +5,8 @@ const FluxoCaixaApp = {
   endDate: "",
   selectionType: "P",
   selectedCompanyIds: [],
+  companyDropOpen: false,
+  companyQuery: "",
   loading: false,
   error: "",
   movements: [],
@@ -26,6 +28,16 @@ const FluxoCaixaApp = {
     if (!this.selectedCompanyIds.length) this.selectedCompanyIds = cons.map(c => String(c.id));
     this.render();
     this.ensureCategories();
+    if (!window._fcEmpDropBound) {
+      window._fcEmpDropBound = true;
+      document.addEventListener("mousedown", (e) => {
+        const t = e.target;
+        if (FluxoCaixaApp.companyDropOpen && t && t.closest && !t.closest("#fc-emp")) {
+          FluxoCaixaApp.companyDropOpen = false;
+          FluxoCaixaApp.render();
+        }
+      });
+    }
   },
 
   async ensureCategories() {
@@ -324,6 +336,68 @@ const FluxoCaixaApp = {
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
+    this.companyDropOpen = true;
+    this.render();
+  },
+
+  companyFilterItems() {
+    return this.consolidacaoCompanies().map(c => ({
+      id: String(c.id),
+      label: `${c.id} - ${String(c.name || "").toUpperCase()} · ${c.pct}%`
+    }));
+  },
+
+  bindCompanyFilter() {
+    if (!window.MlEmpresaFilter) return;
+    MlEmpresaFilter.bind("fc-emp", {
+      toggleOpen: () => {
+        this.companyDropOpen = !this.companyDropOpen;
+        this.render();
+      },
+      setQuery: (q) => {
+        this.companyQuery = q || "";
+        const box = document.getElementById("fc-emp-list");
+        if (box && window.MlEmpresaFilter) {
+          box.innerHTML = MlEmpresaFilter.listHtml({
+            id: "fc-emp",
+            items: this.companyFilterItems(),
+            selectedIds: this.selectedCompanyIds,
+            query: this.companyQuery
+          });
+        }
+      },
+      toggleId: (id, on) => this.toggleCompany(id, on),
+      selectAll: () => {
+        this.selectedCompanyIds = this.consolidacaoCompanies().map(c => String(c.id));
+        this.companyDropOpen = true;
+        this.render();
+      },
+      selectNone: () => {
+        this.selectedCompanyIds = [];
+        this.companyDropOpen = true;
+        this.render();
+      }
+    });
+  },
+
+  companyDropHtml() {
+    const companies = this.consolidacaoCompanies();
+    if (!companies.length) {
+      return `<div style="flex:1;min-width:240px;"><div class="ml-emp-filter-label">Empresas</div><span style="color:#94a3b8;font-size:0.8rem;">Nenhuma empresa com consolidação padrão.</span></div>`;
+    }
+    this.bindCompanyFilter();
+    if (window.MlEmpresaFilter) {
+      return MlEmpresaFilter.html({
+        id: "fc-emp",
+        label: "Empresas",
+        items: this.companyFilterItems(),
+        selectedIds: this.selectedCompanyIds.map(String),
+        open: this.companyDropOpen,
+        query: this.companyQuery,
+        emptyMeansAll: false
+      });
+    }
+    return "";
   },
 
   cellStyle(val, isTotal) {
@@ -335,7 +409,6 @@ const FluxoCaixaApp = {
   render() {
     const root = document.getElementById("fluxo-caixa-root");
     if (!root) return;
-    const companies = this.consolidacaoCompanies();
     const monthHeads = this.months.map(k => `<th style="padding:8px 10px;text-align:right;font-size:0.72rem;white-space:nowrap;">${this.monthLabel(k)}</th>`).join("");
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
@@ -369,17 +442,7 @@ const FluxoCaixaApp = {
             <button class="btn btn-primary" onclick="FluxoCaixaApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
-            <div style="flex:1;min-width:260px;">
-              <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">Empresas (consolidação padrão)</div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                ${companies.map(c => `
-                  <label style="font-size:0.75rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:99px;padding:4px 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                    <input type="checkbox" ${this.selectedCompanyIds.includes(c.id) ? "checked" : ""}
-                      onchange="FluxoCaixaApp.toggleCompany('${c.id}', this.checked)">
-                    ${this.esc(c.name)} <span style="color:#105436;font-weight:800;">${c.pct}%</span>
-                  </label>`).join("") || `<span style="color:#94a3b8;font-size:0.8rem;">Nenhuma empresa com consolidação padrão.</span>`}
-              </div>
-            </div>
+            ${this.companyDropHtml()}
           </div>
           ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}
           <div style="flex:1;overflow:auto;padding:12px 16px;">

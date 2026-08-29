@@ -768,6 +768,11 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      if (pathRoute === '/api/bcb-sgs' && req.method === 'GET') {
+        const handler = require('./api/bcb-sgs');
+        return handler(req, res);
+      }
+
       if (pathRoute === '/api/proxy-download' && req.method === 'GET') {
         const queryParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
         const targetUrl = queryParams.get('url');

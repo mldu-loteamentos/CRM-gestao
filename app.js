@@ -41,6 +41,7 @@
 (function installMouraDialogs() {
   const TITLE = "Moura Leite Loteamentos";
   const nativeAlert = window.alert.bind(window);
+  const nativeConfirm = window.confirm.bind(window);
 
   function ensureDialog() {
     let overlay = document.getElementById("moura-app-dialog");
@@ -54,15 +55,29 @@
         <div style="font-size:0.95rem;font-weight:800;color:#105436;letter-spacing:0.02em;margin-bottom:10px;">${TITLE}</div>
         <div id="moura-app-dialog-msg" style="font-size:0.92rem;color:#1e293b;line-height:1.45;white-space:pre-wrap;word-break:break-word;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+          <button type="button" id="moura-app-dialog-cancel" style="display:none;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Cancelar</button>
           <button type="button" id="moura-app-dialog-ok" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">OK</button>
         </div>
       </div>`;
     (document.body || document.documentElement).appendChild(overlay);
     overlay.querySelector("#moura-app-dialog-ok").addEventListener("click", function() {
+      const resolve = overlay._mouraResolve;
+      overlay._mouraResolve = null;
       overlay.style.display = "none";
+      if (typeof resolve === "function") resolve(true);
+    });
+    overlay.querySelector("#moura-app-dialog-cancel").addEventListener("click", function() {
+      const resolve = overlay._mouraResolve;
+      overlay._mouraResolve = null;
+      overlay.style.display = "none";
+      if (typeof resolve === "function") resolve(false);
     });
     overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) overlay.style.display = "none";
+      if (e.target !== overlay) return;
+      const resolve = overlay._mouraResolve;
+      overlay._mouraResolve = null;
+      overlay.style.display = "none";
+      if (typeof resolve === "function") resolve(false);
     });
     return overlay;
   }
@@ -70,11 +85,32 @@
   window.alert = function(message) {
     try {
       const overlay = ensureDialog();
+      overlay._mouraResolve = null;
       const msgEl = overlay.querySelector("#moura-app-dialog-msg");
+      const cancelBtn = overlay.querySelector("#moura-app-dialog-cancel");
+      const okBtn = overlay.querySelector("#moura-app-dialog-ok");
       if (msgEl) msgEl.textContent = message == null ? "" : String(message);
+      if (cancelBtn) cancelBtn.style.display = "none";
+      if (okBtn) okBtn.textContent = "OK";
       overlay.style.display = "flex";
     } catch (e) {
       nativeAlert(message);
+    }
+  };
+
+  window.mouraConfirm = function(message) {
+    try {
+      const overlay = ensureDialog();
+      const msgEl = overlay.querySelector("#moura-app-dialog-msg");
+      const cancelBtn = overlay.querySelector("#moura-app-dialog-cancel");
+      const okBtn = overlay.querySelector("#moura-app-dialog-ok");
+      if (msgEl) msgEl.textContent = message == null ? "" : String(message);
+      if (cancelBtn) cancelBtn.style.display = "inline-block";
+      if (okBtn) okBtn.textContent = "Continuar";
+      overlay.style.display = "flex";
+      return new Promise((resolve) => { overlay._mouraResolve = resolve; });
+    } catch (e) {
+      return Promise.resolve(nativeConfirm(message));
     }
   };
 })();
@@ -11112,7 +11148,7 @@ async function showDistratoView(customer, sale, bills) {
   const cardFile = document.getElementById("dist-bank-card-file");
   if (cardFile) cardFile.value = "";
   const cardStatus = document.getElementById("dist-bank-card-status");
-  if (cardStatus) cardStatus.innerHTML = 'O arquivo é gravado no cadastro do cliente com a tag <strong>DADOS BANCARIOS PARA DISTRATO</strong>.';
+  if (cardStatus) cardStatus.innerHTML = 'Ao gerar o documento, os dados bancários serão salvos no cadastro do cliente no Sienge (Anexos — <strong>DADOS BANCARIOS PARA DISTRATO</strong>).';
   fillDistratoBeneficiaryLocked(customer);
   if (typeof window.toggleDistratoOtherBeneficiary === "function") window.toggleDistratoOtherBeneficiary();
 
@@ -11602,27 +11638,35 @@ window.onDistratoBankCardFileChange = async function() {
   const file = input && input.files && input.files[0];
   window._distBankCardUploaded = false;
   if (!file) {
-    if (status) status.textContent = "Selecione o print ou a cópia do cartão com os dados bancários.";
+    if (status) {
+      status.style.color = "#64748b";
+      status.innerHTML = "Ao gerar o documento, os dados bancários serão salvos no cadastro do cliente no Sienge (Anexos — <strong>DADOS BANCARIOS PARA DISTRATO</strong>).";
+    }
     return;
   }
+  if (status) {
+    status.style.color = "#1d4ed8";
+    status.textContent = "Arquivo selecionado. Ao clicar em Gerar Termo de Distrato, confirmaremos o envio ao cadastro do cliente no Sienge.";
+  }
+};
+
+window.uploadDistratoBankCardToSienge = async function() {
+  const input = document.getElementById("dist-bank-card-file");
+  const status = document.getElementById("dist-bank-card-status");
+  const file = input && input.files && input.files[0];
   const customer = g_distCustomer;
   const customerId = customer && (customer.id || customer.customerId);
-  if (!customerId) {
-    if (status) { status.style.color = "#b91c1c"; status.textContent = "Cliente não identificado para gravar o anexo."; }
-    return;
+  if (window._distBankCardUploaded) return true;
+  if (!file) throw new Error("Selecione o print ou a cópia do cartão com os dados bancários.");
+  if (!customerId) throw new Error("Cliente não identificado para gravar o anexo.");
+  if (typeof window.anexosUploadCustomerAttachment !== "function") {
+    throw new Error("Módulo de anexos indisponível.");
   }
-  if (status) { status.style.color = "#1d4ed8"; status.textContent = "Enviando anexo para o cadastro do cliente..."; }
-  try {
-    if (typeof window.anexosUploadCustomerAttachment !== "function") {
-      throw new Error("Módulo de anexos indisponível.");
-    }
-    await window.anexosUploadCustomerAttachment(customerId, file, "DADOS BANCARIOS PARA DISTRATO");
-    window._distBankCardUploaded = true;
-    if (status) { status.style.color = "#166534"; status.textContent = "Anexo gravado no cadastro do cliente: DADOS BANCARIOS PARA DISTRATO."; }
-  } catch (e) {
-    console.error(e);
-    if (status) { status.style.color = "#b91c1c"; status.textContent = "Não foi possível enviar o anexo. Tente novamente."; }
-  }
+  if (status) { status.style.color = "#1d4ed8"; status.textContent = "Salvando dados bancários no cadastro do cliente no Sienge..."; }
+  await window.anexosUploadCustomerAttachment(customerId, file, "DADOS BANCARIOS PARA DISTRATO");
+  window._distBankCardUploaded = true;
+  if (status) { status.style.color = "#166534"; status.textContent = "Anexo gravado no cadastro do cliente: DADOS BANCARIOS PARA DISTRATO."; }
+  return true;
 };
 
 window.syncDistratoPermutaUi = function() {
@@ -12027,6 +12071,27 @@ function getDistratoWitnessUsers() {
   return (users || []).filter(u => u && u.assina_testemunha && String(u.status || "").toUpperCase() !== "INATIVO");
 }
 
+function syncDistratoWitnessSelects() {
+  const s1 = document.getElementById("dist-testemunha-1");
+  const s2 = document.getElementById("dist-testemunha-2");
+  if (!s1 || !s2) return;
+  const v1 = String(s1.value || "");
+  const v2 = String(s2.value || "");
+  if (v1 && v2 && v1 === v2) {
+    s2.value = "";
+  }
+  const taken1 = String(s1.value || "");
+  const taken2 = String(s2.value || "");
+  Array.from(s1.options).forEach(opt => {
+    if (!opt.value) { opt.disabled = false; return; }
+    opt.disabled = String(opt.value) === taken2;
+  });
+  Array.from(s2.options).forEach(opt => {
+    if (!opt.value) { opt.disabled = false; return; }
+    opt.disabled = String(opt.value) === taken1;
+  });
+}
+
 function populateDistratoWitnessSelects() {
   const users = getDistratoWitnessUsers();
   const hint = document.getElementById("dist-testemunha-hint");
@@ -12040,10 +12105,15 @@ function populateDistratoWitnessSelects() {
     const prev = el.value;
     el.innerHTML = opts.join("");
     if (prev && users.some(u => String(u.id) === String(prev))) el.value = prev;
+    if (!el._distWitnessBound) {
+      el._distWitnessBound = true;
+      el.addEventListener("change", syncDistratoWitnessSelects);
+    }
   });
+  syncDistratoWitnessSelects();
   if (hint) {
     hint.textContent = users.length
-      ? "Somente usuários com “Assina documentos como testemunha” ligado no cadastro."
+      ? "Somente usuários com “Assina documentos como testemunha” ligado no cadastro. Não é possível repetir a mesma pessoa nas duas testemunhas."
       : "Nenhum usuário marcado como testemunha. Ligue o botão no cadastro de usuários.";
   }
 }
@@ -12167,7 +12237,7 @@ function upgradeDistratoClauses(text) {
   return s;
 }
 
-window.generateDistratoPDF = function generateDistratoPDF() {
+window.generateDistratoPDF = async function generateDistratoPDF() {
   try {
   const results = AppState.currentDistratoResult;
   if (!results) {
@@ -12258,14 +12328,24 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     return;
   }
 
+  const fileEl = document.getElementById("dist-bank-card-file");
+  const bankFile = fileEl && fileEl.files && fileEl.files[0];
+  if (!window._distBankCardUploaded && !bankFile) {
+    alert("Selecione o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o documento.");
+    return;
+  }
+  const okSave = typeof window.mouraConfirm === "function"
+    ? await window.mouraConfirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?")
+    : confirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?");
+  if (!okSave) return;
   if (!window._distBankCardUploaded) {
-    const fileEl = document.getElementById("dist-bank-card-file");
-    if (fileEl && fileEl.files && fileEl.files[0] && typeof window.onDistratoBankCardFileChange === "function") {
-      alert("Aguarde o envio do print/cópia do cartão ou envie o anexo antes de gerar o PDF.");
+    try {
+      await window.uploadDistratoBankCardToSienge();
+    } catch (e) {
+      console.error(e);
+      alert("Não foi possível salvar os dados bancários no cadastro do cliente. Verifique o arquivo e tente de novo.");
       return;
     }
-    alert("Envie o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o PDF.");
-    return;
   }
 
   let payInfoHtml = "";
@@ -12281,6 +12361,12 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     payInfoHtml = `PIX: Chave (${pixType}) - ${pixKey}`;
   }
 
+  const w1Sel = document.getElementById("dist-testemunha-1");
+  const w2Sel = document.getElementById("dist-testemunha-2");
+  if (w1Sel && w2Sel && w1Sel.value && w2Sel.value && String(w1Sel.value) === String(w2Sel.value)) {
+    alert("As duas testemunhas não podem ser a mesma pessoa. Escolha testemunhas diferentes.");
+    return;
+  }
   const w1 = getDistratoWitnessBySelect("dist-testemunha-1");
   const w2 = getDistratoWitnessBySelect("dist-testemunha-2");
 
@@ -27693,7 +27779,7 @@ window.openAdvFiltersModal = function(context = 'fila') {
                     <div class="adv-dropdown-search" style="border-bottom: none; padding-bottom: 5px;"><input type="text" placeholder="Buscar..." style="background: #fff;"></div>
                     <div class="adv-dropdown-actions" style="display:flex; justify-content: flex-start; align-items: center; padding: 5px 12px 10px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; margin-bottom: 5px; gap: 8px;">
                         <button type="button" class="btn-check-all" style="background: var(--color-primary); color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Marcar Todos</button>
-                        <button type="button" class="btn-uncheck-all" style="background: #f97316; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Desmarcar Todos</button>
+                        <button type="button" class="btn-uncheck-all" style="background: #f37021; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Desmarcar Todos</button>
                     </div>
             `;
             items.forEach(item => {
@@ -27727,7 +27813,7 @@ window.openAdvFiltersModal = function(context = 'fila') {
         const opItems = Array.from(operators).sort().map(o => ({id: o, label: o}));
         renderDropdown('adv-dropdown-operador-container', opItems, window.advFilters.operador);
 
-        const compItems = Array.from(companies.entries()).map(([k,v]) => ({id: k, label: v})).sort((a,b)=> parseInt(a.id) - parseInt(b.id));
+        const compItems = Array.from(companies.entries()).map(([k,v]) => ({id: k, label: String(v).toUpperCase()})).sort((a,b)=> parseInt(a.id) - parseInt(b.id));
         renderDropdown('adv-dropdown-empresa-container', compItems, window.advFilters.empresa);
 
         const ccItems = Array.from(ccustos.entries()).map(([k,v]) => ({id: k, label: v.label, companyId: v.companyId})).sort((a,b)=> parseInt(a.id) - parseInt(b.id));
@@ -29696,7 +29782,83 @@ window.closeMapaJuridico = function() {
   if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
 };
 
-window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", companyIds: [], emp: "", q: "", customerId: "" };
+window._mapaJuridicoEmpOpen = false;
+window._mapaJuridicoEmpQuery = "";
+window._mapaJuridicoCompanyOptions = [];
+
+window.mapaJuridicoSelectedCompanyIds = function() {
+  const f = window._mapaJuridicoFilters || {};
+  if (Array.isArray(f.companyIds) && f.companyIds.length) return f.companyIds.map(String);
+  if (f.company) return [String(f.company)];
+  return [];
+};
+
+window.mapaJuridicoMountEmpresaFilter = function() {
+  const wrap = document.getElementById("mapa-filtro-empresa-wrap");
+  if (!wrap || !window.MlEmpresaFilter) return;
+  const items = (window._mapaJuridicoCompanyOptions || []).map(o => ({
+    id: String(o.id),
+    label: `${o.id} - ${String(o.name || "").toUpperCase()}`
+  }));
+  const selectedIds = window.mapaJuridicoSelectedCompanyIds();
+  MlEmpresaFilter.bind("mapa-emp", {
+    toggleOpen() {
+      window._mapaJuridicoEmpOpen = !window._mapaJuridicoEmpOpen;
+      window.mapaJuridicoMountEmpresaFilter();
+      if (window.lucide) lucide.createIcons();
+    },
+    setQuery(q) {
+      window._mapaJuridicoEmpQuery = q || "";
+      const box = document.getElementById("mapa-emp-list");
+      if (box) {
+        box.innerHTML = MlEmpresaFilter.listHtml({
+          id: "mapa-emp",
+          items,
+          selectedIds: window.mapaJuridicoSelectedCompanyIds(),
+          query: window._mapaJuridicoEmpQuery
+        });
+      }
+    },
+    toggleId(id, on) {
+      const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
+      const cur = window.mapaJuridicoSelectedCompanyIds().slice();
+      const sid = String(id);
+      f.companyIds = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter(x => x !== sid);
+      f.company = f.companyIds.length === 1 ? f.companyIds[0] : "";
+      window._mapaJuridicoEmpOpen = true;
+      window.mapaJuridicoSetFilter("emp", "");
+      window.mapaJuridicoMountEmpresaFilter();
+    },
+    selectAll() {
+      const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
+      f.companyIds = items.map(x => String(x.id));
+      f.company = "";
+      window._mapaJuridicoEmpOpen = true;
+      window.mapaJuridicoSetFilter("emp", "");
+      window.mapaJuridicoMountEmpresaFilter();
+    },
+    selectNone() {
+      const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
+      f.companyIds = [];
+      f.company = "";
+      window._mapaJuridicoEmpOpen = true;
+      window.mapaJuridicoSetFilter("emp", "");
+      window.mapaJuridicoMountEmpresaFilter();
+    }
+  });
+  wrap.innerHTML = MlEmpresaFilter.html({
+    id: "mapa-emp",
+    label: "Empresas",
+    items,
+    selectedIds,
+    open: !!window._mapaJuridicoEmpOpen,
+    query: window._mapaJuridicoEmpQuery || "",
+    emptyMeansAll: true,
+    extraClass: "ml-emp-filter--on-dark"
+  });
+  if (window.lucide) lucide.createIcons();
+};
 
 window.mapaJuridicoShowMap = function() {
   window._mapaJuridicoLastPhase = null;
@@ -29708,7 +29870,8 @@ window.mapaJuridicoShowMap = function() {
 
 window.mapaJuridicoClientMatches = function(c) {
   const f = window._mapaJuridicoFilters || {};
-  if (f.company && String(c.companyId) !== String(f.company)) return false;
+  const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
+  if (companyIds.length && !companyIds.includes(String(c.companyId))) return false;
   const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
   if (f.emp && String(cc) !== String(f.emp)) return false;
   if (f.customerId && String(c.customerId) !== String(f.customerId)) return false;
@@ -29760,20 +29923,21 @@ window.mapaJuridicoFillEmpSelect = function() {
     const found = ccs.find(x => String(x.id) === String(ccId) || String(x.id) === String(c.costCenterId));
     return found && found.companyId != null ? String(found.companyId) : "";
   };
-  const list = (cache.generalList || []).filter(c => !f.company || companyOf(c) === String(f.company));
+  const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
+  const list = (cache.generalList || []).filter(c => !companyIds.length || companyIds.includes(companyOf(c)));
   const map = {};
   list.forEach(c => {
     const ccId = String((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D");
     if (!map[ccId]) map[ccId] = window.mapaJuridicoEmpLabel(c.costCenterId);
   });
-  if (f.company && ccs.length) {
+  if (companyIds.length && ccs.length) {
     const ownerOf = (id) => {
       const found = ccs.find(x => String(x.id) === String(id));
       return found && found.companyId != null ? String(found.companyId) : "";
     };
     Object.keys(map).forEach(id => {
       const owner = ownerOf(id);
-      if (owner && owner !== String(f.company)) delete map[id];
+      if (owner && !companyIds.includes(owner)) delete map[id];
     });
   }
   const opts = Object.keys(map).map(id => ({ id, name: map[id] }))
@@ -29789,16 +29953,16 @@ window.mapaJuridicoFillEmpSelect = function() {
 };
 
 window.mapaJuridicoClearFilters = function() {
-  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", companyIds: [], emp: "", q: "", customerId: "" };
   window._mapaJuridicoClientQuery = "";
-  const empSel = document.getElementById("mapa-filtro-empresa");
+  window._mapaJuridicoEmpOpen = false;
+  window._mapaJuridicoEmpQuery = "";
   const emp2 = document.getElementById("mapa-filtro-emp");
   const prazo = document.getElementById("mapa-filtro-prazo");
   const busca = document.getElementById("mapa-filtro-busca");
   const nDias = document.querySelector("#mapa-juridico-ndias-wrap input");
   const box = document.getElementById("mapa-filtro-clientes");
   const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
-  if (empSel) empSel.value = "";
   if (prazo) prazo.value = "";
   if (busca) busca.value = "";
   if (nDias) nDias.value = 7;
@@ -29806,15 +29970,17 @@ window.mapaJuridicoClearFilters = function() {
   if (box) box.style.display = "none";
   window.mapaJuridicoFillEmpSelect();
   if (emp2) emp2.value = "";
+  if (typeof window.mapaJuridicoMountEmpresaFilter === "function") window.mapaJuridicoMountEmpresaFilter();
   window.mapaJuridicoRenderClientList();
   window.mapaJuridicoShowMap();
   window.mapaJuridicoRenderStages();
 };
 
 window.mapaJuridicoSetFilter = function(key, val) {
-  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", companyIds: [], emp: "", q: "", customerId: "" };
   window._mapaJuridicoFilters[key] = val;
   if (key === "company") {
+    window._mapaJuridicoFilters.companyIds = val ? [String(val)] : [];
     window._mapaJuridicoFilters.emp = "";
     window.mapaJuridicoFillEmpSelect();
   }
@@ -29875,7 +30041,8 @@ window.mapaJuridicoUniqueClients = function() {
   const seen = new Map();
   list.forEach(c => {
     if (!c || c.customerId == null || c.customerId === "") return;
-    if (f.company && String(c.companyId) !== String(f.company)) return;
+    const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
+    if (companyIds.length && !companyIds.includes(String(c.companyId))) return;
     const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
     if (f.emp && String(cc) !== String(f.emp)) return;
     const id = String(c.customerId);
@@ -29924,7 +30091,7 @@ window.mapaJuridicoOpenClientList = function() {
 
 window.mapaJuridicoPickClient = function(id) {
   const sid = String(id || "");
-  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", companyIds: [], emp: "", q: "", customerId: "" };
   window._mapaJuridicoFilters.customerId = sid;
   window._mapaJuridicoClientQuery = "";
   const input = document.getElementById("mapa-filtro-busca");
@@ -30522,7 +30689,10 @@ window.exportMapaJuridicoPDF = async function() {
 
 window.showMapaJuridicoOverlay = function(ui) {
   window.closeMapaJuridico();
-  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", companyIds: [], emp: "", q: "", customerId: "" };
+  window._mapaJuridicoEmpOpen = false;
+  window._mapaJuridicoEmpQuery = "";
+  window._mapaJuridicoCompanyOptions = ui.companyOptions || [];
   const overlay = document.createElement("div");
   overlay.id = "mapa-juridico-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
@@ -30539,7 +30709,7 @@ window.showMapaJuridicoOverlay = function(ui) {
       #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
       #mapa-juridico-overlay .mapa-filtros {
         display: grid;
-        grid-template-columns: minmax(180px, 1.05fr) minmax(180px, 1.15fr) 170px 72px minmax(240px, 1.6fr) auto;
+        grid-template-columns: minmax(240px, 1.2fr) minmax(180px, 1.15fr) 170px 72px minmax(240px, 1.6fr) auto;
         gap: 10px 12px;
         align-items: end;
         width: 100%;
@@ -30580,12 +30750,7 @@ window.showMapaJuridicoOverlay = function(ui) {
         </button>
       </div>
       <div class="mapa-filtros" style="padding:10px 18px 14px;background:rgba(255,255,255,0.08);">
-        <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">Empresa
-          <select id="mapa-filtro-empresa" onchange="mapaJuridicoSetFilter('company', this.value)">
-            <option value="">Todas</option>
-            ${(ui.companyOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
-          </select>
-        </label>
+        <div id="mapa-filtro-empresa-wrap"></div>
         <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">Empreendimento
           <select id="mapa-filtro-emp" onchange="mapaJuridicoSetFilter('emp', this.value)">
             <option value="">Todos</option>
@@ -30642,6 +30807,7 @@ window.showMapaJuridicoOverlay = function(ui) {
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  if (typeof window.mapaJuridicoMountEmpresaFilter === "function") window.mapaJuridicoMountEmpresaFilter();
   if (window.lucide) lucide.createIcons();
   window.mapaJuridicoFillEmpSelect();
   window.mapaJuridicoRenderClientList();
@@ -30650,6 +30816,11 @@ window.showMapaJuridicoOverlay = function(ui) {
     const combo = document.getElementById("mapa-client-combo");
     const box = document.getElementById("mapa-filtro-clientes");
     if (box && combo && !combo.contains(e.target)) box.style.display = "none";
+    const emp = document.getElementById("mapa-emp");
+    if (window._mapaJuridicoEmpOpen && emp && !emp.contains(e.target)) {
+      window._mapaJuridicoEmpOpen = false;
+      window.mapaJuridicoMountEmpresaFilter();
+    }
   });
 };
 
