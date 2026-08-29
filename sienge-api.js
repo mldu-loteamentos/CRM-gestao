@@ -1599,9 +1599,10 @@ const SiengeApiService = {
     if (!date) return [];
     try {
       const ep = `/accounts-balances?balanceDate=${encodeURIComponent(date)}&showLastBalanceIfNotExistBalance=${showLast}`;
-      const list = await siengeFetchAllPages(ep, 300);
+      const withCo = opts.companyId ? `${ep}&companyId=${encodeURIComponent(opts.companyId)}` : ep;
+      const list = await siengeFetchAllPages(withCo, 300);
       if (list && list.length) return list;
-      const res = await siengeFetchWithRetry(`${ep}&limit=300&offset=0`);
+      const res = await siengeFetchWithRetry(`${withCo}&limit=300&offset=0`);
       return (res && (res.results || res.data)) || [];
     } catch (e) {
       console.error("[Sienge] Erro ao obter saldos de contas:", e);

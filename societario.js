@@ -7,6 +7,10 @@ const SocietarioApp = {
   selectedId: null,
   selectedLinkId: null,
   panel: "none",
+  linkMode: false,
+  connectFrom: null,
+  NODE_W: 168,
+  NODE_H: 72,
 
   uid(prefix) {
     return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -112,6 +116,7 @@ const SocietarioApp = {
       }
     }
     if (!this.graph.entities.length) this.graph = this.defaultGraph();
+    this.ensurePositions();
   },
 
   normalize(raw) {
@@ -122,7 +127,9 @@ const SocietarioApp = {
       kind: e.kind === "pf" ? "pf" : "pj",
       note: e.note || "",
       companyId: e.companyId != null ? String(e.companyId) : "",
-      partnerId: e.partnerId || ""
+      partnerId: e.partnerId || "",
+      x: e.x == null ? null : Number(e.x),
+      y: e.y == null ? null : Number(e.y)
     })) : [];
     const links = Array.isArray(raw.links) ? raw.links.map(l => ({
       id: l.id || this.uid("lnk"),
@@ -163,78 +170,78 @@ const SocietarioApp = {
     return v.toLocaleString("pt-BR", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }) + "%";
   },
 
-  nodeBox(ent, opts) {
-    const hub = opts && opts.hub;
-    const kind = ent.kind === "pf" ? "PF" : "PJ";
-    const kindBg = ent.kind === "pf" ? "#1e3a5f" : "#0f3d2e";
-    const bg = hub ? "#105436" : (ent.kind === "pf" ? "#1d4ed8" : "#166534");
-    const sel = this.selectedId === ent.id ? "outline: 3px solid #f59e0b; outline-offset: 2px;" : "";
-    const w = hub ? "min-width:200px;padding:14px 22px;font-size:1.05rem;" : "min-width:132px;padding:10px 12px;font-size:0.78rem;";
-    return `<button type="button" onclick="SocietarioApp.selectEntity('${ent.id}')" style="${sel} ${w} cursor:pointer;border:none;border-radius:4px;background:${bg};color:#fff;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;box-shadow:0 2px 6px rgba(0,0,0,0.18);">
-      ${this.esc(ent.name)}
-      ${hub ? "" : `<div style="margin-top:4px;font-size:0.62rem;font-weight:700;opacity:0.9;background:${kindBg};display:inline-block;padding:1px 6px;border-radius:3px;">${kind}</div>`}
-    </button>`;
+  countDescendants(id, seen) {
+    const vis = seen || new Set();
+    if (!id || vis.has(id)) return 1;
+    vis.add(id);
+    const kids = this.childrenOf(id);
+    if (!kids.length) return 1;
+    return kids.reduce((sum, l) => sum + this.countDescendants(l.to, vis), 0);
   },
 
-  edgeLabel(link) {
-    const sel = this.selectedLinkId === link.id ? "background:#f59e0b;color:#1c1917;" : "background:#fff;color:#105436;";
-    return `<button type="button" onclick="event.stopPropagation();SocietarioApp.selectLink('${link.id}')" style="${sel} border:1px solid #105436;border-radius:12px;padding:2px 8px;font-size:0.72rem;font-weight:800;cursor:pointer;margin:4px 0;">${this.fmtPct(link.pct)}</button>`;
+  ensurePositions() {
+    const ents = this.graph.entities || [];
+    if (!ents.length) return;
+    if (ents.some(e => e.x == null || e.y == null || Number.isNaN(e.x) || Number.isNaN(e.y))) {
+      this.autoLayout(false);
+    }
   },
 
-  renderBranch(parentId, depth) {
-    const kids = this.childrenOf(parentId);
-    if (!kids.length) return "";
-    return `<div style="display:flex;justify-content:center;gap:${depth === 0 ? "18px" : "12px"};flex-wrap:wrap;align-items:flex-start;margin-top:0;">
-      ${kids.map(link => {
+  autoLayout(persistAfter) {
+    const W = 196;
+    const H = 118;
+    const hubId = this.graph.hubId;
+    const owners = this.ownersOf(hubId).map(l => this.entity(l.from)).filter(Boolean);
+    owners.forEach((e, i) => {
+      e.x = 80 + i * W;
+      e.y = 48;
+    });
+    const hub = this.entity(hubId);
+    if (hub) {
+      const left = owners.length ? owners[0].x : 400;
+      const right = owners.length ? owners[owners.length - 1].x : 400;
+      hub.x = owners.length ? (left + right) / 2 : 420;
+      hub.y = 200;
+    }
+    const visited = new Set([hubId]);
+    const layoutKids = (parentId, depth, startX) => {
+      const kids = this.childrenOf(parentId);
+      let x = startX;
+      kids.forEach(link => {
         const child = this.entity(link.to);
-        if (!child) return "";
-        return `<div style="display:flex;flex-direction:column;align-items:center;min-width:120px;">
-          <div style="width:2px;height:18px;background:#105436;"></div>
-          ${this.edgeLabel(link)}
-          <div style="width:2px;height:10px;background:#105436;"></div>
-          ${this.nodeBox(child)}
-          ${this.renderBranch(child.id, depth + 1)}
-        </div>`;
-      }).join("")}
-    </div>`;
-  },
-
-  renderChart() {
-    const hub = this.entity(this.graph.hubId);
-    if (!hub) return `<div style="padding:40px;text-align:center;color:#64748b;">Cadastre uma empresa e defina-a como centro da estrutura.</div>`;
-    const owners = this.ownersOf(hub.id);
-    const pj = owners.filter(l => (this.entity(l.from) || {}).kind !== "pf");
-    const pf = owners.filter(l => (this.entity(l.from) || {}).kind === "pf");
-    const ownerRow = (list) => {
-      if (!list.length) return "";
-      return `<div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;align-items:flex-end;">
-        ${list.map(link => {
-          const ent = this.entity(link.from);
-          if (!ent) return "";
-          return `<div style="display:flex;flex-direction:column;align-items:center;">
-            ${this.nodeBox(ent)}
-            <div style="width:2px;height:10px;background:#105436;"></div>
-            ${this.edgeLabel(link)}
-          </div>`;
-        }).join("")}
-      </div>`;
+        if (!child || visited.has(child.id)) return;
+        visited.add(child.id);
+        const subW = Math.max(1, this.countDescendants(child.id));
+        child.x = x + (subW * W) / 2 - this.NODE_W / 2;
+        child.y = (hub ? hub.y : 200) + depth * H;
+        layoutKids(child.id, depth + 1, x);
+        x += subW * W;
+      });
+      return x;
     };
-    return `
-      <div style="overflow:auto;padding:12px 8px 24px;">
-        ${ownerRow(pj)}
-        ${pj.length && pf.length ? `<div style="height:12px;"></div>` : ""}
-        ${ownerRow(pf)}
-        ${owners.length ? `<div style="display:flex;justify-content:center;"><div style="width:2px;height:22px;background:#105436;"></div></div>` : ""}
-        <div style="display:flex;justify-content:center;margin:4px 0 8px;">${this.nodeBox(hub, { hub: true })}</div>
-        ${this.renderBranch(hub.id, 0)}
-      </div>`;
+    layoutKids(hubId, 1, 40);
+    const inChart = this.collectChartIds();
+    const orphans = (this.graph.entities || []).filter(e => !inChart.has(e.id));
+    const maxY = Math.max(280, ...this.graph.entities.map(e => Number(e.y) || 0));
+    orphans.forEach((e, i) => {
+      e.x = 80 + (i % 8) * W;
+      e.y = maxY + 150 + Math.floor(i / 8) * H;
+    });
+    if (persistAfter !== false) this.persist();
   },
 
-  renderLegend() {
-    return `<div style="display:flex;gap:10px;align-items:center;font-size:0.72rem;font-weight:700;color:#334155;">
-      <span style="background:#166534;color:#fff;padding:3px 8px;border-radius:4px;">PJ — Pessoa jurídica</span>
-      <span style="background:#1d4ed8;color:#fff;padding:3px 8px;border-radius:4px;">PF — Pessoa física</span>
-    </div>`;
+  canvasSize() {
+    const ents = this.graph.entities || [];
+    const maxX = Math.max(900, ...ents.map(e => (Number(e.x) || 0) + this.NODE_W + 80));
+    const maxY = Math.max(700, ...ents.map(e => (Number(e.y) || 0) + this.NODE_H + 120));
+    return { w: maxX, h: maxY };
+  },
+
+  nodeCenter(ent) {
+    return {
+      x: (Number(ent.x) || 0) + this.NODE_W / 2,
+      y: (Number(ent.y) || 0) + this.NODE_H / 2
+    };
   },
 
   collectChartIds() {
@@ -250,15 +257,194 @@ const SocietarioApp = {
     return seen;
   },
 
-  renderOrphans() {
-    const inChart = this.collectChartIds();
-    const orphans = (this.graph.entities || []).filter(e => !inChart.has(e.id));
-    if (!orphans.length) return "";
-    return `<div style="margin-top:16px;">
-      <div style="font-size:0.75rem;font-weight:800;color:#105436;text-transform:uppercase;">Empresas ainda sem ligação no organograma</div>
-      <p style="font-size:0.75rem;color:#64748b;margin:4px 0 8px;">Use “+ Interligação” para conectar ao centro ou a outra empresa.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;">${orphans.map(e => this.nodeBox(e)).join("")}</div>
+  canvasNode(ent) {
+    const hub = ent.id === this.graph.hubId;
+    const kind = ent.kind === "pf" ? "PF" : "PJ";
+    const kindBg = ent.kind === "pf" ? "#1e3a5f" : "#0f3d2e";
+    const bg = hub ? "#105436" : (ent.kind === "pf" ? "#1d4ed8" : "#166534");
+    const sel = this.selectedId === ent.id ? "box-shadow:0 0 0 3px #f59e0b,0 4px 12px rgba(0,0,0,0.2);" : "box-shadow:0 2px 8px rgba(0,0,0,0.18);";
+    const x = Number(ent.x) || 40;
+    const y = Number(ent.y) || 40;
+    return `<div class="soc-node" data-id="${ent.id}" style="position:absolute;left:${x}px;top:${y}px;width:${this.NODE_W}px;z-index:2;cursor:grab;user-select:none;${sel}">
+      <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar" style="position:absolute;left:50%;top:-8px;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #105436;cursor:crosshair;z-index:3;"></div>
+      <div class="soc-node-body" style="border-radius:6px;background:${bg};color:#fff;font-weight:800;letter-spacing:0.03em;text-transform:uppercase;padding:${hub ? "12px 10px" : "10px 10px 8px"};font-size:${hub ? "0.92rem" : "0.72rem"};text-align:center;line-height:1.25;">
+        ${this.esc(ent.name)}
+        ${hub ? `<div style="margin-top:4px;font-size:0.6rem;font-weight:700;opacity:0.85;">CENTRO</div>` : `<div style="margin-top:5px;font-size:0.6rem;font-weight:700;opacity:0.9;background:${kindBg};display:inline-block;padding:1px 6px;border-radius:3px;">${kind}</div>`}
+      </div>
+      <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar" style="position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #105436;cursor:crosshair;z-index:3;"></div>
     </div>`;
+  },
+
+  redrawEdges() {
+    const svg = document.getElementById("soc-edges");
+    const labels = document.getElementById("soc-edge-labels");
+    if (!svg || !labels) return;
+    const size = this.canvasSize();
+    svg.setAttribute("width", size.w);
+    svg.setAttribute("height", size.h);
+    svg.style.width = size.w + "px";
+    svg.style.height = size.h + "px";
+    const parts = [];
+    const labelHtml = [];
+    (this.graph.links || []).forEach(link => {
+      const a = this.entity(link.from);
+      const b = this.entity(link.to);
+      if (!a || !b) return;
+      const p1 = this.nodeCenter(a);
+      const p2 = this.nodeCenter(b);
+      const mx = (p1.x + p2.x) / 2;
+      const my = (p1.y + p2.y) / 2;
+      const c1y = p1.y + (p2.y - p1.y) * 0.35;
+      const c2y = p1.y + (p2.y - p1.y) * 0.65;
+      const sel = this.selectedLinkId === link.id;
+      const stroke = sel ? "#f59e0b" : "#105436";
+      parts.push(`<path d="M ${p1.x} ${p1.y} C ${p1.x} ${c1y}, ${p2.x} ${c2y}, ${p2.x} ${p2.y}" fill="none" stroke="${stroke}" stroke-width="${sel ? 3.5 : 2.2}" marker-end="url(#soc-arrow)"/>`);
+      const bg = sel ? "#f59e0b" : "#fff";
+      const color = sel ? "#1c1917" : "#105436";
+      labelHtml.push(`<button type="button" class="soc-edge-pct" data-link="${link.id}" style="position:absolute;left:${mx}px;top:${my}px;transform:translate(-50%,-50%);z-index:4;border:1px solid #105436;border-radius:12px;padding:2px 8px;font-size:0.72rem;font-weight:800;cursor:pointer;background:${bg};color:${color};pointer-events:auto;">${this.fmtPct(link.pct)}</button>`);
+    });
+    if (this._tempLine) {
+      parts.push(`<path d="M ${this._tempLine.x1} ${this._tempLine.y1} L ${this._tempLine.x2} ${this._tempLine.y2}" fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="6 4"/>`);
+    }
+    svg.innerHTML = `<defs><marker id="soc-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#105436"/></marker></defs>${parts.join("")}`;
+    labels.innerHTML = labelHtml.join("");
+    labels.querySelectorAll(".soc-edge-pct").forEach(btn => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.selectLink(btn.getAttribute("data-link"));
+      });
+    });
+  },
+
+  canvasPoint(ev) {
+    const canvas = document.getElementById("soc-canvas");
+    if (!canvas) return { x: 0, y: 0 };
+    const r = canvas.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  },
+
+  bindCanvas() {
+    const wrap = document.getElementById("soc-canvas-wrap");
+    const canvas = document.getElementById("soc-canvas");
+    if (!wrap || !canvas) return;
+    this._drag = null;
+    this._connect = null;
+    this._moved = false;
+
+    const startTrack = () => {
+      const onMove = (ev) => {
+        const pt = this.canvasPoint(ev);
+        if (this._connect) {
+          this._tempLine = { x1: this._connect.x1, y1: this._connect.y1, x2: pt.x, y2: pt.y };
+          this.redrawEdges();
+          return;
+        }
+        if (!this._drag) return;
+        const ent = this.entity(this._drag.id);
+        if (!ent) return;
+        this._moved = true;
+        ent.x = Math.max(8, pt.x - this._drag.dx);
+        ent.y = Math.max(8, pt.y - this._drag.dy);
+        const el = canvas.querySelector('.soc-node[data-id="' + this._drag.id + '"]');
+        if (el) {
+          el.style.left = ent.x + "px";
+          el.style.top = ent.y + "px";
+        }
+        const size = this.canvasSize();
+        canvas.style.width = size.w + "px";
+        canvas.style.height = size.h + "px";
+        this.redrawEdges();
+      };
+      const onUp = (ev) => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (this._connect) {
+          const target = ev.target && ev.target.closest && ev.target.closest(".soc-node");
+          const toId = target ? target.getAttribute("data-id") : null;
+          const from = this._connect.from;
+          this._connect = null;
+          this._tempLine = null;
+          this.linkMode = false;
+          this.redrawEdges();
+          if (toId && from && toId !== from) this.beginLink(from, toId);
+          return;
+        }
+        if (this._drag) {
+          const node = canvas.querySelector('.soc-node[data-id="' + this._drag.id + '"]');
+          if (node) {
+            node.style.cursor = "grab";
+            node.style.zIndex = "2";
+          }
+          const draggedId = this._drag.id;
+          const moved = this._moved;
+          this._drag = null;
+          if (moved) this.persist();
+          else this.selectEntity(draggedId, true);
+        }
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+
+    canvas.querySelectorAll(".soc-node").forEach(node => {
+      node.addEventListener("mousedown", (ev) => {
+        if (ev.button !== 0) return;
+        const id = node.getAttribute("data-id");
+        if (ev.target.classList.contains("soc-port")) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const pt = this.canvasPoint(ev);
+          this._connect = { from: id, x1: pt.x, y1: pt.y };
+          this.linkMode = true;
+          startTrack();
+          return;
+        }
+        ev.preventDefault();
+        const ent = this.entity(id);
+        if (!ent) return;
+        const pt = this.canvasPoint(ev);
+        this._drag = {
+          id,
+          dx: pt.x - (Number(ent.x) || 0),
+          dy: pt.y - (Number(ent.y) || 0)
+        };
+        this._moved = false;
+        node.style.cursor = "grabbing";
+        node.style.zIndex = "8";
+        startTrack();
+      });
+    });
+  },
+
+  beginLink(from, to) {
+    const dup = (this.graph.links || []).find(l => l.from === from && l.to === to);
+    if (dup) {
+      this.selectLink(dup.id);
+      return;
+    }
+    this.selectedLinkId = "";
+    this.selectedId = null;
+    this.panel = "link";
+    this._pendingLink = { from, to, pct: 0, note: "" };
+    this.render();
+    requestAnimationFrame(() => {
+      const fromEl = document.getElementById("soc-lnk-from");
+      const toEl = document.getElementById("soc-lnk-to");
+      if (fromEl) fromEl.value = from;
+      if (toEl) toEl.value = to;
+    });
+  },
+
+  toggleLinkMode() {
+    this.linkMode = !this.linkMode;
+    this.connectFrom = null;
+    this.render();
+  },
+
+  resetLayout() {
+    if (!confirm("Reorganizar o organograma automaticamente? As posições atuais serão substituídas.")) return;
+    this.autoLayout(true);
+    this.render();
   },
 
   renderNotes() {
@@ -331,10 +517,11 @@ const SocietarioApp = {
       `);
     }
     if (this.panel === "link") {
-      const link = (this.graph.links || []).find(l => l.id === this.selectedLinkId) || { from: this.graph.hubId, to: "", pct: 0, note: "" };
-      const isNew = !this.selectedLinkId || !(this.graph.links || []).some(l => l.id === this.selectedLinkId);
+      const existing = (this.graph.links || []).find(l => l.id === this.selectedLinkId);
+      const link = existing || this._pendingLink || { from: this.graph.hubId, to: "", pct: 0, note: "" };
+      const isNew = !existing;
       return this.panelWrap("Interligação (participação)", `
-        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;">Quem detém participação → em qual empresa/pessoa, e o percentual.</p>
+        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;">Arraste o pontinho de uma caixa até outra, ou escolha origem e destino aqui.</p>
         <label style="${this.lbl}">De (sócio / holding)
           <select id="soc-lnk-from" class="form-control">${this.entityOptions(link.from)}</select>
         </label>
@@ -359,8 +546,14 @@ const SocietarioApp = {
         <button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="SocietarioApp.saveNote()">Salvar nota</button>
       `);
     }
-    return `<div style="padding:16px;color:#64748b;font-size:0.85rem;">
-      Clique numa caixa para editar a empresa/pessoa, ou no percentual para ajustar a ligação.
+    return `<div style="padding:16px;color:#64748b;font-size:0.85rem;line-height:1.45;">
+      <strong style="color:#105436;">Organograma dinâmico</strong>
+      <ul style="margin:8px 0 0 16px;padding:0;">
+        <li>Arraste as caixas para posicionar.</li>
+        <li>Arraste o pontinho de uma caixa até outra para traçar a ligação.</li>
+        <li>Clique no percentual para editar a participação.</li>
+        <li>Clique na caixa (sem arrastar) para editar a empresa.</li>
+      </ul>
     </div>`;
   },
 
@@ -379,27 +572,45 @@ const SocietarioApp = {
   render() {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
+    this.ensurePositions();
+    const wrap = document.getElementById("soc-canvas-wrap");
+    const sx = wrap ? wrap.scrollLeft : 0;
+    const sy = wrap ? wrap.scrollTop : 0;
+    const size = this.canvasSize();
+    const linkBtn = this.linkMode
+      ? "background:#ea580c;color:#fff;"
+      : "background:#fff;color:#105436;";
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 120px);min-height:520px;background:#f4f6f4;border-radius:8px;overflow:hidden;border:1px solid #d1e3d6;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#105436;color:#fff;">
           <div>
             <div style="font-size:1.05rem;font-weight:800;letter-spacing:0.06em;">ESTRUTURA SOCIETÁRIA</div>
-            <div style="font-size:0.75rem;opacity:0.85;">Sócios acima · participações e SPEs abaixo · percentuais nas ligações</div>
+            <div style="font-size:0.75rem;opacity:0.85;">Arraste as caixas · trace ligações pelos pontinhos · clique no % para editar</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewEntity()" style="background:#fff;color:#105436;font-weight:700;">+ Empresa / pessoa</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewLink()" style="background:#fff;color:#105436;font-weight:700;">+ Interligação</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewLink()" style="${linkBtn}font-weight:700;">+ Interligação</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.resetLayout()" style="background:#fff;color:#105436;font-weight:700;">Reorganizar</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewNote()" style="background:#fff;color:#105436;font-weight:700;">+ Nota</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.importPartners()" style="background:#ea580c;border:none;color:#fff;font-weight:700;">Vincular parametrização</button>
           </div>
         </div>
         <div style="display:flex;flex:1;min-height:0;">
-          <div style="flex:1;overflow:auto;background:#eef6f1;">
-            ${this.renderChart()}
-            <div style="padding:8px 16px 16px;">
-              ${this.renderOrphans()}
-              ${this.renderLegend()}
-              <div style="margin-top:14px;font-size:0.75rem;font-weight:800;color:#105436;text-transform:uppercase;">Notas</div>
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+            <div id="soc-canvas-wrap" style="flex:1;overflow:auto;background-image:radial-gradient(#c5d9cc 1px, transparent 1px);background-size:18px 18px;background-color:#eef6f1;">
+              <div id="soc-canvas" style="position:relative;width:${size.w}px;height:${size.h}px;">
+                <svg id="soc-edges" style="position:absolute;left:0;top:0;z-index:1;pointer-events:none;"></svg>
+                <div id="soc-edge-labels" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;pointer-events:none;"></div>
+                ${(this.graph.entities || []).map(e => this.canvasNode(e)).join("")}
+              </div>
+            </div>
+            <div style="padding:8px 16px 12px;background:#fff;border-top:1px solid #d1e3d6;max-height:28%;overflow:auto;">
+              <div style="display:flex;gap:10px;align-items:center;font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:8px;">
+                <span style="background:#166534;color:#fff;padding:3px 8px;border-radius:4px;">PJ — Pessoa jurídica</span>
+                <span style="background:#1d4ed8;color:#fff;padding:3px 8px;border-radius:4px;">PF — Pessoa física</span>
+                <span style="color:#64748b;font-weight:600;">Arraste o pontinho branco de uma caixa até outra para criar a participação.</span>
+              </div>
+              <div style="font-size:0.75rem;font-weight:800;color:#105436;text-transform:uppercase;">Notas</div>
               <div style="margin-top:8px;">${this.renderNotes()}</div>
             </div>
           </div>
@@ -409,9 +620,20 @@ const SocietarioApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    requestAnimationFrame(() => {
+      const w = document.getElementById("soc-canvas-wrap");
+      if (w) {
+        w.scrollLeft = sx;
+        w.scrollTop = sy;
+      }
+      const labels = document.getElementById("soc-edge-labels");
+      if (labels) labels.style.pointerEvents = "none";
+      this.redrawEdges();
+      this.bindCanvas();
+    });
   },
 
-  selectEntity(id) {
+  selectEntity(id, keepCanvas) {
     this.selectedId = id;
     this.selectedLinkId = null;
     this.panel = "entity";
@@ -422,6 +644,7 @@ const SocietarioApp = {
     this.selectedLinkId = id;
     this.selectedId = null;
     this.panel = "link";
+    this._pendingLink = null;
     this.render();
   },
 
@@ -436,6 +659,7 @@ const SocietarioApp = {
     this.selectedLinkId = "";
     this.selectedId = null;
     this.panel = "link";
+    this._pendingLink = null;
     this.render();
   },
 
@@ -448,6 +672,7 @@ const SocietarioApp = {
     this.panel = "none";
     this.selectedId = null;
     this.selectedLinkId = null;
+    this._pendingLink = null;
     this.render();
   },
 
@@ -468,8 +693,14 @@ const SocietarioApp = {
       ent.note = note;
       if (company && company.name && !ent.name) ent.name = company.name;
     } else {
+      const size = this.canvasSize();
+      const wrap = document.getElementById("soc-canvas-wrap");
       const id = this.uid("ent");
-      this.graph.entities.push({ id, name, kind, companyId, partnerId, note });
+      this.graph.entities.push({
+        id, name, kind, companyId, partnerId, note,
+        x: (wrap ? wrap.scrollLeft : 0) + 80,
+        y: (wrap ? wrap.scrollTop : 0) + 80
+      });
       if (!this.graph.hubId) this.graph.hubId = id;
       this.selectedId = id;
     }
@@ -520,6 +751,7 @@ const SocietarioApp = {
         this.graph.links.push({ id: this.uid("lnk"), from, to, pct, note });
       }
     }
+    this._pendingLink = null;
     this.persist();
     this.panel = "none";
     this.selectedLinkId = null;
@@ -555,7 +787,18 @@ const SocietarioApp = {
     if (!key) return null;
     let ent = this.graph.entities.find(e => String(e.name).trim().toLowerCase() === key);
     if (!ent) {
-      ent = { id: this.uid("ent"), name: String(name).trim(), kind: kind === "pf" ? "pf" : "pj", note: "", companyId: "", partnerId: "", ...(extra || {}) };
+      const n = this.graph.entities.length;
+      ent = {
+        id: this.uid("ent"),
+        name: String(name).trim(),
+        kind: kind === "pf" ? "pf" : "pj",
+        note: "",
+        companyId: "",
+        partnerId: "",
+        x: 80 + (n % 8) * 196,
+        y: 80 + Math.floor(n / 8) * 118,
+        ...(extra || {})
+      };
       this.graph.entities.push(ent);
     } else if (extra) {
       if (extra.companyId) ent.companyId = extra.companyId;
@@ -589,6 +832,7 @@ const SocietarioApp = {
         added++;
       }
     });
+    this.ensurePositions();
     this.persist();
     this.render();
     alert(added ? `${added} interligação(ões) importada(s) da parametrização.` : "As empresas da parametrização já estavam na estrutura.");

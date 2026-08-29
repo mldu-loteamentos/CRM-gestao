@@ -51,39 +51,71 @@ if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
 
 // getDynamicOperators was removed from here because it is defined at the end of the file.
 
-window.updateOperatorTabsUI = function(useActualData = true) {
-  const dynOps = window.getDynamicOperators() || [];
-  const normOp = (s) => String(s || "")
+window.normalizeOperatorName = function(s) {
+  return String(s || "")
     .toUpperCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\./g, " ")
     .replace(/\s+/g, " ")
     .trim();
+};
 
-  let opsToShow = dynOps.slice();
-  if (useActualData) {
-      const clients = window.rawClientList || [];
-      const activeSet = new Set();
-      const addOp = (op) => {
-          const n = normOp(op);
-          if (!n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS" || n === "SEM CARTEIRA INADIMPLENTE" || n === "NAO COBRAR") return;
-          activeSet.add(n);
-      };
-      clients.forEach(c => addOp(c.assignedOperator));
-      if (clients.length > 0) {
-          opsToShow = dynOps.filter(op => activeSet.has(normOp(op)));
-      }
+window.getOperatorsNamedInCityRules = function() {
+  const names = new Set();
+  const skip = new Set(["NAO ATRIBUIDO", "TODOS", "OUTROS", "SEM CARTEIRA INADIMPLENTE", "NAO COBRAR"]);
+  const rules = (window.AppState && AppState.rules) || {};
+  Object.values(rules).forEach(rule => {
+    if (!rule) return;
+    const op = rule.operator;
+    const list = Array.isArray(op) ? op : [op];
+    list.forEach(n => {
+      const key = window.normalizeOperatorName(n);
+      if (key && !skip.has(key)) names.add(key);
+    });
+  });
+  return names;
+};
+
+window.updateOperatorTabsUI = function(useActualData = true) {
+  const dynOps = window.getDynamicOperators() || [];
+  const normOp = window.normalizeOperatorName;
+  const skip = (n) => !n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS" || n === "SEM CARTEIRA INADIMPLENTE" || n === "NAO COBRAR";
+
+  const clients = window.rawClientList || [];
+  const filaReady = !!(window.AppState && AppState.defaultersLoaded);
+  const activeFromFila = new Set();
+  const displayByNorm = new Map();
+  dynOps.forEach(op => {
+    const n = normOp(op);
+    if (!skip(n)) displayByNorm.set(n, op);
+  });
+  clients.forEach(c => {
+    const n = normOp(c && c.assignedOperator);
+    if (skip(n)) return;
+    activeFromFila.add(n);
+    if (!displayByNorm.has(n)) displayByNorm.set(n, c.assignedOperator);
+  });
+
+  let opsToShow;
+  if (useActualData && (filaReady || clients.length > 0)) {
+    opsToShow = [...activeFromFila].map(n => displayByNorm.get(n)).filter(Boolean);
+  } else {
+    const inRules = window.getOperatorsNamedInCityRules();
+    opsToShow = dynOps.filter(op => inRules.has(normOp(op)));
   }
 
   const filaTabs = document.getElementById("operator-tabs-container");
   if (filaTabs) {
      const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
      existingOpBtns.forEach(btn => btn.remove());
-     const prev = String(window.activeOperatorFilter || "TODOS");
-     const stillVisible = prev === "TODOS" || opsToShow.some(op => String(op) === prev);
-     const activeName = stillVisible ? prev : "TODOS";
-     if (!stillVisible) window.activeOperatorFilter = "TODOS";
+     const prev = String(window.activeOperatorFilter || (typeof activeOperatorFilter !== "undefined" ? activeOperatorFilter : "TODOS") || "TODOS");
+     const stillVisible = prev === "TODOS" || opsToShow.some(op => normOp(op) === normOp(prev));
+     const activeName = stillVisible ? (opsToShow.find(op => normOp(op) === normOp(prev)) || prev) : "TODOS";
+     if (!stillVisible) {
+       window.activeOperatorFilter = "TODOS";
+       try { activeOperatorFilter = "TODOS"; } catch (e) {}
+     }
 
      let opBtnsHtml = `<button class="operator-tab-btn${activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
      opsToShow.forEach(op => {
@@ -2714,18 +2746,61 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   if (client && client.isZeroPaid) return 0;
   if (client && (client.subjudice === "S" || client.subjudice === true)) return 1;
-  if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return 2;
-  return 3;
+  if (client && client.hasOverdueAgreement) return 2;
+  if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return 3;
+  if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return 4;
+  return 5;
 };
 
 window.getFilaQueueGroupMeta = function(group) {
   const map = {
     0: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     1: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
-    2: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
-    3: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
+    2: { label: 'Acordo Jurídico', bg: '#fef3c7', color: '#92400e' },
+    3: { label: 'Recente Jurídico', bg: '#e0e7ff', color: '#3730a3' },
+    4: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
+    5: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
   };
-  return map[group] || map[3];
+  return map[group] || map[5];
+};
+
+window.clientIsRecenteJuridico = function(client, history, retroLimitDate) {
+  if (!client || client.subjudice === "S" || client.subjudice === true) return false;
+  let hist = history;
+  if (!hist) {
+    try { hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { hist = {}; }
+  }
+  const mem = hist[client.customerId] || hist[String(client.customerId)] || hist[Number(client.customerId)];
+  if (!mem || !mem.exitDate) return false;
+  let limit = retroLimitDate;
+  if (!limit) {
+    const retroDaysAgo = parseInt(window.advFilters?.retroMeses || "90", 10);
+    limit = new Date();
+    limit.setDate(limit.getDate() - (Number.isFinite(retroDaysAgo) ? retroDaysAgo : 90));
+  }
+  const ed = typeof parseSafeDate === "function" ? parseSafeDate(mem.exitDate) : new Date(mem.exitDate);
+  return ed && ed >= limit;
+};
+
+window.getAcordoJuridicoAgingHtml = function(client) {
+  const days = Number(client && client.maxDaysDelay) || 0;
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo em atraso (SA, A1, A2…). Cliente que passou pelo jurídico e fez acordo.">
+    <i data-lucide="handshake" style="width: 14px; height: 14px;"></i> Acordo Jurídico - ${dayLabel}
+  </span>`;
+};
+
+window.getRecenteJuridicoAgingHtml = function(client, diffDays) {
+  const days = Number(client && client.maxDaysDelay) || 0;
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  const saida = Number.isFinite(diffDays) ? diffDays : "";
+  const title = saida !== ""
+    ? `Saiu do jurídico há ${saida} dia${saida === 1 ? "" : "s"} sem parcela de acordo (SA/A1…). Pode ter liquidado e voltou a atrasar.`
+    : "Saiu do jurídico sem parcela de acordo e voltou a atrasar.";
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #818cf8; background-color: #e0e7ff; color: #3730a3; font-weight: 600;" title="${title}">
+    <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Recente Jurídico - ${dayLabel}
+    <i data-lucide="x" style="width: 12px; height: 12px; margin-left: 4px; cursor: pointer; color: #4f46e5;" title="Remover marcação" onclick="event.stopPropagation(); window.removerRecenteJuridico(${client.customerId})"></i>
+  </span>`;
 };
 
 window.getFilaSortValue = function(client, sortCol) {
@@ -4117,7 +4192,15 @@ document.addEventListener("click", function(e) {
 
 // Filtro de Operador (Abas do Switch) para Fila de Cobrança
   if (activeOperatorFilter !== "TODOS") {
-    clientList = clientList.filter(c => c.assignedOperator === activeOperatorFilter);
+    const want = (typeof window.normalizeOperatorName === "function")
+      ? window.normalizeOperatorName(activeOperatorFilter)
+      : String(activeOperatorFilter || "").toUpperCase();
+    clientList = clientList.filter(c => {
+      const got = (typeof window.normalizeOperatorName === "function")
+        ? window.normalizeOperatorName(c.assignedOperator)
+        : String(c.assignedOperator || "").toUpperCase();
+      return got === want;
+    });
   }
 
   if (window.homeInsightFilter && window.homeInsightFilter.keys instanceof Set && window.homeInsightFilter.keys.size) {
@@ -4548,16 +4631,16 @@ document.addEventListener("click", function(e) {
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
               ` : (() => {
-                  const mem = subjudiceHistory[client.customerId];
+                  if (client.hasOverdueAgreement) {
+                      return window.getAcordoJuridicoAgingHtml(client);
+                  }
+                  const mem = subjudiceHistory[client.customerId] || subjudiceHistory[String(client.customerId)];
                   if (mem && mem.exitDate) {
                       const ed = parseSafeDate(mem.exitDate);
                       if (ed >= retroLimitDate) {
                           const diffTime = Math.abs(new Date() - ed);
                           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #818cf8; background-color: #e0e7ff; color: #3730a3; font-weight: 600;" title="Saiu do Jurídico há ${diffDays} dias">
-                              <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Recente Jurídico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
-                              <i data-lucide="x" style="width: 12px; height: 12px; margin-left: 4px; cursor: pointer; color: #4f46e5;" title="Remover marcação" onclick="event.stopPropagation(); window.removerRecenteJuridico(${client.customerId})"></i>
-                          </span>`;
+                          return window.getRecenteJuridicoAgingHtml(client, diffDays);
                       }
                   }
                   if (typeof window.nexAgingSpecialHtml === "function") {
@@ -5610,6 +5693,10 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   
   // Simulação de Vencidas adjustments for Sub Judice
   AppState.isSubjudiceMode = isSubjudice;
+  const btnJurEarly = document.getElementById("btn-enviar-juridico-top");
+  if (btnJurEarly && (isSubjudice || isRecordSubjudice(AppState.selectedCustomerId, AppState.selectedSaleId || AppState.selectedContractId))) {
+    btnJurEarly.style.display = "none";
+  }
   const simTaxaSelectRef = document.getElementById("simulador-taxa");
   if (simTaxaSelectRef) {
     if (isSubjudice) {
@@ -7904,7 +7991,11 @@ function formatCpfCnpj(val) {
     AppState.currentCustomerMaxDelay = maxDelayDays;
     const btnJur = document.getElementById("btn-enviar-juridico-top");
     if (btnJur) {
-      if (isSubjudice) {
+      const alreadySubjudice = isSubjudice || isRecordSubjudice(
+        AppState.selectedCustomerId,
+        AppState.selectedSaleId || AppState.selectedContractId
+      );
+      if (alreadySubjudice) {
         btnJur.style.display = "none";
       } else {
         let juridicoDays = 151;
@@ -8970,7 +9061,7 @@ function renderCustomerOccurrences() {
         const color = occ.promiseStatus === "Cumprido" ? "var(--color-success)" : "var(--color-danger)";
         statusHtml = `
           <span style="font-size: 0.75rem; font-weight: 700; color: ${color}; background: ${color}15; padding: 2px 8px; border-radius: 4px; border: 1px solid ${color}30;">
-            ${occ.promiseStatus === "Cumprido" ? "âœ… Cumprido" : "âŒ Quebrado"}
+            ${occ.promiseStatus === "Cumprido" ? "\u2705 Cumprido" : "\u274C Quebrado"}
           </span>
           <span style="font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-left: 6px;">
             (Alterado automaticamente pelo sistema)
@@ -8979,9 +9070,9 @@ function renderCustomerOccurrences() {
       } else {
         statusHtml = `
           <select class="filter-select" style="padding:2px 6px; font-size:0.7rem; height: 22px; border-radius: 4px; border: 1px solid #ccc; background: white;" onchange="updatePromiseStatus('${occ.date}', this.value)">
-            <option value="Pendente" ${occ.promiseStatus === 'Pendente' ? 'selected' : ''}>ðŸŸ¡ Pendente</option>
-            <option value="Cumprido" ${occ.promiseStatus === 'Cumprido' ? 'selected' : ''}>ðŸŸ¢ Cumprido</option>
-            <option value="Quebrado" ${occ.promiseStatus === 'Quebrado' ? 'selected' : ''}>ðŸ”´ Quebrado</option>
+            <option value="Pendente" ${occ.promiseStatus === 'Pendente' ? 'selected' : ''}>\uD83D\uDFE1 Pendente</option>
+            <option value="Cumprido" ${occ.promiseStatus === 'Cumprido' ? 'selected' : ''}>\uD83D\uDFE2 Cumprido</option>
+            <option value="Quebrado" ${occ.promiseStatus === 'Quebrado' ? 'selected' : ''}>\uD83D\uDD34 Quebrado</option>
           </select>
         `;
       }
@@ -12322,6 +12413,113 @@ window.addDaysIso = function(iso, days) {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+window.getBrazilianHolidayMap = function() {
+  return {
+    "2025-01-01": "Confraternização Universal",
+    "2025-03-03": "Carnaval",
+    "2025-03-04": "Carnaval",
+    "2025-04-18": "Paixão de Cristo",
+    "2025-04-21": "Tiradentes",
+    "2025-05-01": "Dia do Trabalho",
+    "2025-06-19": "Corpus Christi",
+    "2025-07-09": "Revolução Constitucionalista",
+    "2025-09-07": "Independência do Brasil",
+    "2025-10-12": "Nossa Sra. Aparecida",
+    "2025-11-02": "Finados",
+    "2025-11-15": "Proclamação da República",
+    "2025-11-20": "Consciência Negra",
+    "2025-12-25": "Natal",
+    "2026-01-01": "Confraternização Universal",
+    "2026-02-16": "Carnaval",
+    "2026-02-17": "Carnaval",
+    "2026-04-03": "Paixão de Cristo",
+    "2026-04-21": "Tiradentes",
+    "2026-05-01": "Dia do Trabalho",
+    "2026-06-04": "Corpus Christi",
+    "2026-07-09": "Revolução Constitucionalista",
+    "2026-09-07": "Independência do Brasil",
+    "2026-10-12": "Nossa Sra. Aparecida",
+    "2026-11-02": "Finados",
+    "2026-11-15": "Proclamação da República",
+    "2026-11-20": "Consciência Negra",
+    "2026-12-25": "Natal",
+    "2027-01-01": "Confraternização Universal",
+    "2027-02-08": "Carnaval",
+    "2027-02-09": "Carnaval",
+    "2027-03-26": "Paixão de Cristo",
+    "2027-04-21": "Tiradentes",
+    "2027-05-01": "Dia do Trabalho",
+    "2027-05-27": "Corpus Christi",
+    "2027-07-09": "Revolução Constitucionalista",
+    "2027-09-07": "Independência do Brasil",
+    "2027-10-12": "Nossa Sra. Aparecida",
+    "2027-11-02": "Finados",
+    "2027-11-15": "Proclamação da República",
+    "2027-11-20": "Consciência Negra",
+    "2027-12-25": "Natal"
+  };
+};
+
+window.isBusinessDayIso = function(iso) {
+  const key = String(iso || "").slice(0, 10);
+  if (!key) return false;
+  const d = new Date(key + "T12:00:00");
+  if (isNaN(d.getTime())) return false;
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return false;
+  const holidays = window.getBrazilianHolidayMap();
+  return !holidays[key];
+};
+
+window.addBusinessDaysIso = function(iso, days) {
+  const n = Number(days) || 0;
+  if (!iso || n <= 0) return String(iso || "").slice(0, 10);
+  let cursor = String(iso).slice(0, 10);
+  let added = 0;
+  let guard = 0;
+  while (added < n && guard < 40) {
+    cursor = window.addDaysIso(cursor, 1);
+    if (window.isBusinessDayIso(cursor)) added++;
+    guard++;
+  }
+  return cursor;
+};
+
+window.boletoCheckPaymentDate = function(dueIso) {
+  const due = String(dueIso || "").slice(0, 10);
+  if (!due) return "";
+  if (!window.isBusinessDayIso(due)) {
+    return window.addBusinessDaysIso(due, 2);
+  }
+  const plus1 = window.addDaysIso(due, 1);
+  if (!window.isBusinessDayIso(plus1)) {
+    return window.addBusinessDaysIso(due, 1);
+  }
+  return plus1;
+};
+
+window.formatIsoDateBr = function(iso) {
+  const key = String(iso || "").slice(0, 10);
+  if (!key) return "";
+  const d = new Date(key + "T12:00:00");
+  if (isNaN(d.getTime())) return key;
+  return d.toLocaleDateString("pt-BR");
+};
+
+window.formatOriginalInstallmentsDueLabel = function(instIds) {
+  const ids = (Array.isArray(instIds) ? instIds : [instIds]).filter(id => id != null && id !== "");
+  const insts = (AppState && AppState.currentContractInstallments) || [];
+  const dates = ids.map(id => {
+    const inst = insts.find(i => String(i.installmentId) === String(id) || String(i.installmentNumber) === String(id));
+    return inst && inst.dueDate ? String(inst.dueDate).slice(0, 10) : null;
+  }).filter(Boolean).sort();
+  if (dates.length === 0) return "";
+  const first = window.formatIsoDateBr(dates[0]);
+  const last = window.formatIsoDateBr(dates[dates.length - 1]);
+  if (dates.length === 1 || first === last) return "Vencimento original: " + first;
+  return "Parcelas de vencimento " + first + " até " + last;
+};
+
 window.isCheckPaymentOccurrence = function(occ) {
   if (!occ) return false;
   if (occ.checkPayment) return true;
@@ -12602,10 +12800,16 @@ window.submitReprocessBoleto = async function() {
       ? window.normalizeCustomerNotesKey(customerId)
       : customerId;
 
-    const parcelasLog = instIds.join(", ");
-    const checkDate = window.addDaysIso(dueDate, 1);
-    const checkDateBr = checkDate ? new Date(checkDate + "T12:00:00").toLocaleDateString("pt-BR") : "";
-    const boletoText = `Boleto gerado. Parcelas Originais ID: ${parcelasLog} | Novo Vencimento: ${dueDate} | Multa: ${fine}% | Juros: ${interest}% | Lembrete automático: Checar pagamento em ${checkDateBr} (D+1)`;
+    const parcelasLog = (typeof window.formatOriginalInstallmentsDueLabel === "function")
+      ? window.formatOriginalInstallmentsDueLabel(instIds)
+      : "";
+    const checkDate = window.boletoCheckPaymentDate(dueDate);
+    const checkDateBr = window.formatIsoDateBr(checkDate);
+    const dueDateBr = window.formatIsoDateBr(dueDate);
+    const checkIsTwoBiz = !window.isBusinessDayIso(dueDate);
+    const checkHint = checkIsTwoBiz ? "2 dias úteis" : "D+1";
+    const parcelasPart = parcelasLog || ("Parcela ID: " + instIds.join(", "));
+    const boletoText = `Boleto gerado. ${parcelasPart} | Novo vencimento: ${dueDateBr} | Multa: ${fine}% | Juros: ${interest}% | Lembrete automático: Checar pagamento em ${checkDateBr} (${checkHint})`;
 
     const promessaSection = document.getElementById('reprocess-promessa-section');
     const isPromessaHidden = promessaSection && promessaSection.style.display === 'none';
@@ -12661,15 +12865,22 @@ window.submitReprocessBoleto = async function() {
     btn.disabled = false;
     closeReprocessModal();
 
+    window._lastGeneratedBoletoInstIds = instIds.slice();
+    window._lastGeneratedBoletoBillId = billId;
+    window._lastGeneratedBoletoAt = Date.now();
+
     if (typeof loadCustomerBoletos === "function") {
       try { await loadCustomerBoletos(customerId, billId); } catch (e) { console.warn(e); }
+    }
+    if (typeof switchCustomerTab === "function") {
+      try { switchCustomerTab("tab-boletos"); } catch (e) {}
     }
 
     const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 5 });
     if (opened) {
-      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' (D+1) foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V).");
+      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V). A aba Boletos do Contrato foi atualizada.");
     } else {
-      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela aba Boletos em alguns segundos.");
+      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela aba Boletos do Contrato em alguns segundos.");
     }
 
   } catch (e) {
@@ -13041,21 +13252,8 @@ async function renderAgendaCalendar() {
   const todayStr = window.localDateStr(today);
   const selectedStr = window.localDateStr(selectedAgendaDate);
   
-  // Feriados Nacionais e de SP (Exemplo para 2026)
-  const holidays = {
-    "2026-01-01": "Confraternização Universal",
-    "2026-02-17": "Carnaval",
-    "2026-04-03": "Paixão de Cristo",
-    "2026-04-21": "Tiradentes",
-    "2026-05-01": "Dia do Trabalho",
-    "2026-06-04": "Corpus Christi",
-    "2026-07-09": "Revolução Constitucionalista",
-    "2026-09-07": "Independência do Brasil",
-    "2026-10-12": "Nossa Sra. Aparecida",
-    "2026-11-02": "Finados",
-    "2026-11-15": "Proclamação da República",
-    "2026-12-25": "Natal"
-  };
+  // Feriados Nacionais e de SP
+  const holidays = (typeof window.getBrazilianHolidayMap === "function") ? window.getBrazilianHolidayMap() : {};
   
   const selectedOperator = window.AgendaSelectedOperator || document.getElementById("agenda-operator-select")?.value || "Todos";
   const agendaSearch = document.getElementById("agenda-search-input")?.value || "";
@@ -21513,12 +21711,15 @@ async function loadCustomerBoletos(customerId, saleId) {
       <tbody>`;
     
     let count = 0;
+    const recentIds = (window._lastGeneratedBoletoInstIds || []).map(String);
+    const recentFresh = window._lastGeneratedBoletoAt && (Date.now() - window._lastGeneratedBoletoAt) < 15 * 60 * 1000;
     
     (currentBill.installments || []).forEach(inst => {
       // Se não tem recibos, ou tem recibos mas nenhum tem receiptType preenchido = não está pago
       const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
+      const isRecentGen = recentFresh && recentIds.includes(String(inst.installmentId));
 
-      if (inst.generatedBillet === true && !isPaid) {
+      if ((inst.generatedBillet === true || isRecentGen) && !isPaid) {
         count++;
         const dueDateObj = inst.dueDate ? new Date(inst.dueDate + 'T12:00:00') : null;
         const dueDateStr = dueDateObj ? dueDateObj.toLocaleDateString('pt-BR') : 'N/D';
@@ -21554,11 +21755,12 @@ async function loadCustomerBoletos(customerId, saleId) {
         }
         
         const valorCorrigido = inst.correctedValue || inst.balanceDue || inst.originalValue || 0;
+        const recentBadge = isRecentGen ? ` <span style="background:#dcfce7; color:#166534; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:700;">Recém gerado</span>` : "";
         
         boletosHtml += `
           <tr id="row-inst-${inst.installmentId}">
             <td style="padding:10px; border-bottom:1px solid #eee; font-weight:600; color:var(--color-primary);">${currentBill.billReceivableId || currentBill.documentCode || 'N/D'}</td>
-            <td style="padding:10px; border-bottom:1px solid #eee;">${inst.installmentNumber || 'N/D'}</td>
+            <td style="padding:10px; border-bottom:1px solid #eee;">${inst.installmentNumber || 'N/D'}${recentBadge}</td>
             <td style="padding:10px; border-bottom:1px solid #eee;">${dueDateStr}</td>
             <td style="padding:10px; border-bottom:1px solid #eee;" id="true-due-date-${inst.installmentId}">Buscando...</td>
             <td style="padding:10px; border-bottom:1px solid #eee;">${new Intl.NumberFormat('pt-BR', {style: 'currency', currency: 'BRL'}).format(inst.originalValue || 0)}</td>
@@ -21573,9 +21775,13 @@ async function loadCustomerBoletos(customerId, saleId) {
     boletosHtml += `</tbody></table>`;
     
     if (count === 0) {
+      const waitingRecent = recentFresh && recentIds.length > 0;
       container.innerHTML = `
         <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">Boletos do Contrato</h3>
-        <p style="font-size: 0.9rem; color: #666;">Não há boletos gerados e em aberto para este contrato no momento.</p>
+        <p style="font-size: 0.9rem; color: #666;">${waitingRecent
+          ? "O boleto foi gerado no Sienge, mas a listagem ainda não refletiu a parcela. Aguarde alguns segundos e recarregue esta aba."
+          : "Não há boletos gerados e em aberto para este contrato no momento."}</p>
+        ${waitingRecent ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="loadCustomerBoletos(${JSON.stringify(customerId)}, ${JSON.stringify(saleId)})">Atualizar boletos</button>` : ""}
       `;
     } else {
       container.innerHTML = `
@@ -21593,7 +21799,8 @@ async function loadCustomerBoletos(customerId, saleId) {
     setTimeout(async () => {
       for (const inst of (currentBill.installments || [])) {
         const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
-        if (inst.generatedBillet === true && !isPaid) {
+        const isRecentGen = recentFresh && recentIds.includes(String(inst.installmentId));
+        if ((inst.generatedBillet === true || isRecentGen) && !isPaid) {
           try {
             const slip = await SiengeApiService.getPaymentSlipNotification(saleId, inst.installmentId);
             let trueDateStr = 'N/D';
@@ -21675,6 +21882,7 @@ async function loadCustomerBoletos(customerId, saleId) {
     `;
   }
 }
+window.loadCustomerBoletos = loadCustomerBoletos;
 
 async function gerarInformeRendimentos() {
   const resultContainer = document.getElementById("informe-rendimentos-result");
@@ -28952,7 +29160,7 @@ window.closeMapaJuridico = function() {
   if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
 };
 
-window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
+window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
 
 window.mapaJuridicoShowMap = function() {
   window._mapaJuridicoLastPhase = null;
@@ -28967,12 +29175,13 @@ window.mapaJuridicoClientMatches = function(c) {
   if (f.company && String(c.companyId) !== String(f.company)) return false;
   const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
   if (f.emp && String(cc) !== String(f.emp)) return false;
+  if (f.customerId && String(c.customerId) !== String(f.customerId)) return false;
   const q = String(f.q || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (q) {
+  if (q && !f.customerId) {
     const name = String(c.customerName || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const title = String((c.billIds && c.billIds[0]) || c.saleId || "").replace(/^B-/i, "").split("-")[0];
     const ids = (c.billIds || []).join(" ");
-    const blob = `${name} ${title} ${ids} ${c.saleId || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const blob = `${name} ${title} ${ids} ${c.saleId || ""} ${c.customerId || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (!blob.includes(q)) return false;
   }
   if (!f.prazo) return true;
@@ -29044,11 +29253,20 @@ window.mapaJuridicoFillEmpSelect = function() {
 };
 
 window.mapaJuridicoSetFilter = function(key, val) {
-  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
   window._mapaJuridicoFilters[key] = val;
   if (key === "company") {
     window._mapaJuridicoFilters.emp = "";
     window.mapaJuridicoFillEmpSelect();
+  }
+  if (key === "company" || key === "emp") {
+    const keep = window.mapaJuridicoUniqueClients();
+    if (window._mapaJuridicoFilters.customerId && !keep.some(c => String(c.customerId) === String(window._mapaJuridicoFilters.customerId))) {
+      window._mapaJuridicoFilters.customerId = "";
+      const input = document.getElementById("mapa-filtro-busca");
+      if (input) input.value = "";
+    }
+    window.mapaJuridicoRenderClientList();
   }
   const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
   if (nWrap) nWrap.style.visibility = window._mapaJuridicoFilters.prazo === "N_DIAS" ? "visible" : "hidden";
@@ -29063,8 +29281,103 @@ window.mapaJuridicoSetFilter = function(key, val) {
 };
 
 window.mapaJuridicoSetSearch = function(val) {
-  clearTimeout(window._mapaJuridicoSearchTimer);
-  window._mapaJuridicoSearchTimer = setTimeout(() => window.mapaJuridicoSetFilter("q", val), 180);
+  window._mapaJuridicoClientQuery = val;
+  if (!String(val || "").trim()) {
+    if (window._mapaJuridicoFilters) window._mapaJuridicoFilters.customerId = "";
+    clearTimeout(window._mapaJuridicoSearchTimer);
+    window._mapaJuridicoSearchTimer = setTimeout(() => window.mapaJuridicoSetFilter("customerId", ""), 180);
+  }
+  window.mapaJuridicoRenderClientList();
+};
+
+window.mapaJuridicoFormatDoc = function(c) {
+  let raw = (c && (c.cpfCnpj || c.document || c.cpf || c.cnpj)) || "";
+  if (!raw && c && c.customerId && window.AppState && AppState.customers) {
+    const cust = AppState.customers[c.customerId] || AppState.customers[String(c.customerId)];
+    if (cust) raw = cust.cpfCnpj || cust.document || cust.cpf || cust.cnpj || "";
+  }
+  const clean = String(raw || "").replace(/\D/g, "");
+  if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return raw ? String(raw) : "sem documento";
+};
+
+window.mapaJuridicoClientLabel = function(c) {
+  const id = c.customerId != null ? c.customerId : "";
+  const name = String(c.customerName || "Cliente").trim().toUpperCase();
+  return id + " - " + name + " - " + window.mapaJuridicoFormatDoc(c);
+};
+
+window.mapaJuridicoUniqueClients = function() {
+  const cache = window._mapaJuridicoCache;
+  const f = window._mapaJuridicoFilters || {};
+  const list = (cache && cache.generalList) || window._subjudiceList || [];
+  const seen = new Map();
+  list.forEach(c => {
+    if (!c || c.customerId == null || c.customerId === "") return;
+    if (f.company && String(c.companyId) !== String(f.company)) return;
+    const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
+    if (f.emp && String(cc) !== String(f.emp)) return;
+    const id = String(c.customerId);
+    if (!seen.has(id)) seen.set(id, c);
+  });
+  return [...seen.values()].sort((a, b) =>
+    String(a.customerName || "").localeCompare(String(b.customerName || ""), "pt-BR")
+  );
+};
+
+window.mapaJuridicoRenderClientList = function() {
+  const box = document.getElementById("mapa-filtro-clientes");
+  if (!box) return;
+  const q = String(window._mapaJuridicoClientQuery || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const qDigits = String(window._mapaJuridicoClientQuery || "").replace(/\D/g, "");
+  const clients = window.mapaJuridicoUniqueClients().filter(c => {
+    if (!q && !qDigits) return true;
+    const label = window.mapaJuridicoClientLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const digits = window.mapaJuridicoFormatDoc(c).replace(/\D/g, "");
+    if (q && label.includes(q)) return true;
+    if (qDigits && digits.includes(qDigits)) return true;
+    return false;
+  });
+  const selected = window._mapaJuridicoFilters && window._mapaJuridicoFilters.customerId;
+  const row = (html, onclick, active) =>
+    `<button type="button" onclick="${onclick}" style="display:block;width:100%;text-align:left;border:none;border-bottom:1px solid #f1f5f9;padding:8px 10px;background:${active ? "#ecfdf5" : "#fff"};cursor:pointer;font-size:0.78rem;line-height:1.35;color:#0f172a;">${html}</button>`;
+  let html = row("<strong>Todos os clientes</strong>", "mapaJuridicoPickClient('')", !selected);
+  if (!clients.length) {
+    html += `<div style="padding:10px;color:#94a3b8;font-size:0.78rem;">Nenhum cliente sub judice com esse filtro.</div>`;
+  } else {
+    html += clients.map(c => {
+      const id = String(c.customerId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const label = window.mapaJuridicoClientLabel(c).replace(/</g, "&lt;");
+      return row(label, `mapaJuridicoPickClient('${id}')`, String(selected) === String(c.customerId));
+    }).join("");
+  }
+  box.innerHTML = html;
+};
+
+window.mapaJuridicoOpenClientList = function() {
+  const box = document.getElementById("mapa-filtro-clientes");
+  if (!box) return;
+  box.style.display = "block";
+  window.mapaJuridicoRenderClientList();
+};
+
+window.mapaJuridicoPickClient = function(id) {
+  const sid = String(id || "");
+  if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  window._mapaJuridicoFilters.customerId = sid;
+  window._mapaJuridicoClientQuery = "";
+  const input = document.getElementById("mapa-filtro-busca");
+  if (input) {
+    if (!sid) input.value = "";
+    else {
+      const c = window.mapaJuridicoUniqueClients().find(x => String(x.customerId) === sid);
+      input.value = c ? window.mapaJuridicoClientLabel(c) : sid;
+    }
+  }
+  const box = document.getElementById("mapa-filtro-clientes");
+  if (box) box.style.display = "none";
+  window.mapaJuridicoSetFilter("customerId", sid);
 };
 
 window.mapaJuridicoShowPhase = function(prefix, compId) {
@@ -29402,7 +29715,7 @@ window.exportMapaJuridicoPDF = async function() {
 
 window.showMapaJuridicoOverlay = function(ui) {
   window.closeMapaJuridico();
-  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "" };
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
   const overlay = document.createElement("div");
   overlay.id = "mapa-juridico-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:12000;background:#f8fafc;display:flex;flex-direction:column;font-family:Inter,Segoe UI,sans-serif;";
@@ -29427,7 +29740,8 @@ window.showMapaJuridicoOverlay = function(ui) {
       }
       #mapa-juridico-overlay .mapa-filtros label { min-width: 0; }
       #mapa-juridico-overlay .mapa-filtros select,
-      #mapa-juridico-overlay .mapa-filtros input[type="search"] {
+      #mapa-juridico-overlay .mapa-filtros input[type="search"],
+      #mapa-juridico-overlay .mapa-filtros input[type="text"] {
         display: block;
         width: 100%;
         height: 32px;
@@ -29439,6 +29753,7 @@ window.showMapaJuridicoOverlay = function(ui) {
         font-size: 0.8rem;
         background: #fff;
       }
+      #mapa-filtro-clientes button:hover { background: #f8fafc !important; }
       @media (max-width: 900px) {
         #mapa-juridico-overlay .mapa-filtros { grid-template-columns: 1fr 1fr; }
       }
@@ -29481,9 +29796,12 @@ window.showMapaJuridicoOverlay = function(ui) {
           <input type="number" min="1" value="7" onchange="mapaJuridicoSetFilter('nDias', this.value)"
             style="display:block;height:32px;width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
         </label>
-        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Nome ou título
-          <input type="search" id="mapa-filtro-busca" placeholder="Pesquise pelo nome ou título..."
-            oninput="mapaJuridicoSetSearch(this.value)" autocomplete="off">
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;position:relative;">Cliente sub judice
+          <div id="mapa-client-combo" style="position:relative;">
+            <input type="text" id="mapa-filtro-busca" placeholder="Clique para ver a lista de clientes..."
+              onfocus="mapaJuridicoOpenClientList()" oninput="mapaJuridicoSetSearch(this.value)" autocomplete="off">
+            <div id="mapa-filtro-clientes" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:90;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);max-height:320px;overflow:auto;"></div>
+          </div>
         </label>
       </div>
     </div>
@@ -29509,7 +29827,13 @@ window.showMapaJuridicoOverlay = function(ui) {
   document.body.appendChild(overlay);
   if (window.lucide) lucide.createIcons();
   window.mapaJuridicoFillEmpSelect();
+  window.mapaJuridicoRenderClientList();
   window.mapaJuridicoRenderStages();
+  overlay.addEventListener("mousedown", (e) => {
+    const combo = document.getElementById("mapa-client-combo");
+    const box = document.getElementById("mapa-filtro-clientes");
+    if (box && combo && !combo.contains(e.target)) box.style.display = "none";
+  });
 };
 
 window.openMapaJuridico = function() {

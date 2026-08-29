@@ -45,11 +45,28 @@ const InvestimentoApp = {
 
   persistPeriod() {
     try {
+      let prev = {};
+      try { prev = JSON.parse(localStorage.getItem(this.FILTER_KEY) || "null") || {}; } catch (e) { prev = {}; }
+      const companies = (this.selectedCompanyIds || []).map(String).filter(Boolean);
+      const selectedCompanyIds = (companies.length || this._clearedCompanies)
+        ? companies
+        : (Array.isArray(prev.selectedCompanyIds) ? prev.selectedCompanyIds : []);
+      let selectedAccountKeys = this.selectedAccountKeys;
+      if (this._clearedAccounts) {
+        selectedAccountKeys = [];
+      } else if (!Array.isArray(selectedAccountKeys)) {
+        selectedAccountKeys = prev.selectedAccountKeys;
+      } else if (!selectedAccountKeys.length && Array.isArray(prev.selectedAccountKeys) && prev.selectedAccountKeys.length && !this.filterCatalog.length) {
+        selectedAccountKeys = prev.selectedAccountKeys;
+      }
       localStorage.setItem(this.FILTER_KEY, JSON.stringify({
         startDate: this.startDate,
         endDate: this.endDate,
-        selectedCompanyIds: this.selectedCompanyIds || [],
-        selectedAccountKeys: this.selectedAccountKeys
+        consultStart: this.consultStart || prev.consultStart || "",
+        consultEnd: this.consultEnd || prev.consultEnd || "",
+        selectedCompanyIds,
+        selectedAccountKeys,
+        groupByCompany: this.groupByCompany !== false
       }));
     } catch (e) { /* ignore quota */ }
   },
@@ -58,15 +75,21 @@ const InvestimentoApp = {
     try {
       const saved = JSON.parse(localStorage.getItem(this.FILTER_KEY) || "null");
       if (!saved || typeof saved !== "object") return;
-      if (this.isIsoDate(saved.startDate)) this.startDate = saved.startDate;
-      if (this.isIsoDate(saved.endDate)) this.endDate = saved.endDate;
-      if (Array.isArray(saved.selectedCompanyIds)) {
+      const start = this.isIsoDate(saved.consultStart) ? saved.consultStart : saved.startDate;
+      const end = this.isIsoDate(saved.consultEnd) ? saved.consultEnd : saved.endDate;
+      if (this.isIsoDate(start)) this.startDate = start;
+      if (this.isIsoDate(end)) this.endDate = end;
+      if (this.isIsoDate(saved.consultStart)) this.consultStart = saved.consultStart;
+      if (this.isIsoDate(saved.consultEnd)) this.consultEnd = saved.consultEnd;
+      if (Array.isArray(saved.selectedCompanyIds) && saved.selectedCompanyIds.length) {
         this.selectedCompanyIds = saved.selectedCompanyIds.map(String).filter(Boolean);
+        this._hadSavedCompanyIds = true;
       }
       if (Array.isArray(saved.selectedAccountKeys)) {
         this.selectedAccountKeys = saved.selectedAccountKeys.map(String).filter(Boolean);
         this._hadSavedAccountKeys = true;
       }
+      if (typeof saved.groupByCompany === "boolean") this.groupByCompany = saved.groupByCompany;
     } catch (e) { /* ignore */ }
   },
 
@@ -80,19 +103,31 @@ const InvestimentoApp = {
     this.persistPeriod();
   },
 
-  init() {
-    this.restorePeriod();
-    if (!this.isIsoDate(this.startDate)) this.startDate = this.defaultStartDate();
-    if (!this.isIsoDate(this.endDate)) this.endDate = this.defaultEndDate();
-    if (this.startDate && this.endDate && this.startDate > this.endDate) {
-      const tmp = this.startDate;
-      this.startDate = this.endDate;
-      this.endDate = tmp;
-    }
+  syncGeridasSelection() {
     const geridas = this.geridasCompanies();
+    if (!geridas.length) return;
     const allowed = new Set(geridas.map(c => String(c.id)));
-    this.selectedCompanyIds = this.selectedCompanyIds.filter(id => allowed.has(String(id)));
-    if (!this.selectedCompanyIds.length) this.selectedCompanyIds = geridas.map(c => String(c.id));
+    const kept = (this.selectedCompanyIds || []).filter(id => allowed.has(String(id)));
+    if (kept.length) {
+      this.selectedCompanyIds = kept;
+      return;
+    }
+    this.selectedCompanyIds = geridas.map(c => String(c.id));
+  },
+
+  init() {
+    if (!this._filtersReady) {
+      this.restorePeriod();
+      if (!this.isIsoDate(this.startDate)) this.startDate = this.defaultStartDate();
+      if (!this.isIsoDate(this.endDate)) this.endDate = this.defaultEndDate();
+      if (this.startDate && this.endDate && this.startDate > this.endDate) {
+        const tmp = this.startDate;
+        this.startDate = this.endDate;
+        this.endDate = tmp;
+      }
+      this._filtersReady = true;
+    }
+    this.syncGeridasSelection();
     if (!window._invDropBound) {
       window._invDropBound = true;
       document.addEventListener("mousedown", (e) => {
@@ -373,7 +408,9 @@ const InvestimentoApp = {
       this.selectedAccountKeys = available;
       return;
     }
-    this.selectedAccountKeys = this.selectedAccountKeys.filter(k => availSet.has(k));
+    if (!available.length) return;
+    const kept = this.selectedAccountKeys.filter(k => availSet.has(k));
+    this.selectedAccountKeys = kept.length ? kept : available;
   },
 
   async refreshFilterCatalog() {
@@ -381,7 +418,6 @@ const InvestimentoApp = {
     const ids = (this.selectedCompanyIds || []).map(String);
     if (!ids.length) {
       this.filterCatalog = [];
-      this.selectedAccountKeys = [];
       this.catalogLoading = false;
       this.render();
       return;
@@ -411,7 +447,7 @@ const InvestimentoApp = {
       mov.documentType, mov.documentIdentification, mov.documentIdentificationName, mov.observations, mov.note,
       ...((mov.financialCategories || []).map(c => `${c.financialCategoryName || ""} ${c.financialCategoryId || ""}`))
     ].join(" ").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (/IRRF|\bIOF\b|TARIFA|IMPOSTO DE RENDA|\bIR SOBRE/.test(blob)) return "tarifas";
+    if (/IRRF|\bIOF\b|TARIFA|IMPOSTO DE RENDA|\bIR SOBRE|RETIDO NA FONTE/.test(blob)) return "tarifas";
     if (/RENDIM|RENDTO|\bJUROS\b|RECEITA FINANCEIRA/.test(blob)) return "rendimento";
     if (/RESGATE/.test(blob)) return "resgate";
     if (/APLICA|APORTE/.test(blob)) return "aporte";
@@ -441,25 +477,108 @@ const InvestimentoApp = {
     return "resgate";
   },
 
-  pickBalance(list, accountNumber, companyId) {
-    const wantDigits = this.normAcc(accountNumber);
-    const wantRaw = String(accountNumber || "").trim().toUpperCase();
-    const rows = (list || []).filter(b => {
-      const raw = String(b.accountNumber || b.number || "").trim();
-      const num = this.normAcc(raw);
-      if (wantDigits) {
-        if (num && wantDigits !== num) return false;
-        if (!num && raw && raw.toUpperCase() !== wantRaw) return false;
-      } else if (wantRaw) {
-        if (raw && raw.toUpperCase() !== wantRaw) return false;
-        if (!raw) return false;
-      }
-      if (companyId && b.companyId != null && String(b.companyId) !== String(companyId)) return false;
-      return true;
-    });
-    if (!rows.length) return 0;
-    rows.sort((a, b) => String(b.balanceDate || "").localeCompare(String(a.balanceDate || "")));
-    return Number(rows[0].amount != null ? rows[0].amount : rows[0].reconciledAmount) || 0;
+  compactName(s) {
+    return String(s || "")
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Z0-9]/g, "");
+  },
+
+  parseMoney(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    const s = String(v).trim().replace(/\s/g, "");
+    if (!s) return null;
+    let n;
+    if (s.includes(",") && s.includes(".")) {
+      n = s.lastIndexOf(",") > s.lastIndexOf(".")
+        ? Number(s.replace(/\./g, "").replace(",", "."))
+        : Number(s.replace(/,/g, ""));
+    } else if (s.includes(",")) {
+      n = Number(s.replace(/\./g, "").replace(",", "."));
+    } else {
+      n = Number(s);
+    }
+    return Number.isFinite(n) ? n : null;
+  },
+
+  bankToken(s) {
+    const t = this.compactName(s);
+    const banks = ["BANCODOBRASIL", "SANTANDER", "BRADESCO", "BANRISUL", "SICOOB", "SICREDI", "ORIGINAL", "NUBANK", "SAFRA", "CAIXA", "ITAU", "BTG", "C6", "CEF"];
+    return banks.find(b => t.includes(b)) || "";
+  },
+
+  productToken(s) {
+    const t = this.compactName(s);
+    if (t.includes("COMPROMISSADA") || t.includes("COMPR")) return "COMPR";
+    if (t.includes("CDBDI")) return "CDBDI";
+    if (t.includes("CDB")) return "CDB";
+    return "";
+  },
+
+  shapeBalance(b, cid) {
+    return {
+      companyId: cid,
+      accountNumber: b.accountNumber || b.number || b.account || b.bankAccountNumber || "",
+      accountName: b.accountName || b.name || b.description || "",
+      mask: b.mask || b.accountMask || "",
+      checkingAccountId: b.checkingAccountId || b.idCheckingAccount || b.idAccount,
+      idCheckingAccount: b.idCheckingAccount,
+      id: b.id || b.idAccount || b.idCheckingAccount
+    };
+  },
+
+  scoreOpeningBalance(acc, b) {
+    const cid = String(acc.companyId);
+    const shaped = this.shapeBalance(b, cid);
+    const blobA = `${acc.accountNumber || ""} ${acc.accountName || ""} ${acc.mask || ""}`;
+    const blobB = `${shaped.accountNumber} ${shaped.accountName} ${shaped.mask}`;
+    const idA = String(acc.checkingAccountId || acc.idCheckingAccount || acc.id || "").trim();
+    const idB = String(shaped.checkingAccountId || shaped.idCheckingAccount || shaped.id || "").trim();
+    if (idA && idB && idA === idB) return 1000;
+    const bankA = this.bankToken(blobA);
+    const bankB = this.bankToken(blobB);
+    if (bankA && bankB && bankA !== bankB) return 0;
+    const prodA = this.productToken(blobA);
+    const prodB = this.productToken(blobB);
+    if (prodA && prodB && prodA !== prodB) return 0;
+    const nameA = this.compactName(acc.accountName || acc.name || "");
+    const nameB = this.compactName(shaped.accountName);
+    const numA = this.compactName(acc.accountNumber || acc.mask || "");
+    const numB = this.compactName(shaped.accountNumber);
+    const digA = this.normAcc(acc.accountNumber || acc.mask || "");
+    const digB = this.normAcc(shaped.accountNumber);
+    let score = 0;
+    if (digA && digB && digA === digB && digA.length >= 5) score += 200;
+    if (nameA && nameB && nameA === nameB) score += 160;
+    if (bankA && bankB && bankA === bankB) score += 80;
+    if (prodA && prodB && prodA === prodB) score += 50;
+    if (numA && numB && numA === numB) score += numA.length >= 6 ? 80 : 25;
+    if (nameA.length >= 14 && nameB.length >= 14 && (nameA.includes(nameB) || nameB.includes(nameA))) score += 40;
+    return score;
+  },
+
+  balanceAmount(b) {
+    const candidates = [b.reconciledAmount, b.reconciledBalance, b.amount, b.balance, b.value];
+    for (let i = 0; i < candidates.length; i++) {
+      const n = this.parseMoney(candidates[i]);
+      if (n != null) return n;
+    }
+    return null;
+  },
+
+  pickOpeningBalance(list, acc) {
+    const cid = String(acc.companyId);
+    const ranked = (list || []).map(b => {
+      const bCid = b.companyId != null ? String(b.companyId) : (b.idCompany != null ? String(b.idCompany) : "");
+      if (bCid && bCid !== cid) return null;
+      return { b, score: this.scoreOpeningBalance(acc, b) };
+    }).filter(x => x && x.score >= 70);
+    if (!ranked.length) return null;
+    ranked.sort((a, b) => b.score - a.score || String(b.b.balanceDate || "").localeCompare(String(a.b.balanceDate || "")));
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].score < 160) return null;
+    return this.balanceAmount(ranked[0].b);
   },
 
   emptyFlow() {
@@ -494,6 +613,44 @@ const InvestimentoApp = {
     return `Rendimento ${yld.toFixed(2).replace(".", ",")}% no mês · CDI ${cdi.toFixed(2).replace(".", ",")}% a.m. · ${pct.toFixed(0)}% do CDI`;
   },
 
+  periodRendimento(monthFlow) {
+    return (monthFlow || []).reduce((s, f) => s + (Number(f.rendimento) || 0), 0);
+  },
+
+  periodImposto(monthFlow) {
+    return (monthFlow || []).reduce((s, f) => s + (Number(f.tarifas) || 0), 0);
+  },
+
+  avgCdiPeriod() {
+    const keys = this.months || [];
+    const vals = keys.map(mk => Number(this.cdiByMonth[mk]) || 0).filter(n => n > 0);
+    if (!vals.length) return null;
+    return vals.reduce((s, n) => s + n, 0) / vals.length;
+  },
+
+  accountPeriodMetaHtml(monthFlow) {
+    const rend = this.periodRendimento(monthFlow);
+    const imposto = Math.abs(this.periodImposto(monthFlow));
+    const avg = this.avgCdiPeriod();
+    const n = (this.months || []).filter(mk => Number(this.cdiByMonth[mk]) > 0).length;
+    const cdiTxt = avg == null
+      ? "CDI médio indisponível no período"
+      : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m. (${n} ${n === 1 ? "mês" : "meses"})`;
+    return `<div style="margin-top:8px;padding:6px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;line-height:1.4;">
+      <div style="font-size:0.68rem;font-weight:800;color:#0369a1;">Rendimento ${this.fmt(rend)}</div>
+      <div style="font-size:0.65rem;font-weight:700;color:#9a3412;margin-top:2px;">Imposto retido ${this.fmt(imposto)}</div>
+      <div style="font-size:0.65rem;font-weight:700;color:#854d0e;margin-top:2px;">${this.esc(cdiTxt)}</div>
+    </div>`;
+  },
+
+  accountPeriodMetaText(monthFlow) {
+    const rend = this.periodRendimento(monthFlow);
+    const imposto = Math.abs(this.periodImposto(monthFlow));
+    const avg = this.avgCdiPeriod();
+    const cdiTxt = avg == null ? "CDI médio indisponível" : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m.`;
+    return `Rendimento ${this.fmt(rend)} · Imposto retido ${this.fmt(imposto)} · ${cdiTxt}`;
+  },
+
   async load() {
     if (!this.startDate || !this.endDate) {
       this.error = "Informe o período.";
@@ -515,13 +672,16 @@ const InvestimentoApp = {
     }
     this.loading = true;
     this.error = "";
+    this.consultStart = this.startDate;
+    this.consultEnd = this.endDate;
     this.persistPeriod();
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
     await this.ensureCdi();
+    const openingDate = this.addDaysIso(this.startDate, -1);
     const histStart = this.addDaysIso(this.startDate, -730);
     try {
-      const [accountsChunks, movChunks] = await Promise.all([
+      const [accountsChunks, movChunks, balGlobal, balByCo] = await Promise.all([
         Promise.all(this.selectedCompanyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
         Promise.all(this.selectedCompanyIds.map(async id => {
           const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
@@ -529,8 +689,11 @@ const InvestimentoApp = {
             companyId: id
           });
           return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
-        }))
+        })),
+        SiengeApiService.getAccountBalances(openingDate),
+        Promise.all(this.selectedCompanyIds.map(id => SiengeApiService.getAccountBalances(openingDate, { companyId: id })))
       ]);
+      const balances = [...(balGlobal || []), ...(balByCo || []).flat()];
 
       let catalog = accountsChunks.flat();
       const wantAcc = new Set(this.selectedAccountKeys || []);
@@ -579,6 +742,8 @@ const InvestimentoApp = {
             accountNumber: num,
             accountName: acc.accountName || acc.name || acc.description || "Conta",
             accountType: acc.accountType || "",
+            checkingAccountId: acc.checkingAccountId || acc.idCheckingAccount || acc.id || "",
+            mask: acc.mask || "",
             opening: 0,
             closingApi: 0,
             aportes: 0,
@@ -592,7 +757,14 @@ const InvestimentoApp = {
         }
         return byAcc.get(key);
       };
-      catalog.forEach(a => ensure(a));
+      catalog.forEach(a => {
+        const row = ensure(a);
+        const apiOpen = this.pickOpeningBalance(balances, a);
+        if (apiOpen != null) {
+          row.opening = apiOpen;
+          row.openingFromApi = true;
+        }
+      });
 
       movements.forEach(mov => {
         const num = this.movAccount(mov);
@@ -600,12 +772,19 @@ const InvestimentoApp = {
         let row = byAcc.get(key);
         if (!row) {
           row = ensure({ companyId: mov.companyId, accountNumber: num, accountName: mov.accountName || num });
+          if (!row.openingFromApi) {
+            const apiOpen = this.pickOpeningBalance(balances, row);
+            if (apiOpen != null) {
+              row.opening = apiOpen;
+              row.openingFromApi = true;
+            }
+          }
         }
         const kind = this.classifyMovement(mov);
         const amount = this.movAmount(mov);
         const day = String(mov.bankMovementDate || "").slice(0, 10);
         if (day && day < this.startDate) {
-          row.opening += amount;
+          if (!row.openingFromApi) row.opening += amount;
           return;
         }
         const mk = String(mov.bankMovementDate || "").slice(0, 7);
@@ -780,6 +959,7 @@ const InvestimentoApp = {
   toggleFilterAccount(key, on) {
     const k = String(key);
     const cur = this.selectedAccountKeys || [];
+    this._clearedAccounts = false;
     if (on) {
       if (!cur.includes(k)) this.selectedAccountKeys = cur.concat([k]);
     } else {
@@ -791,6 +971,7 @@ const InvestimentoApp = {
   },
 
   selectAllFilterAccounts() {
+    this._clearedAccounts = false;
     this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
     this.accountDropOpen = true;
     this.persistPeriod();
@@ -798,6 +979,7 @@ const InvestimentoApp = {
   },
 
   clearFilterAccounts() {
+    this._clearedAccounts = true;
     this.selectedAccountKeys = [];
     this.accountDropOpen = true;
     this.persistPeriod();
@@ -870,6 +1052,7 @@ const InvestimentoApp = {
 
   toggleCompany(id, on) {
     const sid = String(id);
+    this._clearedCompanies = false;
     if (on) {
       if (!this.selectedCompanyIds.includes(sid)) this.selectedCompanyIds.push(sid);
     } else {
@@ -895,6 +1078,7 @@ const InvestimentoApp = {
   },
 
   selectAllGeridas() {
+    this._clearedCompanies = false;
     this.selectedCompanyIds = this.geridasCompanies().map(c => String(c.id));
     this.companyDropOpen = true;
     this.groupByCompany = true;
@@ -908,6 +1092,8 @@ const InvestimentoApp = {
   },
 
   clearGeridas() {
+    this._clearedCompanies = true;
+    this._clearedAccounts = true;
     this.selectedCompanyIds = [];
     this.selectedAccountKeys = [];
     this.filterCatalog = [];
@@ -918,6 +1104,7 @@ const InvestimentoApp = {
 
   toggleGroupByCompany() {
     this.groupByCompany = !this.groupByCompany;
+    this.persistPeriod();
     this.render();
   },
 
@@ -1065,7 +1252,8 @@ const InvestimentoApp = {
           <div style="padding:12px 16px 0;display:flex;gap:10px;flex-wrap:wrap;">
             ${this.kpiCard("Saldo inicial", k.opening, "#0f172a")}
             ${this.kpiCard("Entradas", k.aportes, "#105436")}
-            ${this.kpiCard("Saídas", Math.abs(k.resgates) + Math.abs(k.tarifas), "#b91c1c")}
+            ${this.kpiCard("Saídas", Math.abs(k.resgates), "#b91c1c")}
+            ${this.kpiCard("Imposto retido", Math.abs(k.tarifas), "#9a3412")}
             ${this.kpiCard("Rendimento", k.rendimento, "#0369a1")}
             ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
@@ -1142,12 +1330,13 @@ const InvestimentoApp = {
            </button>`
         : "";
       const labelCell = `
-        <td rowspan="${collapsed ? 1 : 4}" style="padding:8px 10px;vertical-align:top;min-width:180px;max-width:260px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
+        <td rowspan="${collapsed ? 1 : 5}" style="padding:8px 10px;vertical-align:top;min-width:200px;max-width:280px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
           <div style="display:flex;align-items:flex-start;gap:2px;">
             ${chevron}
             <div>
               <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
               ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
+              ${this.accountPeriodMetaHtml(monthFlow)}
             </div>
           </div>
         </td>`;
@@ -1162,7 +1351,12 @@ const InvestimentoApp = {
       }
       const entradas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).aportes || 0);
       const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
+      const impostos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).tarifas || 0);
       const rends = months.map(mk => monthFlow.find(f => f.month === mk) || { rendimento: 0, opening: 0, month: mk });
+      const absCell = (n) => {
+        const v = Math.abs(Number(n) || 0);
+        return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${v ? "#b91c1c" : "#94a3b8"};font-weight:600;white-space:nowrap;">${this.fmt(v)}</td>`;
+      };
       return `
         <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
@@ -1173,15 +1367,17 @@ const InvestimentoApp = {
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#b91c1c;white-space:nowrap;">Saída</td>
           ${empty}
-          ${saidas.map(n => {
-            const v = Math.abs(Number(n) || 0);
-            return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${v ? "#b91c1c" : "#94a3b8"};font-weight:600;white-space:nowrap;">${this.fmt(v)}</td>`;
-          }).join("")}
+          ${saidas.map(n => absCell(n)).join("")}
         </tr>
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
           ${empty}
           ${rends.map(f => rendTd(f.rendimento || 0, f.opening || 0, f.month)).join("")}
+        </tr>
+        <tr style="background:#fff7ed;">
+          <td style="padding:6px 10px;font-weight:700;color:#9a3412;white-space:nowrap;">Imposto retido</td>
+          ${empty}
+          ${impostos.map(n => absCell(n)).join("")}
         </tr>
         <tr style="background:${isTotal ? "#d1fae5" : "#f1f5f9"};">
           <td style="padding:6px 10px;font-weight:800;color:#0f172a;white-space:nowrap;">Saldo</td>
@@ -1264,51 +1460,168 @@ const InvestimentoApp = {
       return;
     }
     const months = this.months;
-    const header = ["Empresa", "Conta", "Nº conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))];
-    const rows = [header];
-    const push = (empresa, conta, num, opening, monthFlow) => {
-      const find = mk => monthFlow.find(f => f.month === mk) || {};
-      rows.push([empresa, conta, num, "Entrada", "", ...months.map(mk => Number(find(mk).aportes) || 0)]);
-      rows.push([empresa, conta, num, "Saída", "", ...months.map(mk => Number(find(mk).resgates) || 0)]);
-      rows.push([empresa, conta, num, "Rendimento", "", ...months.map(mk => Number(find(mk).rendimento) || 0)]);
-      rows.push([empresa, conta, num, "Saldo", Number(opening) || 0, ...months.map(mk => Number(find(mk).closing) || 0)]);
+    const kpis = accounts.reduce((acc, r) => {
+      acc.opening += r.opening || 0;
+      acc.aportes += r.aportes || 0;
+      acc.resgates += r.resgates || 0;
+      acc.rendimento += r.rendimento || 0;
+      acc.tarifas += r.tarifas || 0;
+      acc.closing += r.closing || 0;
+      return acc;
+    }, { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 });
+    const visAgg = this.aggregateFlow(accounts);
+    const colCount = 3 + months.length;
+    const border = {
+      top: { style: "thin", color: { rgb: "D1E3D6" } },
+      bottom: { style: "thin", color: { rgb: "D1E3D6" } },
+      left: { style: "thin", color: { rgb: "D1E3D6" } },
+      right: { style: "thin", color: { rgb: "D1E3D6" } }
     };
-    push("Consolidado", "Empresas selecionadas", "", accounts.reduce((s, r) => s + (r.opening || 0), 0), (() => {
-      const keys = this.months;
-      let running = accounts.reduce((s, r) => s + (r.opening || 0), 0);
-      return keys.map(mk => {
-        const f = accounts.reduce((acc, r) => {
-          const m = (r.months && r.months[mk]) || this.emptyFlow();
-          acc.aportes += m.aportes || 0;
-          acc.resgates += m.resgates || 0;
-          acc.rendimento += m.rendimento || 0;
-          acc.tarifas += m.tarifas || 0;
-          return acc;
-        }, this.emptyFlow());
-        const opening = running;
-        const net = f.aportes + f.resgates + f.rendimento + f.tarifas;
-        running = opening + net;
-        return { month: mk, opening, ...f, closing: running };
+    const fill = (rgb) => ({ patternType: "solid", fgColor: { rgb } });
+    const font = (opts) => Object.assign({ name: "Calibri", sz: 10, color: { rgb: "0F172A" } }, opts || {});
+    const moneyFmt = "#,##0.00";
+    const aoa = [];
+    const merges = [];
+    const styles = {};
+    const mark = (r, c, s) => { styles[r + "|" + c] = s; };
+
+    const pushRow = (cells) => {
+      const row = [];
+      for (let i = 0; i < colCount; i++) row.push(cells[i] == null ? "" : cells[i]);
+      aoa.push(row);
+      return aoa.length - 1;
+    };
+
+    const titleR = pushRow(["Kardex — conta × movimento · saldo inicial e meses"]);
+    merges.push({ s: { r: titleR, c: 0 }, e: { r: titleR, c: colCount - 1 } });
+    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center" } });
+
+    const subR = pushRow([`Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")} · empresas geridas pelo grupo`]);
+    merges.push({ s: { r: subR, c: 0 }, e: { r: subR, c: colCount - 1 } });
+    mark(subR, 0, { font: font({ sz: 9, color: { rgb: "D1FAE5" } }), fill: fill("105436") });
+
+    pushRow([]);
+    const kpiLabelR = pushRow(["Saldo inicial", "Entradas", "Saídas", "Imposto retido", "Rendimento", "Saldo acumulado"]);
+    const kpiValR = pushRow([kpis.opening, kpis.aportes, Math.abs(kpis.resgates), Math.abs(kpis.tarifas), kpis.rendimento, kpis.closing]);
+    [
+      { c: 0, color: "0F172A" },
+      { c: 1, color: "105436" },
+      { c: 2, color: "B91C1C" },
+      { c: 3, color: "9A3412" },
+      { c: 4, color: "0369A1" },
+      { c: 5, color: "0F172A" }
+    ].forEach(x => {
+      mark(kpiLabelR, x.c, { font: font({ bold: true, sz: 8, color: { rgb: "64748B" } }), fill: fill("F8FAFC"), alignment: { horizontal: "center" } });
+      mark(kpiValR, x.c, { font: font({ bold: true, sz: 12, color: { rgb: x.color } }), fill: fill("FFFFFF"), alignment: { horizontal: "right" }, numFmt: moneyFmt });
+    });
+
+    pushRow([]);
+    const headR = pushRow(["Conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))]);
+    for (let c = 0; c < colCount; c++) {
+      mark(headR, c, {
+        font: font({ bold: true, sz: 9, color: { rgb: "FFFFFF" } }),
+        fill: fill("105436"),
+        alignment: { horizontal: c < 2 ? "left" : "right", vertical: "center" },
+        border
       });
-    })());
+    }
+
+    const moneyStyle = (n, extra) => Object.assign({
+      font: font({
+        bold: !!(extra && extra.bold),
+        color: { rgb: n < 0 ? "B91C1C" : (extra && extra.color) || (n === 0 ? "94A3B8" : "0F172A") }
+      }),
+      fill: fill((extra && extra.bg) || "FFFFFF"),
+      alignment: { horizontal: "right", vertical: "center" },
+      border,
+      numFmt: moneyFmt
+    }, extra && extra.s || {});
+
+    const labelStyle = (color, bg, bold) => ({
+      font: font({ bold: !!bold, color: { rgb: color } }),
+      fill: fill(bg),
+      alignment: { vertical: "center", wrapText: true },
+      border
+    });
+
+    const pushBlock = (label, sub, opening, monthFlow, kind) => {
+      const find = mk => monthFlow.find(f => f.month === mk) || {};
+      const entradas = months.map(mk => Number(find(mk).aportes) || 0);
+      const saidas = months.map(mk => Math.abs(Number(find(mk).resgates) || 0));
+      const rends = months.map(mk => Number(find(mk).rendimento) || 0);
+      const impostos = months.map(mk => Math.abs(Number(find(mk).tarifas) || 0));
+      const saldos = months.map(mk => Number(find(mk).closing) || 0);
+      const isTotal = kind === "total";
+      const headBg = isTotal ? "ECFDF5" : "F8FAFC";
+      const saldoBg = isTotal ? "D1FAE5" : "F1F5F9";
+      const contaTxt = (sub ? label + "\n" + sub : label) + "\n" + this.accountPeriodMetaText(monthFlow);
+      const r0 = pushRow([contaTxt, "Entrada", "", ...entradas]);
+      const r1 = pushRow(["", "Saída", "", ...saidas]);
+      const r2 = pushRow(["", "Rendimento", "", ...rends]);
+      const r3 = pushRow(["", "Imposto retido", "", ...impostos]);
+      const r4 = pushRow(["", "Saldo", Number(opening) || 0, ...saldos]);
+      merges.push({ s: { r: r0, c: 0 }, e: { r: r4, c: 0 } });
+      mark(r0, 0, labelStyle("0F172A", headBg, true));
+      mark(r0, 1, labelStyle("105436", headBg, true));
+      mark(r1, 1, labelStyle("B91C1C", "FFFFFF", true));
+      mark(r2, 1, labelStyle("0369A1", "FFFFFF", true));
+      mark(r3, 1, labelStyle("9A3412", "FFF7ED", true));
+      mark(r4, 1, labelStyle("0F172A", saldoBg, true));
+      mark(r0, 2, moneyStyle(0, { bg: headBg, color: "CBD5E1" }));
+      mark(r1, 2, moneyStyle(0, { color: "CBD5E1" }));
+      mark(r2, 2, moneyStyle(0, { color: "CBD5E1" }));
+      mark(r3, 2, moneyStyle(0, { bg: "FFF7ED", color: "CBD5E1" }));
+      mark(r4, 2, moneyStyle(opening, { bold: true, bg: saldoBg }));
+      months.forEach((_, i) => {
+        mark(r0, 3 + i, moneyStyle(entradas[i], { bg: headBg }));
+        mark(r1, 3 + i, moneyStyle(saidas[i], { color: saidas[i] ? "B91C1C" : "94A3B8" }));
+        mark(r2, 3 + i, moneyStyle(rends[i], { color: "0369A1" }));
+        mark(r3, 3 + i, moneyStyle(impostos[i], { bg: "FFF7ED", color: impostos[i] ? "9A3412" : "94A3B8" }));
+        mark(r4, 3 + i, moneyStyle(saldos[i], { bold: true, bg: saldoBg }));
+      });
+    };
+
+    const pushCompanyBar = (text) => {
+      const r = pushRow([text]);
+      merges.push({ s: { r, c: 0 }, e: { r, c: colCount - 1 } });
+      mark(r, 0, { font: font({ bold: true, sz: 10, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center" } });
+    };
+
+    pushBlock("Consolidado", "Empresas selecionadas", visAgg.opening, visAgg.months, "total");
     if (this.groupByCompany && this.selectedCompanyIds.length > 1) {
       const ids = [...new Set(accounts.map(a => String(a.companyId)))];
       ids.sort((a, b) => this.companyName(a).localeCompare(this.companyName(b), "pt-BR"));
       ids.forEach(cid => {
         const accs = this.companyAccounts(cid, accounts);
+        if (!accs.length) return;
         const agg = this.aggregateFlow(accs);
-        const emp = this.companyName(cid);
-        push(emp, "Total da empresa", "", agg.opening, agg.months);
-        accs.forEach(r => push(emp, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
+        pushCompanyBar(this.companyName(cid) + "  ·  " + accs.length + " conta(s)");
+        pushBlock("Total da empresa", this.companyName(cid), agg.opening, agg.months, "total");
+        accs.forEach(r => pushBlock(r.accountNumber || r.accountName, r.accountName, r.opening, this.monthFlowOf(r), "acc"));
       });
     } else {
-      accounts.forEach(r => push(r.companyName, r.accountName, r.accountNumber, r.opening, this.monthFlowOf(r)));
+      accounts.forEach(r => pushBlock(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), "acc"));
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!merges"] = merges;
+    ws["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, ...months.map(() => ({ wch: 14 }))];
+    ws["!rows"] = [{ hpt: 22 }, { hpt: 16 }];
+    Object.keys(styles).forEach(key => {
+      const [r, c] = key.split("|").map(Number);
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      const st = styles[key];
+      ws[addr].s = st;
+      if (st.numFmt && typeof ws[addr].v === "number") {
+        ws[addr].t = "n";
+        ws[addr].z = st.numFmt;
+      }
+    });
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, this.groupByCompany ? "Por empresa" : "Kardex");
+    XLSX.utils.book_append_sheet(wb, ws, "Kardex");
     const stamp = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `investimento_${stamp}.xlsx`);
+    XLSX.writeFile(wb, `investimento_kardex_${stamp}.xlsx`);
   }
 };
 
