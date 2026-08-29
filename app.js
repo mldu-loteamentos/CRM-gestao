@@ -37,6 +37,47 @@
     return _origFetch.apply(this, args);
   };
 })();
+
+(function installMouraDialogs() {
+  const TITLE = "Moura Leite Loteamentos";
+  const nativeAlert = window.alert.bind(window);
+
+  function ensureDialog() {
+    let overlay = document.getElementById("moura-app-dialog");
+    if (overlay) return overlay;
+    overlay = document.createElement("div");
+    overlay.id = "moura-app-dialog";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483000;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;width:100%;max-width:440px;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);padding:22px 22px 18px;font-family:inherit;">
+        <div style="font-size:0.95rem;font-weight:800;color:#105436;letter-spacing:0.02em;margin-bottom:10px;">${TITLE}</div>
+        <div id="moura-app-dialog-msg" style="font-size:0.92rem;color:#1e293b;line-height:1.45;white-space:pre-wrap;word-break:break-word;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+          <button type="button" id="moura-app-dialog-ok" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">OK</button>
+        </div>
+      </div>`;
+    (document.body || document.documentElement).appendChild(overlay);
+    overlay.querySelector("#moura-app-dialog-ok").addEventListener("click", function() {
+      overlay.style.display = "none";
+    });
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) overlay.style.display = "none";
+    });
+    return overlay;
+  }
+
+  window.alert = function(message) {
+    try {
+      const overlay = ensureDialog();
+      const msgEl = overlay.querySelector("#moura-app-dialog-msg");
+      if (msgEl) msgEl.textContent = message == null ? "" : String(message);
+      overlay.style.display = "flex";
+    } catch (e) {
+      nativeAlert(message);
+    }
+  };
+})();
 // Override lucide.createIcons para evitar que ícones inválidos travem o app
 if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
   const originalCreateIcons = lucide.createIcons;
@@ -1369,7 +1410,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-cobranca": "Configurações",
     "prestacao-contas": "Prestação de Contas",
     "fluxo-caixa": "Fluxo de Caixa",
-    "investimento": "Investimento",
+    "investimento": "Aplicações e Investimentos",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "estrutura-societaria": "Estrutura Societária",
     "participacoes": "Participações",
@@ -10904,6 +10945,14 @@ async function showDistratoView(customer, sale, bills) {
   if (sale && sale.id) {
       AppState.selectedSaleId = sale.id;
   }
+  const distUnit = (sale && sale.unitId && AppState.units && AppState.units[sale.unitId]) || {};
+  const distCc = (distUnit && distUnit.costCenterId) || (sale && (sale.costCenterId || sale.enterpriseId)) || AppState.currentCostCenterId;
+  if (distCc && distCc !== "N/D") {
+    AppState.currentCostCenterId = (typeof getPrimaryCostCenter === "function") ? getPrimaryCostCenter(distCc) : distCc;
+  }
+  if (sale && (sale.companyId || distUnit.companyId)) {
+    AppState.currentCompanyId = sale.companyId || distUnit.companyId;
+  }
   
   // Setar aba
   sessionStorage.setItem('currentSubView', 'distrato');
@@ -11375,6 +11424,7 @@ function fillDistratoBeneficiaryLocked(customer) {
   const nomeBen = document.getElementById("dist-bank-beneficiary-name");
   if (nomeBen) {
     nomeBen.value = (customer && customer.name) || "";
+    nomeBen.title = nomeBen.value;
     nomeBen.readOnly = true;
   }
   const cpfBen = document.getElementById("dist-bank-cpf");
@@ -11385,14 +11435,66 @@ function fillDistratoBeneficiaryLocked(customer) {
   }
 }
 
+function maskCpfCnpjTyping(value) {
+  const d = String(value || "").replace(/\D/g, "").slice(0, 14);
+  if (!d) return "";
+  if (d.length <= 11) {
+    if (d.length > 9) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
+    if (d.length > 6) return d.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
+    if (d.length > 3) return d.replace(/(\d{3})(\d{1,3})/, "$1.$2");
+    return d;
+  }
+  if (d.length > 12) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, "$1.$2.$3/$4-$5");
+  if (d.length > 8) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{1,4})/, "$1.$2.$3/$4");
+  if (d.length > 5) return d.replace(/(\d{2})(\d{3})(\d{1,3})/, "$1.$2.$3");
+  if (d.length > 2) return d.replace(/(\d{2})(\d{1,3})/, "$1.$2");
+  return d;
+}
+
+function maskPixCelularTyping(value) {
+  const d = String(value || "").replace(/\D/g, "").slice(0, 11);
+  if (!d) return "";
+  if (d.length <= 2) return "(" + d;
+  if (d.length <= 7) return "(" + d.slice(0, 2) + ") " + d.slice(2);
+  return "(" + d.slice(0, 2) + ") " + d.slice(2, 7) + "-" + d.slice(7);
+}
+
 window.maskDistratoDocField = function(el) {
   if (!el) return;
-  const digits = String(el.value || "").replace(/\D/g, "").slice(0, 14);
-  if (typeof formatCpfCnpj === "function") {
-    const masked = formatCpfCnpj(digits);
-    el.value = masked === "N/D" ? digits : masked;
+  el.value = maskCpfCnpjTyping(el.value);
+};
+
+window.maskDistratoPixKey = function(el) {
+  if (!el) return;
+  const typeEl = document.getElementById("dist-bank-pix-type");
+  const type = typeEl ? typeEl.value : "CPF/CNPJ";
+  if (type === "CPF/CNPJ") {
+    el.value = maskCpfCnpjTyping(el.value);
+    el.maxLength = 18;
+  } else if (type === "Celular") {
+    el.value = maskPixCelularTyping(el.value);
+    el.maxLength = 16;
   } else {
-    el.value = digits;
+    el.removeAttribute("maxLength");
+  }
+};
+
+window.onDistratoPixTypeChange = function() {
+  const typeEl = document.getElementById("dist-bank-pix-type");
+  const keyEl = document.getElementById("dist-bank-pix-key");
+  if (!typeEl || !keyEl) return;
+  const type = typeEl.value;
+  const placeholders = {
+    "CPF/CNPJ": "000.000.000-00",
+    "Celular": "(00) 00000-0000",
+    "E-mail": "email@exemplo.com",
+    "Aleatória": "Chave aleatória"
+  };
+  keyEl.placeholder = placeholders[type] || "Chave PIX";
+  if (type === "CPF/CNPJ" || type === "Celular") {
+    window.maskDistratoPixKey(keyEl);
+  } else {
+    keyEl.removeAttribute("maxLength");
   }
 };
 
@@ -12067,7 +12169,12 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     console.warn("Preâmbulo do distrato indisponível:", e);
   }
   if (!preambleText || /PREÂMBULO NÃO CADASTRADO/i.test(String(preambleText))) {
-    alert("PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO. Cadastre o preâmbulo antes de gerar o PDF.");
+    const unitForCc = (AppState.units && g_distSale.unitId && AppState.units[g_distSale.unitId]) || {};
+    const ccs = (typeof window.collectPreambleCcCandidates === "function")
+      ? window.collectPreambleCcCandidates(unitForCc, g_distSale)
+      : [];
+    const ccLabel = ccs.length ? ccs.join(", ") : "não identificado neste contrato";
+    alert("PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO (" + ccLabel + ").\nCadastre o preâmbulo neste centro de custo antes de gerar o PDF.");
     return;
   }
 
@@ -20126,7 +20233,7 @@ window.openNewPreambleModal = async function() {
 
 window.selectPreambleForEdit = async function(id) {
   if (!AppState.preamblesList) return;
-  const p = AppState.preamblesList.find(x => x.id === id);
+  const p = AppState.preamblesList.find(x => Number(x.id) === Number(id));
   if (!p) return;
   
   window.currentPreambleSelectedCCs = [...(p.centrosCustoIds || [])];
@@ -20265,7 +20372,7 @@ window.savePreamble = function() {
         updatedAt: Date.now()
       });
     } else {
-      const p = AppState.preamblesList.find(x => x.id === currentEditId);
+      const p = AppState.preamblesList.find(x => Number(x.id) === currentEditId);
       if (p) {
         p.text = text;
         p.responsibles = responsibles;
@@ -28360,51 +28467,109 @@ window.mergePreamblesList = function(localStr, cloudStr) {
   return JSON.stringify([...byId.values()].sort((a, b) => Number(a.id) - Number(b.id)));
 };
 
+window.normalizePreambleCcKey = function(value) {
+  if (value == null || value === "" || value === "N/D") return "";
+  let str = Array.isArray(value) ? String(value[0]) : String(value);
+  str = str.split(",")[0].trim();
+  if (typeof getPrimaryCostCenter === "function") {
+    const primary = getPrimaryCostCenter(str);
+    if (primary && primary !== "C.C. N/D") str = String(primary);
+  }
+  str = str.replace(/^C\.C\.\s*/i, "").trim();
+  const num = str.match(/(\d{3,6})/);
+  if (num) return String(Number(num[1]));
+  return str;
+};
+
+window.collectPreambleCcCandidates = function(unit, sale) {
+  const keys = [];
+  const push = (v) => {
+    const k = window.normalizePreambleCcKey(v);
+    if (k && keys.indexOf(k) === -1) keys.push(k);
+  };
+  push(unit && unit.costCenterId);
+  push(unit && unit.enterpriseId);
+  push(sale && sale.costCenterId);
+  push(sale && sale.enterpriseId);
+  push(AppState.currentCostCenterId);
+  if (sale && sale.unitId) {
+    const parts = String(sale.unitId).split("-");
+    if (parts.length >= 2) push(parts[1]);
+  }
+  const bills = (typeof g_distBills !== "undefined" && Array.isArray(g_distBills)) ? g_distBills : [];
+  bills.forEach((b) => {
+    if (!b) return;
+    push(b.costCenterId);
+    const ids = b.costCentersId;
+    if (Array.isArray(ids)) ids.forEach(push);
+    else push(ids);
+  });
+  return keys;
+};
+
+window.preambleMatchesCc = function(p, candidates) {
+  const ids = (p && p.centrosCustoIds) || [];
+  if (!ids.length || !candidates || !candidates.length) return false;
+  return ids.some((x) => {
+    const key = window.normalizePreambleCcKey(x);
+    return key && candidates.indexOf(key) !== -1;
+  });
+};
+
 window.rebuildPreambleIndex = function() {
   const map = {};
   (AppState.preamblesList || []).forEach(p => {
     (p.centrosCustoIds || []).forEach(cc => {
-      map[cc] = p.text;
+      const key = window.normalizePreambleCcKey(cc);
+      if (!key) return;
+      map[key] = p.text;
       map[String(cc)] = p.text;
+      map[cc] = p.text;
     });
   });
   AppState.preambles = Object.keys(map).length ? map : (AppState.preambles || {});
 };
 
 window.ensurePreamblesListLoaded = function() {
-  if (AppState.preamblesList && AppState.preamblesList.length) {
-    window.rebuildPreambleIndex();
-    return AppState.preamblesList;
-  }
   let saved = [];
   try { saved = JSON.parse(localStorage.getItem("crm_moura_preambles_list") || "[]") || []; } catch (e) { saved = []; }
-  AppState.preamblesList = Array.isArray(saved) ? saved : [];
+  if (Array.isArray(saved) && saved.length) {
+    if (!AppState.preamblesList || !AppState.preamblesList.length) {
+      AppState.preamblesList = saved;
+    } else {
+      try {
+        AppState.preamblesList = JSON.parse(window.mergePreamblesList(JSON.stringify(AppState.preamblesList), localStorage.getItem("crm_moura_preambles_list") || "[]")) || saved;
+      } catch (e) {
+        AppState.preamblesList = saved;
+      }
+    }
+  } else if (!AppState.preamblesList) {
+    AppState.preamblesList = [];
+  }
   window.rebuildPreambleIndex();
   return AppState.preamblesList;
 };
 
 window.getPreambleForContract = function(unit, sale) {
   window.ensurePreamblesListLoaded();
-  const ccId = (unit && (unit.costCenterId || unit.enterpriseId))
-    || (sale && (sale.costCenterId || sale.enterpriseId))
-    || AppState.currentCostCenterId
-    || null;
+  const candidates = window.collectPreambleCcCandidates(unit, sale);
   const companyId = (sale && sale.companyId) || (unit && unit.companyId) || AppState.currentCompanyId || null;
   const list = (AppState.preamblesList || []).filter(p => String(p.status || "Ativo").toLowerCase() !== "inativo");
-  const cc = ccId == null || ccId === "N/D" ? "" : String(ccId);
-  const hasCc = (p) => (p.centrosCustoIds || []).some(x => String(x) === cc);
   let hit = null;
-  if (cc) {
+  if (candidates.length) {
     if (companyId != null && companyId !== "") {
-      hit = list.find(p => hasCc(p) && String(p.empresaId) === String(companyId));
+      hit = list.find(p => window.preambleMatchesCc(p, candidates) && String(p.empresaId) === String(companyId));
     }
-    if (!hit) hit = list.find(p => hasCc(p));
+    if (!hit) hit = list.find(p => window.preambleMatchesCc(p, candidates));
   }
   if (!hit && companyId != null && companyId !== "") {
-    hit = list.find(p => String(p.empresaId) === String(companyId));
+    hit = list.find(p => String(p.empresaId) === String(companyId) && (!p.centrosCustoIds || !p.centrosCustoIds.length));
   }
   if (hit && hit.text) return hit.text;
-  if (cc && AppState.preambles && AppState.preambles[cc]) return AppState.preambles[cc];
+  for (let i = 0; i < candidates.length; i++) {
+    const cc = candidates[i];
+    if (AppState.preambles && AppState.preambles[cc]) return AppState.preambles[cc];
+  }
   return "PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO.";
 };
 

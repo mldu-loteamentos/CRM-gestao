@@ -233,6 +233,88 @@ function isSiengeRateLimitError(err) {
   return m.includes("429") || /rate limit/i.test(m);
 }
 
+function siengeIsoDate(d) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function siengeParseIsoDate(iso) {
+  return new Date(String(iso).slice(0, 10) + "T12:00:00");
+}
+
+function siengeDaySpan(startDate, endDate) {
+  const s = siengeParseIsoDate(startDate);
+  const e = siengeParseIsoDate(endDate);
+  return Math.round((e - s) / 86400000) + 1;
+}
+
+function siengeSplitDateRange(startDate, endDate) {
+  const start = String(startDate || "").slice(0, 10);
+  const end = String(endDate || "").slice(0, 10);
+  if (!start || !end || start > end) return [];
+  const days = siengeDaySpan(start, end);
+  if (days <= 21) return [{ start, end }];
+  const weekly = days <= 92;
+  const chunks = [];
+  let cur = siengeParseIsoDate(start);
+  const last = siengeParseIsoDate(end);
+  while (cur <= last) {
+    let chunkEnd;
+    if (weekly) {
+      chunkEnd = new Date(cur);
+      chunkEnd.setDate(chunkEnd.getDate() + 6);
+    } else {
+      chunkEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+    }
+    if (chunkEnd > last) chunkEnd = last;
+    chunks.push({ start: siengeIsoDate(cur), end: siengeIsoDate(chunkEnd) });
+    cur = new Date(chunkEnd);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return chunks;
+}
+
+async function siengeMapLimit(items, limit, fn) {
+  const list = Array.isArray(items) ? items : [];
+  const out = new Array(list.length);
+  let i = 0;
+  const workers = Math.max(1, Math.min(Number(limit) || 1, list.length));
+  async function worker() {
+    while (i < list.length) {
+      const idx = i++;
+      out[idx] = await fn(list[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, worker));
+  return out;
+}
+
+function siengeDedupeBankMovements(rows) {
+  const seen = new Set();
+  const out = [];
+  (rows || []).forEach((m) => {
+    if (!m) return;
+    const id = m.bankMovementId != null ? String(m.bankMovementId)
+      : (m.id != null ? String(m.id) : "");
+    const key = id
+      ? "id:" + id
+      : [
+          String(m.bankMovementDate || "").slice(0, 10),
+          m.companyId,
+          m.accountNumber || m.checkingAccountNumber || "",
+          m.bankMovementAmount,
+          m.documentNumber || m.documentIdentification || "",
+          m.historic || m.history || ""
+        ].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(m);
+  });
+  return out;
+}
+
 function siengeRateLimitWaitMs(attempt, retryAfter) {
   const fromHeader = parseInt(retryAfter, 10);
   if (Number.isFinite(fromHeader) && fromHeader > 0) {
@@ -248,9 +330,11 @@ async function siengeFetchWithRetry(endpoint, retries = 6) {
       return await siengeFetch(endpoint);
     } catch (err) {
       lastError = err;
-      if (isSiengeRateLimitError(err) && attempt < retries - 1) {
+      const invalidJson = /Resposta inválida/i.test(String(err.message || ""));
+      const serverFail = Number(err.status) >= 500;
+      if ((isSiengeRateLimitError(err) || invalidJson || serverFail) && attempt < retries - 1) {
         const waitMs = siengeRateLimitWaitMs(attempt, err.retryAfter);
-        console.warn(`[Sienge] HTTP 429 — aguardando ${waitMs / 1000}s (tentativa ${attempt + 2}/${retries})...`);
+        console.warn(`[Sienge] ${invalidJson ? "JSON inválido" : (err.status || "erro")} — aguardando ${waitMs / 1000}s (tentativa ${attempt + 2}/${retries})...`);
         await new Promise(r => setTimeout(r, waitMs));
       } else {
         throw err;
@@ -516,16 +600,27 @@ const SiengeApiService = {
         return true;
       });
     }
-    let url = `/bulk-data/v1/bank-movement?startDate=${startDate}&endDate=${endDate}&selectionType=${encodeURIComponent(selectionType)}`;
-    if (opts.companyId) url += `&companyId=${encodeURIComponent(opts.companyId)}`;
-    if (opts.costCentersId) {
-      const ids = Array.isArray(opts.costCentersId) ? opts.costCentersId.join(",") : String(opts.costCentersId);
-      url += `&costCentersId=${ids}`;
-    }
-    const res = await siengeFetchWithRetry(url);
-    if (res && Array.isArray(res.data)) return res.data;
-    if (Array.isArray(res)) return res;
-    return [];
+    const chunks = opts.noChunk ? [{ start: startDate, end: endDate }] : siengeSplitDateRange(startDate, endDate);
+    const fetchOnce = async (s, e) => {
+      let url = `/bulk-data/v1/bank-movement?startDate=${s}&endDate=${e}&selectionType=${encodeURIComponent(selectionType)}`;
+      if (opts.companyId) url += `&companyId=${encodeURIComponent(opts.companyId)}`;
+      if (opts.costCentersId) {
+        const ids = Array.isArray(opts.costCentersId) ? opts.costCentersId.join(",") : String(opts.costCentersId);
+        url += `&costCentersId=${ids}`;
+      }
+      const res = await siengeFetchWithRetry(url);
+      if (res && Array.isArray(res.data)) return res.data;
+      if (Array.isArray(res)) return res;
+      return [];
+    };
+    if (!chunks.length) return [];
+    if (chunks.length === 1) return fetchOnce(chunks[0].start, chunks[0].end);
+    const concurrency = Math.max(1, Math.min(Number(opts.concurrency) || 3, 4));
+    const parts = await siengeMapLimit(chunks, concurrency, async (c, idx) => {
+      if (typeof opts.onChunk === "function") opts.onChunk(c, idx, chunks.length);
+      return fetchOnce(c.start, c.end);
+    });
+    return siengeDedupeBankMovements(parts.flat());
   },
 
   _progressListeners: [],

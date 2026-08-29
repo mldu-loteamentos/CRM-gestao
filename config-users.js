@@ -70,7 +70,7 @@ const ConfigUsersApp = {
           name: "Caixa e Banco", key: "sub_fin_cb",
           actions: [
             { id: "caixa_banco", label: "Movimentações" },
-            { id: "investimento", label: "Investimento" },
+            { id: "investimento", label: "Aplicações e Investimentos" },
             { id: "fluxo_caixa", label: "Fluxo de Caixa" }
           ]
         }

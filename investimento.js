@@ -6,6 +6,7 @@ const InvestimentoApp = {
   selectedCompanyIds: [],
   onlyInvestment: true,
   loading: false,
+  loadingHint: "",
   error: "",
   accounts: [],
   months: [],
@@ -726,6 +727,7 @@ const InvestimentoApp = {
       return;
     }
     this.loading = true;
+    this.loadingHint = "Preparando consulta em fatias de semana/mês...";
     this.error = "";
     this.consultStart = this.startDate;
     this.consultEnd = this.endDate;
@@ -736,17 +738,36 @@ const InvestimentoApp = {
     const openingDate = this.addDaysIso(this.startDate, -1);
     const histStart = this.addDaysIso(this.startDate, -730);
     try {
+      const companyIds = this.selectedCompanyIds.slice();
+      let movDone = 0;
+      const movTotal = Math.max(1, companyIds.length);
       const [accountsChunks, movChunks, balGlobal, balByCo] = await Promise.all([
-        Promise.all(this.selectedCompanyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
-        Promise.all(this.selectedCompanyIds.map(async id => {
-          const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
-            selectionType: "M",
-            companyId: id
-          });
-          return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
-        })),
+        Promise.all(companyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
+        (async () => {
+          const rows = [];
+          const limit = Math.min(2, companyIds.length);
+          let next = 0;
+          const worker = async () => {
+            while (next < companyIds.length) {
+              const id = companyIds[next++];
+              const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
+                selectionType: "M",
+                companyId: id,
+                concurrency: 3,
+                onChunk: (c, idx, total) => {
+                  this.loadingHint = `Empresa ${id}: movimentos ${idx + 1}/${total} (${String(c.start).slice(0, 7)} → ${String(c.end).slice(0, 7)}) · ${movDone + 1}/${movTotal} empresas`;
+                  this.render();
+                }
+              });
+              movDone++;
+              rows.push((data || []).map(m => ({ ...m, companyId: m.companyId || id })));
+            }
+          };
+          await Promise.all(Array.from({ length: limit }, worker));
+          return rows;
+        })(),
         SiengeApiService.getAccountBalances(openingDate),
-        Promise.all(this.selectedCompanyIds.map(id => SiengeApiService.getAccountBalances(openingDate, { companyId: id })))
+        Promise.all(companyIds.map(id => SiengeApiService.getAccountBalances(openingDate, { companyId: id })))
       ]);
       const balances = [...(balGlobal || []), ...(balByCo || []).flat()];
 
@@ -1451,8 +1472,10 @@ const InvestimentoApp = {
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
             ${this.accountDropHtml()}
-            <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;">
-              ${this.loading ? "Consultando..." : "Consultar"}
+            <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;display:inline-flex;align-items:center;gap:8px;" ${this.loading ? "disabled" : ""}>
+              ${this.loading
+                ? `<span class="loading-spinner" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></span> Consultando...`
+                : "Consultar"}
             </button>
             <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.visibleAccounts().length ? "" : "disabled"}
               style="height:34px;display:inline-flex;align-items:center;gap:6px;">
@@ -1469,7 +1492,11 @@ const InvestimentoApp = {
             ${this.kpiCard("Saldo acumulado", k.closing, "#0f172a")}
           </div>
           <div style="flex:1;overflow:auto;padding:12px 16px;">
-            ${this.loading ? `<div style="text-align:center;padding:40px;color:#64748b;">Carregando saldos e movimentos das contas de investimento...</div>` : this.tableHtml()}
+            ${this.loading ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 16px;color:var(--color-text-muted);">
+              <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+              <span style="font-weight:500;">Carregando saldos e movimentos das contas de investimento...</span>
+              <div style="font-size:0.82rem;color:#105436;font-weight:700;">${this.esc(this.loadingHint || "Consultando Sienge em partes menores...")}</div>
+            </div>` : this.tableHtml()}
           </div>
         </div>
       </div>`;
@@ -1696,7 +1723,7 @@ const InvestimentoApp = {
       right: { style: "thin", color: { rgb: "D1E3D6" } }
     };
     const fill = (rgb) => ({ patternType: "solid", fgColor: { rgb } });
-    const font = (opts) => Object.assign({ name: "Calibri", sz: 10, color: { rgb: "0F172A" } }, opts || {});
+    const font = (opts) => Object.assign({ name: "Calibri", sz: 8, color: { rgb: "0F172A" } }, opts || {});
     const moneyFmt = "#,##0.00";
     const aoa = [];
     const merges = [];
@@ -1737,7 +1764,7 @@ const InvestimentoApp = {
     const headR = pushRow(["Conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))]);
     for (let c = 0; c < colCount; c++) {
       mark(headR, c, {
-        font: font({ bold: true, sz: 9, color: { rgb: "FFFFFF" } }),
+        font: font({ bold: true, sz: 8, color: { rgb: "FFFFFF" } }),
         fill: fill("105436"),
         alignment: { horizontal: c < 2 ? "left" : "right", vertical: "center" },
         border
@@ -1756,13 +1783,19 @@ const InvestimentoApp = {
     }, extra && extra.s || {});
 
     const labelStyle = (color, bg, bold) => ({
-      font: font({ bold: !!bold, color: { rgb: color } }),
+      font: font({ bold: !!bold, sz: 8, color: { rgb: color } }),
       fill: fill(bg),
-      alignment: { vertical: "center", wrapText: true },
+      alignment: { vertical: "center", wrapText: true, horizontal: "left" },
       border
     });
 
     const wrapRows = new Set([titleR, subR]);
+    const rowHeights = {};
+    const setRowH = (r, hpt) => { rowHeights[r] = Math.max(rowHeights[r] || 0, hpt); };
+    setRowH(titleR, 26);
+    setRowH(subR, 22);
+    setRowH(kpiLabelR, 14);
+    setRowH(kpiValR, 18);
     const pushBlock = (label, sub, opening, monthFlow, kind) => {
       const find = mk => monthFlow.find(f => f.month === mk) || {};
       const entradas = months.map(mk => Number(find(mk).aportes) || 0);
@@ -1780,6 +1813,10 @@ const InvestimentoApp = {
       const r2 = pushRow(["", "Rendimento", "", ...rends]);
       const r3 = pushRow(["", "Imposto retido", "", ...impostos]);
       const r4 = pushRow(["", "Saldo", Number(opening) || 0, ...saldos]);
+      const lines = String(contaTxt).split(/\n/).filter(Boolean).length;
+      const mergeH = Math.max(80, lines * 11 + 10);
+      const hEach = Math.max(16, Math.ceil(mergeH / 5));
+      [r0, r1, r2, r3, r4].forEach(r => setRowH(r, hEach));
       merges.push({ s: { r: r0, c: 0 }, e: { r: r4, c: 0 } });
       mark(r0, 0, labelStyle("0F172A", headBg, true));
       mark(r0, 1, labelStyle("105436", headBg, true));
@@ -1805,7 +1842,8 @@ const InvestimentoApp = {
       const r = pushRow([text]);
       wrapRows.add(r);
       merges.push({ s: { r, c: 0 }, e: { r, c: colCount - 1 } });
-      mark(r, 0, { font: font({ bold: true, sz: 10, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center", wrapText: true } });
+      mark(r, 0, { font: font({ bold: true, sz: 8, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center", wrapText: true } });
+      setRowH(r, Math.max(20, String(text).split(/\n/).length * 12 + 6));
     };
 
     pushBlock("Consolidado", "Empresas selecionadas", visAgg.opening, visAgg.months, "total");
@@ -1826,11 +1864,12 @@ const InvestimentoApp = {
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!merges"] = merges;
-    ws["!cols"] = [{ wch: 34 }, { wch: 14 }, { wch: 16 }, ...months.map(() => ({ wch: 14 }))];
+    ws["!cols"] = [{ wch: 36 }, { wch: 14 }, { wch: 14 }, ...months.map(() => ({ wch: 13 }))];
     ws["!rows"] = aoa.map((_, i) => {
-      if (i === titleR) return { hpt: 28 };
-      if (wrapRows.has(i)) return { hpt: 78 };
-      return { hpt: 18 };
+      if (rowHeights[i] != null) return { hpt: rowHeights[i] };
+      if (i === titleR) return { hpt: 26 };
+      if (wrapRows.has(i)) return { hpt: 22 };
+      return { hpt: 16 };
     });
     Object.keys(styles).forEach(key => {
       const [r, c] = key.split("|").map(Number);
