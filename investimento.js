@@ -668,10 +668,12 @@ const InvestimentoApp = {
       ? "CDI médio indisponível no período"
       : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m. (${n} ${n === 1 ? "mês" : "meses"})`;
     const src = encodeURIComponent(source || "");
-    return `<div style="margin-top:8px;padding:6px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;line-height:1.4;">
-      <div role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','rendimento','period')" style="font-size:0.68rem;font-weight:800;color:#0369a1;cursor:pointer;text-decoration:underline;text-decoration-color:#93c5fd;">Rendimento ${this.fmt(rend)}</div>
-      <div role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','tarifas','period')" style="font-size:0.65rem;font-weight:700;color:#9a3412;margin-top:2px;cursor:pointer;text-decoration:underline;text-decoration-color:#fdba74;">Imposto retido ${this.fmt(imposto)}</div>
-      <div style="font-size:0.65rem;font-weight:700;color:#854d0e;margin-top:2px;">${this.esc(cdiTxt)}</div>
+    return `<div style="margin-top:8px;padding:5px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this.esc(`Rendimento ${this.fmt(rend)} · Imposto retido ${this.fmt(imposto)} · ${cdiTxt}`)}">
+      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','rendimento','period')" style="font-size:0.68rem;font-weight:800;color:#0369a1;cursor:pointer;text-decoration:underline;text-decoration-color:#93c5fd;">Rendimento ${this.fmt(rend)}</span>
+      <span style="color:#cbd5e1;margin:0 6px;">·</span>
+      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','tarifas','period')" style="font-size:0.65rem;font-weight:700;color:#9a3412;cursor:pointer;text-decoration:underline;text-decoration-color:#fdba74;">Imposto retido ${this.fmt(imposto)}</span>
+      <span style="color:#cbd5e1;margin:0 6px;">·</span>
+      <span style="font-size:0.65rem;font-weight:700;color:#854d0e;">${this.esc(cdiTxt)}</span>
     </div>`;
   },
 
@@ -727,7 +729,6 @@ const InvestimentoApp = {
       return;
     }
     this.loading = true;
-    this.loadingHint = "Preparando consulta em fatias de semana/mês...";
     this.error = "";
     this.consultStart = this.startDate;
     this.consultEnd = this.endDate;
@@ -739,8 +740,6 @@ const InvestimentoApp = {
     const histStart = this.addDaysIso(this.startDate, -730);
     try {
       const companyIds = this.selectedCompanyIds.slice();
-      let movDone = 0;
-      const movTotal = Math.max(1, companyIds.length);
       const [accountsChunks, movChunks, balGlobal, balByCo] = await Promise.all([
         Promise.all(companyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
         (async () => {
@@ -753,13 +752,8 @@ const InvestimentoApp = {
               const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
                 selectionType: "M",
                 companyId: id,
-                concurrency: 3,
-                onChunk: (c, idx, total) => {
-                  this.loadingHint = `Empresa ${id}: movimentos ${idx + 1}/${total} (${String(c.start).slice(0, 7)} → ${String(c.end).slice(0, 7)}) · ${movDone + 1}/${movTotal} empresas`;
-                  this.render();
-                }
+                concurrency: 3
               });
-              movDone++;
               rows.push((data || []).map(m => ({ ...m, companyId: m.companyId || id })));
             }
           };
@@ -1294,7 +1288,7 @@ const InvestimentoApp = {
         </div>`
       : "";
     const body = list.length
-      ? `<div style="overflow:auto;max-height:calc(80vh - 160px);">
+      ? `<div style="overflow:auto;max-height:calc(80vh - 160px);" class="crm-scroll-table">
           <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
             <thead>
               <tr>
@@ -1495,7 +1489,6 @@ const InvestimentoApp = {
             ${this.loading ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 16px;color:var(--color-text-muted);">
               <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
               <span style="font-weight:500;">Carregando saldos e movimentos das contas de investimento...</span>
-              <div style="font-size:0.82rem;color:#105436;font-weight:700;">${this.esc(this.loadingHint || "Consultando Sienge em partes menores...")}</div>
             </div>` : this.tableHtml()}
           </div>
         </div>
@@ -1548,7 +1541,11 @@ const InvestimentoApp = {
       });
     })();
     const months = this.months;
-    const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;${extra || ""}">${label}</th>`;
+    const colConta = 380;
+    const colMov = 132;
+    const stickyConta = `position:sticky;left:0;z-index:2;min-width:${colConta}px;max-width:${colConta}px;width:${colConta}px;`;
+    const stickyMov = `position:sticky;left:${colConta}px;z-index:1;min-width:${colMov}px;width:${colMov}px;`;
+    const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;position:sticky;top:0;z-index:4;${extra || ""}">${label}</th>`;
     const clickTd = (n, kind, mk, source, opts) => {
       opts = opts || {};
       const abs = !!opts.abs;
@@ -1572,14 +1569,13 @@ const InvestimentoApp = {
       const source = opts.source || "all";
       const collapsed = collapseKey && this.collapsedAccounts.has(collapseKey);
       const bgHead = isTotal ? "#ecfdf5" : "#f8fafc";
-      const sticky = "position:sticky;left:0;z-index:1;";
       const chevron = collapseKey
         ? `<button type="button" onclick="InvestimentoApp.toggleAccountCollapse(decodeURIComponent('${encodeURIComponent(collapseKey)}'))" style="border:none;background:none;cursor:pointer;padding:0;color:#64748b;display:inline-flex;align-items:center;margin-right:4px;">
              <i data-lucide="${collapsed ? "chevron-right" : "chevron-down"}" style="width:14px;height:14px;"></i>
            </button>`
         : "";
       const labelCell = `
-        <td rowspan="${collapsed ? 1 : 5}" style="padding:8px 10px;vertical-align:top;min-width:200px;max-width:280px;${sticky}background:${bgHead};border-right:1px solid #e2e8f0;">
+        <td rowspan="${collapsed ? 1 : 5}" style="padding:8px 10px;vertical-align:top;${stickyConta}background:${bgHead};border-right:1px solid #e2e8f0;box-shadow:2px 0 0 #e2e8f0;">
           <div style="display:flex;align-items:flex-start;gap:2px;">
             ${chevron}
             <div>

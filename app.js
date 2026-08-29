@@ -11505,18 +11505,11 @@ window.toggleDistratoOtherBeneficiary = function() {
 };
 
 window.loadDistratoBanksList = async function() {
-  const listEl = document.getElementById("dist-bank-name-list");
-  if (!listEl) return;
-  if (Array.isArray(window._distBanksList) && window._distBanksList.length) {
-    if (!listEl.childElementCount) {
-      listEl.innerHTML = window._distBanksList.map((b) => `<option value="${b.label}"></option>`).join("");
-    }
-    return;
-  }
+  if (Array.isArray(window._distBanksList) && window._distBanksList.length) return window._distBanksList;
   try {
     const res = await fetch("https://brasilapi.com.br/api/banks/v1");
     const data = await res.json();
-    const rows = (Array.isArray(data) ? data : [])
+    window._distBanksList = (Array.isArray(data) ? data : [])
       .filter((b) => b && b.code != null && String(b.code) !== "" && b.name)
       .map((b) => {
         const code = String(b.code).padStart(3, "0");
@@ -11524,12 +11517,55 @@ window.loadDistratoBanksList = async function() {
         return { code, name, label: `${code} - ${name}` };
       })
       .sort((a, b) => Number(a.code) - Number(b.code));
-    window._distBanksList = rows;
-    listEl.innerHTML = rows.map((b) => `<option value="${b.label}"></option>`).join("");
   } catch (e) {
     console.warn("Lista de bancos (BrasilAPI) indisponível:", e);
+    window._distBanksList = window._distBanksList || [];
   }
+  return window._distBanksList;
 };
+
+window.hideDistratoBankSuggest = function() {
+  const box = document.getElementById("dist-bank-suggest");
+  if (box) box.style.display = "none";
+};
+
+window.selectDistratoBank = function(label) {
+  const input = document.getElementById("dist-bank-name");
+  if (input) input.value = label || "";
+  window.hideDistratoBankSuggest();
+};
+
+window.filterDistratoBanks = function(query) {
+  const box = document.getElementById("dist-bank-suggest");
+  if (!box) return;
+  const rows = Array.isArray(window._distBanksList) ? window._distBanksList : [];
+  if (!rows.length) {
+    if (typeof window.loadDistratoBanksList === "function") {
+      window.loadDistratoBanksList().then(() => window.filterDistratoBanks(query));
+    }
+    return;
+  }
+  const q = String(query || "").trim().toLowerCase();
+  const matches = (!q ? rows : rows.filter((b) =>
+    b.label.toLowerCase().includes(q) || b.code.includes(q) || b.name.toLowerCase().includes(q)
+  )).slice(0, 40);
+  if (!matches.length) {
+    box.style.display = "none";
+    return;
+  }
+  box.innerHTML = matches.map((b) =>
+    `<button type="button" onclick="selectDistratoBank(${JSON.stringify(b.label).replace(/</g, "\\u003c")})">${b.label.replace(/</g, "&lt;")}</button>`
+  ).join("");
+  box.style.display = "block";
+};
+
+document.addEventListener("click", function(e) {
+  const wrap = document.getElementById("dist-bank-name");
+  const box = document.getElementById("dist-bank-suggest");
+  if (!wrap || !box) return;
+  if (wrap === e.target || wrap.contains(e.target) || box.contains(e.target)) return;
+  window.hideDistratoBankSuggest();
+});
 
 function distPermutaRemainingCash() {
   const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
@@ -29752,6 +29788,29 @@ window.mapaJuridicoFillEmpSelect = function() {
   sel.value = current;
 };
 
+window.mapaJuridicoClearFilters = function() {
+  window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
+  window._mapaJuridicoClientQuery = "";
+  const empSel = document.getElementById("mapa-filtro-empresa");
+  const emp2 = document.getElementById("mapa-filtro-emp");
+  const prazo = document.getElementById("mapa-filtro-prazo");
+  const busca = document.getElementById("mapa-filtro-busca");
+  const nDias = document.querySelector("#mapa-juridico-ndias-wrap input");
+  const box = document.getElementById("mapa-filtro-clientes");
+  const nWrap = document.getElementById("mapa-juridico-ndias-wrap");
+  if (empSel) empSel.value = "";
+  if (prazo) prazo.value = "";
+  if (busca) busca.value = "";
+  if (nDias) nDias.value = 7;
+  if (nWrap) nWrap.style.visibility = "hidden";
+  if (box) box.style.display = "none";
+  window.mapaJuridicoFillEmpSelect();
+  if (emp2) emp2.value = "";
+  window.mapaJuridicoRenderClientList();
+  window.mapaJuridicoShowMap();
+  window.mapaJuridicoRenderStages();
+};
+
 window.mapaJuridicoSetFilter = function(key, val) {
   if (!window._mapaJuridicoFilters) window._mapaJuridicoFilters = { prazo: "", nDias: 7, company: "", emp: "", q: "", customerId: "" };
   window._mapaJuridicoFilters[key] = val;
@@ -30480,7 +30539,7 @@ window.showMapaJuridicoOverlay = function(ui) {
       #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
       #mapa-juridico-overlay .mapa-filtros {
         display: grid;
-        grid-template-columns: minmax(200px, 1.1fr) minmax(200px, 1.2fr) 190px 80px minmax(240px, 1.5fr);
+        grid-template-columns: minmax(180px, 1.05fr) minmax(180px, 1.15fr) 170px 72px minmax(240px, 1.6fr) auto;
         gap: 10px 12px;
         align-items: end;
         width: 100%;
@@ -30495,7 +30554,7 @@ window.showMapaJuridicoOverlay = function(ui) {
         height: 32px;
         box-sizing: border-box;
         min-width: 0;
-        border: 1px solid #e2e8f0;
+        border: 1px solid #cfe3d6;
         border-radius: 6px;
         padding: 0 8px;
         font-size: 0.8rem;
@@ -30504,35 +30563,36 @@ window.showMapaJuridicoOverlay = function(ui) {
       #mapa-filtro-clientes button:hover { background: #f8fafc !important; }
       @media (max-width: 900px) {
         #mapa-juridico-overlay .mapa-filtros { grid-template-columns: 1fr 1fr; }
+        #mapa-juridico-overlay .mapa-filtro-clear { grid-column: 1 / -1; justify-self: start; }
       }
     </style>
-    <div style="flex-shrink:0;background:#fff;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(15,23,42,0.06);">
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 8px;">
-        <button type="button" class="btn btn-secondary" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;">
+    <div style="flex-shrink:0;background:linear-gradient(135deg,#0d4630 0%,#105436 48%,#1a7a50 100%);box-shadow:0 4px 16px rgba(16,84,54,0.28);">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 12px;">
+        <button type="button" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:8px;padding:7px 12px;font-weight:700;font-size:0.82rem;cursor:pointer;">
           <i data-lucide="x" style="width:16px;"></i> Fechar
         </button>
         <div style="flex:1;">
-          <div style="font-size:1.05rem;font-weight:800;color:var(--color-primary);">Mapa Jurídico — Fases processuais</div>
-          <div style="font-size:0.75rem;color:#64748b;">${ui.nowLabel || ""}</div>
+          <div style="font-size:1.08rem;font-weight:800;color:#fff;letter-spacing:0.01em;">Mapa Jurídico — Fases processuais</div>
+          <div style="font-size:0.75rem;color:rgba(255,255,255,0.82);">${ui.nowLabel || ""}</div>
         </div>
-        <button type="button" id="btn-mapa-juridico-pdf" class="btn btn-primary" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;">
+        <button type="button" id="btn-mapa-juridico-pdf" onclick="exportMapaJuridicoPDF()" style="display:inline-flex;align-items:center;gap:6px;background:#fff;color:#105436;border:0;border-radius:8px;padding:8px 14px;font-weight:800;font-size:0.82rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.12);">
           <i data-lucide="file-down" style="width:16px;"></i> Gerar PDF
         </button>
       </div>
-      <div class="mapa-filtros" style="padding:0 18px 12px;">
-        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empresa
+      <div class="mapa-filtros" style="padding:10px 18px 14px;background:rgba(255,255,255,0.08);">
+        <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">Empresa
           <select id="mapa-filtro-empresa" onchange="mapaJuridicoSetFilter('company', this.value)">
             <option value="">Todas</option>
             ${(ui.companyOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
           </select>
         </label>
-        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Empreendimento
+        <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">Empreendimento
           <select id="mapa-filtro-emp" onchange="mapaJuridicoSetFilter('emp', this.value)">
             <option value="">Todos</option>
             ${(ui.empOptions || []).map(o => `<option value="${String(o.id).replace(/"/g, "&quot;")}">${String(o.name).replace(/</g, "&lt;")}</option>`).join("")}
           </select>
         </label>
-        <label style="font-size:0.7rem;font-weight:700;color:#64748b;">Prazo da etapa
+        <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">Prazo da etapa
           <select id="mapa-filtro-prazo" onchange="mapaJuridicoSetFilter('prazo', this.value)">
             <option value="">Todos</option>
             <option value="VENCIDOS">Etapas vencidas</option>
@@ -30540,17 +30600,22 @@ window.showMapaJuridicoOverlay = function(ui) {
             <option value="N_DIAS">Vencem em N dias</option>
           </select>
         </label>
-        <label id="mapa-juridico-ndias-wrap" style="visibility:hidden;font-size:0.7rem;font-weight:700;color:#64748b;">N dias
+        <label id="mapa-juridico-ndias-wrap" style="visibility:hidden;font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);">N dias
           <input type="number" min="1" value="7" onchange="mapaJuridicoSetFilter('nDias', this.value)"
-            style="display:block;height:32px;width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-size:0.8rem;">
+            style="display:block;height:32px;width:100%;box-sizing:border-box;border:1px solid #cfe3d6;border-radius:6px;padding:0 8px;font-size:0.8rem;">
         </label>
-        <label style="font-size:0.7rem;font-weight:700;color:#64748b;position:relative;">Cliente sub judice
+        <label style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.88);position:relative;">Cliente sub judice
           <div id="mapa-client-combo" style="position:relative;">
             <input type="text" id="mapa-filtro-busca" placeholder="Clique para ver a lista de clientes..."
               onfocus="mapaJuridicoOpenClientList()" oninput="mapaJuridicoSetSearch(this.value)" autocomplete="off">
             <div id="mapa-filtro-clientes" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:90;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,0.12);max-height:320px;overflow:auto;"></div>
           </div>
         </label>
+        <div class="mapa-filtro-clear" style="padding-bottom:1px;">
+          <button type="button" onclick="mapaJuridicoClearFilters()" style="height:32px;display:inline-flex;align-items:center;gap:6px;background:#fff;color:#105436;border:0;border-radius:8px;padding:0 12px;font-weight:800;font-size:0.75rem;cursor:pointer;white-space:nowrap;">
+            <i data-lucide="eraser" style="width:14px;"></i> Limpar filtros
+          </button>
+        </div>
       </div>
     </div>
     <div style="flex:1;overflow:auto;padding:16px 16px 28px;">

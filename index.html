@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=598">
+  <link rel="stylesheet" href="style.css?v=601">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1112,7 +1112,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.598 &nbsp;&middot;&nbsp; 29/08/2026
+            v1.0.601 &nbsp;&middot;&nbsp; 29/08/2026
           </span>
         </div>
       </div>
@@ -5231,6 +5231,33 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
           #dist-bank-digit { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
           .dist-bank-readonly { background: #e2e8f0 !important; color: #334155; cursor: not-allowed; }
           #dist-bank-beneficiary-name, #dist-bank-other-name { width: 100%; min-width: 0; box-sizing: border-box; }
+          .dist-bank-suggest {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% + 2px);
+            max-height: 176px;
+            overflow-y: auto;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            z-index: 40;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+          }
+          .dist-bank-suggest button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 7px 10px;
+            font-size: 0.8rem;
+            border: 0;
+            border-bottom: 1px solid #f1f5f9;
+            background: #fff;
+            color: #1e293b;
+            cursor: pointer;
+          }
+          .dist-bank-suggest button:last-child { border-bottom: 0; }
+          .dist-bank-suggest button:hover { background: #eff6ff; }
         </style>
         <section id="view-distrato" style="display: none; background: #f4f6f8; padding: 12px 16px; border-radius: 8px; margin-top: 10px;">
 
@@ -5519,10 +5546,10 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
                       </select>
                     </div>
                     <div id="dist-bank-ted-fields" style="display: none; gap: 10px; margin-top: 10px;">
-                      <div>
+                      <div style="position: relative;">
                         <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Banco</label>
-                        <input type="text" id="dist-bank-name" class="form-control" list="dist-bank-name-list" placeholder="Código ou nome do banco" autocomplete="off">
-                        <datalist id="dist-bank-name-list"></datalist>
+                        <input type="text" id="dist-bank-name" class="form-control" placeholder="Código ou nome do banco" autocomplete="off" oninput="filterDistratoBanks(this.value)" onfocus="filterDistratoBanks(this.value)">
+                        <div id="dist-bank-suggest" class="dist-bank-suggest" style="display: none;"></div>
                       </div>
                       <div>
                         <label style="font-size: 0.75rem; font-weight: 600; color: #334155; display: block; margin-bottom: 4px;">Agência</label>
@@ -6169,37 +6196,37 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=598"></script>
-  <script defer src="sienge-api.js?v=598"></script>
-  <script defer src="azure-auth.js?v=598"></script>
-  <script defer src="app.js?v=598"></script>
-  <script defer src="home-dashboard.js?v=598"></script>
-  <script defer src="anexos.js?v=598"></script>
-  <script defer src="contas-pagar.js?v=598"></script>
-  <script defer src="config-tags.js?v=598"></script>
-  <script defer src="config-users.js?v=598"></script>
-  <script defer src="construcao.js?v=598"></script>
-  <script defer src="empresas.js?v=598"></script>
-  <script defer src="relacionamento.js?v=598"></script>
+  <script defer src="data.js?v=601"></script>
+  <script defer src="sienge-api.js?v=601"></script>
+  <script defer src="azure-auth.js?v=601"></script>
+  <script defer src="app.js?v=601"></script>
+  <script defer src="home-dashboard.js?v=601"></script>
+  <script defer src="anexos.js?v=601"></script>
+  <script defer src="contas-pagar.js?v=601"></script>
+  <script defer src="config-tags.js?v=601"></script>
+  <script defer src="config-users.js?v=601"></script>
+  <script defer src="construcao.js?v=601"></script>
+  <script defer src="empresas.js?v=601"></script>
+  <script defer src="relacionamento.js?v=601"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=598"></script>
-  <script defer src="marketing.js?v=598"></script>
-  <script defer src="plano-financeiro.js?v=598"></script>
-  <script defer src="prestacao-contas.js?v=598"></script>
-  <script defer src="fluxo-caixa.js?v=598"></script>
-  <script defer src="investimento.js?v=598"></script>
-  <script defer src="parametrizacao-parceiro.js?v=598"></script>
-  <script defer src="societario.js?v=598"></script>
-  <script defer src="participacoes.js?v=598"></script>
-  <script defer src="fiscal.js?v=598"></script>
-  <script defer src="indexadores.js?v=598"></script>
-  <script defer src="verificar-construcao.js?v=598"></script>
-  <script src="repactuacoes.js?v=598"></script>
+  <script defer src="centros-custo.js?v=601"></script>
+  <script defer src="marketing.js?v=601"></script>
+  <script defer src="plano-financeiro.js?v=601"></script>
+  <script defer src="prestacao-contas.js?v=601"></script>
+  <script defer src="fluxo-caixa.js?v=601"></script>
+  <script defer src="investimento.js?v=601"></script>
+  <script defer src="parametrizacao-parceiro.js?v=601"></script>
+  <script defer src="societario.js?v=601"></script>
+  <script defer src="participacoes.js?v=601"></script>
+  <script defer src="fiscal.js?v=601"></script>
+  <script defer src="indexadores.js?v=601"></script>
+  <script defer src="verificar-construcao.js?v=601"></script>
+  <script src="repactuacoes.js?v=601"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=598"></script>
+  <script defer src="dashboard-inadimplencia.js?v=601"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

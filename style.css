@@ -1562,3 +1562,16 @@ circle.donut-segment {
 .custom-switch-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
 .custom-switch input:checked + .custom-switch-slider { background-color: #16a34a; }
 .custom-switch input:checked + .custom-switch-slider:before { transform: translateX(14px); }
+
+/* Tabelas longas: cabeçalho fixo ao rolar */
+.crm-scroll-table {
+  overflow: auto;
+  min-height: 0;
+  max-height: calc(100vh - 240px);
+}
+.crm-scroll-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  box-shadow: 0 1px 0 rgba(16, 84, 54, 0.18);
+}
