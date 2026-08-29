@@ -534,8 +534,10 @@ const InvestimentoApp = {
     const shaped = this.shapeBalance(b, cid);
     const blobA = `${acc.accountNumber || ""} ${acc.accountName || ""} ${acc.mask || ""}`;
     const blobB = `${shaped.accountNumber} ${shaped.accountName} ${shaped.mask}`;
+    const fullA = this.compactName(blobA);
+    const fullB = this.compactName(blobB);
     const idA = String(acc.checkingAccountId || acc.idCheckingAccount || acc.id || "").trim();
-    const idB = String(shaped.checkingAccountId || shaped.idCheckingAccount || shaped.id || "").trim();
+    const idB = String(shaped.checkingAccountId || shaped.idCheckingAccount || shaped.id || b.accountId || "").trim();
     if (idA && idB && idA === idB) return 1000;
     const bankA = this.bankToken(blobA);
     const bankB = this.bankToken(blobB);
@@ -552,15 +554,30 @@ const InvestimentoApp = {
     let score = 0;
     if (digA && digB && digA === digB && digA.length >= 5) score += 200;
     if (nameA && nameB && nameA === nameB) score += 160;
-    if (bankA && bankB && bankA === bankB) score += 80;
+    if (fullA && fullB && fullA.length >= 8 && fullB.includes(fullA)) score += 180;
+    if (nameA && fullB && nameA.length >= 8 && fullB.includes(nameA)) score += 140;
+    if (bankA && (bankB === bankA || fullB.includes(bankA))) score += 80;
     if (prodA && prodB && prodA === prodB) score += 50;
-    if (numA && numB && numA === numB) score += numA.length >= 6 ? 80 : 25;
+    if (fullA.includes("MLDU") && fullB.includes("MLDU")) score += 40;
+    if (numA && numB && numA === numB) score += numA.length >= 6 ? 80 : 45;
     if (nameA.length >= 14 && nameB.length >= 14 && (nameA.includes(nameB) || nameB.includes(nameA))) score += 40;
     return score;
   },
 
   balanceAmount(b) {
-    const candidates = [b.reconciledAmount, b.reconciledBalance, b.amount, b.balance, b.value];
+    const candidates = [
+      b.amount,
+      b.balance,
+      b.balanceAmount,
+      b.currentBalance,
+      b.lastBalance,
+      b.lastBalanceAmount,
+      b.availableAmount,
+      b.availableBalance,
+      b.reconciledAmount,
+      b.reconciledBalance,
+      b.value
+    ];
     for (let i = 0; i < candidates.length; i++) {
       const n = this.parseMoney(candidates[i]);
       if (n != null) return n;
@@ -570,15 +587,28 @@ const InvestimentoApp = {
 
   pickOpeningBalance(list, acc) {
     const cid = String(acc.companyId);
+    const seen = new Set();
     const ranked = (list || []).map(b => {
       const bCid = b.companyId != null ? String(b.companyId) : (b.idCompany != null ? String(b.idCompany) : "");
       if (bCid && bCid !== cid) return null;
+      const ident = `${bCid}|${this.accIdentity(b.accountNumber || b.number, b)}|${String(b.balanceDate || b.date || "")}|${this.balanceAmount(b)}`;
+      if (seen.has(ident)) return null;
+      seen.add(ident);
       return { b, score: this.scoreOpeningBalance(acc, b) };
     }).filter(x => x && x.score >= 70);
     if (!ranked.length) return null;
-    ranked.sort((a, b) => b.score - a.score || String(b.b.balanceDate || "").localeCompare(String(a.b.balanceDate || "")));
-    if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].score < 160) return null;
+    ranked.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const da = String(a.b.balanceDate || a.b.date || "");
+      const dbd = String(b.b.balanceDate || b.b.date || "");
+      return dbd.localeCompare(da);
+    });
     return this.balanceAmount(ranked[0].b);
+  },
+
+  isNamedInvestAccount(acc) {
+    const dig = this.normAcc(acc.accountNumber || acc.mask || "");
+    return !dig || dig.length < 5;
   },
 
   emptyFlow() {
@@ -628,7 +658,7 @@ const InvestimentoApp = {
     return vals.reduce((s, n) => s + n, 0) / vals.length;
   },
 
-  accountPeriodMetaHtml(monthFlow) {
+  accountPeriodMetaHtml(monthFlow, source) {
     const rend = this.periodRendimento(monthFlow);
     const imposto = Math.abs(this.periodImposto(monthFlow));
     const avg = this.avgCdiPeriod();
@@ -636,19 +666,44 @@ const InvestimentoApp = {
     const cdiTxt = avg == null
       ? "CDI médio indisponível no período"
       : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m. (${n} ${n === 1 ? "mês" : "meses"})`;
+    const src = encodeURIComponent(source || "");
     return `<div style="margin-top:8px;padding:6px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;line-height:1.4;">
-      <div style="font-size:0.68rem;font-weight:800;color:#0369a1;">Rendimento ${this.fmt(rend)}</div>
-      <div style="font-size:0.65rem;font-weight:700;color:#9a3412;margin-top:2px;">Imposto retido ${this.fmt(imposto)}</div>
+      <div role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','rendimento','period')" style="font-size:0.68rem;font-weight:800;color:#0369a1;cursor:pointer;text-decoration:underline;text-decoration-color:#93c5fd;">Rendimento ${this.fmt(rend)}</div>
+      <div role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','tarifas','period')" style="font-size:0.65rem;font-weight:700;color:#9a3412;margin-top:2px;cursor:pointer;text-decoration:underline;text-decoration-color:#fdba74;">Imposto retido ${this.fmt(imposto)}</div>
       <div style="font-size:0.65rem;font-weight:700;color:#854d0e;margin-top:2px;">${this.esc(cdiTxt)}</div>
     </div>`;
   },
 
-  accountPeriodMetaText(monthFlow) {
+  accountPeriodMetaLines(monthFlow) {
     const rend = this.periodRendimento(monthFlow);
     const imposto = Math.abs(this.periodImposto(monthFlow));
     const avg = this.avgCdiPeriod();
     const cdiTxt = avg == null ? "CDI médio indisponível" : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m.`;
-    return `Rendimento ${this.fmt(rend)} · Imposto retido ${this.fmt(imposto)} · ${cdiTxt}`;
+    return [
+      `Rendimento ${this.fmt(rend)}`,
+      `Imposto retido ${this.fmt(imposto)}`,
+      cdiTxt
+    ];
+  },
+
+  accountPeriodMetaText(monthFlow) {
+    return this.accountPeriodMetaLines(monthFlow).join("\n");
+  },
+
+  excelSplitDot(text) {
+    return String(text || "")
+      .split(/\s*·\s*|\n/)
+      .map(p => p.trim())
+      .filter(Boolean);
+  },
+
+  excelAccountCell(label, sub, monthFlow) {
+    const lines = [String(label || "").trim()].filter(Boolean);
+    this.excelSplitDot(sub).forEach(p => {
+      if (p && p !== label) lines.push(p);
+    });
+    this.accountPeriodMetaLines(monthFlow).forEach(l => lines.push(l));
+    return lines.join("\n");
   },
 
   async load() {
@@ -784,7 +839,7 @@ const InvestimentoApp = {
         const amount = this.movAmount(mov);
         const day = String(mov.bankMovementDate || "").slice(0, 10);
         if (day && day < this.startDate) {
-          if (!row.openingFromApi) row.opening += amount;
+          if (!row.openingFromApi && !this.isNamedInvestAccount(row)) row.opening += amount;
           return;
         }
         const mk = String(mov.bankMovementDate || "").slice(0, 7);
@@ -793,7 +848,20 @@ const InvestimentoApp = {
         else if (kind === "resgate") { row.resgates += amount; row.months[mk].resgates += amount; }
         else if (kind === "rendimento") { row.rendimento += amount; row.months[mk].rendimento += amount; }
         else { row.tarifas += amount; row.months[mk].tarifas += amount; }
-        row.movements.push(mov);
+        row.movements.push({ ...mov, _kind: kind, _amount: amount });
+      });
+
+      byAcc.forEach(row => {
+        if (row.openingFromApi) return;
+        const sample = (row.movements || [])[0];
+        const probe = sample
+          ? Object.assign({}, row, { accountNumber: this.movAccount(sample) })
+          : row;
+        const apiOpen = this.pickOpeningBalance(balances, probe);
+        if (apiOpen != null) {
+          row.opening = apiOpen;
+          row.openingFromApi = true;
+        }
       });
 
       const accounts = [...byAcc.values()].map(row => {
@@ -1122,6 +1190,149 @@ const InvestimentoApp = {
     this.render();
   },
 
+  kindLabel(kind) {
+    return ({
+      aporte: "Entrada",
+      resgate: "Saída",
+      rendimento: "Rendimento",
+      tarifas: "Imposto retido",
+      saldo: "Saldo (lançamentos do mês)",
+      opening: "Saldo inicial"
+    })[kind] || kind;
+  },
+
+  fmtDatePt(iso) {
+    const s = String(iso || "").slice(0, 10);
+    const p = s.split("-");
+    if (p.length !== 3) return s || "—";
+    return `${p[2]}/${p[1]}/${p[0]}`;
+  },
+
+  accountsForSource(source) {
+    const vis = this.visibleAccounts();
+    const s = String(source || "");
+    if (!s || s === "all") return vis;
+    if (s.indexOf("co-") === 0) return this.companyAccounts(s.slice(3), vis);
+    return vis.filter(r => String(r.key) === s);
+  },
+
+  movementsFor(source, kind, month) {
+    const rows = this.accountsForSource(source);
+    const list = [];
+    rows.forEach(r => {
+      (r.movements || []).forEach(m => {
+        const day = String(m.bankMovementDate || "").slice(0, 10);
+        const mk = day.slice(0, 7);
+        if (month && month !== "period" && mk !== month) return;
+        const k = m._kind || this.classifyMovement(m);
+        if (kind && kind !== "saldo" && kind !== "opening" && k !== kind) return;
+        list.push({
+          ...m,
+          _kind: k,
+          _amount: m._amount != null ? m._amount : this.movAmount(m),
+          _accLabel: r.accountNumber || r.accountName,
+          _accName: r.accountName
+        });
+      });
+    });
+    list.sort((a, b) => String(a.bankMovementDate || "").localeCompare(String(b.bankMovementDate || "")));
+    return list;
+  },
+
+  movNumber(m) {
+    return m.bankMovementId || m.id || m.movementId || m.documentNumber || m.documentIdentification || m.document || "—";
+  },
+
+  movHistoric(m) {
+    return m.historic || m.history || m.bankMovementHistoricName || m.bankMovementOperationName || m.originDescription || m.observations || m.note || "";
+  },
+
+  closeMovimentos() {
+    const el = document.getElementById("inv-mov-modal");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  openMovimentos(sourceEnc, kind, monthEnc) {
+    const source = decodeURIComponent(sourceEnc || "");
+    const month = decodeURIComponent(monthEnc || "");
+    const rows = this.accountsForSource(source);
+    const titleAcc = rows.length === 1
+      ? `${rows[0].accountNumber || ""} — ${rows[0].accountName || ""}`
+      : (source.indexOf("co-") === 0 ? this.companyName(source.slice(3)) : "Consolidado");
+    const periodLabel = !month || month === "period"
+      ? "período consultado"
+      : this.monthLabel(month);
+    const list = kind === "opening" ? [] : this.movementsFor(source, kind, month);
+    const total = list.reduce((s, m) => s + (Number(m._amount) || 0), 0);
+    const displayTotal = kind === "resgate" || kind === "tarifas" ? Math.abs(total) : total;
+    const openingHint = kind === "opening"
+      ? `<div style="padding:10px 12px;background:#fef9c3;border:1px solid #facc15;border-radius:8px;margin-bottom:12px;font-size:0.82rem;color:#854d0e;">
+          Saldo inicial da posição no Sienge em ${this.esc(this.fmtDatePt(this.addDaysIso(this.startDate, -1)))}:
+          <strong>${this.fmt(rows.reduce((s, r) => s + (Number(r.opening) || 0), 0))}</strong>
+          ${rows.some(r => r.openingFromApi) ? " (saldo oficial da conta, não é soma de lançamentos do período)." : " (quando não há saldo oficial, o sistema soma movimentos anteriores ao início)."}
+        </div>`
+      : "";
+    const body = list.length
+      ? `<div style="overflow:auto;max-height:calc(80vh - 160px);">
+          <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+            <thead>
+              <tr>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Data</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Nº movimento</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Documento</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Histórico</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Tipo</th>
+                ${rows.length > 1 ? `<th style="padding:8px;background:#105436;color:#fff;text-align:left;">Conta</th>` : ""}
+                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map(m => {
+                const amt = Number(m._amount) || 0;
+                const shown = kind === "resgate" || kind === "tarifas" ? Math.abs(amt) : amt;
+                const color = amt < 0 ? "#b91c1c" : (m._kind === "rendimento" ? "#0369a1" : (m._kind === "tarifas" ? "#9a3412" : "#0f172a"));
+                return `<tr style="border-bottom:1px solid #e2e8f0;">
+                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.fmtDatePt(m.bankMovementDate))}</td>
+                  <td style="padding:7px 8px;font-weight:700;color:#105436;">${this.esc(this.movNumber(m))}</td>
+                  <td style="padding:7px 8px;">${this.esc(m.documentIdentification || m.documentNumber || m.document || "—")}</td>
+                  <td style="padding:7px 8px;max-width:360px;">${this.esc(this.movHistoric(m))}</td>
+                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.kindLabel(m._kind))}</td>
+                  ${rows.length > 1 ? `<td style="padding:7px 8px;">${this.esc(m._accLabel || "")}</td>` : ""}
+                  <td style="padding:7px 8px;text-align:right;font-weight:700;color:${color};font-variant-numeric:tabular-nums;">${this.fmt(shown)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="${rows.length > 1 ? 6 : 5}" style="padding:8px;font-weight:800;text-align:right;">Total (${list.length} lançamento${list.length === 1 ? "" : "s"})</td>
+                <td style="padding:8px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;">${this.fmt(displayTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>`
+      : `<div style="padding:28px;text-align:center;color:#64748b;">Nenhum lançamento neste recorte.</div>`;
+    this.closeMovimentos();
+    const overlay = document.createElement("div");
+    overlay.id = "inv-mov-modal";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:24px;";
+    overlay.onclick = (e) => { if (e.target === overlay) this.closeMovimentos(); };
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;width:min(1100px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
+        <div style="padding:14px 16px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;">
+          <div>
+            <div style="font-size:1rem;font-weight:800;">${this.esc(this.kindLabel(kind))} · ${this.esc(periodLabel)}</div>
+            <div style="font-size:0.78rem;opacity:.9;margin-top:3px;">${this.esc(titleAcc)}</div>
+          </div>
+          <button type="button" onclick="InvestimentoApp.closeMovimentos()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+        </div>
+        <div style="padding:14px 16px 18px;">
+          ${openingHint}
+          ${body}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  },
+
   companyAccounts(companyId, list) {
     return (list || this.accounts).filter(r => String(r.companyId) === String(companyId));
   },
@@ -1311,16 +1522,27 @@ const InvestimentoApp = {
     })();
     const months = this.months;
     const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;${extra || ""}">${label}</th>`;
-    const money = (n, bold) => `<td style="padding:6px 8px;${this.cell(n, bold)}">${this.fmt(n)}</td>`;
-    const empty = `<td style="padding:6px 8px;text-align:right;color:#cbd5e1;">—</td>`;
-    const rendTd = (n, opening, mk, bold) => {
-      const tip = this.esc(this.cdiTip(n, opening, mk));
-      return `<td title="${tip}" style="padding:6px 8px;${this.cell(n, bold)};cursor:help;">${this.fmt(n)}</td>`;
+    const clickTd = (n, kind, mk, source, opts) => {
+      opts = opts || {};
+      const abs = !!opts.abs;
+      const bold = !!opts.bold;
+      const v = abs ? Math.abs(Number(n) || 0) : (Number(n) || 0);
+      const src = encodeURIComponent(source || "all");
+      const k = encodeURIComponent(kind || "");
+      const m = encodeURIComponent(mk || "");
+      const tip = this.esc(opts.title || "Clique para ver os lançamentos");
+      const color = abs
+        ? (v ? "#b91c1c" : "#94a3b8")
+        : (n < 0 ? "#b91c1c" : (n > 0 ? (opts.color || "#105436") : "#94a3b8"));
+      return `<td onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','${k}','${m}')" title="${tip}"
+        style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${color};font-weight:${bold ? 800 : 600};white-space:nowrap;cursor:pointer;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;">${this.fmt(v)}</td>`;
     };
+    const empty = `<td style="padding:6px 8px;text-align:right;color:#cbd5e1;">—</td>`;
 
     const groupRows = (label, sub, opening, monthFlow, isTotal, opts) => {
       opts = opts || {};
       const collapseKey = opts.collapseKey;
+      const source = opts.source || "all";
       const collapsed = collapseKey && this.collapsedAccounts.has(collapseKey);
       const bgHead = isTotal ? "#ecfdf5" : "#f8fafc";
       const sticky = "position:sticky;left:0;z-index:1;";
@@ -1336,7 +1558,7 @@ const InvestimentoApp = {
             <div>
               <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
               ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
-              ${this.accountPeriodMetaHtml(monthFlow)}
+              ${!collapsed ? this.accountPeriodMetaHtml(monthFlow, source) : ""}
             </div>
           </div>
         </td>`;
@@ -1345,48 +1567,44 @@ const InvestimentoApp = {
         return `<tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
           <td style="padding:6px 10px;font-weight:800;color:#0f172a;">Saldo</td>
-          ${money(opening, true)}
-          ${saldos.map(n => money(n, true)).join("")}
+          ${clickTd(opening, "opening", "", source, { bold: true })}
+          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
         </tr>`;
       }
       const entradas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).aportes || 0);
       const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
       const impostos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).tarifas || 0);
       const rends = months.map(mk => monthFlow.find(f => f.month === mk) || { rendimento: 0, opening: 0, month: mk });
-      const absCell = (n) => {
-        const v = Math.abs(Number(n) || 0);
-        return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${v ? "#b91c1c" : "#94a3b8"};font-weight:600;white-space:nowrap;">${this.fmt(v)}</td>`;
-      };
       return `
         <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
           <td style="padding:6px 10px;font-weight:700;color:#105436;white-space:nowrap;">Entrada</td>
           ${empty}
-          ${entradas.map(n => money(n)).join("")}
+          ${entradas.map((n, i) => clickTd(n, "aporte", months[i], source, { color: "#105436" })).join("")}
         </tr>
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#b91c1c;white-space:nowrap;">Saída</td>
           ${empty}
-          ${saidas.map(n => absCell(n)).join("")}
+          ${saidas.map((n, i) => clickTd(n, "resgate", months[i], source, { abs: true })).join("")}
         </tr>
         <tr style="background:#fff;">
           <td style="padding:6px 10px;font-weight:700;color:#0369a1;white-space:nowrap;">Rendimento</td>
           ${empty}
-          ${rends.map(f => rendTd(f.rendimento || 0, f.opening || 0, f.month)).join("")}
+          ${rends.map(f => clickTd(f.rendimento || 0, "rendimento", f.month, source, { color: "#0369a1", title: this.cdiTip(f.rendimento || 0, f.opening || 0, f.month) + " — clique para ver lançamentos" })).join("")}
         </tr>
         <tr style="background:#fff7ed;">
           <td style="padding:6px 10px;font-weight:700;color:#9a3412;white-space:nowrap;">Imposto retido</td>
           ${empty}
-          ${impostos.map(n => absCell(n)).join("")}
+          ${impostos.map((n, i) => clickTd(n, "tarifas", months[i], source, { abs: true })).join("")}
         </tr>
         <tr style="background:${isTotal ? "#d1fae5" : "#f1f5f9"};">
           <td style="padding:6px 10px;font-weight:800;color:#0f172a;white-space:nowrap;">Saldo</td>
-          ${money(opening, true)}
-          ${saldos.map(n => money(n, true)).join("")}
+          ${clickTd(opening, "opening", "", source, { bold: true })}
+          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
         </tr>`;
     };
 
-    const consolidado = groupRows("Consolidado", "Empresas selecionadas", visKpis.opening, visFlow, true);
+    const consolidado = groupRows("Consolidado", "Empresas selecionadas", visKpis.opening, visFlow, true, { source: "all" });
     let body = consolidado;
     const showGroup = this.groupByCompany && this.selectedCompanyIds.length > 1;
     if (showGroup) {
@@ -1408,15 +1626,15 @@ const InvestimentoApp = {
           </td>
         </tr>`;
         if (!closed) {
-          body += groupRows("Total da empresa", this.companyName(cid), agg.opening, agg.months, true, { collapseKey: "co-" + cid });
+          body += groupRows("Total da empresa", this.companyName(cid), agg.opening, agg.months, true, { collapseKey: "co-" + cid, source: "co-" + cid });
           body += accs.map(r =>
-            groupRows(r.accountNumber || r.accountName, r.accountName, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key })
+            groupRows(r.accountNumber || r.accountName, r.accountName, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key, source: r.key })
           ).join("");
         }
       });
     } else {
       body += accounts.map(r =>
-        groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key })
+        groupRows(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), false, { collapseKey: r.key, source: r.key })
       ).join("");
     }
 
@@ -1430,7 +1648,7 @@ const InvestimentoApp = {
               <input type="checkbox" ${this.groupByCompany ? "checked" : ""} onchange="InvestimentoApp.toggleGroupByCompany()">
               Agrupar por empresa
             </label>` : ""}
-            <span style="font-size:0.7rem;color:#64748b;">Passe o mouse no rendimento para ver % do CDI</span>
+            <span style="font-size:0.7rem;color:#64748b;">Clique em um valor para ver os lançamentos</span>
           </div>
         </div>
         <table class="custom-table" style="width:max-content;min-width:100%;border-collapse:collapse;font-size:0.78rem;">
@@ -1492,11 +1710,11 @@ const InvestimentoApp = {
       return aoa.length - 1;
     };
 
-    const titleR = pushRow(["Kardex — conta × movimento · saldo inicial e meses"]);
+    const titleR = pushRow(["Kardex — conta × movimento\nsaldo inicial e meses"]);
     merges.push({ s: { r: titleR, c: 0 }, e: { r: titleR, c: colCount - 1 } });
-    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center" } });
+    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: true } });
 
-    const subR = pushRow([`Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")} · empresas geridas pelo grupo`]);
+    const subR = pushRow([`Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")}\nempresas geridas pelo grupo`]);
     merges.push({ s: { r: subR, c: 0 }, e: { r: subR, c: colCount - 1 } });
     mark(subR, 0, { font: font({ sz: 9, color: { rgb: "D1FAE5" } }), fill: fill("105436") });
 
@@ -1544,6 +1762,7 @@ const InvestimentoApp = {
       border
     });
 
+    const wrapRows = new Set([titleR, subR]);
     const pushBlock = (label, sub, opening, monthFlow, kind) => {
       const find = mk => monthFlow.find(f => f.month === mk) || {};
       const entradas = months.map(mk => Number(find(mk).aportes) || 0);
@@ -1554,8 +1773,9 @@ const InvestimentoApp = {
       const isTotal = kind === "total";
       const headBg = isTotal ? "ECFDF5" : "F8FAFC";
       const saldoBg = isTotal ? "D1FAE5" : "F1F5F9";
-      const contaTxt = (sub ? label + "\n" + sub : label) + "\n" + this.accountPeriodMetaText(monthFlow);
+      const contaTxt = this.excelAccountCell(label, sub, monthFlow);
       const r0 = pushRow([contaTxt, "Entrada", "", ...entradas]);
+      wrapRows.add(r0);
       const r1 = pushRow(["", "Saída", "", ...saidas]);
       const r2 = pushRow(["", "Rendimento", "", ...rends]);
       const r3 = pushRow(["", "Imposto retido", "", ...impostos]);
@@ -1583,8 +1803,9 @@ const InvestimentoApp = {
 
     const pushCompanyBar = (text) => {
       const r = pushRow([text]);
+      wrapRows.add(r);
       merges.push({ s: { r, c: 0 }, e: { r, c: colCount - 1 } });
-      mark(r, 0, { font: font({ bold: true, sz: 10, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center" } });
+      mark(r, 0, { font: font({ bold: true, sz: 10, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center", wrapText: true } });
     };
 
     pushBlock("Consolidado", "Empresas selecionadas", visAgg.opening, visAgg.months, "total");
@@ -1595,18 +1816,22 @@ const InvestimentoApp = {
         const accs = this.companyAccounts(cid, accounts);
         if (!accs.length) return;
         const agg = this.aggregateFlow(accs);
-        pushCompanyBar(this.companyName(cid) + "  ·  " + accs.length + " conta(s)");
+        pushCompanyBar(this.companyName(cid) + "\n" + accs.length + " conta(s)");
         pushBlock("Total da empresa", this.companyName(cid), agg.opening, agg.months, "total");
         accs.forEach(r => pushBlock(r.accountNumber || r.accountName, r.accountName, r.opening, this.monthFlowOf(r), "acc"));
       });
     } else {
-      accounts.forEach(r => pushBlock(r.accountNumber || r.accountName, `${r.accountName} · ${r.companyName}`, r.opening, this.monthFlowOf(r), "acc"));
+      accounts.forEach(r => pushBlock(r.accountNumber || r.accountName, `${r.accountName}\n${r.companyName}`, r.opening, this.monthFlowOf(r), "acc"));
     }
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!merges"] = merges;
-    ws["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, ...months.map(() => ({ wch: 14 }))];
-    ws["!rows"] = [{ hpt: 22 }, { hpt: 16 }];
+    ws["!cols"] = [{ wch: 34 }, { wch: 14 }, { wch: 16 }, ...months.map(() => ({ wch: 14 }))];
+    ws["!rows"] = aoa.map((_, i) => {
+      if (i === titleR) return { hpt: 28 };
+      if (wrapRows.has(i)) return { hpt: 78 };
+      return { hpt: 18 };
+    });
     Object.keys(styles).forEach(key => {
       const [r, c] = key.split("|").map(Number);
       const addr = XLSX.utils.encode_cell({ r, c });

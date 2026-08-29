@@ -1745,6 +1745,37 @@ const AnexosApp = {
   }
 };
 
+window.anexosUploadCustomerAttachment = async function(customerId, file, tagLabel) {
+  const id = String(customerId || "").trim();
+  if (!id) throw new Error("Cliente sem ID.");
+  if (!file) throw new Error("Arquivo não informado.");
+  const tag = String(tagLabel || "DADOS BANCARIOS PARA DISTRATO").replace(/[\\/]+/g, " ").trim();
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const dataIsoDot = `${y}.${m}.${d}`;
+  const dataSuffix = ` ${d}.${m}.${y}`;
+  const extRaw = (file.name && file.name.includes(".")) ? file.name.split(".").pop() : (file.type === "application/pdf" ? "pdf" : "jpg");
+  const extFinal = String(extRaw || "jpg").toLowerCase() === "jpeg" ? "jpg" : String(extRaw || "jpg").toLowerCase();
+  const nomeFinalArquivo = anexosSafeFileName(`[${id}] - ${tag}${dataSuffix}.${extFinal}`);
+  const descricaoSienge = `${dataIsoDot} - ${tag}`.replace(/\s+/g, " ").trim();
+  const apiUrl = anexosApiUrl(`/sienge-proxy/customers/${id}/attachments?description=${encodeURIComponent(descricaoSienge)}`);
+  const multipart = await anexosMultipartBody(file, nomeFinalArquivo);
+  const auth = (typeof getBasicAuthHeader === "function") ? getBasicAuthHeader() : "";
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: auth,
+      Accept: "application/json",
+      "Content-Type": multipart.contentType
+    },
+    body: multipart.body
+  });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return true;
+};
+
 // Travar saida da página se tiver uploads pendentes
 window.addEventListener('beforeunload', (e) => {
   if (AnexosState.files.length > 0) {

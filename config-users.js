@@ -85,6 +85,10 @@ const ConfigUsersApp = {
       submodules: [{ name: "Geral", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Estrutura Societária" }] }]
     },
     {
+      name: "Participações", icon: "pie-chart", key: "mod_participacoes",
+      submodules: [{ name: "Geral", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Prestação de contas (Ellenco)" }] }]
+    },
+    {
       name: "Comercial", icon: "store", key: "mod_comercial",
       submodules: [{ name: "Geral", key: "sub_com_geral", actions: [
         { id: "dashboard", label: "Dashboard" },

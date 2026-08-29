@@ -724,6 +724,50 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Rota para baixar/visualizar PDF do Sienge com nome customizado
+      // --- PARTICIPAÇÕES / PRESTAÇÃO ELLENCO ---
+      if (pathRoute === '/api/participacoes/companies' && req.method === 'GET') {
+        const part = require('./api/participacoes-fs');
+        const data = part.listCompanyFolders(__dirname);
+        return sendJson(res, 200, data);
+      }
+      if (pathRoute === '/api/participacoes/files' && req.method === 'GET') {
+        const part = require('./api/participacoes-fs');
+        const u = new URL(req.url, 'http://localhost');
+        const companyId = u.searchParams.get('companyId');
+        if (!companyId) return sendJson(res, 400, { error: 'companyId obrigatório' });
+        return sendJson(res, 200, part.listPdfFiles(__dirname, companyId));
+      }
+      if (pathRoute === '/api/participacoes/file' && req.method === 'GET') {
+        const part = require('./api/participacoes-fs');
+        const u = new URL(req.url, 'http://localhost');
+        try {
+          const { full } = part.filePath(__dirname, u.searchParams.get('companyId'), u.searchParams.get('file'));
+          const stat = fs.statSync(full);
+          res.writeHead(200, {
+            'Content-Type': 'application/pdf',
+            'Content-Length': stat.size,
+            'Access-Control-Allow-Origin': '*',
+            'Content-Disposition': 'inline; filename="' + encodeURIComponent(path.basename(full)) + '"'
+          });
+          fs.createReadStream(full).pipe(res);
+        } catch (e) {
+          return sendJson(res, 404, { error: e.message });
+        }
+        return;
+      }
+      if (pathRoute === '/api/participacoes/upload' && req.method === 'POST') {
+        const part = require('./api/participacoes-fs');
+        try {
+          const mp = await part.parseMultipart(req);
+          const companyId = (mp.fields && mp.fields.companyId) || '';
+          if (!mp.file || !mp.file.buffer) return sendJson(res, 400, { error: 'Arquivo PDF obrigatório' });
+          const saved = part.saveUpload(__dirname, companyId, mp.file.filename, mp.file.buffer);
+          return sendJson(res, 200, saved);
+        } catch (e) {
+          return sendJson(res, 400, { error: e.message });
+        }
+      }
+
       if (pathRoute === '/api/proxy-download' && req.method === 'GET') {
         const queryParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
         const targetUrl = queryParams.get('url');

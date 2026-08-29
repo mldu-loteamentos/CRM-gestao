@@ -98,8 +98,17 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   });
 
   let opsToShow;
-  if (useActualData && (filaReady || clients.length > 0)) {
-    opsToShow = [...activeFromFila].map(n => displayByNorm.get(n)).filter(Boolean);
+  const fromFila = [...activeFromFila].map(n => displayByNorm.get(n)).filter(Boolean);
+  if (useActualData && clients.length > 0) {
+    const seen = new Set();
+    opsToShow = [];
+    fromFila.forEach(op => {
+      const n = normOp(op);
+      if (skip(n) || seen.has(n)) return;
+      seen.add(n);
+      opsToShow.push(displayByNorm.get(n) || op);
+    });
+    opsToShow.sort((a, b) => String(a).localeCompare(String(b), "pt-BR"));
   } else {
     const inRules = window.getOperatorsNamedInCityRules();
     opsToShow = dynOps.filter(op => inRules.has(normOp(op)));
@@ -1363,6 +1372,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "investimento": "Investimento",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "estrutura-societaria": "Estrutura Societária",
+    "participacoes": "Participações",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",
@@ -1402,6 +1412,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "investimento": "trending-up",
     "parametrizacao-parceiro": "handshake",
     "estrutura-societaria": "git-fork",
+    "participacoes": "pie-chart",
     "plano-financeiro": "layout-list",
     "indexadores": "trending-up",
     "compromissario_prefeitura": "building",
@@ -1520,6 +1531,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   } else if (tabId === "estrutura-societaria") {
     if (typeof SocietarioApp !== "undefined") SocietarioApp.init();
+  } else if (tabId === "participacoes") {
+    if (typeof ParticipacoesApp !== "undefined") ParticipacoesApp.init();
   }
 }
 
@@ -1828,6 +1841,11 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms["sub_fin_cr_" + id + "_editar"] === true
     );
   }
+  if (modKey === "mod_participacoes" || modKey === "sub_part_geral_participacoes_acessar") {
+    return perms.mod_societario === true
+      || perms.sub_soc_geral_estrutura_societaria_acessar === true
+      || perms.sub_soc_geral_estrutura_societaria_visualizar === true;
+  }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
   return perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true;
@@ -2004,6 +2022,7 @@ async function initializeApplication() {
       const map = new Map();
       const add = (n) => {
           if (!n || window.isExactTesteOccurrence(n)) return;
+          if (typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, n.customerId)) return;
           const k = window.occurrenceIdentity(n);
           if (!k || k === '||||') return;
           if (!map.has(k)) map.set(k, n);
@@ -4156,6 +4175,9 @@ document.addEventListener("click", function(e) {
   
   const subjudiceList = rawList.filter(c => c.subjudice === "S");
   window.rawClientList = rawList;
+  if (typeof window.updateOperatorTabsUI === "function") {
+    window.updateOperatorTabsUI(true);
+  }
 
   // Calcular idade de cada cliente a partir do cache global
   if (window.GlobalCustomerCache && window.GlobalCustomerCache.data && window.GlobalCustomerCache.data.length > 0) {
@@ -8949,6 +8971,7 @@ function renderCustomerOccurrences() {
   
   // Restringir a exibição apenas para o contrato selecionado ou legados (sem contrato definido)
   list = list.filter(occ => window.occurrenceMatchesCurrentContract ? window.occurrenceMatchesCurrentContract(occ) : (!occ.saleId || String(occ.saleId) === String(AppState.selectedSaleId)));
+  list = list.filter(occ => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(occ, AppState.selectedCustomerId)));
   
   if (!window.currentHistoryFilters.includes('Todos')) {
     list = list.filter(occ => {
@@ -11030,14 +11053,24 @@ async function showDistratoView(customer, sale, bills) {
   if (loteWrapReset) loteWrapReset.style.display = "none";
   const iniciativaEl = document.getElementById("dist-iniciativa");
   if (iniciativaEl) iniciativaEl.value = "cliente";
-  const nomeBen = document.getElementById("dist-bank-beneficiary-name");
-  if (nomeBen) nomeBen.value = (customer && customer.name) || "";
-  const cpfBen = document.getElementById("dist-bank-cpf");
-  if (cpfBen) cpfBen.value = (customer && customer.cpfCnpj) || "";
+  window._distBankCardUploaded = false;
+  const otherChk = document.getElementById("dist-bank-other-beneficiary");
+  if (otherChk) otherChk.checked = false;
+  const otherName = document.getElementById("dist-bank-other-name");
+  if (otherName) otherName.value = "";
+  const otherCpf = document.getElementById("dist-bank-other-cpf");
+  if (otherCpf) otherCpf.value = "";
+  const cardFile = document.getElementById("dist-bank-card-file");
+  if (cardFile) cardFile.value = "";
+  const cardStatus = document.getElementById("dist-bank-card-status");
+  if (cardStatus) cardStatus.innerHTML = 'O arquivo é gravado no cadastro do cliente com a tag <strong>DADOS BANCARIOS PARA DISTRATO</strong>.';
+  fillDistratoBeneficiaryLocked(customer);
+  if (typeof window.toggleDistratoOtherBeneficiary === "function") window.toggleDistratoOtherBeneficiary();
 
   populateDistratoWitnessSelects();
   calculateDistrato();
   toggleDistratoPaymentFields();
+  if (typeof window.loadDistratoBanksList === "function") window.loadDistratoBanksList();
   if (typeof window.toggleDistratoPermuta === "function") window.toggleDistratoPermuta();
 }
 
@@ -11261,6 +11294,7 @@ window.handleDistratoChoiceChange = function() {
     document.getElementById("dist-restitution-installments").value = 12;
   }
   const refundInstallment = negotiatedRefund / instQty;
+  const refundCash = isPermuta ? Math.max(0, negotiatedRefund - Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0)) : negotiatedRefund;
 
   const penaltyLabel = document.getElementById("dist-penalty-label");
   if (penaltyLabel) penaltyLabel.textContent = isPermuta ? "Multa por permuta (10% do recebido)" : "Multa por Rescisão (10% do contrato)";
@@ -11314,6 +11348,7 @@ window.handleDistratoChoiceChange = function() {
     restituicaoTotal,
     outrasDeducoes,
     refundNet: negotiatedRefund,
+    refundCash,
     instQty,
     refundInstallment,
     extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros },
@@ -11333,7 +11368,124 @@ function toggleDistratoPaymentFields() {
   const pix = document.getElementById("dist-bank-pix-fields");
   if (ted) ted.style.display = type === "TED" ? "grid" : "none";
   if (pix) pix.style.display = type === "PIX" ? "flex" : "none";
+  if (type === "TED" && typeof window.loadDistratoBanksList === "function") window.loadDistratoBanksList();
 }
+
+function fillDistratoBeneficiaryLocked(customer) {
+  const nomeBen = document.getElementById("dist-bank-beneficiary-name");
+  if (nomeBen) {
+    nomeBen.value = (customer && customer.name) || "";
+    nomeBen.readOnly = true;
+  }
+  const cpfBen = document.getElementById("dist-bank-cpf");
+  if (cpfBen) {
+    const raw = (customer && customer.cpfCnpj) || "";
+    cpfBen.value = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(raw) : String(raw);
+    cpfBen.readOnly = true;
+  }
+}
+
+window.maskDistratoDocField = function(el) {
+  if (!el) return;
+  const digits = String(el.value || "").replace(/\D/g, "").slice(0, 14);
+  if (typeof formatCpfCnpj === "function") {
+    const masked = formatCpfCnpj(digits);
+    el.value = masked === "N/D" ? digits : masked;
+  } else {
+    el.value = digits;
+  }
+};
+
+window.toggleDistratoOtherBeneficiary = function() {
+  const on = !!(document.getElementById("dist-bank-other-beneficiary") && document.getElementById("dist-bank-other-beneficiary").checked);
+  const wrap = document.getElementById("dist-bank-other-wrap");
+  if (wrap) wrap.style.display = on ? "grid" : "none";
+};
+
+window.loadDistratoBanksList = async function() {
+  const listEl = document.getElementById("dist-bank-name-list");
+  if (!listEl) return;
+  if (Array.isArray(window._distBanksList) && window._distBanksList.length) {
+    if (!listEl.childElementCount) {
+      listEl.innerHTML = window._distBanksList.map((b) => `<option value="${b.label}"></option>`).join("");
+    }
+    return;
+  }
+  try {
+    const res = await fetch("https://brasilapi.com.br/api/banks/v1");
+    const data = await res.json();
+    const rows = (Array.isArray(data) ? data : [])
+      .filter((b) => b && b.code != null && String(b.code) !== "" && b.name)
+      .map((b) => {
+        const code = String(b.code).padStart(3, "0");
+        const name = String(b.name).trim();
+        return { code, name, label: `${code} - ${name}` };
+      })
+      .sort((a, b) => Number(a.code) - Number(b.code));
+    window._distBanksList = rows;
+    listEl.innerHTML = rows.map((b) => `<option value="${b.label}"></option>`).join("");
+  } catch (e) {
+    console.warn("Lista de bancos (BrasilAPI) indisponível:", e);
+  }
+};
+
+function distPermutaRemainingCash() {
+  const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  const target = distPermutaTargetRefund();
+  if (!isPermuta) return target;
+  const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
+  const selected = Number((window._distPermutaState && window._distPermutaState.selection && window._distPermutaState.selection.selectedVp) || 0);
+  const abated = selected > 0.009 ? selected : saldoPresente;
+  return Math.max(0, target - abated);
+}
+
+function updateDistratoRefundScheduleAmounts() {
+  const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  const negotiated = (AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet != null)
+    ? Number(AppState.currentDistratoResult.refundNet) || 0
+    : distPermutaTargetRefund();
+  const cash = isPermuta ? distPermutaRemainingCash() : negotiated;
+  let instQty = Number(document.getElementById("dist-restitution-installments") && document.getElementById("dist-restitution-installments").value) || 12;
+  if (instQty > 12) instQty = 12;
+  if (instQty < 1) instQty = 1;
+  const refundInstallment = instQty ? cash / instQty : 0;
+  if (AppState.currentDistratoResult) {
+    AppState.currentDistratoResult.refundCash = cash;
+    AppState.currentDistratoResult.instQty = instQty;
+    AppState.currentDistratoResult.refundInstallment = refundInstallment;
+  }
+  const distSumInstEl = document.getElementById("dist-sum-installments-refund");
+  if (distSumInstEl) distSumInstEl.textContent = refundInstallment.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+window.onDistratoBankCardFileChange = async function() {
+  const input = document.getElementById("dist-bank-card-file");
+  const status = document.getElementById("dist-bank-card-status");
+  const file = input && input.files && input.files[0];
+  window._distBankCardUploaded = false;
+  if (!file) {
+    if (status) status.textContent = "Selecione o print ou a cópia do cartão com os dados bancários.";
+    return;
+  }
+  const customer = g_distCustomer;
+  const customerId = customer && (customer.id || customer.customerId);
+  if (!customerId) {
+    if (status) { status.style.color = "#b91c1c"; status.textContent = "Cliente não identificado para gravar o anexo."; }
+    return;
+  }
+  if (status) { status.style.color = "#1d4ed8"; status.textContent = "Enviando anexo para o cadastro do cliente..."; }
+  try {
+    if (typeof window.anexosUploadCustomerAttachment !== "function") {
+      throw new Error("Módulo de anexos indisponível.");
+    }
+    await window.anexosUploadCustomerAttachment(customerId, file, "DADOS BANCARIOS PARA DISTRATO");
+    window._distBankCardUploaded = true;
+    if (status) { status.style.color = "#166534"; status.textContent = "Anexo gravado no cadastro do cliente: DADOS BANCARIOS PARA DISTRATO."; }
+  } catch (e) {
+    console.error(e);
+    if (status) { status.style.color = "#b91c1c"; status.textContent = "Não foi possível enviar o anexo. Tente novamente."; }
+  }
+};
 
 window.syncDistratoPermutaUi = function() {
   const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
@@ -11419,18 +11571,29 @@ function distPermutaTargetRefund() {
 
 window.syncDistratoPermutaAbatimentoUi = function() {
   const on = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
-  const hasContract = !!(document.getElementById("dist-permuta-contract") && document.getElementById("dist-permuta-contract").value);
   const parcelasWrap = document.getElementById("dist-permuta-parcelas-wrap");
   if (parcelasWrap) parcelasWrap.style.display = on ? "block" : "none";
+  const permutaStep = document.getElementById("dist-permuta-step");
+  if (permutaStep) permutaStep.style.display = on ? "" : "none";
   const scheduleWrap = document.getElementById("dist-refund-schedule-wrap");
   const estimateWrap = document.getElementById("dist-refund-estimate-wrap");
+  const refundStep = document.getElementById("dist-refund-step");
+  const hint = document.getElementById("dist-refund-schedule-hint");
   const payBlock = document.getElementById("dist-payment-block");
-  const hideBank = on && hasContract;
-  if (scheduleWrap) scheduleWrap.style.display = hideBank ? "none" : "flex";
-  if (estimateWrap) estimateWrap.style.display = hideBank ? "none" : "block";
-  if (payBlock) payBlock.style.display = hideBank ? "none" : "";
+  if (payBlock) payBlock.style.display = "";
+  const target = distPermutaTargetRefund();
+  const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
+  const cash = distPermutaRemainingCash();
+  const showSchedule = !on || cash > 0.009;
+  if (refundStep) refundStep.style.display = showSchedule ? "" : "none";
+  if (scheduleWrap) scheduleWrap.style.display = showSchedule ? "flex" : "none";
+  if (estimateWrap) estimateWrap.style.display = showSchedule ? "block" : "none";
+  if (hint) {
+    hint.style.display = (on && target > saldoPresente + 0.009) ? "block" : "none";
+  }
   const metaEl = document.getElementById("dist-permuta-meta");
-  if (metaEl) metaEl.textContent = distPermutaFmt(distPermutaTargetRefund());
+  if (metaEl) metaEl.textContent = distPermutaFmt(target);
+  if (typeof updateDistratoRefundScheduleAmounts === "function") updateDistratoRefundScheduleAmounts();
 };
 
 window.loadDistratoPermutaContracts = async function() {
@@ -11670,6 +11833,8 @@ window.onDistratoPermutaInstToggle = function() {
     target
   };
   if (AppState.currentDistratoResult) AppState.currentDistratoResult.permutaAbatimento = window._distPermutaState.selection;
+  if (typeof updateDistratoRefundScheduleAmounts === "function") updateDistratoRefundScheduleAmounts();
+  if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
 };
 
 window.marcarParcelasPermutaAteRestituicao = function() {
@@ -11798,6 +11963,7 @@ function applyDistratoConditionals(text, flags) {
     ['SE_RESTITUICAO', !!flags.hasRestituicao],
     ['SE_SEM_RESTITUICAO', !!flags.hasSemRestituicao],
     ['SE_NOVO_LOTE', !!flags.hasNovoLote],
+    ['SE_PERMUTA_SALDO', !!flags.hasPermutaSaldo],
     ['SE_PAGAMENTO_BANCARIO', !!flags.hasPagamentoBancario],
     ['SE_INICIATIVA_CLIENTE', flags.iniciativa !== 'empresa'],
     ['SE_INICIATIVA_EMPRESA', flags.iniciativa === 'empresa']
@@ -11829,6 +11995,9 @@ function upgradeDistratoClauses(text) {
 {{#SE_PAGAMENTO_BANCARIO}}
 5.2. O valor será restituído em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}
 {{/SE_PAGAMENTO_BANCARIO}}
+{{#SE_PERMUTA_SALDO}}
+5.3. Como o valor da restituição supera o saldo presente do contrato indicado para abatimento ({{VALOR_ABATIMENTO}}), o saldo remanescente de {{VALOR_SALDO_RESTITUICAO}} ({{VALOR_SALDO_RESTITUICAO_EXTENSO}}) será restituído em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF/CNPJ: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}
+{{/SE_PERMUTA_SALDO}}
 {{/SE_PERMUTA}}
 `;
     if (/\{\{\/SE_RESTITUICAO\}\}/.test(s)) {
@@ -11836,6 +12005,13 @@ function upgradeDistratoClauses(text) {
     } else {
       s += '\n' + permutaBlock;
     }
+  }
+  if (!/\{\{#SE_PERMUTA_SALDO\}\}/.test(s) && /\{\{#SE_PERMUTA\}\}/.test(s)) {
+    const saldoBlock = `{{#SE_PERMUTA_SALDO}}
+5.3. Como o valor da restituição supera o saldo presente do contrato indicado para abatimento ({{VALOR_ABATIMENTO}}), o saldo remanescente de {{VALOR_SALDO_RESTITUICAO}} ({{VALOR_SALDO_RESTITUICAO_EXTENSO}}) será restituído em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF/CNPJ: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}
+{{/SE_PERMUTA_SALDO}}
+`;
+    s = s.replace(/\{\{\/SE_PERMUTA\}\}/, saldoBlock + '{{/SE_PERMUTA}}');
   }
   if (!/\{\{#SE_INICIATIVA_CLIENTE\}\}/.test(s) && /CLÁUSULA SEGUNDA/i.test(s)) {
     s = s.replace(
@@ -11860,6 +12036,7 @@ window.generateDistratoPDF = function generateDistratoPDF() {
     alert("Calcule o distrato antes de gerar o termo.");
     return;
   }
+  if (typeof updateDistratoRefundScheduleAmounts === "function") updateDistratoRefundScheduleAmounts();
   if (!g_distSale || !g_distCustomer) {
     alert("Abra o simulador de distrato a partir de um contrato.");
     return;
@@ -11889,16 +12066,64 @@ window.generateDistratoPDF = function generateDistratoPDF() {
   } catch (e) {
     console.warn("Preâmbulo do distrato indisponível:", e);
   }
+  if (!preambleText || /PREÂMBULO NÃO CADASTRADO/i.test(String(preambleText))) {
+    alert("PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO. Cadastre o preâmbulo antes de gerar o PDF.");
+    return;
+  }
 
   const distVal = (id) => {
     const el = document.getElementById(id);
     return el ? String(el.value || "").trim() : "";
   };
 
-  // Dados Bancários
+  const isPermutaNow = isPermuta;
+  if (isPermutaNow) {
+    const loteSel = distVal("dist-permuta-contract") || distVal("dist-novo-lote");
+    const sel = (window._distPermutaState && window._distPermutaState.selection) || {};
+    const insts = (sel.installments && sel.installments.length) ? sel.installments : [];
+    if (!loteSel) {
+      alert("Na permuta, selecione o lote/contrato para abatimento e as parcelas a serem baixadas.");
+      return;
+    }
+    if (!insts.length) {
+      alert("Na permuta, selecione as parcelas a serem baixadas no lote escolhido.");
+      return;
+    }
+  }
+
+  const otherBen = !!(document.getElementById("dist-bank-other-beneficiary") && document.getElementById("dist-bank-other-beneficiary").checked);
+  const beneficiaryName = otherBen
+    ? (distVal("dist-bank-other-name") || "")
+    : (distVal("dist-bank-beneficiary-name") || (g_distCustomer.name || ""));
+  const beneficiaryCpfRaw = otherBen
+    ? (distVal("dist-bank-other-cpf") || "")
+    : (distVal("dist-bank-cpf") || (g_distCustomer.cpfCnpj || ""));
+  const beneficiaryCpf = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(beneficiaryCpfRaw) : beneficiaryCpfRaw;
+  const beneficiaryDigits = String(beneficiaryCpfRaw || "").replace(/\D/g, "");
+  if (!beneficiaryName || beneficiaryDigits.length < 11) {
+    alert("Informe os dados bancários: beneficiário e CPF/CNPJ.");
+    return;
+  }
   const payType = distVal("dist-bank-transfer-type") || "PIX";
-  const beneficiaryName = distVal("dist-bank-beneficiary-name") || (g_distCustomer.name || "");
-  const beneficiaryCpf = distVal("dist-bank-cpf") || (g_distCustomer.cpfCnpj || "");
+  if (payType === "TED") {
+    if (!distVal("dist-bank-name") || !distVal("dist-bank-agency") || !distVal("dist-bank-account")) {
+      alert("Preencha banco, agência e conta para gerar o termo.");
+      return;
+    }
+  } else if (!distVal("dist-bank-pix-key")) {
+    alert("Informe a chave PIX para gerar o termo.");
+    return;
+  }
+
+  if (!window._distBankCardUploaded) {
+    const fileEl = document.getElementById("dist-bank-card-file");
+    if (fileEl && fileEl.files && fileEl.files[0] && typeof window.onDistratoBankCardFileChange === "function") {
+      alert("Aguarde o envio do print/cópia do cartão ou envie o anexo antes de gerar o PDF.");
+      return;
+    }
+    alert("Envie o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o PDF.");
+    return;
+  }
 
   let payInfoHtml = "";
   if (payType === "TED") {
@@ -11963,7 +12188,10 @@ window.generateDistratoPDF = function generateDistratoPDF() {
         })(g_distCustomer.cpfCnpj);
     const instQty = results.instQty || Number(document.getElementById('dist-restitution-installments')?.value) || 1;
     const instVal = results.refundInstallment || 0;
+    const valorAbatimento = Number((results.permutaAbatimento && results.permutaAbatimento.selectedVp) || (window._distPermutaState && window._distPermutaState.selection && window._distPermutaState.selection.selectedVp) || 0);
+    const valorSaldoRest = Number(results.refundCash != null ? results.refundCash : distPermutaRemainingCash());
     const hasRestituicao = !isPermuta && Number(valorLiq) > 0.009;
+    const hasPermutaSaldo = isPermuta && valorSaldoRest > 0.009;
     const iniciativa = distVal("dist-iniciativa") || "cliente";
     const novoLoteRaw = distVal("dist-novo-lote");
     const hasNovoLote = !!(novoLoteRaw && novoLoteRaw !== '____');
@@ -11972,7 +12200,8 @@ window.generateDistratoPDF = function generateDistratoPDF() {
       hasRestituicao,
       hasSemRestituicao: !isPermuta && !hasRestituicao,
       hasNovoLote,
-      hasPagamentoBancario: isPermuta ? !hasNovoLote : hasRestituicao,
+      hasPermutaSaldo,
+      hasPagamentoBancario: isPermuta ? (!hasNovoLote && hasPermutaSaldo) : hasRestituicao,
       iniciativa
     });
     const filled = applyDistratoTemplateVars(
@@ -12008,6 +12237,10 @@ window.generateDistratoPDF = function generateDistratoPDF() {
       QTD_PARCELAS_RESTITUICAO_EXTENSO: numeroPorExtenso(instQty),
       VALOR_PARCELA_RESTITUICAO: instVal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
       VALOR_PARCELA_RESTITUICAO_EXTENSO: valorPorExtensoBRL(instVal),
+      VALOR_ABATIMENTO: valorAbatimento.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      VALOR_ABATIMENTO_EXTENSO: valorPorExtensoBRL(valorAbatimento),
+      VALOR_SALDO_RESTITUICAO: valorSaldoRest.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      VALOR_SALDO_RESTITUICAO_EXTENSO: valorPorExtensoBRL(valorSaldoRest),
       FORMA_PAGAMENTO: payType === 'TED' ? 'TED' : 'PIX',
       BENEFICIARIO: beneficiaryName || '____',
       CPF_BENEFICIARIO: beneficiaryCpf || '____',
@@ -17702,26 +17935,38 @@ window.isBoletoGeradoOccurrence = function(n) {
 
 window.isTitulo4868BoletoOccurrence = function(n, customerId) {
   if (!n) return false;
-  const tRaw = String(n.text || "").replace(/\u00a0/g, " ").trim().toUpperCase().replace(/\s+/g, " ");
-  if (tRaw.includes("[SISTEMA]") && tRaw.includes("BOLETO GERADO")) return false;
-  const sale = String(n.saleId != null ? n.saleId : (n.titulo || "")).trim();
-  const cid = String(customerId != null ? customerId : (n.customerId || "")).trim();
+  const sale = String(n.saleId != null ? n.saleId : (n.titulo || "")).replace(/^B-/i, "").split("-")[0].trim();
+  const cid = String(customerId != null && String(customerId) !== "" ? customerId : (n.customerId || "")).trim();
+  if (sale && sale !== "4868") return false;
+  if (!sale && cid && cid !== "5187") return false;
   if (sale !== "4868" && cid !== "5187") return false;
-  if (!tRaw.includes("TESTE")) return false;
-  return tRaw === "TESTE" || tRaw.indexOf("BOLETO GERADO") !== -1 || !!n.checkPayment;
+  const tNorm = String(n.text || "")
+    .replace(/\u00a0/g, " ")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+  const isBoletoTeste = (tNorm.includes("TESTE") && (tNorm.includes("BOLETO GERADO") || tNorm.includes("[SISTEMA]")))
+    || (!!n.checkPayment && tNorm.includes("TESTE"));
+  const isCitacao = tNorm.includes("AGUARDANDO CITACAO");
+  return isBoletoTeste || isCitacao;
 };
 
 window.stripBoletoNotesTitulo4868FromState = function() {
-  if (!AppState.notes) return 0;
-  let n = 0;
-  Object.keys(AppState.notes).forEach(cid => {
-    const list = AppState.notes[cid];
-    if (!Array.isArray(list)) return;
-    const next = list.filter(x => !window.isTitulo4868BoletoOccurrence(x, cid));
-    n += list.length - next.length;
-    AppState.notes[cid] = next;
-  });
-  return n;
+  const stripStore = (store) => {
+    if (!store) return 0;
+    let n = 0;
+    Object.keys(store).forEach(cid => {
+      const list = store[cid];
+      if (!Array.isArray(list)) return;
+      const next = list.filter(x => !window.isTitulo4868BoletoOccurrence(x, cid));
+      n += list.length - next.length;
+      store[cid] = next;
+    });
+    return n;
+  };
+  return stripStore(AppState.notes) + stripStore(AppState.judNotes);
 };
 
 window.getPurgedBoleto4868Identities = function() {
@@ -17741,34 +17986,44 @@ window.persistPurgedBoleto4868Identities = function(ids) {
 
 window.stripPurgedBoleto4868Identities = function() {
   const ids = new Set(window.getPurgedBoleto4868Identities());
-  if (!ids.size || !AppState.notes) return 0;
-  let n = 0;
-  Object.keys(AppState.notes).forEach(cid => {
-    const list = AppState.notes[cid];
-    if (!Array.isArray(list)) return;
-    const next = list.filter(x => !ids.has(window.occurrenceIdentity(x)));
-    n += list.length - next.length;
-    AppState.notes[cid] = next;
-  });
+  if (!ids.size) return 0;
+  const stripStore = (store) => {
+    if (!store) return 0;
+    let n = 0;
+    Object.keys(store).forEach(cid => {
+      const list = store[cid];
+      if (!Array.isArray(list)) return;
+      const next = list.filter(x => !ids.has(window.occurrenceIdentity(x)) && !window.isTitulo4868BoletoOccurrence(x, cid));
+      n += list.length - next.length;
+      store[cid] = next;
+    });
+    return n;
+  };
+  const n = stripStore(AppState.notes) + stripStore(AppState.judNotes);
   if (n) {
     try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+    try { localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes || {})); } catch (e) {}
   }
   return n;
 };
 
 window.purgeBoletoNotesTitulo4868 = async function() {
-  const found = [];
-  if (AppState.notes) {
-    Object.keys(AppState.notes).forEach(cid => {
-      const list = AppState.notes[cid];
+  const collect = (store) => {
+    const found = [];
+    if (!store) return found;
+    Object.keys(store).forEach(cid => {
+      const list = store[cid];
       if (!Array.isArray(list)) return;
       list.forEach(x => {
         if (window.isTitulo4868BoletoOccurrence(x, cid)) found.push(window.occurrenceIdentity(x));
       });
     });
-  }
+    return found;
+  };
+  const found = collect(AppState.notes).concat(collect(AppState.judNotes));
   window.stripBoletoNotesTitulo4868FromState();
   try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
+  try { localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes || {})); } catch (e) {}
   if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
   if (typeof updateSidebarAgendaBadge === "function") updateSidebarAgendaBadge();
   if (!(window.firebaseDb && window.firebaseCollections)) {
@@ -17776,29 +18031,44 @@ window.purgeBoletoNotesTitulo4868 = async function() {
     return found.length;
   }
   try {
-    const { collection, getDocs, setDoc } = window.firebaseCollections;
-    const snap = await getDocs(collection(window.firebaseDb, "customer_notes_shards"));
-    const patchByRef = [];
-    for (const d of snap.docs) {
-      const data = d.data() || {};
-      const patch = {};
-      let changed = false;
-      Object.keys(data).forEach(k => {
-        if (!Array.isArray(data[k])) return;
-        data[k].forEach(x => {
-          if (window.isTitulo4868BoletoOccurrence(x, k)) found.push(window.occurrenceIdentity(x));
+    const { collection, getDocs, setDoc, doc, getDoc } = window.firebaseCollections;
+    const patchCollection = async (name) => {
+      const snap = await getDocs(collection(window.firebaseDb, name));
+      for (const d of snap.docs) {
+        const data = d.data() || {};
+        const patch = {};
+        let changed = false;
+        Object.keys(data).forEach(k => {
+          if (!Array.isArray(data[k])) return;
+          data[k].forEach(x => {
+            if (window.isTitulo4868BoletoOccurrence(x, k)) found.push(window.occurrenceIdentity(x));
+          });
+          const filtered = data[k].filter(x => !window.isTitulo4868BoletoOccurrence(x, k));
+          if (filtered.length !== data[k].length) {
+            patch[k] = filtered;
+            changed = true;
+          }
         });
-        const filtered = data[k].filter(x => !window.isTitulo4868BoletoOccurrence(x, k));
-        if (filtered.length !== data[k].length) {
-          patch[k] = filtered;
-          changed = true;
+        if (changed) await setDoc(d.ref, patch, { merge: true });
+      }
+    };
+    await patchCollection("customer_notes_shards");
+    try { await patchCollection("customer_jud_notes_shards"); } catch (e) {}
+    try { await patchCollection("jud_notes_shards"); } catch (e) {}
+    try {
+      const legacy = doc(window.firebaseDb, "customer_notes", "5187");
+      const snap = await getDoc(legacy);
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        const list = Array.isArray(data.notes) ? data.notes : [];
+        const filtered = list.filter(x => !window.isTitulo4868BoletoOccurrence(x, "5187"));
+        if (filtered.length !== list.length) {
+          await setDoc(legacy, { notes: filtered }, { merge: true });
         }
-      });
-      if (changed) patchByRef.push({ ref: d.ref, patch });
-    }
-    for (const item of patchByRef) await setDoc(item.ref, item.patch, { merge: true });
+      }
+    } catch (e) {}
   } catch (e) {
-    console.warn("[CRM] Falha ao limpar boletos gerados do título 4868", e);
+    console.warn("[CRM] Falha ao limpar ocorrências do título 4868", e);
   }
   window.persistPurgedBoleto4868Identities(found);
   window.stripPurgedBoleto4868Identities();
@@ -17808,7 +18078,7 @@ window.purgeBoletoNotesTitulo4868 = async function() {
 window.ensureBoletoNotesTitulo4868Removed = async function() {
   window.stripBoletoNotesTitulo4868FromState();
   window.stripPurgedBoleto4868Identities();
-  const flag = "crm_boleto_teste_4868_v4";
+  const flag = "crm_boleto_teste_4868_v5";
   try {
     if (localStorage.getItem(flag) === "1") {
       if (typeof renderCustomerOccurrences === "function") renderCustomerOccurrences();
@@ -17823,7 +18093,7 @@ window.ensureBoletoNotesTitulo4868Removed = async function() {
       if (window.firebaseDb && window.firebaseCollections) {
         try {
           const { doc, setDoc } = window.firebaseCollections;
-          await setDoc(doc(window.firebaseDb, "settings", "boleto_teste_purged_titulo_4868_v4"), {
+          await setDoc(doc(window.firebaseDb, "settings", "boleto_teste_purged_titulo_4868_v5"), {
             purgedAt: Date.now(),
             titulo: "4868",
             identities: window.getPurgedBoleto4868Identities()
@@ -29468,18 +29738,65 @@ window.mapaJuridicoFlattenStatements = function(res) {
   return out;
 };
 
+window.mapaJuridicoInstOverdueAmount = function(inst) {
+  const cb = Number(inst.currentBalance || 0);
+  const withAdd = Number(
+    inst.currentBalanceWithAddition != null ? inst.currentBalanceWithAddition
+      : (inst.correctedValueWithAdditions != null ? inst.correctedValueWithAdditions : NaN)
+  );
+  if (Number.isFinite(withAdd) && withAdd > 0.009) return withAdd;
+  const add = Number(inst.additionalValue || inst.additionsValue || inst.interestValue || inst.interest || 0)
+    + Number(inst.fine || inst.fineValue || 0);
+  return cb + (add > 0 ? add : 0);
+};
+
+window.mapaJuridicoOverdueFromDefaulters = function(customerId, saleId, billId) {
+  const allBills = (typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
+    ? ((window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS) || [])
+    : ((window.AppState && AppState.defaultersBills) || []);
+  const billKey = String(billId || "").replace(/^B-/, "").split("-")[0];
+  const saleKey = String(saleId || "").replace(/^B-/, "").split("-")[0];
+  const customerBills = (allBills || []).filter(b => {
+    if (String(b.customerId) !== String(customerId)) return false;
+    const bSale = String(b.saleId || "").replace(/^B-/, "").split("-")[0];
+    const bBill = String(b.receivableBillId || b.billReceivableId || b.id || "").replace(/^B-/, "").split("-")[0];
+    if (saleKey && bSale && bSale === saleKey) return true;
+    if (billKey && (bBill === billKey || bSale === billKey)) return true;
+    return false;
+  });
+  let total = 0;
+  customerBills.forEach(bill => {
+    const insts = bill.defaulterInstallments || bill.installments || [];
+    if (insts.length) {
+      insts.forEach(inst => {
+        if (inst.correctedValueWithAdditions != null) total += Number(inst.correctedValueWithAdditions) || 0;
+        else if (inst.correctedValueWithoutAdditions != null) {
+          total += Number(inst.correctedValueWithoutAdditions || 0) + Number(inst.interest || 0) + Number(inst.fine || 0);
+        } else {
+          total += Number(inst.value || 0) + Number(inst.interest || 0) + Number(inst.fine || 0);
+        }
+      });
+    } else {
+      total += Number(bill.totalValue != null ? bill.totalValue : ((bill.value || 0) + (bill.interest || 0) + (bill.fine || 0)));
+    }
+  });
+  return total;
+};
+
 window.mapaJuridicoKpisFromInstallments = function(installments) {
   const todayIso = new Date().toISOString().split("T")[0];
   let kpiVencidas = 0, kpiVencidasOriginal = 0, kpiQtdVencidas = 0;
   let kpiAVencer = 0, kpiQtdAVencer = 0;
   let kpiPago = 0, kpiQtdPagas = 0, kpiAcrescimo = 0, kpiDesconto = 0, kpiLiquido = 0;
+  let kpiSomaOriginal = 0;
   (installments || []).forEach(inst => {
     const cb = Number(inst.currentBalance || 0);
     const ov = Number(inst.originalValue || inst.value || 0);
+    kpiSomaOriginal += ov;
     const due = String(inst.dueDate || "").slice(0, 10);
     if (cb > 0.009) {
       if (due && due < todayIso) {
-        kpiVencidas += cb;
+        kpiVencidas += window.mapaJuridicoInstOverdueAmount(inst);
         kpiVencidasOriginal += ov;
         kpiQtdVencidas++;
       } else {
@@ -29497,14 +29814,17 @@ window.mapaJuridicoKpisFromInstallments = function(installments) {
       kpiQtdPagas++;
     });
   });
-  if (kpiLiquido <= 0.009 && kpiPago > 0) kpiLiquido = Math.max(0, kpiPago - kpiDesconto);
-  const recebido = Math.max(0, kpiPago - kpiDesconto);
-  const kpiTotalContrato = recebido + kpiVencidasOriginal + kpiAVencer;
+  if (kpiLiquido <= 0.009 && kpiPago > 0) kpiLiquido = Math.max(0, kpiPago + kpiAcrescimo - kpiDesconto);
+  const recebido = kpiLiquido;
+  const recebidoOriginalMenosDesc = Math.max(0, kpiPago - kpiDesconto);
+  const kpiTotalContrato = recebidoOriginalMenosDesc + kpiVencidasOriginal + kpiAVencer;
   const kpiTotalQtd = kpiQtdPagas + kpiQtdVencidas + kpiQtdAVencer;
-  const percPaid = kpiTotalContrato > 0.009 ? Math.max(0, Math.min(100, (recebido / kpiTotalContrato) * 100)) : 0;
+  const percPaid = kpiSomaOriginal > 0.009
+    ? Math.max(0, Math.min(100, (kpiPago / kpiSomaOriginal) * 100))
+    : 0;
   return {
     kpiVencidas, kpiVencidasOriginal, kpiQtdVencidas, kpiAVencer, kpiQtdAVencer,
-    kpiPago, kpiQtdPagas, kpiAcrescimo, kpiDesconto, kpiLiquido, recebido,
+    kpiPago, kpiQtdPagas, kpiAcrescimo, kpiDesconto, kpiLiquido, recebido, kpiSomaOriginal,
     kpiTotalContrato, kpiTotalQtd, percPaid
   };
 };
@@ -29551,6 +29871,12 @@ window.mapaJuridicoLoadTitleFinance = async function(client) {
     } catch (e) {}
   }
   const kpis = window.mapaJuridicoKpisFromInstallments(installments);
+  const overdueWithJuros = window.mapaJuridicoOverdueFromDefaulters(customerId, client && client.saleId, billId);
+  const fromClient = (Number(client && client.overdueValue) || 0) + (Number(client && client.overdueCharges) || 0);
+  const bestOverdue = Math.max(Number(kpis.kpiVencidas) || 0, overdueWithJuros || 0, fromClient);
+  if (bestOverdue > (kpis.kpiVencidasOriginal || 0) + 0.009) {
+    kpis.kpiVencidas = bestOverdue;
+  }
   let quitacao = null;
   let quitParc = kpis.kpiQtdVencidas + kpis.kpiQtdAVencer;
   let doc = (client && (client.cpfCnpj || client.document || client.cpf)) || "";
@@ -29671,8 +29997,8 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
     }
     return `<span style="${style}">${label}</span>`;
   };
-  const moneyStack = (parc, value, color, sub) =>
-    `<div style="text-align:right;line-height:1.25;min-width:110px;">
+  const moneyStack = (parc, value, color, sub, title) =>
+    `<div style="text-align:right;line-height:1.25;min-width:110px;${title ? "cursor:help;" : ""}"${title ? ` title="${String(title).replace(/"/g, "&quot;")}"` : ""}>
       <div style="font-size:0.65rem;color:#64748b;font-weight:700;">${parc} parc.</div>
       <div style="font-weight:800;color:${color};white-space:nowrap;">${fmt(value)}</div>
       ${sub ? `<div style="font-size:0.6rem;color:#94a3b8;white-space:nowrap;">${sub}</div>` : ""}
@@ -29704,6 +30030,14 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
         }
         #mapa-juridico-phase-table tbody tr:nth-child(even) { background: #f4f6f4; }
         #mapa-juridico-phase-table tbody tr:hover { background: #eef6f1 !important; }
+        .mapa-pct-loading { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-width:110px; }
+        .mapa-pct-spinner {
+          width: 16px; height: 16px; border-radius: 50%;
+          border: 2.5px solid #d1d5db; border-top-color: #105436;
+          animation: mapa-pct-spin 0.75s linear infinite;
+        }
+        .mapa-pct-loading span { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.4px; color: #64748b; white-space: nowrap; }
+        @keyframes mapa-pct-spin { to { transform: rotate(360deg); } }
       </style>
       <table class="custom-table" id="mapa-juridico-phase-table">
         <thead>
@@ -29734,11 +30068,17 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
             const nameEsc = String(c.customerName || "").replace(/"/g, "&quot;");
             const fin = finByIdx && finByIdx[idx];
             const wait = '<span style="color:#94a3b8;">…</span>';
-            const paidCell = fin ? moneyStack(fin.kpiQtdPagas, fin.recebido, "#105436", "Líq. recebido") : wait;
+            const percLoading = `<div class="mapa-pct-loading" title="Buscando dados financeiros do título">
+              <span class="mapa-pct-spinner" aria-hidden="true"></span>
+              <span>BUSCANDO DADOS</span>
+            </div>`;
+            const paidCell = fin ? moneyStack(fin.kpiQtdPagas, fin.kpiLiquido != null ? fin.kpiLiquido : fin.recebido, "#105436", "Líq. recebido") : wait;
             const futureCell = fin ? moneyStack(fin.kpiQtdAVencer, fin.kpiAVencer, "#1976d2", "") : wait;
-            const overdueCell = fin ? moneyStack(fin.kpiQtdVencidas, fin.kpiVencidas, "#e65100", "Orig. " + fmt(fin.kpiVencidasOriginal)) : wait;
+            const jurosVenc = fin ? Math.max(0, (Number(fin.kpiVencidas) || 0) - (Number(fin.kpiVencidasOriginal) || 0)) : 0;
+            const overdueTip = jurosVenc > 0.009 ? ("Juros: " + fmt(jurosVenc)) : "";
+            const overdueCell = fin ? moneyStack(fin.kpiQtdVencidas, fin.kpiVencidas, "#e65100", "Orig. " + fmt(fin.kpiVencidasOriginal), overdueTip) : wait;
             const totalCell = fin ? moneyStack(fin.kpiTotalQtd, fin.kpiTotalContrato, "#105436", "") : wait;
-            const barCell = fin ? percBar(fin.percPaid) : wait;
+            const barCell = fin ? percBar(fin.percPaid) : percLoading;
             const quitCell = fin ? moneyStack(fin.quitParc, fin.quitacao, "#105436", "VP") : wait;
             const vencidasCount = fin ? fin.kpiQtdVencidas : (c.billCount || (c.billIds ? c.billIds.length : "…"));
             return `<tr class="table-row-hover" style="cursor:pointer;" onclick="mapaJuridicoOpenClient(${JSON.stringify(String(c.customerId))}, ${JSON.stringify(String(c.saleId || ''))})">
