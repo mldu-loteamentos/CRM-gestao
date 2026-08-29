@@ -11613,6 +11613,18 @@ function distPermutaRemainingCash() {
   return Math.max(0, target - abated);
 }
 
+function distratoClientPayoutAmount() {
+  const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+  if (isPermuta) return distPermutaRemainingCash();
+  const r = AppState.currentDistratoResult;
+  if (r && r.refundNet != null) return Number(r.refundNet) || 0;
+  return 0;
+}
+
+function distratoNeedsClientPayout() {
+  return distratoClientPayoutAmount() > 0.009;
+}
+
 function updateDistratoRefundScheduleAmounts() {
   const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
   const negotiated = (AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet != null)
@@ -11762,11 +11774,12 @@ window.syncDistratoPermutaAbatimentoUi = function() {
   const refundStep = document.getElementById("dist-refund-step");
   const hint = document.getElementById("dist-refund-schedule-hint");
   const payBlock = document.getElementById("dist-payment-block");
-  if (payBlock) payBlock.style.display = "";
   const target = distPermutaTargetRefund();
   const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
   const cash = distPermutaRemainingCash();
-  const showSchedule = !on || cash > 0.009;
+  const needsPayout = distratoNeedsClientPayout();
+  const showSchedule = needsPayout && (!on || cash > 0.009);
+  if (payBlock) payBlock.style.display = needsPayout ? "" : "none";
   if (refundStep) refundStep.style.display = showSchedule ? "" : "none";
   if (scheduleWrap) scheduleWrap.style.display = showSchedule ? "flex" : "none";
   if (estimateWrap) estimateWrap.style.display = showSchedule ? "block" : "none";
@@ -12192,6 +12205,97 @@ function applyDistratoTemplateVars(text, map) {
   return s;
 }
 
+function isDistratoSignLine(line) {
+  const t = String(line || "").replace(/\s/g, "");
+  return t.length >= 18 && /^_+$/.test(t);
+}
+
+function splitDistratoWitnessFields(line, label) {
+  const raw = String(line || "");
+  const re = new RegExp(label + "\\s*:\\s*", "ig");
+  return raw.split(re).map(x => x.trim()).filter(Boolean);
+}
+
+window.centerDistratoSignatures = function(html) {
+  const s = String(html || "");
+  const lines = s.split(/\r?\n/);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isDistratoSignLine(lines[i])) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return s;
+  const before = lines.slice(0, start).join("\n").replace(/\s+$/, "");
+  const rest = lines.slice(start).map(l => String(l || "").trim()).filter(l => l.length);
+  const parties = [];
+  let i = 0;
+  while (i < rest.length && isDistratoSignLine(rest[i])) {
+    const name = rest[i + 1] || "";
+    const role = rest[i + 2] || "";
+    if (name && /promitente|confitente/i.test(role)) {
+      parties.push({ name, role });
+      i += 3;
+      continue;
+    }
+    break;
+  }
+  if (!parties.length) return s;
+  let w1Name = "";
+  let w2Name = "";
+  let w1Rg = "";
+  let w2Rg = "";
+  let hasWitnessTitle = false;
+  while (i < rest.length) {
+    const line = rest[i];
+    if (/^testemunhas$/i.test(line)) {
+      hasWitnessTitle = true;
+      i++;
+      continue;
+    }
+    if (/nome\s*:/i.test(line)) {
+      const names = splitDistratoWitnessFields(line, "Nome");
+      w1Name = names[0] || w1Name;
+      w2Name = names[1] || w2Name;
+      i++;
+      continue;
+    }
+    if (/rg\s*:/i.test(line)) {
+      const rgs = splitDistratoWitnessFields(line, "RG");
+      w1Rg = rgs[0] || w1Rg;
+      w2Rg = rgs[1] || w2Rg;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  const partyHtml = parties.map(p => `
+    <div style="margin: 28px auto 0; max-width: 420px; text-align: center;">
+      <div style="border-top: 1px solid #111; padding-top: 8px; font-weight: 700;">${p.name}</div>
+      <div style="font-size: 10.5pt; font-weight: 400;">${p.role}</div>
+    </div>`).join("");
+  const witnessesHtml = (hasWitnessTitle || w1Name || w2Name) ? `
+    <div style="margin-top: 36px; text-align: center; font-weight: 700;">Testemunhas</div>
+    <table style="width: 100%; max-width: 680px; margin: 14px auto 0; border-collapse: collapse; white-space: normal;">
+      <tr>
+        <td style="width: 50%; text-align: center; vertical-align: top; padding: 0 12px;">
+          <div>Nome: ${w1Name || "________________"}</div>
+          <div>RG: ${w1Rg || "________________"}</div>
+        </td>
+        <td style="width: 50%; text-align: center; vertical-align: top; padding: 0 12px;">
+          <div>Nome: ${w2Name || "________________"}</div>
+          <div>RG: ${w2Rg || "________________"}</div>
+        </td>
+      </tr>
+    </table>` : "";
+  return `${before}
+<div style="white-space: normal; text-align: center; margin-top: 8px;">
+${partyHtml}
+${witnessesHtml}
+</div>`;
+};
+
 function upgradeDistratoClauses(text) {
   let s = String(text || '');
   if (!/\{\{#SE_PERMUTA\}\}/.test(s)) {
@@ -12304,61 +12408,70 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     }
   }
 
-  const otherBen = !!(document.getElementById("dist-bank-other-beneficiary") && document.getElementById("dist-bank-other-beneficiary").checked);
-  const beneficiaryName = otherBen
-    ? (distVal("dist-bank-other-name") || "")
-    : (distVal("dist-bank-beneficiary-name") || (g_distCustomer.name || ""));
-  const beneficiaryCpfRaw = otherBen
-    ? (distVal("dist-bank-other-cpf") || "")
-    : (distVal("dist-bank-cpf") || (g_distCustomer.cpfCnpj || ""));
-  const beneficiaryCpf = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(beneficiaryCpfRaw) : beneficiaryCpfRaw;
-  const beneficiaryDigits = String(beneficiaryCpfRaw || "").replace(/\D/g, "");
-  if (!beneficiaryName || beneficiaryDigits.length < 11) {
-    alert("Informe os dados bancários: beneficiário e CPF/CNPJ.");
-    return;
-  }
-  const payType = distVal("dist-bank-transfer-type") || "PIX";
-  if (payType === "TED") {
-    if (!distVal("dist-bank-name") || !distVal("dist-bank-agency") || !distVal("dist-bank-account")) {
-      alert("Preencha banco, agência e conta para gerar o termo.");
-      return;
-    }
-  } else if (!distVal("dist-bank-pix-key")) {
-    alert("Informe a chave PIX para gerar o termo.");
-    return;
-  }
+  const needsPayout = typeof distratoNeedsClientPayout === "function"
+    ? distratoNeedsClientPayout()
+    : Number((AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet) || 0) > 0.009;
 
-  const fileEl = document.getElementById("dist-bank-card-file");
-  const bankFile = fileEl && fileEl.files && fileEl.files[0];
-  if (!window._distBankCardUploaded && !bankFile) {
-    alert("Selecione o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o documento.");
-    return;
-  }
-  const okSave = typeof window.mouraConfirm === "function"
-    ? await window.mouraConfirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?")
-    : confirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?");
-  if (!okSave) return;
-  if (!window._distBankCardUploaded) {
-    try {
-      await window.uploadDistratoBankCardToSienge();
-    } catch (e) {
-      console.error(e);
-      alert("Não foi possível salvar os dados bancários no cadastro do cliente. Verifique o arquivo e tente de novo.");
-      return;
-    }
-  }
-
+  let beneficiaryName = "";
+  let beneficiaryCpf = "";
   let payInfoHtml = "";
-  if (payType === "TED") {
-    const bank = distVal("dist-bank-name") || "N/D";
-    const agency = distVal("dist-bank-agency") || "N/D";
-    const account = distVal("dist-bank-account") || "N/D";
-    const digit = distVal("dist-bank-digit") || "";
-    payInfoHtml = `TED Bancário: Banco ${bank} | Agência: ${agency} | Conta: ${account}${digit ? "-" + digit : ""}`;
-  } else {
-    const pixType = distVal("dist-bank-pix-type") || "CPF/CNPJ";
-    const pixKey = distVal("dist-bank-pix-key") || "N/D";
-    payInfoHtml = `PIX: Chave (${pixType}) - ${pixKey}`;
+  let payType = "";
+  if (needsPayout) {
+    const otherBen = !!(document.getElementById("dist-bank-other-beneficiary") && document.getElementById("dist-bank-other-beneficiary").checked);
+    beneficiaryName = otherBen
+      ? (distVal("dist-bank-other-name") || "")
+      : (distVal("dist-bank-beneficiary-name") || (g_distCustomer.name || ""));
+    const beneficiaryCpfRaw = otherBen
+      ? (distVal("dist-bank-other-cpf") || "")
+      : (distVal("dist-bank-cpf") || (g_distCustomer.cpfCnpj || ""));
+    beneficiaryCpf = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(beneficiaryCpfRaw) : beneficiaryCpfRaw;
+    const beneficiaryDigits = String(beneficiaryCpfRaw || "").replace(/\D/g, "");
+    if (!beneficiaryName || beneficiaryDigits.length < 11) {
+      alert("Informe os dados bancários: beneficiário e CPF/CNPJ.");
+      return;
+    }
+    payType = distVal("dist-bank-transfer-type") || "PIX";
+    if (payType === "TED") {
+      if (!distVal("dist-bank-name") || !distVal("dist-bank-agency") || !distVal("dist-bank-account")) {
+        alert("Preencha banco, agência e conta para gerar o termo.");
+        return;
+      }
+    } else if (!distVal("dist-bank-pix-key")) {
+      alert("Informe a chave PIX para gerar o termo.");
+      return;
+    }
+
+    const fileEl = document.getElementById("dist-bank-card-file");
+    const bankFile = fileEl && fileEl.files && fileEl.files[0];
+    if (!window._distBankCardUploaded && !bankFile) {
+      alert("Selecione o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o documento.");
+      return;
+    }
+    const okSave = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?")
+      : confirm("Os dados bancários serão salvos no cadastro do cliente no Sienge, na aba Anexos, com a tag DADOS BANCARIOS PARA DISTRATO.\n\nDeseja continuar e gerar o documento?");
+    if (!okSave) return;
+    if (!window._distBankCardUploaded) {
+      try {
+        await window.uploadDistratoBankCardToSienge();
+      } catch (e) {
+        console.error(e);
+        alert("Não foi possível salvar os dados bancários no cadastro do cliente. Verifique o arquivo e tente de novo.");
+        return;
+      }
+    }
+
+    if (payType === "TED") {
+      const bank = distVal("dist-bank-name") || "N/D";
+      const agency = distVal("dist-bank-agency") || "N/D";
+      const account = distVal("dist-bank-account") || "N/D";
+      const digit = distVal("dist-bank-digit") || "";
+      payInfoHtml = `TED Bancário: Banco ${bank} | Agência: ${agency} | Conta: ${account}${digit ? "-" + digit : ""}`;
+    } else {
+      const pixType = distVal("dist-bank-pix-type") || "CPF/CNPJ";
+      const pixKey = distVal("dist-bank-pix-key") || "N/D";
+      payInfoHtml = `PIX: Chave (${pixType}) - ${pixKey}`;
+    }
   }
 
   const w1Sel = document.getElementById("dist-testemunha-1");
@@ -12433,7 +12546,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       hasPagamentoBancario: isPermuta ? (!hasNovoLote && hasPermutaSaldo) : hasRestituicao,
       iniciativa
     });
-    const filled = applyDistratoTemplateVars(
+    const filled = window.centerDistratoSignatures(applyDistratoTemplateVars(
       (typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup : (x) => String(x || ""))(clausesReady),
       {
       QUADRA: unit.block || unit.quadra || '____',
@@ -12470,7 +12583,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       VALOR_ABATIMENTO_EXTENSO: valorPorExtensoBRL(valorAbatimento),
       VALOR_SALDO_RESTITUICAO: valorSaldoRest.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
       VALOR_SALDO_RESTITUICAO_EXTENSO: valorPorExtensoBRL(valorSaldoRest),
-      FORMA_PAGAMENTO: payType === 'TED' ? 'TED' : 'PIX',
+      FORMA_PAGAMENTO: payType === 'TED' ? 'TED' : (payType === 'PIX' ? 'PIX' : ''),
       BENEFICIARIO: beneficiaryName || '____',
       CPF_BENEFICIARIO: beneficiaryCpf || '____',
       DADOS_PAGAMENTO: payInfoHtml || '',
@@ -12483,7 +12596,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       TESTEMUNHA_2_NOME: w2.nome || t.test2Nome || '________________',
       TESTEMUNHA_2_RG: w2.rg || t.test2Rg || '________________',
       PREAMBULO: preambleText
-    });
+    }));
     docHtml = `
       <div style="text-align: center; margin-bottom: 1.5rem;">
         <h2 style="color: #105436; font-size: 13pt; font-weight: bold; margin-bottom: 5px;">${docTitle}</h2>
@@ -12555,12 +12668,12 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       </table>
     </div>
 
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
+    ${needsPayout ? `<p style="text-align: justify; margin-bottom: 1.5rem;">
       O valor líquido de restituição será pago em <strong>${results.instQty}</strong> parcelas mensais de 
       <strong>R$ ${results.refundInstallment.toFixed(2)}</strong>, sendo creditadas através da seguinte forma de pagamento:<br>
       <strong>Beneficiário:</strong> ${beneficiaryName} | <strong>CPF/CNPJ:</strong> ${beneficiaryCpf}<br>
       <strong>Dados de Crédito:</strong> ${payInfoHtml}
-    </p>
+    </p>` : ""}
 
     <p style="text-align: justify; margin-bottom: 1.5rem;">
       Com a assinatura deste termo, o cliente concede a mais plena, rasa e irrevogável quitação do contrato mencionado, liberando a credora de quaisquer obrigações futuras, autorizando a imediata comercialização do lote pela Moura Leite Loteamentos.
@@ -12570,12 +12683,16 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
     </p>
 
-    <div style="display: flex; justify-content: space-between; margin-top: 4rem;">
-      <div style="width: 45%; border-top: 1.5px solid #000; text-align: center; font-size: 10pt; padding-top: 5px;">
-        MOURA LEITE LOTEAMENTOS<br>Credora
+    <div style="margin-top: 4rem; text-align: center; white-space: normal;">
+      <div style="margin: 28px auto 0; max-width: 420px;">
+        <div style="border-top: 1.5px solid #000; padding-top: 8px; font-size: 10pt;">
+          MOURA LEITE LOTEAMENTOS<br>Credora
+        </div>
       </div>
-      <div style="width: 45%; border-top: 1.5px solid #000; text-align: center; font-size: 10pt; padding-top: 5px;">
-        ${g_distCustomer.name.toUpperCase()}<br>Cliente
+      <div style="margin: 28px auto 0; max-width: 420px;">
+        <div style="border-top: 1.5px solid #000; padding-top: 8px; font-size: 10pt;">
+          ${g_distCustomer.name.toUpperCase()}<br>Cliente
+        </div>
       </div>
     </div>
   `;
@@ -22668,7 +22785,7 @@ function previewDocPadrao(tipo) {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
     const clauses = document.getElementById('doc-distrato-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(String(clauses).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, ''))}</div>`;
+    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${window.centerDistratoSignatures ? window.centerDistratoSignatures(formatDocPadraoMarkup(String(clauses).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, ''))) : formatDocPadraoMarkup(String(clauses))}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');

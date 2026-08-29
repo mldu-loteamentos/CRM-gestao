@@ -441,14 +441,20 @@ const PlanoFinanceiroApp = {
             <!-- Tabela Sienge Default (Visível apenas se selectedVisaoId == null ou type != custom) -->
             <div id="pf-table-wrapper" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
               <div style="padding:10px 18px;border-bottom:1px solid #e8eaed;background:#fff;flex-shrink:0;display:flex;align-items:center;gap:10px;">
-                <input type="text" id="pf-search" placeholder="Buscar..." oninput="PlanoFinanceiroApp.onSearch()" style="flex:1;padding:7px;border:1px solid #ccc;border-radius:4px;">
-                <button onclick="PlanoFinanceiroApp.loadCategories()" title="Recarregar do Sienge" style="padding:7px 15px;background:#fef08a;border:1px solid #fde047;border-radius:4px;color:#854d0e;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:700;transition:all 0.2s;">
+                <input type="text" id="pf-search" placeholder="Buscar..." oninput="PlanoFinanceiroApp.onSearch()" style="flex:1;padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.82rem;">
+                <button type="button" onclick="PlanoFinanceiroApp.expandAllAccounts()" title="Expandir todos os níveis" style="padding:7px 10px;background:#fff;border:1px solid #105436;border-radius:6px;color:#105436;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:700;white-space:nowrap;">
+                  <i data-lucide="chevrons-down" style="width:14px;height:14px;"></i>Expandir todos
+                </button>
+                <button type="button" onclick="PlanoFinanceiroApp.collapseAllAccounts()" title="Recolher todos os níveis" style="padding:7px 10px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;color:#475569;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:700;white-space:nowrap;">
+                  <i data-lucide="chevrons-up" style="width:14px;height:14px;"></i>Recolher todos
+                </button>
+                <button onclick="PlanoFinanceiroApp.loadCategories()" title="Recarregar do Sienge" style="padding:7px 15px;background:#fef08a;border:1px solid #fde047;border-radius:6px;color:#854d0e;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:700;transition:all 0.2s;">
                   <i data-lucide="refresh-cw" style="width:14px;height:14px;" id="pf-refresh-icon"></i>Atualizar
                 </button>
-                <select id="pf-type-filter" onchange="PlanoFinanceiroApp.onSearch()" style="padding:7px 10px;border:1px solid #ccc;border-radius:4px;outline:none;">
+                <select id="pf-type-filter" onchange="PlanoFinanceiroApp.onSearch()" style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;outline:none;">
                   <option value="">Todas as Contas</option>
-                  <option value="T">Totalizadoras</option>
-                  <option value="R">Resultado</option>
+                  <option value="T">Sintéticas (T)</option>
+                  <option value="R">Analíticas (R)</option>
                 </select>
               </div>
               <div style="flex:1;overflow:auto;">
@@ -473,6 +479,8 @@ const PlanoFinanceiroApp = {
                 <div style="padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
                   <span style="font-weight:700;font-size:0.9rem;color:#1e293b;"><i data-lucide="folder-tree" style="width:16px;height:16px;vertical-align:middle;margin-right:5px;"></i>Estrutura da Visão</span>
                   <div style="display:flex;gap:5px;">
+                     <button onclick="PlanoFinanceiroApp.expandAllNodes(true)" title="Expandir todos os nós" style="padding:4px 10px;background:#fff;color:#105436;border:1px solid #105436;border-radius:4px;font-size:0.75rem;cursor:pointer;">Expandir todos</button>
+                     <button onclick="PlanoFinanceiroApp.expandAllNodes(false)" title="Recolher todos os nós" style="padding:4px 10px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:4px;font-size:0.75rem;cursor:pointer;">Recolher todos</button>
                      <button onclick="PlanoFinanceiroApp.autoAllocateUnassigned()" title="Encaixa contas Sienge nos nós por nome/código" style="padding:4px 10px;background:#fff;color:#105436;border:1px solid #105436;border-radius:4px;font-size:0.75rem;cursor:pointer;">Alocar contas</button>
                      <button onclick="PlanoFinanceiroApp.addNode(null)" style="padding:4px 10px;background:#105436;color:#fff;border:none;border-radius:4px;font-size:0.75rem;cursor:pointer;">+ Nó Raiz</button>
                   </div>
@@ -520,16 +528,7 @@ const PlanoFinanceiroApp = {
         c.tpConta = c.tpConta || c.type || c.financialCategoryType || '';
       });
       this.categories.sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), 'pt-BR', { numeric: true }));
-      
-      const idSet = new Set(this.categories.map(c => String(c.id || '')));
-      this.categories.forEach(c => {
-        const strId = String(c.id || '');
-        let depth = 0;
-        for (let i = 1; i < strId.length; i++) {
-          if (idSet.has(strId.substring(0, i))) depth++;
-        }
-        c._depth = depth;
-      });
+      this.buildAccountTreeMeta();
       
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
@@ -714,16 +713,8 @@ const PlanoFinanceiroApp = {
     const typeFilter = (document.getElementById('pf-type-filter') || {}).value || '';
 
     if (!typeFilter) {
-      filtered = filtered.filter(cat => {
-        const strId = String(cat.id || '');
-        for (let i = 1; i < strId.length; i++) {
-          if (this.collapsedIds.has(strId.substring(0, i))) return false;
-        }
-        return true;
-      });
+      filtered = filtered.filter(cat => !this.isAccountHiddenByCollapse(cat));
     }
-
-    const idList = this.categories.map(c => String(c.id));
 
     tbody.innerHTML = filtered.map((cat, idx) => {
       const strId = String(cat.id);
@@ -732,34 +723,42 @@ const PlanoFinanceiroApp = {
       const myTax = this.taxConfig[strId];
       if (myTax) descTags += `<span style="margin-left:5px;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;font-size:0.65rem;padding:2px 6px;border-radius:4px;font-weight:700;">[ Fiscal: ${myTax} ]</span>`;
 
-      const typeStr = String(cat.tpConta).toLowerCase();
-      const isTotalizadora = typeStr === 't' || typeStr.includes('total');
+      const typeInfo = this.accountTypeLabel(cat);
+      const isTotalizadora = typeInfo.synthetic;
       const depth = typeFilter ? 0 : (cat._depth || 0);
-
-      const hasChildren = idList.some(childId => childId.startsWith(strId) && childId !== strId);
+      const hasChildren = !!cat._hasChildren;
       const isCollapsed = this.collapsedIds.has(strId);
-      let toggleBtn = '<span style="display:inline-block;width:20px;"></span>';
-      
+      let toggleBtn = '<span style="display:inline-block;width:22px;"></span>';
       if (!typeFilter && hasChildren) {
-        toggleBtn = `<button onclick="PlanoFinanceiroApp.toggleAccordion('${strId}')" style="background:none;border:none;cursor:pointer;padding:0 5px;font-size:0.7rem;color:#64748b;font-family:monospace;width:20px;">${isCollapsed ? '▶' : '▼'}</button>`;
+        toggleBtn = `<span style="display:inline-flex;align-items:center;gap:0;">
+          <button type="button" onclick="PlanoFinanceiroApp.toggleAccordion('${strId}', 'this')" title="${isCollapsed ? 'Expandir este nível' : 'Recolher este'}" style="background:none;border:none;cursor:pointer;padding:0;color:#64748b;display:flex;align-items:center;">
+            <i data-lucide="${isCollapsed ? 'chevron-right' : 'chevron-down'}" style="width:14px;height:14px;"></i>
+          </button>
+          <button type="button" onclick="PlanoFinanceiroApp.openAccountFoldMenu(event, '${strId}')" title="Expandir / recolher este, o nível ou todos" style="background:none;border:none;cursor:pointer;padding:0 2px;color:#94a3b8;display:flex;align-items:center;">
+            <i data-lucide="chevrons-up-down" style="width:12px;height:12px;"></i>
+          </button>
+        </span>`;
       }
 
+      const zebra = idx % 2 === 0 ? '#fff' : '#f8fafc';
       const rowStyle = isInactive 
-        ? `background:#f3f4f6; color:#9ca3af; text-decoration:line-through; opacity:0.7; border-bottom:1px solid #f0f0f0;` 
+        ? `background:#f3f4f6; color:#9ca3af; text-decoration:line-through; opacity:0.7; border-bottom:1px solid #eef2f7;` 
         : isTotalizadora 
-          ? `background:#f8fafc; font-weight:700; color:#1e293b; border-bottom:1px solid #e2e8f0;`
-          : `background:#fff; transition:background 0.1s; border-bottom:1px solid #f0f0f0;`;
+          ? `background:${depth === 0 ? '#eef6f2' : '#f8fafc'}; font-weight:700; color:#1e293b; border-bottom:1px solid #e2e8f0;`
+          : `background:${zebra}; border-bottom:1px solid #f1f5f9;`;
 
       return `
         <tr style="${rowStyle}">
-          <td style="padding:7px 14px;font-family:monospace;font-size:0.8rem;white-space:nowrap;display:flex;align-items:center;">
-             ${toggleBtn}
-             <span style="color:${isTotalizadora ? '#105436' : 'inherit'}">${strId}</span>
+          <td style="padding:8px 14px;font-family:ui-monospace,Consolas,monospace;font-size:0.8rem;white-space:nowrap;vertical-align:middle;">
+             <span style="display:inline-flex;align-items:center;gap:4px;">
+               ${toggleBtn}
+               <span style="color:${isTotalizadora ? '#105436' : '#334155'};font-weight:${isTotalizadora ? 800 : 600};">${strId}</span>
+             </span>
           </td>
-          <td style="padding:7px 14px;font-size:0.82rem;padding-left:${14 + (depth * 15)}px;">${cat.name} ${descTags}</td>
-          <td style="padding:7px 14px;font-size:0.8rem;">${cat.tpConta}</td>
-          <td style="padding:7px 14px;text-align:center;">
-             <button onclick="PlanoFinanceiroApp.openTaxModal('${strId}')" style="background:none;border:none;cursor:pointer;color:#64748b;"><i data-lucide="settings" style="width:14px;"></i></button>
+          <td style="padding:8px 14px;font-size:0.82rem;padding-left:${16 + (depth * 18)}px;font-weight:${isTotalizadora ? 700 : 500};text-transform:${isTotalizadora ? 'uppercase' : 'none'};">${this.esc(cat.name)} ${descTags}</td>
+          <td style="padding:8px 14px;font-size:0.78rem;color:#475569;">${typeInfo.label}</td>
+          <td style="padding:8px 14px;text-align:center;">
+             <button onclick="PlanoFinanceiroApp.openTaxModal('${strId}')" title="Base fiscal" style="background:none;border:none;cursor:pointer;color:#64748b;"><i data-lucide="settings" style="width:14px;"></i></button>
           </td>
         </tr>
       `;
@@ -768,25 +767,175 @@ const PlanoFinanceiroApp = {
     this._updateVisaoBar();
   },
 
-  toggleAccordion(id) {
-    if (this.collapsedIds.has(id)) this.collapsedIds.delete(id);
-    else this.collapsedIds.add(id);
+  toggleAccordion(id, scope) {
+    this.closeAccountFoldMenu();
+    const sid = String(id);
+    const nextCollapsed = !this.collapsedIds.has(sid);
+    if (scope === 'level') {
+      const cat = this.categories.find(c => String(c.id) === sid);
+      const parent = cat ? cat._parentId : null;
+      this.categories.filter(c => c._hasChildren && String(c._parentId || '') === String(parent || '')).forEach(c => {
+        if (nextCollapsed) this.collapsedIds.add(String(c.id));
+        else this.collapsedIds.delete(String(c.id));
+      });
+    } else if (scope === 'all') {
+      if (nextCollapsed) this.collapseAllAccounts();
+      else this.expandAllAccounts();
+      return;
+    } else {
+      if (this.collapsedIds.has(sid)) this.collapsedIds.delete(sid);
+      else this.collapsedIds.add(sid);
+    }
     this.renderTable();
+  },
+
+  expandAllAccounts() {
+    this.closeAccountFoldMenu();
+    this.collapsedIds = new Set();
+    this.renderTable();
+  },
+
+  collapseAllAccounts() {
+    this.closeAccountFoldMenu();
+    this.collapsedIds = new Set(this.categories.filter(c => c._hasChildren).map(c => String(c.id)));
+    this.renderTable();
+  },
+
+  expandAllNodes(expand) {
+    this.closeNodeFoldMenu();
+    const v = this.getVisao();
+    if (!v || !Array.isArray(v.groups)) return;
+    v.groups.forEach(g => { g.expanded = !!expand; });
+    this.saveToStorage({ silent: true });
+    this.renderBoard();
+  },
+
+  esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  },
+
+  accountTypeLabel(cat) {
+    const t = String(cat.tpConta || cat.type || '').toLowerCase();
+    const synthetic = t === 't' || t.includes('total') || t.includes('sintet');
+    const analytic = t === 'r' || t.includes('result') || t.includes('analit');
+    if (synthetic) return { synthetic: true, label: 'T · Sintética' };
+    if (analytic) return { synthetic: false, label: 'R · Analítica' };
+    return { synthetic: false, label: cat.tpConta || '—' };
+  },
+
+  buildAccountTreeMeta() {
+    const ids = this.categories.map(c => String(c.id || '')).filter(Boolean);
+    const idSet = new Set(ids);
+    const parentOf = (id) => {
+      const s = String(id || '');
+      if (!s) return null;
+      if (s.includes('.')) {
+        const parts = s.split('.').filter(Boolean);
+        while (parts.length > 1) {
+          parts.pop();
+          const cand = parts.join('.');
+          if (idSet.has(cand)) return cand;
+        }
+        return null;
+      }
+      let best = null;
+      idSet.forEach(other => {
+        if (other === s || other.length >= s.length) return;
+        if (s.startsWith(other) && (!best || other.length > best.length)) best = other;
+      });
+      return best;
+    };
+    this.categories.forEach(c => {
+      c._parentId = parentOf(c.id);
+    });
+    this.categories.forEach(c => {
+      const id = String(c.id);
+      c._hasChildren = this.categories.some(x => String(x._parentId) === id);
+      let depth = 0;
+      let p = c._parentId;
+      const seen = new Set();
+      while (p && !seen.has(p)) {
+        seen.add(p);
+        depth++;
+        const parent = this.categories.find(x => String(x.id) === p);
+        p = parent ? parent._parentId : null;
+      }
+      c._depth = depth;
+    });
+  },
+
+  isAccountHiddenByCollapse(cat) {
+    let p = cat._parentId;
+    const seen = new Set();
+    while (p && !seen.has(p)) {
+      if (this.collapsedIds.has(p)) return true;
+      seen.add(p);
+      const parent = this.categories.find(x => String(x.id) === p);
+      p = parent ? parent._parentId : null;
+    }
+    return false;
+  },
+
+  closeAccountFoldMenu() {
+    const el = document.getElementById('pf-account-fold-menu');
+    if (el) el.remove();
+    if (this._accFoldCloser) {
+      document.removeEventListener('click', this._accFoldCloser);
+      this._accFoldCloser = null;
+    }
+  },
+
+  openAccountFoldMenu(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeAccountFoldMenu();
+    const sid = String(id);
+    const collapsed = this.collapsedIds.has(sid);
+    const menu = document.createElement('div');
+    menu.id = 'pf-account-fold-menu';
+    menu.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,0.14);min-width:230px;padding:6px;overflow:hidden;';
+    const r = event.currentTarget.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.left = r.left + 'px';
+    const item = (label, fn) => `<button type="button" onclick="${fn}" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;font-weight:600;">${label}</button>`;
+    menu.innerHTML = `
+      ${item(collapsed ? 'Expandir apenas este' : 'Recolher apenas este', `PlanoFinanceiroApp.toggleAccordion('${sid}', 'this')`)}
+      ${item(collapsed ? 'Expandir o nível inteiro' : 'Recolher o nível inteiro', `PlanoFinanceiroApp.toggleAccordion('${sid}', 'level')`)}
+      <div style="height:1px;background:#e2e8f0;margin:4px 0;"></div>
+      ${item('Expandir todos', "PlanoFinanceiroApp.expandAllAccounts()")}
+      ${item('Recolher todos', "PlanoFinanceiroApp.collapseAllAccounts()")}
+    `;
+    document.body.appendChild(menu);
+    this._accFoldCloser = () => this.closeAccountFoldMenu();
+    setTimeout(() => document.addEventListener('click', this._accFoldCloser), 0);
   },
 
   openTaxModal(id) {
     const currentBase = this.taxConfig[id] || '';
+    const cat = this.categories.find(c => String(c.id) === String(id));
+    const nome = cat ? (cat.name || '') : '';
     const modalHtml = `
-      <div id="pf-tax-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;">
-        <div style="background:#fff;border-radius:12px;width:400px;padding:20px;">
-          <h3 style="margin:0 0 15px 0;">Base Fiscal para: ${id}</h3>
-          <select id="pf-tax-select" style="width:100%;padding:8px;margin-bottom:15px;">
-            <option value="">Nenhuma</option>
-            ${this.taxBases.map(b => `<option value="${b}" ${currentBase===b?'selected':''}>${b}</option>`).join('')}
-          </select>
-          <div style="text-align:right;">
-            <button onclick="document.getElementById('pf-tax-overlay').remove()">Cancelar</button>
-            <button onclick="PlanoFinanceiroApp.saveTaxConfig('${id}')">Salvar</button>
+      <div id="pf-tax-overlay" style="position:fixed;inset:0;background:rgba(12,41,29,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;">
+        <div style="background:#fff;border-radius:12px;width:100%;max-width:440px;overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);">
+          <div style="background:#105436;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <div>
+              <div style="color:#fff;font-size:0.95rem;font-weight:800;">Base fiscal</div>
+              <div style="color:rgba(255,255,255,0.82);font-size:0.75rem;margin-top:2px;">Conta ${this.esc(id)}${nome ? ' · ' + this.esc(nome) : ''}</div>
+            </div>
+            <button type="button" onclick="document.getElementById('pf-tax-overlay').remove()" style="background:rgba(255,255,255,0.14);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:1.1rem;line-height:1;">×</button>
+          </div>
+          <div style="padding:18px;">
+            <label style="display:block;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Base de cálculo</label>
+            <select id="pf-tax-select" style="width:100%;height:38px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:0.88rem;color:#0f172a;background:#fff;box-sizing:border-box;">
+              <option value="">Nenhuma</option>
+              ${this.taxBases.map(b => `<option value="${this.esc(b)}" ${currentBase===b?'selected':''}>${this.esc(b)}</option>`).join('')}
+            </select>
+            <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A base escolhida fica vinculada a esta conta do plano e é usada nos cálculos fiscais.</p>
+          </div>
+          <div style="padding:0 18px 16px;display:flex;justify-content:flex-end;gap:8px;">
+            <button type="button" onclick="document.getElementById('pf-tax-overlay').remove()" style="padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Cancelar</button>
+            <button type="button" onclick="PlanoFinanceiroApp.saveTaxConfig('${id}')" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">Salvar</button>
           </div>
         </div>
       </div>
@@ -1079,6 +1228,9 @@ const PlanoFinanceiroApp = {
     menu.innerHTML = `
       <button type="button" onclick="PlanoFinanceiroApp.toggleNode('${id}', 'this')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? 'Recolher apenas este' : 'Expandir apenas este'}</button>
       <button type="button" onclick="PlanoFinanceiroApp.toggleNode('${id}', 'level')" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">${expanded ? 'Recolher o nível inteiro' : 'Expandir o nível inteiro'}</button>
+      <div style="height:1px;background:#e2e8f0;margin:4px 0;"></div>
+      <button type="button" onclick="PlanoFinanceiroApp.expandAllNodes(true)" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">Expandir todos</button>
+      <button type="button" onclick="PlanoFinanceiroApp.expandAllNodes(false)" style="display:block;width:100%;text-align:left;border:none;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;color:#1e293b;">Recolher todos</button>
     `;
     document.body.appendChild(menu);
     this._foldMenuCloser = () => this.closeNodeFoldMenu();
