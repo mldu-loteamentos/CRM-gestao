@@ -410,7 +410,7 @@ const MarketingApp = {
             </div>
           </div>
           <div style="padding:14px 20px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;">
-            <button class="btn btn-outline" onclick="MarketingApp.closeBudgetModal()">Cancelar</button>
+            <button class="btn btn-cancel" onclick="MarketingApp.closeBudgetModal()">Cancelar</button>
             <button class="btn btn-primary" onclick="MarketingApp.saveBudget()">Salvar evento</button>
           </div>
         </div>

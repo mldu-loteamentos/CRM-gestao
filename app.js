@@ -55,7 +55,7 @@
         <div style="font-size:0.95rem;font-weight:800;color:#105436;letter-spacing:0.02em;margin-bottom:10px;">${TITLE}</div>
         <div id="moura-app-dialog-msg" style="font-size:0.92rem;color:#1e293b;line-height:1.45;white-space:pre-wrap;word-break:break-word;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
-          <button type="button" id="moura-app-dialog-cancel" style="display:none;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Cancelar</button>
+          <button type="button" class="btn btn-cancel" id="moura-app-dialog-cancel" style="display:none;padding:8px 16px;border-radius:8px;">Cancelar</button>
           <button type="button" id="moura-app-dialog-ok" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">OK</button>
         </div>
       </div>`;
@@ -1390,6 +1390,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 
   // Esconder todas as seções e abas
   document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
+  if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   document.querySelectorAll("#view-customer-details, #view-renegotiation, #view-distrato").forEach(view => view.style.display = "none");
   document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
   
@@ -8844,6 +8845,7 @@ function formatCpfCnpj(val) {
   };
   document.getElementById("btn-back-to-details-distrato").onclick = () => {
     sessionStorage.removeItem('currentSubView');
+    if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
     viewCustomerCard(customerId, saleId);
   };
 
@@ -8984,6 +8986,7 @@ function formatCpfCnpj(val) {
 }
 
 function goBackToDashboard() {
+  if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   if (window._homeInsightReturn) {
     window._homeInsightReturn = false;
     document.getElementById("view-customer-details").style.display = "none";
@@ -9510,7 +9513,7 @@ window.openPromisedInstallmentsModal = function() {
       <div style="flex: 1;">
         <button class="btn btn-outline" onclick="document.querySelectorAll('.prom-modal-check:not(:disabled)').forEach(c => c.checked = false); const ca = document.getElementById('promise-modal-check-all'); if(ca) ca.checked = false;" style="color: #64748b; border-color: #cbd5e1;">Desmarcar todas</button>
       </div>
-      <button class="btn btn-outline" onclick="document.getElementById('promise-installments-modal').remove()">Cancelar</button>
+      <button class="btn btn-cancel" onclick="document.getElementById('promise-installments-modal').remove()">Cancelar</button>
       <button class="btn btn-primary" onclick="window.confirmPromiseModalSelection()">Adicionar Selecionadas</button>
     </div>
   `;
@@ -10320,6 +10323,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
   document.getElementById("view-customer-details").style.display = "none";
   const viewDistrato = document.getElementById("view-distrato");
   if (viewDistrato) viewDistrato.style.display = "none";
+  if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   document.getElementById("view-renegotiation").style.display = "block";
   sessionStorage.setItem('currentSubView', 'renegotiation');
   const custId = customer.id || customer.customerId || "";
@@ -11057,6 +11061,8 @@ async function showDistratoView(customer, sale, bills) {
       breakdownEl.textContent = `Orig. ${totalPaidOrig.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} - Desc. ${totalPaidDesc.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
   }
 
+  window.resetDistratoEditableFields({ keepComputed: true });
+
   // Valores padrão de despesas
   const isSubjudice = sale.subjudice === "S";
   const fruitionInput = document.getElementById("dist-fruition-months");
@@ -11112,12 +11118,6 @@ async function showDistratoView(customer, sale, bills) {
     badge.style.color = isPre2019 ? '#856404' : '#94a3b8';
   }
 
-  const restPctEl = document.getElementById("dist-restitution-pct");
-  if(restPctEl) restPctEl.value = 60; // Padrão
-  
-  const restInstEl = document.getElementById("dist-restitution-installments");
-  if(restInstEl) restInstEl.value = 12;
-
   // Aplicar máscara de moeda nos campos de texto
   if (typeof window.applyDistratoCurrencyMask === 'function') {
     window.applyDistratoCurrencyMask();
@@ -11128,27 +11128,6 @@ async function showDistratoView(customer, sale, bills) {
     }
   }
 
-  const permutaEl = document.getElementById("dist-permuta-toggle");
-  if (permutaEl) permutaEl.checked = false;
-  window._distPermutaState = { contracts: [], installments: [], selection: null };
-  const loteHidden = document.getElementById("dist-novo-lote");
-  if (loteHidden) loteHidden.value = "";
-  if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
-  const loteWrapReset = document.getElementById("dist-permuta-lote-wrap");
-  if (loteWrapReset) loteWrapReset.style.display = "none";
-  const iniciativaEl = document.getElementById("dist-iniciativa");
-  if (iniciativaEl) iniciativaEl.value = "cliente";
-  window._distBankCardUploaded = false;
-  const otherChk = document.getElementById("dist-bank-other-beneficiary");
-  if (otherChk) otherChk.checked = false;
-  const otherName = document.getElementById("dist-bank-other-name");
-  if (otherName) otherName.value = "";
-  const otherCpf = document.getElementById("dist-bank-other-cpf");
-  if (otherCpf) otherCpf.value = "";
-  const cardFile = document.getElementById("dist-bank-card-file");
-  if (cardFile) cardFile.value = "";
-  const cardStatus = document.getElementById("dist-bank-card-status");
-  if (cardStatus) cardStatus.innerHTML = 'Ao gerar o documento, os dados bancários serão salvos no cadastro do cliente no Sienge (Anexos — <strong>DADOS BANCARIOS PARA DISTRATO</strong>).';
   fillDistratoBeneficiaryLocked(customer);
   if (typeof window.toggleDistratoOtherBeneficiary === "function") window.toggleDistratoOtherBeneficiary();
 
@@ -11158,6 +11137,84 @@ async function showDistratoView(customer, sale, bills) {
   if (typeof window.loadDistratoBanksList === "function") window.loadDistratoBanksList();
   if (typeof window.toggleDistratoPermuta === "function") window.toggleDistratoPermuta();
 }
+
+window.resetDistratoEditableFields = function(opts) {
+  const keepComputed = !!(opts && opts.keepComputed);
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  };
+  const setChk = (id, on) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!on;
+  };
+
+  setVal("dist-restitution-pct", "60");
+  setVal("dist-restitution-val", "0,00");
+  setVal("dist-restitution-choice", "custom");
+  setVal("dist-restitution-installments", "12");
+  setVal("dist-iniciativa", "cliente");
+  setVal("dist-fruition-months", "1");
+  ["dist-taxa-assoc", "dist-iptu", "dist-agua", "dist-luz", "dist-homolog", "dist-outros", "dist-comissao"].forEach((id) => {
+    setVal(id, "0,00");
+  });
+
+  const permutaEl = document.getElementById("dist-permuta-toggle");
+  if (permutaEl) permutaEl.checked = false;
+  window._distPermutaState = { contracts: [], installments: [], selection: null };
+  setVal("dist-novo-lote", "");
+  const permSel = document.getElementById("dist-permuta-contract");
+  if (permSel) {
+    permSel.innerHTML = `<option value="">Selecione o contrato do cliente...</option>`;
+    permSel.value = "";
+  }
+  const permBody = document.getElementById("dist-permuta-parcelas-body");
+  if (permBody) permBody.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+  const loteWrap = document.getElementById("dist-permuta-lote-wrap");
+  if (loteWrap) loteWrap.style.display = "none";
+  if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
+
+  window._distBankCardUploaded = false;
+  setChk("dist-bank-other-beneficiary", false);
+  setVal("dist-bank-other-name", "");
+  setVal("dist-bank-other-cpf", "");
+  setVal("dist-bank-beneficiary-name", "");
+  setVal("dist-bank-cpf", "");
+  setVal("dist-bank-transfer-type", "PIX");
+  setVal("dist-bank-name", "");
+  setVal("dist-bank-agency", "");
+  setVal("dist-bank-account", "");
+  setVal("dist-bank-digit", "");
+  setVal("dist-bank-pix-type", "CPF/CNPJ");
+  setVal("dist-bank-pix-key", "");
+  const cardFile = document.getElementById("dist-bank-card-file");
+  if (cardFile) cardFile.value = "";
+  const cardStatus = document.getElementById("dist-bank-card-status");
+  if (cardStatus) {
+    cardStatus.style.color = "#64748b";
+    cardStatus.innerHTML = 'Ao gerar o documento, os dados bancários serão salvos no cadastro do cliente no Sienge (Anexos — <strong>DADOS BANCARIOS PARA DISTRATO</strong>).';
+  }
+  if (typeof window.hideDistratoBankSuggest === "function") window.hideDistratoBankSuggest();
+  if (typeof window.toggleDistratoOtherBeneficiary === "function") window.toggleDistratoOtherBeneficiary();
+  if (typeof window.toggleDistratoPaymentFields === "function") window.toggleDistratoPaymentFields();
+  if (typeof window.onDistratoPixTypeChange === "function") window.onDistratoPixTypeChange();
+
+  ["dist-testemunha-1", "dist-testemunha-2"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  if (typeof syncDistratoWitnessSelects === "function") syncDistratoWitnessSelects();
+
+  if (!keepComputed && window.AppState) AppState.currentDistratoResult = null;
+};
+
+window.leaveDistratoSimulation = function() {
+  if (typeof window.resetDistratoEditableFields === "function") window.resetDistratoEditableFields();
+  g_distCustomer = null;
+  g_distSale = null;
+  g_distBills = [];
+  if (window.AppState) AppState.currentDistratoResult = null;
+};
 
 function calculateDistrato() {
   if (!g_distSale) return;
@@ -11582,9 +11639,9 @@ window.filterDistratoBanks = function(query) {
     return;
   }
   const q = String(query || "").trim().toLowerCase();
-  const matches = (!q ? rows : rows.filter((b) =>
+  const matches = !q ? rows : rows.filter((b) =>
     b.label.toLowerCase().includes(q) || b.code.includes(q) || b.name.toLowerCase().includes(q)
-  )).slice(0, 40);
+  );
   if (!matches.length) {
     box.style.display = "none";
     return;
@@ -12115,9 +12172,8 @@ function populateDistratoWitnessSelects() {
   ["dist-testemunha-1", "dist-testemunha-2"].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    const prev = el.value;
     el.innerHTML = opts.join("");
-    if (prev && users.some(u => String(u.id) === String(prev))) el.value = prev;
+    el.value = "";
     if (!el._distWitnessBound) {
       el._distWitnessBound = true;
       el.addEventListener("change", syncDistratoWitnessSelects);
@@ -15452,7 +15508,7 @@ window.showDeleteRecurrenceChoice = function(index, sourceKey, noteText, dateStr
                 <button onclick="deleteRecurrenceAll('${sourceKey}', ${index})" style="padding:10px 14px; border-radius:7px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-size:0.82rem; cursor:pointer; font-weight:600; text-align:left; transition:background 0.15s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'">
                     <strong>ðŸ—‘ï¸ Excluir toda a recorrência</strong><br><span style="font-weight:400; font-size:0.75rem; color:#7f1d1d;">Remove o lembrete de todos os dias futuros</span>
                 </button>
-                <button onclick="document.getElementById('delete-rec-overlay').style.display='none'" style="padding:8px 14px; border-radius:7px; border:1px solid #e2e8f0; background:white; color:#64748b; font-size:0.82rem; cursor:pointer;">Cancelar</button>
+                <button class="btn btn-cancel" onclick="document.getElementById('delete-rec-overlay').style.display='none'">Cancelar</button>
             </div>
         </div>
     `;
@@ -15614,7 +15670,7 @@ window.openAgendaAlarmModal = function(dateStr, index, sourceKey = '', focusSect
             </div>
 
             <div style="display:flex; justify-content:flex-end; gap:8px;">
-                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('agenda-alarm-overlay').style.display='none'">Cancelar</button>
+                <button class="btn btn-sm btn-cancel" onclick="document.getElementById('agenda-alarm-overlay').style.display='none'">Cancelar</button>
                 <button class="btn btn-sm btn-danger" onclick="saveAgendaAlarm('${dateStr}', ${index}, null, '${sourceKey}', true)">Remover Alarme</button>
                 <button class="btn btn-sm btn-primary" onclick="saveAgendaAlarm('${dateStr}', ${index}, document.getElementById('agenda-alarm-datetime').value, '${sourceKey}', false)">Salvar</button>
             </div>
@@ -16818,7 +16874,7 @@ window.enviarLoteJuridico = async function() {
         <ul style="margin:0; padding-left:0; list-style:none; font-size:0.82rem; color:#1e293b; max-height:200px; overflow-y:auto;">${listHtml}</ul>
       </div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">
-        <button onclick="document.getElementById('juridico-lote-overlay').style.display='none'" style="padding:8px 18px; border-radius:6px; border:1px solid #cbd5e1; background:white; color:#64748b; font-size:0.85rem; cursor:pointer; font-weight:600;">Cancelar</button>
+        <button class="btn btn-cancel" onclick="document.getElementById('juridico-lote-overlay').style.display='none'">Cancelar</button>
         <button id="btn-confirmar-lote-jur" onclick="confirmarEnvioLoteJuridico()" style="padding:8px 18px; border-radius:6px; border:none; background:#dc2626; color:white; font-size:0.85rem; cursor:pointer; font-weight:700; display:inline-flex; align-items:center; gap:6px;">
           <i data-lucide="send" style="width:14px;"></i> Confirmar Envio
         </button>
@@ -21964,7 +22020,7 @@ window.openEtapaModal = function(id = 'new', parentId = null) {
                     </div>
                 </div>
                 <div style="padding: 15px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
-                    <button class="btn btn-outline" onclick="document.getElementById('etapa-judicial-modal').style.display='none'" style="padding: 8px 16px;">Cancelar</button>
+                    <button class="btn btn-cancel" onclick="document.getElementById('etapa-judicial-modal').style.display='none'" style="padding: 8px 16px;">Cancelar</button>
                     <button class="btn btn-primary" onclick="window.salvarEtapaModal()" style="padding: 8px 16px; background: #128143; border: none; color: white;">Salvar</button>
                 </div>
             </div>
@@ -22083,7 +22139,7 @@ window.openJudicialOptionsEditor = function() {
           </div>
           
           <div style="display: flex; gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
-            <button style="flex: 1; padding: 10px 18px; font-size: 0.95rem; background: #f97316; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#ea580c'" onmouseout="this.style.background='#f97316'" onclick="window.closeJudicialOptionsEditor()">Cancelar</button>
+            <button class="btn btn-cancel" style="flex: 1; padding: 10px 18px; font-size: 0.95rem;" onclick="window.closeJudicialOptionsEditor()">Cancelar</button>
             <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="window.saveJudicialOptionsList()">Salvar Alterações</button>
           </div>
           
@@ -26444,7 +26500,7 @@ window.openOptionsEditor = function(type) {
       <button onclick="addOptionToList()" class="btn btn-primary" style="padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; display: flex; align-items: center; gap: 6px; font-weight: 600;"><i data-lucide="plus" style="width: 16px; height: 16px;"></i> Adicionar</button>
     </div>
     <div style="display: flex; gap: 12px; border-top: 1px solid #f1f5f9; padding-top: 20px;">
-      <button style="flex: 1; padding: 10px 18px; font-size: 0.95rem; background: #f97316; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='#ea580c'" onmouseout="this.style.background='#f97316'" onclick="closeOptionsEditor()">Cancelar</button>
+      <button class="btn btn-cancel" style="flex: 1; padding: 10px 18px; font-size: 0.95rem;" onclick="closeOptionsEditor()">Cancelar</button>
       <button class="btn btn-primary" style="flex: 1; padding: 10px 18px; font-size: 0.95rem; border-radius: 8px; font-weight: 600;" onclick="saveOptionsList('${type}')">Salvar Alterações</button>
     </div>
   `;

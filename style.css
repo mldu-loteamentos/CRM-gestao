@@ -752,6 +752,23 @@ body {
   box-shadow: 0 4px 12px rgba(243, 112, 33, 0.15);
 }
 
+/* Cancelar = mesmo laranja dos botões Extrato (.btn-secondary) */
+.btn-cancel,
+button.btn-cancel,
+#moura-app-dialog-cancel {
+  background-color: var(--color-secondary) !important;
+  color: var(--color-white) !important;
+  border: none !important;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-cancel:hover,
+button.btn-cancel:hover,
+#moura-app-dialog-cancel:hover {
+  background-color: var(--color-secondary-hover) !important;
+  box-shadow: 0 4px 12px rgba(243, 112, 33, 0.15);
+}
+
 .btn-outline {
   background-color: transparent;
   border: 1.5px solid var(--color-primary);

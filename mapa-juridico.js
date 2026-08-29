@@ -186,7 +186,7 @@ window.gerarMapaJuridicoPDF = function() {
             </div>
         </div>
         <div style="position: fixed; bottom: 30px; right: 30px; display: flex; gap: 10px;">
-            <button id="btn-cancel-pdf" style="padding: 12px 24px; border: none; border-radius: 8px; background: #e2e8f0; color: #475569; font-weight: bold; cursor: pointer;">Cancelar</button>
+            <button id="btn-cancel-pdf" class="btn btn-cancel" style="padding: 12px 24px;">Cancelar</button>
             <button id="btn-gerar-pdf" style="padding: 12px 24px; border: none; border-radius: 8px; background: #166534; color: white; font-weight: bold; cursor: pointer;">Baixar PDF</button>
         </div>
     `;

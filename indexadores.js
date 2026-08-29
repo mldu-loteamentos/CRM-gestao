@@ -136,7 +136,7 @@ const IndexadoresApp = {
             </div>
           </div>
           <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; background: #f8fafc; text-align: right;">
-            <button class="btn btn-outline" onclick="document.getElementById('idx-settings-modal').remove()" style="margin-right: 10px;">Cancelar</button>
+            <button class="btn btn-cancel" onclick="document.getElementById('idx-settings-modal').remove()" style="margin-right: 10px;">Cancelar</button>
             <button class="btn btn-primary" onclick="IndexadoresApp.saveSettings()">Salvar Configurações</button>
           </div>
         </div>

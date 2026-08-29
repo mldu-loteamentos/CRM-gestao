@@ -1011,11 +1011,11 @@ const InvestimentoApp = {
   companyFullLabel(c) {
     const legal = String((c && (c.legalName || c.name)) || "").toUpperCase();
     return `${c.id} - ${legal}`;
-  }
+  },
 
   companyFilterItems() {
     return this.geridasCompanies().map(c => ({ id: String(c.id), label: this.companyFullLabel(c) }));
-  }
+  },
 
   bindCompanyFilter() {
     if (!window.MlEmpresaFilter) return;

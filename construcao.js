@@ -771,7 +771,7 @@ window.openNewConstrucaoModal = function(editId = null) {
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                    <button type="button" class="btn btn-outline" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
+                    <button type="button" class="btn btn-cancel" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
                     <button type="button" class="btn btn-primary" onclick="window.saveNovaVistoria()" id="btn-salvar-vistoria">Salvar Vistoria</button>
                 </div>
             </div>
@@ -1100,7 +1100,7 @@ window.deleteNovaVistoria = async function(id) {
             <h3 style="margin: 0 0 12px; font-size: 1.25rem; font-weight: 700; color: #0f1e29;">Excluir Vistoria</h3>
             <p style="margin: 0 0 24px; font-size: 0.95rem; color: #64748b; line-height: 1.5;">Tem certeza que deseja excluir esta vistoria? Esta ação não poderá ser desfeita.</p>
             <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="btn-cancel-del" style="flex: 1; padding: 10px 16px; border: 1px solid #cbd5e1; background: #fff; color: #475569; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Cancelar</button>
+                <button id="btn-cancel-del" class="btn btn-cancel" style="flex: 1; padding: 10px 16px; font-size: 0.95rem;">Cancelar</button>
                 <button id="btn-confirm-del" style="flex: 1; padding: 10px 16px; border: none; background: #ef4444; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Sim, excluir</button>
             </div>
         </div>

@@ -184,7 +184,7 @@ const CentrosCustoApp = {
             </div>
           </div>
           <div style="padding: 16px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; background: #f9f9f9; border-radius: 0 0 8px 8px;">
-            <button class="btn btn-outline" onclick="CentrosCustoApp.closeModal()">Cancelar</button>
+            <button class="btn btn-cancel" onclick="CentrosCustoApp.closeModal()">Cancelar</button>
             <button class="btn btn-primary" onclick="CentrosCustoApp.saveCustom(${id})"><i data-lucide="save" style="width: 14px;"></i> Salvar</button>
           </div>
         </div>

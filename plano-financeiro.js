@@ -453,15 +453,15 @@ const PlanoFinanceiroApp = {
                 </button>
                 <select id="pf-type-filter" onchange="PlanoFinanceiroApp.onSearch()" style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;outline:none;">
                   <option value="">Todas as Contas</option>
-                  <option value="T">Sintéticas (T)</option>
-                  <option value="R">Analíticas (R)</option>
+                  <option value="T">Totalizadora</option>
+                  <option value="R">Resultado</option>
                 </select>
               </div>
               <div style="flex:1;overflow:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:0.82rem;" id="pf-table">
                   <thead>
                     <tr style="background:#f1f5f9;position:sticky;top:0;z-index:1;">
-                      <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;width:120px;">Conta</th>
+                      <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;width:170px;">Conta</th>
                       <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;">Descrição</th>
                       <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;width:120px;">Tipo</th>
                       <th style="padding:10px 14px;text-align:center;border-bottom:2px solid #e2e8f0;width:80px;">Ações</th>
@@ -527,8 +527,8 @@ const PlanoFinanceiroApp = {
         c.name = c.name || c.description || c.financialCategoryName || '';
         c.tpConta = c.tpConta || c.type || c.financialCategoryType || '';
       });
-      this.categories.sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), 'pt-BR', { numeric: true }));
       this.buildAccountTreeMeta();
+      this.sortAccountsTree();
       
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
@@ -678,12 +678,13 @@ const PlanoFinanceiroApp = {
     
     const matched = this.categories.filter(c => {
       const q = (searchTerm || '').toLowerCase();
-      const matchText = !q || String(c.id || '').toLowerCase().includes(q) || String(c.name || '').toLowerCase().includes(q);
+      const codeDisp = this.formatAccountCode(c).toLowerCase();
+      const matchText = !q || String(c.id || '').toLowerCase().includes(q) || codeDisp.includes(q) || String(c.name || '').toLowerCase().includes(q);
       
       let typeStr = String(c.tpConta || '').toLowerCase();
       let matchType = true;
-      if (typeFilter === 'T') matchType = typeStr === 't' || typeStr.includes('total');
-      else if (typeFilter === 'R') matchType = typeStr === 'r' || typeStr.includes('resultado');
+      if (typeFilter === 'T') matchType = typeStr === 't' || typeStr.includes('total') || typeStr.includes('sintet');
+      else if (typeFilter === 'R') matchType = typeStr === 'r' || typeStr.includes('result') || typeStr.includes('analit');
       
       return matchText && matchType;
     });
@@ -691,13 +692,15 @@ const PlanoFinanceiroApp = {
     if (typeFilter) return matched;
 
     const keepIds = new Set(matched.map(c => String(c.id)));
-    const allIds = new Set(this.categories.map(c => String(c.id)));
     
     matched.forEach(c => {
-      const strId = String(c.id);
-      for (let i = 1; i < strId.length; i++) {
-        const prefix = strId.substring(0, i);
-        if (allIds.has(prefix)) keepIds.add(prefix);
+      let p = c._parentId;
+      const seen = new Set();
+      while (p && !seen.has(String(p))) {
+        keepIds.add(String(p));
+        seen.add(String(p));
+        const parent = this.categories.find(x => String(x.id) === String(p));
+        p = parent ? parent._parentId : null;
       }
     });
 
@@ -725,9 +728,11 @@ const PlanoFinanceiroApp = {
 
       const typeInfo = this.accountTypeLabel(cat);
       const isTotalizadora = typeInfo.synthetic;
-      const depth = typeFilter ? 0 : (cat._depth || 0);
+      const depth = cat._depth || 0;
       const hasChildren = !!cat._hasChildren;
       const isCollapsed = this.collapsedIds.has(strId);
+      const codeDisp = this.formatAccountCode(cat);
+      const indentPx = 10 + depth * 22;
       let toggleBtn = '<span style="display:inline-block;width:22px;"></span>';
       if (!typeFilter && hasChildren) {
         toggleBtn = `<span style="display:inline-flex;align-items:center;gap:0;">
@@ -744,15 +749,15 @@ const PlanoFinanceiroApp = {
       const rowStyle = isInactive 
         ? `background:#f3f4f6; color:#9ca3af; text-decoration:line-through; opacity:0.7; border-bottom:1px solid #eef2f7;` 
         : isTotalizadora 
-          ? `background:${depth === 0 ? '#eef6f2' : '#f8fafc'}; font-weight:700; color:#1e293b; border-bottom:1px solid #e2e8f0;`
+          ? `background:${depth === 0 ? '#eef6f2' : '#f4faf7'}; font-weight:700; color:#1e293b; border-bottom:1px solid #e2e8f0;`
           : `background:${zebra}; border-bottom:1px solid #f1f5f9;`;
 
       return `
         <tr style="${rowStyle}">
-          <td style="padding:8px 14px;font-family:ui-monospace,Consolas,monospace;font-size:0.8rem;white-space:nowrap;vertical-align:middle;">
+          <td style="padding:8px 14px 8px ${indentPx}px;font-family:ui-monospace,Consolas,monospace;font-size:0.8rem;white-space:nowrap;vertical-align:middle;">
              <span style="display:inline-flex;align-items:center;gap:4px;">
                ${toggleBtn}
-               <span style="color:${isTotalizadora ? '#105436' : '#334155'};font-weight:${isTotalizadora ? 800 : 600};">${strId}</span>
+               <span style="color:${isTotalizadora ? '#105436' : '#334155'};font-weight:${isTotalizadora ? 800 : 600};">${this.esc(codeDisp)}</span>
              </span>
           </td>
           <td style="padding:8px 14px;font-size:0.82rem;padding-left:${16 + (depth * 18)}px;font-weight:${isTotalizadora ? 700 : 500};text-transform:${isTotalizadora ? 'uppercase' : 'none'};">${this.esc(cat.name)} ${descTags}</td>
@@ -819,9 +824,69 @@ const PlanoFinanceiroApp = {
     const t = String(cat.tpConta || cat.type || '').toLowerCase();
     const synthetic = t === 't' || t.includes('total') || t.includes('sintet');
     const analytic = t === 'r' || t.includes('result') || t.includes('analit');
-    if (synthetic) return { synthetic: true, label: 'T · Sintética' };
-    if (analytic) return { synthetic: false, label: 'R · Analítica' };
+    if (synthetic) return { synthetic: true, label: 'Totalizadora' };
+    if (analytic) return { synthetic: false, label: 'Resultado' };
     return { synthetic: false, label: cat.tpConta || '—' };
+  },
+
+  formatAccountCode(cat) {
+    const raw = String((cat && cat.id) || '').trim();
+    if (!raw) return '';
+    if (raw.includes('.')) return raw.replace(/^\.+|\.+$/g, '');
+    const chain = [];
+    let node = cat;
+    const seen = new Set();
+    while (node && !seen.has(String(node.id))) {
+      seen.add(String(node.id));
+      chain.unshift(node);
+      const pid = node._parentId;
+      node = pid ? this.categories.find(x => String(x.id) === String(pid)) : null;
+    }
+    const segs = [];
+    let prevId = '';
+    chain.forEach((n, i) => {
+      const sid = String(n.id);
+      if (i === 0) {
+        segs.push(sid);
+        prevId = sid;
+        return;
+      }
+      let rest = sid.startsWith(prevId) ? sid.slice(prevId.length) : sid;
+      if (/^\d+$/.test(rest)) {
+        if (rest.length % 2 === 1) rest = rest.padStart(rest.length + 1, '0');
+        (rest.match(/.{1,2}/g) || [rest]).forEach(p => segs.push(p));
+      } else if (rest) {
+        segs.push(rest);
+      }
+      prevId = sid;
+    });
+    return segs.join('.');
+  },
+
+  sortAccountsTree() {
+    const byParent = new Map();
+    this.categories.forEach(c => {
+      const p = String(c._parentId || '');
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(c);
+    });
+    const cmp = (a, b) => String(a.id || '').localeCompare(String(b.id || ''), 'pt-BR', { numeric: true });
+    const out = [];
+    const walk = (pid) => {
+      const kids = (byParent.get(String(pid || '')) || []).slice().sort(cmp);
+      kids.forEach(c => {
+        out.push(c);
+        walk(String(c.id));
+      });
+    };
+    walk('');
+    if (out.length !== this.categories.length) {
+      const seen = new Set(out.map(c => String(c.id)));
+      this.categories.forEach(c => {
+        if (!seen.has(String(c.id))) out.push(c);
+      });
+    }
+    this.categories = out;
   },
 
   buildAccountTreeMeta() {
@@ -842,8 +907,17 @@ const PlanoFinanceiroApp = {
       let best = null;
       idSet.forEach(other => {
         if (other === s || other.length >= s.length) return;
-        if (s.startsWith(other) && (!best || other.length > best.length)) best = other;
+        if (!s.startsWith(other)) return;
+        const restLen = s.length - other.length;
+        if (restLen % 2 !== 0) return;
+        if (!best || other.length > best.length) best = other;
       });
+      if (!best) {
+        idSet.forEach(other => {
+          if (other === s || other.length >= s.length) return;
+          if (s.startsWith(other) && (!best || other.length > best.length)) best = other;
+        });
+      }
       return best;
     };
     this.categories.forEach(c => {
@@ -934,7 +1008,7 @@ const PlanoFinanceiroApp = {
             <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A base escolhida fica vinculada a esta conta do plano e é usada nos cálculos fiscais.</p>
           </div>
           <div style="padding:0 18px 16px;display:flex;justify-content:flex-end;gap:8px;">
-            <button type="button" onclick="document.getElementById('pf-tax-overlay').remove()" style="padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Cancelar</button>
+            <button type="button" class="btn btn-cancel" onclick="document.getElementById('pf-tax-overlay').remove()">Cancelar</button>
             <button type="button" onclick="PlanoFinanceiroApp.saveTaxConfig('${id}')" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">Salvar</button>
           </div>
         </div>
@@ -1011,7 +1085,7 @@ const PlanoFinanceiroApp = {
 
     // Filtra resultado/analiticas apenas e não atribuidas e não ignoradas
     let unassigned = this.categories.filter(c => String(c.tpConta).toLowerCase() === 'r' && !assignedIds.has(String(c.id)) && !ignoredIds.has(String(c.id)));
-    if (q) unassigned = unassigned.filter(c => String(c.id).includes(q) || String(c.name).toLowerCase().includes(q));
+    if (q) unassigned = unassigned.filter(c => String(c.id).includes(q) || this.formatAccountCode(c).toLowerCase().includes(q) || String(c.name).toLowerCase().includes(q));
 
     const totalUnassignedUnignored = this.categories.filter(c => String(c.tpConta).toLowerCase() === 'r' && !assignedIds.has(String(c.id)) && !ignoredIds.has(String(c.id))).length;
 
@@ -1037,7 +1111,7 @@ const PlanoFinanceiroApp = {
                const name = c ? c.name : 'Desconhecida';
                return `
                  <div style="background:#fef2f2;border:1px solid #fca5a5;padding:6px 8px;border-radius:6px;font-size:0.7rem;color:#b91c1c;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-                   <span>${id} - <span style="font-weight:normal;">${name.substring(0, 20)}...</span></span>
+                   <span>${this.esc(c ? this.formatAccountCode(c) : id)} - <span style="font-weight:normal;">${name.substring(0, 20)}...</span></span>
                    <button onclick="PlanoFinanceiroApp.restoreAccount('${id}')" title="Restaurar" style="background:none;border:none;color:#dc2626;cursor:pointer;"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i></button>
                  </div>
                `;
@@ -1051,7 +1125,7 @@ const PlanoFinanceiroApp = {
              style="background:#fff;border:1px solid #cbd5e1;padding:8px 10px;border-radius:6px;font-size:0.75rem;cursor:grab;box-shadow:0 1px 2px rgba(0,0,0,0.05);display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:8px;"
              onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#cbd5e1'">
           <div style="display:flex;flex-direction:column;gap:3px;overflow:hidden;">
-            <strong style="color:#0f172a;font-family:monospace;">${c.id}</strong>
+            <strong style="color:#0f172a;font-family:monospace;">${this.esc(this.formatAccountCode(c))}</strong>
             <span style="color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${c.name}">${c.name}</span>
           </div>
           <button onclick="PlanoFinanceiroApp.ignoreAccount('${c.id}')" title="Desconsiderar esta conta" style="background:none;border:none;color:#94a3b8;cursor:pointer;padding:4px;"><i data-lucide="eye-off" style="width:14px;height:14px;"></i></button>
@@ -1174,7 +1248,7 @@ const PlanoFinanceiroApp = {
             <div draggable="true" ondragstart="PlanoFinanceiroApp.onDragStart(event, '${accId}', '${node.id}')" ondragend="PlanoFinanceiroApp.onDragEnd()"
                  title="Arraste para outro grupo amarelo"
                  style="background:#f8fafc; border:1px solid #cbd5e1; padding:4px 8px; border-radius:4px; font-size:0.75rem; display:flex; justify-content:space-between; align-items:center; cursor:grab;">
-              <div style="pointer-events:none;"><strong style="color:#0f172a;">${accId}</strong> <span style="color:#64748b;">${name}</span></div>
+              <div style="pointer-events:none;"><strong style="color:#0f172a;">${this.esc(c ? this.formatAccountCode(c) : accId)}</strong> <span style="color:#64748b;">${name}</span></div>
               <button onmousedown="event.stopPropagation()" onclick="event.stopPropagation(); PlanoFinanceiroApp.removeAccountFromGroup('${node.id}', '${accId}')" title="Remover deste grupo" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:1rem;line-height:1;">&times;</button>
             </div>
           `;

@@ -1305,7 +1305,7 @@ const AnexosApp = {
             <textarea id="req-tag-reason" class="form-control" rows="3" placeholder="Por que precisamos dessa tag?"></textarea>
           </div>
           <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-            <button class="btn btn-outline" onclick="document.getElementById('modal-solicitar-tag').remove()">Cancelar</button>
+            <button class="btn btn-cancel" onclick="document.getElementById('modal-solicitar-tag').remove()">Cancelar</button>
             <button class="btn btn-primary" onclick="AnexosApp.enviarSolicitacaoTag()">Enviar Solicitação</button>
           </div>
         </div>

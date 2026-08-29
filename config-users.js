@@ -602,7 +602,7 @@ const ConfigUsersApp = {
             </div>
 
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 18px; border-top: 1px solid #e8eaed;">
-               <button onclick="document.getElementById('user-modal-overlay').remove()" style="padding: 11px 18px; border: 1px solid #d1d5db; background: #fff; color: #475569; font-weight: 600; border-radius: 8px; cursor: pointer;">Cancelar</button>
+               <button class="btn btn-cancel" onclick="document.getElementById('user-modal-overlay').remove()">Cancelar</button>
                <button onclick="ConfigUsersApp.saveUserModal(${user ? user.id : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
             </div>
             </div>

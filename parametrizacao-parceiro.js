@@ -1155,7 +1155,7 @@ const ParametrizacaoParceiroApp = {
       </div>
       <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.createFromForm()">Criar prestação de contas</button>
-        <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.selectedId=ParametrizacaoParceiroApp.items[0]&&ParametrizacaoParceiroApp.items[0].id;ParametrizacaoParceiroApp.render()">Cancelar</button>
+        <button class="btn btn-cancel" onclick="ParametrizacaoParceiroApp.selectedId=ParametrizacaoParceiroApp.items[0]&&ParametrizacaoParceiroApp.items[0].id;ParametrizacaoParceiroApp.render()">Cancelar</button>
       </div>
     </div>`;
   },

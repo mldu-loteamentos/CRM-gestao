@@ -260,8 +260,8 @@ const SocietarioApp = {
   canvasNode(ent) {
     const hub = ent.id === this.graph.hubId;
     const kind = ent.kind === "pf" ? "PF" : "PJ";
-    const kindBg = ent.kind === "pf" ? "#1e3a5f" : "#0f3d2e";
-    const bg = hub ? "#105436" : (ent.kind === "pf" ? "#1d4ed8" : "#166534");
+    const bg = this.nodeColor(ent);
+    const kindBg = this.darkenHex(bg, 0.22);
     const sel = this.selectedId === ent.id ? "box-shadow:0 0 0 3px #f59e0b,0 4px 12px rgba(0,0,0,0.2);" : "box-shadow:0 2px 8px rgba(0,0,0,0.18);";
     const x = Number(ent.x) || 40;
     const y = Number(ent.y) || 40;
@@ -491,28 +491,41 @@ const SocietarioApp = {
       const ent = this.entity(this.selectedId) || { id: "", name: "", kind: "pj", note: "", companyId: "", partnerId: "" };
       const isNew = !ent.id;
       return this.panelWrap("Empresa / pessoa", `
+        <p style="font-size:0.78rem;color:#64748b;margin:0 0 10px;line-height:1.4;">Inclui ou edita um quadradinho no organograma. PJ fica verde e PF azul, ou escolha outra cor abaixo.</p>
         <label style="${this.lbl}">Nome
+          ${this.hint("Nome que aparece na caixa (empresa ou pessoa).")}
           <input id="soc-ent-name" class="form-control" value="${this.esc(ent.name)}">
         </label>
         <label style="${this.lbl}">Tipo
-          <select id="soc-ent-kind" class="form-control">
+          ${this.hint("PJ = pessoa jurídica (empresa). PF = pessoa física (sócio). Isso também sugere a cor padrão.")}
+          <select id="soc-ent-kind" class="form-control" onchange="SocietarioApp.onEntityKindChange()">
             <option value="pj" ${ent.kind !== "pf" ? "selected" : ""}>Pessoa jurídica (PJ)</option>
             <option value="pf" ${ent.kind === "pf" ? "selected" : ""}>Pessoa física (PF)</option>
           </select>
         </label>
+        <div style="${this.lbl}">Cor da caixa
+          ${this.hint("Mesma lógica de PF (azul) e PJ (verde). Pode marcar outra cor se quiser destacar um grupo.")}
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            ${this.colorSwatchesHtml(ent.color || this.defaultKindColor(ent.kind))}
+            <input id="soc-ent-color" type="color" value="${this.esc(ent.color || this.defaultKindColor(ent.kind))}" title="Cor personalizada" style="width:42px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">
+          </div>
+        </div>
         <label style="${this.lbl}">Empresa Sienge
+          ${this.hint("Opcional. Liga esta caixa a uma empresa do cadastro do CRM/Sienge.")}
           <select id="soc-ent-company" class="form-control">${this.companyOptions(ent.companyId)}</select>
         </label>
         <label style="${this.lbl}">Parceiro / sócio (parametrização)
+          ${this.hint("Opcional. Liga esta caixa a um sócio já cadastrado em Parametrização de Parceiros.")}
           <select id="soc-ent-partner" class="form-control">${this.partnerOptions(ent.partnerId)}</select>
         </label>
         <label style="${this.lbl}">Nota
+          ${this.hint("Texto livre sobre esta caixa. Também aparece na lista de notas embaixo.")}
           <textarea id="soc-ent-note" class="form-control" rows="3">${this.esc(ent.note)}</textarea>
         </label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-          <button type="button" class="btn btn-primary" onclick="SocietarioApp.saveEntity()">${isNew ? "Incluir" : "Salvar"}</button>
-          ${!isNew ? `<button type="button" class="btn btn-outline" onclick="SocietarioApp.setHub('${ent.id}')">Definir como centro</button>` : ""}
-          ${!isNew ? `<button type="button" class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="SocietarioApp.deleteEntity('${ent.id}')">Excluir</button>` : ""}
+          <button type="button" class="btn btn-primary" onclick="SocietarioApp.saveEntity()" title="Grava o quadradinho no organograma">${isNew ? "Incluir" : "Salvar"}</button>
+          ${!isNew ? `<button type="button" class="btn btn-outline" onclick="SocietarioApp.setHub('${ent.id}')" title="A empresa do centro do organograma (caixa principal)">Definir como centro</button>` : ""}
+          ${!isNew ? `<button type="button" class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="SocietarioApp.deleteEntity('${ent.id}')" title="Remove a caixa e as ligações ligadas a ela">Excluir</button>` : ""}
         </div>
       `);
     }
@@ -521,17 +534,21 @@ const SocietarioApp = {
       const link = existing || this._pendingLink || { from: this.graph.hubId, to: "", pct: 0, note: "" };
       const isNew = !existing;
       return this.panelWrap("Interligação (participação)", `
-        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;">Arraste o pontinho de uma caixa até outra, ou escolha origem e destino aqui.</p>
+        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;line-height:1.4;">Traça a seta de participação: de quem detém o percentual para a empresa participada. Também dá para arrastar o pontinho branco de uma caixa até a outra.</p>
         <label style="${this.lbl}">De (sócio / holding)
+          ${this.hint("Quem possui a participação (origem da seta).")}
           <select id="soc-lnk-from" class="form-control">${this.entityOptions(link.from)}</select>
         </label>
         <label style="${this.lbl}">Para (participada)
+          ${this.hint("Empresa que recebe a participação (destino da seta).")}
           <select id="soc-lnk-to" class="form-control">${this.entityOptions(link.to, link.from)}</select>
         </label>
         <label style="${this.lbl}">Percentual
+          ${this.hint("Quanto esta origem detém na participada. Clique no % da linha do organograma para editar depois.")}
           <input id="soc-lnk-pct" class="form-control" type="number" min="0" max="100" step="0.01" value="${link.pct || 0}">
         </label>
         <label style="${this.lbl}">Nota da ligação
+          ${this.hint("Opcional. Ex.: acordo de sócios, cláusula especial.")}
           <textarea id="soc-lnk-note" class="form-control" rows="2">${this.esc(link.note)}</textarea>
         </label>
         <div style="display:flex;gap:8px;margin-top:8px;">
@@ -542,6 +559,7 @@ const SocietarioApp = {
     }
     if (this.panel === "note") {
       return this.panelWrap("Nova nota da estrutura", `
+        ${this.hint("Anota um texto geral da estrutura (não fica preso a uma caixa). Ex.: Moura Leite tem 50% na Ellenco...")}
         <textarea id="soc-note-text" class="form-control" rows="4" placeholder="Ex.: Moura Leite tem 50% na Ellenco, que por sua vez tem 55,5% na Vercellino..."></textarea>
         <button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="SocietarioApp.saveNote()">Salvar nota</button>
       `);
@@ -552,12 +570,75 @@ const SocietarioApp = {
         <li>Arraste as caixas para posicionar.</li>
         <li>Arraste o pontinho de uma caixa até outra para traçar a ligação.</li>
         <li>Clique no percentual para editar a participação.</li>
-        <li>Clique na caixa (sem arrastar) para editar a empresa.</li>
+        <li>Clique na caixa (sem arrastar) para editar a empresa, o tipo PF/PJ e a cor.</li>
       </ul>
+      <p style="margin:12px 0 0;font-size:0.75rem;color:#94a3b8;">Passe o mouse nos botões do topo para ver o que cada um faz.</p>
     </div>`;
   },
 
   lbl: "display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#334155;margin-bottom:10px;",
+
+  hint(text) {
+    return `<span style="display:block;font-size:0.72rem;font-weight:500;color:#64748b;line-height:1.35;">${this.esc(text)}</span>`;
+  },
+
+  defaultKindColor(kind) {
+    return kind === "pf" ? "#1d4ed8" : "#166534";
+  },
+
+  nodeColor(ent) {
+    const raw = String((ent && ent.color) || "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
+    if (ent && ent.id === this.graph.hubId) return "#105436";
+    return this.defaultKindColor(ent && ent.kind);
+  },
+
+  darkenHex(hex, amount) {
+    const h = String(hex || "").replace("#", "");
+    if (h.length !== 6) return "#0f3d2e";
+    const n = parseInt(h, 16);
+    const r = Math.max(0, Math.round(((n >> 16) & 255) * (1 - amount)));
+    const g = Math.max(0, Math.round(((n >> 8) & 255) * (1 - amount)));
+    const b = Math.max(0, Math.round((n & 255) * (1 - amount)));
+    return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+  },
+
+  colorPresets() {
+    return [
+      { hex: "#166534", label: "PJ" },
+      { hex: "#1d4ed8", label: "PF" },
+      { hex: "#105436", label: "Centro" },
+      { hex: "#c2410c", label: "Laranja" },
+      { hex: "#0f766e", label: "Verde-água" },
+      { hex: "#6d28d9", label: "Roxo" },
+      { hex: "#334155", label: "Cinza" }
+    ];
+  },
+
+  colorSwatchesHtml(current) {
+    const cur = String(current || "").toLowerCase();
+    return this.colorPresets().map(p => {
+      const on = cur === p.hex.toLowerCase();
+      return `<button type="button" title="${this.esc(p.label)}" onclick="SocietarioApp.pickEntityColor('${p.hex}')"
+        style="width:26px;height:26px;border-radius:6px;border:${on ? "2px solid #0f172a" : "1px solid rgba(15,23,42,0.25)"};background:${p.hex};cursor:pointer;padding:0;"></button>`;
+    }).join("");
+  },
+
+  pickEntityColor(hex) {
+    const el = document.getElementById("soc-ent-color");
+    if (el) el.value = hex;
+  },
+
+  onEntityKindChange() {
+    const kindEl = document.getElementById("soc-ent-kind");
+    const colorEl = document.getElementById("soc-ent-color");
+    if (!kindEl || !colorEl) return;
+    const cur = String(colorEl.value || "").toLowerCase();
+    const defaults = this.colorPresets().map(p => p.hex.toLowerCase());
+    if (!cur || defaults.includes(cur)) {
+      colorEl.value = this.defaultKindColor(kindEl.value);
+    }
+  },
 
   panelWrap(title, inner) {
     return `<div style="padding:14px;">
@@ -588,11 +669,11 @@ const SocietarioApp = {
             <div style="font-size:0.75rem;opacity:0.85;">Arraste as caixas · trace ligações pelos pontinhos · clique no % para editar</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewEntity()" style="background:#fff;color:#105436;font-weight:700;">+ Empresa / pessoa</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewLink()" style="${linkBtn}font-weight:700;">+ Interligação</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.resetLayout()" style="background:#fff;color:#105436;font-weight:700;">Reorganizar</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewNote()" style="background:#fff;color:#105436;font-weight:700;">+ Nota</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.importPartners()" style="background:#ea580c;border:none;color:#fff;font-weight:700;">Vincular parametrização</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria um quadradinho novo no organograma: empresa (PJ, verde) ou pessoa física (PF, azul). Depois dá para mudar a cor." style="background:#fff;color:#105436;font-weight:700;">+ Empresa / pessoa</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewLink()" title="Cria a seta de participação entre duas caixas (quem detém quanto de quem). Também dá para arrastar o pontinho branco de uma caixa até a outra." style="${linkBtn}font-weight:700;">+ Interligação</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona todas as caixas automaticamente. As ligações e os percentuais permanecem." style="background:#fff;color:#105436;font-weight:700;">Reorganizar</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewNote()" title="Inclui um texto livre na lista de notas, embaixo do organograma." style="background:#fff;color:#105436;font-weight:700;">+ Nota</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.importPartners()" title="Traz sócios e sociedades já cadastrados em Parametrização de Parceiros e cria as caixas e ligações." style="background:#ea580c;border:none;color:#fff;font-weight:700;">Vincular parametrização</button>
           </div>
         </div>
         <div style="display:flex;flex:1;min-height:0;">
@@ -605,10 +686,10 @@ const SocietarioApp = {
               </div>
             </div>
             <div style="padding:8px 16px 12px;background:#fff;border-top:1px solid #d1e3d6;max-height:28%;overflow:auto;">
-              <div style="display:flex;gap:10px;align-items:center;font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:8px;">
+              <div style="display:flex;gap:10px;align-items:center;font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:8px;flex-wrap:wrap;">
                 <span style="background:#166534;color:#fff;padding:3px 8px;border-radius:4px;">PJ — Pessoa jurídica</span>
                 <span style="background:#1d4ed8;color:#fff;padding:3px 8px;border-radius:4px;">PF — Pessoa física</span>
-                <span style="color:#64748b;font-weight:600;">Arraste o pontinho branco de uma caixa até outra para criar a participação.</span>
+                <span style="color:#64748b;font-weight:600;">A cor padrão segue o tipo. Clique na caixa para escolher outra.</span>
               </div>
               <div style="font-size:0.75rem;font-weight:800;color:#105436;text-transform:uppercase;">Notas</div>
               <div style="margin-top:8px;">${this.renderNotes()}</div>
@@ -680,6 +761,8 @@ const SocietarioApp = {
     const name = (document.getElementById("soc-ent-name").value || "").trim();
     if (!name) { alert("Informe o nome."); return; }
     const kind = document.getElementById("soc-ent-kind").value === "pf" ? "pf" : "pj";
+    const colorRaw = (document.getElementById("soc-ent-color") && document.getElementById("soc-ent-color").value) || "";
+    const color = /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : this.defaultKindColor(kind);
     const companyId = document.getElementById("soc-ent-company").value;
     const partnerId = document.getElementById("soc-ent-partner").value;
     const note = document.getElementById("soc-ent-note").value || "";
@@ -688,6 +771,7 @@ const SocietarioApp = {
       const ent = this.entity(this.selectedId);
       ent.name = name;
       ent.kind = kind;
+      ent.color = color;
       ent.companyId = companyId;
       ent.partnerId = partnerId;
       ent.note = note;
@@ -697,7 +781,7 @@ const SocietarioApp = {
       const wrap = document.getElementById("soc-canvas-wrap");
       const id = this.uid("ent");
       this.graph.entities.push({
-        id, name, kind, companyId, partnerId, note,
+        id, name, kind, color, companyId, partnerId, note,
         x: (wrap ? wrap.scrollLeft : 0) + 80,
         y: (wrap ? wrap.scrollTop : 0) + 80
       });
@@ -792,6 +876,7 @@ const SocietarioApp = {
         id: this.uid("ent"),
         name: String(name).trim(),
         kind: kind === "pf" ? "pf" : "pj",
+        color: this.defaultKindColor(kind === "pf" ? "pf" : "pj"),
         note: "",
         companyId: "",
         partnerId: "",
