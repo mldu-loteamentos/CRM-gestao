@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=631">
+  <link rel="stylesheet" href="style.css?v=632">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1127,7 +1127,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.631 &nbsp;&middot;&nbsp; 31/08/2026
+            v1.0.632 &nbsp;&middot;&nbsp; 31/08/2026
           </span>
         </div>
       </div>
@@ -2083,7 +2083,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               Posição de estoque
             </h2>
             <p style="font-size: 0.9rem; color: var(--color-text-muted); margin: 0 0 16px;">
-              Unidades dos empreendimentos (centros de custo 1xxxx, 2xxxx e 3xxxx). Abrir a tela só lê o Firebase — não chama Sienge. Consultar filtra o que já está salvo. Atualizar unidades / Cruzar contratos são manuais.
+              Unidades dos empreendimentos (centros de custo 1xxxx, 2xxxx e 3xxxx). Abrir a tela só lê o Firebase. Batimento financeiro: selecione um empreendimento — cruza contratos, marca quitados (saldo 0) e só então busca extrato no que ainda está sem saldo. Recebido conciliado não é recalculado.
             </p>
             <div class="est-stock-filters">
               <div class="est-stock-field" style="flex: 1.4; min-width: 240px;">
@@ -2107,8 +2107,11 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   <button type="button" class="est-btn-atualizar" id="est-btn-atualizar" onclick="EstoqueComercialApp.consultar(true)" title="Só use se precisar baixar de novo as unidades no Sienge">
                     <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar unidades
                   </button>
-                  <button type="button" class="est-btn-contratos" id="est-btn-contratos" onclick="EstoqueComercialApp.cruzarContratos()" title="Busca contractNumber e saldo por empreendimento, um CC por vez">
+                  <button type="button" class="est-btn-contratos" id="est-btn-contratos" onclick="EstoqueComercialApp.cruzarContratos()" title="Busca contrato e saldo por empreendimento, um CC por vez">
                     Cruzar contratos
+                  </button>
+                  <button type="button" class="est-btn-batimento" id="est-btn-batimento" onclick="EstoqueComercialApp.batimentoFinanceiro()" title="Incremental: cruza o CC e usa extrato só nos vendidos ainda sem saldo. Quitados e recebido travado não entram de novo.">
+                    Batimento financeiro
                   </button>
                   <button type="button" class="est-btn-parar" id="est-btn-parar" onclick="EstoqueComercialApp.parar()" style="display:none;">
                     Parar
@@ -2135,6 +2138,8 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   <th>Estoque legal</th>
                   <th>Área</th>
                   <th>Contrato</th>
+                  <th>Valor contrato</th>
+                  <th>Recebido</th>
                   <th>Situação financeira</th>
                   <th>Saldo a receber</th>
                 </tr>
@@ -6288,40 +6293,40 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=631"></script>
-  <script defer src="sienge-api.js?v=631"></script>
-  <script defer src="azure-auth.js?v=631"></script>
-  <script defer src="app.js?v=631"></script>
-  <script defer src="home-dashboard.js?v=631"></script>
-  <script defer src="anexos.js?v=631"></script>
-  <script defer src="contas-pagar.js?v=631"></script>
-  <script defer src="config-tags.js?v=631"></script>
-  <script defer src="config-users.js?v=631"></script>
-  <script defer src="construcao.js?v=631"></script>
-  <script defer src="empresas.js?v=631"></script>
-  <script defer src="relacionamento.js?v=631"></script>
+  <script defer src="data.js?v=632"></script>
+  <script defer src="sienge-api.js?v=632"></script>
+  <script defer src="azure-auth.js?v=632"></script>
+  <script defer src="app.js?v=632"></script>
+  <script defer src="home-dashboard.js?v=632"></script>
+  <script defer src="anexos.js?v=632"></script>
+  <script defer src="contas-pagar.js?v=632"></script>
+  <script defer src="config-tags.js?v=632"></script>
+  <script defer src="config-users.js?v=632"></script>
+  <script defer src="construcao.js?v=632"></script>
+  <script defer src="empresas.js?v=632"></script>
+  <script defer src="relacionamento.js?v=632"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=631"></script>
-  <script defer src="centros-custo.js?v=631"></script>
-  <script defer src="marketing.js?v=631"></script>
-  <script defer src="plano-financeiro.js?v=631"></script>
-  <script defer src="prestacao-contas.js?v=631"></script>
+  <script defer src="estoque-comercial.js?v=632"></script>
+  <script defer src="centros-custo.js?v=632"></script>
+  <script defer src="marketing.js?v=632"></script>
+  <script defer src="plano-financeiro.js?v=632"></script>
+  <script defer src="prestacao-contas.js?v=632"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=631"></script>
-  <script defer src="fluxo-caixa.js?v=631"></script>
-  <script defer src="investimento.js?v=631"></script>
-  <script defer src="parametrizacao-parceiro.js?v=631"></script>
-  <script defer src="societario.js?v=631"></script>
-  <script defer src="participacoes.js?v=631"></script>
-  <script defer src="fiscal.js?v=631"></script>
-  <script defer src="indexadores.js?v=631"></script>
-  <script defer src="verificar-construcao.js?v=631"></script>
-  <script src="repactuacoes.js?v=631"></script>
+  <script defer src="empresa-filter.js?v=632"></script>
+  <script defer src="fluxo-caixa.js?v=632"></script>
+  <script defer src="investimento.js?v=632"></script>
+  <script defer src="parametrizacao-parceiro.js?v=632"></script>
+  <script defer src="societario.js?v=632"></script>
+  <script defer src="participacoes.js?v=632"></script>
+  <script defer src="fiscal.js?v=632"></script>
+  <script defer src="indexadores.js?v=632"></script>
+  <script defer src="verificar-construcao.js?v=632"></script>
+  <script src="repactuacoes.js?v=632"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=631"></script>
+  <script defer src="dashboard-inadimplencia.js?v=632"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

@@ -12780,9 +12780,20 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   }
 }
 
+window.fixUtf8Mojibake = function(s) {
+  return String(s == null ? "" : s).replace(/\u00C3([\u0080-\u00BF])/g, (_, c) => {
+    try {
+      return new TextDecoder("utf-8").decode(new Uint8Array([0xC3, c.charCodeAt(0)]));
+    } catch (e) {
+      return _;
+    }
+  });
+};
+
 window.generateDemonstrativoDistratoPDF = function() {
   const results = AppState.currentDistratoResult;
   if (!results) return;
+  const txt = (s) => (typeof window.fixUtf8Mojibake === "function" ? window.fixUtf8Mojibake(s) : String(s == null ? "" : s));
 
   const unit = AppState.units[g_distSale.unitId] || {};
   const dataGeracao = new Date().toLocaleString('pt-BR');
@@ -12796,11 +12807,13 @@ window.generateDemonstrativoDistratoPDF = function() {
   const costCenter = (AppState.costCenters || []).find(c => c.id == unit.costCenterId);
   const companyId = costCenter ? costCenter.companyId : 2;
   const company = window.MOCK_DATA && window.MOCK_DATA.COMPANIES ? window.MOCK_DATA.COMPANIES.find(c => c.id == companyId) : null;
-  const companyName = company ? company.name : "Moura Leite Loteamentos";
+  const companyName = txt(company ? company.name : "Moura Leite Loteamentos");
   
-  let enterpriseName = "CERQUEIRA CÉSAR - CHÃCARA MOURA LEITE";
+  let enterpriseName = "CERQUEIRA C\u00C9SAR - CH\u00C1CARA MOURA LEITE";
   if (costCenter) {
-    enterpriseName = costCenter.city ? costCenter.city.toUpperCase() + " - " + costCenter.name.toUpperCase() : costCenter.name.toUpperCase();
+    const city = txt(costCenter.city || "").toUpperCase();
+    const ccName = txt(costCenter.name || "").toUpperCase();
+    enterpriseName = city ? city + " - " + ccName : ccName;
   }
 
   const refundText = results.instQty > 1 ?
@@ -12809,18 +12822,18 @@ window.generateDemonstrativoDistratoPDF = function() {
 
   const cleanUnitId = (unit.id || "").replace('U-', '');
   const titleUnitId = cleanUnitId.replace('-', ' - ');
-  const pageTitle = `Cálculo Distrato - ${g_distCustomer.name} - Título ${g_distSale.id} (${titleUnitId})`;
+  const pageTitle = `C\u00E1lculo Distrato - ${txt(g_distCustomer.name)} - T\u00EDtulo ${g_distSale.id} (${titleUnitId})`;
   
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #000; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">DEMONSTRATIVO DE CÃLCULO DE DISTRATO</h2>
+      <h2 style="color: #000; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">DEMONSTRATIVO DE C\u00C1LCULO DE DISTRATO</h2>
       <h3 style="font-size: 12pt; color: #333; margin: 0;">${companyName}</h3>
       <div style="font-size: 11pt; color: #333; font-weight: bold; margin-top: 5px;">${enterpriseName}</div>
       <div style="font-size: 10pt; color: #666; margin-top: 5px;">Gerado em: ${dataGeracao}</div>
     </div>
 
     <div style="margin-bottom: 1.5rem; font-size: 11pt; padding: 10px 0; border-top: 1px solid #000; border-bottom: 1px solid #000;">
-      <strong>Cliente:</strong> ${g_distCustomer.name} (CPF/CNPJ: ${g_distCustomer.cpfCnpj})<br>
+      <strong>Cliente:</strong> ${txt(g_distCustomer.name)} (CPF/CNPJ: ${g_distCustomer.cpfCnpj})<br>
       <strong>Unidade:</strong> ${cleanUnitId}
     </div>
     
@@ -12843,7 +12856,7 @@ window.generateDemonstrativoDistratoPDF = function() {
     </div>
 
     <div style="margin-bottom: 2rem;">
-      <h4 style="color: #000; margin: 0 0 10px 0; font-weight: bold; font-size: 12pt;">CÃLCULO DE DISTRATO</h4>
+      <h4 style="color: #000; margin: 0 0 10px 0; font-weight: bold; font-size: 12pt;">C\u00C1LCULO DE DISTRATO</h4>
       <table style="width: 100%; border-collapse: collapse; font-size: 11pt;">
         <tr style="background-color: #f1f5f9;">
           <td style="padding: 8px 5px; font-weight: bold; border-bottom: 1px solid #000; border-top: 1px solid #000;">Valor Total Pago (Recebido):</td>
@@ -12870,7 +12883,7 @@ window.generateDemonstrativoDistratoPDF = function() {
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.iptu || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
-          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Ãgua:</td>
+          <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">\u00C1gua:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.agua || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
         <tr>
@@ -12908,8 +12921,10 @@ window.generateDemonstrativoDistratoPDF = function() {
 
   const printWindow = window.open('', '_blank', 'width=800,height=900');
   printWindow.document.write(`
-    <html>
+    <!DOCTYPE html>
+    <html lang="pt-BR">
       <head>
+        <meta charset="UTF-8">
         <title>${pageTitle}</title>
         <style>
           @page { size: A4 portrait; margin: 8mm; }
@@ -29982,18 +29997,130 @@ window.mapaJuridicoSelectedCompanyIds = function() {
   return [];
 };
 
-window.mapaJuridicoMountEmpresaFilter = function() {
-  const wrap = document.getElementById("mapa-filtro-empresa-wrap");
-  if (!wrap || !window.MlEmpresaFilter) return;
-  const items = (window._mapaJuridicoCompanyOptions || []).map(o => ({
+window.mapaJuridicoEmpresaItems = function() {
+  return (window._mapaJuridicoCompanyOptions || []).map(o => ({
     id: String(o.id),
     label: `${o.id} - ${String(o.name || "").toUpperCase()}`
   }));
+};
+
+window.mapaJuridicoCompanyOf = function(c) {
+  if (!c) return "";
+  if (c.companyId != null && String(c.companyId) !== "" && String(c.companyId) !== "undefined") {
+    return String(c.companyId);
+  }
+  const ccs = (window.AppState && AppState.cachedCostCenters) || [];
+  const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId;
+  const found = ccs.find(x => String(x.id) === String(ccId) || String(x.id) === String(c.costCenterId));
+  return found && found.companyId != null ? String(found.companyId) : "";
+};
+
+window.mapaJuridicoApplyCompanyFilter = function() {
+  const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
+  f.emp = "";
+  window.mapaJuridicoFillEmpSelect();
+  const keep = window.mapaJuridicoUniqueClients();
+  if (f.customerId && !keep.some(c => String(c.customerId) === String(f.customerId))) {
+    f.customerId = "";
+    const input = document.getElementById("mapa-filtro-busca");
+    if (input) input.value = "";
+  }
+  window.mapaJuridicoRenderClientList();
+  const phaseView = document.getElementById("mapa-juridico-view-phase");
+  const inPhase = phaseView && phaseView.style.display !== "none";
+  window.mapaJuridicoRenderStages();
+  if (inPhase && window._mapaJuridicoLastPhase) {
+    window.mapaJuridicoShowPhase(window._mapaJuridicoLastPhase.prefix, window._mapaJuridicoLastPhase.compId);
+  } else {
+    window.mapaJuridicoShowMap();
+  }
+  window.mapaJuridicoRefreshEmpresaFilter();
+};
+
+window.mapaJuridicoBindEmpresaFilterDom = function() {
+  const btn = document.querySelector("#mapa-emp .ml-emp-filter-btn");
+  if (btn) {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window._mapaJuridicoEmpOpen = !window._mapaJuridicoEmpOpen;
+      window.mapaJuridicoRefreshEmpresaFilter();
+      if (window.lucide) lucide.createIcons();
+    };
+  }
+  const allBtn = document.querySelector("#mapa-emp .ml-emp-filter-all");
+  const noneBtn = document.querySelector("#mapa-emp .ml-emp-filter-none");
+  if (allBtn) {
+    allBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.MlEmpresaFilter) MlEmpresaFilter.selectAll("mapa-emp");
+    };
+  }
+  if (noneBtn) {
+    noneBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.MlEmpresaFilter) MlEmpresaFilter.selectNone("mapa-emp");
+    };
+  }
+};
+
+window.mapaJuridicoEnsureEmpresaFilterClicks = function() {
+  if (window._mapaJuridicoEmpClicksBound) return;
+  window._mapaJuridicoEmpClicksBound = true;
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const inEmp = t.closest("#mapa-emp") || t.closest("#mapa-emp-panel");
+    if (!inEmp) return;
+    if (t.closest(".ml-emp-filter-all")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.MlEmpresaFilter) MlEmpresaFilter.selectAll("mapa-emp");
+      return;
+    }
+    if (t.closest(".ml-emp-filter-none")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.MlEmpresaFilter) MlEmpresaFilter.selectNone("mapa-emp");
+    }
+  }, true);
+};
+
+window.mapaJuridicoRefreshEmpresaFilter = function() {
+  const emp = document.getElementById("mapa-emp");
+  if (!emp || !window.MlEmpresaFilter) {
+    window.mapaJuridicoMountEmpresaFilter();
+    return;
+  }
+  emp.classList.toggle("is-open", !!window._mapaJuridicoEmpOpen);
+  const items = window.mapaJuridicoEmpresaItems();
+  const selectedIds = window.mapaJuridicoSelectedCompanyIds();
+  const btnSpan = emp.querySelector(".ml-emp-filter-btn span");
+  if (btnSpan) btnSpan.textContent = MlEmpresaFilter.buttonLabel(items, selectedIds, true, false);
+  const list = document.getElementById("mapa-emp-list");
+  if (list) {
+    list.innerHTML = MlEmpresaFilter.listHtml({
+      id: "mapa-emp",
+      items,
+      selectedIds,
+      query: window._mapaJuridicoEmpQuery || ""
+    });
+  }
+  window.mapaJuridicoBindEmpresaFilterDom();
+};
+
+window.mapaJuridicoMountEmpresaFilter = function() {
+  const wrap = document.getElementById("mapa-filtro-empresa-wrap");
+  if (!wrap || !window.MlEmpresaFilter) return;
+  window.mapaJuridicoEnsureEmpresaFilterClicks();
+  const items = window.mapaJuridicoEmpresaItems();
   const selectedIds = window.mapaJuridicoSelectedCompanyIds();
   MlEmpresaFilter.bind("mapa-emp", {
     toggleOpen() {
       window._mapaJuridicoEmpOpen = !window._mapaJuridicoEmpOpen;
-      window.mapaJuridicoMountEmpresaFilter();
+      window.mapaJuridicoRefreshEmpresaFilter();
       if (window.lucide) lucide.createIcons();
     },
     setQuery(q) {
@@ -30002,7 +30129,7 @@ window.mapaJuridicoMountEmpresaFilter = function() {
       if (box) {
         box.innerHTML = MlEmpresaFilter.listHtml({
           id: "mapa-emp",
-          items,
+          items: window.mapaJuridicoEmpresaItems(),
           selectedIds: window.mapaJuridicoSelectedCompanyIds(),
           query: window._mapaJuridicoEmpQuery
         });
@@ -30015,24 +30142,21 @@ window.mapaJuridicoMountEmpresaFilter = function() {
       f.companyIds = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter(x => x !== sid);
       f.company = f.companyIds.length === 1 ? f.companyIds[0] : "";
       window._mapaJuridicoEmpOpen = true;
-      window.mapaJuridicoSetFilter("emp", "");
-      window.mapaJuridicoMountEmpresaFilter();
+      window.mapaJuridicoApplyCompanyFilter();
     },
     selectAll() {
       const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
-      f.companyIds = items.map(x => String(x.id));
+      f.companyIds = window.mapaJuridicoEmpresaItems().map(x => String(x.id));
       f.company = "";
       window._mapaJuridicoEmpOpen = true;
-      window.mapaJuridicoSetFilter("emp", "");
-      window.mapaJuridicoMountEmpresaFilter();
+      window.mapaJuridicoApplyCompanyFilter();
     },
     selectNone() {
       const f = window._mapaJuridicoFilters || (window._mapaJuridicoFilters = {});
       f.companyIds = [];
       f.company = "";
       window._mapaJuridicoEmpOpen = true;
-      window.mapaJuridicoSetFilter("emp", "");
-      window.mapaJuridicoMountEmpresaFilter();
+      window.mapaJuridicoApplyCompanyFilter();
     }
   });
   wrap.innerHTML = MlEmpresaFilter.html({
@@ -30045,6 +30169,7 @@ window.mapaJuridicoMountEmpresaFilter = function() {
     emptyMeansAll: true,
     extraClass: "ml-emp-filter--on-dark"
   });
+  window.mapaJuridicoBindEmpresaFilterDom();
   if (window.lucide) lucide.createIcons();
 };
 
@@ -30059,7 +30184,8 @@ window.mapaJuridicoShowMap = function() {
 window.mapaJuridicoClientMatches = function(c) {
   const f = window._mapaJuridicoFilters || {};
   const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
-  if (companyIds.length && !companyIds.includes(String(c.companyId))) return false;
+  const owner = typeof window.mapaJuridicoCompanyOf === "function" ? window.mapaJuridicoCompanyOf(c) : String(c.companyId || "");
+  if (companyIds.length && !companyIds.includes(owner)) return false;
   const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
   if (f.emp && String(cc) !== String(f.emp)) return false;
   if (f.customerId && String(c.customerId) !== String(f.customerId)) return false;
@@ -30105,12 +30231,9 @@ window.mapaJuridicoFillEmpSelect = function() {
   if (!sel || !cache) return;
   const f = window._mapaJuridicoFilters || {};
   const ccs = (window.AppState && AppState.cachedCostCenters) || [];
-  const companyOf = (c) => {
-    if (c.companyId != null && String(c.companyId) !== "") return String(c.companyId);
-    const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId;
-    const found = ccs.find(x => String(x.id) === String(ccId) || String(x.id) === String(c.costCenterId));
-    return found && found.companyId != null ? String(found.companyId) : "";
-  };
+  const companyOf = (c) => (typeof window.mapaJuridicoCompanyOf === "function"
+    ? window.mapaJuridicoCompanyOf(c)
+    : (c && c.companyId != null ? String(c.companyId) : ""));
   const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
   const list = (cache.generalList || []).filter(c => !companyIds.length || companyIds.includes(companyOf(c)));
   const map = {};
@@ -30230,7 +30353,8 @@ window.mapaJuridicoUniqueClients = function() {
   list.forEach(c => {
     if (!c || c.customerId == null || c.customerId === "") return;
     const companyIds = typeof window.mapaJuridicoSelectedCompanyIds === "function" ? window.mapaJuridicoSelectedCompanyIds() : (f.company ? [String(f.company)] : []);
-    if (companyIds.length && !companyIds.includes(String(c.companyId))) return;
+    const owner = typeof window.mapaJuridicoCompanyOf === "function" ? window.mapaJuridicoCompanyOf(c) : String(c.companyId || "");
+    if (companyIds.length && !companyIds.includes(owner)) return;
     const cc = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "";
     if (f.emp && String(cc) !== String(f.emp)) return;
     const id = String(c.customerId);
@@ -30733,9 +30857,15 @@ window.mapaJuridicoRenderStages = function() {
   register(generalAgg, "", "Visão Geral");
   const blocks = [{ title: "Visão Geral", compId: "", items: generalAgg }];
   const f = window._mapaJuridicoFilters || {};
+  const selectedCompanies = typeof window.mapaJuridicoSelectedCompanyIds === "function"
+    ? window.mapaJuridicoSelectedCompanyIds()
+    : (f.company ? [String(f.company)] : []);
   (cache.sortedCompanies || []).forEach(compId => {
-    if (f.company && String(compId) !== String(f.company)) return;
-    const list = filtered.filter(c => String(c.companyId) === String(compId));
+    if (selectedCompanies.length && !selectedCompanies.includes(String(compId))) return;
+    const list = filtered.filter(c => {
+      const owner = typeof window.mapaJuridicoCompanyOf === "function" ? window.mapaJuridicoCompanyOf(c) : String(c.companyId || "");
+      return owner === String(compId);
+    });
     if (!list.length) return;
     const items = aggOf(list);
     register(items, compId, cache.companyNames[compId] || ("Empresa " + compId));
@@ -30895,6 +31025,11 @@ window.showMapaJuridicoOverlay = function(ui) {
       }
       #mapa-juridico-overlay .mapa-legenda-item:hover .mapa-legenda-tip { display: block; }
       #mapa-juridico-overlay .mapa-fase-ativa:hover { transform: translateY(-1px); }
+      #mapa-juridico-overlay .mapa-header {
+        position: relative;
+        z-index: 40;
+        overflow: visible;
+      }
       #mapa-juridico-overlay .mapa-filtros {
         display: grid;
         grid-template-columns: minmax(240px, 1.2fr) minmax(180px, 1.15fr) 170px 72px minmax(240px, 1.6fr) auto;
@@ -30902,7 +31037,11 @@ window.showMapaJuridicoOverlay = function(ui) {
         align-items: end;
         width: 100%;
         box-sizing: border-box;
+        overflow: visible;
+        position: relative;
+        z-index: 41;
       }
+      #mapa-filtro-empresa-wrap { position: relative; z-index: 42; overflow: visible; }
       #mapa-juridico-overlay .mapa-filtros label { min-width: 0; }
       #mapa-juridico-overlay .mapa-filtros select,
       #mapa-juridico-overlay .mapa-filtros input[type="search"],
@@ -30924,7 +31063,7 @@ window.showMapaJuridicoOverlay = function(ui) {
         #mapa-juridico-overlay .mapa-filtro-clear { grid-column: 1 / -1; justify-self: start; }
       }
     </style>
-    <div style="flex-shrink:0;background:linear-gradient(135deg,#0d4630 0%,#105436 48%,#1a7a50 100%);box-shadow:0 4px 16px rgba(16,84,54,0.28);">
+    <div class="mapa-header" style="flex-shrink:0;background:linear-gradient(135deg,#0d4630 0%,#105436 48%,#1a7a50 100%);box-shadow:0 4px 16px rgba(16,84,54,0.28);overflow:visible;">
       <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 12px;">
         <button type="button" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:8px;padding:7px 12px;font-weight:700;font-size:0.82rem;cursor:pointer;">
           <i data-lucide="x" style="width:16px;"></i> Fechar
@@ -31001,13 +31140,14 @@ window.showMapaJuridicoOverlay = function(ui) {
   window.mapaJuridicoRenderClientList();
   window.mapaJuridicoRenderStages();
   overlay.addEventListener("mousedown", (e) => {
+    const t = e.target;
     const combo = document.getElementById("mapa-client-combo");
     const box = document.getElementById("mapa-filtro-clientes");
-    if (box && combo && !combo.contains(e.target)) box.style.display = "none";
-    const emp = document.getElementById("mapa-emp");
-    if (window._mapaJuridicoEmpOpen && emp && !emp.contains(e.target)) {
+    if (box && combo && !combo.contains(t)) box.style.display = "none";
+    const inEmp = t && t.closest && (t.closest("#mapa-emp") || t.closest("#mapa-emp-panel"));
+    if (window._mapaJuridicoEmpOpen && !inEmp) {
       window._mapaJuridicoEmpOpen = false;
-      window.mapaJuridicoMountEmpresaFilter();
+      window.mapaJuridicoRefreshEmpresaFilter();
     }
   });
 };

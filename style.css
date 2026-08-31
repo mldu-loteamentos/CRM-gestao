@@ -1624,7 +1624,8 @@ circle.donut-segment {
 .est-btn-atualizar { height: 38px; padding: 0 14px; background: #105436; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-btn-atualizar:disabled { opacity: 0.6; cursor: wait; }
 .est-btn-contratos { height: 38px; padding: 0 14px; background: #0f766e; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
-.est-btn-contratos:disabled { opacity: 0.6; cursor: wait; }
+.est-btn-batimento { height: 38px; padding: 0 14px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
+.est-btn-batimento:disabled { opacity: 0.6; cursor: wait; }
 .est-btn-parar { height: 38px; padding: 0 14px; background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
 .est-stock-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .est-pill { border: none; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 6px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
