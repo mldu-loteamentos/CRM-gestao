@@ -1623,6 +1623,9 @@ circle.donut-segment {
 .est-btn-consultar:disabled { opacity: 0.6; cursor: wait; }
 .est-btn-atualizar { height: 38px; padding: 0 14px; background: #105436; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-btn-atualizar:disabled { opacity: 0.6; cursor: wait; }
+.est-btn-contratos { height: 38px; padding: 0 14px; background: #0f766e; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
+.est-btn-contratos:disabled { opacity: 0.6; cursor: wait; }
+.est-btn-parar { height: 38px; padding: 0 14px; background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
 .est-stock-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .est-pill { border: none; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 6px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
 .est-pill.is-active { background: #2563eb; color: #fff; }
@@ -1630,7 +1633,14 @@ circle.donut-segment {
 .est-stock-bar { height: 6px; background: #e2e8f0; border-radius: 99px; margin-top: 8px; overflow: hidden; }
 .est-stock-bar span { display: block; height: 100%; background: #105436; }
 .est-stock-meta { margin-top: 8px; font-size: 0.8rem; color: #64748b; }
-.est-stock-kpis { display: flex; flex-wrap: wrap; gap: 8px; }
+.est-stock-finance { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.est-fin-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; border-top: 4px solid #105436; }
+.est-fin-card.is-muted { border-top-color: #94a3b8; }
+.est-fin-card.is-warn { border-top-color: #dc2626; }
+.est-fin-card.is-ok { border-top-color: #16a34a; }
+.est-fin-card label { display: block; font-size: 0.7rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.est-fin-card strong { display: block; font-size: 1.25rem; color: #0f172a; margin-top: 4px; }
+.est-fin-card small { display: block; margin-top: 4px; color: #64748b; font-size: 0.75rem; }
 .est-kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; min-width: 110px; }
 .est-kpi span { display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; }
 .est-kpi strong { font-size: 1.15rem; color: #0f172a; }
@@ -1642,4 +1652,5 @@ circle.donut-segment {
 .est-fin-Quitado { background: #ecfdf5; color: #047857; }
 .est-fin-Adimplente { background: #eff6ff; color: #1d4ed8; }
 .est-fin-Inadimplente { background: #fef2f2; color: #b91c1c; }
-.est-fin-aberto { background: #fff7ed; color: #c2410c; }
+.est-fin-Distratado { background: #f1f5f9; color: #475569; }
+.est-fin-apurar { background: #f8fafc; color: #64748b; }

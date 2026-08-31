@@ -43,8 +43,10 @@ const EstoqueComercialApp = {
     fetchedAt: null,
     complete: false,
     contractsEnriched: false,
+    contractsCcDone: [],
     firebaseOk: false,
     inited: false,
+    stopSync: false,
     defaulterIndex: null
   },
 
@@ -90,6 +92,7 @@ const EstoqueComercialApp = {
   slimUnit(u, empName) {
     const stock = String(u.commercialStock || "").trim().toUpperCase();
     const contractNumber = u.contractNumber || u.contractnumber || u.currentSalesContractNumber || null;
+    const contractId = u.contractId || u.salesContractId || u.currentSalesContractId || null;
     const bal = u.outstandingBalance;
     const quitado = bal === 0 || bal === "0";
     return {
@@ -100,12 +103,14 @@ const EstoqueComercialApp = {
       commercialStock: stock,
       legalStock: u.legalStock || "",
       buildingStock: u.buildingStock || u.constructionStock || "",
-      contractId: u.contractId || null,
-      contractNumber: contractNumber || null,
+      contractId: contractId,
+      contractNumber: contractNumber || (contractId != null ? String(contractId) : null),
       receivableBillId: u.receivableBillId || null,
       customerId: u.customerId || null,
       outstandingBalance: bal == null || bal === "" ? null : Number(bal),
-      quitado: !!quitado && !!contractNumber,
+      contractValue: u.totalSellingValue || u.value || null,
+      situation: u.situation || "",
+      quitado: !!quitado,
       area: u.totalArea || u.privateArea || u.indexedPrivateArea || null
     };
   },
@@ -127,6 +132,7 @@ const EstoqueComercialApp = {
       ccDone: this.state.ccDone,
       complete: this.state.complete,
       contractsEnriched: this.state.contractsEnriched,
+      contractsCcDone: this.state.contractsCcDone,
       fetchedAt: this.state.fetchedAt || new Date().toISOString()
     };
     try {
@@ -142,6 +148,7 @@ const EstoqueComercialApp = {
     this.state.ccDone = Array.isArray(data.ccDone) ? data.ccDone.map(String) : [];
     this.state.complete = !!data.complete;
     this.state.contractsEnriched = !!data.contractsEnriched;
+    this.state.contractsCcDone = Array.isArray(data.contractsCcDone) ? data.contractsCcDone.map(String) : [];
     this.state.fetchedAt = data.fetchedAt || null;
   },
 
@@ -180,6 +187,7 @@ const EstoqueComercialApp = {
         ccDone: [...new Set(ccDone.concat(meta.ccDone || []))],
         complete: meta.complete !== false,
         contractsEnriched: !!meta.contractsEnriched,
+        contractsCcDone: Array.isArray(meta.contractsCcDone) ? meta.contractsCcDone.map(String) : [],
         fetchedAt: meta.fetchedAt || null
       };
     } catch (e) {
@@ -222,6 +230,7 @@ const EstoqueComercialApp = {
         ccDone: this.state.ccDone,
         complete: this.state.complete,
         contractsEnriched: this.state.contractsEnriched,
+        contractsCcDone: this.state.contractsCcDone,
         fetchedAt: this.state.fetchedAt || new Date().toISOString(),
         unitCount: this.state.units.length,
         updatedAt: new Date().toISOString()
@@ -248,6 +257,43 @@ const EstoqueComercialApp = {
     return this.saveFirebase();
   },
 
+  async saveFirebaseCc(ccId) {
+    if (!this.fbReady()) return false;
+    const { doc, setDoc } = window.firebaseCollections;
+    const cc = String(ccId);
+    const list = this.state.units.filter(u => String(u.enterpriseId) === cc);
+    try {
+      const empName = (list[0] && list[0].enterpriseName) || this.empName(cc);
+      const writes = [];
+      for (let i = 0, n = 0; i < list.length; i += this.FB_CHUNK, n += 1) {
+        writes.push(setDoc(doc(window.firebaseDb, this.FB_COL, `cc_${cc}_${n}`), {
+          enterpriseId: cc,
+          enterpriseName: empName,
+          chunk: n,
+          units: list.slice(i, i + this.FB_CHUNK),
+          updatedAt: new Date().toISOString(),
+          date: this.todayStr()
+        }));
+      }
+      writes.push(setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+        date: this.todayStr(),
+        ccDone: this.state.ccDone,
+        complete: this.state.complete,
+        contractsEnriched: this.state.contractsEnriched,
+        contractsCcDone: this.state.contractsCcDone,
+        fetchedAt: this.state.fetchedAt || new Date().toISOString(),
+        unitCount: this.state.units.length,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }));
+      await Promise.all(writes);
+      this.state.firebaseOk = true;
+      return true;
+    } catch (e) {
+      console.error("[Estoque] gravação CC Firebase", cc, e);
+      return false;
+    }
+  },
+
   async init() {
     this.renderPills();
     if (this.state.inited && this.state.units.length) {
@@ -262,27 +308,16 @@ const EstoqueComercialApp = {
     const local = this.loadCache();
     if (fb && fb.units.length) {
       this.applyCache(fb);
+      this.state.firebaseOk = true;
     } else if (local && local.units && local.units.length) {
       this.applyCache(local);
+      if (this.fbReady()) await this.persistAll();
     }
     await this.loadEnterprises();
     this.fillUnitSelect();
     this.updateMeta();
     if (this.state.units.length) this.renderTable();
     if (window.lucide) window.lucide.createIcons();
-
-    if (this.state.units.length) {
-      this.setProgress("Gravando estoque no Firebase…", 10);
-      await this.persistAll();
-      this.updateMeta();
-      if (this.needsContractEnrich()) {
-        await this.enrichContracts();
-      }
-      this.setProgress("");
-      this.fillUnitSelect();
-      this.updateMeta();
-      this.renderTable();
-    }
     this.state.inited = true;
   },
 
@@ -383,7 +418,7 @@ const EstoqueComercialApp = {
     const el = document.getElementById("est-stock-meta");
     if (!el) return;
     if (!this.state.units.length) {
-      el.textContent = "Ainda sem estoque. Consultar dispara o loop no Sienge e grava no Firebase.";
+      el.textContent = "Ainda sem estoque. Só Atualizar unidades dispara o loop no Sienge.";
       return;
     }
     const when = this.state.fetchedAt ? new Date(this.state.fetchedAt).toLocaleString("pt-BR") : "hoje";
@@ -396,42 +431,107 @@ const EstoqueComercialApp = {
     return String(name || "").replace(/\s+/g, "").toUpperCase();
   },
 
+  normNameLoose(name) {
+    return this.normName(name).replace(/-0+/g, "-").replace(/^0+/, "") || this.normName(name);
+  },
+
   buildDefaulterIndex() {
-    const idx = { byRb: new Set(), byUnit: new Set() };
+    const idx = { byRb: new Map(), byUnit: new Map() };
     const bills = (window.AppState && AppState.defaultersBills) || [];
     bills.forEach(b => {
-      if (b.receivableBillId) idx.byRb.add(String(b.receivableBillId));
-      if (b.id) idx.byRb.add(String(b.id));
+      const val = Number(b.value) || 0;
+      const rb = String(b.receivableBillId || b.id || "");
+      if (rb) idx.byRb.set(rb, (idx.byRb.get(rb) || 0) + val);
       const cc = String(b.costCenterId || (b.costCentersId && b.costCentersId[0]) || "");
       const units = String(b.units || "");
       units.split(/[;,|/]/).forEach(part => {
         const n = this.normName(part);
-        if (n && n !== "N/D") idx.byUnit.add(`${cc}|${n}`);
+        if (n && n !== "N/D") {
+          const k = `${cc}|${n}`;
+          idx.byUnit.set(k, (idx.byUnit.get(k) || 0) + val);
+        }
       });
-      if (cc) idx.byUnit.add(`${cc}|${this.normName(units)}`);
     });
     this.state.defaulterIndex = idx;
     return idx;
   },
 
   isInadimplente(u) {
+    return this.overdueValue(u) > 0.009;
+  },
+
+  overdueValue(u) {
     const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
-    if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) return true;
-    const cc = String(u.enterpriseId || "");
-    return idx.byUnit.has(`${cc}|${this.normName(u.name)}`);
+    if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) {
+      return idx.byRb.get(String(u.receivableBillId)) || 0;
+    }
+    const k = `${String(u.enterpriseId || "")}|${this.normName(u.name)}`;
+    return idx.byUnit.get(k) || 0;
+  },
+
+  displayContract(u) {
+    const n = u && (u.contractNumber || u.contractId);
+    return n ? String(n) : "";
   },
 
   financialStatus(u) {
     const code = String(u.commercialStock || "").toUpperCase();
-    const sold = this.SOLD_CODES.includes(code) || !!u.contractNumber || !!u.contractId;
+    const sold = this.SOLD_CODES.includes(code) || !!this.displayContract(u);
     if (!sold) return "—";
-    if (u.quitado || (u.contractNumber && u.outstandingBalance === 0)) return "Quitado";
+    if (String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
+    const bal = u.outstandingBalance;
+    if (u.quitado || bal === 0) return "Quitado";
     if (this.isInadimplente(u)) return "Inadimplente";
-    if (u.contractNumber || this.SOLD_CODES.includes(code)) {
-      if (window.AppState && AppState.defaultersLoaded) return "Adimplente";
-      return "Em aberto";
-    }
-    return "—";
+    if (bal != null && Number(bal) > 0.009) return "Adimplente";
+    return "A apurar";
+  },
+
+  money(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  },
+
+  contractKey(u) {
+    return String(u.receivableBillId || u.contractNumber || u.contractId || ("u-" + u.id));
+  },
+
+  portfolioOf(rows) {
+    const seen = new Set();
+    let aReceber = 0;
+    let atraso = 0;
+    let ativos = 0;
+    let quitados = 0;
+    let distratados = 0;
+    let inadimplentes = 0;
+    let semSaldo = 0;
+    (rows || []).forEach(u => {
+      const fin = this.financialStatus(u);
+      if (fin === "—") return;
+      if (fin === "Distratado") {
+        distratados += 1;
+        return;
+      }
+      if (fin === "Quitado") {
+        quitados += 1;
+        return;
+      }
+      if (fin === "A apurar" || fin === "Em aberto") {
+        semSaldo += 1;
+        return;
+      }
+      const key = this.contractKey(u);
+      if (seen.has(key)) return;
+      seen.add(key);
+      ativos += 1;
+      const bal = u.outstandingBalance;
+      if (bal == null || Number.isNaN(Number(bal))) semSaldo += 1;
+      else aReceber += Number(bal) || 0;
+      const ov = this.overdueValue(u);
+      if (ov > 0.009) {
+        inadimplentes += 1;
+        atraso += ov;
+      }
+    });
+    return { aReceber, atraso, aVencer: Math.max(0, aReceber - atraso), ativos, quitados, distratados, inadimplentes, semSaldo };
   },
 
   selectedUnits() {
@@ -455,6 +555,19 @@ const EstoqueComercialApp = {
   },
 
   renderKpis(rows) {
+    const finEl = document.getElementById("est-stock-finance");
+    if (finEl) {
+      const p = this.portfolioOf(rows);
+      const falta = p.semSaldo
+        ? `<small>${p.semSaldo} contrato(s) ativo(s) ainda sem saldo — rode o cruzamento de contratos.</small>`
+        : `<small>${p.ativos} contrato(s) ativo(s) · ${p.inadimplentes} em atraso</small>`;
+      finEl.innerHTML = `
+        <div class="est-fin-card"><label>A receber</label><strong>${this.money(p.aReceber)}</strong>${falta}</div>
+        <div class="est-fin-card is-warn"><label>Em atraso</label><strong>${this.money(p.atraso)}</strong><small>Da fila de inadimplência do dia (se carregada)</small></div>
+        <div class="est-fin-card"><label>A vencer</label><strong>${this.money(p.aVencer)}</strong><small>A receber menos o atraso (aprox.)</small></div>
+        <div class="est-fin-card is-ok"><label>Quitados</label><strong>${p.quitados}</strong><small>Saldo zero — fora do a receber</small></div>
+      `;
+    }
     const el = document.getElementById("est-stock-kpis");
     if (!el) return;
     const counts = {};
@@ -490,29 +603,41 @@ const EstoqueComercialApp = {
       const status = this.mapStock(u.commercialStock);
       const area = u.area != null && u.area !== "" ? Number(u.area).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "—";
       const empName = u.enterpriseName || this.empName(u.enterpriseId);
-      const contrato = u.contractNumber || "—";
+      const contrato = this.displayContract(u) || "—";
       const fin = this.financialStatus(u);
-      const finClass = fin === "Em aberto" ? "est-fin-aberto" : "est-fin-" + fin;
+      const finClass = fin === "Em aberto" || fin === "A apurar" ? "est-fin-apurar" : "est-fin-" + fin;
+      const saldo = fin === "Quitado"
+        ? this.money(0)
+        : (fin === "—" || fin === "Distratado" || fin === "A apurar"
+          ? "—"
+          : (u.outstandingBalance == null ? "—" : this.money(u.outstandingBalance)));
       return `<tr>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
         <td>${this.esc(u.enterpriseId)} / ${this.esc(empName)}</td>
-        <td>${this.esc(u.id)} / ${this.esc(u.name)}</td>
-        <td>${this.esc(u.commercialStock || "—")}</td>
+        <td>${this.esc(u.name)}</td>
+        <td>${this.esc(status)}</td>
         <td>${this.esc(this.mapCode(this.LEGAL_MAP, u.legalStock))}</td>
-        <td>${this.esc(this.mapCode(this.OBRA_MAP, u.buildingStock))}</td>
         <td>${this.esc(area)}</td>
         <td>${this.esc(contrato)}</td>
         <td><span class="est-fin-chip ${finClass}">${this.esc(fin)}</span></td>
+        <td style="text-align:right;white-space:nowrap;">${this.esc(saldo)}</td>
       </tr>`;
     }).join("");
   },
 
   setBusy(on) {
     this.state.loading = !!on;
-    ["est-btn-consultar", "est-btn-atualizar", "est-filter-emp", "est-filter-unit"].forEach(id => {
+    ["est-btn-consultar", "est-btn-atualizar", "est-btn-contratos", "est-filter-emp", "est-filter-unit"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = !!on;
     });
+    const stop = document.getElementById("est-btn-parar");
+    if (stop) stop.style.display = on ? "inline-flex" : "none";
+  },
+
+  parar() {
+    this.state.stopSync = true;
+    this.setProgress("Parando…");
   },
 
   sleep(ms) {
@@ -522,16 +647,18 @@ const EstoqueComercialApp = {
   keepQuitado(prev, next) {
     const old = {};
     (prev || []).forEach(u => {
-      if (u && u.quitado) old[String(u.id)] = u;
+      if (u) old[String(u.id)] = u;
     });
     return (next || []).map(u => {
       const keep = old[String(u.id)];
       if (!keep) return u;
       return {
         ...u,
-        quitado: true,
         contractNumber: u.contractNumber || keep.contractNumber,
-        outstandingBalance: 0,
+        outstandingBalance: keep.quitado ? 0 : (u.outstandingBalance != null ? u.outstandingBalance : keep.outstandingBalance),
+        contractValue: u.contractValue || keep.contractValue,
+        situation: u.situation || keep.situation,
+        quitado: !!(keep.quitado || u.quitado),
         receivableBillId: u.receivableBillId || keep.receivableBillId,
         customerId: u.customerId || keep.customerId
       };
@@ -544,6 +671,7 @@ const EstoqueComercialApp = {
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
+      if (this.state.stopSync) break;
       const path = `/units?limit=${this.LIMIT}&offset=${offset}&enterpriseId=${cc.id}&additionalData=NONE`;
       const data = await this.siengeFetch(path);
       const results = (data && data.results) || [];
@@ -556,9 +684,9 @@ const EstoqueComercialApp = {
 
   needsContract(u) {
     if (!u || u.quitado) return false;
-    if (u.contractNumber) return false;
+    if (u.outstandingBalance != null && !Number.isNaN(Number(u.outstandingBalance))) return false;
     const code = String(u.commercialStock || "").toUpperCase();
-    return this.SOLD_CODES.includes(code) || !!u.contractId;
+    return this.SOLD_CODES.includes(code) || !!u.contractId || !!u.contractNumber;
   },
 
   needsContractEnrich() {
@@ -569,152 +697,189 @@ const EstoqueComercialApp = {
   },
 
   applyContractInfo(u, info) {
-    if (!info || u.quitado) return u;
+    if (!info) return u;
     const bal = info.outstandingBalance;
-    const quitado = Number(bal) === 0 && info.situation !== "Distratado";
+    const quitado = Number(bal) === 0 && !String(info.situation || "").toLowerCase().includes("distrat");
     return {
       ...u,
-      contractNumber: info.contractNumber || u.contractNumber,
+      contractNumber: info.contractNumber || u.contractNumber || (u.contractId != null ? String(u.contractId) : null),
       receivableBillId: info.receivableBillId || u.receivableBillId,
       customerId: info.customerId || u.customerId,
-      outstandingBalance: bal == null ? u.outstandingBalance : Number(bal),
-      quitado: !!quitado
+      outstandingBalance: bal == null || bal === "" ? u.outstandingBalance : Number(bal),
+      contractValue: info.contractValue || u.contractValue,
+      situation: info.situation || u.situation,
+      quitado: u.quitado || !!quitado
     };
   },
 
   contractInfoFromSale(c) {
     const mainCust = (c.salesContractCustomers || []).find(x => x.main === true) || (c.salesContractCustomers || [])[0] || {};
+    const num = c.number || c.contractNumber || c.documentNumber || (c.id != null ? String(c.id) : "");
     return {
-      contractNumber: c.number || c.contractNumber || c.documentNumber || "",
+      saleId: c.id,
+      contractNumber: num,
       outstandingBalance: c.outstandingBalance,
+      contractValue: c.totalSellingValue || c.value || null,
       receivableBillId: c.receivableBillId || null,
       customerId: mainCust.id || c.customerId || null,
       situation: c.situation || c.status || ""
     };
   },
 
+  rememberContractNames(byName, raw, info) {
+    if (!raw) return;
+    const n = this.normName(raw);
+    const l = this.normNameLoose(raw);
+    if (n) byName[n] = info;
+    if (l) byName[l] = info;
+  },
+
   async fetchContractsForCc(ccId) {
     const byId = {};
     const byName = {};
+    const bySaleId = {};
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
+      if (this.state.stopSync) break;
       const path = `/sales-contracts?limit=${this.LIMIT}&offset=${offset}&enterpriseId=${ccId}`;
       const data = await this.siengeFetch(path);
       const results = (data && data.results) || [];
       results.forEach(c => {
         const info = this.contractInfoFromSale(c);
-        const units = c.salesContractUnits || [];
+        if (c.id != null) bySaleId[String(c.id)] = info;
+        const units = c.salesContractUnits || c.units || [];
         units.forEach(su => {
           const uid = su.unitId || su.id;
           if (uid) byId[String(uid)] = info;
-          if (su.name) byName[this.normName(su.name)] = info;
+          this.rememberContractNames(byName, su.name || su.unitName || su.unityName, info);
         });
         if (c.unitId) byId[String(c.unitId)] = info;
-        if (c.unitName) byName[this.normName(c.unitName)] = info;
+        this.rememberContractNames(byName, c.unitName || c.unityName, info);
       });
       if (results.length < this.LIMIT) hasMore = false;
       else offset += results.length;
     }
-    return { byId, byName };
+    return { byId, byName, bySaleId };
   },
 
   async enrichContracts() {
-    const ccs = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))];
-    if (!ccs.length) {
+    this.state.stopSync = false;
+    const pending = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))]
+      .filter(id => !this.state.contractsCcDone.includes(String(id)));
+    if (!pending.length) {
       this.state.contractsEnriched = true;
-      await this.persistAll();
+      this.saveCache();
+      this.setProgress("");
+      this.updateMeta();
+      this.renderTable();
       return;
     }
     this.setBusy(true);
     try {
-      for (let i = 0; i < ccs.length; i++) {
-        const ccId = ccs[i];
-        this.setProgress(`Cruzando contratos ${ccId} (${i + 1}/${ccs.length})…`, ((i + 1) / ccs.length) * 100);
+      for (let i = 0; i < pending.length; i++) {
+        if (this.state.stopSync) break;
+        const ccId = pending[i];
+        this.setProgress(`Cruzando contratos ${ccId} (${i + 1}/${pending.length})…`, ((i + 1) / pending.length) * 100);
         try {
           const maps = await this.fetchContractsForCc(ccId);
           this.state.units = this.state.units.map(u => {
             if (String(u.enterpriseId) !== String(ccId)) return u;
             if (u.quitado) return u;
-            const info = maps.byId[String(u.id)] || maps.byName[this.normName(u.name)];
+            const info = maps.byId[String(u.id)]
+              || (u.contractId != null ? maps.bySaleId[String(u.contractId)] : null)
+              || maps.byName[this.normName(u.name)]
+              || maps.byName[this.normNameLoose(u.name)];
             return this.applyContractInfo(u, info);
           });
-          await this.persistAll();
+          if (!this.state.contractsCcDone.includes(ccId)) this.state.contractsCcDone.push(ccId);
+          this.saveCache();
+          await this.saveFirebaseCc(ccId);
         } catch (e) {
           console.error("[Estoque] contratos CC", ccId, e);
         }
         await this.sleep(80);
       }
-      this.state.contractsEnriched = true;
-      this.state.fetchedAt = this.state.fetchedAt || new Date().toISOString();
-      await this.persistAll();
+      this.state.contractsEnriched = this.state.stopSync
+        ? false
+        : !this.state.units.some(u => this.needsContract(u));
+      await this.saveFirebaseCc(pending[pending.length - 1]);
     } finally {
       this.setBusy(false);
+      this.setProgress(this.state.stopSync ? "Cruzamento interrompido. O que já cruzou ficou salvo." : "");
+      this.state.stopSync = false;
+      this.updateMeta();
+      this.renderTable();
+      if (window.lucide) window.lucide.createIcons();
     }
+  },
+
+  async cruzarContratos() {
+    if (this.state.loading) return;
+    if (!this.state.units.length) await this.init();
+    if (!this.state.units.length) {
+      alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
+      return;
+    }
+    await this.enrichContracts();
   },
 
   async consultar(forceRefresh) {
     if (this.state.loading) return;
+    if (!this.state.units.length) await this.init();
+    if (!forceRefresh) {
+      this.fillUnitSelect();
+      this.updateMeta();
+      this.renderTable();
+      return;
+    }
     if (!this.state.enterprises.length) await this.loadEnterprises();
     if (!this.state.enterprises.length) {
       alert("Nenhum centro de custo começando com 1, 2 ou 3.");
       return;
     }
 
-    if (forceRefresh) {
-      const prev = this.state.units.slice();
-      this.state.units = [];
-      this.state.ccDone = [];
-      this.state.complete = false;
-      this.state.contractsEnriched = false;
-      this.state.fetchedAt = null;
-      this._prevQuitados = prev;
-    } else if (!this.state.units.length) {
-      const fb = await this.loadFirebase();
-      const local = this.loadCache();
-      this.applyCache(fb && fb.units.length ? fb : local);
-    }
+    const prev = this.state.units.slice();
+    this.state.stopSync = false;
+    this.state.units = [];
+    this.state.ccDone = [];
+    this.state.complete = false;
+    this.state.fetchedAt = null;
+    this._prevQuitados = prev;
 
-    const pending = this.state.enterprises.filter(cc => !this.state.ccDone.includes(String(cc.id)));
     this.setBusy(true);
-
     try {
-      if (pending.length) {
-        const total = this.state.enterprises.length;
-        let done = this.state.ccDone.length;
-        for (const cc of pending) {
-          done += 1;
-          this.setProgress(`Buscando ${this.ccLabel(cc)} (${done}/${total})…`, (done / total) * 100);
-          try {
-            let batch = await this.fetchUnitsForCc(cc);
-            if (this._prevQuitados) batch = this.keepQuitado(this._prevQuitados, batch);
-            else batch = this.keepQuitado(this.state.units, batch);
-            this.state.units = this.state.units.filter(u => String(u.enterpriseId) !== String(cc.id)).concat(batch);
-            this.state.ccDone.push(String(cc.id));
-            this.state.fetchedAt = new Date().toISOString();
-            await this.persistAll();
-          } catch (e) {
-            console.error("[Estoque] falha no CC", cc.id, e);
-            this.setProgress(`Erro em ${cc.id}: ${e.message || e}. Continuando…`, (done / total) * 100);
-            await this.sleep(400);
-          }
-          await this.sleep(80);
+      const total = this.state.enterprises.length;
+      let done = 0;
+      for (const cc of this.state.enterprises) {
+        if (this.state.stopSync) break;
+        done += 1;
+        this.setProgress(`Buscando ${this.ccLabel(cc)} (${done}/${total})…`, (done / total) * 100);
+        try {
+          let batch = await this.fetchUnitsForCc(cc);
+          batch = this.keepQuitado(this._prevQuitados, batch);
+          this.state.units = this.state.units.filter(u => String(u.enterpriseId) !== String(cc.id)).concat(batch);
+          this.state.ccDone.push(String(cc.id));
+          this.state.fetchedAt = new Date().toISOString();
+          this.saveCache();
+          await this.saveFirebaseCc(cc.id);
+        } catch (e) {
+          console.error("[Estoque] falha no CC", cc.id, e);
+          this.setProgress(`Erro em ${cc.id}: ${e.message || e}. Continuando…`, (done / total) * 100);
+          await this.sleep(400);
         }
-        this.state.complete = this.state.ccDone.length >= this.state.enterprises.length;
-        this._prevQuitados = null;
-        await this.persistAll();
+        await this.sleep(80);
       }
-
-      if (this.needsContractEnrich()) {
-        await this.enrichContracts();
-      }
-
-      this.setProgress("");
+      this.state.complete = !this.state.stopSync;
+      this._prevQuitados = null;
+      this.saveCache();
+      this.setProgress(this.state.stopSync ? "Atualização interrompida. O que já baixou ficou salvo." : "");
       this.fillUnitSelect();
       this.updateMeta();
       this.renderTable();
     } finally {
       this.setBusy(false);
+      this.state.stopSync = false;
       if (window.lucide) window.lucide.createIcons();
     }
   }
