@@ -42,11 +42,16 @@ window.MlEmpresaFilter = {
     return id ? `${id} - ${name}` : name;
   },
 
-  buttonLabel(items, selectedIds, emptyMeansAll) {
+  buttonLabel(items, selectedIds, emptyMeansAll, countMode) {
     const all = items || [];
     const sel = (selectedIds || []).map(String);
     const n = sel.length;
     if (!all.length) return "Nenhuma empresa";
+    if (countMode) {
+      if (!n) return emptyMeansAll ? `Todos (${all.length})` : "Selecione empresas";
+      if (n === all.length) return `Todos (${all.length})`;
+      return `${n} de ${all.length} empresas`;
+    }
     if (!n) return emptyMeansAll ? "Todos" : "Selecione empresas";
     if (n === all.length) return "Todos";
     if (n === 1) {
@@ -84,16 +89,16 @@ window.MlEmpresaFilter = {
     const open = !!opts.open;
     const label = opts.label || "Empresas";
     const extra = opts.extraClass ? ` ${opts.extraClass}` : "";
-    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll);
-    return `<div class="ml-emp-filter${extra}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
+    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode);
+    return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
-      <button type="button" class="ml-emp-filter-btn" onclick="MlEmpresaFilter.toggleOpen(${JSON.stringify(id)})">
+      <button type="button" class="ml-emp-filter-btn" onclick="event.stopPropagation();MlEmpresaFilter.toggleOpen(${JSON.stringify(id)})">
         <span>${this.esc(btn)}</span>
         <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;"></i>
       </button>
-      ${open ? `<div class="ml-emp-filter-panel">
+      <div class="ml-emp-filter-panel" id="${this.esc(id)}-panel">
         <div class="ml-emp-filter-search">
-          <input type="text" placeholder="Buscar..." value="${this.esc(opts.query || "")}"
+          <input id="${this.esc(id)}-search" type="text" placeholder="Buscar..." value="${this.esc(opts.query || "")}"
             onclick="event.stopPropagation()"
             oninput="MlEmpresaFilter.setQuery(${JSON.stringify(id)}, this.value)">
         </div>
@@ -102,7 +107,7 @@ window.MlEmpresaFilter = {
           <button type="button" class="ml-emp-filter-none" onclick="event.stopPropagation();MlEmpresaFilter.selectNone(${JSON.stringify(id)})">Desmarcar Todos</button>
         </div>
         <div class="ml-emp-filter-list" id="${this.esc(id)}-list">${this.listHtml(opts)}</div>
-      </div>` : ""}
+      </div>
     </div>`;
   }
 };
