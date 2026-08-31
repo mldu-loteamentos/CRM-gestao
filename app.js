@@ -1912,7 +1912,12 @@ window.isCrmSuperAdmin = function() {
 window.permCoversMenuKey = function(perms, modKey) {
   if (!perms || !modKey) return false;
   if (perms[modKey] === true) return true;
-  if (modKey === "sub_fin_cr_configuracoes_acessar") {
+  if (modKey === "sub_fiscal_geral_csll_acessar") {
+    return perms.sub_fiscal_geral_fiscal_acessar === true
+      || perms.sub_fiscal_geral_csll_acessar === true
+      || perms.sub_fiscal_geral_csll_visualizar === true
+      || perms.sub_fiscal_geral_csll_editar === true;
+  }
     return ["configuracoes", "regras_cobranca", "regras_negociacao"].some(id =>
       perms["sub_fin_cr_" + id + "_acessar"] === true
       || perms["sub_fin_cr_" + id + "_visualizar"] === true

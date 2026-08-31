@@ -21,6 +21,16 @@ window.configuracoesPermChecked = function(savedPerms, flag) {
     || savedPerms["sub_fin_cr_regras_negociacao_" + flag]);
 };
 
+window.permFlagsForAction = function(sub, act) {
+  const base = (act && act.permBase) || ((sub && sub.key) + "_" + (act && act.id));
+  return {
+    base,
+    acessar: base + "_acessar",
+    visualizar: base + "_visualizar",
+    editar: base + "_editar"
+  };
+};
+
 const ConfigUsersApp = {
   
   users: [
@@ -35,14 +45,56 @@ const ConfigUsersApp = {
 
   profiles: [], // Será carregado dinamicamente
 
+  permFlags(sub, act) {
+    return window.permFlagsForAction(sub, act);
+  },
+
+  hydrateSubmoduleFlags(savedPerms) {
+    if (!savedPerms) return savedPerms;
+    this.modules.forEach(m => {
+      m.submodules.forEach(sub => {
+        if (savedPerms[sub.key]) return;
+        const on = sub.actions.some(act => {
+          const f = this.permFlags(sub, act);
+          return !!(savedPerms[f.acessar] || savedPerms[f.visualizar] || savedPerms[f.editar]);
+        });
+        if (on) savedPerms[sub.key] = true;
+      });
+    });
+    if (savedPerms.sub_fiscal_geral_fiscal_acessar && savedPerms.sub_fiscal_geral_csll_acessar == null) {
+      savedPerms.sub_fiscal_geral_csll_acessar = true;
+      savedPerms.sub_fiscal_geral_csll_visualizar = !!savedPerms.sub_fiscal_geral_fiscal_visualizar;
+      savedPerms.sub_fiscal_geral_csll_editar = !!savedPerms.sub_fiscal_geral_fiscal_editar;
+    }
+    return savedPerms;
+  },
+
+  persistUsers() {
+    localStorage.setItem("crm_users", JSON.stringify(this.users));
+    if (typeof window !== "undefined") {
+      window._cachedCrmUsersBadge = null;
+      if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI();
+      if (typeof window.forceUploadLocalConfig === "function") {
+        window.forceUploadLocalConfig(true).catch(() => {});
+      }
+    }
+  },
+
   modules: [
     {
       name: "Engenharia", icon: "hard-hat", key: "mod_eng",
-      submodules: [{ name: "Geral", key: "sub_eng_geral", actions: [{ id: "engenharia", label: "Engenharia" }] }]
+      submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [{ id: "engenharia", label: "Engenharia" }] }]
+    },
+    {
+      name: "Vistoria", icon: "camera", key: "mod_vistoria",
+      submodules: [
+        { name: "Vistoria", key: "sub_vist_tela", actions: [{ id: "vistoria", label: "Vistoria", permBase: "sub_vistoria_geral_vistoria" }] },
+        { name: "Verificar Construção", key: "sub_vist_verificar", actions: [{ id: "verificar_construcao", label: "Verificar Construção", permBase: "sub_vistoria_geral_verificar_construcao" }] }
+      ]
     },
     {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
-      submodules: [{ name: "Geral", key: "sub_compras_geral", actions: [{ id: "compras", label: "Compras" }] }]
+      submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [{ id: "compras", label: "Compras" }] }]
     },
     {
       name: "Financeiro", icon: "dollar-sign", key: "mod_fin",
@@ -50,7 +102,7 @@ const ConfigUsersApp = {
         {
           name: "Contas a Receber", key: "sub_fin_cr",
           actions: [
-            { id: "fila_cobranca", label: "Fila de Cobrança" },
+            { id: "fila_cobranca", label: "Dashboard / Fila de Cobrança" },
             { id: "agenda", label: "Agenda do Operador" },
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
@@ -78,57 +130,49 @@ const ConfigUsersApp = {
     },
     {
       name: "Fiscal / Contábil", icon: "calculator", key: "mod_fiscal",
-      submodules: [{ name: "Geral", key: "sub_fiscal_geral", actions: [{ id: "fiscal", label: "Fiscal / Contábil" }] }]
-    },
-    {
-      name: "Societário", icon: "git-fork", key: "mod_societario",
-      submodules: [{ name: "Geral", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Estrutura Societária" }] }]
+      submodules: [
+        { name: "PIS/COFINS", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "PIS/COFINS", permBase: "sub_fiscal_geral_fiscal" }] },
+        { name: "CSLL/IRPJ", key: "sub_fiscal_csll", actions: [{ id: "csll", label: "CSLL/IRPJ", permBase: "sub_fiscal_geral_csll" }] }
+      ]
     },
     {
       name: "Participações", icon: "pie-chart", key: "mod_participacoes",
-      submodules: [{ name: "Geral", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Prestação de contas (Ellenco)" }] }]
+      submodules: [{ name: "Prestação de contas (Ellenco)", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Participações" }] }]
+    },
+    {
+      name: "Societário", icon: "git-fork", key: "mod_societario",
+      submodules: [{ name: "Estrutura Societária", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Estrutura Societária" }] }]
     },
     {
       name: "Comercial", icon: "store", key: "mod_comercial",
-      submodules: [{ name: "Geral", key: "sub_com_geral", actions: [
-        { id: "dashboard", label: "Dashboard" },
-        { id: "assistente_anexos", label: "Assistente de Anexos" }
-      ]}]
+      submodules: [
+        { name: "Dashboard", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard", permBase: "sub_com_geral_dashboard" }] },
+        { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] }
+      ]
     },
     {
       name: "Marketing", icon: "megaphone", key: "mod_mkt",
-      submodules: [{ name: "Geral", key: "sub_mkt_geral", actions: [
-        { id: "budget", label: "Budget" },
-        { id: "eventos", label: "Eventos" }
-      ] }]
+      submodules: [
+        { name: "Budget", key: "sub_mkt_budget", actions: [{ id: "budget", label: "Budget", permBase: "sub_mkt_geral_budget" }] },
+        { name: "Eventos", key: "sub_mkt_eventos", actions: [{ id: "eventos", label: "Eventos", permBase: "sub_mkt_geral_eventos" }] }
+      ]
     },
     {
       name: "Relacionamento", icon: "users", key: "mod_rel",
-      submodules: [{ name: "Geral", key: "sub_rel_geral", actions: [{ id: "relacionamento", label: "Relacionamento" }] }]
+      submodules: [{ name: "Relacionamento", key: "sub_rel_geral", actions: [{ id: "relacionamento", label: "Relacionamento" }] }]
     },
-      {
-         name: "Vistoria", icon: "camera", key: "mod_vistoria",
-         submodules: [
-            { name: "Geral", key: "sub_vistoria_geral", actions: [
-                  { id: "vistoria", label: "Vistoria" },
-                  { id: "verificar_construcao", label: "Verificar Construção" }
-            ] }
-         ]
-      },
     {
       name: "Compromissário", icon: "building", key: "mod_compromissario",
-      submodules: [{ name: "Geral", key: "sub_compromissario_geral", actions: [{ id: "prefeitura", label: "Prefeitura" }, { id: "associacoes", label: "Associações" }] }]
+      submodules: [
+        { name: "Prefeitura", key: "sub_comp_pref", actions: [{ id: "prefeitura", label: "Prefeitura", permBase: "sub_compromissario_geral_prefeitura" }] },
+        { name: "Associações", key: "sub_comp_assoc", actions: [{ id: "associacoes", label: "Associações", permBase: "sub_compromissario_geral_associacoes" }] }
+      ]
     },
     {
       name: "Segurança", icon: "shield", key: "mod_seg",
       submodules: [
-        {
-          name: "Geral", key: "sub_seg_geral",
-          actions: [
-            { id: "auditoria", label: "Auditoria do Sistema" },
-            { id: "acessos", label: "Acessos" }
-          ]
-        }
+        { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [{ id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" }] },
+        { name: "Acessos", key: "sub_seg_acc", actions: [{ id: "acessos", label: "Acessos", permBase: "sub_seg_geral_acessos" }] }
       ]
     },
     {
@@ -263,9 +307,10 @@ const ConfigUsersApp = {
                m.submodules.forEach(sub => {
                   allPerms[sub.key] = true;
                   sub.actions.forEach(act => {
-                     allPerms[`${sub.key}_${act.id}_acessar`] = true;
-                     allPerms[`${sub.key}_${act.id}_visualizar`] = true;
-                     allPerms[`${sub.key}_${act.id}_editar`] = true;
+                     const f = this.permFlags(sub, act);
+                     allPerms[f.acessar] = true;
+                     allPerms[f.visualizar] = true;
+                     allPerms[f.editar] = true;
                   });
                });
             });
@@ -307,7 +352,7 @@ const ConfigUsersApp = {
   openUserModal(userId = null) {
       let user = null;
       if (userId) {
-         user = this.users.find(u => u.id === userId);
+         user = this.users.find(u => String(u.id) === String(userId));
          if (!user) return;
       }
       
@@ -603,7 +648,7 @@ const ConfigUsersApp = {
 
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 18px; border-top: 1px solid #e8eaed;">
                <button class="btn btn-cancel" onclick="document.getElementById('user-modal-overlay').remove()">Cancelar</button>
-               <button onclick="ConfigUsersApp.saveUserModal(${user ? user.id : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
+               <button onclick="ConfigUsersApp.saveUserModal(${user ? JSON.stringify(user.id) : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
             </div>
             </div>
          </div>
@@ -613,18 +658,14 @@ const ConfigUsersApp = {
   },
 
   toggleUserStatus(userId) {
-      const user = this.users.find(u => u.id === userId);
+      const user = this.users.find(u => String(u.id) === String(userId));
       if (user) {
           if (user.status === 'ATIVO') {
               user.status = 'INATIVO';
           } else {
               user.status = 'ATIVO';
           }
-          localStorage.setItem('crm_users', JSON.stringify(this.users));
-          if (typeof window !== 'undefined') {
-              window._cachedCrmUsersBadge = null;
-              if (typeof window.updateOperatorTabsUI === 'function') window.updateOperatorTabsUI();
-          }
+          this.persistUsers();
           this.render();
       }
   },
@@ -658,7 +699,7 @@ const ConfigUsersApp = {
       }
       
       if (userId) {
-          const user = this.users.find(u => u.id === userId);
+          const user = this.users.find(u => String(u.id) === String(userId));
           if (user) {
               user.name = name;
               user.email = email;
@@ -701,15 +742,11 @@ const ConfigUsersApp = {
              resend_billet: resendBillet,
              assina_testemunha: assinaTestemunha,
              doc_rg: docRg,
-             status: "PENDENTE"
+             status: "ATIVO"
           });
       }
       
-      localStorage.setItem('crm_users', JSON.stringify(this.users));
-      if (typeof window !== 'undefined') {
-          window._cachedCrmUsersBadge = null;
-          if (typeof window.updateOperatorTabsUI === 'function') window.updateOperatorTabsUI();
-      }
+      this.persistUsers();
       document.getElementById('user-modal-overlay').remove();
       this.render();
   },
@@ -720,12 +757,14 @@ const ConfigUsersApp = {
 
     let trs = this.users.map(u => {
       const isActive = u.status === 'ATIVO';
-      const statusSwitch = u.status === 'PENDENTE'
-        ? '<span style="background: #fef7e0; color: #f29900; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;">PENDENTE</span>'
-        : `<label class="ml-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
-             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${u.id})">
+      const isPending = String(u.status || '').toUpperCase() === 'PENDENTE';
+      const statusSwitch = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+             ${isPending ? '<span style="background: #fef7e0; color: #f29900; padding: 4px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">PENDENTE</span>' : ''}
+             <label class="ml-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
+             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${JSON.stringify(u.id)})">
              <span class="ml-slider"></span>
-           </label>`;
+           </label>
+           </div>`;
 
       return `
         <tr style="border-bottom: 1px solid #f0f0f0;">
@@ -741,7 +780,7 @@ const ConfigUsersApp = {
           </td>
           <td style="padding: 16px 15px;">${statusSwitch}</td>
           <td style="padding: 16px 15px;">
-             <button onclick="ConfigUsersApp.openUserModal(${u.id})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
+             <button onclick="ConfigUsersApp.openUserModal(${JSON.stringify(u.id)})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
           </td>
         </tr>
       `;
@@ -779,6 +818,7 @@ const ConfigUsersApp = {
     // Load saved permissions for selected profile
     const savedPermsStr = localStorage.getItem(`crm_perms_${this.selectedProfile}`);
     let savedPerms = savedPermsStr ? JSON.parse(savedPermsStr) : {};
+    this.hydrateSubmoduleFlags(savedPerms);
     
     const isAdmin = this.selectedProfile === 'admin';
 
@@ -789,9 +829,10 @@ const ConfigUsersApp = {
          m.submodules.forEach(sub => {
             savedPerms[sub.key] = true;
             sub.actions.forEach(act => {
-               savedPerms[`${sub.key}_${act.id}_acessar`] = true;
-               savedPerms[`${sub.key}_${act.id}_visualizar`] = true;
-               savedPerms[`${sub.key}_${act.id}_editar`] = true;
+               const f = this.permFlags(sub, act);
+               savedPerms[f.acessar] = true;
+               savedPerms[f.visualizar] = true;
+               savedPerms[f.editar] = true;
             });
          });
       });
@@ -813,9 +854,10 @@ const ConfigUsersApp = {
             const regular = [];
             const regras = [];
             sub.actions.forEach(act => {
-              const permKeyAcc = `${sub.key}_${act.id}_acessar`;
-              const permKeyVis = `${sub.key}_${act.id}_visualizar`;
-              const permKeyEdi = `${sub.key}_${act.id}_editar`;
+              const f = this.permFlags(sub, act);
+              const permKeyAcc = f.acessar;
+              const permKeyVis = f.visualizar;
+              const permKeyEdi = f.editar;
               const unionCfg = act.id === "configuracoes" && typeof window.configuracoesPermChecked === "function";
               const chkAcc = (unionCfg ? window.configuracoesPermChecked(savedPerms, "acessar") : savedPerms[permKeyAcc]) ? "checked" : "";
               const chkVis = (unionCfg ? window.configuracoesPermChecked(savedPerms, "visualizar") : savedPerms[permKeyVis]) ? "checked" : "";
@@ -975,9 +1017,10 @@ const ConfigUsersApp = {
        this.modules.find(m => m.key === key).submodules.forEach(sub => {
           perms[sub.key] = isChecked;
           sub.actions.forEach(act => {
-             perms[`${sub.key}_${act.id}_acessar`] = isChecked;
-             perms[`${sub.key}_${act.id}_visualizar`] = isChecked;
-             perms[`${sub.key}_${act.id}_editar`] = isChecked;
+             const f = this.permFlags(sub, act);
+             perms[f.acessar] = isChecked;
+             perms[f.visualizar] = isChecked;
+             perms[f.editar] = isChecked;
           });
        });
     } else if (level === 'submodule') {
@@ -992,9 +1035,10 @@ const ConfigUsersApp = {
              m.submodules.forEach(s => {
                 if(s.key === subKey) {
                    s.actions.forEach(act => {
-                     perms[`${s.key}_${act.id}_acessar`] = false;
-                     perms[`${s.key}_${act.id}_visualizar`] = false;
-                     perms[`${s.key}_${act.id}_editar`] = false;
+                     const f = this.permFlags(s, act);
+                     perms[f.acessar] = false;
+                     perms[f.visualizar] = false;
+                     perms[f.editar] = false;
                    });
                 }
              })
