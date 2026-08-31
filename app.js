@@ -900,9 +900,12 @@ window.refreshCityRulesFromSienge = async function() {
   }
 };
 window.applyDynamicCityRules = function() {
+  if (typeof window.dedupeAccentCityRules === "function") {
+    window.dedupeAccentCityRules();
+  }
   if (!AppState.cachedCostCenters) return;
 
-  const cities = new Set();
+  const cityMap = {};
   AppState.cachedCostCenters.forEach(cc => {
     if (cc && cc.name) {
       const codeStr = cc.code ? String(cc.code) : "";
@@ -915,39 +918,51 @@ window.applyDynamicCityRules = function() {
       const city = typeof window.extractCityFromCostCenter === "function"
         ? window.extractCityFromCostCenter(idStr || codeStr, nameStr)
         : "";
-      if (city) cities.add(city);
+      if (!city) return;
+      const fold = typeof window.foldCityKey === "function" ? window.foldCityKey(city) : String(city).toUpperCase();
+      const pretty = (typeof window.extractCityDisplayName === "function" && window.extractCityDisplayName(idStr || codeStr, nameStr))
+        || (typeof window.prettierCityLabel === "function" && window.prettierCityLabel([city]))
+        || city;
+      cityMap[fold] = typeof window.prettierCityLabel === "function"
+        ? window.prettierCityLabel([cityMap[fold], pretty, city])
+        : pretty;
     }
   });
 
-  // Ordenar cidades alfabeticamente
-  const sortedCities = Array.from(cities).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-
+  const sortedFolds = Object.keys(cityMap).sort((a, b) => cityMap[a].localeCompare(cityMap[b], 'pt-BR'));
   const activeRuleIds = new Set();
 
-  // Criar regra para cada cidade
-  sortedCities.forEach(city => {
-    const ruleId = "CID_" + city.replace(/\s+/g, '_');
+  sortedFolds.forEach(fold => {
+    const ruleId = (typeof window.canonicalCityRuleId === "function")
+      ? window.canonicalCityRuleId(fold)
+      : ("CID_" + String(fold).replace(/\s+/g, '_'));
+    if (!ruleId) return;
     activeRuleIds.add(ruleId);
+    const pretty = cityMap[fold];
     if (!AppState.rules[ruleId]) {
       AppState.rules[ruleId] = {
         id: ruleId,
-        desc: city,
+        desc: pretty,
         operator: "OUTROS"
       };
     } else {
-      AppState.rules[ruleId].desc = city;
-      // Nunca alterar operadores de cidade já cadastrada (ajuste manual prevalece).
+      const currentDesc = AppState.rules[ruleId].desc;
+      AppState.rules[ruleId].desc = typeof window.prettierCityLabel === "function"
+        ? window.prettierCityLabel([currentDesc, pretty])
+        : (currentDesc || pretty);
     }
   });
 
-  // Remover regras antigas que não são de cidades ou que não existem mais (ex: RESIDENCIAL AVARÉ I sem hífen)
   if (AppState.rules) {
     Object.keys(AppState.rules).forEach(key => {
       if (!key.startsWith("CID_") && key !== "filaConfig") {
         delete AppState.rules[key];
-      } else if (!activeRuleIds.has(key)) {
-        if (AppState.rules[key].operator === "OUTROS") {
-           delete AppState.rules[key]; // Remove cidades obsoletas que ficaram salvas no cache e não têm operador
+      } else if (key.startsWith("CID_") && !activeRuleIds.has(key)) {
+        const ops = window.mergeCityOperatorValues
+          ? window.mergeCityOperatorValues(AppState.rules[key].operator)
+          : [];
+        if (!ops.length && (AppState.rules[key].operator === "OUTROS" || !AppState.rules[key].operator)) {
+           delete AppState.rules[key];
         }
       }
     });
@@ -957,9 +972,130 @@ window.applyDynamicCityRules = function() {
   window.checkUnassignedCities();
 };
 
+window.foldCityKey = function(s) {
+  return String(s || "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+};
+
+window.canonicalCityRuleId = function(ruleIdOrCity) {
+  const s = String(ruleIdOrCity || "");
+  const body = s.indexOf("CID_") === 0 ? s.slice(4) : s;
+  const fold = window.foldCityKey(body);
+  return fold ? ("CID_" + fold) : "";
+};
+
+window.prettierCityLabel = function(names) {
+  const list = (names || []).map(n => String(n || "").trim().toUpperCase()).filter(Boolean);
+  if (!list.length) return "";
+  const defaults = {
+    AVARE: "AVARÉ",
+    ARACARIGUAMA: "ARAÇARIGUAMA",
+    ARACOIABA_DA_SERRA: "ARAÇOIABA DA SERRA",
+    ARACOIABA: "ARAÇOIABA DA SERRA",
+    TATUI: "TATUÍ",
+    CERQUEIRA_CESAR: "CERQUEIRA CÉSAR",
+    SAO_MANUEL: "SÃO MANUEL",
+    ITAI: "ITAÍ",
+    TAGUAI: "TAGUAÍ"
+  };
+  list.sort((a, b) => {
+    const da = (a.normalize("NFD").match(/[\u0300-\u036f]/g) || []).length;
+    const db = (b.normalize("NFD").match(/[\u0300-\u036f]/g) || []).length;
+    return db - da;
+  });
+  const best = list[0];
+  const fold = window.foldCityKey(best);
+  if (defaults[fold] && (best.normalize("NFD").match(/[\u0300-\u036f]/g) || []).length === 0) {
+    return defaults[fold];
+  }
+  return best.replace(/_/g, " ");
+};
+
+window.mergeCityOperatorValues = function() {
+  const skip = function(o) {
+    const n = typeof window.normalizeOperatorName === "function"
+      ? window.normalizeOperatorName(o)
+      : String(o || "").toUpperCase();
+    return !n || n === "OUTROS" || n === "NAO ATRIBUIDO" || n === "SEM CARTEIRA INADIMPLENTE" || n === "NAO COBRAR";
+  };
+  const out = [];
+  const seen = new Set();
+  Array.prototype.forEach.call(arguments, function(val) {
+    const arr = Array.isArray(val) ? val : (val != null && val !== "" ? [val] : []);
+    arr.forEach(function(o) {
+      if (skip(o)) return;
+      const k = typeof window.normalizeOperatorName === "function"
+        ? window.normalizeOperatorName(o)
+        : String(o).toUpperCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(o);
+    });
+  });
+  return out;
+};
+
+window.dedupeAccentCityRules = function() {
+  if (!window.AppState || !AppState.rules) return false;
+  const rules = AppState.rules;
+  const groups = {};
+  Object.keys(rules).forEach(function(key) {
+    if (!String(key).startsWith("CID_")) return;
+    const canon = window.canonicalCityRuleId(key);
+    if (!canon) return;
+    if (!groups[canon]) groups[canon] = [];
+    groups[canon].push(key);
+  });
+  let changed = false;
+  Object.keys(groups).forEach(function(canon) {
+    const keys = groups[canon];
+    const names = [];
+    const opParts = [];
+    keys.forEach(function(k) {
+      const r = rules[k];
+      if (!r) return;
+      if (r.desc) names.push(r.desc);
+      names.push(String(k).replace(/^CID_/, "").replace(/_/g, " "));
+      opParts.push(r.operator);
+    });
+    const mergedOps = window.mergeCityOperatorValues.apply(null, opParts);
+    const pretty = window.prettierCityLabel(names) || canon.replace(/^CID_/, "").replace(/_/g, " ");
+    const prev = rules[canon];
+    const operator = mergedOps.length
+      ? mergedOps
+      : (prev && prev.operator != null ? prev.operator : (rules[keys[0]] && rules[keys[0]].operator != null ? rules[keys[0]].operator : "OUTROS"));
+    const keepManual = keys.some(function(k) { return rules[k] && rules[k].manual; });
+    const base = Object.assign({}, rules[keys[0]] || {}, prev || {});
+    rules[canon] = Object.assign({}, base, {
+      id: canon,
+      desc: pretty,
+      operator: operator,
+      manual: keepManual || !!base.manual
+    });
+    keys.forEach(function(k) {
+      if (k !== canon) {
+        delete rules[k];
+        changed = true;
+      }
+    });
+    if (!prev || prev.desc !== pretty) changed = true;
+  });
+  if (changed) {
+    try { localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules)); } catch (e) {}
+  }
+  return changed;
+};
+
 window.lookupCityRule = function(ruleId) {
   const rules = (window.AppState && AppState.rules) || {};
   if (!ruleId) return null;
+  const canon = window.canonicalCityRuleId(ruleId);
+  if (canon && rules[canon]) return rules[canon];
   if (rules[ruleId]) return rules[ruleId];
   const norm = String(ruleId).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const key = Object.keys(rules).find(k => String(k).normalize("NFD").replace(/[\u0300-\u036f]/g, "") === norm);
@@ -2651,6 +2787,9 @@ async function initializeApplication() {
   if (!localStorage.getItem("crm_moura_rules")) {
     localStorage.setItem("crm_moura_rules", JSON.stringify(INITIAL_RULES_CONFIG));
   }
+  if (typeof window.dedupeAccentCityRules === "function") {
+    window.dedupeAccentCityRules();
+  }
   
   // Migrar regras salvas do formato Nome Completo para Username Formatado (sem ponto)
   try {
@@ -3108,6 +3247,19 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
     return null;
 };
 
+window.extractCityDisplayName = function(ccId, ccName) {
+    const folded = window.extractCityFromCostCenter(ccId, ccName);
+    if (!folded) return null;
+    let cleanName = (ccName || "").replace(/^(?:\d+\s*-\s*)+/, '');
+    if (cleanName.toUpperCase().startsWith("C.C. ")) {
+        cleanName = cleanName.substring(5);
+    }
+    const raw = cleanName.split('-')[0].trim().toUpperCase();
+    return typeof window.prettierCityLabel === "function"
+      ? window.prettierCityLabel([raw, folded])
+      : folded;
+};
+
 window.findCachedCostCenter = function(idCCusto) {
   const rawId = (typeof getPrimaryCostCenter === "function") ? getPrimaryCostCenter(idCCusto) : idCCusto;
   const id = String(rawId == null ? "" : rawId).trim();
@@ -3125,7 +3277,10 @@ window.resolveCityRuleId = function(idCCusto, ccNameHint) {
     : "";
   if (city) city = String(city).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
   if (!city) return { city: "", ruleId: null };
-  return { city, ruleId: "CID_" + city.replace(/\s+/g, "_") };
+  const ruleId = typeof window.canonicalCityRuleId === "function"
+    ? window.canonicalCityRuleId(city)
+    : ("CID_" + city.replace(/\s+/g, "_"));
+  return { city, ruleId };
 };
 
 function parseSafeDate(dStr) {
@@ -19994,6 +20149,10 @@ function loadPreamblesConfigTab() {
 function renderRulesSettingsTable() {
   const body = document.getElementById("rules-config-table-body");
   if (!body) return;
+
+  if (typeof window.dedupeAccentCityRules === "function") {
+    window.dedupeAccentCityRules();
+  }
   
   body.innerHTML = "";
   
@@ -20050,8 +20209,9 @@ function renderRulesSettingsTable() {
         }
         
         if (city) {
-          if (!cityStats[city]) {
-             cityStats[city] = {
+          const cityKey = typeof window.foldCityKey === "function" ? window.foldCityKey(city) : String(city).toUpperCase();
+          if (!cityStats[cityKey]) {
+             cityStats[cityKey] = {
                totalOverdue: 0,
                ate30: new Set(),
                acima30: new Set(),
@@ -20062,29 +20222,29 @@ function renderRulesSettingsTable() {
           }
           
           const billVal = bill.totalValue || (bill.value || 0) + (bill.interest || 0) + (bill.fine || 0);
-          cityStats[city].totalOverdue += billVal;
-          cityStats[city].billCount++;
+          cityStats[cityKey].totalOverdue += billVal;
+          cityStats[cityKey].billCount++;
           
           const empName = ccObj ? `${ccId} - ${ccObj.name}` : String(ccId);
-          if (!cityStats[city].enterprises[empName]) {
-             cityStats[city].enterprises[empName] = { totalOverdue: 0, billCount: 0, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
+          if (!cityStats[cityKey].enterprises[empName]) {
+             cityStats[cityKey].enterprises[empName] = { totalOverdue: 0, billCount: 0, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
           }
-          cityStats[city].enterprises[empName].totalOverdue += billVal;
-          cityStats[city].enterprises[empName].billCount++;
+          cityStats[cityKey].enterprises[empName].totalOverdue += billVal;
+          cityStats[cityKey].enterprises[empName].billCount++;
           
           if (bill.saleId) {
              let isSubj = bill.subjudice === "S" || bill.subjudice === true;
              if (isSubj) {
-                cityStats[city].subjudiceSales.add(bill.saleId);
-                cityStats[city].enterprises[empName].subjudiceSales.add(bill.saleId);
+                cityStats[cityKey].subjudiceSales.add(bill.saleId);
+                cityStats[cityKey].enterprises[empName].subjudiceSales.add(bill.saleId);
              } else {
                 const days = bill.daysDelay || 0;
                 if (days <= 30) {
-                   cityStats[city].ate30.add(bill.saleId);
-                   cityStats[city].enterprises[empName].ate30.add(bill.saleId);
+                   cityStats[cityKey].ate30.add(bill.saleId);
+                   cityStats[cityKey].enterprises[empName].ate30.add(bill.saleId);
                 } else {
-                   cityStats[city].acima30.add(bill.saleId);
-                   cityStats[city].enterprises[empName].acima30.add(bill.saleId);
+                   cityStats[cityKey].acima30.add(bill.saleId);
+                   cityStats[cityKey].enterprises[empName].acima30.add(bill.saleId);
                 }
              }
           }
@@ -20107,8 +20267,10 @@ function renderRulesSettingsTable() {
   const opSummary = {};
 
   sortedRules.forEach((rule, index) => {
-    const normalizedDesc = rule.desc ? rule.desc.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : '';
-    const stats = cityStats[normalizedDesc] || cityStats[rule.desc] || { totalOverdue: 0, billCount: 0, enterprises: {}, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
+    const foldDesc = typeof window.foldCityKey === "function"
+      ? window.foldCityKey(rule.desc || rule.id)
+      : (rule.desc ? rule.desc.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : '');
+    const stats = cityStats[foldDesc] || cityStats[rule.desc] || { totalOverdue: 0, billCount: 0, enterprises: {}, ate30: new Set(), acima30: new Set(), subjudiceSales: new Set() };
     
     const isZero = stats.totalOverdue === 0;
     const formattedOverdue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalOverdue);
@@ -20223,10 +20385,22 @@ function renderRulesSettingsTable() {
   setTimeout(() => lucide.createIcons(), 50);
 }
 
+window.resolveStoredCityRuleId = function(ruleId) {
+  if (!AppState.rules || !ruleId) return ruleId;
+  const canon = typeof window.canonicalCityRuleId === "function" ? window.canonicalCityRuleId(ruleId) : ruleId;
+  if (canon && AppState.rules[canon]) return canon;
+  if (AppState.rules[ruleId]) return ruleId;
+  const found = Object.keys(AppState.rules).find(function(k) {
+    return typeof window.canonicalCityRuleId === "function" && window.canonicalCityRuleId(k) === canon;
+  });
+  return found || canon || ruleId;
+};
+
 window.markCityAssignmentManual = function(ruleId) {
-  if (!AppState.rules || !AppState.rules[ruleId]) return;
-  AppState.rules[ruleId].manual = true;
-  AppState.rules[ruleId].opsUpdatedAt = Date.now();
+  const id = typeof window.resolveStoredCityRuleId === "function" ? window.resolveStoredCityRuleId(ruleId) : ruleId;
+  if (!AppState.rules || !AppState.rules[id]) return;
+  AppState.rules[id].manual = true;
+  AppState.rules[id].opsUpdatedAt = Date.now();
 };
 
 window.addOperatorToRule = function(ruleId, op) {
@@ -20234,6 +20408,7 @@ window.addOperatorToRule = function(ruleId, op) {
     alert("Sem permissão para editar Regras de Cobrança.");
     return;
   }
+  ruleId = typeof window.resolveStoredCityRuleId === "function" ? window.resolveStoredCityRuleId(ruleId) : ruleId;
   if (!op || !AppState.rules || !AppState.rules[ruleId]) return;
   
   if (op === "NÃO ATRIBUÍDO" || op === "SEM CARTEIRA INADIMPLENTE") {
@@ -20264,6 +20439,7 @@ window.removeOperatorFromRule = function(ruleId, op) {
     alert("Sem permissão para editar Regras de Cobrança.");
     return;
   }
+  ruleId = typeof window.resolveStoredCityRuleId === "function" ? window.resolveStoredCityRuleId(ruleId) : ruleId;
   if (!AppState.rules || !AppState.rules[ruleId]) return;
   
   let currentOps = AppState.rules[ruleId].operator;
@@ -29142,8 +29318,13 @@ window.syncGlobalConfigFromFirebase = async function() {
                             _originalSetItem.call(localStorage, k, merged);
                             try { AppState.rules = JSON.parse(merged); } catch (e) {}
                             changed = true;
+                        } else {
+                            try { AppState.rules = JSON.parse(localStorage.getItem(k) || "{}"); } catch (e) {}
                         }
-                        if (merged !== globalData[k] && window.forceUploadLocalConfig) {
+                        if (typeof window.dedupeAccentCityRules === "function") {
+                            window.dedupeAccentCityRules();
+                        }
+                        if (localStorage.getItem(k) !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                             setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                         }
                         return;
@@ -29814,7 +29995,7 @@ window.userHasResendBilletFlag = function() {
         if (match && match.resend_billet) flag = true;
       } catch (e) {}
     }
-    return { ok: flag || isAdmin, isAdmin, user: logged };
+    return { ok: !!flag, isAdmin, user: logged };
 };
 
 window.pushWhatsappTitle = function(list, rec) {
@@ -29918,7 +30099,7 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     const month = today.getMonth() + 1;
     const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
     
-    if (!isTest && !gate.isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
+    if (!isTest && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
         return;
     }
     
