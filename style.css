@@ -1638,4 +1638,8 @@ circle.donut-segment {
 .est-stock-toolbar input { flex: 1; max-width: 420px; height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font-size: 0.85rem; }
 .est-stock-table-wrap { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
 .est-stock-table thead th { background: #105436; color: #fff; box-shadow: none; }
-.est-status-chip { display: inline-block; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; }
+.est-fin-chip { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; background: #f1f5f9; color: #475569; }
+.est-fin-Quitado { background: #ecfdf5; color: #047857; }
+.est-fin-Adimplente { background: #eff6ff; color: #1d4ed8; }
+.est-fin-Inadimplente { background: #fef2f2; color: #b91c1c; }
+.est-fin-aberto { background: #fff7ed; color: #c2410c; }

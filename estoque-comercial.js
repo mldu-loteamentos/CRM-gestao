@@ -1,32 +1,35 @@
 const EstoqueComercialApp = {
   CACHE_KEY: "crm_estoque_posicao_v1",
+  FB_COL: "estoque_comercial",
   LIMIT: 200,
+  FB_CHUNK: 400,
+  SOLD_CODES: ["V", "O", "G", "P", "L"],
   STATUS_PILLS: [
     { id: "all", label: "Todas" },
-    { id: "Disponível", label: "Disponível" },
-    { id: "Reservada", label: "Reservada" },
-    { id: "Reserva técnica", label: "Reserva técnica" },
-    { id: "Permuta", label: "Permuta" },
-    { id: "Mútuo", label: "Mútuo" },
-    { id: "Proposta", label: "Proposta" },
-    { id: "Vendida", label: "Vendida" },
-    { id: "Locado", label: "Locado" },
-    { id: "Transferida", label: "Transferida" },
-    { id: "Terceiros", label: "Terceiros" },
-    { id: "Vendida em pré-contrato", label: "Vendida em pré-contrato" }
+    { id: "D", label: "Disponível" },
+    { id: "C", label: "Reservada" },
+    { id: "R", label: "Reserva técnica" },
+    { id: "E", label: "Permuta" },
+    { id: "M", label: "Mútuo" },
+    { id: "P", label: "Proposta" },
+    { id: "V", label: "Vendida" },
+    { id: "L", label: "Locado" },
+    { id: "T", label: "Transferida" },
+    { id: "G", label: "Terceiros" },
+    { id: "O", label: "Vendida em pré-contrato" }
   ],
   STOCK_MAP: {
+    C: "Reservada",
     D: "Disponível",
-    S: "Reservada",
     R: "Reserva técnica",
     E: "Permuta",
     M: "Mútuo",
     P: "Proposta",
     V: "Vendida",
     L: "Locado",
-    F: "Transferida",
-    T: "Terceiros",
-    C: "Vendida em pré-contrato"
+    T: "Transferida",
+    G: "Terceiros",
+    O: "Vendida em pré-contrato"
   },
   LEGAL_MAP: { L: "Livre", B: "Bloqueado", I: "Indisponível" },
   OBRA_MAP: { P: "Projeto", A: "Andamento", C: "Concluído", O: "Obra" },
@@ -39,7 +42,10 @@ const EstoqueComercialApp = {
     status: "all",
     fetchedAt: null,
     complete: false,
-    inited: false
+    contractsEnriched: false,
+    firebaseOk: false,
+    inited: false,
+    defaulterIndex: null
   },
 
   todayStr() {
@@ -63,10 +69,9 @@ const EstoqueComercialApp = {
     return `${cc.id} - ${String(cc.name || "").toUpperCase()}`;
   },
 
-  mapStock(code, extra) {
-    const raw = String(code || "").trim();
+  mapStock(code) {
+    const raw = String(code || "").trim().toUpperCase();
     if (this.STOCK_MAP[raw]) return this.STOCK_MAP[raw];
-    if (extra && extra.contractId) return "Vendida";
     return raw ? `Outros (${raw})` : "Sem status";
   },
 
@@ -76,16 +81,31 @@ const EstoqueComercialApp = {
     return map[raw] || raw;
   },
 
+  siengeFetch(path) {
+    const fn = window.siengeFetchWithRetry;
+    if (typeof fn === "function") return fn(path);
+    throw new Error("Sienge fetch indisponível");
+  },
+
   slimUnit(u, empName) {
+    const stock = String(u.commercialStock || "").trim().toUpperCase();
+    const contractNumber = u.contractNumber || u.contractnumber || u.currentSalesContractNumber || null;
+    const bal = u.outstandingBalance;
+    const quitado = bal === 0 || bal === "0";
     return {
       id: u.id,
       name: u.name || "",
       enterpriseId: String(u.enterpriseId || ""),
       enterpriseName: empName || "",
-      commercialStock: u.commercialStock || "",
+      commercialStock: stock,
       legalStock: u.legalStock || "",
       buildingStock: u.buildingStock || u.constructionStock || "",
       contractId: u.contractId || null,
+      contractNumber: contractNumber || null,
+      receivableBillId: u.receivableBillId || null,
+      customerId: u.customerId || null,
+      outstandingBalance: bal == null || bal === "" ? null : Number(bal),
+      quitado: !!quitado && !!contractNumber,
       area: u.totalArea || u.privateArea || u.indexedPrivateArea || null
     };
   },
@@ -94,9 +114,7 @@ const EstoqueComercialApp = {
     try {
       const raw = localStorage.getItem(this.CACHE_KEY);
       if (!raw) return null;
-      const data = JSON.parse(raw);
-      if (!data || data.date !== this.todayStr()) return null;
-      return data;
+      return JSON.parse(raw);
     } catch (e) {
       return null;
     }
@@ -108,31 +126,163 @@ const EstoqueComercialApp = {
       units: this.state.units,
       ccDone: this.state.ccDone,
       complete: this.state.complete,
+      contractsEnriched: this.state.contractsEnriched,
       fetchedAt: this.state.fetchedAt || new Date().toISOString()
     };
     try {
       localStorage.setItem(this.CACHE_KEY, JSON.stringify(payload));
     } catch (e) {
-      console.warn("[Estoque] Cache cheio ou indisponível", e);
+      console.warn("[Estoque] localStorage cheio; Firebase permanece a fonte.", e);
     }
   },
 
   applyCache(data) {
+    if (!data) return;
     this.state.units = Array.isArray(data.units) ? data.units : [];
     this.state.ccDone = Array.isArray(data.ccDone) ? data.ccDone.map(String) : [];
     this.state.complete = !!data.complete;
+    this.state.contractsEnriched = !!data.contractsEnriched;
     this.state.fetchedAt = data.fetchedAt || null;
+  },
+
+  fbReady() {
+    return !!(window.firebaseDb && window.firebaseCollections && window.firebaseCollections.doc);
+  },
+
+  async waitFirebase(ms) {
+    const limit = ms || 5000;
+    const t0 = Date.now();
+    while (Date.now() - t0 < limit) {
+      if (this.fbReady()) return true;
+      await this.sleep(120);
+    }
+    return this.fbReady();
+  },
+
+  async loadFirebase() {
+    if (!this.fbReady()) return null;
+    const { doc, getDoc, getDocs, collection } = window.firebaseCollections;
+    try {
+      const metaSnap = await getDoc(doc(window.firebaseDb, this.FB_COL, "_meta"));
+      const colSnap = await getDocs(collection(window.firebaseDb, this.FB_COL));
+      const units = [];
+      const ccDone = [];
+      colSnap.forEach(d => {
+        if (d.id === "_meta") return;
+        const data = d.data() || {};
+        if (Array.isArray(data.units)) units.push(...data.units);
+        if (data.enterpriseId) ccDone.push(String(data.enterpriseId));
+      });
+      if (!units.length) return null;
+      const meta = metaSnap.exists() ? metaSnap.data() : {};
+      return {
+        units,
+        ccDone: [...new Set(ccDone.concat(meta.ccDone || []))],
+        complete: meta.complete !== false,
+        contractsEnriched: !!meta.contractsEnriched,
+        fetchedAt: meta.fetchedAt || null
+      };
+    } catch (e) {
+      console.error("[Estoque] leitura Firebase", e);
+      return null;
+    }
+  },
+
+  async saveFirebase() {
+    if (!this.fbReady()) return false;
+    const { doc, setDoc, getDocs, collection, deleteDoc } = window.firebaseCollections;
+    try {
+      const grouped = {};
+      this.state.units.forEach(u => {
+        const cc = String(u.enterpriseId || "0");
+        if (!grouped[cc]) grouped[cc] = [];
+        grouped[cc].push(u);
+      });
+
+      const keep = new Set(["_meta"]);
+      const writes = [];
+      Object.keys(grouped).forEach(cc => {
+        const list = grouped[cc];
+        const empName = (list[0] && list[0].enterpriseName) || this.empName(cc);
+        for (let i = 0, n = 0; i < list.length; i += this.FB_CHUNK, n += 1) {
+          const id = `cc_${cc}_${n}`;
+          keep.add(id);
+          writes.push(setDoc(doc(window.firebaseDb, this.FB_COL, id), {
+            enterpriseId: cc,
+            enterpriseName: empName,
+            chunk: n,
+            units: list.slice(i, i + this.FB_CHUNK),
+            updatedAt: new Date().toISOString(),
+            date: this.todayStr()
+          }));
+        }
+      });
+      writes.push(setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+        date: this.todayStr(),
+        ccDone: this.state.ccDone,
+        complete: this.state.complete,
+        contractsEnriched: this.state.contractsEnriched,
+        fetchedAt: this.state.fetchedAt || new Date().toISOString(),
+        unitCount: this.state.units.length,
+        updatedAt: new Date().toISOString()
+      }));
+      await Promise.all(writes);
+
+      const existing = await getDocs(collection(window.firebaseDb, this.FB_COL));
+      const leftovers = [];
+      existing.forEach(d => {
+        if (!keep.has(d.id)) leftovers.push(deleteDoc(d.ref));
+      });
+      if (leftovers.length) await Promise.all(leftovers);
+      this.state.firebaseOk = true;
+      return true;
+    } catch (e) {
+      console.error("[Estoque] gravação Firebase", e);
+      this.state.firebaseOk = false;
+      return false;
+    }
+  },
+
+  persistAll() {
+    this.saveCache();
+    return this.saveFirebase();
   },
 
   async init() {
     this.renderPills();
-    const cache = this.loadCache();
-    if (cache) this.applyCache(cache);
+    if (this.state.inited && this.state.units.length) {
+      this.fillUnitSelect();
+      this.updateMeta();
+      this.renderTable();
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+    await this.waitFirebase();
+    const fb = await this.loadFirebase();
+    const local = this.loadCache();
+    if (fb && fb.units.length) {
+      this.applyCache(fb);
+    } else if (local && local.units && local.units.length) {
+      this.applyCache(local);
+    }
     await this.loadEnterprises();
     this.fillUnitSelect();
     this.updateMeta();
     if (this.state.units.length) this.renderTable();
     if (window.lucide) window.lucide.createIcons();
+
+    if (this.state.units.length) {
+      this.setProgress("Gravando estoque no Firebase…", 10);
+      await this.persistAll();
+      this.updateMeta();
+      if (this.needsContractEnrich()) {
+        await this.enrichContracts();
+      }
+      this.setProgress("");
+      this.fillUnitSelect();
+      this.updateMeta();
+      this.renderTable();
+    }
     this.state.inited = true;
   },
 
@@ -171,7 +321,7 @@ const EstoqueComercialApp = {
     const wrap = document.getElementById("est-stock-pills");
     if (!wrap) return;
     wrap.innerHTML = this.STATUS_PILLS.map(p =>
-      `<button type="button" class="est-pill${this.state.status === p.id ? " is-active" : ""}" data-status="${this.esc(p.id)}" onclick="EstoqueComercialApp.setStatus('${p.id.replace(/'/g, "\\'")}')">${this.esc(p.label)}</button>`
+      `<button type="button" class="est-pill${this.state.status === p.id ? " is-active" : ""}" data-status="${this.esc(p.id)}" onclick="EstoqueComercialApp.setStatus('${p.id}')">${this.esc(p.label)}</button>`
     ).join("");
   },
 
@@ -184,6 +334,7 @@ const EstoqueComercialApp = {
 
   onEmpChange() {
     this.fillUnitSelect();
+    this.renderTable();
   },
 
   filteredByEmp(units) {
@@ -198,10 +349,7 @@ const EstoqueComercialApp = {
     const emp = (document.getElementById("est-filter-emp") || {}).value || "";
     const keep = sel.value;
     sel.innerHTML = '<option value="">Todas as unidades</option>';
-    if (!emp) {
-      sel.disabled = false;
-      return;
-    }
+    if (!emp) return;
     const list = this.filteredByEmp(this.state.units).slice().sort((a, b) =>
       String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" })
     );
@@ -235,14 +383,55 @@ const EstoqueComercialApp = {
     const el = document.getElementById("est-stock-meta");
     if (!el) return;
     if (!this.state.units.length) {
-      el.textContent = this.state.complete
-        ? "Nenhuma unidade encontrada nos empreendimentos 1/2/3."
-        : "Ainda sem cache de hoje. Consultar dispara o loop no Sienge (limit 200 por página, um empreendimento por vez).";
+      el.textContent = "Ainda sem estoque. Consultar dispara o loop no Sienge e grava no Firebase.";
       return;
     }
     const when = this.state.fetchedAt ? new Date(this.state.fetchedAt).toLocaleString("pt-BR") : "hoje";
-    const extra = this.state.complete ? "" : ` Carga incompleta (${this.state.ccDone.length} empreendimentos). Consulte de novo para continuar.`;
-    el.textContent = `${this.state.units.length} unidades em cache · atualizado ${when}.${extra}`;
+    const fb = this.state.firebaseOk ? " Firebase ok." : (this.fbReady() ? " Gravando/lendo Firebase." : " Firebase indisponível.");
+    const extra = this.state.complete ? "" : ` Carga incompleta (${this.state.ccDone.length} empreendimentos).`;
+    el.textContent = `${this.state.units.length} unidades · atualizado ${when}.${extra}${fb}`;
+  },
+
+  normName(name) {
+    return String(name || "").replace(/\s+/g, "").toUpperCase();
+  },
+
+  buildDefaulterIndex() {
+    const idx = { byRb: new Set(), byUnit: new Set() };
+    const bills = (window.AppState && AppState.defaultersBills) || [];
+    bills.forEach(b => {
+      if (b.receivableBillId) idx.byRb.add(String(b.receivableBillId));
+      if (b.id) idx.byRb.add(String(b.id));
+      const cc = String(b.costCenterId || (b.costCentersId && b.costCentersId[0]) || "");
+      const units = String(b.units || "");
+      units.split(/[;,|/]/).forEach(part => {
+        const n = this.normName(part);
+        if (n && n !== "N/D") idx.byUnit.add(`${cc}|${n}`);
+      });
+      if (cc) idx.byUnit.add(`${cc}|${this.normName(units)}`);
+    });
+    this.state.defaulterIndex = idx;
+    return idx;
+  },
+
+  isInadimplente(u) {
+    const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
+    if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) return true;
+    const cc = String(u.enterpriseId || "");
+    return idx.byUnit.has(`${cc}|${this.normName(u.name)}`);
+  },
+
+  financialStatus(u) {
+    const code = String(u.commercialStock || "").toUpperCase();
+    const sold = this.SOLD_CODES.includes(code) || !!u.contractNumber || !!u.contractId;
+    if (!sold) return "—";
+    if (u.quitado || (u.contractNumber && u.outstandingBalance === 0)) return "Quitado";
+    if (this.isInadimplente(u)) return "Inadimplente";
+    if (u.contractNumber || this.SOLD_CODES.includes(code)) {
+      if (window.AppState && AppState.defaultersLoaded) return "Adimplente";
+      return "Em aberto";
+    }
+    return "—";
   },
 
   selectedUnits() {
@@ -253,11 +442,12 @@ const EstoqueComercialApp = {
     if (emp) rows = rows.filter(u => String(u.enterpriseId) === String(emp));
     if (unitId) rows = rows.filter(u => String(u.id) === String(unitId));
     if (this.state.status && this.state.status !== "all") {
-      rows = rows.filter(u => this.mapStock(u.commercialStock, u) === this.state.status);
+      const want = String(this.state.status).toUpperCase();
+      rows = rows.filter(u => String(u.commercialStock || "").toUpperCase() === want);
     }
     if (q) {
       rows = rows.filter(u => {
-        const hay = `${u.enterpriseId} ${u.enterpriseName} ${u.id} ${u.name} ${u.commercialStock}`.toLowerCase();
+        const hay = `${u.enterpriseId} ${u.enterpriseName} ${u.id} ${u.name} ${u.commercialStock} ${u.contractNumber || ""}`.toLowerCase();
         return hay.includes(q);
       });
     }
@@ -269,7 +459,7 @@ const EstoqueComercialApp = {
     if (!el) return;
     const counts = {};
     rows.forEach(u => {
-      const k = this.mapStock(u.commercialStock, u);
+      const k = this.mapStock(u.commercialStock);
       counts[k] = (counts[k] || 0) + 1;
     });
     const keys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
@@ -288,7 +478,7 @@ const EstoqueComercialApp = {
     const rows = this.selectedUnits();
     this.renderKpis(rows);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhuma unidade para os filtros atuais.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#94a3b8;">Nenhuma unidade para os filtros atuais.</td></tr>`;
       return;
     }
     const sorted = rows.slice().sort((a, b) => {
@@ -297,9 +487,12 @@ const EstoqueComercialApp = {
       return String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" });
     });
     tbody.innerHTML = sorted.map(u => {
-      const status = this.mapStock(u.commercialStock, u);
+      const status = this.mapStock(u.commercialStock);
       const area = u.area != null && u.area !== "" ? Number(u.area).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "—";
       const empName = u.enterpriseName || this.empName(u.enterpriseId);
+      const contrato = u.contractNumber || "—";
+      const fin = this.financialStatus(u);
+      const finClass = fin === "Em aberto" ? "est-fin-aberto" : "est-fin-" + fin;
       return `<tr>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
         <td>${this.esc(u.enterpriseId)} / ${this.esc(empName)}</td>
@@ -308,7 +501,8 @@ const EstoqueComercialApp = {
         <td>${this.esc(this.mapCode(this.LEGAL_MAP, u.legalStock))}</td>
         <td>${this.esc(this.mapCode(this.OBRA_MAP, u.buildingStock))}</td>
         <td>${this.esc(area)}</td>
-        <td>${u.contractId ? this.esc(u.contractId) : "—"}</td>
+        <td>${this.esc(contrato)}</td>
+        <td><span class="est-fin-chip ${finClass}">${this.esc(fin)}</span></td>
       </tr>`;
     }).join("");
   },
@@ -325,6 +519,25 @@ const EstoqueComercialApp = {
     return new Promise(r => setTimeout(r, ms));
   },
 
+  keepQuitado(prev, next) {
+    const old = {};
+    (prev || []).forEach(u => {
+      if (u && u.quitado) old[String(u.id)] = u;
+    });
+    return (next || []).map(u => {
+      const keep = old[String(u.id)];
+      if (!keep) return u;
+      return {
+        ...u,
+        quitado: true,
+        contractNumber: u.contractNumber || keep.contractNumber,
+        outstandingBalance: 0,
+        receivableBillId: u.receivableBillId || keep.receivableBillId,
+        customerId: u.customerId || keep.customerId
+      };
+    });
+  },
+
   async fetchUnitsForCc(cc) {
     const empName = cc.name || "";
     const collected = [];
@@ -332,13 +545,112 @@ const EstoqueComercialApp = {
     let hasMore = true;
     while (hasMore) {
       const path = `/units?limit=${this.LIMIT}&offset=${offset}&enterpriseId=${cc.id}&additionalData=NONE`;
-      const data = await window.siengeFetchWithRetry(path);
+      const data = await this.siengeFetch(path);
       const results = (data && data.results) || [];
       results.forEach(u => collected.push(this.slimUnit(u, empName)));
       if (results.length < this.LIMIT) hasMore = false;
       else offset += results.length;
     }
     return collected;
+  },
+
+  needsContract(u) {
+    if (!u || u.quitado) return false;
+    if (u.contractNumber) return false;
+    const code = String(u.commercialStock || "").toUpperCase();
+    return this.SOLD_CODES.includes(code) || !!u.contractId;
+  },
+
+  needsContractEnrich() {
+    if (this.state.contractsEnriched) {
+      return this.state.units.some(u => this.needsContract(u));
+    }
+    return this.state.units.some(u => this.needsContract(u));
+  },
+
+  applyContractInfo(u, info) {
+    if (!info || u.quitado) return u;
+    const bal = info.outstandingBalance;
+    const quitado = Number(bal) === 0 && info.situation !== "Distratado";
+    return {
+      ...u,
+      contractNumber: info.contractNumber || u.contractNumber,
+      receivableBillId: info.receivableBillId || u.receivableBillId,
+      customerId: info.customerId || u.customerId,
+      outstandingBalance: bal == null ? u.outstandingBalance : Number(bal),
+      quitado: !!quitado
+    };
+  },
+
+  contractInfoFromSale(c) {
+    const mainCust = (c.salesContractCustomers || []).find(x => x.main === true) || (c.salesContractCustomers || [])[0] || {};
+    return {
+      contractNumber: c.number || c.contractNumber || c.documentNumber || "",
+      outstandingBalance: c.outstandingBalance,
+      receivableBillId: c.receivableBillId || null,
+      customerId: mainCust.id || c.customerId || null,
+      situation: c.situation || c.status || ""
+    };
+  },
+
+  async fetchContractsForCc(ccId) {
+    const byId = {};
+    const byName = {};
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const path = `/sales-contracts?limit=${this.LIMIT}&offset=${offset}&enterpriseId=${ccId}`;
+      const data = await this.siengeFetch(path);
+      const results = (data && data.results) || [];
+      results.forEach(c => {
+        const info = this.contractInfoFromSale(c);
+        const units = c.salesContractUnits || [];
+        units.forEach(su => {
+          const uid = su.unitId || su.id;
+          if (uid) byId[String(uid)] = info;
+          if (su.name) byName[this.normName(su.name)] = info;
+        });
+        if (c.unitId) byId[String(c.unitId)] = info;
+        if (c.unitName) byName[this.normName(c.unitName)] = info;
+      });
+      if (results.length < this.LIMIT) hasMore = false;
+      else offset += results.length;
+    }
+    return { byId, byName };
+  },
+
+  async enrichContracts() {
+    const ccs = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))];
+    if (!ccs.length) {
+      this.state.contractsEnriched = true;
+      await this.persistAll();
+      return;
+    }
+    this.setBusy(true);
+    try {
+      for (let i = 0; i < ccs.length; i++) {
+        const ccId = ccs[i];
+        this.setProgress(`Cruzando contratos ${ccId} (${i + 1}/${ccs.length})…`, ((i + 1) / ccs.length) * 100);
+        try {
+          const maps = await this.fetchContractsForCc(ccId);
+          this.state.units = this.state.units.map(u => {
+            if (String(u.enterpriseId) !== String(ccId)) return u;
+            if (u.quitado) return u;
+            const info = maps.byId[String(u.id)] || maps.byName[this.normName(u.name)];
+            return this.applyContractInfo(u, info);
+          });
+          await this.persistAll();
+        } catch (e) {
+          console.error("[Estoque] contratos CC", ccId, e);
+        }
+        await this.sleep(80);
+      }
+      this.state.contractsEnriched = true;
+      this.state.fetchedAt = this.state.fetchedAt || new Date().toISOString();
+      await this.persistAll();
+    } finally {
+      this.setBusy(false);
+    }
   },
 
   async consultar(forceRefresh) {
@@ -350,13 +662,17 @@ const EstoqueComercialApp = {
     }
 
     if (forceRefresh) {
+      const prev = this.state.units.slice();
       this.state.units = [];
       this.state.ccDone = [];
       this.state.complete = false;
+      this.state.contractsEnriched = false;
       this.state.fetchedAt = null;
-    } else {
-      const cache = this.loadCache();
-      if (cache) this.applyCache(cache);
+      this._prevQuitados = prev;
+    } else if (!this.state.units.length) {
+      const fb = await this.loadFirebase();
+      const local = this.loadCache();
+      this.applyCache(fb && fb.units.length ? fb : local);
     }
 
     const pending = this.state.enterprises.filter(cc => !this.state.ccDone.includes(String(cc.id)));
@@ -370,11 +686,13 @@ const EstoqueComercialApp = {
           done += 1;
           this.setProgress(`Buscando ${this.ccLabel(cc)} (${done}/${total})…`, (done / total) * 100);
           try {
-            const batch = await this.fetchUnitsForCc(cc);
+            let batch = await this.fetchUnitsForCc(cc);
+            if (this._prevQuitados) batch = this.keepQuitado(this._prevQuitados, batch);
+            else batch = this.keepQuitado(this.state.units, batch);
             this.state.units = this.state.units.filter(u => String(u.enterpriseId) !== String(cc.id)).concat(batch);
             this.state.ccDone.push(String(cc.id));
             this.state.fetchedAt = new Date().toISOString();
-            this.saveCache();
+            await this.persistAll();
           } catch (e) {
             console.error("[Estoque] falha no CC", cc.id, e);
             this.setProgress(`Erro em ${cc.id}: ${e.message || e}. Continuando…`, (done / total) * 100);
@@ -383,8 +701,14 @@ const EstoqueComercialApp = {
           await this.sleep(80);
         }
         this.state.complete = this.state.ccDone.length >= this.state.enterprises.length;
-        this.saveCache();
+        this._prevQuitados = null;
+        await this.persistAll();
       }
+
+      if (this.needsContractEnrich()) {
+        await this.enrichContracts();
+      }
+
       this.setProgress("");
       this.fillUnitSelect();
       this.updateMeta();
