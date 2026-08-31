@@ -522,9 +522,9 @@ const EstoqueComercialApp = {
   sanitizeUnit(u) {
     if (!u) return u;
     const next = { ...u };
-    if (next.contractId != null && String(next.contractNumber || "") === String(next.contractId)) {
-      next.contractNumber = null;
-    }
+    const sameAsId = next.contractId != null && String(next.contractNumber || "") === String(next.contractId);
+    const hasSaldo = next.outstandingBalance != null || next.presentDebitBalance != null;
+    if (sameAsId && !hasSaldo) next.contractNumber = null;
     return next;
   },
 
@@ -779,21 +779,31 @@ const EstoqueComercialApp = {
     return this.state.units.some(u => this.needsContract(u));
   },
 
+  salePayable(c) {
+    const v = c.outstandingBalance ?? c.currentBalance ?? c.balance ?? c.receivableBalance
+      ?? c.totalOutstandingBalance ?? c.presentValue ?? c.debtBalance;
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isNaN(n) ? null : n;
+  },
+
   applyContractInfo(u, info) {
     if (!info) return u;
     const bal = info.outstandingBalance;
-    const quitado = Number(bal) === 0 && !String(info.situation || "").toLowerCase().includes("distrat");
-    const num = info.contractNumber && String(info.contractNumber) !== String(info.saleId || u.contractId || "")
-      ? info.contractNumber
-      : (this.displayContract(u) || null);
+    const quitado = bal === 0 && !String(info.situation || "").toLowerCase().includes("distrat");
+    let num = info.contractNumber ? String(info.contractNumber) : "";
+    if (num && info.saleId != null && String(num) === String(info.saleId) && this.displayContract(u)) {
+      num = this.displayContract(u);
+    }
+    if (!num) num = this.displayContract(u) || "";
     return {
       ...u,
       contractId: info.saleId || u.contractId,
-      contractNumber: num,
+      contractNumber: num || u.contractNumber || null,
       receivableBillId: info.receivableBillId || u.receivableBillId,
       customerId: info.customerId || u.customerId,
       customerDoc: info.customerDoc || u.customerDoc,
-      outstandingBalance: bal == null || bal === "" ? u.outstandingBalance : Number(bal),
+      outstandingBalance: bal == null ? u.outstandingBalance : Number(bal),
       presentDebitBalance: info.presentDebitBalance != null ? Number(info.presentDebitBalance) : u.presentDebitBalance,
       contractValue: info.contractValue || u.contractValue,
       situation: info.situation || u.situation,
@@ -808,7 +818,7 @@ const EstoqueComercialApp = {
     return {
       saleId: c.id,
       contractNumber: num ? String(num) : "",
-      outstandingBalance: c.outstandingBalance,
+      outstandingBalance: this.salePayable(c),
       contractValue: c.totalSellingValue || c.value || null,
       receivableBillId: c.receivableBillId || null,
       customerId: mainCust.id || c.customerId || null,
@@ -829,6 +839,7 @@ const EstoqueComercialApp = {
     const byId = {};
     const byName = {};
     const bySaleId = {};
+    const byNumber = {};
     let offset = 0;
     let hasMore = true;
     while (hasMore) {
@@ -839,31 +850,47 @@ const EstoqueComercialApp = {
       results.forEach(c => {
         const info = this.contractInfoFromSale(c);
         if (c.id != null) bySaleId[String(c.id)] = info;
-        const units = c.salesContractUnits || c.units || [];
+        if (info.contractNumber) byNumber[String(info.contractNumber)] = info;
+        if (info.receivableBillId) byNumber[String(info.receivableBillId)] = info;
+        const units = c.salesContractUnits || c.units || c.salesContractBuildings || [];
         units.forEach(su => {
-          const uid = su.unitId || su.id;
+          const uid = su.unitId || su.buildingUnitId || su.id;
           if (uid) byId[String(uid)] = info;
-          this.rememberContractNames(byName, su.name || su.unitName || su.unityName, info);
+          this.rememberContractNames(byName, su.name || su.unitName || su.unityName || su.unit, info);
         });
         if (c.unitId) byId[String(c.unitId)] = info;
-        this.rememberContractNames(byName, c.unitName || c.unityName, info);
+        this.rememberContractNames(byName, c.unitName || c.unityName || c.unit, info);
       });
       if (results.length < this.LIMIT) hasMore = false;
       else offset += results.length;
     }
-    return { byId, byName, bySaleId };
+    return { byId, byName, bySaleId, byNumber };
+  },
+
+  pickSale(u, maps) {
+    if (!u || !maps) return null;
+    return maps.byId[String(u.id)]
+      || (u.contractId != null ? maps.bySaleId[String(u.contractId)] : null)
+      || (this.displayContract(u) ? maps.byNumber[this.displayContract(u)] : null)
+      || (u.contractNumber ? maps.byNumber[String(u.contractNumber)] : null)
+      || (u.receivableBillId ? maps.byNumber[String(u.receivableBillId)] : null)
+      || maps.byName[this.normName(u.name)]
+      || maps.byName[this.normNameLoose(u.name)]
+      || null;
   },
 
   async enrichContracts() {
     this.state.stopSync = false;
-    const pending = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))]
-      .filter(id => !this.state.contractsCcDone.includes(String(id)));
+    const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
+    let pending = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))];
+    if (empSel) pending = pending.filter(id => id === String(empSel));
     if (!pending.length) {
       this.state.contractsEnriched = true;
       this.saveCache();
       this.setProgress("");
       this.updateMeta();
       this.renderTable();
+      alert("Não há unidades vendidas pendentes de contrato/saldo.");
       return;
     }
     this.setBusy(true);
@@ -871,21 +898,19 @@ const EstoqueComercialApp = {
       for (let i = 0; i < pending.length; i++) {
         if (this.state.stopSync) break;
         const ccId = pending[i];
-        this.setProgress(`Cruzando contratos ${ccId} (${i + 1}/${pending.length})…`, ((i + 1) / pending.length) * 100);
+        const falta = this.state.units.filter(u => String(u.enterpriseId) === ccId && this.needsContract(u)).length;
+        this.setProgress(`Cruzando ${ccId} por unidade, id e número do contrato (${i + 1}/${pending.length}, ${falta} unidades)…`, ((i + 1) / pending.length) * 100);
         try {
           const maps = await this.fetchContractsForCc(ccId);
           this.state.units = this.state.units.map(u => {
             if (String(u.enterpriseId) !== String(ccId)) return u;
-            if (u.quitado) return u;
-            const info = maps.byId[String(u.id)]
-              || (u.contractId != null ? maps.bySaleId[String(u.contractId)] : null)
-              || maps.byName[this.normName(u.name)]
-              || maps.byName[this.normNameLoose(u.name)];
-            return this.applyContractInfo(u, info);
+            const info = this.pickSale(u, maps);
+            return info ? this.applyContractInfo(u, info) : u;
           });
           if (!this.state.contractsCcDone.includes(ccId)) this.state.contractsCcDone.push(ccId);
           this.saveCache();
           await this.saveFirebaseCc(ccId);
+          this.renderTable();
         } catch (e) {
           console.error("[Estoque] contratos CC", ccId, e);
         }
@@ -894,7 +919,6 @@ const EstoqueComercialApp = {
       this.state.contractsEnriched = this.state.stopSync
         ? false
         : !this.state.units.some(u => this.needsContract(u));
-      await this.saveFirebaseCc(pending[pending.length - 1]);
     } finally {
       this.setBusy(false);
       this.setProgress(this.state.stopSync ? "Cruzamento interrompido. O que já cruzou ficou salvo." : "");
