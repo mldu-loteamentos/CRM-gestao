@@ -711,12 +711,11 @@ const InvestimentoApp = {
       ? "CDI médio indisponível no período"
       : `CDI médio ${avg.toFixed(2).replace(".", ",")}% a.m. (${n} ${n === 1 ? "mês" : "meses"})`;
     const src = encodeURIComponent(source || "");
-    return `<div style="margin-top:8px;padding:5px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this.esc(`Rendimento ${this.fmt(rend)} · Imposto retido ${this.fmt(imposto)} · ${cdiTxt}`)}">
-      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','rendimento','period')" style="font-size:0.68rem;font-weight:800;color:#0369a1;cursor:pointer;text-decoration:underline;text-decoration-color:#93c5fd;">Rendimento ${this.fmt(rend)}</span>
-      <span style="color:#cbd5e1;margin:0 6px;">·</span>
-      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','tarifas','period')" style="font-size:0.65rem;font-weight:700;color:#9a3412;cursor:pointer;text-decoration:underline;text-decoration-color:#fdba74;">Imposto retido ${this.fmt(imposto)}</span>
-      <span style="color:#cbd5e1;margin:0 6px;">·</span>
-      <span style="font-size:0.65rem;font-weight:700;color:#854d0e;">${this.esc(cdiTxt)}</span>
+    const tip = this.esc(`Rendimento ${this.fmt(rend)} · Imposto retido ${this.fmt(imposto)} · ${cdiTxt}`);
+    return `<div title="${tip}" style="margin-top:8px;padding:6px 8px;background:#fef9c3;border:1px solid #facc15;border-radius:6px;max-width:100%;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;gap:2px;line-height:1.25;">
+      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','rendimento','period')" style="font-size:0.68rem;font-weight:800;color:#0369a1;cursor:pointer;text-decoration:underline;text-decoration-color:#93c5fd;white-space:normal;word-break:break-word;">Rendimento ${this.fmt(rend)}</span>
+      <span role="button" onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','tarifas','period')" style="font-size:0.65rem;font-weight:700;color:#9a3412;cursor:pointer;text-decoration:underline;text-decoration-color:#fdba74;white-space:normal;word-break:break-word;">Imposto retido ${this.fmt(imposto)}</span>
+      <span style="font-size:0.65rem;font-weight:700;color:#854d0e;white-space:normal;word-break:break-word;">${this.esc(cdiTxt)}</span>
     </div>`;
   },
 
@@ -1512,8 +1511,8 @@ const InvestimentoApp = {
             </div>
           </div>
         </div>
-        <div style="flex:1;min-height:0;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;display:flex;flex-direction:column;">
-          <div style="padding:14px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+        <div style="flex:1;min-height:0;overflow:visible;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;display:flex;flex-direction:column;">
+          <div style="padding:14px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;position:relative;z-index:40;overflow:visible;flex-shrink:0;">
             ${this.companyDropHtml()}
             <label style="font-size:0.75rem;font-weight:700;color:#475569;">Início
               <input type="date" value="${this.startDate}" onchange="InvestimentoApp.setStartDate(this.value)"
@@ -1552,6 +1551,7 @@ const InvestimentoApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    this.bindCompanyFilter();
     if (this.accountDropOpen) {
       const a = document.getElementById("inv-acc-search");
       if (a) {
@@ -1601,7 +1601,7 @@ const InvestimentoApp = {
     const months = this.months;
     const colConta = 380;
     const colMov = 132;
-    const stickyConta = `position:sticky;left:0;z-index:2;min-width:${colConta}px;max-width:${colConta}px;width:${colConta}px;`;
+    const stickyConta = `position:sticky;left:0;z-index:2;min-width:${colConta}px;max-width:${colConta}px;width:${colConta}px;overflow:hidden;`;
     const stickyMov = `position:sticky;left:${colConta}px;z-index:1;min-width:${colMov}px;width:${colMov}px;`;
     const th = (label, extra) => `<th style="padding:8px 8px;text-align:right;border-bottom:2px solid #d1fae5;background:#105436;color:#fff;font-size:0.72rem;font-weight:700;white-space:nowrap;position:sticky;top:0;z-index:4;${extra || ""}">${label}</th>`;
     const clickTd = (n, kind, mk, source, opts) => {
@@ -1633,12 +1633,12 @@ const InvestimentoApp = {
            </button>`
         : "";
       const labelCell = `
-        <td rowspan="${collapsed ? 1 : 5}" style="padding:8px 10px;vertical-align:top;${stickyConta}background:${bgHead};border-right:1px solid #e2e8f0;box-shadow:2px 0 0 #e2e8f0;">
-          <div style="display:flex;align-items:flex-start;gap:2px;">
+        <td rowspan="${collapsed ? 1 : 5}" style="padding:8px 10px;vertical-align:top;${stickyConta}background:${bgHead};border-right:1px solid #e2e8f0;box-shadow:2px 0 0 #e2e8f0;overflow:hidden;">
+          <div style="display:flex;align-items:flex-start;gap:2px;max-width:100%;min-width:0;">
             ${chevron}
-            <div>
-              <div style="font-weight:800;color:#0f172a;font-size:0.82rem;">${this.esc(label)}</div>
-              ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(sub)}</div>` : ""}
+            <div style="min-width:0;flex:1;max-width:100%;overflow:hidden;">
+              <div style="font-weight:800;color:#0f172a;font-size:0.82rem;white-space:normal;overflow-wrap:anywhere;">${this.esc(label)}</div>
+              ${sub ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;white-space:normal;overflow-wrap:anywhere;">${this.esc(sub)}</div>` : ""}
               ${!collapsed ? this.accountPeriodMetaHtml(monthFlow, source) : ""}
             </div>
           </div>
@@ -1753,14 +1753,110 @@ const InvestimentoApp = {
       </div>`;
   },
 
-  exportExcel() {
+  async ensureExcelJS() {
+    if (window.ExcelJS) return window.ExcelJS;
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("Falha ao carregar ExcelJS"));
+      document.head.appendChild(s);
+    });
+    return window.ExcelJS;
+  },
+
+  drawLogoDataUrl() {
+    const c = document.createElement("canvas");
+    c.width = 128;
+    c.height = 128;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#105436";
+    ctx.beginPath();
+    ctx.arc(64, 64, 62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f37021";
+    ctx.beginPath();
+    ctx.arc(92, 92, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(64, 22);
+    ctx.lineTo(78, 52);
+    ctx.lineTo(50, 52);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(60, 50, 8, 42);
+    ctx.beginPath();
+    ctx.ellipse(48, 58, 16, 10, -0.5, 0, Math.PI * 2);
+    ctx.ellipse(80, 58, 16, 10, 0.5, 0, Math.PI * 2);
+    ctx.ellipse(64, 44, 14, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    return c.toDataURL("image/png");
+  },
+
+  async logoDataUrl() {
+    const urls = [
+      "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj",
+      "Banner/logo comemorativa.png"
+    ];
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        const res = await fetch(urls[i], { mode: "cors" });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        if (!blob || !blob.type || blob.type.indexOf("image") < 0) continue;
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) {
+          const jpeg = blob.type.indexOf("jpeg") >= 0 || blob.type.indexOf("jpg") >= 0;
+          return { dataUrl, extension: jpeg ? "jpeg" : "png" };
+        }
+      } catch (e) { /* try next */ }
+    }
+    return { dataUrl: this.drawLogoDataUrl(), extension: "png" };
+  },
+
+  excelFill(argb) {
+    return { type: "pattern", pattern: "solid", fgColor: { argb } };
+  },
+
+  excelFont(opts) {
+    return Object.assign({ name: "Calibri", size: 9, color: { argb: "FF0F172A" } }, opts || {});
+  },
+
+  excelBorder() {
+    const s = { style: "thin", color: { argb: "FFE2E8F0" } };
+    return { top: s, bottom: s, left: s, right: s };
+  },
+
+  excelPaint(cell, opts) {
+    if (opts.font) cell.font = this.excelFont(opts.font);
+    if (opts.fill) cell.fill = this.excelFill(opts.fill);
+    if (opts.align) cell.alignment = opts.align;
+    if (opts.border) cell.border = this.excelBorder();
+    if (opts.numFmt) cell.numFmt = opts.numFmt;
+  },
+
+  generatedAtLabel(d) {
+    const pad = n => String(n).padStart(2, "0");
+    return `Relatório gerado em ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} às ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  },
+
+  async exportExcel() {
     const accounts = this.visibleAccounts();
     if (!accounts.length) {
       alert("Consulte o período antes de exportar.");
       return;
     }
-    if (typeof XLSX === "undefined") {
-      alert("Biblioteca de Excel não carregou. Recarregue a página.");
+    let ExcelJS;
+    try {
+      ExcelJS = await this.ensureExcelJS();
+    } catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
       return;
     }
     const months = this.months;
@@ -1775,87 +1871,132 @@ const InvestimentoApp = {
     }, { opening: 0, aportes: 0, resgates: 0, rendimento: 0, tarifas: 0, closing: 0 });
     const visAgg = this.aggregateFlow(accounts);
     const colCount = 3 + months.length;
-    const border = {
-      top: { style: "thin", color: { rgb: "D1E3D6" } },
-      bottom: { style: "thin", color: { rgb: "D1E3D6" } },
-      left: { style: "thin", color: { rgb: "D1E3D6" } },
-      right: { style: "thin", color: { rgb: "D1E3D6" } }
-    };
-    const fill = (rgb) => ({ patternType: "solid", fgColor: { rgb } });
-    const font = (opts) => Object.assign({ name: "Calibri", sz: 8, color: { rgb: "0F172A" } }, opts || {});
     const moneyFmt = "#,##0.00";
-    const aoa = [];
-    const merges = [];
-    const styles = {};
-    const mark = (r, c, s) => { styles[r + "|" + c] = s; };
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Kardex", {
+      views: [{
+        state: "frozen",
+        xSplit: 1,
+        ySplit: 6,
+        topLeftCell: "B7",
+        activeCell: "B7",
+        showGridLines: false
+      }],
+      properties: { showGridLines: false }
+    });
+    ws.properties.showGridLines = false;
+    ws.views = [{
+      state: "frozen",
+      xSplit: 1,
+      ySplit: 6,
+      topLeftCell: "B7",
+      activeCell: "B7",
+      showGridLines: false
+    }];
 
-    const pushRow = (cells) => {
-      const row = [];
-      for (let i = 0; i < colCount; i++) row.push(cells[i] == null ? "" : cells[i]);
-      aoa.push(row);
-      return aoa.length - 1;
+    const lastCol = colCount;
+    const colLetter = (i) => {
+      let n = i;
+      let s = "";
+      while (n > 0) {
+        const m = (n - 1) % 26;
+        s = String.fromCharCode(65 + m) + s;
+        n = Math.floor((n - 1) / 26);
+      }
+      return s;
+    };
+    const lastL = colLetter(lastCol);
+
+    ws.columns = [
+      { width: 38 },
+      { width: 16 },
+      { width: 14 },
+      ...months.map(() => ({ width: 13 }))
+    ];
+
+    const headerFill = "FF105436";
+    ws.mergeCells("A1:A2");
+    ws.mergeCells(`B1:${lastL}1`);
+    ws.mergeCells(`B2:${lastL}2`);
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 18;
+    this.excelPaint(ws.getCell("A1"), { fill: headerFill, font: { bold: true, size: 10, color: { argb: "FFFFFFFF" } }, align: { vertical: "middle", horizontal: "center" } });
+    this.excelPaint(ws.getCell("B1"), { fill: headerFill, font: { bold: true, size: 14, color: { argb: "FFFFFFFF" } }, align: { vertical: "middle", horizontal: "left" } });
+    this.excelPaint(ws.getCell("B2"), { fill: headerFill, font: { size: 9, color: { argb: "FFD1FAE5" } }, align: { vertical: "middle", horizontal: "left" } });
+    ws.getCell("B1").value = "Kardex — conta × movimento";
+    ws.getCell("B2").value = `Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")} · empresas geridas pelo grupo`;
+
+    try {
+      const logo = await this.logoDataUrl();
+      const imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+      ws.addImage(imgId, {
+        tl: { col: 0, row: 0 },
+        ext: { width: 42, height: 42 }
+      });
+    } catch (e) { /* logo opcional */ }
+
+    ws.getRow(3).height = 8;
+    const kpiMeta = [
+      { label: "Saldo inicial", value: kpis.opening, color: "FF0F172A" },
+      { label: "Entradas", value: kpis.aportes, color: "FF105436" },
+      { label: "Saídas", value: Math.abs(kpis.resgates), color: "FFB91C1C" },
+      { label: "Imposto retido", value: Math.abs(kpis.tarifas), color: "FF9A3412" },
+      { label: "Rendimento", value: kpis.rendimento, color: "FF0369A1" },
+      { label: "Saldo acumulado", value: kpis.closing, color: "FF0F172A" }
+    ];
+    const kpiRowL = ws.getRow(4);
+    const kpiRowV = ws.getRow(5);
+    kpiRowL.height = 16;
+    kpiRowV.height = 20;
+    kpiMeta.forEach((k, i) => {
+      const cellL = kpiRowL.getCell(i + 1);
+      const cellV = kpiRowV.getCell(i + 1);
+      cellL.value = k.label;
+      cellV.value = k.value;
+      this.excelPaint(cellL, { fill: "FFF8FAFC", font: { bold: true, size: 8, color: { argb: "FF64748B" } }, align: { horizontal: "center", vertical: "middle" } });
+      this.excelPaint(cellV, { fill: "FFFFFFFF", font: { bold: true, size: 12, color: { argb: k.color } }, align: { horizontal: "right", vertical: "middle" }, numFmt: moneyFmt });
+    });
+
+    const headRow = ws.getRow(6);
+    headRow.height = 20;
+    const heads = ["Conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))];
+    heads.forEach((h, i) => {
+      const cell = headRow.getCell(i + 1);
+      cell.value = h;
+      this.excelPaint(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i < 2 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+
+    let rowIdx = 7;
+    const moneyCell = (cell, n, extra) => {
+      extra = extra || {};
+      cell.value = Number(n) || 0;
+      const zero = !n;
+      const color = extra.color || (n < 0 ? "FFB91C1C" : (zero ? "FF94A3B8" : "FF0F172A"));
+      this.excelPaint(cell, {
+        fill: extra.bg || "FFFFFFFF",
+        font: { bold: !!extra.bold, size: 9, color: { argb: color } },
+        align: { horizontal: "right", vertical: "middle" },
+        border: true,
+        numFmt: moneyFmt
+      });
+    };
+    const labelCell = (cell, text, color, bg) => {
+      cell.value = text;
+      this.excelPaint(cell, {
+        fill: bg,
+        font: { bold: true, size: 9, color: { argb: color } },
+        align: { vertical: "middle", horizontal: "left", wrapText: true },
+        border: true
+      });
     };
 
-    const titleR = pushRow(["Kardex — conta × movimento · saldo inicial e meses"]);
-    merges.push({ s: { r: titleR, c: 0 }, e: { r: titleR, c: colCount - 1 } });
-    mark(titleR, 0, { font: font({ bold: true, sz: 14, color: { rgb: "FFFFFF" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: false, horizontal: "left" } });
-
-    const periodTxt = `Período ${this.startDate.split("-").reverse().join("/")} a ${this.endDate.split("-").reverse().join("/")} · empresas geridas pelo grupo`;
-    const subR = pushRow([periodTxt]);
-    merges.push({ s: { r: subR, c: 0 }, e: { r: subR, c: colCount - 1 } });
-    mark(subR, 0, { font: font({ sz: 9, color: { rgb: "D1FAE5" } }), fill: fill("105436"), alignment: { vertical: "center", wrapText: false } });
-
-    pushRow([]);
-    const kpiLabelR = pushRow(["Saldo inicial", "Entradas", "Saídas", "Imposto retido", "Rendimento", "Saldo acumulado"]);
-    const kpiValR = pushRow([kpis.opening, kpis.aportes, Math.abs(kpis.resgates), Math.abs(kpis.tarifas), kpis.rendimento, kpis.closing]);
-    [
-      { c: 0, color: "0F172A" },
-      { c: 1, color: "105436" },
-      { c: 2, color: "B91C1C" },
-      { c: 3, color: "9A3412" },
-      { c: 4, color: "0369A1" },
-      { c: 5, color: "0F172A" }
-    ].forEach(x => {
-      mark(kpiLabelR, x.c, { font: font({ bold: true, sz: 8, color: { rgb: "64748B" } }), fill: fill("F8FAFC"), alignment: { horizontal: "center" } });
-      mark(kpiValR, x.c, { font: font({ bold: true, sz: 12, color: { rgb: x.color } }), fill: fill("FFFFFF"), alignment: { horizontal: "right" }, numFmt: moneyFmt });
-    });
-
-    pushRow([]);
-    const headR = pushRow(["Conta", "Movimento", "Saldo inicial", ...months.map(mk => this.monthLabel(mk))]);
-    for (let c = 0; c < colCount; c++) {
-      mark(headR, c, {
-        font: font({ bold: true, sz: 8, color: { rgb: "FFFFFF" } }),
-        fill: fill("105436"),
-        alignment: { horizontal: c < 2 ? "left" : "right", vertical: "center" },
-        border
-      });
-    }
-
-    const moneyStyle = (n, extra) => Object.assign({
-      font: font({
-        bold: !!(extra && extra.bold),
-        color: { rgb: n < 0 ? "B91C1C" : (extra && extra.color) || (n === 0 ? "94A3B8" : "0F172A") }
-      }),
-      fill: fill((extra && extra.bg) || "FFFFFF"),
-      alignment: { horizontal: "right", vertical: "center" },
-      border,
-      numFmt: moneyFmt
-    }, extra && extra.s || {});
-
-    const labelStyle = (color, bg, bold) => ({
-      font: font({ bold: !!bold, sz: 8, color: { rgb: color } }),
-      fill: fill(bg),
-      alignment: { vertical: "center", wrapText: true, horizontal: "left" },
-      border
-    });
-
-    const wrapRows = new Set();
-    const rowHeights = {};
-    const setRowH = (r, hpt) => { rowHeights[r] = Math.max(rowHeights[r] || 0, hpt); };
-    setRowH(titleR, 22);
-    setRowH(subR, 18);
-    setRowH(kpiLabelR, 14);
-    setRowH(kpiValR, 18);
     const pushBlock = (label, sub, opening, monthFlow, kind) => {
       const find = mk => monthFlow.find(f => f.month === mk) || {};
       const entradas = months.map(mk => Number(find(mk).aportes) || 0);
@@ -1864,46 +2005,62 @@ const InvestimentoApp = {
       const impostos = months.map(mk => Math.abs(Number(find(mk).tarifas) || 0));
       const saldos = months.map(mk => Number(find(mk).closing) || 0);
       const isTotal = kind === "total";
-      const headBg = isTotal ? "ECFDF5" : "F8FAFC";
-      const saldoBg = isTotal ? "D1FAE5" : "F1F5F9";
+      const headBg = isTotal ? "FFECFDF5" : "FFF8FAFC";
+      const saldoBg = isTotal ? "FF475569" : "FF64748B";
       const contaTxt = this.excelAccountCell(label, sub, monthFlow);
-      const r0 = pushRow([contaTxt, "Entrada", "", ...entradas]);
-      wrapRows.add(r0);
-      const r1 = pushRow(["", "Saída", "", ...saidas]);
-      const r2 = pushRow(["", "Rendimento", "", ...rends]);
-      const r3 = pushRow(["", "Imposto retido", "", ...impostos]);
-      const r4 = pushRow(["", "Saldo", Number(opening) || 0, ...saldos]);
+      const r0 = rowIdx;
+      const r1 = rowIdx + 1;
+      const r2 = rowIdx + 2;
+      const r3 = rowIdx + 3;
+      const r4 = rowIdx + 4;
       const lines = String(contaTxt).split(/\n/).filter(Boolean).length;
-      const mergeH = Math.max(80, lines * 11 + 10);
-      const hEach = Math.max(16, Math.ceil(mergeH / 5));
-      [r0, r1, r2, r3, r4].forEach(r => setRowH(r, hEach));
-      merges.push({ s: { r: r0, c: 0 }, e: { r: r4, c: 0 } });
-      mark(r0, 0, labelStyle("0F172A", headBg, true));
-      mark(r0, 1, labelStyle("105436", headBg, true));
-      mark(r1, 1, labelStyle("B91C1C", "FFFFFF", true));
-      mark(r2, 1, labelStyle("0369A1", "FFFFFF", true));
-      mark(r3, 1, labelStyle("9A3412", "FFF7ED", true));
-      mark(r4, 1, labelStyle("0F172A", saldoBg, true));
-      mark(r0, 2, moneyStyle(0, { bg: headBg, color: "CBD5E1" }));
-      mark(r1, 2, moneyStyle(0, { color: "CBD5E1" }));
-      mark(r2, 2, moneyStyle(0, { color: "CBD5E1" }));
-      mark(r3, 2, moneyStyle(0, { bg: "FFF7ED", color: "CBD5E1" }));
-      mark(r4, 2, moneyStyle(opening, { bold: true, bg: saldoBg }));
-      months.forEach((_, i) => {
-        mark(r0, 3 + i, moneyStyle(entradas[i], { bg: headBg }));
-        mark(r1, 3 + i, moneyStyle(saidas[i], { color: saidas[i] ? "B91C1C" : "94A3B8" }));
-        mark(r2, 3 + i, moneyStyle(rends[i], { color: "0369A1" }));
-        mark(r3, 3 + i, moneyStyle(impostos[i], { bg: "FFF7ED", color: impostos[i] ? "9A3412" : "94A3B8" }));
-        mark(r4, 3 + i, moneyStyle(saldos[i], { bold: true, bg: saldoBg }));
+      const hEach = Math.max(18, Math.ceil((Math.max(90, lines * 13 + 12)) / 5));
+      [r0, r1, r2, r3, r4].forEach(r => { ws.getRow(r).height = hEach; });
+
+      ws.mergeCells(r0, 1, r4, 1);
+      const conta = ws.getCell(r0, 1);
+      conta.value = contaTxt;
+      this.excelPaint(conta, {
+        fill: headBg,
+        font: { bold: true, size: 9, color: { argb: "FF0F172A" } },
+        align: { vertical: "top", horizontal: "left", wrapText: true },
+        border: true
       });
+
+      labelCell(ws.getCell(r0, 2), "Entrada", "FF105436", headBg);
+      labelCell(ws.getCell(r1, 2), "Saída", "FFB91C1C", "FFFFFFFF");
+      labelCell(ws.getCell(r2, 2), "Rendimento", "FF0369A1", "FFFFFFFF");
+      labelCell(ws.getCell(r3, 2), "Imposto retido", "FF9A3412", "FFFFF7ED");
+      labelCell(ws.getCell(r4, 2), "Saldo", "FFFFFFFF", saldoBg);
+
+      moneyCell(ws.getCell(r0, 3), 0, { bg: headBg, color: "FFCBD5E1" });
+      moneyCell(ws.getCell(r1, 3), 0, { color: "FFCBD5E1" });
+      moneyCell(ws.getCell(r2, 3), 0, { color: "FFCBD5E1" });
+      moneyCell(ws.getCell(r3, 3), 0, { bg: "FFFFF7ED", color: "FFCBD5E1" });
+      moneyCell(ws.getCell(r4, 3), opening, { bold: true, bg: saldoBg, color: "FFFFFFFF" });
+
+      months.forEach((_, i) => {
+        const c = 4 + i;
+        moneyCell(ws.getCell(r0, c), entradas[i], { bg: headBg, color: entradas[i] ? "FF105436" : "FF94A3B8" });
+        moneyCell(ws.getCell(r1, c), saidas[i], { color: saidas[i] ? "FFB91C1C" : "FF94A3B8" });
+        moneyCell(ws.getCell(r2, c), rends[i], { color: rends[i] ? "FF0369A1" : "FF94A3B8" });
+        moneyCell(ws.getCell(r3, c), impostos[i], { bg: "FFFFF7ED", color: impostos[i] ? "FF9A3412" : "FF94A3B8" });
+        moneyCell(ws.getCell(r4, c), saldos[i], { bold: true, bg: saldoBg, color: "FFFFFFFF" });
+      });
+      rowIdx += 5;
     };
 
     const pushCompanyBar = (text) => {
-      const r = pushRow([text]);
-      wrapRows.add(r);
-      merges.push({ s: { r, c: 0 }, e: { r, c: colCount - 1 } });
-      mark(r, 0, { font: font({ bold: true, sz: 8, color: { rgb: "FFFFFF" } }), fill: fill("0F766E"), alignment: { vertical: "center", wrapText: true } });
-      setRowH(r, Math.max(20, String(text).split(/\n/).length * 12 + 6));
+      ws.mergeCells(rowIdx, 1, rowIdx, lastCol);
+      const cell = ws.getCell(rowIdx, 1);
+      cell.value = text;
+      this.excelPaint(cell, {
+        fill: "FF0F766E",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { vertical: "middle", wrapText: true, horizontal: "left" }
+      });
+      ws.getRow(rowIdx).height = Math.max(20, String(text).split(/\n/).length * 14);
+      rowIdx += 1;
     };
 
     pushBlock("Consolidado", "Empresas selecionadas", visAgg.opening, visAgg.months, "total");
@@ -1922,39 +2079,28 @@ const InvestimentoApp = {
       accounts.forEach(r => pushBlock(r.accountNumber || r.accountName, `${r.accountName}\n${r.companyName}`, r.opening, this.monthFlowOf(r), "acc"));
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!merges"] = merges;
-    ws["!cols"] = [{ wch: 36 }, { wch: 14 }, { wch: 14 }, ...months.map(() => ({ wch: 13 }))];
-    ws["!rows"] = aoa.map((_, i) => {
-      if (rowHeights[i] != null) return { hpt: rowHeights[i] };
-      if (i === titleR) return { hpt: 26 };
-      if (wrapRows.has(i)) return { hpt: 22 };
-      return { hpt: 16 };
+    rowIdx += 1;
+    ws.mergeCells(rowIdx, 1, rowIdx, lastCol);
+    const foot = ws.getCell(rowIdx, 1);
+    foot.value = this.generatedAtLabel(new Date());
+    this.excelPaint(foot, {
+      font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+      align: { vertical: "middle", horizontal: "left" }
     });
-    Object.keys(styles).forEach(key => {
-      const [r, c] = key.split("|").map(Number);
-      const addr = XLSX.utils.encode_cell({ r, c });
-      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
-      const st = styles[key];
-      ws[addr].s = st;
-      if (st.numFmt && typeof ws[addr].v === "number") {
-        ws[addr].t = "n";
-        ws[addr].z = st.numFmt;
-      }
-    });
-    const wb = XLSX.utils.book_new();
-    const freezeY = headR + 1;
-    ws["!views"] = [{
-      state: "frozen",
-      xSplit: 2,
-      ySplit: freezeY,
-      topLeftCell: XLSX.utils.encode_cell({ r: freezeY, c: 2 }),
-      activePane: "bottomRight"
-    }];
-    ws["!freeze"] = { xSplit: 2, ySplit: freezeY, topLeftCell: XLSX.utils.encode_cell({ r: freezeY, c: 2 }), activePane: "bottomRight" };
-    XLSX.utils.book_append_sheet(wb, ws, "Kardex");
+    ws.getRow(rowIdx).height = 18;
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `investimento_kardex_${stamp}.xlsx`);
+    a.href = URL.createObjectURL(blob);
+    a.download = `investimento_kardex_${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1000);
   }
 };
 
