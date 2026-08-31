@@ -90,11 +90,11 @@ window.MlEmpresaFilter = {
     const label = opts.label || "Empresas";
     const extra = opts.extraClass ? ` ${opts.extraClass}` : "";
     const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode);
-    return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()">
+    return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
-      <button type="button" class="ml-emp-filter-btn" onclick="event.stopPropagation();MlEmpresaFilter.toggleOpen(${JSON.stringify(id)})">
+      <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${JSON.stringify(id)})`}">
         <span>${this.esc(btn)}</span>
-        <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;"></i>
+        <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;pointer-events:none;"></i>
       </button>
       <div class="ml-emp-filter-panel" id="${this.esc(id)}-panel">
         <div class="ml-emp-filter-search">

@@ -1601,7 +1601,8 @@ circle.donut-segment {
 .ml-emp-filter-btn { width: 100%; min-height: 34px; border: 1px solid #334155; border-radius: 6px; background: #fff; display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; cursor: pointer; font-size: 0.85rem; font-weight: 700; color: #0f172a; text-align: left; gap: 8px; }
 .ml-emp-filter-btn span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ml-emp-filter-panel { display: none; position: absolute; left: 0; min-width: 100%; width: max(100%, 360px); top: calc(100% + 4px); z-index: 230; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15,23,42,0.14); overflow: hidden; }
-.ml-emp-filter.is-open .ml-emp-filter-panel { display: block; }
+.ml-emp-filter.is-open .ml-emp-filter-panel,
+.ml-emp-filter-panel.is-open { display: block; }
 .ml-emp-filter-search { padding: 10px 10px 6px; background: #fff; }
 .ml-emp-filter-search input { width: 100%; height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; box-sizing: border-box; font-size: 0.85rem; }
 .ml-emp-filter-actions { display: flex; gap: 8px; padding: 6px 10px 10px; border-bottom: 1px solid #e2e8f0; background: #fff; }

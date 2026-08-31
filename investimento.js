@@ -133,7 +133,12 @@ const InvestimentoApp = {
       window._invDropBound = true;
       document.addEventListener("mousedown", (e) => {
         const t = e.target;
-        if (t && t.closest && (t.closest("#inv-emp") || t.closest("#inv-acc-drop"))) return;
+        if (t && t.closest && (
+          t.closest("#inv-emp") ||
+          t.closest("#inv-emp-panel") ||
+          t.closest("#inv-acc-drop") ||
+          t.closest("#inv-acc-panel")
+        )) return;
         let changed = false;
         if (InvestimentoApp.companyDropOpen) {
           InvestimentoApp.companyDropOpen = false;
@@ -985,7 +990,27 @@ const InvestimentoApp = {
 
   applyDropOpenState() {
     const emp = document.getElementById("inv-emp");
+    const panel = document.getElementById("inv-emp-panel");
     if (emp) emp.classList.toggle("is-open", !!this.companyDropOpen);
+    if (panel) {
+      if (this.companyDropOpen) {
+        const btn = emp && emp.querySelector(".ml-emp-filter-btn");
+        const r = btn ? btn.getBoundingClientRect() : { left: 24, bottom: 140, width: 320 };
+        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        panel.style.display = "block";
+        panel.classList.add("is-open");
+        panel.style.position = "fixed";
+        panel.style.left = Math.max(8, r.left) + "px";
+        panel.style.top = (r.bottom + 4) + "px";
+        panel.style.width = Math.max(r.width, 360) + "px";
+        panel.style.zIndex = "5000";
+        panel.style.maxHeight = "min(420px, calc(100vh - " + (r.bottom + 16) + "px))";
+      } else {
+        panel.style.display = "none";
+        panel.classList.remove("is-open");
+        if (emp && panel.parentElement !== emp) emp.appendChild(panel);
+      }
+    }
     const accPanel = document.getElementById("inv-acc-panel");
     if (accPanel) accPanel.style.display = this.accountDropOpen ? "block" : "none";
   },
@@ -1064,14 +1089,23 @@ const InvestimentoApp = {
   },
 
   bindCompanyFilter() {
-    if (!window.MlEmpresaFilter) return;
-    MlEmpresaFilter.bind("inv-emp", {
-      toggleOpen: () => this.toggleCompanyDrop(),
-      setQuery: (q) => this.filterCompanyList(q),
-      toggleId: (id, on) => this.toggleCompany(id, on),
-      selectAll: () => this.selectAllGeridas(),
-      selectNone: () => this.clearGeridas()
-    });
+    if (window.MlEmpresaFilter) {
+      MlEmpresaFilter.bind("inv-emp", {
+        toggleOpen: () => this.toggleCompanyDrop(),
+        setQuery: (q) => this.filterCompanyList(q),
+        toggleId: (id, on) => this.toggleCompany(id, on),
+        selectAll: () => this.selectAllGeridas(),
+        selectNone: () => this.clearGeridas()
+      });
+    }
+    const btn = document.querySelector("#inv-emp .ml-emp-filter-btn");
+    if (btn) {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleCompanyDrop(e);
+      };
+    }
   },
 
   companyListHtml() {
@@ -1107,7 +1141,8 @@ const InvestimentoApp = {
         open: this.companyDropOpen,
         query: this.companyQuery,
         emptyMeansAll: false,
-        countMode: true
+        countMode: true,
+        toggleJs: "InvestimentoApp.toggleCompanyDrop(event)"
       });
     }
     return `<div id="inv-emp">${this.companyListHtml()}</div>`;
@@ -1958,40 +1993,35 @@ const InvestimentoApp = {
       showGridLines: false
     }];
     ws.columns = [
-      { width: 38 },
+      { width: 46 },
       { width: 16 },
       { width: 14 },
       ...Array.from({ length: minCols - 3 }, () => ({ width: 14 }))
     ];
 
+    const logoCm = 1.54;
+    const logoPx = Math.round(logoCm * 96 / 2.54);
     ws.mergeCells("A1:A2");
-    ws.mergeCells("B1:C1");
-    ws.mergeCells("B2:C2");
-    ws.getRow(1).height = 22;
-    ws.getRow(2).height = 20;
-    this.excelPaint(ws.getCell("A1"), {
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const subtitle = opts.subtitle || `${this.periodLabel()} · empresas geridas pelo grupo`;
+    const titleCell = ws.getCell("A1");
+    titleCell.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Kardex — conta × movimento\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: subtitle }
+      ]
+    };
+    this.excelPaint(titleCell, {
       fill: "FFFFFFFF",
-      font: { bold: true, size: 10, color: { argb: "FF0F172A" } },
-      align: { vertical: "middle", horizontal: "center" }
-    });
-    ws.getCell("B1").value = "Kardex — conta × movimento";
-    this.excelPaint(ws.getCell("B1"), {
-      fill: "FFFFFFFF",
-      font: { bold: true, size: 14, color: { argb: "FF0F172A" } },
-      align: { vertical: "middle", horizontal: "left" }
-    });
-    ws.getCell("B2").value = opts.subtitle || `${this.periodLabel()} · empresas geridas pelo grupo`;
-    this.excelPaint(ws.getCell("B2"), {
-      fill: "FFFFFFFF",
-      font: { size: 9, color: { argb: "FF64748B" } },
-      align: { vertical: "middle", horizontal: "left" }
+      align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
     });
 
     if (opts.imgId != null) {
       try {
         ws.addImage(opts.imgId, {
-          tl: { col: 0.12, row: 0.12 },
-          ext: { width: 36, height: 36 }
+          tl: { col: 0.04, row: 0.08 },
+          ext: { width: logoPx, height: logoPx }
         });
       } catch (e) { /* logo opcional */ }
     }
