@@ -30088,9 +30088,86 @@ window.fetchWhatsappTitlesFromSienge = async function(customerId) {
     return titles;
 };
 
+window.WHATSAPP_ALERT_SNOOZE_KEY = "crm_whatsapp_alerts_snooze_until";
+
+window.getWhatsappAlertSnoozeUntil = function() {
+    const n = Number(localStorage.getItem(window.WHATSAPP_ALERT_SNOOZE_KEY) || 0);
+    return Number.isFinite(n) ? n : 0;
+};
+
+window.scheduleWhatsappAlertSnoozeWake = function() {
+    if (window._whatsappAlertSnoozeTimer) {
+        clearTimeout(window._whatsappAlertSnoozeTimer);
+        window._whatsappAlertSnoozeTimer = null;
+    }
+    const until = window.getWhatsappAlertSnoozeUntil();
+    const delay = until - Date.now();
+    if (delay <= 0) return;
+    window._whatsappAlertSnoozeTimer = setTimeout(function() {
+        window._whatsappAlertSnoozeTimer = null;
+        if (typeof window.checkMonthlyBilletAlerts === "function") {
+            window.checkMonthlyBilletAlerts();
+        }
+    }, delay);
+};
+
+window.toggleWhatsappSnoozeMenu = function(ev) {
+    if (ev) ev.stopPropagation();
+    const menu = document.getElementById("whatsapp-snooze-menu");
+    if (!menu) return;
+    const open = menu.style.display === "flex";
+    menu.style.display = open ? "none" : "flex";
+    if (!open) {
+        const close = function(e) {
+            if (menu.contains(e.target)) return;
+            menu.style.display = "none";
+            document.removeEventListener("click", close);
+        };
+        setTimeout(function() { document.addEventListener("click", close); }, 0);
+    }
+};
+
+window.snoozeWhatsappBilletAlert = function(choice) {
+    const now = new Date();
+    let until = new Date(now);
+    if (choice === "amanha") {
+        until.setDate(until.getDate() + 1);
+    } else {
+        const mins = parseInt(choice, 10);
+        if (!mins) return;
+        until = new Date(now.getTime() + mins * 60 * 1000);
+    }
+    try {
+        localStorage.setItem(window.WHATSAPP_ALERT_SNOOZE_KEY, String(until.getTime()));
+    } catch (e) {}
+    const modal = document.getElementById("modal-whatsapp-alerts");
+    if (modal) modal.style.display = "none";
+    const menu = document.getElementById("whatsapp-snooze-menu");
+    if (menu) menu.style.display = "none";
+    window.scheduleWhatsappAlertSnoozeWake();
+    const mins = parseInt(choice, 10);
+    const label = choice === "amanha"
+        ? "amanhã"
+        : (mins >= 60 ? ((mins / 60) + " h") : (mins + " min"));
+    if (typeof window.showToast === "function") {
+        window.showToast("Lembrete adiado para " + label + ".", "info");
+    }
+};
+
 window.checkMonthlyBilletAlerts = async function(isTest = false) {
     const gate = window.userHasResendBilletFlag();
     if (!isTest && !gate.ok) return;
+
+    if (!isTest) {
+        const snoozeUntil = window.getWhatsappAlertSnoozeUntil();
+        if (snoozeUntil && Date.now() < snoozeUntil) {
+            window.scheduleWhatsappAlertSnoozeWake();
+            return;
+        }
+        if (snoozeUntil && Date.now() >= snoozeUntil) {
+            try { localStorage.removeItem(window.WHATSAPP_ALERT_SNOOZE_KEY); } catch (e) {}
+        }
+    }
 
     await loadWhatsappAlerts();
     
@@ -30110,6 +30187,10 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     }
     
     let modal = document.getElementById("modal-whatsapp-alerts");
+    if (modal && !document.getElementById("whatsapp-snooze-menu")) {
+        modal.remove();
+        modal = null;
+    }
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'modal-whatsapp-alerts';
@@ -30119,8 +30200,18 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
                 <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 1.25rem;">Lembrete de Envio de Boletos (WhatsApp)</h2>
                 <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Os seguintes clientes estão com o alerta ativado para envio manual da remessa mensal via WhatsApp:</p>
                 <div id="whatsapp-alerts-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; padding-right: 5px;"></div>
-                <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                    <button class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="document.getElementById('modal-whatsapp-alerts').style.display='none'">Lembrar Mais Tarde</button>
+                <div id="whatsapp-alerts-footer" style="display: flex; justify-content: flex-end; gap: 12px; align-items: flex-end;">
+                    <div style="position: relative;">
+                        <button type="button" class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.toggleWhatsappSnoozeMenu(event)">Lembrar Mais Tarde ▾</button>
+                        <div id="whatsapp-snooze-menu" style="display: none; flex-direction: column; position: absolute; bottom: calc(100% + 6px); right: 0; min-width: 180px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 24px rgba(15,23,42,0.15); overflow: hidden; z-index: 2;">
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert(15)">15 min</button>
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert(30)">30 min</button>
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert(60)">1 h</button>
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert(120)">2 h</button>
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert(180)">3 h</button>
+                            <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;border-top:1px solid #e2e8f0;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeWhatsappBilletAlert('amanha')">Amanhã</button>
+                        </div>
+                    </div>
                     <button class="btn btn-primary" style="background: #0f766e; color: white; border: none; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.markWhatsappAlertsAsDone()">Marcar como Concluído neste Mês</button>
                 </div>
             </div>
@@ -30294,6 +30385,11 @@ window.markWhatsappAlertsAsDone = async function() {
     const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
     window.whatsappAlertsData.lastCompletedMonth = currentMonthStr;
     await saveWhatsappAlerts();
+    try { localStorage.removeItem(window.WHATSAPP_ALERT_SNOOZE_KEY); } catch (e) {}
+    if (window._whatsappAlertSnoozeTimer) {
+        clearTimeout(window._whatsappAlertSnoozeTimer);
+        window._whatsappAlertSnoozeTimer = null;
+    }
     const modal = document.getElementById("modal-whatsapp-alerts");
     if (modal) modal.style.display = "none";
 };

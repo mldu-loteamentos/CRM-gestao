@@ -99,7 +99,7 @@ const EstoqueComercialApp = {
     const contractNumber = rawNum == null || rawNum === "" ? null : String(rawNum);
     const contractId = u.contractId || u.salesContractId || u.currentSalesContractId || null;
     const bal = u.outstandingBalance;
-    const quitado = bal === 0 || bal === "0";
+    const balNum = bal == null || bal === "" ? null : Number(bal);
     return {
       id: u.id,
       name: u.name || "",
@@ -112,10 +112,10 @@ const EstoqueComercialApp = {
       contractNumber: contractNumber || null,
       receivableBillId: u.receivableBillId || null,
       customerId: u.customerId || null,
-      outstandingBalance: bal == null || bal === "" ? null : Number(bal),
+      outstandingBalance: balNum != null && !Number.isNaN(balNum) && balNum > 0.009 ? balNum : null,
       contractValue: u.totalSellingValue || u.value || null,
       situation: u.situation || "",
-      quitado: !!quitado,
+      quitado: false,
       area: u.totalArea || u.privateArea || u.indexedPrivateArea || null
     };
   },
@@ -575,7 +575,7 @@ const EstoqueComercialApp = {
     if (!sold) return "—";
     if (String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
     const bal = this.unitBalance(u);
-    if (u.quitado || bal === 0) return "Quitado";
+    if (u.quitado) return "Quitado";
     if (this.isInadimplente(u)) return "Ativo inadimplente";
     if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
     return "A apurar";
@@ -790,10 +790,12 @@ const EstoqueComercialApp = {
   },
 
   needsContract(u) {
-    if (!u || u.quitado) return false;
+    if (!u) return false;
     const code = String(u.commercialStock || "").toUpperCase();
     const sold = this.SOLD_CODES.includes(code) || !!u.contractId;
     if (!sold) return false;
+    if (u.quitado && u.statementDone && u.quitacaoDate) return false;
+    if (u.quitado) return true;
     if (!this.displayContract(u)) return true;
     if (this.unitBalance(u) == null) return true;
     return false;
@@ -822,22 +824,7 @@ const EstoqueComercialApp = {
 
   lastBaixaFromExtractRow(row) {
     if (!row) return null;
-    let last = this.lastBaixaFromReceipts(row.receipts);
-    [
-      row.payOffDate, row.payoffDate, row.quittanceDate, row.settlementDate,
-      row.lastReceiptDate, row.receiptDate, row.paymentDate, row.netReceiptDate,
-      row.correctionDate, row.calculationDate
-    ].forEach(v => {
-      const d = this.isoDate(v);
-      if (d && (!last || d > last)) last = d;
-    });
-    const sit = String(row.installmentSituation || row.situation || "");
-    const paidSit = sit === "2" || /quit|pago|liquid|baix/i.test(sit);
-    if (paidSit || Number(row.currentBalance || 0) <= 0.009) {
-      const d = this.isoDate(row.dueDate || row.originalDueDate);
-      if (d && (!last || d > last)) last = d;
-    }
-    return last;
+    return this.lastBaixaFromReceipts(row.receipts);
   },
 
   digitsKey(s) {
@@ -879,7 +866,43 @@ const EstoqueComercialApp = {
 
   applyContractInfo(u, info) {
     if (!info) return u;
-    if (u.quitado && u.receivedLocked) {
+    const bal = info.outstandingBalance;
+    const value = info.contractValue != null ? Number(info.contractValue) : (u.contractValue != null ? Number(u.contractValue) : null);
+    const sit = String(info.situation || u.situation || "").toLowerCase();
+    const distrato = sit.includes("distrat") || (info.active === false && !info.payOffDate);
+    const sitQuit = /quit|pago|liquid|baixad/.test(sit);
+    const hasOpenBal = bal != null && Number(bal) > 0.009;
+    if (hasOpenBal) {
+      let numOpen = info.contractNumber ? String(info.contractNumber) : "";
+      if (numOpen && info.saleId != null && String(numOpen) === String(info.saleId) && this.displayContract(u)) {
+        numOpen = this.displayContract(u);
+      }
+      let received = u.receivedAmount;
+      let locked = !!u.receivedLocked;
+      if (!locked && value != null) {
+        received = Math.max(0, Number(value) - Number(bal));
+        locked = true;
+      }
+      return {
+        ...u,
+        contractId: info.saleId || u.contractId,
+        contractNumber: numOpen || u.contractNumber || null,
+        receivableBillId: info.receivableBillId || u.receivableBillId,
+        customerId: info.customerId || u.customerId,
+        customerDoc: info.customerDoc || u.customerDoc,
+        outstandingBalance: Number(bal),
+        presentDebitBalance: Number(bal),
+        contractValue: value != null ? value : u.contractValue,
+        receivedAmount: received,
+        receivedLocked: locked,
+        situation: info.situation || u.situation,
+        quitado: false,
+        quitacaoDate: null,
+        statementDone: false,
+        finAt: new Date().toISOString()
+      };
+    }
+    if (u.quitado && u.receivedLocked && u.statementDone) {
       return {
         ...u,
         contractNumber: u.contractNumber || info.contractNumber || null,
@@ -888,12 +911,7 @@ const EstoqueComercialApp = {
         quitacaoDate: u.quitacaoDate || info.payOffDate || null
       };
     }
-    const bal = info.outstandingBalance;
-    const value = info.contractValue != null ? Number(info.contractValue) : (u.contractValue != null ? Number(u.contractValue) : null);
-    const sit = String(info.situation || u.situation || "").toLowerCase();
-    const distrato = sit.includes("distrat") || (info.active === false && !info.payOffDate);
-    const sitQuit = /quit|pago|liquid|baixad/.test(sit);
-    const quitado = !distrato && (bal === 0 || !!info.payOffDate || sitQuit);
+    const quitado = !distrato && (!!info.payOffDate || sitQuit);
     let num = info.contractNumber ? String(info.contractNumber) : "";
     if (num && info.saleId != null && String(num) === String(info.saleId) && this.displayContract(u)) {
       num = this.displayContract(u);
@@ -902,7 +920,7 @@ const EstoqueComercialApp = {
     let received = u.receivedAmount;
     let locked = !!u.receivedLocked;
     const nextBal = bal == null ? u.outstandingBalance : Number(bal);
-    if (!locked && value != null && nextBal != null && !Number.isNaN(Number(nextBal))) {
+    if (!locked && value != null && nextBal != null && !Number.isNaN(Number(nextBal)) && Number(nextBal) > 0.009) {
       received = Math.max(0, Number(value) - Number(nextBal));
       locked = true;
     }
@@ -920,7 +938,7 @@ const EstoqueComercialApp = {
       receivedLocked: locked,
       situation: info.situation || u.situation,
       quitado: u.quitado || !!quitado,
-      quitacaoDate: u.quitacaoDate || info.payOffDate || (quitado ? u.quitacaoDate : null) || null,
+      quitacaoDate: quitado ? (u.quitacaoDate || info.payOffDate || null) : null,
       finAt: new Date().toISOString()
     };
   },
@@ -1020,7 +1038,8 @@ const EstoqueComercialApp = {
         try {
           const maps = await this.fetchContractsForCc(ccId);
           this.state.units = this.state.units.map(u => {
-            if (String(u.enterpriseId) !== String(ccId) || u.quitado) return u;
+            if (String(u.enterpriseId) !== String(ccId)) return u;
+            if (u.quitado && u.statementDone && u.quitacaoDate) return u;
             const info = this.pickSale(u, maps);
             return info ? this.applyContractInfo(u, info) : u;
           });
@@ -1140,8 +1159,6 @@ const EstoqueComercialApp = {
     (installments || []).forEach(inst => {
       const d = this.lastBaixaFromReceipts(inst.receipts);
       if (d && (!last || d > last)) last = d;
-      const instPay = this.isoDate(inst.payOffDate || inst.paymentDate);
-      if (instPay && (!last || instPay > last)) last = instPay;
     });
     return last;
   },
