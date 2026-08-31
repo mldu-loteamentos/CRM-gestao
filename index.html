@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=633">
+  <link rel="stylesheet" href="style.css?v=634">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -237,6 +237,45 @@
     .customer-tab-pane>.crm-card,
     #simulador-full-container.kpi-card {
       min-height: 280px;
+    }
+
+    #simulador-full-container {
+      overflow: hidden;
+    }
+    #simulador-table-container {
+      width: 100%;
+    }
+    #simulador-table-container > div {
+      overflow-x: auto;
+    }
+    #simulador-table-container table.sim-vencidas-table {
+      width: max-content;
+      min-width: 0;
+      table-layout: auto;
+      border-collapse: collapse;
+    }
+    #simulador-table-container table.sim-vencidas-table th,
+    #simulador-table-container table.sim-vencidas-table td {
+      padding: 6px 8px;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    #simulador-table-container table.sim-vencidas-table th.sim-col-status,
+    #simulador-table-container table.sim-vencidas-table td.sim-col-status {
+      width: 1%;
+    }
+    #simulador-table-container table.sim-vencidas-table th.sim-col-acoes,
+    #simulador-table-container table.sim-vencidas-table td.sim-col-acoes {
+      width: 1%;
+      text-align: right;
+      white-space: nowrap;
+    }
+    #simulador-table-container .sim-acoes {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+      white-space: nowrap;
     }
 
     .ficha-tab-pane>.crm-card {
@@ -1127,7 +1166,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.633 &nbsp;&middot;&nbsp; 31/08/2026
+            v1.0.634 &nbsp;&middot;&nbsp; 31/08/2026
           </span>
         </div>
       </div>
@@ -4449,10 +4488,10 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               <div id="tab-simulacao" class="customer-tab-pane" style="display: none;">
                 <!-- Simulador de Atrasos -->
                 <div id="simulador-full-container" class="kpi-card"
-                  style="display: flex; flex-direction: row; gap: 2rem; align-items: flex-start; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); background: #fff; border-left: 4px solid var(--color-primary); display: none;">
+                  style="display: flex; flex-direction: row; gap: 1.25rem; align-items: flex-start; padding: 20px 22px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); background: #fff; border-left: 4px solid var(--color-primary); display: none;">
 
                   <!-- Parte Esquerda: Data e Totais -->
-                  <div style="display: flex; flex-direction: column; gap: 1.5rem; flex: 0 0 35%; min-width: 300px; padding-right: 1rem; border-right: 1px solid #e0e0e0;">
+                  <div style="display: flex; flex-direction: column; gap: 1.25rem; flex: 0 0 260px; width: 260px; min-width: 240px; max-width: 280px; padding-right: 1rem; border-right: 1px solid #e0e0e0;">
 
                     <!-- Data Prevista e Taxas -->
                     <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -4515,28 +4554,34 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   <div style="flex: 1; min-width: 0;">
                     <h4 style="margin: 0 0 6px 0; color: var(--color-primary); font-size: 1.1rem; font-weight: 700;">
                       Parcelas vencidas e boletos do contrato</h4>
-                    <p style="margin: 0 0 12px; font-size: 0.78rem; color: #64748b;">Vencimento do boleto, valor original e corrigido, status e ações (ver / baixar / reprocessar) ficam nesta tela — substitui a aba Boletos do Contrato.</p>
+                    <p style="margin: 0 0 10px; font-size: 0.75rem; color: #64748b; line-height: 1.45;">
+                      Status do boleto nesta tela:
+                      <span style="color:#94a3b8;">Sem boleto</span> ·
+                      <span style="background:var(--color-primary);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;">A Vencer</span> (na validade) ·
+                      <span style="color:#856404;background:#fff3cd;border:1px solid #ffeeba;padding:1px 6px;border-radius:4px;font-size:0.7rem;">Vencido (&lt;28d)</span> ·
+                      <span style="background:var(--color-danger);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;">Baixado (&gt;28d)</span> — Reprocessar
+                    </p>
                     <p id="simulador-empty-msg" style="display:none; margin: 0 0 12px; font-size: 0.9rem; color: #64748b;">Não há parcelas vencidas nem boletos em aberto para este contrato no momento.</p>
 
                     <div id="simulador-table-container" style="display: none;">
                       <div style="max-height: 420px; overflow-y: auto; overflow-x: auto; border-bottom: 1px solid #ddd;">
-                        <table class="crm-table"
-                          style="width: 100%; font-size: 0.78rem; text-align: left; border-collapse: collapse; margin-top: 0; min-width: 980px;">
+                        <table class="crm-table sim-vencidas-table"
+                          style="font-size: 0.78rem; text-align: left; margin-top: 0;">
                           <thead>
                             <tr style="text-align:left;">
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 36px; text-align: center; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">
+                              <th style="border-bottom: 1px solid #cbd5e1; width: 32px; text-align: center; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">
                                 <input type="checkbox" id="simulador-check-all" checked></th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 52px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Parc.</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 88px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Venc. Orig.</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 88px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Venc. Boleto</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 52px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Atraso</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 88px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Original</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 88px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Corrigido</th>
-                              <th id="simulador-th-multa" style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 78px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Multa</th>
-                              <th id="simulador-th-juros" style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 78px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Juros</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; text-align: right; width: 92px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Atualizado</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; width: 120px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Status</th>
-                              <th style="padding: 8px; border-bottom: 1px solid #cbd5e1; text-align: center; min-width: 140px; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Ações</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Parc.</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Venc. Orig.</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Venc. Boleto</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Atraso</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Original</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Corrigido</th>
+                              <th id="simulador-th-multa" style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Multa</th>
+                              <th id="simulador-th-juros" style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Juros</th>
+                              <th style="border-bottom: 1px solid #cbd5e1; text-align: right; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Atualizado</th>
+                              <th class="sim-col-status" style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Status</th>
+                              <th class="sim-col-acoes" style="border-bottom: 1px solid #cbd5e1; position: sticky; top: 0; background: #f1f5f9; z-index: 1;">Ações</th>
                             </tr>
                           </thead>
                           <tbody id="simulador-table-body">
@@ -6297,40 +6342,40 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=633"></script>
-  <script defer src="sienge-api.js?v=633"></script>
-  <script defer src="azure-auth.js?v=633"></script>
-  <script defer src="app.js?v=633"></script>
-  <script defer src="home-dashboard.js?v=633"></script>
-  <script defer src="anexos.js?v=633"></script>
-  <script defer src="contas-pagar.js?v=633"></script>
-  <script defer src="config-tags.js?v=633"></script>
-  <script defer src="config-users.js?v=633"></script>
-  <script defer src="construcao.js?v=633"></script>
-  <script defer src="empresas.js?v=633"></script>
-  <script defer src="relacionamento.js?v=633"></script>
+  <script defer src="data.js?v=634"></script>
+  <script defer src="sienge-api.js?v=634"></script>
+  <script defer src="azure-auth.js?v=634"></script>
+  <script defer src="app.js?v=634"></script>
+  <script defer src="home-dashboard.js?v=634"></script>
+  <script defer src="anexos.js?v=634"></script>
+  <script defer src="contas-pagar.js?v=634"></script>
+  <script defer src="config-tags.js?v=634"></script>
+  <script defer src="config-users.js?v=634"></script>
+  <script defer src="construcao.js?v=634"></script>
+  <script defer src="empresas.js?v=634"></script>
+  <script defer src="relacionamento.js?v=634"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=633"></script>
-  <script defer src="centros-custo.js?v=633"></script>
-  <script defer src="marketing.js?v=633"></script>
-  <script defer src="plano-financeiro.js?v=633"></script>
-  <script defer src="prestacao-contas.js?v=633"></script>
+  <script defer src="estoque-comercial.js?v=634"></script>
+  <script defer src="centros-custo.js?v=634"></script>
+  <script defer src="marketing.js?v=634"></script>
+  <script defer src="plano-financeiro.js?v=634"></script>
+  <script defer src="prestacao-contas.js?v=634"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=633"></script>
-  <script defer src="fluxo-caixa.js?v=633"></script>
-  <script defer src="investimento.js?v=633"></script>
-  <script defer src="parametrizacao-parceiro.js?v=633"></script>
-  <script defer src="societario.js?v=633"></script>
-  <script defer src="participacoes.js?v=633"></script>
-  <script defer src="fiscal.js?v=633"></script>
-  <script defer src="indexadores.js?v=633"></script>
-  <script defer src="verificar-construcao.js?v=633"></script>
-  <script src="repactuacoes.js?v=633"></script>
+  <script defer src="empresa-filter.js?v=634"></script>
+  <script defer src="fluxo-caixa.js?v=634"></script>
+  <script defer src="investimento.js?v=634"></script>
+  <script defer src="parametrizacao-parceiro.js?v=634"></script>
+  <script defer src="societario.js?v=634"></script>
+  <script defer src="participacoes.js?v=634"></script>
+  <script defer src="fiscal.js?v=634"></script>
+  <script defer src="indexadores.js?v=634"></script>
+  <script defer src="verificar-construcao.js?v=634"></script>
+  <script src="repactuacoes.js?v=634"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=633"></script>
+  <script defer src="dashboard-inadimplencia.js?v=634"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

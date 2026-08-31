@@ -904,31 +904,17 @@ window.applyDynamicCityRules = function() {
 
   const cities = new Set();
   AppState.cachedCostCenters.forEach(cc => {
-    // Apenas centros de custo que começam com "1", "2" ou "3" (Empreendimentos)
     if (cc && cc.name) {
       const codeStr = cc.code ? String(cc.code) : "";
       const nameStr = cc.name ? String(cc.name) : "";
+      const idStr = cc.id != null ? String(cc.id) : "";
       
-      if (!/^[123]/.test(codeStr) && !/^[123]/.test(nameStr)) {
+      if (!/^[123]/.test(codeStr) && !/^[123]/.test(nameStr) && !/^[123]/.test(idStr)) {
           return;
       }
-      
-      let cleanName = nameStr.replace(/^[0-9.]+\s+/, '').trim();
-      let city = "";
-      if (cleanName.includes('-')) {
-        city = cleanName.split('-')[0].trim().toUpperCase();
-      } else {
-        city = cleanName.trim().toUpperCase();
-      }
-      
-      // Remover acentos para padronizar (ex: CERQUEIRA CÉSAR -> CERQUEIRA CESAR)
-      city = city.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
-      
-      // Tratamento especial para Empreendimento 14201 (Terra do Araçari / Araçariguama)
-      if (String(cc.id) === "14201" || cleanName.toUpperCase().includes("ARAÇARI")) {
-         city = "ARACARIGUAMA";
-      }
-      
+      const city = typeof window.extractCityFromCostCenter === "function"
+        ? window.extractCityFromCostCenter(idStr || codeStr, nameStr)
+        : "";
       if (city) cities.add(city);
     }
   });
@@ -971,24 +957,20 @@ window.applyDynamicCityRules = function() {
   window.checkUnassignedCities();
 };
 
-window.extractCityFromCostCenter = function(idCCusto, ccName) {
-    if (!idCCusto && !ccName) return "NÃO INFORMADA";
-    
-    let city = "";
-    if (ccName && ccName.includes('-')) {
-        city = ccName.split('-')[0].trim().toUpperCase();
-    }
-    
-    if (String(idCCusto) === "14201" || (ccName && ccName.toUpperCase().includes("ARAÇARI"))) {
-       city = "ARAÇARIGUAMA";
-    }
-    
-    return city || "NÃO INFORMADA";
+window.lookupCityRule = function(ruleId) {
+  const rules = (window.AppState && AppState.rules) || {};
+  if (!ruleId) return null;
+  if (rules[ruleId]) return rules[ruleId];
+  const norm = String(ruleId).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const key = Object.keys(rules).find(k => String(k).normalize("NFD").replace(/[\u0300-\u036f]/g, "") === norm);
+  return key ? rules[key] : null;
 };
 
 function getRuleOperator(ruleId, defaultOp, customerId = null) {
-  if (AppState.rules && AppState.rules[ruleId]) {
-    const op = AppState.rules[ruleId].operator;
+  const rule = (typeof window.lookupCityRule === "function" && window.lookupCityRule(ruleId))
+    || (AppState.rules && AppState.rules[ruleId]);
+  if (rule) {
+    const op = rule.operator;
     if (Array.isArray(op)) {
       if (op.length === 0) return defaultOp;
       if (op.length === 1) return op[0];
@@ -1036,9 +1018,18 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
       }
       return defaultOp;
   }
-  if (AppState.rules && AppState.rules[ruleId]) {
-    const op = AppState.rules[ruleId].operator;
+  const rule = (typeof window.lookupCityRule === "function" && window.lookupCityRule(ruleId))
+    || (AppState.rules && AppState.rules[ruleId]);
+  if (rule) {
+    const op = rule.operator;
     let cityOps = Array.isArray(op) ? op : [op];
+    const isOpCobranca = (u) => {
+      if (!u) return false;
+      if (typeof window.isOperadorCobrancaProfile === "function") return window.isOperadorCobrancaProfile(u.profile_name);
+      const p = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return p.includes("OPERADOR COBRANCA");
+    };
+    const userOpType = (u) => (u && u.operator_type) ? u.operator_type : "interno";
     
     let candidateOps = cityOps.filter(o => {
        if (o === "NÃO ATRIBUÍDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃO COBRAR" || o === "OUTROS") return false;
@@ -1048,16 +1039,17 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
            const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
            return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
        });
-       const opType = u ? u.operator_type : 'interno';
+       const opType = userOpType(u);
        
        if (requiredType === 'interno_absoluto') return opType === 'interno';
+       if (requiredType === 'fallback') return true;
        return opType === requiredType;
     });
 
     if (candidateOps.length === 0) {
         if (requiredType === 'interno_absoluto' || requiredType === 'interno') {
             const internalNames = users
-              .filter(u => u && u.profile_name && u.profile_name.toUpperCase() === 'OPERADOR COBRANÇA' && u.operator_type === 'interno' && u.status !== 'INATIVO')
+              .filter(u => u && isOpCobranca(u) && userOpType(u) === 'interno' && u.status !== 'INATIVO')
               .map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : (u.name ? u.name.toUpperCase() : ''))
               .filter(Boolean);
             if (internalNames.length > 0) {
@@ -1070,6 +1062,15 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
                 }
                 return internalNames[0];
             }
+            const cityFallback = cityOps.filter(o => o !== "NÃO ATRIBUÍDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃO COBRAR" && o !== "OUTROS");
+            if (cityFallback.length === 1) return cityFallback[0];
+            if (cityFallback.length > 1 && customerId) {
+                let hash = 0;
+                const strId = String(customerId);
+                for (let i = 0; i < strId.length; i++) hash = Math.imul(31, hash) + strId.charCodeAt(i) | 0;
+                return cityFallback[Math.abs(hash) % cityFallback.length];
+            }
+            if (cityFallback.length > 0) return cityFallback[0];
             return defaultOp;
         }
         
@@ -1241,22 +1242,11 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     }
 
     let idCCusto = c.costCenterId;
-    let city = "";
-    if (idCCusto) {
-      let ccName = "";
-      if (AppState.cachedCostCenters) {
-        const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
-        if (ccObj) ccName = ccObj.name || "";
-      }
-      if (ccName.includes("-")) {
-        city = ccName.split("-")[0].trim().toUpperCase();
-      } else {
-        city = ccName.trim().toUpperCase();
-      }
-      if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-        city = "ARAÇARIGUAMA";
-      }
-    }
+    const resolved = (typeof window.resolveCityRuleId === "function")
+      ? window.resolveCityRuleId(idCCusto)
+      : { city: "", ruleId: null };
+    let city = resolved.city || "";
+    const ruleId = resolved.ruleId;
 
     if (requiredType === "advogado") {
       let matchedAdv = null;
@@ -1277,8 +1267,7 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       if (matchedAdv) {
         c.assignedOperator = formatOperatorUserName(matchedAdv);
         c.appliedRule = "RÉGUA - JURÍDICO";
-      } else if (city) {
-        const ruleId = "CID_" + city.replace(/\s+/g, "_");
+      } else if (ruleId) {
         c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, "fallback");
         c.appliedRule = "RÉGUA (JURÍDICO SEM ADV) - " + city;
       } else {
@@ -1288,8 +1277,7 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       return;
     }
 
-    if (city) {
-      const ruleId = "CID_" + city.replace(/\s+/g, "_");
+    if (ruleId) {
       c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, requiredType);
       c.appliedRule = "RÉGUA (" + ruleSuffix + ") - " + city;
     } else if (requiredType === "apoio_juridico") {
@@ -1322,23 +1310,17 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
   
   // Regra Dinâmica por Cidade do Empreendimento (prioridade única agora)
   if (idCCusto) {
-    let ccName = "";
-    if (AppState.cachedCostCenters) {
-      const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
-      if (ccObj) ccName = ccObj.name || "";
-    }
-    let city = "";
-    if (ccName.includes('-')) {
-        city = ccName.split('-')[0].trim().toUpperCase();
-    }
-    
-    // Tratamento especial para Empreendimento 14201 (Terra do Araçari / Araçariguama)
-    if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI") || (sale && sale.unitId && String(sale.unitId).includes("14201"))) {
-       city = "ARAÇARIGUAMA";
+    const resolved = (typeof window.resolveCityRuleId === "function")
+      ? window.resolveCityRuleId(idCCusto)
+      : { city: "", ruleId: null };
+    let city = resolved.city || "";
+    const ruleId = resolved.ruleId;
+    if (sale && sale.unitId && String(sale.unitId).includes("14201")) {
+       city = "ARACARIGUAMA";
     }
     
-    if (city) {
-      const ruleId = "CID_" + city.replace(/\s+/g, '_');
+    if (ruleId || city) {
+      const useRuleId = ruleId || ("CID_" + city.replace(/\s+/g, '_'));
       const custId = client ? (client.id || client.customerId) : null;
       
       let isSubj = false;
@@ -1355,11 +1337,11 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
       }
       
       if (isSubj) {
-          const operator = getRuleOperatorByType(ruleId, "OUTROS", custId, "advogado");
+          const operator = getRuleOperatorByType(useRuleId, "OUTROS", custId, "advogado");
           return { operator: operator, rule: "REGRA CIDADE (SUB JUDICE) - " + city };
       }
       
-      const operator = getRuleOperator(ruleId, "OUTROS", custId);
+      const operator = getRuleOperator(useRuleId, "OUTROS", custId);
       return { operator: operator, rule: "REGRA CIDADE - " + city };
     }
   }
@@ -1738,6 +1720,11 @@ async function processSuccessfulLogin(loggedUser) {
     if (loginVideo) loginVideo.pause();
     renderUserSession();
     await initializeApplication();
+    setTimeout(() => {
+      if (typeof window.checkMonthlyBilletAlerts === "function") {
+        window.checkMonthlyBilletAlerts();
+      }
+    }, 2500);
   } catch (err) {
     const errorMsg = document.getElementById("login-error-msg");
     if (errorMsg) {
@@ -3092,7 +3079,7 @@ function getPrimaryCostCenter(id) {
 function getCostCenterName(id) {
     const rawId = getPrimaryCostCenter(id);
     if (!AppState.cachedCostCenters) return "C.C. " + rawId;
-    const cc = AppState.cachedCostCenters.find(c => String(c.id) === String(rawId));
+    const cc = AppState.cachedCostCenters.find(c => String(c.id) === String(rawId) || String(c.code) === String(rawId));
     if (cc && cc.name) return cc.name;
     return "C.C. " + rawId;
 }
@@ -3119,6 +3106,26 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
         return cityMatch;
     }
     return null;
+};
+
+window.findCachedCostCenter = function(idCCusto) {
+  const rawId = (typeof getPrimaryCostCenter === "function") ? getPrimaryCostCenter(idCCusto) : idCCusto;
+  const id = String(rawId == null ? "" : rawId).trim();
+  if (!id || id.indexOf("N/D") !== -1) return null;
+  const list = (window.AppState && AppState.cachedCostCenters) || [];
+  return list.find(cc => String(cc.id) === id || String(cc.code) === id) || null;
+};
+
+window.resolveCityRuleId = function(idCCusto, ccNameHint) {
+  const cc = typeof window.findCachedCostCenter === "function" ? window.findCachedCostCenter(idCCusto) : null;
+  const id = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(idCCusto) : idCCusto) || (cc && cc.id);
+  const name = ccNameHint || (cc && cc.name) || "";
+  let city = typeof window.extractCityFromCostCenter === "function"
+    ? window.extractCityFromCostCenter(id, name)
+    : "";
+  if (city) city = String(city).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  if (!city) return { city: "", ruleId: null };
+  return { city, ruleId: "CID_" + city.replace(/\s+/g, "_") };
 };
 
 function parseSafeDate(dStr) {
@@ -4035,24 +4042,12 @@ document.addEventListener("click", function(e) {
           let op = "NÃO ATRIBUÍDO";
           let rule = "REGRA PADRÃO";
           if (idCCusto) {
-            let ccName = "";
-            if (AppState.cachedCostCenters) {
-              const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
-              if (ccObj) ccName = ccObj.name || "";
-            }
-            let city = "";
-            if (ccName.includes('-')) {
-                city = ccName.split('-')[0].trim().toUpperCase();
-            } else {
-                city = ccName.trim().toUpperCase();
-            }
-            if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-               city = "ARAÇARIGUAMA";
-            }
-            if (city) {
-              const ruleId = "CID_" + city.replace(/\s+/g, '_');
-              op = getRuleOperator(ruleId, "NÃO ATRIBUÍDO", customerId);
-              rule = "REGRA CIDADE - " + city;
+            const resolved = (typeof window.resolveCityRuleId === "function")
+              ? window.resolveCityRuleId(idCCusto)
+              : { city: "", ruleId: null };
+            if (resolved.ruleId) {
+              op = getRuleOperator(resolved.ruleId, "NÃO ATRIBUÍDO", customerId);
+              rule = "REGRA CIDADE - " + resolved.city;
             }
           }
           consolidated[key].assignedOperator = op;
@@ -8617,7 +8612,7 @@ function formatCpfCnpj(val) {
                       statusHtml = `<span style="color:#64748b;font-size:0.72rem;">Consultando…</span>`;
                     } else if (inst.boletoBaixado) {
                       statusHtml = `<span style="background:var(--color-danger);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;white-space:nowrap;">Baixado (&gt;28 dias)</span>`;
-                      acoesHtml = `<button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 8px;border-radius:4px;background:var(--color-danger);border-color:var(--color-danger);white-space:nowrap;" onclick="reprocessBoleto(${JSON.stringify(String(boletoBillId))}, ${JSON.stringify(String(inst.installmentId))}, ${boletoCcArg}, 'simulacao')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar</button>`;
+                      acoesHtml = `<div class="sim-acoes"><button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 8px;border-radius:4px;background:var(--color-danger);border-color:var(--color-danger);" onclick="reprocessBoleto(${JSON.stringify(String(boletoBillId))}, ${JSON.stringify(String(inst.installmentId))}, ${boletoCcArg}, 'simulacao')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar</button></div>`;
                     } else if (inst.isActiveBoleto) {
                       const today0 = new Date(); today0.setHours(0,0,0,0);
                       const fb = inst.dtFebraban ? new Date(inst.dtFebraban) : null;
@@ -8629,8 +8624,8 @@ function formatCpfCnpj(val) {
                       } else {
                         statusHtml = `<span style="background:var(--color-primary);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;">A Vencer</span>`;
                       }
-                      acoesHtml = `<button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 6px;border-radius:4px;white-space:nowrap;" onclick="openBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>
-                        <button class="btn btn-outline btn-sm" style="font-size:0.72rem;padding:4px 6px;border-radius:4px;margin-left:4px;white-space:nowrap;" onclick="downloadBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)" title="Download"><i data-lucide="download" style="width:12px;height:12px;"></i></button>`;
+                      acoesHtml = `<div class="sim-acoes"><button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 8px;border-radius:4px;" onclick="openBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver</button>
+                        <button class="btn btn-outline btn-sm" style="font-size:0.72rem;padding:4px 8px;border-radius:4px;" onclick="downloadBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)" title="Download"><i data-lucide="download" style="width:12px;height:12px;"></i></button></div>`;
                     }
                   }
 
@@ -8638,18 +8633,18 @@ function formatCpfCnpj(val) {
                   const tr = document.createElement("tr");
                   tr.style.cssText = `opacity: ${inst.selected || inst.isActiveBoleto || inst.boletoBaixado ? "1" : "0.55"}; ${bgStyle} border-bottom: 1px solid #f1f5f9;`;
                   tr.innerHTML = `
-                     <td style="padding: 8px; text-align: center;">${chkHtml}</td>
-                     <td style="padding: 8px;">${inst.installmentNumber || inst.installmentId || "—"}</td>
-                     <td style="padding: 8px; font-weight: 500;">${dateLabel}</td>
-                     <td style="padding: 8px;">${vencBoleto}</td>
-                     <td style="padding: 8px;">${diasAtraso > 0 ? diasAtraso : "—"}</td>
-                     <td style="padding: 8px;">${kpiFmt(origVal)}</td>
-                     <td style="padding: 8px; color: var(--color-danger); font-weight: 700;">${kpiFmt(corrVal)}</td>
-                     <td style="padding: 8px;">${kpiFmt(multa)}</td>
-                     <td style="padding: 8px;">${kpiFmt(juros)}</td>
-                     <td style="padding: 8px; font-weight: 700; text-align: right; color: var(--color-primary);">${valorAtualizadoHtml}</td>
-                     <td style="padding: 8px;">${statusHtml}</td>
-                     <td style="padding: 8px; text-align: center; ${AppState.isSubjudiceMode ? "display:none;" : ""}">${acoesHtml}</td>
+                     <td style="text-align: center;">${chkHtml}</td>
+                     <td>${inst.installmentNumber || inst.installmentId || "—"}</td>
+                     <td style="font-weight: 500;">${dateLabel}</td>
+                     <td>${vencBoleto}</td>
+                     <td>${diasAtraso > 0 ? diasAtraso : "—"}</td>
+                     <td>${kpiFmt(origVal)}</td>
+                     <td style="color: var(--color-danger); font-weight: 700;">${kpiFmt(corrVal)}</td>
+                     <td>${kpiFmt(multa)}</td>
+                     <td>${kpiFmt(juros)}</td>
+                     <td style="font-weight: 700; text-align: right; color: var(--color-primary);">${valorAtualizadoHtml}</td>
+                     <td class="sim-col-status">${statusHtml}</td>
+                     <td class="sim-col-acoes" style="${AppState.isSubjudiceMode ? "display:none;" : ""}">${acoesHtml || "—"}</td>
                   `;
                   simTableBody.appendChild(tr);
                }
@@ -16393,29 +16388,16 @@ async function _loadZeroPaidTab_Impl() {
       let assignedOp = "NÃO ATRIBUÍDO";
       const idCCusto = (bill.costCentersId && bill.costCentersId.length > 0) ? (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId) : (bill.costCenterId || (bill.unitId ? bill.unitId.split('-')[1] : '20100'));
       if (idCCusto) {
-          let ccName = "";
-          if (AppState.cachedCostCenters) {
-              const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === String(idCCusto));
-              if (ccObj) ccName = ccObj.name || "";
-          }
-          let city = "";
-          if (ccName.includes('-')) {
-              city = ccName.split('-')[0].trim().toUpperCase();
-          } else {
-              city = ccName.trim().toUpperCase();
-          }
-          if (String(idCCusto) === "14201" || ccName.toUpperCase().includes("ARAÇARI")) {
-             city = "ARAÇARIGUAMA";
-          }
-          
-          if (city) {
-              const ruleId = "CID_" + city.replace(/\s+/g, '_');
-              let requiredType = "interno_absoluto"; // 0% Pago tem prioridade máxima
+          const resolved = (typeof window.resolveCityRuleId === "function")
+            ? window.resolveCityRuleId(idCCusto)
+            : { city: "", ruleId: null };
+          if (resolved.ruleId) {
+              let requiredType = "interno_absoluto";
               const isSubj = sale.subjudice === "S" || sale.subjudice === true;
-              if (isSubj) { 
-                  requiredType = "advogado"; 
+              if (isSubj) {
+                  requiredType = "advogado";
               }
-              assignedOp = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", bill.customerId, requiredType);
+              assignedOp = getRuleOperatorByType(resolved.ruleId, "NÃO ATRIBUÍDO", bill.customerId, requiredType);
           }
       }
 
@@ -29745,13 +29727,23 @@ window.toggleWhatsappAlert = async function() {
     const customerId = String(AppState.selectedCustomerId);
     if (!customerId || customerId === "null" || customerId === "undefined") return;
     
-    // Certificar de que está atualizado com o servidor antes de gravar
     await loadWhatsappAlerts();
     
     if (window.whatsappAlertsData.clients[customerId]) {
         delete window.whatsappAlertsData.clients[customerId];
     } else {
-        window.whatsappAlertsData.clients[customerId] = true;
+        const sale = (AppState.sales || []).find(s =>
+          String(s.id) === String(AppState.selectedSaleId)
+          || String(s.receivableBillId) === String(AppState.selectedSaleId)
+        ) || {};
+        const billId = sale.receivableBillId || AppState.selectedSaleId || null;
+        window.whatsappAlertsData.clients[customerId] = {
+            on: true,
+            saleId: AppState.selectedSaleId || sale.id || null,
+            receivableBillId: billId,
+            contractNumber: sale.contractNumber || sale.number || null,
+            at: new Date().toISOString()
+        };
     }
     
     updateWhatsappAlertButtonState();
@@ -29803,33 +29795,131 @@ function getBusinessDaysOfMonth(year, month) {
     return days;
 }
 
-window.checkMonthlyBilletAlerts = async function(isTest = false) {
-    // Check if the current logged in user has the flag enabled (or if it's admin for testing)
-    const currentUserStr = localStorage.getItem("crm_logged_user");
-    let isAdmin = false;
-    if (currentUserStr) {
-        try {
-            const currentUser = JSON.parse(currentUserStr);
-            if (currentUser.nivel === 'Administrador' || (currentUser.profile_name && currentUser.profile_name.toUpperCase().includes('ADMIN'))) {
-                isAdmin = true;
-            }
-            if (!isTest && !currentUser.resend_billet && !isAdmin) {
-                return; // User is not responsible for resending billets
-            }
-        } catch(e) {}
-    } else {
-        if (!isTest) return; // No user logged in
+window.userHasResendBilletFlag = function() {
+    const u = (window.AppState && AppState.currentUser) || null;
+    let logged = u;
+    if (!logged) {
+      try { logged = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { logged = null; }
     }
+    if (!logged) return { ok: false, isAdmin: false, user: null };
+    const profile = String(logged.profile_name || logged.nivel || logged.role || "").toUpperCase();
+    const isAdmin = profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
+      || String(logged.role || "").toUpperCase().includes("ADMIN")
+      || (logged.email && /israel@mouraleite\.com\.br|admin@mouraleite\.com\.br/i.test(logged.email));
+    let flag = !!logged.resend_billet;
+    if (!flag && logged.email) {
+      try {
+        const users = JSON.parse(localStorage.getItem("crm_users") || "[]") || [];
+        const match = users.find(x => String(x.email || "").toLowerCase() === String(logged.email).toLowerCase());
+        if (match && match.resend_billet) flag = true;
+      } catch (e) {}
+    }
+    return { ok: flag || isAdmin, isAdmin, user: logged };
+};
+
+window.pushWhatsappTitle = function(list, rec) {
+    if (!rec || !list) return;
+    const raw = rec.receivableBillId || rec.billId || rec.saleId || rec.id;
+    const id = String(raw || "").replace(/^B-/, "").split("-")[0].trim();
+    if (!id || id === "undefined" || id === "null") return;
+    if (list.some(x => String(x.id) === id)) return;
+    list.push({
+      id,
+      saleId: rec.saleId || rec.id || null,
+      contractNumber: rec.contractNumber || rec.number || null,
+      unit: rec.unitName || rec.units || rec.unit || null,
+      status: rec.status || rec.situation || ""
+    });
+};
+
+window.collectLocalWhatsappTitles = function(customerId) {
+    const id = String(customerId);
+    const titles = [];
+    const saved = window.whatsappAlertsData && window.whatsappAlertsData.clients
+      ? window.whatsappAlertsData.clients[id]
+      : null;
+    if (saved && typeof saved === "object") {
+      window.pushWhatsappTitle(titles, saved);
+    }
+    (window.rawClientList || []).forEach(c => {
+      if (String(c.customerId) !== id) return;
+      window.pushWhatsappTitle(titles, { saleId: c.saleId, receivableBillId: c.receivableBillId || c.saleId, billIds: c.billIds });
+      (c.billIds || []).forEach(b => window.pushWhatsappTitle(titles, { receivableBillId: b }));
+    });
+    (window.AppState && AppState.sales || []).forEach(s => {
+      if (String(s.customerId) !== id) return;
+      window.pushWhatsappTitle(titles, s);
+    });
+    (window.AppState && AppState.defaultersBills || []).forEach(b => {
+      if (String(b.customerId) !== id) return;
+      window.pushWhatsappTitle(titles, { receivableBillId: b.id || b.receivableBillId || b.saleId, saleId: b.saleId, unitName: b.units });
+    });
+    if (window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+      window.GlobalCustomerCache.data.forEach(c => {
+        if (String(c.id || c.customerId) !== id) return;
+        window.pushWhatsappTitle(titles, { saleId: c.saleId, receivableBillId: c.receivableBillId });
+        (c.sales || []).forEach(s => window.pushWhatsappTitle(titles, s));
+      });
+    }
+    const cust = window.AppState && AppState.customers && (AppState.customers[id] || AppState.customers[Number(id)]);
+    if (cust) {
+      (cust.sales || []).forEach(s => window.pushWhatsappTitle(titles, s));
+      (cust.receivableBills || []).forEach(rb => {
+        if (String(rb.documentId || rb.document || "CT").toUpperCase().indexOf("CT") === -1 && rb.documentId) return;
+        window.pushWhatsappTitle(titles, { receivableBillId: rb.receivableBillId || rb.id });
+      });
+    }
+    return titles;
+};
+
+window.fetchWhatsappTitlesFromSienge = async function(customerId) {
+    const titles = [];
+    const api = window.SiengeApiService;
+    if (!api) return titles;
+    try {
+      if (typeof api.getSales === "function") {
+        const sales = await api.getSales(customerId);
+        (sales || []).forEach(s => {
+          if (String(s.status || "").toLowerCase().includes("distrat")) return;
+          window.pushWhatsappTitle(titles, s);
+        });
+      }
+    } catch (e) {
+      console.warn("[WhatsApp alerta] getSales", customerId, e);
+    }
+    if (typeof api.getReceivableBills === "function") {
+      try {
+        const res = await api.getReceivableBills(customerId);
+        const rows = (res && (res.results || res.data)) || [];
+        rows.forEach(rb => {
+          const doc = String(rb.documentId || rb.documentType || rb.document || "CT").toUpperCase();
+          if (doc && doc !== "CT" && !doc.includes("CT")) return;
+          window.pushWhatsappTitle(titles, {
+            receivableBillId: rb.receivableBillId || rb.billReceivableId || rb.id,
+            contractNumber: rb.number || rb.documentNumber,
+            unitName: rb.units || rb.unitName
+          });
+        });
+      } catch (e) {
+        console.warn("[WhatsApp alerta] receivable-bills", customerId, e);
+      }
+    }
+    return titles;
+};
+
+window.checkMonthlyBilletAlerts = async function(isTest = false) {
+    const gate = window.userHasResendBilletFlag();
+    if (!isTest && !gate.ok) return;
 
     await loadWhatsappAlerts();
     
     const today = new Date();
     const year = today.getFullYear();
-    const month = today.getMonth() + 1; // 1-12
+    const month = today.getMonth() + 1;
     const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
     
-    if (!isTest && !isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
-        return; // Já feito este mês
+    if (!isTest && !gate.isAdmin && window.whatsappAlertsData.lastCompletedMonth === currentMonthStr) {
+        return;
     }
     
     const clientIds = Object.keys(window.whatsappAlertsData.clients || {});
@@ -29858,8 +29948,8 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     }
     const listEl = document.getElementById("whatsapp-alerts-list");
     if (!listEl) return;
-    
-    listEl.innerHTML = "";
+    listEl.innerHTML = `<div style="padding:16px;color:#64748b;font-size:0.9rem;">Localizando títulos no Sienge…</div>`;
+    if (modal) modal.style.display = "flex";
     
     let clientDataMap = {};
     let clientTitlesMap = {};
@@ -29943,7 +30033,6 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
     let checkedState = {};
     try { checkedState = JSON.parse(localStorage.getItem('whatsappAlertsIndividual_' + monthKey) || '{}'); } catch(e){}
     
-    // Define a função global se ainda não existir
     if (typeof window.toggleWhatsappIndividual === 'undefined') {
         window.toggleWhatsappIndividual = function(cid, el) {
             const mKey = window.currentMonthStr || new Date().toISOString().slice(0, 7);
@@ -29953,31 +30042,42 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
             localStorage.setItem('whatsappAlertsIndividual_' + mKey, JSON.stringify(st));
         };
     }
-    
-    clientIds.forEach(id => {
+
+    const cards = [];
+    for (const id of clientIds) {
             const data = clientDataMap[id] || {};
             const name = data.name || data.customerName || `Cliente #${id}`;
-            const email = data.email || "N/D";
-            const phone = data.phones && data.phones[0] ? data.phones[0].number : (data.phoneNumber || "N/D");
-            
-            // Tenta pegar o título direto do rawClientList (bTitle)
-            let rawC = window.rawClientList ? window.rawClientList.find(r => String(r.customerId) === String(id)) : null;
-            let finalTitles = clientTitlesMap[id] || [];
-            if (rawC && rawC.saleId && !finalTitles.includes(String(rawC.saleId))) {
-                finalTitles.push(String(rawC.saleId));
-            } else if (rawC && rawC.billIds && rawC.billIds.length > 0) {
-                rawC.billIds.forEach(bId => {
-                    if (!finalTitles.includes(String(bId))) finalTitles.push(String(bId));
-                });
-            }
-            
-            let titlesHtml = "";
-            if (finalTitles.length > 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Títulos associados:</strong> ${finalTitles.join(', ')}</div>`;
-            } else if (finalTitles.length === 1) {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> ${finalTitles[0]}</div>`;
+            const email = data.email || (data.emails && data.emails[0] && (data.emails[0].email || data.emails[0])) || "N/D";
+            const phone = data.phones && data.phones[0]
+              ? (data.phones[0].number || data.phones[0].phoneNumber)
+              : (data.phoneNumber || data.phone || "N/D");
+
+            let titleObjs = window.collectLocalWhatsappTitles(id);
+            if (!titleObjs.length) {
+              try {
+                const remote = await window.fetchWhatsappTitlesFromSienge(id);
+                titleObjs = remote;
+              } catch (e) {}
             } else {
-                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #475569; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> Não identificado</div>`;
+              try {
+                const remote = await window.fetchWhatsappTitlesFromSienge(id);
+                (remote || []).forEach(t => window.pushWhatsappTitle(titleObjs, t));
+              } catch (e) {}
+            }
+
+            let titlesHtml = "";
+            if (titleObjs.length) {
+                const parts = titleObjs.map(t => {
+                  const extra = t.contractNumber && String(t.contractNumber) !== String(t.id)
+                    ? ` (contrato ${t.contractNumber})`
+                    : "";
+                  const unit = t.unit ? ` · ${t.unit}` : "";
+                  return `${t.id}${extra}${unit}`;
+                });
+                const label = titleObjs.length > 1 ? "Títulos" : "Título";
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #105436; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>${label}:</strong> ${parts.join(" · ")}</div>`;
+            } else {
+                titlesHtml = `<div style="margin-top: 8px; font-size: 0.85rem; color: #b91c1c; padding-top: 6px; border-top: 1px dashed #e2e8f0;"><strong>Título:</strong> Não identificado (Sienge sem contrato CT para este cliente)</div>`;
             }
             
             const isChecked = checkedState[id] ? "checked" : "";
@@ -29999,8 +30099,10 @@ window.checkMonthlyBilletAlerts = async function(isTest = false) {
                     ${titlesHtml}
                 </div>
             `;
-            listEl.appendChild(card);
-        });
+            cards.push(card);
+    }
+    listEl.innerHTML = "";
+    cards.forEach(card => listEl.appendChild(card));
         
     if (modal) modal.style.display = "flex";
     if (window.lucide) lucide.createIcons();
