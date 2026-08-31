@@ -295,30 +295,80 @@ const EstoqueComercialApp = {
   },
 
   async init() {
+    this.state.loading = false;
+    this.setBusy(false);
     this.renderPills();
     if (this.state.inited && this.state.units.length) {
+      this.fillEnterprisesFromUnits();
       this.fillUnitSelect();
       this.updateMeta();
       this.renderTable();
       if (window.lucide) window.lucide.createIcons();
       return;
     }
-    await this.waitFirebase();
-    const fb = await this.loadFirebase();
-    const local = this.loadCache();
-    if (fb && fb.units.length) {
-      this.applyCache(fb);
-      this.state.firebaseOk = true;
-    } else if (local && local.units && local.units.length) {
-      this.applyCache(local);
-      if (this.fbReady()) await this.persistAll();
+    if (this._initPromise) return this._initPromise;
+    this._initPromise = this.loadFromCache();
+    try {
+      await this._initPromise;
+    } finally {
+      this._initPromise = null;
     }
-    await this.loadEnterprises();
+  },
+
+  fillEnterprisesFromUnits() {
+    const byId = {};
+    (this.state.units || []).forEach(u => {
+      const id = String(u.enterpriseId || "");
+      if (!id) return;
+      if (!byId[id]) byId[id] = { id, name: u.enterpriseName || "" };
+    });
+    const fromUnits = Object.values(byId).sort((a, b) => Number(a.id) - Number(b.id));
+    if (fromUnits.length) {
+      const have = new Set(this.state.enterprises.map(c => String(c.id)));
+      fromUnits.forEach(cc => {
+        if (!have.has(String(cc.id))) this.state.enterprises.push(cc);
+      });
+      this.state.enterprises.sort((a, b) => Number(a.id) - Number(b.id));
+    }
+    const sel = document.getElementById("est-filter-emp");
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">Todos os empreendimentos</option>';
+    this.state.enterprises.forEach(cc => {
+      const opt = document.createElement("option");
+      opt.value = String(cc.id);
+      opt.textContent = this.ccLabel(cc);
+      sel.appendChild(opt);
+    });
+    if (keep && this.state.enterprises.some(cc => String(cc.id) === keep)) sel.value = keep;
+  },
+
+  async loadFromCache() {
+    this.setProgress("Carregando estoque do Firebase…");
+    try {
+      await this.waitFirebase(8000);
+      const fb = await this.loadFirebase();
+      const local = this.loadCache();
+      if (fb && fb.units.length) {
+        this.applyCache(fb);
+        this.state.firebaseOk = true;
+      } else if (local && local.units && local.units.length) {
+        this.applyCache(local);
+      }
+    } catch (e) {
+      console.error("[Estoque] leitura cache", e);
+    }
+    this.fillEnterprisesFromUnits();
     this.fillUnitSelect();
     this.updateMeta();
-    if (this.state.units.length) this.renderTable();
+    this.renderTable();
+    this.setProgress("");
     if (window.lucide) window.lucide.createIcons();
     this.state.inited = true;
+    this.loadEnterprises().then(() => {
+      this.fillEnterprisesFromUnits();
+      this.fillUnitSelect();
+    }).catch(() => {});
   },
 
   async loadEnterprises() {
@@ -622,7 +672,7 @@ const EstoqueComercialApp = {
     const rows = this.selectedUnits();
     this.renderKpis(rows);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhuma unidade para os filtros atuais.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhuma unidade no estoque salvo. Se o Firebase já tem dados, atualize a página (Ctrl+F5).</td></tr>`;
       return;
     }
     const sorted = rows.slice().sort((a, b) => {
@@ -930,16 +980,25 @@ const EstoqueComercialApp = {
     await this.saveFirebaseCc(u.enterpriseId);
     this.setProgress("");
   },
-    if (this.state.loading) return;
-    if (!this.state.units.length) await this.init();
-    if (!this.state.units.length) {
-      alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
-      return;
+
+  async cruzarContratos() {
+    try {
+      if (this.state.loading) return;
+      if (!this.state.units.length) await this.init();
+      if (!this.state.units.length) {
+        alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
+        return;
+      }
+      await this.enrichContracts();
+    } catch (e) {
+      console.error("[Estoque] cruzar", e);
+      this.setBusy(false);
+      alert("Erro ao cruzar contratos: " + (e.message || e));
     }
-    await this.enrichContracts();
   },
 
   async consultar(forceRefresh) {
+    try {
     if (this.state.loading) return;
     if (!this.state.units.length) await this.init();
     if (!forceRefresh) {
@@ -1006,6 +1065,11 @@ const EstoqueComercialApp = {
       this.setBusy(false);
       this.state.stopSync = false;
       if (window.lucide) window.lucide.createIcons();
+    }
+    } catch (e) {
+      console.error("[Estoque] consultar", e);
+      this.setBusy(false);
+      alert("Erro na consulta: " + (e.message || e));
     }
   }
 };
