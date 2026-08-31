@@ -1593,14 +1593,14 @@ circle.donut-segment {
   box-shadow: 0 1px 0 rgba(16, 84, 54, 0.18);
 }
 
-.ml-emp-filter { position: relative; min-width: 240px; max-width: 480px; flex: 1; z-index: 80; overflow: visible; }
+.ml-emp-filter { position: relative; flex: 0 1 320px; width: 320px; max-width: 360px; min-width: 240px; z-index: 80; overflow: visible; }
 .ml-emp-filter.is-open { z-index: 220; }
 .ml-emp-filter--on-dark .ml-emp-filter-label { color: rgba(255,255,255,0.88); }
 .ml-emp-filter--on-dark .ml-emp-filter-btn { border-color: #cfe3d6; height: 32px; min-height: 32px; }
 .ml-emp-filter-label { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
 .ml-emp-filter-btn { width: 100%; min-height: 34px; border: 1px solid #334155; border-radius: 6px; background: #fff; display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; cursor: pointer; font-size: 0.85rem; font-weight: 700; color: #0f172a; text-align: left; gap: 8px; }
 .ml-emp-filter-btn span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ml-emp-filter-panel { display: none; position: absolute; left: 0; min-width: 100%; width: max(100%, 360px); top: calc(100% + 4px); z-index: 230; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15,23,42,0.14); overflow: hidden; }
+.ml-emp-filter-panel { display: none; position: absolute; left: 0; right: 0; width: 100%; max-width: 100%; min-width: 0; top: calc(100% + 4px); z-index: 230; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15,23,42,0.14); overflow: hidden; box-sizing: border-box; }
 .ml-emp-filter.is-open .ml-emp-filter-panel,
 .ml-emp-filter-panel.is-open { display: block; }
 .ml-emp-filter-search { padding: 10px 10px 6px; background: #fff; }

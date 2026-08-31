@@ -103,8 +103,8 @@ window.MlEmpresaFilter = {
             oninput="MlEmpresaFilter.setQuery(${JSON.stringify(id)}, this.value)">
         </div>
         <div class="ml-emp-filter-actions">
-          <button type="button" class="ml-emp-filter-all" onclick="event.stopPropagation();MlEmpresaFilter.selectAll(${JSON.stringify(id)})">Marcar Todos</button>
-          <button type="button" class="ml-emp-filter-none" onclick="event.stopPropagation();MlEmpresaFilter.selectNone(${JSON.stringify(id)})">Desmarcar Todos</button>
+          <button type="button" class="ml-emp-filter-all" onclick="event.preventDefault();event.stopPropagation();${opts.selectAllJs || `MlEmpresaFilter.selectAll(${JSON.stringify(id)})`}">Marcar Todos</button>
+          <button type="button" class="ml-emp-filter-none" onclick="event.preventDefault();event.stopPropagation();${opts.selectNoneJs || `MlEmpresaFilter.selectNone(${JSON.stringify(id)})`}">Desmarcar Todos</button>
         </div>
         <div class="ml-emp-filter-list" id="${this.esc(id)}-list">${this.listHtml(opts)}</div>
       </div>

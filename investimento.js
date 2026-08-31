@@ -131,6 +131,23 @@ const InvestimentoApp = {
     this.syncGeridasSelection();
     if (!window._invDropBound) {
       window._invDropBound = true;
+      document.addEventListener("click", (e) => {
+        const t = e.target;
+        if (!t || !t.closest) return;
+        const inEmp = t.closest("#inv-emp") || t.closest("#inv-emp-panel");
+        if (!inEmp) return;
+        if (t.closest(".ml-emp-filter-all")) {
+          e.preventDefault();
+          e.stopPropagation();
+          InvestimentoApp.selectAllGeridas();
+          return;
+        }
+        if (t.closest(".ml-emp-filter-none")) {
+          e.preventDefault();
+          e.stopPropagation();
+          InvestimentoApp.clearGeridas();
+        }
+      }, true);
       document.addEventListener("mousedown", (e) => {
         const t = e.target;
         if (t && t.closest && (
@@ -994,17 +1011,18 @@ const InvestimentoApp = {
     if (emp) emp.classList.toggle("is-open", !!this.companyDropOpen);
     if (panel) {
       if (this.companyDropOpen) {
-        const btn = emp && emp.querySelector(".ml-emp-filter-btn");
-        const r = btn ? btn.getBoundingClientRect() : { left: 24, bottom: 140, width: 320 };
-        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        if (emp && panel.parentElement !== emp) emp.appendChild(panel);
         panel.style.display = "block";
         panel.classList.add("is-open");
-        panel.style.position = "fixed";
-        panel.style.left = Math.max(8, r.left) + "px";
-        panel.style.top = (r.bottom + 4) + "px";
-        panel.style.width = Math.max(r.width, 360) + "px";
-        panel.style.zIndex = "5000";
-        panel.style.maxHeight = "min(420px, calc(100vh - " + (r.bottom + 16) + "px))";
+        panel.style.position = "absolute";
+        panel.style.left = "0";
+        panel.style.right = "0";
+        panel.style.top = "calc(100% + 4px)";
+        panel.style.width = "100%";
+        panel.style.maxWidth = "100%";
+        panel.style.minWidth = "0";
+        panel.style.zIndex = "230";
+        panel.style.maxHeight = "";
       } else {
         panel.style.display = "none";
         panel.classList.remove("is-open");
@@ -1106,6 +1124,22 @@ const InvestimentoApp = {
         this.toggleCompanyDrop(e);
       };
     }
+    const allBtn = document.querySelector("#inv-emp .ml-emp-filter-all");
+    const noneBtn = document.querySelector("#inv-emp .ml-emp-filter-none");
+    if (allBtn) {
+      allBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.selectAllGeridas();
+      };
+    }
+    if (noneBtn) {
+      noneBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.clearGeridas();
+      };
+    }
   },
 
   companyListHtml() {
@@ -1142,7 +1176,9 @@ const InvestimentoApp = {
         query: this.companyQuery,
         emptyMeansAll: false,
         countMode: true,
-        toggleJs: "InvestimentoApp.toggleCompanyDrop(event)"
+        toggleJs: "InvestimentoApp.toggleCompanyDrop(event)",
+        selectAllJs: "InvestimentoApp.selectAllGeridas()",
+        selectNoneJs: "InvestimentoApp.clearGeridas()"
       });
     }
     return `<div id="inv-emp">${this.companyListHtml()}</div>`;
