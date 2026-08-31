@@ -1138,17 +1138,17 @@ const EstoqueComercialApp = {
     const kpis = this.kpisFromInstallments(installments);
     const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
     const received = Number(kpis.kpiPago) || 0;
-    const quitado = aReceber <= 0.009;
+    const quitado = aReceber <= 0.009 && (received <= 0.009 || !u.contractValue || received >= Number(u.contractValue) * 0.8);
     const value = u.contractValue != null ? Number(u.contractValue) : (received + aReceber);
     return {
       ...u,
       receivableBillId: u.receivableBillId || bill.billReceivableId || bill.receivableBillId || null,
-      outstandingBalance: quitado ? 0 : aReceber,
-      receivedAmount: u.receivedLocked ? u.receivedAmount : received,
+      outstandingBalance: aReceber > 0.009 ? aReceber : (quitado ? 0 : u.outstandingBalance),
+      receivedAmount: u.receivedLocked && !quitado && aReceber <= 0.009 ? u.receivedAmount : received,
       receivedLocked: true,
       contractValue: value || u.contractValue,
-      quitado: u.quitado || quitado,
-      quitacaoDate: u.quitacaoDate || this.lastBaixaFromInstallments(installments) || this.isoDate(bill.payOffDate) || null,
+      quitado: aReceber > 0.009 ? false : (u.quitado || quitado),
+      quitacaoDate: aReceber > 0.009 ? null : (u.quitacaoDate || this.lastBaixaFromInstallments(installments) || null),
       statementDone: true,
       finAt: new Date().toISOString()
     };
@@ -1211,11 +1211,24 @@ const EstoqueComercialApp = {
     return map;
   },
 
+  extractFitsUnit(u, g) {
+    if (!u || !g) return false;
+    if (u.receivableBillId && String(g.billId) === String(u.receivableBillId).replace(/^B-/, "").split("-")[0]) {
+      if (!g.unitName || this.unitNameMatches(g.unitName, u.name)) return true;
+    }
+    const num = this.displayContract(u);
+    if (num && (this.docMatchesContract(g.document, num) || this.docMatchesContract(g.contractNumber, num) || this.docMatchesContract(g.billId, num))) {
+      return true;
+    }
+    if (this.unitNameMatches(g.unitName, u.name)) return true;
+    return false;
+  },
+
   pickExtractForUnit(u, byBill) {
     if (!u || !byBill) return null;
     if (u.receivableBillId) {
       const hit = byBill[String(u.receivableBillId)] || byBill[String(u.receivableBillId).replace(/^B-/, "").split("-")[0]];
-      if (hit) return hit;
+      if (hit && this.extractFitsUnit(u, hit)) return hit;
     }
     const num = this.displayContract(u);
     let byDoc = null;
@@ -1231,8 +1244,34 @@ const EstoqueComercialApp = {
   },
 
   applyExtractQuitado(u, g) {
-    if (!u || !g || g.hasOpen || g.remaining > 0.009) return u;
-    const received = u.receivedLocked ? u.receivedAmount : (g.paid || u.receivedAmount);
+    if (!u || !g) return u;
+    if (g.hasOpen || g.remaining > 0.009) {
+      const received = g.paid != null ? g.paid : u.receivedAmount;
+      return {
+        ...u,
+        receivableBillId: u.receivableBillId || g.billId,
+        outstandingBalance: g.remaining,
+        presentDebitBalance: g.remaining,
+        receivedAmount: received,
+        receivedLocked: true,
+        quitado: false,
+        quitacaoDate: null,
+        statementDone: true,
+        finAt: new Date().toISOString()
+      };
+    }
+    const paid = Number(g.paid) || 0;
+    const contract = Number(u.contractValue) || 0;
+    const lastBaixa = g.lastBaixa || null;
+    if (!lastBaixa && paid <= 0.009) return u;
+    if (contract > 1 && paid > 0.009 && paid < contract * 0.8) {
+      return {
+        ...u,
+        receivableBillId: u.receivableBillId || g.billId,
+        statementDone: false
+      };
+    }
+    const received = u.receivedLocked && u.quitado ? u.receivedAmount : (paid || u.receivedAmount);
     return {
       ...u,
       receivableBillId: u.receivableBillId || g.billId,
@@ -1240,7 +1279,7 @@ const EstoqueComercialApp = {
       receivedAmount: received,
       receivedLocked: true,
       quitado: true,
-      quitacaoDate: u.quitacaoDate || g.lastBaixa || null,
+      quitacaoDate: lastBaixa || u.quitacaoDate || null,
       statementDone: true,
       finAt: new Date().toISOString()
     };
@@ -1261,13 +1300,10 @@ const EstoqueComercialApp = {
       if (String(u.enterpriseId) !== String(ccId) || !this.isSoldUnit(u)) return u;
       const g = this.pickExtractForUnit(u, byBill);
       if (!g) return u;
-      if (u.quitado && !u.quitacaoDate && g.lastBaixa) {
-        marked += 1;
-        return { ...u, quitacaoDate: g.lastBaixa, receivableBillId: u.receivableBillId || g.billId };
-      }
       const next = this.applyExtractQuitado(u, g);
-      if (next.quitado && !u.quitado) marked += 1;
-      else if (next.quitacaoDate && next.quitacaoDate !== u.quitacaoDate) marked += 1;
+      if (next.quitado !== u.quitado || next.quitacaoDate !== u.quitacaoDate || next.outstandingBalance !== u.outstandingBalance) {
+        marked += 1;
+      }
       return next;
     });
     return marked;
@@ -1555,7 +1591,7 @@ const EstoqueComercialApp = {
         if (present != null) {
           u.presentDebitBalance = present;
           if (u.outstandingBalance == null) u.outstandingBalance = present;
-          if (present === 0) u.quitado = true;
+          if (present === 0 && u.statementDone) u.quitado = true;
         }
       } catch (e) {
         console.warn("[Estoque] saldo devedor presente", e);

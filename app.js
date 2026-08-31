@@ -1822,9 +1822,11 @@ function validateAndLoadCrmUser(user) {
 
 async function processSuccessfulLogin(loggedUser) {
   try {
+    window._crmLoginSync = true;
     if (window.syncGlobalConfigFromFirebase) {
        await window.syncGlobalConfigFromFirebase();
     }
+    window._crmLoginSync = false;
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
     window.updateOperatorTabsUI();
@@ -1870,6 +1872,8 @@ async function processSuccessfulLogin(loggedUser) {
       alert(err.message);
     }
     MouraAuth.logout();
+  } finally {
+    window._crmLoginSync = false;
   }
 }
 
@@ -29235,28 +29239,44 @@ window.mergeCityAssignmentRules = function(localStr, cloudStr) {
   let cloud = {};
   try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
   try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
-  const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
   const merged = {};
+  const cityBucket = {};
+  const addCity = function(key, rule) {
+    if (!rule) return;
+    const canon = typeof window.canonicalCityRuleId === "function" ? window.canonicalCityRuleId(key) : key;
+    if (!cityBucket[canon]) cityBucket[canon] = [];
+    cityBucket[canon].push(rule);
+  };
+  const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
   keys.forEach(key => {
     if (!String(key).startsWith("CID_")) {
       merged[key] = cloud[key] !== undefined ? cloud[key] : local[key];
       return;
     }
-    const l = local[key];
-    const c = cloud[key];
-    if (!l) { merged[key] = c; return; }
-    if (!c) { merged[key] = l; return; }
-    const lT = Number(l.opsUpdatedAt || 0);
-    const cT = Number(c.opsUpdatedAt || 0);
-    let pick = c;
-    if (lT > cT) pick = l;
-    else if (cT > lT) pick = c;
-    else if (l.manual && !c.manual) pick = l;
-    else if (c.manual && !l.manual) pick = c;
-    else if (window.cityOpsLooksForcedDefault(c.operator) && !window.cityOpsLooksForcedDefault(l.operator)) pick = l;
-    else if (window.cityOpsLooksForcedDefault(l.operator) && !window.cityOpsLooksForcedDefault(c.operator)) pick = c;
-    else pick = l.manual ? l : c;
-    merged[key] = { ...c, ...l, ...pick, operator: pick.operator };
+    if (local[key]) addCity(key, local[key]);
+    if (cloud[key] && cloud[key] !== local[key]) addCity(key, cloud[key]);
+  });
+  Object.keys(cityBucket).forEach(function(canon) {
+    const list = cityBucket[canon];
+    let pick = list[0];
+    list.forEach(function(r) {
+      const pT = Number((pick && pick.opsUpdatedAt) || 0);
+      const rT = Number((r && r.opsUpdatedAt) || 0);
+      if (rT > pT) pick = r;
+      else if (rT === pT && r && r.manual && !(pick && pick.manual)) pick = r;
+    });
+    const ops = typeof window.mergeCityOperatorValues === "function"
+      ? window.mergeCityOperatorValues.apply(null, list.map(function(r) { return r && r.operator; }))
+      : (pick && pick.operator);
+    const names = list.map(function(r) { return r && r.desc; }).filter(Boolean);
+    const pretty = typeof window.prettierCityLabel === "function"
+      ? window.prettierCityLabel(names)
+      : (pick && pick.desc);
+    merged[canon] = Object.assign({}, pick, {
+      id: canon,
+      desc: pretty || (pick && pick.desc) || canon.replace(/^CID_/, "").replace(/_/g, " "),
+      operator: (ops && ops.length) ? ops : (pick && pick.operator) || "OUTROS"
+    });
   });
   return JSON.stringify(merged);
 };
@@ -29317,14 +29337,14 @@ window.syncGlobalConfigFromFirebase = async function() {
                         if (merged !== localStorage.getItem(k)) {
                             _originalSetItem.call(localStorage, k, merged);
                             try { AppState.rules = JSON.parse(merged); } catch (e) {}
-                            changed = true;
                         } else {
                             try { AppState.rules = JSON.parse(localStorage.getItem(k) || "{}"); } catch (e) {}
                         }
                         if (typeof window.dedupeAccentCityRules === "function") {
                             window.dedupeAccentCityRules();
                         }
-                        if (localStorage.getItem(k) !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        const after = localStorage.getItem(k) || "";
+                        if (after !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                             setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                         }
                         return;
@@ -29354,9 +29374,16 @@ window.syncGlobalConfigFromFirebase = async function() {
                 }
             });
             
-            if (changed) {
-                console.log("[Firebase] Configurações alteradas recebidas da nuvem. Recarregando a página para aplicar...");
-                location.reload();
+            if (changed && !window._crmLoginSync) {
+                if (sessionStorage.getItem("crm_config_reloaded") === "1") {
+                    console.log("[Firebase] Configurações da nuvem aplicadas sem novo reload (evita loop de login).");
+                } else {
+                    sessionStorage.setItem("crm_config_reloaded", "1");
+                    console.log("[Firebase] Configurações alteradas recebidas da nuvem. Recarregando a página para aplicar...");
+                    location.reload();
+                }
+            } else if (changed) {
+                console.log("[Firebase] Configurações globais aplicadas no login, sem recarregar.");
             } else {
                 console.log("[Firebase] Configurações globais já estão atualizadas com a nuvem.");
             }
