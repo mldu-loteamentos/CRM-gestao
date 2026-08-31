@@ -719,6 +719,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
 };
 // Lógica das Abas do Cliente
 function switchCustomerTab(tabId) {
+  if (tabId === "tab-boletos") tabId = "tab-simulacao";
   if (tabId === 'tab-quitacao' && AppState.isCurrentContractPaid) {
     alert(AppState.currentPayoffMsg);
     return;
@@ -5755,13 +5756,13 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
 
   // --- Abas Inferiores ---
   const bottomTabsIds = [
-      'tab-contrato', 'tab-outros', 'tab-valor-quitacao', 'tab-simulacao-vencidas',
+      'tab-contrato', 'tab-outros', 'tab-valor-quitacao', 'tab-simulacao',
       'tab-ocorrencias', 'tab-boletos', 'tab-renegociacoes', 'tab-vizinhos',
       'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
   ];
   
   // Abas permitidas para o advogado: Contrato de Venda | Valor quitação | Simulação vencidas | Construção
-  const allowedAdvogadoTabs = ['tab-contrato', 'tab-valor-quitacao', 'tab-simulacao-vencidas', 'tab-construcao'];
+  const allowedAdvogadoTabs = ['tab-contrato', 'tab-valor-quitacao', 'tab-simulacao', 'tab-construcao'];
   
   bottomTabsIds.forEach(tabId => {
       const btn = document.querySelector(`button[data-target="${tabId}"]`);
@@ -5776,6 +5777,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
           btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : 'inline-block';
       }
   });
+  const boletosTabBtn = document.querySelector('button[data-target="tab-boletos"]');
+  if (boletosTabBtn) boletosTabBtn.style.display = 'none';
 
   // Botões do Rodapé de Abas
   const irBtn = document.getElementById('btn-informe-rendimentos');
@@ -8412,66 +8415,117 @@ function formatCpfCnpj(val) {
          if (!simInput.value) simInput.value = hojeIso;
          
          let vencidasSimulador = [];
+         const recentIds = (window._lastGeneratedBoletoInstIds || []).map(String);
+         const recentFresh = window._lastGeneratedBoletoAt && (Date.now() - window._lastGeneratedBoletoAt) < 15 * 60 * 1000;
+         const boletoBillId = sale.receivableBillId || sale.id || saleId;
+         const boletoCcArg = JSON.stringify(AppState.currentCostCenterId || sale.costCenterId || sale.enterpriseId || null);
          
-         // Utiliza as parcelas já processadas no AppState
          if (AppState.currentContractInstallments) {
             AppState.currentContractInstallments.forEach(inst => {
                const cb = inst.currentBalance || 0;
-               if (cb > 0 && inst.installmentSituation === 1 && inst.dueDate && inst.dueDate < hojeIso) {
-                  vencidasSimulador.push({
-                     ...inst,
-                     cb: cb,
-                     due: new Date(inst.dueDate + 'T12:00:00'),
-                     selected: true,   // â† começa marcada: inclui no cálculo imediatamente
-                     isActiveBoleto: false,
-                     isFetchingBoleto: true
-                  });
-               }
+               const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
+               if (isPaid || cb <= 0 || inst.installmentSituation !== 1 || !inst.dueDate) return;
+               const overdue = inst.dueDate < hojeIso;
+               const hasBoletoFlag = inst.generatedBillet === true || (recentFresh && recentIds.includes(String(inst.installmentId)));
+               if (!overdue && !hasBoletoFlag) return;
+               vencidasSimulador.push({
+                  ...inst,
+                  cb: cb,
+                  due: new Date(inst.dueDate + 'T12:00:00'),
+                  selected: !!overdue,
+                  isOverdue: !!overdue,
+                  generatedBillet: !!hasBoletoFlag,
+                  isActiveBoleto: false,
+                  isFetchingBoleto: !!hasBoletoFlag,
+                  originalValue: Number(inst.originalValue != null ? inst.originalValue : cb),
+                  correctedValue: Number(inst.correctedValue != null ? inst.correctedValue : (inst.balanceDue != null ? inst.balanceDue : cb))
+               });
             });
+            vencidasSimulador.sort((a, b) => a.due - b.due);
          }
 
-         // Async fetch Febraban dates to validate active tickets
-         vencidasSimulador.forEach(async (simInst) => {
-            if (simInst.isFetchingBoleto) {
-               try {
-                  const slip = await SiengeApiService.getPaymentSlipNotification(saleId, simInst.installmentId);
-                  if (slip && slip.results && slip.results.length > 0) {
-                     simInst.isActiveBoleto = true; // Confirmou que existe
-                     const barcode = slip.results[0].digitableLine || slip.results[0].digitableNumber || "";
-                     let dtFebraban = null;
-                     if (barcode) {
-                       const clean = barcode.replace(/\D/g, '');
-                       if (clean.length >= 47) {
-                         const factorStr = clean.substring(33, 37);
-                         const factor = parseInt(factorStr, 10);
-                         if (!isNaN(factor) && factor >= 1000) {
-                           let totalDays = factor;
-                           if (factor < 5000 && new Date().getFullYear() >= 2025) {
-                              totalDays += 9000;
-                           }
-                           dtFebraban = new Date(new Date('1997-10-07T12:00:00Z').getTime() + (totalDays * 24 * 60 * 60 * 1000));
-                         }
-                       }
-                     }
-                     if (dtFebraban) {
-                       simInst.dtFebraban = dtFebraban;
-                       const diffDaysFebraban = Math.round((new Date() - dtFebraban) / (1000 * 60 * 60 * 24));
-                       if (diffDaysFebraban > 28) {
-                          simInst.isActiveBoleto = false; // Vencido há mais de 28 dias do Febraban
-                       }
-                     }
-                  } else {
-                     simInst.isActiveBoleto = false;
+         const fetchSlipForSimInst = async (simInst) => {
+            if (!simInst.isFetchingBoleto && !simInst.generatedBillet) return;
+            simInst.isFetchingBoleto = true;
+            try {
+               const slip = await SiengeApiService.getPaymentSlipNotification(saleId, simInst.installmentId);
+               if (slip && slip.results && slip.results.length > 0) {
+                  simInst.isActiveBoleto = true;
+                  const barcode = slip.results[0].digitableLine || slip.results[0].digitableNumber || "";
+                  let dtFebraban = null;
+                  if (barcode) {
+                    const clean = barcode.replace(/\D/g, '');
+                    if (clean.length >= 47) {
+                      const factorStr = clean.substring(33, 37);
+                      const factor = parseInt(factorStr, 10);
+                      if (!isNaN(factor) && factor >= 1000) {
+                        let totalDays = factor;
+                        if (factor < 5000 && new Date().getFullYear() >= 2025) {
+                           totalDays += 9000;
+                        }
+                        dtFebraban = new Date(new Date('1997-10-07T12:00:00Z').getTime() + (totalDays * 24 * 60 * 60 * 1000));
+                      }
+                    }
                   }
-               } catch(e) {
+                  if (dtFebraban) {
+                    simInst.dtFebraban = dtFebraban;
+                    const diffDaysFebraban = Math.round((new Date() - dtFebraban) / (1000 * 60 * 60 * 24));
+                    if (diffDaysFebraban > 28) {
+                       simInst.isActiveBoleto = false;
+                       simInst.boletoBaixado = true;
+                    } else {
+                       simInst.boletoBaixado = false;
+                    }
+                  }
+                  const barcodeVal = (slip.results[0].digitableNumber || slip.results[0].digitableLine || "").replace(/\D/g, "");
+                  if (barcodeVal.length >= 47) {
+                    const valueCents = parseInt(barcodeVal.substring(37, 47), 10);
+                    if (!isNaN(valueCents) && valueCents > 0) simInst.slipValue = valueCents / 100;
+                  }
+               } else {
                   simInst.isActiveBoleto = false;
                }
-               simInst.isFetchingBoleto = false;
-               // Parcelas com boleto ativo ficam selecionadas mas destacadas visualmente
-               // Não desmarcamos: o operador pode decidir desmarcar se quiser
-               recalcularSimulador(); 
+            } catch(e) {
+               simInst.isActiveBoleto = false;
             }
-         });
+            simInst.isFetchingBoleto = false;
+            if (typeof recalcularSimulador === "function") recalcularSimulador();
+         };
+
+         window.refreshSimuladorAfterBoleto = function(instIds) {
+            const ids = (instIds || []).map(String);
+            vencidasSimulador.forEach((s) => {
+               if (!ids.length || ids.includes(String(s.installmentId))) {
+                  s.generatedBillet = true;
+                  s.isFetchingBoleto = true;
+                  s.isActiveBoleto = false;
+                  s.boletoBaixado = false;
+               }
+            });
+            ids.forEach((id) => {
+               if (vencidasSimulador.some(s => String(s.installmentId) === String(id))) return;
+               const src = (AppState.currentContractInstallments || []).find(i => String(i.installmentId) === String(id));
+               if (!src || !src.dueDate) return;
+               const cb = src.currentBalance || 0;
+               vencidasSimulador.push({
+                  ...src,
+                  cb,
+                  due: new Date(src.dueDate + "T12:00:00"),
+                  selected: false,
+                  isOverdue: src.dueDate < hojeIso,
+                  generatedBillet: true,
+                  isActiveBoleto: false,
+                  isFetchingBoleto: true,
+                  originalValue: Number(src.originalValue != null ? src.originalValue : cb),
+                  correctedValue: Number(src.correctedValue != null ? src.correctedValue : (src.balanceDue != null ? src.balanceDue : cb))
+               });
+            });
+            vencidasSimulador.sort((a, b) => a.due - b.due);
+            vencidasSimulador.forEach((s) => {
+               if (s.isFetchingBoleto) fetchSlipForSimInst(s);
+            });
+            if (typeof recalcularSimulador === "function") recalcularSimulador();
+         };
 
          const recalcularSimulador = () => {
             if (simInput.value < hojeIso) simInput.value = hojeIso;
@@ -8483,12 +8537,15 @@ function formatCpfCnpj(val) {
             let totalJuros = 0;
             
             if (simTableBody) simTableBody.innerHTML = "";
+            const emptyEl = document.getElementById("simulador-empty-msg");
             if (vencidasSimulador.length > 0) {
                if (simTableContainer) simTableContainer.style.display = "block";
                if (simFullContainer) simFullContainer.style.display = "flex";
+               if (emptyEl) emptyEl.style.display = "none";
             } else {
                if (simTableContainer) simTableContainer.style.display = "none";
-               if (simFullContainer) simFullContainer.style.display = "none";
+               if (simFullContainer) simFullContainer.style.display = "flex";
+               if (emptyEl) emptyEl.style.display = "block";
             }
 
             const simThMulta = document.getElementById("simulador-th-multa");
@@ -8532,47 +8589,72 @@ function formatCpfCnpj(val) {
                }
                
                if (simTableBody) {
-                  let chkHtml = '';
+                  let chkHtml = "";
                   let bgStyle = "background-color: transparent;";
-                  let dateLabel = inst.due.toLocaleDateString('pt-BR');
-                  
+                  const dateLabel = inst.due.toLocaleDateString("pt-BR");
+                  const origVal = inst.originalValue != null ? inst.originalValue : inst.cb;
+                  const corrVal = inst.slipValue != null ? inst.slipValue : (inst.correctedValue != null ? inst.correctedValue : inst.cb);
+
                   if (inst.isFetchingBoleto) {
                      chkHtml = `<div class="loading-spinner" style="width:14px; height:14px; border:2px solid var(--color-primary); border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite;"></div>`;
                      bgStyle = "background-color: rgba(0,0,0,0.02);";
-                  } else if (inst.isActiveBoleto) {
-                     chkHtml = `<input type="checkbox" class="sim-row-check" data-index="${index}" data-inst-id="${inst.installmentId}" data-has-active-boleto="true" ${inst.selected ? 'checked' : ''} style="cursor: pointer;">`;
-                     bgStyle = AppState.isSubjudiceMode ? "background-color: transparent;" : "background-color: #fff3cd;"; // yellow background
+                  } else if (inst.isActiveBoleto || inst.boletoBaixado) {
+                     chkHtml = `<input type="checkbox" class="sim-row-check" data-index="${index}" data-inst-id="${inst.installmentId}" data-has-active-boleto="true" ${inst.selected ? "checked" : ""} style="cursor: pointer;">`;
+                     bgStyle = AppState.isSubjudiceMode ? "background-color: transparent;" : (inst.boletoBaixado ? "background-color: #fee2e2;" : "background-color: #ecfdf5;");
                   } else {
-                     chkHtml = `<input type="checkbox" class="sim-row-check" data-index="${index}" data-inst-id="${inst.installmentId}" ${inst.selected ? 'checked' : ''} style="cursor: pointer;">`;
+                     chkHtml = `<input type="checkbox" class="sim-row-check" data-index="${index}" data-inst-id="${inst.installmentId}" ${inst.selected ? "checked" : ""} style="cursor: pointer;">`;
                   }
 
-                  let valorAtualizadoHtml = kpiFmt(inst.cb + multa + juros);
-                  let acoesHtml = '';
-                  if (inst.isActiveBoleto) {
-                      if (!AppState.isSubjudiceMode) {
-                        dateLabel += `<br><span style="font-size:0.7rem; color:#856404; font-weight:bold; white-space:nowrap;"><i data-lucide="alert-triangle" style="width: 10px; height: 10px; vertical-align: middle; margin-right: 2px;"></i>Parcela com boleto gerado</span>`;
-                        acoesHtml = `<button class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; white-space: nowrap;" onclick="openBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>`;
+                  let vencBoleto = "—";
+                  if (inst.isFetchingBoleto) vencBoleto = "Buscando…";
+                  else if (inst.dtFebraban) vencBoleto = inst.dtFebraban.toLocaleDateString("pt-BR");
+                  else if (inst.generatedBillet || inst.isActiveBoleto) vencBoleto = "N/D";
+
+                  let statusHtml = `<span style="color:#94a3b8;font-size:0.72rem;">Sem boleto</span>`;
+                  let acoesHtml = "";
+                  if (!AppState.isSubjudiceMode) {
+                    if (inst.isFetchingBoleto) {
+                      statusHtml = `<span style="color:#64748b;font-size:0.72rem;">Consultando…</span>`;
+                    } else if (inst.boletoBaixado) {
+                      statusHtml = `<span style="background:var(--color-danger);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;white-space:nowrap;">Baixado (&gt;28 dias)</span>`;
+                      acoesHtml = `<button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 8px;border-radius:4px;background:var(--color-danger);border-color:var(--color-danger);white-space:nowrap;" onclick="reprocessBoleto(${JSON.stringify(String(boletoBillId))}, ${JSON.stringify(String(inst.installmentId))}, ${boletoCcArg}, 'simulacao')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar</button>`;
+                    } else if (inst.isActiveBoleto) {
+                      const today0 = new Date(); today0.setHours(0,0,0,0);
+                      const fb = inst.dtFebraban ? new Date(inst.dtFebraban) : null;
+                      if (fb) fb.setHours(0,0,0,0);
+                      const diasBol = fb ? Math.floor((today0 - fb) / 86400000) : (diasAtraso > 0 ? diasAtraso : 0);
+                      if (diasBol > 0) {
+                        const diasVal = Math.max(0, 28 - diasBol);
+                        statusHtml = `<span style="color:#856404;background:#fff3cd;border:1px solid #ffeeba;padding:2px 6px;border-radius:4px;font-size:0.7rem;white-space:nowrap;">Vencido (válido por ${diasVal}d)</span>`;
+                      } else {
+                        statusHtml = `<span style="background:var(--color-primary);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;">A Vencer</span>`;
                       }
+                      acoesHtml = `<button class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:4px 6px;border-radius:4px;white-space:nowrap;" onclick="openBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>
+                        <button class="btn btn-outline btn-sm" style="font-size:0.72rem;padding:4px 6px;border-radius:4px;margin-left:4px;white-space:nowrap;" onclick="downloadBoletoPdf(${JSON.stringify(String(saleId))}, ${JSON.stringify(String(inst.installmentId))}, this)" title="Download"><i data-lucide="download" style="width:12px;height:12px;"></i></button>`;
+                    }
                   }
 
-                  const conditionType = inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || '-';
-                  
+                  const valorAtualizadoHtml = kpiFmt(inst.cb + multa + juros);
                   const tr = document.createElement("tr");
-                  tr.style.cssText = `opacity: ${inst.selected || inst.isActiveBoleto ? '1' : '0.5'}; ${bgStyle} border-bottom: 1px solid #f1f5f9; transition: background 0.2s;`;
+                  tr.style.cssText = `opacity: ${inst.selected || inst.isActiveBoleto || inst.boletoBaixado ? "1" : "0.55"}; ${bgStyle} border-bottom: 1px solid #f1f5f9;`;
                   tr.innerHTML = `
-                     <td style="padding: 10px; text-align: center;">${chkHtml}</td>
-                     <td style="padding: 10px; font-weight: 500;">${dateLabel}</td>
-                     <td style="padding: 10px;">${conditionType}</td>
-                     <td style="padding: 10px;">${diasAtraso > 0 ? diasAtraso : '-'}</td>
-                     <td style="padding: 10px;">${kpiFmt(inst.cb)}</td>
-                     <td style="padding: 10px;">${kpiFmt(multa)}</td>
-                     <td style="padding: 10px;">${kpiFmt(juros)}</td>
-                     <td style="padding: 10px; font-weight: 700; text-align: right; color: var(--color-primary);">${valorAtualizadoHtml}</td>
-                     <td style="padding: 10px; text-align: center; ${AppState.isSubjudiceMode ? 'display:none;' : ''}">${acoesHtml}</td>
+                     <td style="padding: 8px; text-align: center;">${chkHtml}</td>
+                     <td style="padding: 8px;">${inst.installmentNumber || inst.installmentId || "—"}</td>
+                     <td style="padding: 8px; font-weight: 500;">${dateLabel}</td>
+                     <td style="padding: 8px;">${vencBoleto}</td>
+                     <td style="padding: 8px;">${diasAtraso > 0 ? diasAtraso : "—"}</td>
+                     <td style="padding: 8px;">${kpiFmt(origVal)}</td>
+                     <td style="padding: 8px; color: var(--color-danger); font-weight: 700;">${kpiFmt(corrVal)}</td>
+                     <td style="padding: 8px;">${kpiFmt(multa)}</td>
+                     <td style="padding: 8px;">${kpiFmt(juros)}</td>
+                     <td style="padding: 8px; font-weight: 700; text-align: right; color: var(--color-primary);">${valorAtualizadoHtml}</td>
+                     <td style="padding: 8px;">${statusHtml}</td>
+                     <td style="padding: 8px; text-align: center; ${AppState.isSubjudiceMode ? "display:none;" : ""}">${acoesHtml}</td>
                   `;
                   simTableBody.appendChild(tr);
                }
             });
+            if (window.lucide) lucide.createIcons();
             
             if (simPrincipalEl) simPrincipalEl.textContent = kpiFmt(totalPrincipal);
             if (simJurosEl) simJurosEl.textContent = kpiFmt(totalMulta + totalJuros);
@@ -8583,7 +8665,7 @@ function formatCpfCnpj(val) {
             // Atualiza VF do Funil
             window.funnelCurrentVF = kpiAVencer + totalAtualizado;
             
-            const countVencidas = vencidasSimulador.length;
+            const countVencidas = vencidasSimulador.filter(i => i.isOverdue).length;
             const countAVencer = (dbContract && dbContract.installments) ? dbContract.installments.filter(i => new Date(i.dueDate) > new Date() && i.status !== 'Quitado' && i.currentBalance > 0).length : 0;
             
             // Popula a nova interface da aba Valor Quitação
@@ -8607,7 +8689,7 @@ function formatCpfCnpj(val) {
             if (barVf) barVf.textContent = kpiFmt(window.funnelCurrentVF);
             
             // KPI cards: valor = soma de TODAS as vencidas (independente de seleção)
-            const totalAtualizadoKPI = vencidasSimulador.reduce((acc, inst) => {
+            const totalAtualizadoKPI = vencidasSimulador.filter(i => i.isOverdue).reduce((acc, inst) => {
               const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
               const multaK = diasAtraso2 >= 1
                  ? (inst.cb * 0.02) * taxaMultiplier
@@ -8670,21 +8752,26 @@ function formatCpfCnpj(val) {
          
          const updateCheckAllState = () => {
             if (!simCheckAll) return;
-            const allChecked = vencidasSimulador.length > 0 && vencidasSimulador.every(i => i.selected);
-            simCheckAll.checked = allChecked;
+            const overdues = vencidasSimulador.filter(i => i.isOverdue);
+            simCheckAll.checked = overdues.length > 0 && overdues.every(i => i.selected);
          };
 
          if (simCheckAll) {
             simCheckAll.addEventListener('change', (e) => {
                const isChecked = e.target.checked;
-               vencidasSimulador.forEach(inst => inst.selected = isChecked);
+               vencidasSimulador.forEach(inst => {
+                 if (inst.isOverdue) inst.selected = isChecked;
+               });
                recalcularSimulador();
             });
          }
          
          if (simInput) simInput.addEventListener('change', recalcularSimulador);
          if (simTaxaSelect) simTaxaSelect.addEventListener('change', recalcularSimulador);
-         recalcularSimulador(); // calcula inicial
+         recalcularSimulador();
+         vencidasSimulador.forEach((simInst) => {
+            if (simInst.isFetchingBoleto) fetchSlipForSimInst(simInst);
+         });
       }
     }
     // === FIM NOVA LÓGICA ===
@@ -8874,7 +8961,6 @@ function formatCpfCnpj(val) {
   // Ocorrências e notificações
   renderCustomerOccurrences();
   renderSiengeNotifications(saleId);
-  loadCustomerBoletos(customerId, saleId);
   loadRenegotiationHistory(customerId, saleId);
   
   // Inicializar o simulador de parcelas
@@ -13599,18 +13685,18 @@ window.submitReprocessBoleto = async function() {
     window._lastGeneratedBoletoBillId = billId;
     window._lastGeneratedBoletoAt = Date.now();
 
-    if (typeof loadCustomerBoletos === "function") {
-      try { await loadCustomerBoletos(customerId, billId); } catch (e) { console.warn(e); }
+    if (typeof window.refreshSimuladorAfterBoleto === "function") {
+      try { window.refreshSimuladorAfterBoleto(instIds); } catch (e) { console.warn(e); }
     }
     if (typeof switchCustomerTab === "function") {
-      try { switchCustomerTab("tab-boletos"); } catch (e) {}
+      try { switchCustomerTab("tab-simulacao"); } catch (e) {}
     }
 
     const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 5 });
     if (opened) {
-      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V). A aba Boletos do Contrato foi atualizada.");
+      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V). Confira na Simulação de Vencidas.");
     } else {
-      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela aba Boletos do Contrato em alguns segundos.");
+      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela Simulação de Vencidas em alguns segundos.");
     }
 
   } catch (e) {

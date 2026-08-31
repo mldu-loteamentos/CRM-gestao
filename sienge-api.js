@@ -1480,6 +1480,19 @@ const SiengeApiService = {
   },
 
   // 14. Extrato por BillReceivableId
+  async getCustomerExtractHistoryByCompany(companyId) {
+    if (s_apiMode === "simulado") return { data: [] };
+    if (!companyId) return { data: [] };
+    try {
+      const endYear = new Date().getFullYear() + 24;
+      const endDueDate = `${endYear}-01-01`;
+      return await siengeFetchWithRetry(`/bulk-data/v1/customer-extract-history?startDueDate=1996-01-01&endDueDate=${endDueDate}&companyId=${companyId}&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=true&includeRevokedInstallments=true&includeRenegotiatedDischarge=false`);
+    } catch (e) {
+      console.error("[Sienge] Erro ao obter extrato histórico por empresa:", e);
+      throw e;
+    }
+  },
+
   async getCustomerExtractHistoryByBill(billReceivableId) {
     if (s_apiMode === "simulado") {
       return { data: [] }; // Mock if needed

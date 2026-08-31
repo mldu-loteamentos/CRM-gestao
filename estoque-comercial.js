@@ -547,6 +547,8 @@ const EstoqueComercialApp = {
     if (val != null && bal != null) return this.money(Math.max(0, val - bal));
     return "";
   },
+
+  displayContract(u) {
     if (!u) return "";
     if (u.contractNumber != null && String(u.contractNumber).trim() !== "") return String(u.contractNumber);
     if (u.receivableBillId && String(u.receivableBillId) !== String(u.contractId || "")) return String(u.receivableBillId);
@@ -684,7 +686,7 @@ const EstoqueComercialApp = {
     const rows = this.selectedUnits();
     this.renderKpis(rows);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#94a3b8;">Nenhuma unidade no estoque salvo. Se o Firebase já tem dados, atualize a página (Ctrl+F5).</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:#94a3b8;">Nenhuma unidade no estoque salvo. Se o Firebase já tem dados, atualize a página (Ctrl+F5).</td></tr>`;
       return;
     }
     const sorted = rows.slice().sort((a, b) => {
@@ -716,6 +718,9 @@ const EstoqueComercialApp = {
         <td style="text-align:right;white-space:nowrap;">${this.displayReceived(u) || "—"}</td>
         <td><span class="est-fin-chip ${finClass}">${this.esc(fin)}</span></td>
         <td style="text-align:right;white-space:nowrap;">${this.esc(saldo)}</td>
+        <td style="white-space:nowrap;">${fin === "Quitado" && u.quitacaoDate
+          ? this.esc(new Date(u.quitacaoDate + "T12:00:00").toLocaleDateString("pt-BR"))
+          : "—"}</td>
       </tr>`;
     }).join("");
   },
@@ -756,6 +761,7 @@ const EstoqueComercialApp = {
         receivedAmount: keep.receivedLocked ? keep.receivedAmount : (u.receivedAmount != null ? u.receivedAmount : keep.receivedAmount),
         receivedLocked: !!(keep.receivedLocked || u.receivedLocked),
         statementDone: !!(keep.statementDone || u.statementDone),
+        quitacaoDate: keep.quitacaoDate || u.quitacaoDate || null,
         finAt: u.finAt || keep.finAt,
         situation: u.situation || keep.situation,
         quitado: !!(keep.quitado || u.quitado),
@@ -808,6 +814,23 @@ const EstoqueComercialApp = {
     return Number.isNaN(n) ? null : n;
   },
 
+  isoDate(s) {
+    if (!s) return null;
+    const d = String(s).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  },
+
+  lastBaixaFromReceipts(receipts) {
+    let last = null;
+    (receipts || []).forEach(rec => {
+      const t = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || "").toLowerCase();
+      if (t.includes("distrato") || t.includes("cancel") || t === "3" || t === "7") return;
+      const d = this.isoDate(rec.date || rec.receiptDate || rec.paymentDate || rec.netReceiptDate);
+      if (d && (!last || d > last)) last = d;
+    });
+    return last;
+  },
+
   applyContractInfo(u, info) {
     if (!info) return u;
     if (u.quitado && u.receivedLocked) {
@@ -815,12 +838,15 @@ const EstoqueComercialApp = {
         ...u,
         contractNumber: u.contractNumber || info.contractNumber || null,
         receivableBillId: u.receivableBillId || info.receivableBillId,
-        customerId: u.customerId || info.customerId
+        customerId: u.customerId || info.customerId,
+        quitacaoDate: u.quitacaoDate || info.payOffDate || null
       };
     }
     const bal = info.outstandingBalance;
     const value = info.contractValue != null ? Number(info.contractValue) : (u.contractValue != null ? Number(u.contractValue) : null);
-    const quitado = bal === 0 && !String(info.situation || u.situation || "").toLowerCase().includes("distrat");
+    const sit = String(info.situation || u.situation || "").toLowerCase();
+    const distrato = sit.includes("distrat") || (info.active === false && !info.payOffDate);
+    const quitado = !distrato && (bal === 0 || !!info.payOffDate || sit.includes("quit"));
     let num = info.contractNumber ? String(info.contractNumber) : "";
     if (num && info.saleId != null && String(num) === String(info.saleId) && this.displayContract(u)) {
       num = this.displayContract(u);
@@ -847,6 +873,7 @@ const EstoqueComercialApp = {
       receivedLocked: locked,
       situation: info.situation || u.situation,
       quitado: u.quitado || !!quitado,
+      quitacaoDate: u.quitacaoDate || info.payOffDate || (quitado ? u.quitacaoDate : null) || null,
       finAt: new Date().toISOString()
     };
   },
@@ -863,7 +890,9 @@ const EstoqueComercialApp = {
       receivableBillId: c.receivableBillId || null,
       customerId: mainCust.id || c.customerId || null,
       customerDoc: String(doc || "").replace(/\D/g, ""),
-      situation: c.situation || c.status || ""
+      situation: c.situation || c.status || "",
+      active: c.active,
+      payOffDate: this.isoDate(c.payOffDate || c.payoffDate || c.quittanceDate || c.settlementDate || c.lastPaymentDate)
     };
   },
 
@@ -1053,9 +1082,140 @@ const EstoqueComercialApp = {
       receivedLocked: true,
       contractValue: value || u.contractValue,
       quitado: u.quitado || quitado,
+      quitacaoDate: u.quitacaoDate || this.lastBaixaFromInstallments(installments) || this.isoDate(bill.payOffDate) || null,
       statementDone: true,
       finAt: new Date().toISOString()
     };
+  },
+
+  lastBaixaFromInstallments(installments) {
+    let last = null;
+    (installments || []).forEach(inst => {
+      const d = this.lastBaixaFromReceipts(inst.receipts);
+      if (d && (!last || d > last)) last = d;
+      const instPay = this.isoDate(inst.payOffDate || inst.paymentDate);
+      if (instPay && (!last || instPay > last)) last = instPay;
+    });
+    return last;
+  },
+
+  companyIdOfCc(ccId) {
+    const cc = (this.state.enterprises || []).find(c => String(c.id) === String(ccId));
+    if (cc && cc.companyId != null && cc.companyId !== "") return String(cc.companyId);
+    const all = (window.AppState && AppState.cachedCostCenters) || [];
+    const found = all.find(x => String(x.id) === String(ccId));
+    return found && found.companyId != null ? String(found.companyId) : "";
+  },
+
+  extractRows(res) {
+    if (!res) return [];
+    if (Array.isArray(res.data)) return res.data;
+    if (Array.isArray(res.results)) return res.results;
+    return [];
+  },
+
+  groupExtractByBill(rows, ccId) {
+    const map = {};
+    (rows || []).forEach(row => {
+      if (!row) return;
+      const rowCc = String(row.costCenterId || row.costCenter || "");
+      if (ccId && rowCc && rowCc !== String(ccId)) return;
+      const bid = String(row.billReceivableId || row.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      if (!bid) return;
+      if (!map[bid]) {
+        map[bid] = { billId: bid, unitName: "", remaining: 0, lastBaixa: null, paid: 0, hasOpen: false, document: "" };
+      }
+      const g = map[bid];
+      g.unitName = row.unitName || row.unityName || g.unitName;
+      g.document = row.document || g.document;
+      const bal = Number(row.currentBalance != null ? row.currentBalance : (row.currentBalanceWithAddition || 0));
+      if (bal > 0.009) {
+        g.hasOpen = true;
+        g.remaining += bal;
+      }
+      const recLast = this.lastBaixaFromReceipts(row.receipts);
+      if (recLast && (!g.lastBaixa || recLast > g.lastBaixa)) g.lastBaixa = recLast;
+      const pay = this.isoDate(row.payOffDate || row.payoffDate);
+      if (pay && (!g.lastBaixa || pay > g.lastBaixa)) g.lastBaixa = pay;
+      (row.receipts || []).forEach(rec => {
+        const t = String(rec.type || rec.receiptType || "").toLowerCase();
+        if (t.includes("distrato") || t.includes("cancel")) return;
+        g.paid += Number(rec.netReceipt || rec.receiptValue || rec.value || 0);
+      });
+    });
+    return map;
+  },
+
+  pickExtractForUnit(u, byBill) {
+    if (!u || !byBill) return null;
+    if (u.receivableBillId) {
+      const hit = byBill[String(u.receivableBillId)] || byBill[String(u.receivableBillId).replace(/^B-/, "").split("-")[0]];
+      if (hit) return hit;
+    }
+    const num = this.displayContract(u);
+    const name = this.normName(u.name);
+    let found = null;
+    Object.values(byBill).forEach(g => {
+      if (num && String(g.document || "").replace(/\s/g, "").includes(String(num).replace(/\s/g, ""))) found = g;
+      else if (name && this.normName(g.unitName) === name) found = g;
+    });
+    return found;
+  },
+
+  applyExtractQuitado(u, g) {
+    if (!u || !g || g.hasOpen || g.remaining > 0.009) return u;
+    if (!g.lastBaixa && !(g.paid > 0.009) && !u.quitado) return u;
+    const received = u.receivedLocked ? u.receivedAmount : (g.paid || u.receivedAmount);
+    return {
+      ...u,
+      receivableBillId: u.receivableBillId || g.billId,
+      outstandingBalance: 0,
+      receivedAmount: received,
+      receivedLocked: true,
+      quitado: true,
+      quitacaoDate: u.quitacaoDate || g.lastBaixa || null,
+      statementDone: true,
+      finAt: new Date().toISOString()
+    };
+  },
+
+  async fetchExtractByCompany(companyId) {
+    if (window.SiengeApiService && typeof SiengeApiService.getCustomerExtractHistoryByCompany === "function") {
+      return SiengeApiService.getCustomerExtractHistoryByCompany(companyId);
+    }
+    const endYear = new Date().getFullYear() + 24;
+    const endDueDate = `${endYear}-01-01`;
+    return this.siengeFetch(`/bulk-data/v1/customer-extract-history?startDueDate=1996-01-01&endDueDate=${endDueDate}&companyId=${companyId}&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=true&includeRevokedInstallments=true&includeRenegotiatedDischarge=false`);
+  },
+
+  async enrichQuitadosFromExtract(ccId) {
+    const companyId = this.companyIdOfCc(ccId);
+    if (!companyId) {
+      this.setProgress(`Sem empresa do centro ${ccId} para o extrato bulk. Rode depois de carregar os centros de custo.`);
+      return 0;
+    }
+    this.setProgress(`Lendo extrato histórico da empresa ${companyId} (quitados de ${ccId})…`);
+    const res = await this.fetchExtractByCompany(companyId);
+    const rows = this.extractRows(res);
+    const byBill = this.groupExtractByBill(rows, ccId);
+    let marked = 0;
+    this.state.units = this.state.units.map(u => {
+      if (String(u.enterpriseId) !== String(ccId) || !this.isSoldUnit(u)) return u;
+      const g = this.pickExtractForUnit(u, byBill);
+      if (!g) return u;
+      if (u.quitado && !u.quitacaoDate && g.lastBaixa) {
+        marked += 1;
+        return { ...u, quitacaoDate: g.lastBaixa, receivableBillId: u.receivableBillId || g.billId };
+      }
+      const next = this.applyExtractQuitado(u, g);
+      if (next.quitado && !u.quitado) marked += 1;
+      else if (next.quitacaoDate && next.quitacaoDate !== u.quitacaoDate) marked += 1;
+      return next;
+    });
+    this.saveCache();
+    await this.saveFirebaseCc(ccId);
+    this.renderTable();
+    return marked;
   },
 
   statementQueue(empSel) {
@@ -1137,12 +1297,20 @@ const EstoqueComercialApp = {
       }
       this.state.stopSync = false;
       this.setBusy(true);
+      if (!this.state.enterprises.length) await this.loadEnterprises();
       await this.enrichContracts({ quiet: true, keepBusy: true });
       if (this.state.stopSync) return;
-      const n = await this.enrichStatements();
+      let fromExtract = 0;
+      try {
+        fromExtract = await this.enrichQuitadosFromExtract(empSel);
+      } catch (ex) {
+        console.warn("[Estoque] extrato bulk da empresa", ex);
+        this.setProgress("Extrato bulk falhou; quitados pelo saldo do contrato foram mantidos. " + (ex.message || ex));
+      }
       const qtdQ = this.state.units.filter(u => String(u.enterpriseId) === empSel && u.quitado).length;
       const qtdA = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.isSoldUnit(u) && !u.quitado).length;
-      this.setProgress(`Batimento de ${empSel}: ${qtdQ} quitados · ${qtdA} ativos · ${n} extrato(s) neste passe.`);
+      const comData = this.state.units.filter(u => String(u.enterpriseId) === empSel && u.quitado && u.quitacaoDate).length;
+      this.setProgress(`Batimento de ${empSel}: ${qtdQ} quitados (${comData} com data da última baixa) · ${qtdA} ativos · ${fromExtract} ajuste(s) no extrato.`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
