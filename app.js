@@ -862,18 +862,49 @@ function getCustomerFromState(id) {
 const INITIAL_RULES_CONFIG = {};
 
 window.checkUnassignedCities = function() {
-  let hasUnassigned = false;
-  if (AppState.rules) {
-    Object.keys(AppState.rules).forEach(key => {
-      if (key.startsWith("CID_") && AppState.rules[key].operator === "OUTROS") {
-        hasUnassigned = true;
-      }
-    });
-  }
   const alertEl = document.getElementById("dashboard-new-city-alert");
-  if (alertEl) {
-    alertEl.style.display = hasUnassigned ? "flex" : "none";
+  const show = function(on) {
+    if (alertEl) alertEl.style.display = on ? "flex" : "none";
+  };
+  const hasOps = function(rule) {
+    if (!rule) return false;
+    const ops = typeof window.mergeCityOperatorValues === "function"
+      ? window.mergeCityOperatorValues(rule.operator)
+      : [];
+    return ops.length > 0;
+  };
+  const bills = AppState.defaultersBills;
+  if (!Array.isArray(bills) || !bills.length) {
+    show(false);
+    return;
   }
+  const overdueFolds = new Set();
+  bills.forEach(function(bill) {
+    let ccId = bill.costCenterId;
+    if (bill.costCentersId && bill.costCentersId.length > 0) {
+      ccId = Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId;
+    }
+    if (!ccId && bill.unitId) ccId = String(bill.unitId).split("-")[1];
+    if (!ccId) return;
+    const ccIdStr = String(ccId);
+    const ccObj = (AppState.cachedCostCenters || []).find(function(cc) { return String(cc.id) === ccIdStr; });
+    let city = "";
+    if (ccObj && typeof window.extractCityFromCostCenter === "function") {
+      city = window.extractCityFromCostCenter(ccIdStr, ccObj.name) || "";
+    }
+    const fold = typeof window.foldCityKey === "function" ? window.foldCityKey(city) : String(city).toUpperCase();
+    if (fold) overdueFolds.add(fold);
+  });
+  let missing = false;
+  overdueFolds.forEach(function(fold) {
+    const ruleId = typeof window.canonicalCityRuleId === "function"
+      ? window.canonicalCityRuleId(fold)
+      : ("CID_" + fold);
+    const rule = (typeof window.lookupCityRule === "function" && window.lookupCityRule(ruleId))
+      || (AppState.rules && AppState.rules[ruleId]);
+    if (!hasOps(rule)) missing = true;
+  });
+  show(missing);
 };
 
 window.refreshCityRulesFromSienge = async function() {
@@ -4053,6 +4084,9 @@ document.addEventListener("click", function(e) {
 
           if (typeof renderRulesSettingsTable === 'function') {
             renderRulesSettingsTable();
+          }
+          if (typeof window.checkUnassignedCities === "function") {
+            window.checkUnassignedCities();
           }
         }
     } finally {
