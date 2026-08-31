@@ -104,7 +104,7 @@ const EstoqueComercialApp = {
       legalStock: u.legalStock || "",
       buildingStock: u.buildingStock || u.constructionStock || "",
       contractId: contractId,
-      contractNumber: contractNumber || (contractId != null ? String(contractId) : null),
+      contractNumber: contractNumber || null,
       receivableBillId: u.receivableBillId || null,
       customerId: u.customerId || null,
       outstandingBalance: bal == null || bal === "" ? null : Number(bal),
@@ -144,7 +144,7 @@ const EstoqueComercialApp = {
 
   applyCache(data) {
     if (!data) return;
-    this.state.units = Array.isArray(data.units) ? data.units : [];
+    this.state.units = (Array.isArray(data.units) ? data.units : []).map(u => this.sanitizeUnit(u));
     this.state.ccDone = Array.isArray(data.ccDone) ? data.ccDone.map(String) : [];
     this.state.complete = !!data.complete;
     this.state.contractsEnriched = !!data.contractsEnriched;
@@ -469,20 +469,51 @@ const EstoqueComercialApp = {
     return idx.byUnit.get(k) || 0;
   },
 
+  sanitizeUnit(u) {
+    if (!u) return u;
+    const next = { ...u };
+    if (next.contractId != null && String(next.contractNumber || "") === String(next.contractId)) {
+      next.contractNumber = null;
+    }
+    return next;
+  },
+
+  isFakeContractNumber(u) {
+    if (!u || !u.contractNumber) return true;
+    if (u.contractId != null && String(u.contractNumber) === String(u.contractId)) return true;
+    return false;
+  },
+
   displayContract(u) {
-    const n = u && (u.contractNumber || u.contractId);
-    return n ? String(n) : "";
+    if (!u) return "";
+    if (u.contractNumber && String(u.contractNumber) !== String(u.contractId || "")) return String(u.contractNumber);
+    if (u.receivableBillId && String(u.receivableBillId) !== String(u.contractId || "")) return String(u.receivableBillId);
+    return "";
+  },
+
+  unitBalance(u) {
+    if (!u) return null;
+    if (u.presentDebitBalance != null && !Number.isNaN(Number(u.presentDebitBalance))) return Number(u.presentDebitBalance);
+    if (u.outstandingBalance != null && !Number.isNaN(Number(u.outstandingBalance))) return Number(u.outstandingBalance);
+    return null;
+  },
+
+  finChipClass(fin) {
+    if (fin === "Ativo adimplente") return "est-fin-Adimplente";
+    if (fin === "Ativo inadimplente") return "est-fin-Inadimplente";
+    if (fin === "Em aberto" || fin === "A apurar") return "est-fin-apurar";
+    return "est-fin-" + fin;
   },
 
   financialStatus(u) {
     const code = String(u.commercialStock || "").toUpperCase();
-    const sold = this.SOLD_CODES.includes(code) || !!this.displayContract(u);
+    const sold = this.SOLD_CODES.includes(code) || !!u.contractId || !!this.displayContract(u);
     if (!sold) return "—";
     if (String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
-    const bal = u.outstandingBalance;
+    const bal = this.unitBalance(u);
     if (u.quitado || bal === 0) return "Quitado";
-    if (this.isInadimplente(u)) return "Inadimplente";
-    if (bal != null && Number(bal) > 0.009) return "Adimplente";
+    if (this.isInadimplente(u)) return "Ativo inadimplente";
+    if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
     return "A apurar";
   },
 
@@ -522,7 +553,7 @@ const EstoqueComercialApp = {
       if (seen.has(key)) return;
       seen.add(key);
       ativos += 1;
-      const bal = u.outstandingBalance;
+      const bal = this.unitBalance(u);
       if (bal == null || Number.isNaN(Number(bal))) semSaldo += 1;
       else aReceber += Number(bal) || 0;
       const ov = this.overdueValue(u);
@@ -591,7 +622,7 @@ const EstoqueComercialApp = {
     const rows = this.selectedUnits();
     this.renderKpis(rows);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#94a3b8;">Nenhuma unidade para os filtros atuais.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhuma unidade para os filtros atuais.</td></tr>`;
       return;
     }
     const sorted = rows.slice().sort((a, b) => {
@@ -605,17 +636,17 @@ const EstoqueComercialApp = {
       const empName = u.enterpriseName || this.empName(u.enterpriseId);
       const contrato = this.displayContract(u) || "—";
       const fin = this.financialStatus(u);
-      const finClass = fin === "Em aberto" || fin === "A apurar" ? "est-fin-apurar" : "est-fin-" + fin;
+      const finClass = this.finChipClass(fin);
+      const bal = this.unitBalance(u);
       const saldo = fin === "Quitado"
         ? this.money(0)
-        : (fin === "—" || fin === "Distratado" || fin === "A apurar"
+        : (fin === "—" || fin === "Distratado" || fin === "A apurar" || bal == null
           ? "—"
-          : (u.outstandingBalance == null ? "—" : this.money(u.outstandingBalance)));
+          : this.money(bal));
       return `<tr>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
         <td>${this.esc(u.enterpriseId)} / ${this.esc(empName)}</td>
         <td>${this.esc(u.name)}</td>
-        <td>${this.esc(status)}</td>
         <td>${this.esc(this.mapCode(this.LEGAL_MAP, u.legalStock))}</td>
         <td>${this.esc(area)}</td>
         <td>${this.esc(contrato)}</td>
@@ -652,16 +683,18 @@ const EstoqueComercialApp = {
     return (next || []).map(u => {
       const keep = old[String(u.id)];
       if (!keep) return u;
-      return {
+      return this.sanitizeUnit({
         ...u,
         contractNumber: u.contractNumber || keep.contractNumber,
         outstandingBalance: keep.quitado ? 0 : (u.outstandingBalance != null ? u.outstandingBalance : keep.outstandingBalance),
+        presentDebitBalance: u.presentDebitBalance != null ? u.presentDebitBalance : keep.presentDebitBalance,
         contractValue: u.contractValue || keep.contractValue,
         situation: u.situation || keep.situation,
         quitado: !!(keep.quitado || u.quitado),
         receivableBillId: u.receivableBillId || keep.receivableBillId,
-        customerId: u.customerId || keep.customerId
-      };
+        customerId: u.customerId || keep.customerId,
+        customerDoc: u.customerDoc || keep.customerDoc
+      });
     });
   },
 
@@ -684,9 +717,9 @@ const EstoqueComercialApp = {
 
   needsContract(u) {
     if (!u || u.quitado) return false;
-    if (u.outstandingBalance != null && !Number.isNaN(Number(u.outstandingBalance))) return false;
+    if (this.unitBalance(u) != null && this.displayContract(u)) return false;
     const code = String(u.commercialStock || "").toUpperCase();
-    return this.SOLD_CODES.includes(code) || !!u.contractId || !!u.contractNumber;
+    return this.SOLD_CODES.includes(code) || !!u.contractId;
   },
 
   needsContractEnrich() {
@@ -700,12 +733,18 @@ const EstoqueComercialApp = {
     if (!info) return u;
     const bal = info.outstandingBalance;
     const quitado = Number(bal) === 0 && !String(info.situation || "").toLowerCase().includes("distrat");
+    const num = info.contractNumber && String(info.contractNumber) !== String(info.saleId || u.contractId || "")
+      ? info.contractNumber
+      : (this.displayContract(u) || null);
     return {
       ...u,
-      contractNumber: info.contractNumber || u.contractNumber || (u.contractId != null ? String(u.contractId) : null),
+      contractId: info.saleId || u.contractId,
+      contractNumber: num,
       receivableBillId: info.receivableBillId || u.receivableBillId,
       customerId: info.customerId || u.customerId,
+      customerDoc: info.customerDoc || u.customerDoc,
       outstandingBalance: bal == null || bal === "" ? u.outstandingBalance : Number(bal),
+      presentDebitBalance: info.presentDebitBalance != null ? Number(info.presentDebitBalance) : u.presentDebitBalance,
       contractValue: info.contractValue || u.contractValue,
       situation: info.situation || u.situation,
       quitado: u.quitado || !!quitado
@@ -714,14 +753,16 @@ const EstoqueComercialApp = {
 
   contractInfoFromSale(c) {
     const mainCust = (c.salesContractCustomers || []).find(x => x.main === true) || (c.salesContractCustomers || [])[0] || {};
-    const num = c.number || c.contractNumber || c.documentNumber || (c.id != null ? String(c.id) : "");
+    const num = c.number || c.contractNumber || c.documentNumber || c.salesContractNumber || "";
+    const doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj || c.customerCpf || c.customerCnpj || "";
     return {
       saleId: c.id,
-      contractNumber: num,
+      contractNumber: num ? String(num) : "",
       outstandingBalance: c.outstandingBalance,
       contractValue: c.totalSellingValue || c.value || null,
       receivableBillId: c.receivableBillId || null,
       customerId: mainCust.id || c.customerId || null,
+      customerDoc: String(doc || "").replace(/\D/g, ""),
       situation: c.situation || c.status || ""
     };
   },
@@ -814,7 +855,81 @@ const EstoqueComercialApp = {
     }
   },
 
-  async cruzarContratos() {
+  parseDebit(res) {
+    if (!res || typeof res !== "object") return null;
+    const pick = (o) => {
+      if (!o || typeof o !== "object") return null;
+      const v = o.presentValue != null ? o.presentValue : (o.totalBalance != null ? o.totalBalance : o.currentBalance);
+      if (v == null || v === "") return null;
+      const n = Number(v);
+      return Number.isNaN(n) ? null : n;
+    };
+    const direct = pick(res);
+    if (direct != null) return direct;
+    if (Array.isArray(res.data) && res.data[0]) return pick(res.data[0]);
+    if (Array.isArray(res.results) && res.results[0]) return pick(res.results[0]);
+    return null;
+  },
+
+  customerDocFromContract(c) {
+    const mainCust = (c && c.salesContractCustomers || []).find(x => x.main === true) || (c && c.salesContractCustomers || [])[0] || {};
+    return String(mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj || c.customerCpf || c.customerCnpj || "").replace(/\D/g, "");
+  },
+
+  async fetchSaleForUnit(u) {
+    if (u.contractId) {
+      try {
+        const raw = await this.siengeFetch(`/sales-contracts/${u.contractId}`);
+        if (raw && (raw.id || raw.number || raw.contractNumber)) return raw;
+      } catch (e) {
+        console.warn("[Estoque] sales-contracts id", u.contractId, e);
+      }
+    }
+    try {
+      const res = await this.siengeFetch(`/sales-contracts?limit=50&offset=0&enterpriseId=${u.enterpriseId}&unitId=${u.id}`);
+      const list = (res && res.results) || [];
+      const named = list.find(c => {
+        const units = c.salesContractUnits || [];
+        return units.some(su => String(su.unitId || su.id) === String(u.id) || this.normName(su.name || su.unitName) === this.normName(u.name));
+      });
+      return named || list[0] || null;
+    } catch (e) {
+      console.warn("[Estoque] sales-contracts unit", u.id, e);
+      return null;
+    }
+  },
+
+  async hydrateUnitById(unitId) {
+    const idx = this.state.units.findIndex(x => String(x.id) === String(unitId));
+    if (idx < 0) return;
+    let u = this.sanitizeUnit(this.state.units[idx]);
+    this.setProgress(`Consultando contrato da unidade ${u.name}…`);
+    const raw = await this.fetchSaleForUnit(u);
+    if (raw) {
+      const info = this.contractInfoFromSale(raw);
+      info.customerDoc = info.customerDoc || this.customerDocFromContract(raw);
+      u = this.applyContractInfo(u, info);
+    }
+    const doc = u.customerDoc;
+    const rb = u.receivableBillId;
+    if (doc && window.SiengeApiService && typeof SiengeApiService.getTotalCurrentDebitBalance === "function") {
+      try {
+        const debit = await SiengeApiService.getTotalCurrentDebitBalance(doc, rb || "");
+        const present = this.parseDebit(debit);
+        if (present != null) {
+          u.presentDebitBalance = present;
+          if (u.outstandingBalance == null) u.outstandingBalance = present;
+          if (present === 0) u.quitado = true;
+        }
+      } catch (e) {
+        console.warn("[Estoque] saldo devedor presente", e);
+      }
+    }
+    this.state.units[idx] = u;
+    this.saveCache();
+    await this.saveFirebaseCc(u.enterpriseId);
+    this.setProgress("");
+  },
     if (this.state.loading) return;
     if (!this.state.units.length) await this.init();
     if (!this.state.units.length) {
@@ -829,8 +944,18 @@ const EstoqueComercialApp = {
     if (!this.state.units.length) await this.init();
     if (!forceRefresh) {
       this.fillUnitSelect();
+      const unitId = (document.getElementById("est-filter-unit") || {}).value;
+      if (unitId) {
+        this.setBusy(true);
+        try {
+          await this.hydrateUnitById(unitId);
+        } finally {
+          this.setBusy(false);
+        }
+      }
       this.updateMeta();
       this.renderTable();
+      if (window.lucide) window.lucide.createIcons();
       return;
     }
     if (!this.state.enterprises.length) await this.loadEnterprises();
