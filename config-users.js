@@ -147,6 +147,7 @@ const ConfigUsersApp = {
       name: "Comercial", icon: "store", key: "mod_comercial",
       submodules: [
         { name: "Dashboard", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard", permBase: "sub_com_geral_dashboard" }] },
+        { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
         { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] }
       ]
     },

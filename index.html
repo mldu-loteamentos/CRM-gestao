@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=625">
+  <link rel="stylesheet" href="style.css?v=626">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -984,6 +984,9 @@
             <li data-tab="dashboard-comercial" data-module="sub_com_geral_dashboard_acessar">
               <a onclick="switchTab('dashboard-comercial', 'Dashboard')">Dashboard</a>
             </li>
+            <li data-tab="estoque-comercial" data-module="sub_com_geral_estoque_acessar">
+              <a onclick="switchTab('estoque-comercial', 'Posição de estoque')">Posição de estoque</a>
+            </li>
             <li data-tab="anexos" data-module="sub_com_geral_assistente_anexos_acessar">
               <a onclick="switchTab('anexos', 'Assistente de Anexos')">Assistente de Anexos</a>
             </li>
@@ -1124,7 +1127,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.625 &nbsp;&middot;&nbsp; 31/08/2026
+            v1.0.626 &nbsp;&middot;&nbsp; 31/08/2026
           </span>
         </div>
       </div>
@@ -2065,6 +2068,72 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 </tr>
               </thead>
               <tbody id="comercial-table-body">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: POSIÇÃO DE ESTOQUE COMERCIAL -->
+      <section id="tab-estoque-comercial" class="tab-pane" style="display: none;">
+        <div class="est-stock-page">
+          <div class="search-filter-panel" style="margin-bottom: 16px;">
+            <h2 style="display: flex; align-items: center; gap: 8px; margin: 0 0 6px;">
+              <i data-lucide="package" style="width: 24px; color: var(--color-primary);"></i>
+              Posição de estoque
+            </h2>
+            <p style="font-size: 0.9rem; color: var(--color-text-muted); margin: 0 0 16px;">
+              Unidades dos empreendimentos (centros de custo 1xxxx, 2xxxx e 3xxxx) via Sienge. A primeira carga percorre todos os centros e fica em cache no dia; depois filtre sem nova API.
+            </p>
+            <div class="est-stock-filters">
+              <div class="est-stock-field" style="flex: 1.4; min-width: 240px;">
+                <label for="est-filter-emp">Empreendimento</label>
+                <select id="est-filter-emp" onchange="EstoqueComercialApp.onEmpChange()">
+                  <option value="">Todos os empreendimentos</option>
+                </select>
+              </div>
+              <div class="est-stock-field" style="flex: 1; min-width: 180px;">
+                <label for="est-filter-unit">Unidade</label>
+                <select id="est-filter-unit">
+                  <option value="">Todas as unidades</option>
+                </select>
+              </div>
+              <div class="est-stock-field" style="flex: 0 0 auto;">
+                <label>&nbsp;</label>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="est-btn-consultar" id="est-btn-consultar" onclick="EstoqueComercialApp.consultar()">
+                    <i data-lucide="search" style="width: 16px;"></i> Consultar
+                  </button>
+                  <button type="button" class="est-btn-atualizar" id="est-btn-atualizar" onclick="EstoqueComercialApp.consultar(true)" title="Buscar de novo no Sienge">
+                    <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="est-stock-pills" class="est-stock-pills"></div>
+            <div id="est-stock-progress" class="est-stock-progress" style="display: none;"></div>
+            <div id="est-stock-meta" class="est-stock-meta"></div>
+          </div>
+          <div id="est-stock-kpis" class="est-stock-kpis"></div>
+          <div class="est-stock-toolbar">
+            <input type="search" id="est-stock-search" placeholder="Pesquisar centro de custo ou unidade..." oninput="EstoqueComercialApp.renderTable()">
+          </div>
+          <div class="table-container crm-scroll-table est-stock-table-wrap">
+            <table class="custom-table est-stock-table">
+              <thead>
+                <tr>
+                  <th>Status unidade</th>
+                  <th>Cód. / Empreendimento</th>
+                  <th>Cód. / Unidade</th>
+                  <th>Estoque comercial</th>
+                  <th>Estoque legal</th>
+                  <th>Estoque obra</th>
+                  <th>Área</th>
+                  <th>Contrato</th>
+                </tr>
+              </thead>
+              <tbody id="est-stock-tbody">
+                <tr><td colspan="8" style="text-align:center;color:#94a3b8;">Clique em Consultar para carregar o estoque.</td></tr>
               </tbody>
             </table>
           </div>
@@ -6212,39 +6281,40 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=625"></script>
-  <script defer src="sienge-api.js?v=625"></script>
-  <script defer src="azure-auth.js?v=625"></script>
-  <script defer src="app.js?v=625"></script>
-  <script defer src="home-dashboard.js?v=625"></script>
-  <script defer src="anexos.js?v=625"></script>
-  <script defer src="contas-pagar.js?v=625"></script>
-  <script defer src="config-tags.js?v=625"></script>
-  <script defer src="config-users.js?v=625"></script>
-  <script defer src="construcao.js?v=625"></script>
-  <script defer src="empresas.js?v=625"></script>
-  <script defer src="relacionamento.js?v=625"></script>
+  <script defer src="data.js?v=626"></script>
+  <script defer src="sienge-api.js?v=626"></script>
+  <script defer src="azure-auth.js?v=626"></script>
+  <script defer src="app.js?v=626"></script>
+  <script defer src="home-dashboard.js?v=626"></script>
+  <script defer src="anexos.js?v=626"></script>
+  <script defer src="contas-pagar.js?v=626"></script>
+  <script defer src="config-tags.js?v=626"></script>
+  <script defer src="config-users.js?v=626"></script>
+  <script defer src="construcao.js?v=626"></script>
+  <script defer src="empresas.js?v=626"></script>
+  <script defer src="relacionamento.js?v=626"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="centros-custo.js?v=625"></script>
-  <script defer src="marketing.js?v=625"></script>
-  <script defer src="plano-financeiro.js?v=625"></script>
-  <script defer src="prestacao-contas.js?v=625"></script>
+  <script defer src="estoque-comercial.js?v=626"></script>
+  <script defer src="centros-custo.js?v=626"></script>
+  <script defer src="marketing.js?v=626"></script>
+  <script defer src="plano-financeiro.js?v=626"></script>
+  <script defer src="prestacao-contas.js?v=626"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=625"></script>
-  <script defer src="fluxo-caixa.js?v=625"></script>
-  <script defer src="investimento.js?v=625"></script>
-  <script defer src="parametrizacao-parceiro.js?v=625"></script>
-  <script defer src="societario.js?v=625"></script>
-  <script defer src="participacoes.js?v=625"></script>
-  <script defer src="fiscal.js?v=625"></script>
-  <script defer src="indexadores.js?v=625"></script>
-  <script defer src="verificar-construcao.js?v=625"></script>
-  <script src="repactuacoes.js?v=625"></script>
+  <script defer src="empresa-filter.js?v=626"></script>
+  <script defer src="fluxo-caixa.js?v=626"></script>
+  <script defer src="investimento.js?v=626"></script>
+  <script defer src="parametrizacao-parceiro.js?v=626"></script>
+  <script defer src="societario.js?v=626"></script>
+  <script defer src="participacoes.js?v=626"></script>
+  <script defer src="fiscal.js?v=626"></script>
+  <script defer src="indexadores.js?v=626"></script>
+  <script defer src="verificar-construcao.js?v=626"></script>
+  <script src="repactuacoes.js?v=626"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=625"></script>
+  <script defer src="dashboard-inadimplencia.js?v=626"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

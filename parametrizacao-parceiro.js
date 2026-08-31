@@ -106,8 +106,10 @@ const ParametrizacaoParceiroApp = {
       o.naAccounts = o.naAccounts || {};
       o.inAccounts = o.inAccounts || {};
     });
-    p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "", paymentDay: "", bankInfo: null };
+    p.creditor = p.creditor || { id: "", name: "", cpfCnpj: "", sharePct: "", paymentDay: "", paymentDayMode: "monthDay", paymentBusinessDays: "", bankInfo: null };
     p.creditor.paymentDay = p.creditor.paymentDay == null ? "" : p.creditor.paymentDay;
+    p.creditor.paymentDayMode = p.creditor.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
+    if (p.creditor.paymentBusinessDays == null) p.creditor.paymentBusinessDays = "";
     p.creditor.bankList = p.creditor.bankList || [];
     p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
     const first = p.obras[0];
@@ -671,7 +673,7 @@ const ParametrizacaoParceiroApp = {
   clearCreditor() {
     const p = this.current();
     if (!p) return;
-    p.creditor = { id: "", name: "", cpfCnpj: "", paymentDay: "", bankInfo: null, bankList: [] };
+    p.creditor = { id: "", name: "", cpfCnpj: "", paymentDay: "", paymentDayMode: "monthDay", paymentBusinessDays: "", bankInfo: null, bankList: [] };
     this.creditorQuery = "";
     this.creditorHits = [];
     this.persist();
@@ -687,12 +689,14 @@ const ParametrizacaoParceiroApp = {
   pickCreditor(id, name, doc) {
     const p = this.current();
     if (!p) return;
-    const day = p.creditor && p.creditor.paymentDay;
+    const prev = p.creditor || {};
     p.creditor = {
       id: String(id || ""),
       name: String(name || ""),
       cpfCnpj: String(doc || ""),
-      paymentDay: day == null ? "" : day,
+      paymentDay: prev.paymentDay == null ? "" : prev.paymentDay,
+      paymentDayMode: prev.paymentDayMode === "businessDays" ? "businessDays" : "monthDay",
+      paymentBusinessDays: prev.paymentBusinessDays == null ? "" : prev.paymentBusinessDays,
       bankInfo: null,
       bankList: [],
       bankLoaded: false
@@ -704,17 +708,140 @@ const ParametrizacaoParceiroApp = {
     this.ensureCreditorBank();
   },
 
+  PAY_MIN_DAY: 8,
+
+  easterGregorian(year) {
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return { year, month, day };
+  },
+
+  holidayKey(y, m, d) {
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  },
+
+  holidaySet(year) {
+    const set = new Set([
+      this.holidayKey(year, 1, 1),
+      this.holidayKey(year, 4, 21),
+      this.holidayKey(year, 5, 1),
+      this.holidayKey(year, 9, 7),
+      this.holidayKey(year, 10, 12),
+      this.holidayKey(year, 11, 2),
+      this.holidayKey(year, 11, 15),
+      this.holidayKey(year, 11, 20),
+      this.holidayKey(year, 12, 25)
+    ]);
+    const easter = this.easterGregorian(year);
+    const add = (delta) => {
+      const utc = Date.UTC(easter.year, easter.month - 1, easter.day + delta);
+      const dt = new Date(utc);
+      return this.holidayKey(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+    };
+    set.add(add(-48));
+    set.add(add(-47));
+    set.add(add(-2));
+    set.add(add(60));
+    return set;
+  },
+
+  isBusinessDayLocal(date) {
+    const wd = date.getDay();
+    if (wd === 0 || wd === 6) return false;
+    const y = date.getFullYear();
+    const key = this.holidayKey(y, date.getMonth() + 1, date.getDate());
+    return !this.holidaySet(y).has(key) && !this.holidaySet(y - 1).has(key);
+  },
+
+  monthClosingDate(ref) {
+    const d = ref ? new Date(ref) : new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 0);
+  },
+
+  addBusinessDaysAfter(startDate, n) {
+    const count = Number(n) || 0;
+    const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    if (count <= 0) return d;
+    let added = 0;
+    let guard = 0;
+    while (added < count && guard < 400) {
+      d.setDate(d.getDate() + 1);
+      if (this.isBusinessDayLocal(d)) added++;
+      guard++;
+    }
+    return d;
+  },
+
+  previewBusinessPay(n) {
+    const close = this.monthClosingDate();
+    const due = this.addBusinessDaysAfter(close, n);
+    return { close, due, day: due.getDate() };
+  },
+
+  fmtDateBR(d) {
+    const pad = x => String(x).padStart(2, "0");
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  },
+
+  updatePaymentDayMode(mode) {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = p.creditor || {};
+    p.creditor.paymentDayMode = mode === "businessDays" ? "businessDays" : "monthDay";
+    this.persist();
+    this.render();
+  },
+
   updatePaymentDay(value) {
     const p = this.current();
     if (!p) return;
     p.creditor = p.creditor || {};
     const n = parseInt(String(value).trim(), 10);
-    if (!Number.isFinite(n) || n < 1 || n > 31) {
+    if (!Number.isFinite(n)) {
       p.creditor.paymentDay = "";
+    } else if (n < this.PAY_MIN_DAY) {
+      p.creditor.paymentDay = this.PAY_MIN_DAY;
+    } else if (n > 31) {
+      p.creditor.paymentDay = 31;
     } else {
       p.creditor.paymentDay = n;
     }
     this.persist();
+    this.render();
+  },
+
+  updatePaymentBusinessDays(value) {
+    const p = this.current();
+    if (!p) return;
+    p.creditor = p.creditor || {};
+    const n = parseInt(String(value).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) {
+      p.creditor.paymentBusinessDays = "";
+      this.persist();
+      this.render();
+      return;
+    }
+    const prev = this.previewBusinessPay(n);
+    p.creditor.paymentBusinessDays = n;
+    if (prev.day < this.PAY_MIN_DAY) {
+      p.creditor.paymentDayHint = `Cairia no dia ${prev.day} (${this.fmtDateBR(prev.due)}). O mínimo é dia ${this.PAY_MIN_DAY}. Aumente os dias úteis.`;
+    } else {
+      p.creditor.paymentDayHint = "";
+    }
+    this.persist();
+    this.render();
   },
 
   isDefaultBank(b) {
@@ -1258,6 +1385,21 @@ const ParametrizacaoParceiroApp = {
     const banks = cred.bankList || [];
     const bank = cred.bankInfo || null;
     const day = cred.paymentDay == null ? "" : cred.paymentDay;
+    const mode = cred.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
+    const biz = cred.paymentBusinessDays == null ? "" : cred.paymentBusinessDays;
+    const bizN = parseInt(String(biz), 10);
+    const bizPrev = Number.isFinite(bizN) && bizN >= 1 ? this.previewBusinessPay(bizN) : null;
+    const bizOk = bizPrev && bizPrev.day >= this.PAY_MIN_DAY;
+    const bizHint = !bizPrev
+      ? "Contados a partir do último dia do mês de fechamento, pulando sábados, domingos e feriados."
+      : (bizOk
+        ? `Com fechamento em ${this.fmtDateBR(bizPrev.close)}, o título cai em ${this.fmtDateBR(bizPrev.due)} (dia ${bizPrev.day}).`
+        : `Cairia no dia ${bizPrev.day} (${this.fmtDateBR(bizPrev.due)}). O mínimo é dia ${this.PAY_MIN_DAY}. Aumente os dias úteis.`);
+    const modeBtn = (id, label) => {
+      const on = mode === id;
+      return `<button type="button" onclick="ParametrizacaoParceiroApp.updatePaymentDayMode('${id}')"
+        style="border:1px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#e8f5ee" : "#fff"};color:${on ? "#105436" : "#334155"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.78rem;font-weight:700;">${label}</button>`;
+    };
     const bankRow = (b) => {
       const on = bank && String(b.id) === String(bank.id);
       const acc = `${b.accountNumber || ""}${b.checkDigit ? "-" + b.checkDigit : ""}`;
@@ -1284,12 +1426,28 @@ const ParametrizacaoParceiroApp = {
             </div>
             <button type="button" onclick="ParametrizacaoParceiroApp.clearCreditor()" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;">Trocar</button>
           </div>
-          <label style="display:flex;flex-direction:column;gap:4px;margin-top:14px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia do pagamento
-            <input type="number" min="1" max="31" placeholder="1 a 31" value="${this.esc(day)}"
-              onchange="ParametrizacaoParceiroApp.updatePaymentDay(this.value)"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-            <span style="font-weight:500;color:#94a3b8;">Dia do mês em que o título a pagar será gerado.</span>
-          </label>
+          <div style="margin-top:14px;">
+            <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+              ${modeBtn("monthDay", "Dia do mês")}
+              ${modeBtn("businessDays", "Dias úteis após o fechamento")}
+            </div>
+            ${mode === "monthDay" ? `
+              <label style="display:flex;flex-direction:column;gap:4px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia (mínimo ${this.PAY_MIN_DAY})
+                <input type="number" min="${this.PAY_MIN_DAY}" max="31" placeholder="${this.PAY_MIN_DAY} a 31" value="${this.esc(day)}"
+                  onchange="ParametrizacaoParceiroApp.updatePaymentDay(this.value)"
+                  style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+                <span style="font-weight:500;color:#94a3b8;">Dia do mês em que o título a pagar será gerado. Sempre a partir do dia ${this.PAY_MIN_DAY}.</span>
+              </label>
+            ` : `
+              <label style="display:flex;flex-direction:column;gap:4px;max-width:280px;font-size:0.75rem;font-weight:700;color:#475569;">Dias úteis após o fechamento
+                <input type="number" min="1" max="31" placeholder="Ex.: 6" value="${this.esc(biz)}"
+                  onchange="ParametrizacaoParceiroApp.updatePaymentBusinessDays(this.value)"
+                  style="height:36px;border:1px solid ${bizPrev && !bizOk ? "#fca5a5" : "#e2e8f0"};border-radius:6px;padding:0 10px;">
+                <span style="font-weight:500;color:${bizPrev && !bizOk ? "#b91c1c" : "#94a3b8"};">${this.esc(bizHint)}</span>
+              </label>
+            `}
+          </div>
           <div style="margin-top:16px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
               <h4 style="margin:0;font-size:0.85rem;color:#0f172a;">Dados bancários do credor</h4>

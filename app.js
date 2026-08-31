@@ -1432,6 +1432,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   const titleMap = {
     dashboard: "Fila de Cobrança",
     "dashboard-comercial": "Dashboard Comercial",
+    "estoque-comercial": "Posição de estoque",
     agenda: "Agenda do Operador",
     zeropaid: "Clientes 0% Pago (Sem Receita)",
     wesend: "Notificações",
@@ -1472,6 +1473,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   const iconMap = {
     dashboard: "list-todo",
     "dashboard-comercial": "bar-chart-2",
+    "estoque-comercial": "package",
     agenda: "calendar",
     zeropaid: "percent",
     wesend: "mail",
@@ -1917,6 +1919,13 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_fiscal_geral_csll_acessar === true
       || perms.sub_fiscal_geral_csll_visualizar === true
       || perms.sub_fiscal_geral_csll_editar === true;
+  }
+  if (modKey === "sub_com_geral_estoque_acessar") {
+    return perms.mod_comercial === true
+      || perms.sub_com_geral_dashboard_acessar === true
+      || perms.sub_com_geral_assistente_anexos_acessar === true
+      || perms.sub_com_dash === true
+      || perms.sub_com_anexos === true;
   }
   if (modKey === "sub_fin_cr_configuracoes_acessar") {
     return ["configuracoes", "regras_cobranca", "regras_negociacao"].some(id =>
