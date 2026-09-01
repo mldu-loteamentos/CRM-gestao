@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=647">
+  <link rel="stylesheet" href="style.css?v=652">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1204,7 +1204,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.647 &nbsp;&middot;&nbsp; 01/09/2026
+            v1.0.652 &nbsp;&middot;&nbsp; 01/09/2026
           </span>
         </div>
       </div>
@@ -1524,9 +1524,10 @@
                     <span class="doc-fmt-hint">Selecione o trecho e clique em Negrito, ou use Ctrl+B</span>
                   </div>
                   <textarea class="form-control" id="doc-reneg-clauses" rows="30" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">Pelo presente instrumento particular e na melhor forma de direito, de um lado:
-{{CREDOR_NOME}}, brasileiro, administrador de empresa, portador da Cédula de Identidade RG n.º {{CREDOR_RG}} SSP-SP, inscrito no CPF-MF sob o n.º {{CREDOR_CPF}}, casado no regime de comunhão parcial de bens na vigência da Lei n.º 6.515/77, com {{CREDOR_ESPOSA_NOME}}, brasileira, do lar, portadora da Cédula de Identidade RG n.º {{CREDOR_ESPOSA_RG}} SSP-SP, inscrita no CPF-MF sob o n.º {{CREDOR_ESPOSA_CPF}}, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado, administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP. De ora em diante chamados simplesmente de CONFITENTES CREDORES, e de outro lado:
+{{PREAMBULO}}
+De ora em diante chamados simplesmente de CONFITENTES CREDORES, e de outro lado:
 
-{{NOME_CLIENTE}}, {{NACIONALIDADE_CLIENTE}}, {{PROFISSAO_CLIENTE}}, portador(a) da Cédula de Identidade RG Nº {{RG_CLIENTE}}, inscrito(a) no CPF-MF sob o Nº {{CPF_CNPJ}}, casado(a) - regime comunhão parcial de bens, residente(s) e domiciliado(s) na {{ENDERECO_CLIENTE}}, no município de {{CIDADE_CLIENTE}}; neste ato denominados CONFITENTE DEVEDORES, firmam o presente termo nas seguintes condições:
+{{NOME_CLIENTE}}, {{NACIONALIDADE_CLIENTE}}, {{PROFISSAO_CLIENTE}}, portador(a) da Cédula de Identidade RG Nº {{RG_CLIENTE}}, inscrito(a) no CPF-MF sob o Nº {{CPF_CNPJ}}, {{ESTADO_CIVIL}}, residente(s) e domiciliado(s) na {{ENDERECO_CLIENTE}}, no município de {{CIDADE_CLIENTE}}; neste ato denominados CONFITENTE DEVEDORES, firmam o presente termo nas seguintes condições:
 
 1ª- Os CONFITENTE DEVEDORES reconhecem e confessam a inadimplência no pagamento das parcelas vencidas a partir de {{MES_ANO_INADIMPLENCIA}} do compromisso de compra e venda realizada com os CONFITENTES CREDORES, do Lote-Quadra {{QUADRA}}-{{LOTE}} do loteamento denominado {{EMPREENDIMENTO}}, na cidade de {{CIDADE_LOTEAMENTO}}, firmado aos {{DATA_CONTRATO_ORIGINAL}}.
 
@@ -1934,6 +1935,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
 
                 <div class="var-pill-group-title">Outros / Credor</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_HOJE_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{PREAMBULO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_NOME}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_CPF}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_RG}}</div>
@@ -4132,6 +4134,8 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 onclick="switchFichaTab('ficha-conjuge')">Cônjuge</button>
               <button class="ficha-tab-btn" data-target="ficha-complemento"
                 onclick="switchFichaTab('ficha-complemento')">Complemento</button>
+              <button class="ficha-tab-btn" data-target="ficha-representante" style="display:none;"
+                onclick="switchFichaTab('ficha-representante')">Representante legal</button>
               <button class="ficha-tab-btn" data-target="ficha-procuradores"
                 onclick="switchFichaTab('ficha-procuradores')">Procuradores</button>
               <button class="ficha-tab-btn" data-target="ficha-anexos"
@@ -4155,11 +4159,11 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                       <span class="label" id="lbl-cpf-cnpj">CPF/CNPJ</span>
                       <span class="val" id="det-cpf">Carregando...</span>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item" id="ficha-item-age">
                       <span class="label">Idade</span>
                       <span class="val" id="det-age">Carregando...</span>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item" id="ficha-item-civil">
                       <span class="label">Estado Civil</span>
                       <span class="val" id="det-civil-status">Carregando...</span>
                     </div>
@@ -4205,6 +4209,13 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               <div id="ficha-complemento" class="ficha-tab-pane" style="display: none;">
                 <div class="crm-card">
                   <div id="det-complemento-content">Carregando...</div>
+                </div>
+              </div>
+
+              <!-- TAB: REPRESENTANTE LEGAL (PJ) -->
+              <div id="ficha-representante" class="ficha-tab-pane" style="display: none;">
+                <div class="crm-card">
+                  <div id="det-representante-content">Carregando...</div>
                 </div>
               </div>
 
@@ -4291,8 +4302,8 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 onclick="switchCustomerTab('tab-simulacao')">Simulação de Vencidas</button>
               <button class="customer-tab-btn" data-target="tab-ocorrencias"
                 onclick="switchCustomerTab('tab-ocorrencias')">Ocorrências e Promessas</button>
-              <button class="customer-tab-btn" data-target="tab-boletos" style="display:none;"
-                onclick="switchCustomerTab('tab-simulacao')">Boletos do Contrato</button>
+              <button class="customer-tab-btn" data-target="tab-boletos"
+                onclick="switchCustomerTab('tab-boletos')">Boletos do Contrato</button>
               <button class="customer-tab-btn" data-target="tab-historico-renegociacoes"
                 onclick="switchCustomerTab('tab-historico-renegociacoes')">Histórico de Renegociações</button>
               
@@ -6398,42 +6409,42 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=647"></script>
-  <script defer src="sienge-api.js?v=647"></script>
-  <script defer src="azure-auth.js?v=647"></script>
-  <script defer src="app.js?v=647"></script>
-  <script defer src="home-dashboard.js?v=647"></script>
-  <script defer src="anexos.js?v=647"></script>
-  <script defer src="contas-pagar.js?v=647"></script>
-  <script defer src="config-tags.js?v=647"></script>
-  <script defer src="config-users.js?v=647"></script>
-  <script defer src="construcao.js?v=647"></script>
-  <script defer src="empresas.js?v=647"></script>
-  <script defer src="relacionamento.js?v=647"></script>
+  <script defer src="data.js?v=652"></script>
+  <script defer src="sienge-api.js?v=652"></script>
+  <script defer src="azure-auth.js?v=652"></script>
+  <script defer src="app.js?v=652"></script>
+  <script defer src="home-dashboard.js?v=652"></script>
+  <script defer src="anexos.js?v=652"></script>
+  <script defer src="contas-pagar.js?v=652"></script>
+  <script defer src="config-tags.js?v=652"></script>
+  <script defer src="config-users.js?v=652"></script>
+  <script defer src="construcao.js?v=652"></script>
+  <script defer src="empresas.js?v=652"></script>
+  <script defer src="relacionamento.js?v=652"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=647"></script>
-  <script defer src="centros-custo.js?v=647"></script>
-  <script defer src="marketing.js?v=647"></script>
-  <script defer src="plano-financeiro.js?v=647"></script>
-  <script defer src="prestacao-contas.js?v=647"></script>
+  <script defer src="estoque-comercial.js?v=652"></script>
+  <script defer src="centros-custo.js?v=652"></script>
+  <script defer src="marketing.js?v=652"></script>
+  <script defer src="plano-financeiro.js?v=652"></script>
+  <script defer src="prestacao-contas.js?v=652"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=647"></script>
-  <script defer src="fluxo-caixa.js?v=647"></script>
-  <script defer src="caixa-diario.js?v=647"></script>
-  <script defer src="investimento.js?v=647"></script>
-  <script defer src="parametrizacao-parceiro.js?v=647"></script>
-  <script defer src="societario.js?v=647"></script>
-  <script defer src="participacoes.js?v=647"></script>
-  <script defer src="fiscal.js?v=647"></script>
-  <script defer src="indexadores.js?v=647"></script>
-  <script defer src="verificar-construcao.js?v=647"></script>
-  <script src="repactuacoes.js?v=647"></script>
-  <script defer src="repactuacao-lote.js?v=647"></script>
+  <script defer src="empresa-filter.js?v=652"></script>
+  <script defer src="fluxo-caixa.js?v=652"></script>
+  <script defer src="caixa-diario.js?v=652"></script>
+  <script defer src="investimento.js?v=652"></script>
+  <script defer src="parametrizacao-parceiro.js?v=652"></script>
+  <script defer src="societario.js?v=652"></script>
+  <script defer src="participacoes.js?v=652"></script>
+  <script defer src="fiscal.js?v=652"></script>
+  <script defer src="indexadores.js?v=652"></script>
+  <script defer src="verificar-construcao.js?v=652"></script>
+  <script src="repactuacoes.js?v=652"></script>
+  <script defer src="repactuacao-lote.js?v=652"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=647"></script>
+  <script defer src="dashboard-inadimplencia.js?v=652"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

@@ -719,7 +719,6 @@ window.handleDynamicCustomerSearch = function(query, type) {
 };
 // Lógica das Abas do Cliente
 function switchCustomerTab(tabId) {
-  if (tabId === "tab-boletos") tabId = "tab-simulacao";
   if (tabId === 'tab-quitacao' && AppState.isCurrentContractPaid) {
     alert(AppState.currentPayoffMsg);
     return;
@@ -785,6 +784,10 @@ function switchCustomerTab(tabId) {
   
   if (tabId === 'tab-construcao' && typeof window.loadConstrucoes === 'function') {
     window.loadConstrucoes();
+  }
+
+  if (tabId === 'tab-boletos' && typeof window.loadCustomerBoletos === 'function') {
+    window.loadCustomerBoletos(AppState.selectedCustomerId, AppState.selectedSaleId || AppState.selectedTitulo);
   }
 
   if (tabId === 'tab-notificacoes' && typeof window.renderNexHistory === 'function') {
@@ -857,6 +860,85 @@ function getCustomerFromState(id) {
   }
   return AppState.customers[id] || { name: "Cliente Sienge " + id, phone: "N/D", cpfCnpj: "N/D", email: "N/D", address: "N/D" };
 }
+
+window.isPessoaJuridicaCustomer = function(customer) {
+  if (!customer) return false;
+  const pType = String(customer.personType || customer.type || "").toUpperCase();
+  if (pType === "J" || pType === "JURIDICA" || pType === "JURÍDICA" || /JURID/.test(pType)) return true;
+  if (pType === "F" || pType === "FISICA" || pType === "FÍSICA") return false;
+  const doc = String(customer.cpfCnpj || customer.cnpj || customer.cpf || "").replace(/\D/g, "");
+  if (doc.length === 14 || customer.cnpj) return true;
+  return false;
+};
+
+window.applyFichaPersonTypeTabs = function(customer) {
+  const pj = window.isPessoaJuridicaCustomer(customer);
+  const conj = document.querySelector('button[data-target="ficha-conjuge"]');
+  const comp = document.querySelector('button[data-target="ficha-complemento"]');
+  const repr = document.querySelector('button[data-target="ficha-representante"]');
+  if (conj) conj.style.display = pj ? "none" : "inline-block";
+  if (comp) comp.style.display = pj ? "none" : "inline-block";
+  if (repr) repr.style.display = pj ? "inline-block" : "none";
+  const ageItem = document.getElementById("ficha-item-age");
+  const civilItem = document.getElementById("ficha-item-civil");
+  if (ageItem) ageItem.style.display = pj ? "none" : "";
+  if (civilItem) civilItem.style.display = pj ? "none" : "";
+  const active = document.querySelector(".ficha-tab-btn.active");
+  const target = active && active.getAttribute("data-target");
+  if (pj && (target === "ficha-conjuge" || target === "ficha-complemento")) {
+    if (typeof switchFichaTab === "function") switchFichaTab("ficha-cadastro");
+  }
+  if (!pj && target === "ficha-representante") {
+    if (typeof switchFichaTab === "function") switchFichaTab("ficha-cadastro");
+  }
+};
+
+window.renderRepresentantesLegais = async function(customer) {
+  const el = document.getElementById("det-representante-content");
+  if (!el) return;
+  const agents = Array.isArray(customer && customer.agents) ? customer.agents : [];
+  const ids = agents.map(a => a && (a.id != null ? a.id : (a.customerId != null ? a.customerId : a.agentId))).filter(v => v != null && v !== "");
+  if (!ids.length) {
+    el.innerHTML = `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Este cliente não possui representante legal cadastrado no Sienge.</span>`;
+    return;
+  }
+  el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:var(--color-text-muted);font-size:0.9rem;"><div class="loading-spinner" style="width:16px;height:16px;border:2px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>Carregando representantes...</div>`;
+  const cards = [];
+  for (const id of ids) {
+    let person = (AppState.customers && AppState.customers[id]) || null;
+    if (!person || !person.name) {
+      try {
+        if (window.SiengeApiService && SiengeApiService.getCustomer) {
+          person = await SiengeApiService.getCustomer(id);
+          if (person && AppState.customers) AppState.customers[id] = person;
+        }
+      } catch (e) {
+        person = { id };
+      }
+    }
+    const src = agents.find(a => String(a.id || a.customerId) === String(id)) || {};
+    const name = (person && person.name) || src.name || ("Cliente #" + id);
+    const doc = (typeof formatCpfCnpj === "function")
+      ? formatCpfCnpj((person && (person.cpfCnpj || person.cpf || person.cnpj)) || src.cpf || src.cnpj || "")
+      : ((person && (person.cpfCnpj || person.cpf)) || "N/D");
+    const email = (person && person.email) || src.email || "N/D";
+    const phoneSrc = person && Array.isArray(person.phones) && person.phones[0];
+    const phone = phoneSrc
+      ? ((phoneSrc.areaCode ? "(" + String(phoneSrc.areaCode).replace(/^0+/, "") + ") " : "") + (phoneSrc.number || phoneSrc.phoneNumber || ""))
+      : (person && person.phone) || "N/D";
+    cards.push(`
+      <div class="customer-detail-grid" style="border: 1px solid var(--color-border); padding: 15px; border-radius: 6px; margin-bottom: 10px;">
+        <div class="detail-item"><span class="label">Nome</span><span class="val">${name}</span></div>
+        <div class="detail-item"><span class="label">CPF/CNPJ</span><span class="val">${doc || "N/D"}</span></div>
+        <div class="detail-item"><span class="label">Telefone</span><span class="val">${phone || "N/D"}</span></div>
+        <div class="detail-item"><span class="label">E-mail</span><span class="val">${email || "N/D"}</span></div>
+        <div class="detail-item"><span class="label">ID no Sienge</span><span class="val">${id}</span></div>
+      </div>`);
+  }
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${cards.join("")}</div>`;
+  if (window.lucide) lucide.createIcons();
+};
+
 
 
 const INITIAL_RULES_CONFIG = {};
@@ -1540,6 +1622,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 
   // Esconder todas as seções e abas
   document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
+  try { sessionStorage.removeItem("currentSubView"); } catch (e) {}
   if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   document.querySelectorAll("#view-customer-details, #view-renegotiation, #view-distrato").forEach(view => view.style.display = "none");
   document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
@@ -5984,8 +6067,6 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
           btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : 'inline-block';
       }
   });
-  const boletosTabBtn = document.querySelector('button[data-target="tab-boletos"]');
-  if (boletosTabBtn) boletosTabBtn.style.display = 'none';
 
   // Botões do Rodapé de Abas
   const irBtn = document.getElementById('btn-informe-rendimentos');
@@ -6093,6 +6174,19 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   }
   if (!customer) {
     customer = { id: customerId, name: 'Cliente ' + customerId, cpfCnpj: 'N/D', phone: 'N/D', email: 'N/D', address: 'N/D' };
+  }
+  if (window.isPessoaJuridicaCustomer(customer) && window.SiengeApiService && SiengeApiService.getCustomer) {
+    try {
+      const full = await SiengeApiService.getCustomer(customerId);
+      if (full) {
+        customer = Object.assign({}, customer, full);
+        AppState.customers[customerId] = customer;
+      }
+    } catch (e) {}
+  }
+  if (typeof window.applyFichaPersonTypeTabs === "function") window.applyFichaPersonTypeTabs(customer);
+  if (window.isPessoaJuridicaCustomer(customer) && typeof window.renderRepresentantesLegais === "function") {
+    window.renderRepresentantesLegais(customer);
   }
 
   // Preencher dados cadastrais imediatamente
@@ -6588,11 +6682,14 @@ function formatCpfCnpj(val) {
   // Preencher aba: Procuradores
   const detProcuradoresEl = document.getElementById("det-procuradores-content");
   if (detProcuradoresEl) {
-    if (customer.attorneys && Array.isArray(customer.attorneys) && customer.attorneys.length > 0) {
-      let attorneyRows = customer.attorneys.map(att => `
+    const procuradores = (Array.isArray(customer.attorneys) && customer.attorneys.length)
+      ? customer.attorneys
+      : (Array.isArray(customer.procurators) ? customer.procurators : []);
+    if (procuradores.length > 0) {
+      let attorneyRows = procuradores.map(att => `
         <div class="customer-detail-grid" style="border: 1px solid var(--color-border); padding: 15px; border-radius: 6px; margin-bottom: 10px;">
           <div class="detail-item"><span class="label">Nome</span><span class="val">${att.name || 'N/D'}</span></div>
-          <div class="detail-item"><span class="label">CPF</span><span class="val">${formatCpfCnpj(att.cpf)}</span></div>
+          <div class="detail-item"><span class="label">CPF</span><span class="val">${formatCpfCnpj(att.cpf || att.cpfCnpj)}</span></div>
           <div class="detail-item"><span class="label">E-mail</span><span class="val">${att.email || 'N/D'}</span></div>
           <div class="detail-item"><span class="label">Profissão</span><span class="val">${att.profession || 'N/D'}</span></div>
         </div>
@@ -9158,16 +9255,10 @@ function formatCpfCnpj(val) {
     viewCustomerCard(customerId, saleId);
   };
 
-  const savedSubView = sessionStorage.getItem('currentSubView');
-  if (savedSubView === 'renegotiation') {
-    showRenegotiationView(customer, sale, clientUnpaid);
-  } else if (savedSubView === 'distrato') {
-    showDistratoView(customer, sale, clientUnpaid);
-  }
-
   // Ocorrências e notificações
   renderCustomerOccurrences();
   renderSiengeNotifications(saleId);
+  if (typeof loadCustomerBoletos === "function") loadCustomerBoletos(customerId, saleId);
   loadRenegotiationHistory(customerId, saleId);
   
   // Inicializar o simulador de parcelas
@@ -9294,6 +9385,7 @@ function formatCpfCnpj(val) {
 }
 
 function goBackToDashboard() {
+  try { sessionStorage.removeItem("currentSubView"); } catch (e) {}
   if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   if (window._homeInsightReturn) {
     window._homeInsightReturn = false;
@@ -11180,6 +11272,10 @@ function calculateRenegotiation() {
 function generateAgreementPDF() {
   const results = AppState.currentRenegResult;
   if (!results) return;
+  return (async function() {
+  if (typeof window.enrichCustomerForLegalDocs === "function" && g_renegCustomer) {
+    g_renegCustomer = await window.enrichCustomerForLegalDocs(g_renegCustomer);
+  }
   
   // Obter Preâmbulo dos Sócios baseado na unidade
   const unit = AppState.units[g_renegSale.unitId] || {};
@@ -11188,9 +11284,26 @@ function generateAgreementPDF() {
     : (AppState.preambles[unit.costCenterId] || "PREÂMBULO NÃO CADASTRADO NO SHAREPOINT.");
   
   // Obter Cláusulas Editadas
-  let textTemplate = formatDocPadraoMarkup(document.getElementById("reneg-clauses-editor").value);
-  
-  // Substituir variáveis
+  let textTemplate = document.getElementById("reneg-clauses-editor").value;
+  if (typeof window.upgradeCredorPlaceholdersToPreamble === "function") {
+    textTemplate = window.upgradeCredorPlaceholdersToPreamble(textTemplate);
+  }
+  textTemplate = formatDocPadraoMarkup(textTemplate);
+
+  const extraMap = {
+    PARCELAS_ACORDO: String(results.instQty),
+    DATA_PRIMEIRA_PARCELA: new Date(results.firstDueDate).toLocaleDateString('pt-BR'),
+    VALOR_DIVIDA: results.newDebtBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+    VALOR_PARCELA_ACORDO: results.installmentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  };
+  if (typeof valorPorExtensoBRL === "function") {
+    extraMap.VALOR_DIVIDA_EXTENSO = valorPorExtensoBRL(results.newDebtBalance);
+    extraMap.VALOR_PARCELA_EXTENSO = valorPorExtensoBRL(results.installmentValue);
+  }
+  const legalMap = window.buildLegalDocVarMap
+    ? window.buildLegalDocVarMap(g_renegCustomer, g_renegSale, unit, { preambleText, map: extraMap })
+    : extraMap;
+  textTemplate = applyDistratoTemplateVars(textTemplate, legalMap);
   textTemplate = textTemplate
     .replace(/{{PARCELAS_ACORDO}}/g, `<strong>${results.instQty}</strong>`)
     .replace(/{{DATA_PRIMEIRA_PARCELA}}/g, `<strong>${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</strong>`);
@@ -11202,16 +11315,6 @@ function generateAgreementPDF() {
       <h3 style="font-size: 12pt; color: #666; margin: 0;">Moura Leite Loteamentos</h3>
     </div>
     
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      De um lado, a credora qualificada no seguinte preâmbulo:<br>
-      <strong>${preambleText}</strong>
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      De outro lado, o devedor adquirente:<br>
-      <strong>DEVEDOR:</strong> ${g_renegCustomer.name}, portador do CPF/CNPJ nº ${g_renegCustomer.cpfCnpj}, residente no endereço ${g_renegCustomer.address}.
-    </p>
-
     <p style="text-align: justify; margin-bottom: 1.5rem;">
       <strong>OBJETO DO ACORDO:</strong> Referente à Unidade/Lote <strong>${g_renegSale.unitId}</strong> do Empreendimento/Cidade <strong>${unit.city || unit.enterpriseName || '___'}</strong>, com área aproximada de <strong>${unit.area || '___'} mÂ²</strong>, comercializada originalmente na data de <strong>${g_renegSale.saleDate ? new Date(g_renegSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '___'}</strong>.
     </p>
@@ -11272,6 +11375,7 @@ function generateAgreementPDF() {
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
   lucide.createIcons();
+  })();
 }
 
 function closePdfModal() {
@@ -11522,6 +11626,11 @@ window.leaveDistratoSimulation = function() {
   g_distSale = null;
   g_distBills = [];
   if (window.AppState) AppState.currentDistratoResult = null;
+  try {
+    if (sessionStorage.getItem("currentSubView") === "distrato") {
+      sessionStorage.removeItem("currentSubView");
+    }
+  } catch (e) {}
 };
 
 function calculateDistrato() {
@@ -12569,6 +12678,179 @@ function applyDistratoTemplateVars(text, map) {
   return s;
 }
 
+function isBlankLegalField(v) {
+  const s = String(v || "").trim();
+  return !s || s === "N/D" || /^n\/?d$/i.test(s) || /^[\s,./_-]+$/.test(s);
+}
+
+window.formatLegalCustomerAddress = function(customer) {
+  if (!customer) return "";
+  if (!isBlankLegalField(customer.address) && !/^,\s*,/.test(String(customer.address))) {
+    return String(customer.address).trim();
+  }
+  const addr0 = Array.isArray(customer.addresses) && customer.addresses[0] ? customer.addresses[0] : null;
+  if (!addr0) return "";
+  const street = String(addr0.street || addr0.streetName || "").trim();
+  const typeHint = String(addr0.streetTypeDescription || addr0.streetType || "").trim();
+  const skipType = /^(residencial|comercial|outros|correspondencia|correspondência)$/i.test(typeHint);
+  const streetFull = (!skipType && typeHint && street && !street.toLowerCase().startsWith(typeHint.toLowerCase()))
+    ? (typeHint + " " + street)
+    : street;
+  const city = addr0.cityName || addr0.city || customer.city || "";
+  const state = addr0.stateName || addr0.state || customer.state || "";
+  const zipRaw = String(addr0.postalCode || addr0.zipCode || customer.zipCode || "").replace(/\D/g, "");
+  const zip = zipRaw.length === 8 ? zipRaw.replace(/(\d{5})(\d{3})/, "$1-$2") : zipRaw;
+  const parts = [
+    streetFull && addr0.number ? streetFull + ", " + addr0.number : streetFull,
+    addr0.complement,
+    addr0.neighborhood,
+    [city, state].filter(Boolean).join("/"),
+    zip ? "CEP " + zip : ""
+  ].map(p => String(p || "").trim()).filter(p => p && p !== "-" && p !== "/");
+  return parts.join(", ");
+};
+
+window.pickCustomerRg = function(customer) {
+  if (!customer) return "";
+  const rg = customer.rg || customer.numberIdentityCard || customer.identityCard || customer.identity || "";
+  return isBlankLegalField(rg) ? "" : String(rg).trim();
+};
+
+window.resolveLoteamentoName = function(unit, sale) {
+  const ccId = (unit && (unit.costCenterId || unit.enterpriseId)) || (sale && (sale.costCenterId || sale.enterpriseId)) || "";
+  const list = (typeof AppState !== "undefined" && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+  const cc = list.find(x => String(x.id) === String(ccId) || String(x.code) === String(ccId)) || {};
+  let name = cc.name || (sale && (sale.enterpriseName || sale.costCenterName)) || (unit && (unit.enterpriseName || unit.enterprise)) || "";
+  if (!name && typeof getCostCenterName === "function" && ccId) name = getCostCenterName(ccId) || "";
+  name = String(name || "").replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, "").trim();
+  name = name.replace(/^LOTEAMENTOS\s*[-–:]\s*/i, "").trim();
+  if (/^C\.C\.\s*\d+$/i.test(name)) name = "";
+  return name;
+};
+
+window.resolveCidadeLoteamento = function(unit, sale) {
+  const ccId = (unit && (unit.costCenterId || unit.enterpriseId)) || (sale && (sale.costCenterId || sale.enterpriseId)) || "";
+  const list = (typeof AppState !== "undefined" && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+  const cc = list.find(x => String(x.id) === String(ccId) || String(x.code) === String(ccId)) || {};
+  const fromCc = cc.city || cc.cidade || (typeof window.extractCityDisplayName === "function" ? window.extractCityDisplayName(ccId, cc.name) : "") || "";
+  return (unit && (unit.city || unit.cidade)) || fromCc || (sale && (sale.city || sale.cidade)) || "Botucatu-SP";
+};
+
+window.upgradeCredorPlaceholdersToPreamble = function(text) {
+  let s = String(text || "");
+  if (!/\{\{CREDOR_NOME\}\}/.test(s)) return s;
+  if (/\{\{PREAMBULO\}\}/.test(s) && /\{\{CREDOR_NOME\}\}[\s\S]{0,80}\{\{CREDOR_RG\}\}/.test(s)) {
+    s = s.replace(/\{\{CREDOR_NOME\}\}[\s\S]*?(?=De ora em diante)/i, "{{PREAMBULO}}\n\n");
+  } else if (/\{\{CREDOR_NOME\}\}[\s\S]{0,120}\{\{CREDOR_RG\}\}/.test(s)) {
+    s = s.replace(/\{\{CREDOR_NOME\}\}[\s\S]*?(?=De ora em diante)/i, "{{PREAMBULO}}\n\n");
+  }
+  return s;
+};
+
+window.enrichCustomerForLegalDocs = async function(customer) {
+  const c = Object.assign({}, customer || {});
+  const id = c.id || c.customerId;
+  const needsRg = !window.pickCustomerRg(c);
+  const needsAddr = isBlankLegalField(window.formatLegalCustomerAddress(c));
+  if (id && window.SiengeApiService && typeof SiengeApiService.getCustomer === "function" && (needsRg || needsAddr || isBlankLegalField(c.profession))) {
+    try {
+      const detail = await SiengeApiService.getCustomer(id);
+      if (detail) {
+        ["name", "cpfCnpj", "cpf", "cnpj", "rg", "numberIdentityCard", "identity", "nationality",
+          "profession", "occupation", "civilStatus", "maritalStatus", "matrimonialRegime",
+          "sex", "gender", "personType", "spouseName", "spouseCpf", "addresses", "address",
+          "city", "state", "zipCode", "issuingBody"].forEach(k => {
+          if (detail[k] != null && detail[k] !== "" && (c[k] == null || isBlankLegalField(c[k]))) c[k] = detail[k];
+        });
+        if (Array.isArray(detail.addresses) && detail.addresses.length) c.addresses = detail.addresses;
+      }
+    } catch (e) {
+      console.warn("Cadastro do cliente incompleto para o termo:", e);
+    }
+  }
+  c.address = window.formatLegalCustomerAddress(c);
+  c.rg = window.pickCustomerRg(c);
+  c.cpfCnpj = c.cpfCnpj || c.cpf || c.cnpj || "";
+  if (isBlankLegalField(c.city) && Array.isArray(c.addresses) && c.addresses[0]) {
+    c.city = c.addresses[0].cityName || c.addresses[0].city || c.city;
+    c.state = c.state || c.addresses[0].stateName || c.addresses[0].state;
+  }
+  return c;
+};
+
+window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
+  extras = extras || {};
+  const saleObj = sale || {};
+  const unitObj = unit || {};
+  const cust = customer || {};
+  const preamble = extras.preambleText || "";
+  const ccId = unitObj.costCenterId || saleObj.costCenterId || saleObj.enterpriseId;
+  const list = (typeof AppState !== "undefined" && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+  const costCenter = list.find(x => String(x.id) === String(ccId)) || {};
+  const companyId = saleObj.companyId || costCenter.companyId || extras.companyId;
+  let companyName = extras.companyName || "";
+  let companyCnpj = extras.companyCnpj || "";
+  if (!companyName && typeof getCompanyName === "function" && companyId) companyName = getCompanyName(companyId) || "";
+  if (typeof AppState !== "undefined" && AppState.companies) {
+    const co = AppState.companies.find(x => String(x.id) === String(companyId));
+    if (co) {
+      companyName = companyName || co.name || "";
+      companyCnpj = companyCnpj || co.cnpj || co.cnpjCpf || "";
+    }
+  }
+  const mask = (typeof formatCpfCnpj === "function")
+    ? formatCpfCnpj
+    : function (val) {
+        const clean = String(val || "").replace(/\D/g, "");
+        if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+        if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+        return val || "";
+      };
+  const empName = extras.empName != null ? extras.empName : window.resolveLoteamentoName(unitObj, saleObj);
+  const cidadeLote = extras.cidadeLote != null ? extras.cidadeLote : window.resolveCidadeLoteamento(unitObj, saleObj);
+  const civil = [cust.maritalStatus || cust.civilStatus, cust.matrimonialRegime].filter(v => !isBlankLegalField(v)).join(" - ");
+  const saleDateRaw = saleObj.saleDate || saleObj.contractDate;
+  let saleDateStr = extras.saleDateStr || "";
+  if (!saleDateStr && saleDateRaw) {
+    const iso = String(saleDateRaw).slice(0, 10);
+    saleDateStr = /^\d{4}-\d{2}-\d{2}/.test(iso)
+      ? iso.split("-").reverse().join("/")
+      : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
+  }
+  const dateExt = extras.dateExt || new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+  return Object.assign({
+    QUADRA: unitObj.block || unitObj.quadra || saleObj.block || "____",
+    LOTE: unitObj.lot || unitObj.lote || saleObj.lot || "____",
+    TITULO: saleObj.receivableBillId || saleObj.id || "____",
+    UNIDADE: unitObj.id || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "____",
+    NOME_CLIENTE: cust.name || "",
+    CPF_CNPJ: mask(cust.cpfCnpj),
+    CPF_CLIENTE: mask(cust.cpfCnpj),
+    RG_CLIENTE: window.pickCustomerRg(cust) || "____",
+    NACIONALIDADE_CLIENTE: isBlankLegalField(cust.nationality) ? "brasileiro(a)" : cust.nationality,
+    ESTADO_CIVIL: civil,
+    PROFISSAO_CLIENTE: isBlankLegalField(cust.profession) ? "" : cust.profession,
+    ENDERECO_CLIENTE: window.formatLegalCustomerAddress(cust),
+    CIDADE_CLIENTE: cust.city || "",
+    DATA_CONTRATO: saleDateStr || "____",
+    DATA_CONTRATO_ORIGINAL: saleDateStr || "____",
+    EMPREENDIMENTO: empName || "____",
+    EMPRESA_NOME: companyName || "MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA",
+    EMPRESA_CNPJ: mask(companyCnpj) || "01.066.134/0001-78",
+    CIDADE_LOTEAMENTO: cidadeLote,
+    CIDADE_ATUAL: "Botucatu",
+    DATA_HOJE_EXTENSO: dateExt,
+    DATA_ATUAL_EXTENSO: dateExt,
+    PREAMBULO: preamble,
+    CREDOR_NOME: companyName || preamble,
+    CREDOR_CPF: mask(companyCnpj),
+    CREDOR_RG: "",
+    CREDOR_ESPOSA_NOME: "",
+    CREDOR_ESPOSA_RG: "",
+    CREDOR_ESPOSA_CPF: ""
+  }, extras.map || {});
+};
+
 function isDistratoSignLine(line) {
   const t = String(line || "").replace(/\s/g, "");
   return t.length >= 18 && /^_+$/.test(t);
@@ -12716,6 +12998,9 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   if (!g_distSale || !g_distCustomer) {
     alert("Abra o simulador de distrato a partir de um contrato.");
     return;
+  }
+  if (typeof window.enrichCustomerForLegalDocs === "function") {
+    g_distCustomer = await window.enrichCustomerForLegalDocs(g_distCustomer);
   }
 
   const isPermuta = !!(results.isPermuta || (document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked));
@@ -12868,9 +13153,8 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   let docHtml = '';
 
   if (useLegalTemplate) {
-    const emp = AppState.enterprises && (AppState.enterprises[unit.enterpriseId] || AppState.enterprises.find?.(e => String(e.id) === String(unit.enterpriseId)));
-    const empName = (emp && (emp.name || emp.nome)) || unit.enterpriseName || unit.enterprise || '';
-    const cidadeLote = unit.city || (emp && (emp.city || emp.cidade)) || 'Botucatu-SP';
+    const empName = window.resolveLoteamentoName(unit, g_distSale);
+    const cidadeLote = window.resolveCidadeLoteamento(unit, g_distSale);
     const areaNum = unit.area || unit.privateArea || unit.Privatearea || '';
     const areaLabel = areaNum === '' || areaNum == null ? '____' : (String(areaNum).match(/m/) ? String(areaNum) : (areaNum + ' m²'));
     const areaExt = areaNum && !isNaN(Number(areaNum))
@@ -12910,28 +13194,16 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       hasPagamentoBancario: isPermuta ? (!hasNovoLote && hasPermutaSaldo) : hasRestituicao,
       iniciativa
     });
-    const filled = window.centerDistratoSignatures(applyDistratoTemplateVars(
-      (typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup : (x) => String(x || ""))(clausesReady),
-      {
-      QUADRA: unit.block || unit.quadra || '____',
-      LOTE: unit.lot || unit.lote || '____',
-      TITULO: g_distSale.receivableBillId || g_distSale.id || '____',
-      UNIDADE: unit.id || [unit.block, unit.lot].filter(Boolean).join('-') || '____',
-      NOME_CLIENTE: g_distCustomer.name || '',
-      CPF_CNPJ: cpfCnpj,
-      RG_CLIENTE: g_distCustomer.rg || g_distCustomer.identity || '____',
-      NACIONALIDADE_CLIENTE: g_distCustomer.nationality || g_distCustomer.nacionalidade || 'brasileiro(a)',
-      ESTADO_CIVIL: g_distCustomer.maritalStatus || g_distCustomer.civilStatus || '',
-      PROFISSAO_CLIENTE: g_distCustomer.profession || g_distCustomer.occupation || '',
-      ENDERECO_CLIENTE: g_distCustomer.address || '',
-      CIDADE_CLIENTE: g_distCustomer.city || '',
-      DATA_CONTRATO: saleDateStr,
-      DATA_CONTRATO_ORIGINAL: saleDateStr,
-      EMPREENDIMENTO: empName || '____',
-      EMPRESA_NOME: 'MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA',
-      EMPRESA_CNPJ: '01.066.134/0001-78',
-      CIDADE_LOTEAMENTO: cidadeLote,
-      CIDADE_ATUAL: 'Botucatu',
+    clausesReady = (typeof window.upgradeCredorPlaceholdersToPreamble === "function")
+      ? window.upgradeCredorPlaceholdersToPreamble(clausesReady)
+      : clausesReady;
+    const legalBase = window.buildLegalDocVarMap(g_distCustomer, g_distSale, unit, {
+      preambleText,
+      empName,
+      cidadeLote,
+      saleDateStr,
+      dateExt,
+      map: {
       AREA_LOTE: areaLabel,
       AREA_LOTE_EXTENSO: areaExt,
       VALOR_RESTITUICAO: valorFmt,
@@ -12953,14 +13225,16 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       DADOS_PAGAMENTO: payInfoHtml || '',
       PERCENTUAL_RETENCAO: pctRetencao,
       NOVO_LOTE: novoLoteRaw || '____',
-      DATA_HOJE_EXTENSO: dateExt,
-      DATA_ATUAL_EXTENSO: dateExt,
       TESTEMUNHA_1_NOME: w1.nome || t.test1Nome || '________________',
       TESTEMUNHA_1_RG: w1.rg || t.test1Rg || '________________',
       TESTEMUNHA_2_NOME: w2.nome || t.test2Nome || '________________',
-      TESTEMUNHA_2_RG: w2.rg || t.test2Rg || '________________',
-      PREAMBULO: preambleText
-    }));
+      TESTEMUNHA_2_RG: w2.rg || t.test2Rg || '________________'
+      }
+    });
+    const filled = window.centerDistratoSignatures(applyDistratoTemplateVars(
+      (typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup : (x) => String(x || ""))(clausesReady),
+      legalBase
+    ));
     docHtml = `
       <div style="text-align: center; margin-bottom: 1.5rem;">
         <h2 style="color: #105436; font-size: 13pt; font-weight: bold; margin-bottom: 5px;">${docTitle}</h2>
@@ -13896,7 +14170,10 @@ window.submitReprocessBoleto = async function() {
       try { window.refreshSimuladorAfterBoleto(instIds); } catch (e) { console.warn(e); }
     }
     if (typeof switchCustomerTab === "function") {
-      try { switchCustomerTab("tab-simulacao"); } catch (e) {}
+      try { switchCustomerTab(source === "boletos" ? "tab-boletos" : "tab-simulacao"); } catch (e) {}
+    }
+    if (source === "boletos" && typeof window.loadCustomerBoletos === "function") {
+      try { window.loadCustomerBoletos(AppState.selectedCustomerId, billId); } catch (e) {}
     }
 
     const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 5 });
@@ -23102,6 +23379,11 @@ async function saveDocPadrao(tipo) {
     const el = document.getElementById(id);
     if (el) data[id] = el.value;
   });
+  if (tipo === 'reneg' && data['doc-reneg-clauses'] && typeof window.upgradeCredorPlaceholdersToPreamble === 'function') {
+    data['doc-reneg-clauses'] = window.upgradeCredorPlaceholdersToPreamble(data['doc-reneg-clauses']);
+    const elReneg = document.getElementById('doc-reneg-clauses');
+    if (elReneg) elReneg.value = data['doc-reneg-clauses'];
+  }
   
   if (window.firebaseCollections && window.firebaseDb) {
     try {
@@ -23129,12 +23411,14 @@ async function saveDocPadrao(tipo) {
   if (tipo === 'reneg') {
     const clausesEl = document.getElementById('reneg-clauses-editor');
     if (clausesEl && data['doc-reneg-clauses']) {
-      clausesEl.value = data['doc-reneg-clauses'];
+      clausesEl.value = (typeof window.upgradeCredorPlaceholdersToPreamble === 'function')
+        ? window.upgradeCredorPlaceholdersToPreamble(data['doc-reneg-clauses'])
+        : data['doc-reneg-clauses'];
     }
   }
 }
 
-function previewDocPadrao(tipo) {
+async function previewDocPadrao(tipo) {
   const labelMap = {
     reneg: 'Termo de Acordo',
     boleto: 'Boleto de Cobrança',
@@ -23144,13 +23428,42 @@ function previewDocPadrao(tipo) {
     distrato: 'Distrato / Rescisão',
   };
   const label = labelMap[tipo] || tipo;
-  const data = JSON.parse(localStorage.getItem(`crm_docpadrao_${tipo}`) || '{}');
+  const fillLegalPreview = async (rawText) => {
+    let text = String(rawText || '');
+    if (typeof window.upgradeCredorPlaceholdersToPreamble === 'function') {
+      text = window.upgradeCredorPlaceholdersToPreamble(text);
+    }
+    const sale = (tipo === 'distrato' && g_distSale) ? g_distSale : (g_renegSale || g_distSale || {});
+    const unit = (sale && sale.unitId && AppState.units && AppState.units[sale.unitId]) || {};
+    let customer = (tipo === 'distrato' && g_distCustomer) ? g_distCustomer : (g_renegCustomer || g_distCustomer || {});
+    if ((!customer || !customer.name) && typeof AppState !== 'undefined' && AppState.selectedCustomerId && typeof getCustomerFromState === 'function') {
+      customer = getCustomerFromState(AppState.selectedCustomerId) || customer;
+    }
+    if (typeof window.enrichCustomerForLegalDocs === 'function' && (customer.id || customer.customerId)) {
+      customer = await window.enrichCustomerForLegalDocs(customer);
+    }
+    let preambleText = '';
+    if (typeof window.getPreambleForContract === 'function') {
+      preambleText = window.getPreambleForContract(unit, sale);
+    }
+    if (!preambleText || /NÃO CADASTRADO/i.test(String(preambleText))) {
+      preambleText = '[Qualificação do CREDOR: cadastre o preâmbulo da empresa neste centro de custo]';
+    }
+    const map = window.buildLegalDocVarMap
+      ? window.buildLegalDocVarMap(customer, sale, unit, { preambleText })
+      : {};
+    return applyDistratoTemplateVars(
+      typeof formatDocPadraoMarkup === 'function' ? formatDocPadraoMarkup(text) : text,
+      map
+    );
+  };
   let content = '';
   if (tipo === 'reneg') {
     const title = document.getElementById('doc-reneg-title')?.value || '';
     const subtitle = document.getElementById('doc-reneg-subtitle')?.value || '';
     const clauses = document.getElementById('doc-reneg-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${formatDocPadraoMarkup(clauses)}</div>`;
+    const filled = await fillLegalPreview(clauses);
+    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'boleto') {
     const inst1 = document.getElementById('doc-boleto-inst1')?.value || '';
     const inst2 = document.getElementById('doc-boleto-inst2')?.value || '';
@@ -23172,7 +23485,9 @@ function previewDocPadrao(tipo) {
     const title = document.getElementById('doc-distrato-title')?.value || '';
     const pct = document.getElementById('doc-distrato-pct')?.value || '';
     const clauses = document.getElementById('doc-distrato-clauses')?.value || '';
-    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${window.centerDistratoSignatures ? window.centerDistratoSignatures(formatDocPadraoMarkup(String(clauses).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, ''))) : formatDocPadraoMarkup(String(clauses))}</div>`;
+    let filled = await fillLegalPreview(clauses);
+    filled = String(filled).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, '');
+    content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${window.centerDistratoSignatures ? window.centerDistratoSignatures(filled) : filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -23188,6 +23503,10 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
     if (!el || data[id] === undefined) return;
     if (id === 'doc-distrato-clauses' && isLegacyDistratoClauses(data[id])) return;
     if (id === 'doc-distrato-title' && /INSTRUMENTO DE DISTRATO E RESCISÃO CONTRATUAL/i.test(String(data[id] || ''))) return;
+    if (id === 'doc-reneg-clauses' && typeof window.upgradeCredorPlaceholdersToPreamble === 'function') {
+      el.value = window.upgradeCredorPlaceholdersToPreamble(data[id]);
+      return;
+    }
     el.value = data[id];
   });
 }

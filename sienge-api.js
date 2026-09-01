@@ -449,6 +449,50 @@ function runLocalPrepaymentSimulation(saleId, installmentsToPay) {
   };
 }
 
+function formatSiengeAddressLine(addr) {
+  if (!addr || typeof addr !== "object") return "";
+  const typeHint = String(addr.streetTypeDescription || addr.streetType || "").trim();
+  const streetRaw = String(addr.street || addr.streetName || "").trim();
+  const skipType = /^(residencial|comercial|outros|correspondencia|correspondência)$/i.test(typeHint);
+  const street = (!skipType && typeHint && streetRaw && !streetRaw.toLowerCase().startsWith(typeHint.toLowerCase()))
+    ? (typeHint + " " + streetRaw)
+    : streetRaw;
+  const city = addr.cityName || addr.city || "";
+  const state = addr.stateName || addr.state || "";
+  const zipRaw = String(addr.postalCode || addr.zipCode || "").replace(/\D/g, "");
+  const zip = zipRaw.length === 8 ? zipRaw.replace(/(\d{5})(\d{3})/, "$1-$2") : zipRaw;
+  const parts = [
+    street && addr.number ? street + ", " + addr.number : street,
+    addr.complement,
+    addr.neighborhood,
+    [city, state].filter(Boolean).join("/"),
+    zip ? "CEP " + zip : ""
+  ].map(p => String(p || "").trim()).filter(p => p && p !== "-" && p !== "/");
+  return parts.join(", ");
+}
+
+function normalizeSiengeCustomer(c) {
+  if (!c || typeof c !== "object") return c;
+  c.cpfCnpj = c.cpfCnpj || c.cpf || c.cnpj || "";
+  c.rg = c.rg || c.numberIdentityCard || c.identityCard || c.identity || "";
+  c.issuingBody = c.issuingBody || c.rgIssuingBody || "";
+  c.nationality = c.nationality || c.nacionalidade || "";
+  c.profession = c.profession || c.occupation || "";
+  c.civilStatus = c.civilStatus || c.maritalStatus || "";
+  c.maritalStatus = c.maritalStatus || c.civilStatus || "";
+  const addr0 = Array.isArray(c.addresses) && c.addresses.length ? c.addresses[0] : null;
+  const line = formatSiengeAddressLine(addr0);
+  if (line && (!c.address || c.address === "N/D" || /^[\s,/-]+$/.test(c.address))) {
+    c.address = line;
+  }
+  if (addr0) {
+    c.city = c.city || addr0.cityName || addr0.city || "";
+    c.state = c.state || addr0.stateName || addr0.state || "";
+    c.zipCode = c.zipCode || addr0.postalCode || addr0.zipCode || "";
+  }
+  return c;
+}
+
 // -----------------------------------------------
 // Interface de Acesso aos Serviços
 // -----------------------------------------------
@@ -1048,13 +1092,11 @@ const SiengeApiService = {
       return window.MOCK_DATA.CUSTOMERS[id] || null;
     }
     const c = await siengeFetchWithRetry(`/customers/${id}`);
-    const addressStr = c.addresses?.[0]
-      ? `${c.addresses[0].street || ''}, ${c.addresses[0].number || ''}, ${c.addresses[0].neighborhood || ''}, ${c.addresses[0].cityName || ''} - ${c.addresses[0].stateName || ''}`
-      : "N/D";
-    return {
+    return normalizeSiengeCustomer({
+      ...c,
       id: c.id,
       name: c.name,
-      cpfCnpj: c.cnpj || c.cpf || "000.000.000-00",
+      cpfCnpj: c.cnpj || c.cpf || "",
       email: c.email || c.emails?.[0]?.email || "N/D",
       phone: c.phones?.[0]?.number || c.phones?.[0]?.phoneNumber || "N/D",
       phones: c.phones || [],
@@ -1063,9 +1105,8 @@ const SiengeApiService = {
       profession: c.profession || "N/D",
       sex: c.sex || "N/D",
       birthDate: c.birthDate || "1980-01-01",
-      subtypes: c.subTypes || c.subtypes || [],
-      address: addressStr
-    };
+      subtypes: c.subTypes || c.subtypes || []
+    });
   },
 
   // 5. Contratos de Venda (chamado apenas ao abrir Detalhes ou por customerId específico)
@@ -1329,10 +1370,7 @@ const SiengeApiService = {
     }
     try {
       const res = await siengeFetchWithRetry(`/customers/${customerId}`);
-      if (res) {
-        res.cpfCnpj = res.cpfCnpj || res.cpf || res.cnpj || "";
-      }
-      return res;
+      return normalizeSiengeCustomer(res);
     } catch (e) {
       console.error("[Sienge] Erro ao obter cliente por ID:", e);
       return null;

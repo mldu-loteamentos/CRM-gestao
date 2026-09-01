@@ -75,7 +75,26 @@ async function loadUnits() {
   return units;
 }
 
-async function saveCc(ccId, allUnits) {
+async function saveCaixaPosicao(units, today) {
+  const pos = (units || []).filter(isFinanceLike).map((u) => slimCaixaRow(u, today));
+  const CHUNK = 120;
+  const nChunks = Math.max(1, Math.ceil(pos.length / CHUNK) || 1);
+  for (let c = 0; c < nChunks; c++) {
+    await setDoc(doc(db, "caixa_posicao", `${today}_${c}`), {
+      date: today,
+      chunk: c,
+      rows: pos.slice(c * CHUNK, (c + 1) * CHUNK),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  await setDoc(doc(db, "caixa_posicao", "_meta"), {
+    lastDate: today,
+    chunks: nChunks,
+    count: pos.length,
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
+  return pos.length;
+}
   const cc = String(ccId);
   const list = allUnits.filter((u) => String(u.enterpriseId) === cc);
   const empName = (list[0] && list[0].enterpriseName) || "";
@@ -91,6 +110,27 @@ async function saveCc(ccId, allUnits) {
     }));
   }
   await Promise.all(writes);
+}
+
+async function saveCaixaPosicao(units, today) {
+  const pos = (units || []).filter(isFinanceLike).map((u) => slimCaixaRow(u, today));
+  const CHUNK = 120;
+  const nChunks = Math.max(1, Math.ceil(pos.length / CHUNK) || 1);
+  for (let c = 0; c < nChunks; c++) {
+    await setDoc(doc(db, "caixa_posicao", `${today}_${c}`), {
+      date: today,
+      chunk: c,
+      rows: pos.slice(c * CHUNK, (c + 1) * CHUNK),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  await setDoc(doc(db, "caixa_posicao", "_meta"), {
+    lastDate: today,
+    chunks: nChunks,
+    count: pos.length,
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
+  return pos.length;
 }
 
 module.exports = async function handler(req, res) {
@@ -152,12 +192,14 @@ module.exports = async function handler(req, res) {
         batimentoDate: today,
         batimentoDone: true
       }, { merge: true });
+      const n = await saveCaixaPosicao(units, today);
       return res.status(200).json({
         done: true,
         date: today,
         processed: state.processed,
         skippedSettled: settledN,
-        pendingCustomers: 0
+        pendingCustomers: 0,
+        caixaPosicao: n
       });
     }
 
@@ -195,24 +237,8 @@ module.exports = async function handler(req, res) {
         batimentoDate: today,
         batimentoDone: true
       }, { merge: true });
-      const pos = nextUnits.filter(isFinanceLike).map((u) => slimCaixaRow(u, today));
-      const CHUNK = 120;
-      const nChunks = Math.max(1, Math.ceil(pos.length / CHUNK));
-      for (let c = 0; c < nChunks; c++) {
-        await setDoc(doc(db, "caixa_posicao", `${today}_${c}`), {
-          date: today,
-          chunk: c,
-          rows: pos.slice(c * CHUNK, (c + 1) * CHUNK),
-          updatedAt: new Date().toISOString()
-        });
-      }
-      await setDoc(doc(db, "caixa_posicao", "_meta"), {
-        lastDate: today,
-        chunks: nChunks,
-        count: pos.length,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-      log.push(`caixa_posicao ${today}: ${pos.length} contratos`);
+      const n = await saveCaixaPosicao(nextUnits, today);
+      log.push(`caixa_posicao ${today}: ${n} contratos`);
     }
 
     return res.status(200).json({
