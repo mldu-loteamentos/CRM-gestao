@@ -25445,6 +25445,23 @@ window.loadRelacionamentoUnidades = async function(cc) {
       return a.name.toString().localeCompare(b.name.toString(), undefined, { numeric: true, sensitivity: 'base' });
     });
 
+    if (window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
+      EstoqueComercialApp.markCcUnits(cc, allUnits.length > 0);
+    }
+
+    if (!allUnits.length) {
+      const empSelect = document.getElementById('relacionamento-filter-emp');
+      if (empSelect) {
+        Array.from(empSelect.options).forEach(opt => {
+          if (String(opt.value) === String(cc)) opt.remove();
+        });
+        empSelect.value = '';
+      }
+      selectUnidade.innerHTML = '<option value="">Sem unidades neste centro de custo</option>';
+      selectUnidade.disabled = true;
+      return;
+    }
+
     selectUnidade.innerHTML = '<option value="">Selecione uma unidade...</option>';
     
     // Buscar contratos para mostrar cliente
@@ -26585,8 +26602,9 @@ window.searchRelacionamento = async function() {
 document.addEventListener('tabChanged', async (e) => {
   if (e.detail === 'relacionamento_gestao') {
     const empSelect = document.getElementById('relacionamento-filter-emp');
-    if (empSelect && empSelect.options.length <= 1) {
+    if (empSelect) {
       try {
+         const keep = empSelect.value;
          let ccs = await SiengeApiService.getCostCenters();
          
          const localCustom = localStorage.getItem('crm_centros_custo_custom');
@@ -26600,6 +26618,10 @@ document.addEventListener('tabChanged', async (e) => {
             const tipo = custom.tipo_cc || '';
             return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'Incorporação';
          });
+
+         if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterCostCentersForEmp === "function") {
+            ccs = EstoqueComercialApp.filterCostCentersForEmp(ccs);
+         }
          
          // Sort by ID ascending
          ccs.sort((a, b) => a.id - b.id);
@@ -26609,6 +26631,9 @@ document.addEventListener('tabChanged', async (e) => {
             opts += `<option value="${c.id}">${c.id} - ${c.name}</option>`;
          });
          empSelect.innerHTML = opts;
+         if (keep && Array.from(empSelect.options).some(o => String(o.value) === String(keep))) {
+            empSelect.value = keep;
+         }
       } catch(e) {}
     }
   }

@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=639">
+  <link rel="stylesheet" href="style.css?v=644">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1192,7 +1192,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.639 &nbsp;&middot;&nbsp; 01/09/2026
+            v1.0.644 &nbsp;&middot;&nbsp; 01/09/2026
           </span>
         </div>
       </div>
@@ -2147,9 +2147,6 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               <i data-lucide="package" style="width: 24px; color: var(--color-primary);"></i>
               Posição de estoque
             </h2>
-            <p style="font-size: 0.9rem; color: var(--color-text-muted); margin: 0 0 16px;">
-              Lista de unidades (centros 1xxxx, 2xxxx e 3xxxx). A tela abre com o que já está salvo. Para preencher contrato e situação financeira, escolha <strong>um empreendimento</strong> e use os botões abaixo, na ordem.
-            </p>
             <div class="est-stock-filters">
               <div class="est-stock-field" style="flex: 1.4; min-width: 240px;">
                 <label for="est-filter-emp">Empreendimento</label>
@@ -2176,7 +2173,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               </div>
               <div class="est-stock-action-group">
                 <span class="est-stock-action-label">2. Situação financeira</span>
-                <p class="est-stock-action-hint">Exige um empreendimento. Primeiro vincula o CV de cada lote; depois classifica Adimplente, Inadimplente ou Quitado.</p>
+                <p class="est-stock-action-hint">Diário às 7:30 (dia útil). Com Todos os empreendimentos, percorre só os centros que têm lote. Contrato quitado sai das consultas auxiliares. Primeiro vincula o CV; depois classifica Adimplente, Inadimplente ou Quitado (sem vencido e sem a vencer = quitado, com a data da última baixa).</p>
                 <div class="est-stock-action-btns">
                   <button type="button" class="est-btn-contratos" id="est-btn-contratos" onclick="EstoqueComercialApp.cruzarContratos()" title="Preenche a coluna Contrato (número do CV) nas unidades vendidas deste empreendimento.">
                     <i data-lucide="link" style="width: 16px;"></i> Vincular contratos
@@ -6380,40 +6377,40 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=639"></script>
-  <script defer src="sienge-api.js?v=639"></script>
-  <script defer src="azure-auth.js?v=639"></script>
-  <script defer src="app.js?v=639"></script>
-  <script defer src="home-dashboard.js?v=639"></script>
-  <script defer src="anexos.js?v=639"></script>
-  <script defer src="contas-pagar.js?v=639"></script>
-  <script defer src="config-tags.js?v=639"></script>
-  <script defer src="config-users.js?v=639"></script>
-  <script defer src="construcao.js?v=639"></script>
-  <script defer src="empresas.js?v=639"></script>
-  <script defer src="relacionamento.js?v=639"></script>
+  <script defer src="data.js?v=644"></script>
+  <script defer src="sienge-api.js?v=644"></script>
+  <script defer src="azure-auth.js?v=644"></script>
+  <script defer src="app.js?v=644"></script>
+  <script defer src="home-dashboard.js?v=644"></script>
+  <script defer src="anexos.js?v=644"></script>
+  <script defer src="contas-pagar.js?v=644"></script>
+  <script defer src="config-tags.js?v=644"></script>
+  <script defer src="config-users.js?v=644"></script>
+  <script defer src="construcao.js?v=644"></script>
+  <script defer src="empresas.js?v=644"></script>
+  <script defer src="relacionamento.js?v=644"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=639"></script>
-  <script defer src="centros-custo.js?v=639"></script>
-  <script defer src="marketing.js?v=639"></script>
-  <script defer src="plano-financeiro.js?v=639"></script>
-  <script defer src="prestacao-contas.js?v=639"></script>
+  <script defer src="estoque-comercial.js?v=644"></script>
+  <script defer src="centros-custo.js?v=644"></script>
+  <script defer src="marketing.js?v=644"></script>
+  <script defer src="plano-financeiro.js?v=644"></script>
+  <script defer src="prestacao-contas.js?v=644"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=639"></script>
-  <script defer src="fluxo-caixa.js?v=639"></script>
-  <script defer src="investimento.js?v=639"></script>
-  <script defer src="parametrizacao-parceiro.js?v=639"></script>
-  <script defer src="societario.js?v=639"></script>
-  <script defer src="participacoes.js?v=639"></script>
-  <script defer src="fiscal.js?v=639"></script>
-  <script defer src="indexadores.js?v=639"></script>
-  <script defer src="verificar-construcao.js?v=639"></script>
-  <script src="repactuacoes.js?v=639"></script>
+  <script defer src="empresa-filter.js?v=644"></script>
+  <script defer src="fluxo-caixa.js?v=644"></script>
+  <script defer src="investimento.js?v=644"></script>
+  <script defer src="parametrizacao-parceiro.js?v=644"></script>
+  <script defer src="societario.js?v=644"></script>
+  <script defer src="participacoes.js?v=644"></script>
+  <script defer src="fiscal.js?v=644"></script>
+  <script defer src="indexadores.js?v=644"></script>
+  <script defer src="verificar-construcao.js?v=644"></script>
+  <script src="repactuacoes.js?v=644"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=639"></script>
+  <script defer src="dashboard-inadimplencia.js?v=644"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
