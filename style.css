@@ -1619,14 +1619,21 @@ circle.donut-segment {
 .est-stock-filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .est-stock-field label { display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
 .est-stock-field select { width: 100%; height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; background: #fff; font-size: 0.88rem; color: #0f172a; }
-.est-btn-consultar { height: 38px; padding: 0 18px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.est-stock-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 14px; }
+.est-stock-action-group { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; }
+.est-stock-action-group.is-secondary { background: #fff; border-style: dashed; }
+.est-stock-action-label { display: block; font-size: 0.72rem; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.est-stock-action-hint { margin: 0 0 10px; font-size: 0.8rem; line-height: 1.35; color: #64748b; }
+.est-stock-action-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.est-btn-consultar { height: 38px; padding: 0 16px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-btn-consultar:disabled { opacity: 0.6; cursor: wait; }
-.est-btn-atualizar { height: 38px; padding: 0 14px; background: #105436; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.est-btn-atualizar { height: 38px; padding: 0 14px; background: #fff; color: #105436; border: 1px solid #105436; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-btn-atualizar:disabled { opacity: 0.6; cursor: wait; }
-.est-btn-contratos { height: 38px; padding: 0 14px; background: #0f766e; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
-.est-btn-batimento { height: 38px; padding: 0 14px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
+.est-btn-contratos { height: 38px; padding: 0 14px; background: #0f766e; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.est-btn-contratos:disabled { opacity: 0.6; cursor: wait; }
+.est-btn-batimento { height: 38px; padding: 0 14px; background: #1d4ed8; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-btn-batimento:disabled { opacity: 0.6; cursor: wait; }
-.est-btn-parar { height: 38px; padding: 0 14px; background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; }
+.est-btn-parar { height: 38px; padding: 0 14px; background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .est-stock-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .est-pill { border: none; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 6px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
 .est-pill.is-active { background: #2563eb; color: #fff; }

@@ -573,11 +573,13 @@ const EstoqueComercialApp = {
     const code = String(u.commercialStock || "").toUpperCase();
     const sold = this.SOLD_CODES.includes(code) || !!u.contractId || !!this.displayContract(u);
     if (!sold) return "—";
-    if (String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
+    if (u.relFin === "distratado" || String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
+    if (u.relFin === "quitado" || u.quitado) return "Quitado";
+    if (u.relFin === "inadimplente" || this.isInadimplente(u)) return "Ativo inadimplente";
+    if (u.relFin === "adimplente") return "Ativo adimplente";
     const bal = this.unitBalance(u);
-    if (u.quitado) return "Quitado";
-    if (this.isInadimplente(u)) return "Ativo inadimplente";
     if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
+    if (this.displayContract(u) || u.contractId) return "Ativo adimplente";
     return "A apurar";
   },
 
@@ -961,12 +963,27 @@ const EstoqueComercialApp = {
     };
   },
 
+  cleanUnitKey(name, entId) {
+    if (!name) return "";
+    let clean = String(name).trim();
+    if (entId) {
+      const eStr = String(entId);
+      if (clean === eStr) return "";
+      if (clean.startsWith(eStr + " - ")) clean = clean.substring(eStr.length + 3);
+      else if (clean.startsWith(eStr + "-")) clean = clean.substring(eStr.length + 1);
+      else if (clean.startsWith(eStr + " ")) clean = clean.substring(eStr.length + 1);
+    }
+    return clean.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  },
+
   rememberContractNames(byName, raw, info) {
     if (!raw) return;
     const n = this.normName(raw);
     const l = this.normNameLoose(raw);
     if (n) byName[n] = info;
     if (l) byName[l] = info;
+    const c = this.cleanUnitKey(raw);
+    if (c) byName[c] = info;
   },
 
   async fetchContractsForCc(ccId) {
@@ -1003,6 +1020,7 @@ const EstoqueComercialApp = {
 
   pickSale(u, maps) {
     if (!u || !maps) return null;
+    const clean = this.cleanUnitKey(u.name, u.enterpriseId);
     return maps.byId[String(u.id)]
       || (u.contractId != null ? maps.bySaleId[String(u.contractId)] : null)
       || (this.displayContract(u) ? maps.byNumber[this.displayContract(u)] : null)
@@ -1010,6 +1028,7 @@ const EstoqueComercialApp = {
       || (u.receivableBillId ? maps.byNumber[String(u.receivableBillId)] : null)
       || maps.byName[this.normName(u.name)]
       || maps.byName[this.normNameLoose(u.name)]
+      || (clean ? maps.byName[clean] : null)
       || null;
   },
 
@@ -1017,7 +1036,9 @@ const EstoqueComercialApp = {
     opts = opts || {};
     this.state.stopSync = false;
     const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
-    let pending = [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))];
+    let pending = empSel
+      ? [String(empSel)]
+      : [...new Set(this.state.units.filter(u => this.needsContract(u)).map(u => String(u.enterpriseId)))];
     if (empSel) pending = pending.filter(id => id === String(empSel));
     if (!pending.length) {
       this.state.contractsEnriched = true;
@@ -1102,17 +1123,16 @@ const EstoqueComercialApp = {
   },
 
   kpisFromInstallments(installments) {
-    if (typeof window.mapaJuridicoKpisFromInstallments === "function") {
-      return window.mapaJuridicoKpisFromInstallments(installments);
-    }
     let paid = 0;
     let due = 0;
     let upcoming = 0;
     const today = new Date().toISOString().split("T")[0];
     (installments || []).forEach(inst => {
-      const cb = Number(inst.currentBalance || 0);
+      const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
       (inst.receipts || []).forEach(rec => {
-        paid += Number(rec.receiptValue || rec.netReceiptValue || 0);
+        const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
+        if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") return;
+        paid += Number(rec.receiptValue || 0);
       });
       const dueDate = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
       if (cb > 0.009 && dueDate && dueDate < today) due += cb;
@@ -1453,6 +1473,205 @@ const EstoqueComercialApp = {
     return done;
   },
 
+  classifyReceivableBill(b) {
+    if (!b) return "adimplente";
+    const sit = String(b.status || b.situation || "").toUpperCase();
+    if ((b.active === false && !b.payOffDate) || sit === "CANCELED" || sit === "DISTRATO") return "distratado";
+    if (b.payOffDate || sit === "QUIT" || sit === "QUITADO") return "quitado";
+    if (b.defaulting) return "inadimplente";
+    if (b.active !== false && !b.payOffDate && b.dueDate) {
+      try {
+        const due = new Date(b.dueDate).toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T")[0];
+        if (due < today) return "inadimplente";
+      } catch (e) {}
+    }
+    return "adimplente";
+  },
+
+  classifyUnitBills(bills) {
+    const list = (bills || []).filter(Boolean);
+    if (!list.length) return null;
+    const ranks = list.map(b => this.classifyReceivableBill(b));
+    if (ranks.every(s => s === "distratado")) return "distratado";
+    if (ranks.every(s => s === "quitado")) return "quitado";
+    if (ranks.some(s => s === "inadimplente")) return "inadimplente";
+    return "adimplente";
+  },
+
+  billMatchesEstoqueUnit(b, u) {
+    if (!b || !u) return false;
+    const bid = String(b.id || b.receivableBillId || b.billReceivableId || "");
+    if (u.receivableBillId && bid && String(u.receivableBillId) === bid) return true;
+    const bEnt = String(b.enterpriseId || b.costCenterId || "");
+    if (bEnt && String(u.enterpriseId) !== bEnt) return false;
+    const bName = b.unityName || b.unitName || b.unit || "";
+    const uk = this.cleanUnitKey(u.name, u.enterpriseId);
+    const bk = this.cleanUnitKey(bName, bEnt || u.enterpriseId);
+    if (uk && bk && uk === bk) return true;
+    if (this.unitNameMatches(bName, u.name)) return true;
+    return false;
+  },
+
+  applyRelFin(u, status, bill) {
+    const next = {
+      ...u,
+      relFin: status,
+      statementDone: true,
+      finAt: new Date().toISOString()
+    };
+    if (bill) {
+      const bid = bill.id || bill.receivableBillId || bill.billReceivableId;
+      if (bid) next.receivableBillId = u.receivableBillId || bid;
+    }
+    if (status === "quitado") {
+      next.quitado = true;
+      next.outstandingBalance = 0;
+      next.presentDebitBalance = 0;
+      next.quitacaoDate = this.isoDate(bill && (bill.payOffDate || bill.payoffDate)) || u.quitacaoDate || null;
+    } else if (status === "distratado") {
+      next.quitado = false;
+      next.quitacaoDate = null;
+      next.situation = u.situation || "Distratado";
+    } else {
+      next.quitado = false;
+      next.quitacaoDate = null;
+      if (status === "inadimplente") {
+        const ov = this.overdueValue(next);
+        if (ov > 0.009 && next.outstandingBalance == null) next.outstandingBalance = ov;
+      }
+    }
+    return next;
+  },
+
+  applyFichaMoney(u, installments, status, rb) {
+    const kpis = this.kpisFromInstallments(installments);
+    const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
+    const received = Number(kpis.kpiPago) || 0;
+    let fin = status;
+    if (aReceber <= 0.009 && received > 0.009) fin = "quitado";
+    else if (kpis.kpiVencidas > 0.009) fin = "inadimplente";
+    else if (aReceber > 0.009) fin = "adimplente";
+    const next = this.applyRelFin(u, fin, rb);
+    next.receivedAmount = received;
+    next.receivedLocked = true;
+    next.outstandingBalance = aReceber;
+    next.presentDebitBalance = aReceber;
+    next.kpiVencidas = kpis.kpiVencidas;
+    next.kpiAVencer = kpis.kpiAVencer;
+    if (fin === "quitado") {
+      next.quitado = true;
+      next.outstandingBalance = 0;
+      next.presentDebitBalance = 0;
+      next.quitacaoDate = next.quitacaoDate || this.lastBaixaFromInstallments(installments);
+    }
+    return next;
+  },
+
+  async fetchStatementsCached(customerId) {
+    const id = String(customerId || "");
+    if (!id) return [];
+    if (!this.state.stCache) this.state.stCache = {};
+    if (this.state.stCache[id]) return this.state.stCache[id];
+    const fn = window.SiengeApiService && SiengeApiService.getCustomerFinancialStatements;
+    if (typeof fn !== "function") return [];
+    try {
+      const res = await fn.call(SiengeApiService, id);
+      const rows = this.flattenStatements(res);
+      this.state.stCache[id] = rows;
+      return rows;
+    } catch (e) {
+      console.warn("[Estoque] extrato ficha", id, e);
+      this.state.stCache[id] = [];
+      return [];
+    }
+  },
+
+  async fetchReceivableBillsCached(customerId) {
+    const id = String(customerId || "");
+    if (!id) return [];
+    if (!this.state.rbCache) this.state.rbCache = {};
+    if (this.state.rbCache[id]) return this.state.rbCache[id];
+    const fn = window.SiengeApiService && SiengeApiService.getReceivableBills;
+    if (typeof fn !== "function") return [];
+    try {
+      const res = await fn.call(SiengeApiService, id);
+      const rows = this.extractRows(res);
+      this.state.rbCache[id] = rows;
+      return rows;
+    } catch (e) {
+      console.warn("[Estoque] receivable-bills", id, e);
+      this.state.rbCache[id] = [];
+      return [];
+    }
+  },
+
+  async applyRelacionamentoBatimento(ccId) {
+    this.buildDefaulterIndex();
+    const sold = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isSoldUnit(u));
+    const byCust = new Map();
+    sold.forEach(u => {
+      if (!u.customerId) return;
+      const id = String(u.customerId);
+      if (!byCust.has(id)) byCust.set(id, []);
+      byCust.get(id).push(u);
+    });
+    const custIds = [...byCust.keys()];
+    let marked = 0;
+    for (let i = 0; i < custIds.length; i++) {
+      if (this.state.stopSync) break;
+      const customerId = custIds[i];
+      this.setProgress(`Valores da ficha ${i + 1}/${custIds.length} — cliente ${customerId}…`, ((i + 1) / Math.max(custIds.length, 1)) * 100);
+      const bills = await this.fetchReceivableBillsCached(customerId);
+      const statements = await this.fetchStatementsCached(customerId);
+      const unitIds = new Set(byCust.get(customerId).map(u => String(u.id)));
+      this.state.units = this.state.units.map(u => {
+        if (!unitIds.has(String(u.id))) return u;
+        const mine = bills.filter(b => this.billMatchesEstoqueUnit(b, u));
+        const stmt = statements.find(s => {
+          const sid = String(s.billReceivableId || s.receivableBillId || s.id || "").replace(/^B-/, "").split("-")[0];
+          if (mine.some(b => String(b.id || b.receivableBillId || "") === sid)) return true;
+          return this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u);
+        }) || (statements.length === 1 && unitIds.size === 1 ? statements[0] : null);
+        const status = this.classifyUnitBills(mine)
+          || (this.isInadimplente(u) ? "inadimplente" : ((this.displayContract(u) || u.contractId) ? "adimplente" : null));
+        const rb = mine
+          .filter(b => this.classifyReceivableBill(b) === status)
+          .sort((a, b) => String(b.payOffDate || "").localeCompare(String(a.payOffDate || "")))[0]
+          || mine[0]
+          || null;
+        if (stmt && (stmt.installments || []).length) {
+          marked += 1;
+          return this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt);
+        }
+        if (!status) return u;
+        marked += 1;
+        return this.applyRelFin(u, status, rb);
+      });
+      if ((i + 1) % 10 === 0) {
+        this.saveCache();
+        this.renderTable();
+      }
+      await this.sleep(90);
+    }
+    this.state.units = this.state.units.map(u => {
+      if (String(u.enterpriseId) !== String(ccId) || !this.isSoldUnit(u) || u.relFin) return u;
+      if (this.isInadimplente(u)) {
+        marked += 1;
+        return this.applyRelFin(u, "inadimplente", null);
+      }
+      if (this.displayContract(u) || u.contractId) {
+        marked += 1;
+        return this.applyRelFin(u, "adimplente", null);
+      }
+      return u;
+    });
+    this.saveCache();
+    await this.saveFirebaseCc(ccId);
+    this.renderTable();
+    return marked;
+  },
+
   async batimentoFinanceiro() {
     try {
       if (this.state.loading) return;
@@ -1471,17 +1690,12 @@ const EstoqueComercialApp = {
       if (!this.state.enterprises.length) await this.loadEnterprises();
       await this.enrichContracts({ quiet: true, keepBusy: true });
       if (this.state.stopSync) return;
-      let fromExtract = 0;
-      try {
-        fromExtract = await this.enrichQuitadosFromExtract(empSel);
-      } catch (ex) {
-        console.warn("[Estoque] extrato bulk da empresa", ex);
-        this.setProgress("Extrato bulk falhou; quitados pelo saldo do contrato foram mantidos. " + (ex.message || ex));
-      }
-      const qtdQ = this.state.units.filter(u => String(u.enterpriseId) === empSel && u.quitado).length;
-      const qtdA = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.isSoldUnit(u) && !u.quitado).length;
-      const comData = this.state.units.filter(u => String(u.enterpriseId) === empSel && u.quitado && u.quitacaoDate).length;
-      this.setProgress(`Batimento de ${empSel}: ${qtdQ} quitados (${comData} com data da última baixa) · ${qtdA} ativos · ${fromExtract} ajuste(s) no extrato.`);
+      const marked = await this.applyRelacionamentoBatimento(empSel);
+      const qtdQ = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.financialStatus(u) === "Quitado").length;
+      const qtdI = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.financialStatus(u) === "Ativo inadimplente").length;
+      const qtdA = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.financialStatus(u) === "Ativo adimplente").length;
+      const qtdP = this.state.units.filter(u => String(u.enterpriseId) === empSel && this.financialStatus(u) === "A apurar").length;
+      this.setProgress(`Batimento de ${empSel} (mesma lógica do Relacionamento): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${qtdP} a apurar · ${marked} unidade(s) classificada(s).`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
