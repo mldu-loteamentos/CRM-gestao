@@ -161,8 +161,14 @@ const RepactuacaoLoteApp = {
   },
 
   init() {
-    this.state.inited = true;
-    this.render();
+    try {
+      this.state.inited = true;
+      this.render();
+    } catch (e) {
+      console.error("[Repactuação lote] init", e);
+      const root = document.getElementById("repactuacao-lote-root");
+      if (root) root.innerHTML = `<p style="padding:24px;color:#b91c1c;">Não foi possível montar a tela de Repactuação. Recarregue a página.</p>`;
+    }
   },
 
   bindUpload() {
@@ -425,13 +431,13 @@ const RepactuacaoLoteApp = {
         this.state.rows = this.state.rows.map((row) => {
           if (String(row.titulo) !== String(titulo)) return row;
           const hit = (insts || []).find((x) => Number(x.installmentNumber || x.number) === Number(row.parcela));
-          const cur = hit
-            ? Number(
-              hit.value != null ? hit.value
-                : (hit.installmentValue != null ? hit.installmentValue
-                  : (hit.currentValue != null ? hit.currentValue : hit.originalValue))
-            )
-          const projetado = cur != null && row.factor ? cur * row.factor : null;
+          const raw = hit
+            ? (hit.value != null ? hit.value
+              : (hit.installmentValue != null ? hit.installmentValue
+                : (hit.currentValue != null ? hit.currentValue : hit.originalValue)))
+            : null;
+          const cur = raw == null || raw === "" ? null : Number(raw);
+          const projetado = cur != null && Number.isFinite(cur) && row.factor ? cur * row.factor : null;
           const valorOk = projetado != null && row.excelValor != null
             ? Math.abs(projetado - row.excelValor) <= Math.max(0.05, Math.abs(row.excelValor) * 0.002)
             : null;

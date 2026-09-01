@@ -1853,7 +1853,17 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "investimento") {
     if (typeof InvestimentoApp !== "undefined") InvestimentoApp.init();
   } else if (tabId === "repactuacao-lote") {
-    if (typeof RepactuacaoLoteApp !== "undefined") RepactuacaoLoteApp.init();
+    const bootRepac = () => {
+      try {
+        if (window.RepactuacaoLoteApp && typeof window.RepactuacaoLoteApp.init === "function") {
+          window.RepactuacaoLoteApp.init();
+        }
+      } catch (err) {
+        console.error("[Repactuação]", err);
+      }
+    };
+    bootRepac();
+    setTimeout(bootRepac, 0);
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   } else if (tabId === "estrutura-societaria") {
@@ -2408,7 +2418,7 @@ async function initializeApplication() {
   window.mergeOccurrenceLists = function(a, b) {
       const map = new Map();
       const add = (n) => {
-          if (!n || window.isExactTesteOccurrence(n)) return;
+          if (!n) return;
           if (typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, n.customerId)) return;
           const k = window.occurrenceIdentity(n);
           if (!k || k === '||||') return;
@@ -2441,8 +2451,8 @@ async function initializeApplication() {
   };
 
   window.applyRemoteNotes = function(local, remote, customerId) {
-      const remoteList = window.stripExactTesteNotes(remote);
-      const localList = window.stripExactTesteNotes(local);
+      const remoteList = Array.isArray(remote) ? remote : [];
+      const localList = Array.isArray(local) ? local : [];
       const remoteKeys = new Set(remoteList.map(n => window.occurrenceIdentity(n)));
       const graceMs = 120000;
       const now = Date.now();
@@ -2656,10 +2666,10 @@ async function initializeApplication() {
         if (window.firebaseDb && window.firebaseCollections) {
             if (customerId) {
                const customerKey = window.normalizeCustomerNotesKey(customerId);
-               const notesToSave = window.stripExactTesteNotes(window.mergeOccurrenceLists(
+               const notesToSave = window.mergeOccurrenceLists(
                    window.getCustomerNotesList(AppState.notes, customerKey),
                    window.getCustomerNotesList(AppState.notes, customerId)
-               )).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
+               ).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
                AppState.notes[customerKey] = notesToSave;
                if (!notesToSave.length) {
                    console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
@@ -10211,15 +10221,26 @@ async function saveCustomerOccurrence() {
     }
   }
   
-  const currentSale = (AppState.sales || []).find(s => String(s.id) === String(AppState.selectedSaleId)) || {};
+  const currentSale = (AppState.sales || []).find(s =>
+    String(s.id) === String(AppState.selectedSaleId)
+    || String(s.receivableBillId) === String(AppState.selectedSaleId)
+    || String(s.receivableBillId) === String(AppState.currentReceivableBillId)
+  ) || {};
   const pinCheckbox = document.getElementById("note-pin-checkbox");
   const isPinned = pinCheckbox ? pinCheckbox.checked : false;
+  const canonicalSaleId = (typeof window.nexCanonicalTitulo === "function")
+    ? window.nexCanonicalTitulo(AppState.selectedSaleId)
+    : (AppState.currentReceivableBillId || AppState.selectedTitulo || AppState.selectedSaleId);
+
+  const newOccId = () => (window.crypto && typeof window.crypto.randomUUID === "function")
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const occurrence = {
-    id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: newOccId(),
     date: new Date().toISOString(),
     author: AppState.currentUser.name,
-    saleId: AppState.selectedSaleId || null,
+    saleId: canonicalSaleId || AppState.selectedSaleId || null,
     unitId: currentSale.unitId || null,
     text: text,
     promiseDate: (canal === "Nota interna") ? null : promiseDate,
@@ -10248,43 +10269,51 @@ async function saveCustomerOccurrence() {
   if (canal !== "Nota interna") {
       const uniqueOtherSales = new Set();
       const otherContracts = [];
-      // Filter clientList to find other INADIMPLENTE contracts for this customer
-      if (window.clientList) {
-          const otherClientEntries = window.clientList.filter(c => 
-              String(c.customerId) === String(AppState.selectedCustomerId) && 
-              String(c.saleId) !== String(AppState.selectedSaleId)
-          );
-          
-          otherClientEntries.forEach(c => {
-              if (!uniqueOtherSales.has(String(c.saleId))) {
-                  uniqueOtherSales.add(String(c.saleId));
-                  otherContracts.push({ saleId: c.saleId, unitId: c.unitId });
-              }
-          });
-      }
+      const currentSet = (typeof window.getCurrentContractIdSet === "function")
+        ? window.getCurrentContractIdSet()
+        : new Set([String(AppState.selectedSaleId || ""), String(canonicalSaleId || "")].filter(Boolean));
+      const isCurrentFicha = (saleId, billIds) => {
+        const ids = [saleId].concat(Array.isArray(billIds) ? billIds : []).filter(v => v != null && v !== "");
+        return ids.some((id) => {
+          const raw = String(id);
+          const tok = (typeof window.normalizeContractIdToken === "function")
+            ? window.normalizeContractIdToken(raw)
+            : raw;
+          return currentSet.has(raw) || (tok && currentSet.has(tok));
+        });
+      };
+      const sourceList = [].concat(window.clientList || [], window.rawClientList || []);
+      sourceList.forEach(c => {
+          if (String(c.customerId) !== String(AppState.selectedCustomerId)) return;
+          if (isCurrentFicha(c.saleId, c.billIds)) return;
+          const sid = c.saleId;
+          if (sid == null || uniqueOtherSales.has(String(sid))) return;
+          uniqueOtherSales.add(String(sid));
+          otherContracts.push({ saleId: sid, unitId: c.unitId });
+      });
       
       if (otherContracts.length > 0 && !window.isCrossContractValidating) {
           const hasInstallments = occurrence.promisedInstallments && occurrence.promisedInstallments.length > 0;
           if (!hasInstallments) {
-              // Show customized modal instead of confirm()
+              window.finalizeOccurrenceSave(occurrence, null, true);
               const modal = document.getElementById("cross-contract-modal");
               const textEl = document.getElementById("cross-contract-modal-text");
               if (modal && textEl) {
-                  textEl.innerHTML = `O cliente possui outros contratos pendentes (ex: <b>Título ${otherContracts[0].saleId}</b>). O sistema pode replicar este mesmo registro para ele.`;
+                  const titulos = otherContracts.map(oc => oc.saleId).slice(0, 4).join(", ");
+                  textEl.innerHTML = `A ocorrência já foi gravada neste título (<b>${occurrence.saleId}</b>). Replicar o mesmo registro para o(s) outro(s) contrato(s) pendente(s): <b>${titulos}</b>?`;
                   window.pendingReplicationData = {
                       occurrence: occurrence,
                       otherContracts: otherContracts
                   };
                   modal.style.display = "flex";
                   setTimeout(() => modal.classList.add('active'), 10);
-                  return; // Exit here, wait for user action
+                  return;
               }
           }
       }
-      window.isCrossContractValidating = false; // Reset flag after checking
+      window.isCrossContractValidating = false;
   }
 
-  // If we reach here, it means no other contracts OR it's Nota interna
   window.finalizeOccurrenceSave(occurrence, null, false);
   } catch (err) {
       console.error("Erro ao salvar ocorrência:", err);
@@ -10305,9 +10334,17 @@ window.crossContractAction = function(action) {
     const otherContracts = window.pendingReplicationData.otherContracts;
     
     if (action === 'replicar') {
+        const notes = AppState.notes[AppState.selectedCustomerId] || (AppState.notes[AppState.selectedCustomerId] = []);
         otherContracts.forEach(oc => {
-            const clonedOcc = { ...occ, saleId: oc.saleId, unitId: oc.unitId };
-            AppState.notes[AppState.selectedCustomerId].push(clonedOcc);
+            const clonedOcc = {
+              ...occ,
+              id: (window.crypto && typeof window.crypto.randomUUID === "function")
+                ? window.crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              saleId: oc.saleId,
+              unitId: oc.unitId
+            };
+            notes.push(clonedOcc);
         });
         
         try {
@@ -10324,15 +10361,20 @@ window.crossContractAction = function(action) {
             if (changed) localStorage.setItem('crm_queue_entry_dates', JSON.stringify(queueDates));
         } catch(e) {}
         
+        window.pendingReplicationData = null;
+        if (window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId);
+        else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
         window.finalizeOccurrenceSave(occ, null, false);
     } 
     else if (action === 'validar') {
         const nextSaleId = otherContracts[0].saleId;
-        window.pendingOccurrenceClone = { ...occ }; // Save for prefilling
-        window.isCrossContractValidating = true; // Prevent prompt on next save
-        window.finalizeOccurrenceSave(occ, nextSaleId, true); // true = skip clearing form
+        window.pendingOccurrenceClone = { ...occ, id: null };
+        window.isCrossContractValidating = true;
+        window.pendingReplicationData = null;
+        window.finalizeOccurrenceSave(occ, nextSaleId, true);
     } 
     else if (action === 'nao_replicar') {
+        window.pendingReplicationData = null;
         window.finalizeOccurrenceSave(occ, null, false);
     }
 };
@@ -20472,7 +20514,6 @@ function loadPreamblesConfigTab() {
       saved = [
         { id: 1, text: "EMPREENDIMENTOS IMOBILIÃRIOS CHÃCARA MOURA LEITE, inscrita no CNPJ sob o nº 01.610.787/0001-76, com endereço na Rua J. J. Esteves, 172, na cidade e comarca de Cerqueira César, Estado de São Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 208, fls. 287 a 289, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP.", responsibles: "RESPONSÃVEL 1: EMPREENDIMENTOS IMOBILIÃRIOS CHÃCARA MOURA LEITE", status: "Ativo" },
         { id: 2, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA, inscrita no CGC-MF sob o nº 01.066.134/0001-78, com endereço na Rua Campos Sales, 2175, Vila Sonia, na cidade e comarca de Botucatu, Estado de São Paulo, neste ato representados pelo sócio PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Campos Salles, nº 2.175, Vila Sonia, na cidade e comarca de BOTUCATU/SP.", responsibles: "RESPONSÃVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA", status: "Ativo" },
-        { id: 3, text: "T.L.M. PARTICIPAÇÃ•ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.º 02.983.678/0001-67, com endereço na Praça da Matriz, 104 Sala 01, na cidade de Araçariguama comarca de São Roque, Estado de São Paulo, neste ato representados pelo seu procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 242, pag. 173 à 175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃVEL 1: T.L.M. PARTICIPAÇÃ•ES E EMPREENDIMENTOS", status: "Ativo" },
         { id: 4, text: "T.L.M. PARTICIPAÇÃ•ES E EMPREENDIMENTOS, inscrita no CGC-MF sob n.º 02.983.678/0001-67, com endereço na Praça da Matriz, 104 Sala 01, na cidade de Araçariguama comarca de São Roque, Estado de São Paulo, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 242, pag. 173 à 175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP, de ora em diante chamada simplesmente de PROMITENTE VENDEDORA, e do outro lado:", responsibles: "RESPONSÃVEL 1: T.L.M. PARTICIPAÇÃ•ES E EMPREENDIMENTOS", status: "Ativo" },
         { id: 5, text: "MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA, inscrita no CGC-MF sob o nº 01.066.134/0001-78, com endereço na Av. Dr. Vital Brasil, 1190, na cidade e comarca de Botucatu, Estado de São Paulo, neste ato representados pelo seu sócio PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP e TADEU LEMOS DE MOURA LEITE, brasileiro, empresário, portador da cédula de identidade RG nº4.180.086-2 inscrito no CPF-MF nº386.497.728-20, casado no regime comunhão parcial de bens com CAROLINA AP. DE ALMEIDA MOURA LEITE, brasileira, advogada, portadora da cédula de identidade RG nº 28.177.033-5, inscrita no CPF-MF nº 170.324.868-60. Residentes e Domiciliados na Rua Almirante Giachetta, 180 AP 61 Pq Campolim, na cidade de Sorocaba-SP, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 242, pag. 173 à 175, em 12/06/2024, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP.", responsibles: "RESPONSÃVEL 1: MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA\nRESPONSÃVEL 2: TADEU LEMOS DE MOURA LEITE\nRESPONSÃVEL 3: CAROLINA AP. DE ALMEIDA MOURA LEITE", status: "Ativo" },
         { id: 6, text: "ALEXANDRE GHELARDI, brasileiro, administrador de empresa, portador da Cédula de Identidade RG n.º 8.427.046 SSP-SP, inscrito no CPF-MF sob o n.º 850.924.368-91, casado no regime de comunhão parcial de bens na vigência da Lei n.º 6.515/77, com LIVIA TAVARES PADOVAN GHELARDI, brasileira, do lar, portadora da Cédula de Identidade RG n.º 10.505.462-8 SSP-SP, inscrita no CPF-MF sob o n.º 198.215.568-09, neste ato representados pelo seu bastante procurador PAULO JOSÉ FONSECA DE MOURA LEITE, brasileiro, casado,  administrador de empresa, portador da Cédula de Identidade, R.G. sob o nº 26.577.836-0 SSP/SP, inscrito no C.P.F/MF sob o nº 163.085.288-03, residente e domiciliado na Rua Salim Kahil, nº 470, Bloco 1, Apto 301, Vila Nogueira, na cidade e comarca de BOTUCATU/SP, nos termos da PROCURAÇÃO PÚBLICA lavrada no Livro 208, fls. 283 a 286, em 25/03/2021, no Oficial de Registro Civil das Pessoas Naturais e Tabelião de Notas do Distrito de Rubião Junior, Botucatu-SP.", responsibles: "RESPONSÃVEL 1: ALEXANDRE GHELARDI\nRESPONSÃVEL 2: LIVIA TAVARES PADOVAN GHELARDI", status: "Ativo" },
@@ -20486,9 +20527,11 @@ function loadPreamblesConfigTab() {
     }
     AppState.preamblesList = saved;
   }
+  if (typeof window.tombstoneDraftTlmPreamble3 === "function") window.tombstoneDraftTlmPreamble3();
   if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
   
   AppState.preamblesList.forEach(p => {
+    if (p && p.deleted) return;
     const statusText = p.status || "Ativo";
     const badgeClass = statusText === 'Ativo' ? "badge-success" : "badge-danger";
     const ccs = (p.centrosCustoIds || []).join(", ") || "—";
@@ -20503,6 +20546,9 @@ function loadPreamblesConfigTab() {
       <td style="text-align: center;">
         <button class="btn btn-outline btn-sm" onclick="selectPreambleForEdit(${p.id})">
           <i data-lucide="edit" style="width:12px; height:12px;"></i> Editar
+        </button>
+        <button class="btn btn-danger btn-sm" style="margin-left:6px;" onclick="deletePreamble(${p.id})">
+          <i data-lucide="trash-2" style="width:12px; height:12px;"></i> Excluir
         </button>
       </td>
     `;
@@ -21067,7 +21113,7 @@ window.loadCentrosCustoForPreamble = function(selectedIds = []) {
     const currentEditId = document.getElementById("preamble-edit-id").value;
     let vinculatedToOther = null;
     if (AppState.preamblesList) {
-      vinculatedToOther = AppState.preamblesList.find(p => p.id != currentEditId && p.centrosCustoIds && p.centrosCustoIds.includes(cc.id));
+      vinculatedToOther = AppState.preamblesList.find(p => !p.deleted && p.id != currentEditId && p.centrosCustoIds && p.centrosCustoIds.includes(cc.id));
     }
     
     const isChecked = window.currentPreambleSelectedCCs && window.currentPreambleSelectedCCs.includes(cc.id);
@@ -21085,17 +21131,92 @@ window.loadCentrosCustoForPreamble = function(selectedIds = []) {
   html += '</div>';
   
   ccListDiv.innerHTML = html;
-  if (typeof window.updatePreambleSelectedBadges === 'function') window.updatePreambleSelectedBadges();
+  if (typeof window.expandPreambleSelectedCcChildren === "function") window.expandPreambleSelectedCcChildren();
+  if (typeof window.updatePreambleSelectedBadges === "function") window.updatePreambleSelectedBadges();
+};
+
+window.PREAMBLE_CC_CHILDREN = {
+  12900: [12901]
+};
+
+window.preambleCcIdTakenByOther = function(ccId) {
+  const currentEditEl = document.getElementById("preamble-edit-id");
+  const currentEditId = currentEditEl ? currentEditEl.value : "";
+  const want = Number(ccId);
+  if (!Number.isFinite(want) || !AppState.preamblesList) return null;
+  return AppState.preamblesList.find(p => {
+    if (!p || p.deleted || String(p.id) === String(currentEditId)) return false;
+    return (p.centrosCustoIds || []).some(x => Number(x) === want);
+  }) || null;
+};
+
+window.getPreambleCcChildren = function(ccId) {
+  const id = Number(ccId);
+  if (!Number.isFinite(id)) return [];
+  const out = [];
+  const push = (child) => {
+    const n = Number(child);
+    if (!Number.isFinite(n) || n === id || out.indexOf(n) !== -1) return;
+    out.push(n);
+  };
+  const mapped = (window.PREAMBLE_CC_CHILDREN && window.PREAMBLE_CC_CHILDREN[id]) || [];
+  mapped.forEach(push);
+  if (id % 100 === 0) push(id + 1);
+  const visible = new Set();
+  document.querySelectorAll(".preamble-cc-checkbox").forEach(cb => {
+    const n = Number(cb.value);
+    if (Number.isFinite(n)) visible.add(n);
+  });
+  if (!visible.size && Array.isArray(AppState.cachedCostCenters)) {
+    AppState.cachedCostCenters.forEach(cc => {
+      const n = Number(cc && cc.id);
+      if (Number.isFinite(n)) visible.add(n);
+    });
+  }
+  return out.filter(childId => {
+    if (!visible.has(childId)) return false;
+    const cb = document.querySelector(`.preamble-cc-checkbox[value="${childId}"]`);
+    if (cb && cb.disabled) return false;
+    return !window.preambleCcIdTakenByOther(childId);
+  });
+};
+
+window.syncPreambleCcCheckbox = function(ccId, checked) {
+  const cb = document.querySelector(`.preamble-cc-checkbox[value="${ccId}"]`);
+  if (cb && !cb.disabled) cb.checked = !!checked;
+};
+
+window.expandPreambleSelectedCcChildren = function() {
+  if (!window.currentPreambleSelectedCCs) window.currentPreambleSelectedCCs = [];
+  const selected = window.currentPreambleSelectedCCs.map(Number);
+  selected.forEach(id => {
+    window.getPreambleCcChildren(id).forEach(childId => {
+      if (!window.currentPreambleSelectedCCs.some(x => Number(x) === childId)) {
+        window.currentPreambleSelectedCCs.push(childId);
+      }
+      window.syncPreambleCcCheckbox(childId, true);
+    });
+  });
 };
 
 window.togglePreambleCC = function(ccId, isChecked) {
   if (!window.currentPreambleSelectedCCs) window.currentPreambleSelectedCCs = [];
+  ccId = Number(ccId);
+  const children = window.getPreambleCcChildren(ccId);
   if (isChecked) {
-    if (!window.currentPreambleSelectedCCs.includes(ccId)) {
+    if (!window.currentPreambleSelectedCCs.some(x => Number(x) === ccId)) {
       window.currentPreambleSelectedCCs.push(ccId);
     }
+    children.forEach(childId => {
+      if (!window.currentPreambleSelectedCCs.some(x => Number(x) === childId)) {
+        window.currentPreambleSelectedCCs.push(childId);
+      }
+      window.syncPreambleCcCheckbox(childId, true);
+    });
   } else {
-    window.currentPreambleSelectedCCs = window.currentPreambleSelectedCCs.filter(id => id !== ccId);
+    const drop = new Set([ccId].concat(children));
+    window.currentPreambleSelectedCCs = window.currentPreambleSelectedCCs.filter(id => !drop.has(Number(id)));
+    children.forEach(childId => window.syncPreambleCcCheckbox(childId, false));
   }
   window.updatePreambleSelectedBadges();
 };
@@ -21110,10 +21231,8 @@ window.toggleAllPreambleCC = function(checked) {
 
 window.removePreambleSelectedCC = function(ccId) {
   if (!window.currentPreambleSelectedCCs) return;
-  window.currentPreambleSelectedCCs = window.currentPreambleSelectedCCs.filter(id => id !== ccId);
-  const cb = document.querySelector(`.preamble-cc-checkbox[value="${ccId}"]`);
-  if (cb) cb.checked = false;
-  window.updatePreambleSelectedBadges();
+  window.togglePreambleCC(Number(ccId), false);
+  window.syncPreambleCcCheckbox(ccId, false);
 };
 
 window.updatePreambleSelectedBadges = function() {
@@ -21173,12 +21292,14 @@ window.openNewPreambleModal = async function() {
   if (container) container.innerHTML = "";
   addResponsibleField();
   
+  const delBtnNew = document.getElementById("btn-delete-preamble");
+  if (delBtnNew) delBtnNew.style.display = "none";
   await window.loadPreambleConfigData();
 };
 
 window.selectPreambleForEdit = async function(id) {
   if (!AppState.preamblesList) return;
-  const p = AppState.preamblesList.find(x => Number(x.id) === Number(id));
+  const p = AppState.preamblesList.find(x => Number(x.id) === Number(id) && !x.deleted);
   if (!p) return;
   
   window.currentPreambleSelectedCCs = [...(p.centrosCustoIds || [])];
@@ -21226,6 +21347,10 @@ window.selectPreambleForEdit = async function(id) {
   } else {
     addResponsibleField();
   }
+  
+  const delBtn = document.getElementById("btn-delete-preamble");
+  if (delBtn) delBtn.style.display = "inline-flex";
+  if (window.lucide) lucide.createIcons();
 };
 
 window.cancelPreambleEdit = function() {
@@ -21241,6 +21366,45 @@ window.cancelPreambleEdit = function() {
   
   const container = document.getElementById("preamble-responsibles-container");
   if (container) container.innerHTML = "";
+  const delBtnCancel = document.getElementById("btn-delete-preamble");
+  if (delBtnCancel) delBtnCancel.style.display = "none";
+};
+
+window.deletePreamble = async function(idFromRow) {
+  try {
+    let id = idFromRow;
+    if (id == null || id === "") {
+      const modeEl = document.getElementById("preamble-edit-mode");
+      if (!modeEl || modeEl.value !== "edit") return;
+      id = document.getElementById("preamble-edit-id") && document.getElementById("preamble-edit-id").value;
+    }
+    id = parseInt(id, 10);
+    if (!Number.isFinite(id)) return;
+
+    const ok = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm("Excluir o preâmbulo " + id + " de forma permanente? Ele sai da lista (não fica como inativo).")
+      : window.confirm("Excluir o preâmbulo " + id + "?");
+    if (!ok) return;
+
+    if (!AppState.preamblesList) {
+      AppState.preamblesList = JSON.parse(localStorage.getItem("crm_moura_preambles_list") || "[]") || [];
+    }
+    const tomb = { id: id, deleted: true, updatedAt: Date.now() };
+    const idx = AppState.preamblesList.findIndex(x => Number(x.id) === id);
+    if (idx >= 0) AppState.preamblesList[idx] = tomb;
+    else AppState.preamblesList.push(tomb);
+
+    localStorage.setItem("crm_moura_preambles_list", JSON.stringify(AppState.preamblesList));
+    if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
+    if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig(true).catch(() => {});
+    }
+    cancelPreambleEdit();
+    loadPreamblesConfigTab();
+  } catch (err) {
+    alert("Erro ao excluir preâmbulo: " + err.message);
+    console.error(err);
+  }
 };
 
 window.addResponsibleField = function(value = "") {
@@ -21289,6 +21453,7 @@ window.savePreamble = function() {
     const empSelect = document.getElementById("preamble-empresa");
     const empresaId = empSelect ? empSelect.value : "";
     
+    if (typeof window.expandPreambleSelectedCcChildren === "function") window.expandPreambleSelectedCcChildren();
     const centrosCustoIds = [...(window.currentPreambleSelectedCCs || [])];
     
     if (!AppState.preamblesList) {
@@ -21298,7 +21463,7 @@ window.savePreamble = function() {
     // Validar duplicidade (mesmo se desabilitado por DOM tinkering)
     const currentEditId = mode === "new" ? -1 : parseInt(document.getElementById("preamble-edit-id").value, 10);
     for (let ccId of centrosCustoIds) {
-      const duplicado = AppState.preamblesList.find(p => p.id !== currentEditId && p.centrosCustoIds && p.centrosCustoIds.includes(ccId));
+      const duplicado = AppState.preamblesList.find(p => !p.deleted && p.id !== currentEditId && p.centrosCustoIds && p.centrosCustoIds.includes(ccId));
       if (duplicado) {
         alert(`O MESMO CENTRO DE CUSTO NÃO PODE ESTAR EM MAIS DE UM PREAMBULO.\nO Centro de Custo ${ccId} já pertence ao Preâmbulo ${duplicado.id}.`);
         return;
@@ -21306,7 +21471,7 @@ window.savePreamble = function() {
     }
     
     if (mode === "new") {
-      const nextId = AppState.preamblesList.length > 0 ? Math.max(...AppState.preamblesList.map(x => x.id)) + 1 : 1;
+      const nextId = AppState.preamblesList.length > 0 ? Math.max(...AppState.preamblesList.map(x => Number(x.id) || 0)) + 1 : 1;
       AppState.preamblesList.push({
         id: nextId,
         text: text,
@@ -21325,6 +21490,7 @@ window.savePreamble = function() {
         p.empresaId = empresaId;
         p.centrosCustoIds = centrosCustoIds;
         p.updatedAt = Date.now();
+        p.deleted = false;
       } else {
         alert("Erro: Preâmbulo não encontrado para edição.");
         return;
@@ -29474,18 +29640,28 @@ window.mergePreamblesList = function(localStr, cloudStr) {
     if (!p || p.id == null) return;
     const id = Number(p.id);
     const prev = byId.get(id);
-    if (!prev) {
-      byId.set(id, { ...p, id });
+    const pAt = Number(p.updatedAt || 0);
+    const prevAt = prev ? Number(prev.updatedAt || 0) : 0;
+    if (p.deleted) {
+      if (!prev || pAt >= prevAt) {
+        byId.set(id, { id: id, deleted: true, updatedAt: Math.max(pAt, prevAt) || Date.now() });
+      }
       return;
     }
-    const newer = Number(p.updatedAt || 0) >= Number(prev.updatedAt || 0) ? p : prev;
+    if (prev && prev.deleted && prevAt >= pAt) return;
+    if (!prev) {
+      byId.set(id, { ...p, id: id, deleted: false });
+      return;
+    }
+    const newer = pAt >= prevAt ? p : prev;
     const older = newer === p ? prev : p;
     const ccNew = Array.isArray(newer.centrosCustoIds) ? newer.centrosCustoIds : [];
     const ccOld = Array.isArray(older.centrosCustoIds) ? older.centrosCustoIds : [];
     byId.set(id, {
       ...older,
       ...newer,
-      id,
+      id: id,
+      deleted: false,
       text: (newer.text && String(newer.text).length >= String(older.text || "").length) ? newer.text : (older.text || newer.text),
       empresaId: newer.empresaId || older.empresaId || "",
       centrosCustoIds: ccNew.length ? ccNew : ccOld,
@@ -29551,6 +29727,7 @@ window.preambleMatchesCc = function(p, candidates) {
 window.rebuildPreambleIndex = function() {
   const map = {};
   (AppState.preamblesList || []).forEach(p => {
+    if (!p || p.deleted) return;
     (p.centrosCustoIds || []).forEach(cc => {
       const key = window.normalizePreambleCcKey(cc);
       if (!key) return;
@@ -29560,6 +29737,19 @@ window.rebuildPreambleIndex = function() {
     });
   });
   AppState.preambles = Object.keys(map).length ? map : (AppState.preambles || {});
+};
+
+window.tombstoneDraftTlmPreamble3 = function() {
+  const list = AppState.preamblesList;
+  if (!Array.isArray(list)) return false;
+  const idx = list.findIndex(x => Number(x.id) === 3 && !(x && x.deleted));
+  if (idx < 0) return false;
+  const t = String(list[idx].text || "");
+  if (!/T\.L\.M\.\s*PARTICIPA/i.test(t)) return false;
+  list[idx] = { id: 3, deleted: true, updatedAt: Date.now() };
+  try { localStorage.setItem("crm_moura_preambles_list", JSON.stringify(list)); } catch (e) {}
+  if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+  return true;
 };
 
 window.ensurePreamblesListLoaded = function() {
@@ -29578,6 +29768,7 @@ window.ensurePreamblesListLoaded = function() {
   } else if (!AppState.preamblesList) {
     AppState.preamblesList = [];
   }
+  window.tombstoneDraftTlmPreamble3();
   window.rebuildPreambleIndex();
   return AppState.preamblesList;
 };
@@ -29586,7 +29777,7 @@ window.getPreambleForContract = function(unit, sale) {
   window.ensurePreamblesListLoaded();
   const candidates = window.collectPreambleCcCandidates(unit, sale);
   const companyId = (sale && sale.companyId) || (unit && unit.companyId) || AppState.currentCompanyId || null;
-  const list = (AppState.preamblesList || []).filter(p => String(p.status || "Ativo").toLowerCase() !== "inativo");
+  const list = (AppState.preamblesList || []).filter(p => !p.deleted && String(p.status || "Ativo").toLowerCase() !== "inativo");
   let hit = null;
   if (candidates.length) {
     if (companyId != null && companyId !== "") {
