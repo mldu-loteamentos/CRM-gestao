@@ -123,8 +123,14 @@ const ConfigUsersApp = {
           actions: [
             { id: "caixa_banco", label: "Movimentações" },
             { id: "investimento", label: "Aplicações e Investimentos" },
-            { id: "fluxo_caixa", label: "Fluxo de Caixa" }
+            { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
+            { id: "fluxo_caixa_diario", label: "Fluxo de caixa diário" },
+            { id: "resultado_caixa", label: "Resultado de caixa" }
           ]
+        },
+        {
+          name: "Repactuação", key: "sub_fin_repac",
+          actions: [{ id: "repactuacao", label: "Repactuação" }]
         }
       ]
     },

@@ -1597,8 +1597,11 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-negociacao": "Configurações",
     "regras-cobranca": "Configurações",
     "prestacao-contas": "Prestação de Contas",
-    "fluxo-caixa": "Fluxo de Caixa",
+    "fluxo-caixa": "Fluxo de caixa (DFC)",
+    "fluxo-caixa-diario": "Fluxo de caixa diário",
+    "resultado-caixa": "Resultado de caixa",
     "investimento": "Aplicações e Investimentos",
+    "repactuacao-lote": "Repactuação",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "estrutura-societaria": "Estrutura Societária",
     "participacoes": "Participações",
@@ -1639,7 +1642,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "regras-cobranca": "sliders",
     "prestacao-contas": "receipt",
     "fluxo-caixa": "git-branch",
+    "fluxo-caixa-diario": "calendar-clock",
+    "resultado-caixa": "scale",
     "investimento": "trending-up",
+    "repactuacao-lote": "refresh-cw",
     "parametrizacao-parceiro": "handshake",
     "estrutura-societaria": "git-fork",
     "participacoes": "pie-chart",
@@ -1755,8 +1761,14 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   } else if (tabId === "fluxo-caixa") {
     if (typeof FluxoCaixaApp !== "undefined") FluxoCaixaApp.init();
+  } else if (tabId === "fluxo-caixa-diario") {
+    if (typeof FluxoCaixaDiarioApp !== "undefined") FluxoCaixaDiarioApp.init();
+  } else if (tabId === "resultado-caixa") {
+    if (typeof ResultadoCaixaApp !== "undefined") ResultadoCaixaApp.init();
   } else if (tabId === "investimento") {
     if (typeof InvestimentoApp !== "undefined") InvestimentoApp.init();
+  } else if (tabId === "repactuacao-lote") {
+    if (typeof RepactuacaoLoteApp !== "undefined") RepactuacaoLoteApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   } else if (tabId === "estrutura-societaria") {
@@ -2021,8 +2033,15 @@ window.applyPermissions = function(profileName) {
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
-        const cbAlias = (modKey === 'sub_fin_cb_fluxo_caixa_acessar' || modKey === 'sub_fin_cb_caixa_banco_acessar' || modKey === 'sub_fin_cb_investimento_acessar') && perms.sub_fin_cb === true;
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || window.permCoversMenuKey(perms, modKey)) {
+        const cbAlias = (
+          modKey === 'sub_fin_cb_fluxo_caixa_acessar'
+          || modKey === 'sub_fin_cb_caixa_banco_acessar'
+          || modKey === 'sub_fin_cb_investimento_acessar'
+          || modKey === 'sub_fin_cb_fluxo_caixa_diario_acessar'
+          || modKey === 'sub_fin_cb_resultado_caixa_acessar'
+        ) && perms.sub_fin_cb === true;
+        const repacAlias = modKey === 'sub_fin_repac_repactuacao_acessar' && (perms.mod_fin === true || perms.sub_fin_repac === true);
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';

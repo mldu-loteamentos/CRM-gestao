@@ -418,8 +418,8 @@ const FluxoCaixaApp = {
               <i data-lucide="git-branch" style="width:18px;height:18px;color:#fff;"></i>
             </div>
             <div>
-              <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Fluxo de Caixa</h2>
-              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">DFC Padrão · API caixa e banco · consolidação pelo % MLDU</p>
+              <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Fluxo de caixa (DFC)</h2>
+              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">DFC mensal · API caixa e banco · consolidação pelo % MLDU</p>
             </div>
           </div>
         </div>

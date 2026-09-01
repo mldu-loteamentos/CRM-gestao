@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=644">
+  <link rel="stylesheet" href="style.css?v=647">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -996,9 +996,21 @@
                   <a onclick="switchTab('investimento', 'Aplicações e Investimentos')">Aplicações e Investimentos</a>
                 </li>
                 <li data-tab="fluxo-caixa" data-module="sub_fin_cb_fluxo_caixa_acessar">
-                  <a onclick="switchTab('fluxo-caixa', 'Fluxo de Caixa')">Fluxo de Caixa</a>
+                  <a onclick="switchTab('fluxo-caixa', 'Fluxo de caixa (DFC)')">Fluxo de caixa (DFC)</a>
+                </li>
+                <li data-tab="fluxo-caixa-diario" data-module="sub_fin_cb_fluxo_caixa_diario_acessar">
+                  <a onclick="switchTab('fluxo-caixa-diario', 'Fluxo de caixa diário')">Fluxo de caixa diário</a>
+                </li>
+                <li data-tab="resultado-caixa" data-module="sub_fin_cb_resultado_caixa_acessar">
+                  <a onclick="switchTab('resultado-caixa', 'Resultado de caixa')">Resultado de caixa</a>
                 </li>
               </ul>
+            </li>
+            <!-- 4.4 Repactuação -->
+            <li class="nav-item" data-tab="repactuacao-lote" data-module="sub_fin_repac_repactuacao_acessar">
+              <a onclick="switchTab('repactuacao-lote', 'Repactuação')" title="Repactuação">
+                <span>Repactuação</span>
+              </a>
             </li>
           </ul>
         </li>
@@ -1192,7 +1204,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.644 &nbsp;&middot;&nbsp; 01/09/2026
+            v1.0.647 &nbsp;&middot;&nbsp; 01/09/2026
           </span>
         </div>
       </div>
@@ -1261,8 +1273,17 @@
       <section id="tab-fluxo-caixa" class="tab-pane" style="display: none;">
         <div id="fluxo-caixa-root"></div>
       </section>
+      <section id="tab-fluxo-caixa-diario" class="tab-pane" style="display: none;">
+        <div id="fluxo-caixa-diario-root"></div>
+      </section>
+      <section id="tab-resultado-caixa" class="tab-pane" style="display: none;">
+        <div id="resultado-caixa-root"></div>
+      </section>
       <section id="tab-investimento" class="tab-pane" style="display: none;">
         <div id="investimento-root"></div>
+      </section>
+      <section id="tab-repactuacao-lote" class="tab-pane" style="display: none;">
+        <div id="repactuacao-lote-root"></div>
       </section>
 
       <!-- TAB: UPLOAD DE KMZ -->
@@ -6377,40 +6398,42 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=644"></script>
-  <script defer src="sienge-api.js?v=644"></script>
-  <script defer src="azure-auth.js?v=644"></script>
-  <script defer src="app.js?v=644"></script>
-  <script defer src="home-dashboard.js?v=644"></script>
-  <script defer src="anexos.js?v=644"></script>
-  <script defer src="contas-pagar.js?v=644"></script>
-  <script defer src="config-tags.js?v=644"></script>
-  <script defer src="config-users.js?v=644"></script>
-  <script defer src="construcao.js?v=644"></script>
-  <script defer src="empresas.js?v=644"></script>
-  <script defer src="relacionamento.js?v=644"></script>
+  <script defer src="data.js?v=647"></script>
+  <script defer src="sienge-api.js?v=647"></script>
+  <script defer src="azure-auth.js?v=647"></script>
+  <script defer src="app.js?v=647"></script>
+  <script defer src="home-dashboard.js?v=647"></script>
+  <script defer src="anexos.js?v=647"></script>
+  <script defer src="contas-pagar.js?v=647"></script>
+  <script defer src="config-tags.js?v=647"></script>
+  <script defer src="config-users.js?v=647"></script>
+  <script defer src="construcao.js?v=647"></script>
+  <script defer src="empresas.js?v=647"></script>
+  <script defer src="relacionamento.js?v=647"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=644"></script>
-  <script defer src="centros-custo.js?v=644"></script>
-  <script defer src="marketing.js?v=644"></script>
-  <script defer src="plano-financeiro.js?v=644"></script>
-  <script defer src="prestacao-contas.js?v=644"></script>
+  <script defer src="estoque-comercial.js?v=647"></script>
+  <script defer src="centros-custo.js?v=647"></script>
+  <script defer src="marketing.js?v=647"></script>
+  <script defer src="plano-financeiro.js?v=647"></script>
+  <script defer src="prestacao-contas.js?v=647"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=644"></script>
-  <script defer src="fluxo-caixa.js?v=644"></script>
-  <script defer src="investimento.js?v=644"></script>
-  <script defer src="parametrizacao-parceiro.js?v=644"></script>
-  <script defer src="societario.js?v=644"></script>
-  <script defer src="participacoes.js?v=644"></script>
-  <script defer src="fiscal.js?v=644"></script>
-  <script defer src="indexadores.js?v=644"></script>
-  <script defer src="verificar-construcao.js?v=644"></script>
-  <script src="repactuacoes.js?v=644"></script>
+  <script defer src="empresa-filter.js?v=647"></script>
+  <script defer src="fluxo-caixa.js?v=647"></script>
+  <script defer src="caixa-diario.js?v=647"></script>
+  <script defer src="investimento.js?v=647"></script>
+  <script defer src="parametrizacao-parceiro.js?v=647"></script>
+  <script defer src="societario.js?v=647"></script>
+  <script defer src="participacoes.js?v=647"></script>
+  <script defer src="fiscal.js?v=647"></script>
+  <script defer src="indexadores.js?v=647"></script>
+  <script defer src="verificar-construcao.js?v=647"></script>
+  <script src="repactuacoes.js?v=647"></script>
+  <script defer src="repactuacao-lote.js?v=647"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=644"></script>
+  <script defer src="dashboard-inadimplencia.js?v=647"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

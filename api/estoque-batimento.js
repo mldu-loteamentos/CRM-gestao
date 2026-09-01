@@ -3,8 +3,8 @@ const {
   getFirestore, doc, setDoc, getDoc, getDocs, collection
 } = require("firebase/firestore");
 const { isBusinessDaySP, todayIsoSP } = require("../lib/br-calendar");
+const { slimCaixaRow, isFinanceLike } = require("../lib/caixa-snapshot");
 const {
-  isSoldUnit,
   isFinanceUnit,
   isSettledUnit,
   extractRows,
@@ -195,6 +195,24 @@ module.exports = async function handler(req, res) {
         batimentoDate: today,
         batimentoDone: true
       }, { merge: true });
+      const pos = nextUnits.filter(isFinanceLike).map((u) => slimCaixaRow(u, today));
+      const CHUNK = 120;
+      const nChunks = Math.max(1, Math.ceil(pos.length / CHUNK));
+      for (let c = 0; c < nChunks; c++) {
+        await setDoc(doc(db, "caixa_posicao", `${today}_${c}`), {
+          date: today,
+          chunk: c,
+          rows: pos.slice(c * CHUNK, (c + 1) * CHUNK),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      await setDoc(doc(db, "caixa_posicao", "_meta"), {
+        lastDate: today,
+        chunks: nChunks,
+        count: pos.length,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      log.push(`caixa_posicao ${today}: ${pos.length} contratos`);
     }
 
     return res.status(200).json({

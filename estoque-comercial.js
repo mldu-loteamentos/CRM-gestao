@@ -855,7 +855,12 @@ const EstoqueComercialApp = {
         quitado: !!(keep.quitado || u.quitado),
         receivableBillId: u.receivableBillId || keep.receivableBillId,
         customerId: u.customerId || keep.customerId,
-        customerDoc: u.customerDoc || keep.customerDoc
+        customerDoc: u.customerDoc || keep.customerDoc,
+        customerName: u.customerName || keep.customerName,
+        pmp3m: u.pmp3m != null ? u.pmp3m : keep.pmp3m,
+        openParcelas: Array.isArray(u.openParcelas) && u.openParcelas.length ? u.openParcelas : keep.openParcelas,
+        kpiVencidas: u.kpiVencidas != null ? u.kpiVencidas : keep.kpiVencidas,
+        kpiAVencer: u.kpiAVencer != null ? u.kpiAVencer : keep.kpiAVencer
       });
     });
   },
@@ -977,6 +982,7 @@ const EstoqueComercialApp = {
         receivableBillId: info.receivableBillId || u.receivableBillId,
         customerId: info.customerId || u.customerId,
         customerDoc: info.customerDoc || u.customerDoc,
+        customerName: info.customerName || u.customerName,
         outstandingBalance: Number(bal),
         presentDebitBalance: Number(bal),
         contractValue: value != null ? value : u.contractValue,
@@ -1018,6 +1024,7 @@ const EstoqueComercialApp = {
       receivableBillId: info.receivableBillId || u.receivableBillId,
       customerId: info.customerId || u.customerId,
       customerDoc: info.customerDoc || u.customerDoc,
+      customerName: info.customerName || u.customerName,
       outstandingBalance: nextBal,
       presentDebitBalance: info.presentDebitBalance != null ? Number(info.presentDebitBalance) : u.presentDebitBalance,
       contractValue: value != null ? value : u.contractValue,
@@ -1042,6 +1049,7 @@ const EstoqueComercialApp = {
       receivableBillId: c.receivableBillId || null,
       customerId: mainCust.id || c.customerId || null,
       customerDoc: String(doc || "").replace(/\D/g, ""),
+      customerName: mainCust.name || c.customerName || "",
       situation: c.situation || c.status || "",
       active: c.active,
       payOffDate: this.isoDate(c.payOffDate || c.payoffDate || c.quittanceDate || c.settlementDate || c.lastPaymentDate)
@@ -1671,7 +1679,50 @@ const EstoqueComercialApp = {
         || u.quitacaoDate
         || null;
     }
+    next.pmp3m = this.pmpLastMonths(installments, 3);
+    next.openParcelas = next.quitado ? [] : this.openParcelasFromInstallments(installments);
+    if (rb && (rb.clientName || rb.customerName || rb.name)) {
+      next.customerName = rb.clientName || rb.customerName || rb.name;
+    }
     return next;
+  },
+
+  pmpLastMonths(installments, months) {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - (months || 3));
+    const cut = cutoff.toISOString().split("T")[0];
+    let days = 0;
+    let n = 0;
+    (installments || []).forEach(inst => {
+      const due = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
+      (inst.receipts || []).forEach(rec => {
+        const t = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || "").toLowerCase();
+        if (t.includes("distrato") || t.includes("cancel") || t === "3" || t === "7") return;
+        const pay = this.isoDate(rec.date || rec.receiptDate || rec.paymentDate || rec.netReceiptDate);
+        if (!pay || pay < cut || !due) return;
+        const diff = Math.round((new Date(pay + "T12:00:00") - new Date(due + "T12:00:00")) / 86400000);
+        if (!Number.isFinite(diff)) return;
+        days += diff;
+        n += 1;
+      });
+    });
+    return n ? Math.round(days / n) : 0;
+  },
+
+  openParcelasFromInstallments(installments) {
+    const today = new Date().toISOString().split("T")[0];
+    const horizon = new Date();
+    horizon.setMonth(horizon.getMonth() + 18);
+    const lim = horizon.toISOString().split("T")[0];
+    const out = [];
+    (installments || []).forEach(inst => {
+      const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
+      const due = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
+      if (cb <= 0.009 || !due || due > lim) return;
+      out.push({ due, val: cb, overdue: due < today });
+    });
+    out.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    return out.slice(0, 24);
   },
 
   async fetchStatementsCached(customerId) {
