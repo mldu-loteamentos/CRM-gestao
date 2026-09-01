@@ -75,26 +75,7 @@ async function loadUnits() {
   return units;
 }
 
-async function saveCaixaPosicao(units, today) {
-  const pos = (units || []).filter(isFinanceLike).map((u) => slimCaixaRow(u, today));
-  const CHUNK = 120;
-  const nChunks = Math.max(1, Math.ceil(pos.length / CHUNK) || 1);
-  for (let c = 0; c < nChunks; c++) {
-    await setDoc(doc(db, "caixa_posicao", `${today}_${c}`), {
-      date: today,
-      chunk: c,
-      rows: pos.slice(c * CHUNK, (c + 1) * CHUNK),
-      updatedAt: new Date().toISOString()
-    });
-  }
-  await setDoc(doc(db, "caixa_posicao", "_meta"), {
-    lastDate: today,
-    chunks: nChunks,
-    count: pos.length,
-    updatedAt: new Date().toISOString()
-  }, { merge: true });
-  return pos.length;
-}
+async function saveCc(ccId, allUnits) {
   const cc = String(ccId);
   const list = allUnits.filter((u) => String(u.enterpriseId) === cc);
   const empName = (list[0] && list[0].enterpriseName) || "";

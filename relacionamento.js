@@ -11,6 +11,161 @@ const RelacionamentoApp = {
     this.renderPermuta();
     this.renderTermos();
     this.renderHistorico();
+    this.fillCartorioSelect();
+  },
+
+  DEFAULT_CARTORIOS: [
+    "TABELIÃO DE NOTAS E DE PROTESTO DE LETRAS E TÍTULOS DE BOITUVA/SP",
+    "OFICIAL DE REGISTRO CIVIL DAS PESSOAS NATURAIS E TABELIAO DE NOTAS DO MUNICIPIO DE ARAÇARIGUAMA/SP",
+    "TABELIÃO DE NOTAS E DE PROTESTO DE LETRAS E TÍTULOS DE PIRAJU/SP",
+    "1º TABELIÃO DE NOTAS E DE PROTESTO DE LETRAS E TÍTULOS DE BOTUCATU/SP",
+    "2º TABELIAO DE NOTAS E DE PROTESTO DE LETRAS E TÍTULOS DE BOTUCATU/SP",
+    "CARTÓRIO DE REGISTRO CIVIL DAS PESSOAS NATURAIS E TABELIONATO DO DISTRITO DE RUBIÃO JÚNIOR",
+    "CARTÓRIO DE REGISTRO CIVIL E TABELIONATO DE TAGUAI/SP",
+    "CARTÓRIO DE REGISTRO CIVIL E TABELIONATO DE FARTURA/SP",
+    "OFICIAL DE REGISTRO CIVIL DAS PESSOAS NATURAIS E TABELIAO DE NOTAS DE BERNARDINO DE CAMPOS/SP",
+    "CARTÓRIO DE NOTAS DA COMARCA DE CERQUEIRA CÉSAR/SP",
+    "CARTÓRIO DE NOTAS DE MANDURI/SP",
+    "1º TABELIAO DE NOTAS E PROTESTO DE AVARE/SP",
+    "2º TABELIAO DE NOTAS E PROTESTOS DE AVARE/SP",
+    "OFICIAL DE REGISTRO CIVIL DAS PESSOAS NATURAIS E TABELIÃO DE NOTAS DO MUNICÍPIO DE ARANDU",
+    "CARTÓRIO DE NOTAS E PROTESTOS DE LARANJAL PAULISTA/SP"
+  ],
+
+  _normCartorioNome(s) {
+    return String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  },
+
+  getCartoriosList() {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem("crm_moura_cartorios_list") || "[]") || []; } catch (e) { saved = []; }
+    const seed = this.DEFAULT_CARTORIOS.map((nome) => ({ nome: nome, deleted: false, updatedAt: 0 }));
+    const merged = typeof window.mergeCartoriosList === "function"
+      ? JSON.parse(window.mergeCartoriosList(JSON.stringify(saved), JSON.stringify(seed)) || "[]")
+      : seed.concat(saved);
+    const seen = new Set();
+    const list = [];
+    (Array.isArray(merged) ? merged : []).forEach((item) => {
+      const nome = String((item && item.nome) || item || "").trim();
+      const key = this._normCartorioNome(nome);
+      if (!nome || !key || seen.has(key) || (item && item.deleted)) return;
+      seen.add(key);
+      list.push({ nome: nome, updatedAt: Number((item && item.updatedAt) || 0) });
+    });
+    list.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    return list;
+  },
+
+  persistCartoriosList(list) {
+    localStorage.setItem("crm_moura_cartorios_list", JSON.stringify(list || []));
+    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+  },
+
+  fillCartorioSelect(selectedNome) {
+    const sel = document.getElementById("esc-cartorio");
+    if (!sel) return;
+    const current = selectedNome != null ? selectedNome : sel.value;
+    const list = this.getCartoriosList();
+    sel.innerHTML = '<option value="">Selecione o cartório</option>' + list.map((c) => {
+      const nome = c.nome || "";
+      const esc = nome.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+      return `<option value="${esc}">${esc}</option>`;
+    }).join("");
+    if (current) {
+      const hit = list.find((c) => this._normCartorioNome(c.nome) === this._normCartorioNome(current));
+      sel.value = hit ? hit.nome : current;
+      if (sel.value !== current && current) {
+        const opt = document.createElement("option");
+        opt.value = current;
+        opt.textContent = current;
+        sel.appendChild(opt);
+        sel.value = current;
+      }
+    }
+    if (window.lucide) lucide.createIcons();
+  },
+
+  pickCartorioForCidade(cidade) {
+    const n = this._normCartorioNome(cidade).replace(/\/SP$/, "").trim();
+    if (!n) return "";
+    const list = this.getCartoriosList();
+    const hit = list.find((c) => this._normCartorioNome(c.nome).includes(n));
+    return hit ? hit.nome : "";
+  },
+
+  adicionarCartorio() {
+    const box = document.getElementById("esc-cartorio-novo-box");
+    const input = document.getElementById("esc-cartorio-novo-nome");
+    if (box) box.style.display = "block";
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+  },
+
+  cancelarNovoCartorio() {
+    const box = document.getElementById("esc-cartorio-novo-box");
+    const input = document.getElementById("esc-cartorio-novo-nome");
+    if (box) box.style.display = "none";
+    if (input) input.value = "";
+  },
+
+  salvarNovoCartorio() {
+    const input = document.getElementById("esc-cartorio-novo-nome");
+    const nome = (input && input.value || "").trim();
+    if (!nome) {
+      alert("Informe o nome completo do cartório.");
+      return;
+    }
+    const list = this.getCartoriosList();
+    const key = this._normCartorioNome(nome);
+    const exists = list.find((c) => this._normCartorioNome(c.nome) === key);
+    if (!exists) {
+      list.push({ nome: nome, deleted: false, updatedAt: Date.now() });
+      this.persistCartoriosList(list);
+    }
+    this.fillCartorioSelect(nome);
+    this.cancelarNovoCartorio();
+  },
+
+  _installmentSettled(inst) {
+    if (!inst) return true;
+    const sit = String(inst.installmentSituation || inst.situation || inst.status || "").toLowerCase();
+    if (sit === "2" || sit === "paid" || /quitad|paga/.test(sit)) return true;
+    if (inst.isValidReceipt === true) return true;
+    const cb = inst.currentBalance;
+    if (cb !== undefined && cb !== null && Number(cb) <= 0.009) return true;
+    return false;
+  },
+
+  async _avaliarContratoQuitado(sale, bill) {
+    const status = String((sale && sale.status) || "").toLowerCase();
+    if (status === "quitado") return { quitado: true, motivo: "Status do contrato: Quitado" };
+    if (bill && bill.payOffDate) return { quitado: true, motivo: "Título com data de quitação" };
+    const bals = [
+      sale && sale.outstandingBalance,
+      bill && bill.outstandingBalance,
+      bill && bill.balance,
+      bill && bill.currentBalance
+    ].filter((v) => v !== undefined && v !== null && v !== "");
+    if (bals.length && bals.every((v) => Number(v) <= 0.009)) {
+      return { quitado: true, motivo: "Saldo do contrato zerado" };
+    }
+    const perc = Number(sale && sale.percPaid);
+    if (Number.isFinite(perc) && perc >= 0.999) return { quitado: true, motivo: "Contrato 100% pago" };
+    const billId = (sale && sale.receivableBillId) || (bill && (bill.id || bill.receivableBillId));
+    if (billId && window.SiengeApiService && SiengeApiService.getBillInstallments) {
+      try {
+        const inst = await SiengeApiService.getBillInstallments(billId);
+        const list = Array.isArray(inst) ? inst : [];
+        if (list.length) {
+          const open = list.filter((p) => !this._installmentSettled(p));
+          if (!open.length) return { quitado: true, motivo: "Todas as parcelas baixadas" };
+          return { quitado: false, motivo: open.length + " parcela(s) em aberto" };
+        }
+      } catch (e) {}
+    }
+    return { quitado: false, motivo: "Não foi possível confirmar a quitação no Sienge" };
   },
 
   renderBuscaCliente(contextId) {
@@ -199,10 +354,11 @@ const RelacionamentoApp = {
     const card = document.getElementById("esc-doc-card");
     if (card) card.style.display = "none";
     this._escSetResultsHtml("");
-    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos"].forEach((id) => {
+    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });
+    this.cancelarNovoCartorio();
     const dd = document.getElementById("esc-nome-dropdown");
     if (dd) dd.style.display = "none";
   },
@@ -404,16 +560,20 @@ const RelacionamentoApp = {
         "situado no município de " + (cidadeLote || "____") + ",",
         areaStr ? ("com área de " + areaStr + ".") : ""
       ].filter(Boolean).join(" ");
-      const cidadeCartorio = cidadeLote
-        ? (String(cidadeLote).includes("/") ? cidadeLote : cidadeLote + "/SP")
-        : "";
-      RelacionamentoState.escritura = { customer, sale, unit, unitDetails, bill, empName, cidadeLote };
-      document.getElementById("esc-cidade-cartorio").value = cidadeCartorio;
-      document.getElementById("esc-localizacao").value = localizacao;
-      document.getElementById("esc-bancos").value = "";
+      const quitadoInfo = await this._avaliarContratoQuitado(sale, bill);
+      RelacionamentoState.escritura = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, quitado: quitadoInfo.quitado, quitadoMotivo: quitadoInfo.motivo };
+      const cartorioHint = this.pickCartorioForCidade(cidadeLote);
+      this.fillCartorioSelect(cartorioHint);
+      const locEl = document.getElementById("esc-localizacao");
+      if (locEl) locEl.value = localizacao;
+      const bancEl = document.getElementById("esc-bancos");
+      if (bancEl) bancEl.value = "";
       const titulo = sale.receivableBillId || bill?.id || "—";
       const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
       const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const statusHtml = quitadoInfo.quitado
+        ? `<span style="color:#15803d;font-weight:700;">Quitado</span><div style="font-size:0.75rem;color:#64748b;">${quitadoInfo.motivo}</div>`
+        : `<span style="color:#b91c1c;font-weight:700;">Não quitado</span><div style="font-size:0.75rem;color:#b91c1c;">${quitadoInfo.motivo}. Este termo só pode ser emitido com o contrato quitado.</div>`;
       document.getElementById("esc-contrato-resumo").innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:0.9rem;">
           <div><span style="color:#64748b;">Cliente</span><br><strong>${customer.name || "—"}</strong></div>
@@ -421,7 +581,10 @@ const RelacionamentoApp = {
           <div><span style="color:#64748b;">Contrato</span><br><strong>${sale.id || "—"}</strong></div>
           <div><span style="color:#64748b;">Unidade</span><br><strong>${block && lot ? (block + " - " + lot) : (unitName || "—")}</strong></div>
           <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
+          <div><span style="color:#64748b;">Situação</span><br>${statusHtml}</div>
         </div>`;
+      const genBtn = document.querySelector('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"]');
+      if (genBtn) genBtn.disabled = !quitadoInfo.quitado;
       document.getElementById("esc-doc-card").style.display = "block";
       this._escSetResultsHtml("");
     } catch (err) {
@@ -436,6 +599,15 @@ const RelacionamentoApp = {
       alert("Busque e selecione um contrato antes de gerar o documento.");
       return;
     }
+    if (!ctx.quitado) {
+      alert("Este termo só pode ser emitido se o contrato estiver quitado. " + (ctx.quitadoMotivo || ""));
+      return;
+    }
+    const nomeCartorio = (document.getElementById("esc-cartorio")?.value || "").trim();
+    if (!nomeCartorio) {
+      alert("Selecione o cartório.");
+      return;
+    }
     try {
       let t = {};
       try { t = JSON.parse(localStorage.getItem("crm_docpadrao_escritura") || "{}"); } catch (e) {}
@@ -443,6 +615,10 @@ const RelacionamentoApp = {
       const corpoEl = document.getElementById("doc-escritura-corpo");
       const docTitle = (titleEl && titleEl.value) || t["doc-escritura-title"] || "AUTORIZAÇÃO PARA LAVRATURA DE ESCRITURA";
       let corpo = (corpoEl && corpoEl.value) || t["doc-escritura-corpo"] || "";
+      if (!corpo || /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(corpo)) {
+        const ta = document.getElementById("doc-escritura-corpo");
+        corpo = (ta && ta.defaultValue) || corpo;
+      }
       if (!corpo) {
         alert("O modelo de autorização não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
@@ -473,7 +649,7 @@ const RelacionamentoApp = {
         ? Number(mine.percentage != null ? mine.percentage : mine.participationPercentage)
         : (custs.length <= 1 ? 100 : null);
       const pctLabel = pct != null && !isNaN(pct) ? " (" + pct + "%)" : "";
-      const cidadeCartorio = (document.getElementById("esc-cidade-cartorio")?.value || "").trim() || ((cidadeLote || "____") + (String(cidadeLote || "").includes("/") ? "" : "/SP"));
+      const cidadeCartorio = nomeCartorio;
       const localizacao = (document.getElementById("esc-localizacao")?.value || "").trim() || "____";
       const bancos = (document.getElementById("esc-bancos")?.value || "").trim() || "conforme extrato anexo";
       const dateExt = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
@@ -496,6 +672,7 @@ const RelacionamentoApp = {
         saleDateStr,
         dateExt,
         map: {
+          NOME_CARTORIO: nomeCartorio,
           CIDADE_CARTORIO: cidadeCartorio,
           QUADRA_LOTE: quadraLote,
           LOCALIZACAO: localizacao,
@@ -524,15 +701,10 @@ const RelacionamentoApp = {
           };
       const filled = fillVars(markup, legalBase);
       const headerUnidade = [unitNumericId, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
-      const docHtml = `
-        <div style="text-align:center;margin-bottom:1.25rem;">
-          <div style="font-size:10pt;color:#334155;margin-bottom:4px;">${headerUnidade}</div>
-          <div style="font-size:10pt;color:#334155;margin-bottom:10px;">Título ${titulo}</div>
-          <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
-        </div>
-        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>
+      const alreadyHasTabeliao = /Livro\s*n/i.test(filled);
+      const tabeliaoBox = alreadyHasTabeliao ? "" : `
         <div style="border:1.5px solid #105436;padding:12px 14px;margin-top:2rem;font-size:10pt;">
-          <p style="margin:0 0 10px;font-weight:bold;">ATENÇÃO: Senhor tabelião, após a lavratura da escritura, favor preencher:</p>
+          <p style="margin:0 0 10px;font-weight:bold;">ATENÇÃO: Senhor tabelião, favor preencher os dados abaixo e devolver esta autorização à Moura Leite Desenvolvimento & Urbanização, no ato da assinatura desta.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;">
             <div>Livro nº ________________________</div>
             <div>Folha nº ________________________</div>
@@ -540,6 +712,14 @@ const RelacionamentoApp = {
             <div>Data ____ / ____ / ________</div>
           </div>
         </div>`;
+      const docHtml = `
+        <div style="text-align:center;margin-bottom:1.25rem;">
+          <div style="font-size:10pt;color:#334155;margin-bottom:4px;">${headerUnidade}</div>
+          <div style="font-size:10pt;color:#334155;margin-bottom:10px;">Título ${titulo}</div>
+          <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
+        </div>
+        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>
+        ${tabeliaoBox}`;
       document.getElementById("pdf-modal-title").textContent = "Autorização para lavratura de escritura";
       document.getElementById("pdf-document-content").innerHTML = docHtml;
       document.getElementById("pdf-view-overlay").classList.add("active");

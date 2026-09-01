@@ -39,6 +39,134 @@ window.ConstrucaoApp = {
         }
     },
 
+    proxyUrl(path) {
+        if (typeof anexosApiUrl === "function") return anexosApiUrl(path);
+        const host = window.location.hostname;
+        const isLocal = !host || host === "localhost" || host === "127.0.0.1";
+        const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+        const origin = isLocal ? `http://localhost:${port}` : "";
+        let p = String(path || "");
+        if (!p.startsWith("/")) p = "/" + p;
+        if (p.startsWith("/sienge-proxy")) p = "/api" + p;
+        return origin + p;
+    },
+
+    normUnitKey(s) {
+        return String(s || "")
+            .replace(/^Quadra-Lote:\s*/i, "")
+            .replace(/[\s-]+/g, "")
+            .toUpperCase();
+    },
+
+    extractUnitName(c) {
+        if (!c) return "";
+        let n = c.unitName || c.unityName || c.units || c.unit || c.unitIdentifier || c.unidade || "";
+        if (!n && c.property && c.property.unitName) n = c.property.unitName;
+        if (!n && c.block && c.lot) n = String(c.block) + "-" + String(c.lot);
+        if (!n && c.unitId) {
+            const parts = String(c.unitId).split("-");
+            if (parts[0] === "U" && parts.length >= 3) n = parts.slice(2).join("-");
+        }
+        if (typeof AppState !== "undefined" && AppState.units && c.unitId && AppState.units[c.unitId]) {
+            const u = AppState.units[c.unitId];
+            if (!n && u.block && u.lot && u.block !== "N/D") n = u.block + "-" + u.lot;
+        }
+        return String(n).replace(/^Quadra-Lote:\s*/i, "").trim();
+    },
+
+    extractCostCenterId(c) {
+        if (!c) return "";
+        let cc = c.enterpriseId || c.costCenterId || (c.property && c.property.costCenterId) || "";
+        if (!cc && c.unitId) {
+            const parts = String(c.unitId).split("-");
+            if (parts[0] === "U" && parts[1]) cc = parts[1];
+        }
+        if (!cc && typeof AppState !== "undefined") cc = AppState.currentCostCenterId || "";
+        return String(cc || "").trim();
+    },
+
+    unitMatches(siengeName, wantName) {
+        const a = this.normUnitKey(siengeName);
+        const b = this.normUnitKey(wantName);
+        return a && b && (a === b || a.includes(b) || b.includes(a));
+    },
+
+    async findSiengeUnitId(contractObj) {
+        const cc = this.extractCostCenterId(contractObj);
+        const unitName = this.extractUnitName(contractObj);
+        const rawId = contractObj.siengeUnitId || contractObj.unitNumericId || (contractObj.property && contractObj.property.id);
+        if (rawId != null && /^\d+$/.test(String(rawId))) return String(rawId);
+        if (contractObj.unitId && /^\d+$/.test(String(contractObj.unitId))) return String(contractObj.unitId);
+
+        if (window.SiengeApiService && typeof SiengeApiService.getUnit === "function" && contractObj.unitId) {
+            try {
+                const u = await SiengeApiService.getUnit(contractObj.unitId);
+                if (u && u.id && /^\d+$/.test(String(u.id))) return String(u.id);
+            } catch (e) {}
+        }
+        if (window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function" && cc && unitName) {
+            try {
+                const det = await SiengeApiService.getUnitDetails(cc, unitName);
+                const hit = (det && det.results || []).find(u => this.unitMatches(u.name, unitName) || (u.id && /^\d+$/.test(String(u.id)) && det.results.length === 1));
+                if (hit && hit.id && /^\d+$/.test(String(hit.id))) return String(hit.id);
+            } catch (e) {}
+        }
+
+        if (!cc || !unitName) {
+            throw new Error("Não foi possível identificar o centro de custo ou a unidade do contrato para anexar no Sienge.");
+        }
+        const authHeader = typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "";
+        let offset = 0;
+        while (offset < 2000) {
+            const uRes = await fetch(this.proxyUrl(`/sienge-proxy/units?limit=200&offset=${offset}&enterpriseId=${encodeURIComponent(cc)}&additionalData=NONE`), {
+                headers: { Authorization: authHeader }
+            });
+            if (!uRes.ok) throw new Error("Falha ao buscar unidades no Sienge (HTTP " + uRes.status + ").");
+            const uData = await uRes.json();
+            const uResults = uData.results || [];
+            const match = uResults.find(u => this.unitMatches(u.name, unitName));
+            if (match && match.id) return String(match.id);
+            if (uResults.length < 200) break;
+            offset += 200;
+        }
+        throw new Error('Unidade "' + unitName + '" não encontrada no empreendimento ' + cc + " no Sienge.");
+    },
+
+    async postUnitAttachment(siengeUnitId, fileBlob, fileName, descricao) {
+        const apiUrl = this.proxyUrl(`/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricao)}`);
+        const authHeader = typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "";
+        if (typeof anexosMultipartBody === "function") {
+            const multipart = await anexosMultipartBody(fileBlob, fileName);
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", apiUrl);
+                if (authHeader) xhr.setRequestHeader("Authorization", authHeader);
+                xhr.setRequestHeader("Accept", "application/json");
+                xhr.setRequestHeader("Content-Type", multipart.contentType);
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                    else reject(new Error("Sienge HTTP " + xhr.status + ": " + (xhr.responseText || "").slice(0, 240)));
+                };
+                xhr.onerror = () => reject(new Error("Erro de rede ao enviar a foto ao Sienge."));
+                xhr.send(multipart.body);
+            });
+        }
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", apiUrl);
+            if (authHeader) xhr.setRequestHeader("Authorization", authHeader);
+            xhr.setRequestHeader("Accept", "application/json");
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                else reject(new Error("Sienge HTTP " + xhr.status + ": " + (xhr.responseText || "").slice(0, 240)));
+            };
+            xhr.onerror = () => reject(new Error("Erro de rede ao enviar a foto ao Sienge."));
+            const formData = new FormData();
+            formData.append("file", fileBlob, fileName);
+            xhr.send(formData);
+        });
+    },
+
     getResponsibleOperator(contract) {
         if (!contract) return "Não atribuído";
         
@@ -718,6 +846,7 @@ window.openNewConstrucaoModal = function(editId = null) {
         const defaultResp = editCheck ? (editCheck.responsible || responsible) : responsible;
         const defaultObs = editCheck ? (editCheck.observations || '') : '';
         const defaultStage = editCheck ? editCheck.stage : '';
+        const siengeOn = !!(editCheck && (editCheck.sendToSienge || editCheck.siengeSent));
 
         let stageOptions = window.ConstrucaoApp.stages.map(s => `<option value="${s}" ${s === defaultStage ? 'selected' : ''}>${s}</option>`).join('');
 
@@ -764,9 +893,9 @@ window.openNewConstrucaoModal = function(editId = null) {
                         <span style="color: #64748b; font-size: 0.8rem;">Anexar a foto selecionada ao contrato no Sienge</span>
                     </div>
                     <label style="position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer;">
-                        <input type="checkbox" id="vistoria-send-sienge" style="opacity: 0; width: 0; height: 0; position: absolute;" onchange="document.getElementById('send-sienge-track').style.backgroundColor = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';">
-                        <span id="send-sienge-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px; pointer-events: none;"></span>
-                        <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); pointer-events: none; transform: translateX(0);"></span>
+                        <input type="checkbox" id="vistoria-send-sienge" ${siengeOn ? "checked" : ""} style="opacity: 0; width: 0; height: 0; position: absolute;" onchange="document.getElementById('send-sienge-track').style.backgroundColor = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';">
+                        <span id="send-sienge-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${siengeOn ? "#16a34a" : "#cbd5e1"}; transition: .4s; border-radius: 24px; pointer-events: none;"></span>
+                        <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); pointer-events: none; transform: ${siengeOn ? "translateX(20px)" : "translateX(0)"};"></span>
                     </label>
                 </div>
 
@@ -969,9 +1098,11 @@ window.saveNovaVistoria = async function() {
         let fileUrl = null;
         let fileName = null;
         const sendToSienge = document.getElementById('vistoria-send-sienge') && document.getElementById('vistoria-send-sienge').checked;
+        let photoBlob = null;
         
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
+            photoBlob = file;
             const uploadRes = await window.ConstrucaoApp.uploadFile(file, customerId);
             fileUrl = uploadRes.url;
             fileName = uploadRes.name;
@@ -982,60 +1113,33 @@ window.saveNovaVistoria = async function() {
                 fileName = editCheck.fileName;
             }
         }
-        
-        if (sendToSienge && fileInput.files.length > 0) {
-            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge...';
-            const costCenterId = contractObj.enterpriseId || contractObj.costCenterId || (contractObj.property && contractObj.property.costCenterId) || contractObj.unitId?.split('-')[1];
-            let unitNameNorm = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim().toUpperCase();
-            if (!unitNameNorm && contractObj.property && contractObj.property.unitName) unitNameNorm = contractObj.property.unitName.toUpperCase();
-            
-            if (costCenterId && unitNameNorm) {
-                const authHeader = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
 
-                let siengeUnitId = null;
-                let offset = 0;
-                let found = false;
-                while (!found && offset < 1000) {
-                    const uRes = await fetch(`/api/sienge-proxy/units?limit=200&offset=${offset}&enterpriseId=${costCenterId}&additionalData=NONE`, { headers: { 'Authorization': authHeader } });
-                    if (!uRes.ok) break;
-                    const uData = await uRes.json();
-                    const uResults = uData.results || [];
-                    const match = uResults.find(u => (u.name || '').trim().toUpperCase() === unitNameNorm || (u.name || '').trim().replace(/[\s-]+/g, '').toUpperCase() === unitNameNorm.replace(/[\s-]+/g, ''));
-                    if (match) { siengeUnitId = match.id; found = true; }
-                    else if (uResults.length < 200) break;
-                    else offset += 200;
+        let siengeSent = false;
+        let siengeErr = "";
+        if (sendToSienge) {
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge...';
+            try {
+                if (!photoBlob && fileUrl) {
+                    const imgRes = await fetch(fileUrl);
+                    if (!imgRes.ok) throw new Error("Não foi possível ler a foto salva para enviar ao Sienge.");
+                    photoBlob = await imgRes.blob();
                 }
-                
-                if (siengeUnitId) {
-                    const dateObj = new Date();
-                    const dateStrFileName = dateObj.toLocaleDateString('pt-BR').replace(/\//g, '-');
-                    const dateStrDesc = dateObj.toLocaleDateString('pt-BR').split('/').reverse().join('.');
-                    const baseName = `${costCenterId} ${unitNameNorm} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
-                    const nomeFinal = `${baseName}.jpg`;
-                    const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
-                    
-                    const isVercel = window.location.hostname.includes('vercel.app');
-                    let apiUrl = '';
-                    if (isVercel) {
-                        apiUrl = `/api/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
-                    } else {
-                        const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-                        const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-                        apiUrl = `http://${host}:${port}/sienge-proxy/units/${siengeUnitId}/attachments?description=${encodeURIComponent(descricaoSienge)}`;
-                    }
-                    
-                    await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        xhr.open('POST', apiUrl);
-                        if (authHeader) xhr.setRequestHeader('Authorization', authHeader);
-                        xhr.setRequestHeader('Accept', 'application/json');
-                        xhr.onload = () => resolve(xhr.responseText);
-                        xhr.onerror = () => resolve(null);
-                        const formData = new FormData();
-                        formData.append('file', fileInput.files[0], nomeFinal);
-                        xhr.send(formData);
-                    });
-                }
+                if (!photoBlob) throw new Error("Anexe a foto da vistoria para enviar ao Sienge.");
+                const siengeUnitId = await window.ConstrucaoApp.findSiengeUnitId(contractObj);
+                const ccId = window.ConstrucaoApp.extractCostCenterId(contractObj);
+                const unitNameNorm = window.ConstrucaoApp.extractUnitName(contractObj);
+                const dateObj = new Date();
+                const dateStrFileName = dateObj.toLocaleDateString("pt-BR").replace(/\//g, "-");
+                const dateStrDesc = dateObj.toLocaleDateString("pt-BR").split("/").reverse().join(".");
+                const unitFormatted = String(unitNameNorm || "").replace(/-/g, " ");
+                const baseName = `${ccId} ${unitFormatted} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
+                const nomeFinal = `${baseName}.jpg`;
+                const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
+                await window.ConstrucaoApp.postUnitAttachment(siengeUnitId, photoBlob, nomeFinal, descricaoSienge);
+                siengeSent = true;
+            } catch (err) {
+                siengeErr = (err && err.message) || String(err);
+                console.error("[Vistoria] envio Sienge", err);
             }
         }
 
@@ -1060,6 +1164,9 @@ window.saveNovaVistoria = async function() {
             observations: obs,
             fileUrl: fileUrl,
             fileName: fileName,
+            sendToSienge: !!sendToSienge,
+            siengeSent: !!siengeSent,
+            siengeError: siengeErr || "",
             updatedAt: new Date().toISOString()
         };
 
@@ -1072,6 +1179,9 @@ window.saveNovaVistoria = async function() {
         
         document.getElementById('modal-nova-vistoria').remove();
         window.loadConstrucoes();
+        if (sendToSienge && !siengeSent) {
+            alert("A vistoria foi salva no CRM, mas a foto NÃO foi enviada ao Sienge.\n\n" + (siengeErr || "Tente de novo em Editar vistoria, com a opção Enviar para o Sienge ligada."));
+        }
 
     } catch(e) {
         console.error("Erro ao salvar vistoria:", e);

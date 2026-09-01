@@ -53,7 +53,16 @@ const EstoqueComercialApp = {
   },
 
   todayStr() {
-    return new Date().toISOString().split("T")[0];
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date());
+    } catch (e) {
+      return new Date().toISOString().split("T")[0];
+    }
   },
 
   isObraCc(id) {
@@ -316,7 +325,7 @@ const EstoqueComercialApp = {
         grouped[cc].push(u);
       });
 
-      const keep = new Set(["_meta"]);
+      const keep = new Set(["_meta", "_batimento_state"]);
       const writes = [];
       Object.keys(grouped).forEach(cc => {
         const list = grouped[cc];
@@ -364,6 +373,45 @@ const EstoqueComercialApp = {
   persistAll() {
     this.saveCache();
     return this.saveFirebase();
+  },
+
+  async persistTodayResult() {
+    const today = this.todayStr();
+    this.state.fetchedAt = new Date().toISOString();
+    this.state.lastSnapshotDate = today;
+    this.saveCache();
+    if (this.fbReady()) {
+      try {
+        const { doc, setDoc } = window.firebaseCollections;
+        await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+          date: today,
+          batimentoAt: new Date().toISOString(),
+          batimentoDate: today,
+          batimentoDone: true,
+          fetchedAt: this.state.fetchedAt,
+          unitCount: this.state.units.length,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        await setDoc(doc(window.firebaseDb, this.FB_COL, "_batimento_state"), {
+          date: today,
+          cursor: 999999,
+          processed: this.state.units.filter(u => this.isFinanceUnit(u)).length,
+          skippedSettled: this.state.units.filter(u => this.isSettledUnit(u)).length,
+          done: true,
+          source: "manual"
+        });
+      } catch (e) {
+        console.warn("[Estoque] meta do batimento do dia", e);
+      }
+    }
+    if (window.CaixaPosicaoStore && typeof CaixaPosicaoStore.saveFromUnits === "function") {
+      try {
+        await CaixaPosicaoStore.saveFromUnits(this.state.units, today);
+      } catch (e) {
+        console.warn("[Estoque] posição de caixa do dia", e);
+      }
+    }
+    return today;
   },
 
   async saveFirebaseCc(ccId) {
@@ -1861,7 +1909,8 @@ const EstoqueComercialApp = {
       const qtdI = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo inadimplente").length;
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
-      this.setProgress(`Batimento (${ccIds.length} empreendimento(s), mesma lógica do Relacionamento): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s) classificada(s).`);
+      const day = await this.persistTodayResult();
+      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado. Amanhã o batimento automático começa às 7:30.`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
@@ -2022,6 +2071,10 @@ const EstoqueComercialApp = {
       this.updateMeta();
       this.renderTable();
       if (window.lucide) window.lucide.createIcons();
+      if (this.state.units.length && this.state.lastSnapshotDate !== this.todayStr()) {
+        await this.persistTodayResult();
+        this.updateMeta();
+      }
       return;
     }
     if (!this.state.enterprises.length) await this.loadEnterprises();

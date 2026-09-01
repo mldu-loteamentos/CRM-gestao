@@ -284,7 +284,9 @@ const ResultadoCaixaApp = {
     this.render();
     try {
       const units = await CaixaPosicaoStore.loadEstoqueUnits();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = (window.EstoqueComercialApp && typeof EstoqueComercialApp.todayStr === "function")
+        ? EstoqueComercialApp.todayStr()
+        : new Date().toISOString().slice(0, 10);
       await CaixaPosicaoStore.saveFromUnits(units, today);
       this.date = today;
       await this.refresh();

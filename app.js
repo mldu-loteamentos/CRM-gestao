@@ -1604,6 +1604,20 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
+  if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
+    let perms = {};
+    try {
+      const profileName = (AppState.currentUser && AppState.currentUser.profile_name) || "";
+      const crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
+      const matched = crmProfiles.find(p => p.name === String(profileName).trim().toUpperCase());
+      const profileId = matched ? matched.id : String(profileName).trim().toLowerCase().replace(/\s+/g, "_");
+      perms = JSON.parse(localStorage.getItem("crm_perms_" + profileId) || "{}") || {};
+    } catch (e) { perms = {}; }
+    if (!window.permCoversMenuKey(perms, "sub_com_geral_estoque_acessar")) {
+      alert("Sem permissão para Posição de estoque.");
+      return;
+    }
+  }
   if (tabId === 'configuracoes' && typeof window.hasFinCrAction === 'function') {
     const canCfg = window.hasFinCrAction('configuracoes', 'acessar')
       || window.hasFinCrAction('regras_cobranca', 'acessar')
@@ -2205,13 +2219,6 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_fiscal_geral_csll_acessar === true
       || perms.sub_fiscal_geral_csll_visualizar === true
       || perms.sub_fiscal_geral_csll_editar === true;
-  }
-  if (modKey === "sub_com_geral_estoque_acessar") {
-    return perms.mod_comercial === true
-      || perms.sub_com_geral_dashboard_acessar === true
-      || perms.sub_com_geral_assistente_anexos_acessar === true
-      || perms.sub_com_dash === true
-      || perms.sub_com_anexos === true;
   }
   if (modKey === "sub_fin_cr_configuracoes_acessar") {
     return ["configuracoes", "regras_cobranca", "regras_negociacao"].some(id =>
@@ -12957,7 +12964,22 @@ window.centerDistratoSignatures = function(html) {
     }
   }
   if (start < 0) return s;
-  const before = lines.slice(0, start).join("\n").replace(/\s+$/, "");
+  let beforeLines = lines.slice(0, start);
+  let dateLine = "";
+  for (let j = beforeLines.length - 1; j >= 0; j--) {
+    const t = String(beforeLines[j] || "").trim();
+    if (!t) continue;
+    if (/,\s*\d{1,2}\s+de\s+[a-zçáéíóúâêôãõü]+\s+de\s+\d{4}/i.test(t)
+      || /\{\{\s*CIDADE_LOTEAMENTO\s*\}\}/.test(t)
+      || /\{\{\s*DATA_HOJE_EXTENSO\s*\}\}/.test(t)
+      || /\{\{\s*CIDADE_ATUAL\s*\}\}/.test(t)) {
+      dateLine = t;
+      beforeLines.splice(j, 1);
+      break;
+    }
+    break;
+  }
+  const before = beforeLines.join("\n").replace(/\s+$/, "");
   const rest = lines.slice(start).map(l => String(l || "").trim()).filter(l => l.length);
   const parties = [];
   let i = 0;
@@ -13000,10 +13022,10 @@ window.centerDistratoSignatures = function(html) {
     }
     i++;
   }
-  const partyHtml = parties.map(p => `
-    <div style="margin: 28px auto 0; max-width: 420px; text-align: center;">
-      <div style="border-top: 1px solid #111; padding-top: 8px; font-weight: 700;">${p.name}</div>
-      <div style="font-size: 10.5pt; font-weight: 400;">${p.role}</div>
+  const partyHtml = parties.map((p, idx) => `
+    <div style="margin: ${idx === 0 ? 36 : 56}px auto 0; max-width: 420px; text-align: center;">
+      <div style="border-top: 1px solid #111; padding-top: 10px; font-weight: 700;">${p.name}</div>
+      <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${p.role}</div>
     </div>`).join("");
   const witnessesHtml = (hasWitnessTitle || w1Name || w2Name) ? `
     <div style="margin-top: 36px; text-align: center; font-weight: 700;">Testemunhas</div>
@@ -13019,7 +13041,11 @@ window.centerDistratoSignatures = function(html) {
         </td>
       </tr>
     </table>` : "";
+  const dateHtml = dateLine
+    ? `<div style="white-space: normal; text-align: center; margin: 28px 0 12px; font-weight: 500;">${dateLine}</div>`
+    : "";
   return `${before}
+${dateHtml}
 <div style="white-space: normal; text-align: center; margin-top: 8px;">
 ${partyHtml}
 ${witnessesHtml}
@@ -23717,7 +23743,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
     const el = document.getElementById(id);
     if (!el || data[id] === undefined) return;
     if (id === 'doc-distrato-clauses' && isLegacyDistratoClauses(data[id])) return;
-    if (id === 'doc-distrato-title' && /INSTRUMENTO DE DISTRATO E RESCISÃO CONTRATUAL/i.test(String(data[id] || ''))) return;
+    if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
     if (id === 'doc-reneg-clauses' && typeof window.upgradeCredorPlaceholdersToPreamble === 'function') {
       el.value = window.upgradeCredorPlaceholdersToPreamble(data[id]);
       return;
@@ -29619,8 +29645,45 @@ window.SYNC_KEYS = [
     "crm_centros_custo_custom",
     "crm_centros_custo_tipos",
     "crm_plano_visoes_v2",
-    "crm_moura_preambles_list"
+    "crm_moura_preambles_list",
+    "crm_moura_cartorios_list"
 ];
+
+window.mergeCartoriosList = function(localStr, cloudStr) {
+  let local = [];
+  let cloud = [];
+  try { local = JSON.parse(localStr || "[]") || []; } catch (e) { local = []; }
+  try { cloud = JSON.parse(cloudStr || "[]") || []; } catch (e) { cloud = []; }
+  if (!Array.isArray(local)) local = [];
+  if (!Array.isArray(cloud)) cloud = [];
+  const norm = (s) => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  const byKey = new Map();
+  const mergeOne = (item) => {
+    if (item == null) return;
+    const nome = String((item && item.nome) || item || "").trim();
+    if (!nome) return;
+    const key = norm(nome);
+    const rec = (item && typeof item === "object")
+      ? { nome: nome, deleted: !!item.deleted, updatedAt: Number(item.updatedAt || 0) }
+      : { nome: nome, deleted: false, updatedAt: 0 };
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, rec);
+      return;
+    }
+    const pAt = Number(prev.updatedAt || 0);
+    const nAt = Number(rec.updatedAt || 0);
+    if (rec.deleted) {
+      if (nAt >= pAt) byKey.set(key, rec);
+      return;
+    }
+    if (prev.deleted && pAt >= nAt) return;
+    byKey.set(key, nAt >= pAt ? rec : prev);
+  };
+  cloud.forEach(mergeOne);
+  local.forEach(mergeOne);
+  return JSON.stringify([...byKey.values()].filter(x => x && !x.deleted).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
+};
 
 window.preambleLinkScore = function(p) {
   if (!p) return 0;
@@ -29956,9 +30019,21 @@ window.syncGlobalConfigFromFirebase = async function() {
                     setTimeout(() => window.forceUploadLocalConfig(true), 1600);
                 }
             })();
+            (function syncCartoriosFromCloud() {
+                const k = "crm_moura_cartorios_list";
+                const merged = window.mergeCartoriosList(localStorage.getItem(k), globalData[k] || "[]");
+                if (merged && merged !== (localStorage.getItem(k) || "")) {
+                    _originalSetItem.call(localStorage, k, merged);
+                    changed = true;
+                }
+                if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                    setTimeout(() => window.forceUploadLocalConfig(true), 1700);
+                }
+            })();
             // Sincroniza chaves fixas
             window.SYNC_KEYS.forEach(k => {
                 if (k === "crm_moura_preambles_list") return;
+                if (k === "crm_moura_cartorios_list") return;
                 if (k === "crm_empresas_custom") {
                     const merged = window.mergeEmpresasCustom(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -30069,6 +30144,9 @@ window.forceUploadLocalConfig = async function(silent = true) {
           }
           if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
             payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+          }
+          if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
+            payload.crm_moura_cartorios_list = window.mergeCartoriosList(payload.crm_moura_cartorios_list || "[]", cloud.crm_moura_cartorios_list || "[]");
           }
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });

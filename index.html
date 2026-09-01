@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=661">
+  <link rel="stylesheet" href="style.css?v=666">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1221,7 +1221,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.661 &nbsp;&middot;&nbsp; 01/09/2026
+            v1.0.666 &nbsp;&middot;&nbsp; 01/09/2026
           </span>
         </div>
       </div>
@@ -1883,28 +1883,33 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                     <button type="button" class="doc-fmt-btn" onclick="wrapDocPadraoBold('doc-escritura-corpo')" title="Negrito (Ctrl+B)"><b>N</b> Negrito</button>
                     <span class="doc-fmt-hint">Usado em Relacionamento → Gerar documentos → Autorização de escritura.</span>
                   </div>
-                  <textarea class="form-control" id="doc-escritura-corpo" rows="28" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.45; resize: vertical;">Autorizamos o(a) Senhor(a) Tabelião desta cidade de {{CIDADE_CARTORIO}} a lavrar a escritura definitiva de compra e venda do Lote nº {{QUADRA_LOTE}} do loteamento {{EMPREENDIMENTO}}, situado em {{CIDADE_LOTEAMENTO}}, assim descrito:
+                  <textarea class="form-control" id="doc-escritura-corpo" rows="32" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.45; resize: vertical;">Pelo presente, autorizamos o {{NOME_CARTORIO}} a lavrar a Escritura Definitiva de Venda e Compra do Lote de terreno sob nº {{QUADRA_LOTE}} (Quadra-Lote) do loteamento denominado {{EMPREENDIMENTO}}, situado no Município de {{CIDADE_LOTEAMENTO}}, com as seguintes confrontações:
 
-**LOCALIZAÇÃO**
+Localização:
 {{LOCALIZACAO}}
 
-Matrícula nº {{MATRICULA}}, com a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}), em nome de {{NOME_CLIENTE}}{{PERCENTUAL_CLIENTE}}, no valor de {{VALOR_CONTRATO}} ({{VALOR_CONTRATO_EXTENSO}}), conforme contrato firmado em {{DATA_CONTRATO}}.
+Matrícula: {{MATRICULA}}
 
-O pagamento se deu através de boletos bancários, {{DADOS_BANCARIOS}}.
+Ao(s) cliente(s) {{NOME_CLIENTE}}{{PERCENTUAL_CLIENTE}}, pelo valor total de {{VALOR_CONTRATO}} ({{VALOR_CONTRATO_EXTENSO}}). Em cumprimento ao contrato particular de compromisso de compra e venda firmado em {{DATA_CONTRATO}}.
 
-As datas e valores dos pagamentos constam no extrato anexo.
+Realizou os pagamentos mensais através de boletos bancários. {{DADOS_BANCARIOS}}
 
-**ATENÇÃO:** A escritura deve ser lavrada em nome dos contratantes.
+As datas de pagamentos e os valores recebidos estão apresentados no extrato anexo.
 
-**ATENÇÃO:** É necessário CND do exercício vigente e do anterior.
+Atenção: O presente termo de autorização de escritura está sendo lavrado em nome dos titulares apresentados em contrato. Em caso de alteração, favor enviar o documento comprobatório para a empresa atualizar o cadastro e enviar um novo termo.
 
-**ATENÇÃO:** Este documento só tem validade acompanhado do extrato anexo.
+A Moura Leite Loteamentos realizará a assinatura da escritura apenas com a apresentação da Certidão Negativa de Débitos (CND) referente ao ano vigente e anos anteriores. O presente documento não tem validade se estiver apresentado sem o anexo que se refere ao extrato de pagamentos.
 
 {{CIDADE_ATUAL}}, {{DATA_HOJE_EXTENSO}}
 
-
 ____________________________________________
-REPRESENTANTE DA EMPRESA</textarea>
+REPRESENTANTE DA EMPRESA
+
+ATENÇÃO: Senhor tabelião, favor preencher os dados abaixo e devolver esta autorização à Moura Leite Desenvolvimento & Urbanização, no ato da assinatura desta.
+
+Livro nº __________    Folha nº __________    Matrícula nº __________    Data ____/____/____
+
+Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 16px;">
                   <button class="btn btn-primary" onclick="saveDocPadrao('escritura')">
@@ -1998,6 +2003,7 @@ REPRESENTANTE DA EMPRESA</textarea>
                 <div class="var-pill" onclick="copyVar(this)">{{VALOR_MULTA}}</div>
 
                 <div class="var-pill-group-title">Escritura</div>
+                <div class="var-pill" onclick="copyVar(this)">{{NOME_CARTORIO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CIDADE_CARTORIO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{QUADRA_LOTE}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{LOCALIZACAO}}</div>
@@ -2620,7 +2626,7 @@ REPRESENTANTE DA EMPRESA</textarea>
             <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Autorização para lavratura de escritura</h3>
           </div>
           <div style="padding: 16px 20px;">
-            <p style="font-size: 0.9rem; color: #64748b; margin: 0 0 16px;">Informe o título, o contrato ou o nome do cliente. O modelo padrão fica em Configurações → Documentos padrões.</p>
+            <p style="font-size: 0.9rem; color: #64748b; margin: 0 0 16px;">Informe o título, o contrato ou o nome do cliente. O termo só é emitido para contrato <strong>quitado</strong>. O modelo fica em Configurações → Documentos padrões.</p>
             <div style="display: grid; grid-template-columns: 140px 160px 1fr auto; gap: 12px; align-items: end;">
               <div class="form-group" style="margin: 0;">
                 <label>Título</label>
@@ -2646,8 +2652,23 @@ REPRESENTANTE DA EMPRESA</textarea>
           <div style="padding: 16px 20px;">
             <div id="esc-contrato-resumo" style="margin-bottom: 16px;"></div>
             <div class="form-group">
-              <label>Cidade do cartório / tabelião</label>
-              <input type="text" class="form-control" id="esc-cidade-cartorio" placeholder="Boituva/SP">
+              <label for="esc-cartorio">Selecione o Cartório</label>
+              <div style="display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;">
+                <select id="esc-cartorio" class="form-control" style="flex: 1; min-width: 220px;">
+                  <option value="">Selecione o cartório</option>
+                </select>
+                <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.adicionarCartorio()" style="white-space: nowrap;">
+                  <i data-lucide="plus" style="width:16px;"></i> Adicionar cartório
+                </button>
+              </div>
+              <div id="esc-cartorio-novo-box" style="display: none; margin-top: 10px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc;">
+                <label for="esc-cartorio-novo-nome">Nome completo do cartório</label>
+                <input type="text" class="form-control" id="esc-cartorio-novo-nome" placeholder="Ex.: TABELIÃO DE NOTAS E DE PROTESTO DE LETRAS E TÍTULOS DE BOITUVA/SP" style="margin-bottom: 10px;">
+                <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                  <button type="button" class="btn btn-cancel" onclick="RelacionamentoApp.cancelarNovoCartorio()">Cancelar</button>
+                  <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.salvarNovoCartorio()">Salvar cartório</button>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label>Localização do lote (medidas e confrontações)</label>
@@ -6534,42 +6555,42 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=661"></script>
-  <script defer src="sienge-api.js?v=661"></script>
-  <script defer src="azure-auth.js?v=661"></script>
-  <script defer src="app.js?v=661"></script>
-  <script defer src="home-dashboard.js?v=661"></script>
-  <script defer src="anexos.js?v=661"></script>
-  <script defer src="contas-pagar.js?v=661"></script>
-  <script defer src="config-tags.js?v=661"></script>
-  <script defer src="config-users.js?v=661"></script>
-  <script defer src="construcao.js?v=661"></script>
-  <script defer src="empresas.js?v=661"></script>
-  <script defer src="relacionamento.js?v=661"></script>
+  <script defer src="data.js?v=666"></script>
+  <script defer src="sienge-api.js?v=666"></script>
+  <script defer src="azure-auth.js?v=666"></script>
+  <script defer src="app.js?v=666"></script>
+  <script defer src="home-dashboard.js?v=666"></script>
+  <script defer src="anexos.js?v=666"></script>
+  <script defer src="contas-pagar.js?v=666"></script>
+  <script defer src="config-tags.js?v=666"></script>
+  <script defer src="config-users.js?v=666"></script>
+  <script defer src="construcao.js?v=666"></script>
+  <script defer src="empresas.js?v=666"></script>
+  <script defer src="relacionamento.js?v=666"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=661"></script>
-  <script defer src="centros-custo.js?v=661"></script>
-  <script defer src="marketing.js?v=661"></script>
-  <script defer src="plano-financeiro.js?v=661"></script>
-  <script defer src="prestacao-contas.js?v=661"></script>
+  <script defer src="estoque-comercial.js?v=666"></script>
+  <script defer src="centros-custo.js?v=666"></script>
+  <script defer src="marketing.js?v=666"></script>
+  <script defer src="plano-financeiro.js?v=666"></script>
+  <script defer src="prestacao-contas.js?v=666"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=661"></script>
-  <script defer src="fluxo-caixa.js?v=661"></script>
-  <script defer src="caixa-diario.js?v=661"></script>
-  <script defer src="investimento.js?v=661"></script>
-  <script defer src="parametrizacao-parceiro.js?v=661"></script>
-  <script defer src="societario.js?v=661"></script>
-  <script defer src="participacoes.js?v=661"></script>
-  <script defer src="fiscal.js?v=661"></script>
-  <script defer src="indexadores.js?v=661"></script>
-  <script defer src="verificar-construcao.js?v=661"></script>
-  <script src="repactuacoes.js?v=661"></script>
-  <script defer src="repactuacao-lote.js?v=661"></script>
+  <script defer src="empresa-filter.js?v=666"></script>
+  <script defer src="fluxo-caixa.js?v=666"></script>
+  <script defer src="caixa-diario.js?v=666"></script>
+  <script defer src="investimento.js?v=666"></script>
+  <script defer src="parametrizacao-parceiro.js?v=666"></script>
+  <script defer src="societario.js?v=666"></script>
+  <script defer src="participacoes.js?v=666"></script>
+  <script defer src="fiscal.js?v=666"></script>
+  <script defer src="indexadores.js?v=666"></script>
+  <script defer src="verificar-construcao.js?v=666"></script>
+  <script src="repactuacoes.js?v=666"></script>
+  <script defer src="repactuacao-lote.js?v=666"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=661"></script>
+  <script defer src="dashboard-inadimplencia.js?v=666"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
