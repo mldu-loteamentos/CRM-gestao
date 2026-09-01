@@ -94,21 +94,92 @@ function internalCompanyIds(customRaw) {
   return allowed;
 }
 
-function normalizeBill(bill, underJudgmentIds) {
-  let value = 0, interest = 0, fine = 0, daysDelay = 0;
-  const installments = bill.defaulterInstallments || [];
-  installments.forEach((inst) => {
-    if (inst.correctedValueWithAdditions !== undefined) {
-      value += inst.correctedValueWithAdditions;
-    } else {
-      value += inst.correctedValueWithoutAdditions !== undefined ? inst.correctedValueWithoutAdditions : (inst.value || 0);
-      interest += inst.interest || 0;
-      fine += inst.fine || 0;
-    }
-    const delay = inst.daysOfDelay !== undefined ? inst.daysOfDelay : (inst.daysDelay || 0);
-    if (delay > daysDelay) daysDelay = delay;
+function installmentDueIso(inst) {
+  return String((inst && inst.dueDate) || "").slice(0, 10);
+}
+
+function installmentIsSettled(inst) {
+  if (!inst) return true;
+  const sit = String(inst.installmentSituation || inst.situation || inst.status || "").toLowerCase();
+  if (sit === "2" || sit === "paid" || /quitad|paga/.test(sit)) return true;
+  if (inst.isValidReceipt === true) return true;
+  const cb = inst.currentBalance;
+  if (cb !== undefined && cb !== null && Number(cb) <= 0.009) return true;
+  const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+  return recs.some((r) => {
+    const op = String(r.operationTypeId || r.typeId || r.type || "");
+    const val = Number(r.netReceiptValue || r.receiptValue || r.value || 0);
+    const dt = r.paymentDate || r.receiptDate || r.date;
+    return dt && (String(op) === "2" || val > 0.009);
   });
-  return {
+}
+
+function installmentOverdueAmount(inst) {
+  if (inst.correctedValueWithAdditions !== undefined && inst.correctedValueWithAdditions !== null) {
+    return Number(inst.correctedValueWithAdditions) || 0;
+  }
+  if (inst.correctedValueWithoutAdditions !== undefined && inst.correctedValueWithoutAdditions !== null) {
+    return (Number(inst.correctedValueWithoutAdditions) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
+  }
+  return (Number(inst.value) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
+}
+
+function summarizeOpenDefaulterBill(bill) {
+  const todayIso = todayIsoSP();
+  const all = (bill && bill.defaulterInstallments) || [];
+  const open = all.filter((inst) => {
+    if (installmentIsSettled(inst)) return false;
+    const due = installmentDueIso(inst);
+    if (due && due > todayIso) return false;
+    return true;
+  });
+  let value = 0, interest = 0, fine = 0, daysDelay = 0;
+  open.forEach((inst) => {
+    value += installmentOverdueAmount(inst);
+    interest += Number(inst.interest) || 0;
+    fine += Number(inst.fine) || 0;
+    const delay = inst.daysOfDelay !== undefined ? inst.daysOfDelay : (inst.daysDelay || 0);
+    if (Number(delay) > daysDelay) daysDelay = Number(delay) || 0;
+  });
+  return { value, interest, fine, daysDelay, installments: open };
+}
+
+function paidDaysFromDate(dateStr, today) {
+  const clean = String(dateStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return null;
+  const rDate = new Date(clean + "T12:00:00");
+  const todayDate = new Date(today + "T12:00:00");
+  const diffDays = Math.floor((todayDate - rDate) / (1000 * 60 * 60 * 24));
+  if (!Number.isFinite(diffDays) || diffDays < 0) return null;
+  return diffDays;
+}
+
+function collectIncomePaidEntries(rows, today) {
+  const map = new Map();
+  (rows || []).forEach((item) => {
+    const bId = item.billReceivableId || item.receivableBillId || item.billId || item.documentId || item.invoiceId || item.id;
+    if (!bId) return;
+    const dates = [];
+    if (item.receipts && Array.isArray(item.receipts)) {
+      item.receipts.forEach((receipt) => {
+        if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) dates.push(receipt.paymentDate);
+      });
+    }
+    if (!dates.length && (item.paymentDate || item.receiptDate)) dates.push(item.paymentDate || item.receiptDate);
+    dates.forEach((dateStr) => {
+      const days = paidDaysFromDate(dateStr, today);
+      if (days == null) return;
+      const key = String(bId);
+      const cur = map.get(key);
+      if (cur === undefined || days < cur) map.set(key, days);
+    });
+  });
+  return Array.from(map.entries());
+}
+
+function normalizeBill(bill, underJudgmentIds) {
+  const installments = bill.defaulterInstallments || [];
+  const mapped = {
     id: bill.receivableBillId || String(bill.id),
     saleId: bill.receivableBillId ? Number(bill.receivableBillId) : (bill.saleId || 100),
     realSaleId: bill.saleId,
@@ -118,7 +189,7 @@ function normalizeBill(bill, underJudgmentIds) {
     costCentersId: bill.costCentersId || [],
     costCenterId: bill.costCenterId || (bill.costCentersId && bill.costCentersId[0]) || null,
     units: bill.units || "N/D",
-    value, interest, fine, daysDelay,
+    value: 0, interest: 0, fine: 0, daysDelay: 0,
     slipStatus: "Vencido",
     subjudice: underJudgmentIds.has(String(bill.receivableBillId || bill.id)) ? "S" : "N",
     defaulterInstallments: installments,
@@ -128,6 +199,13 @@ function normalizeBill(bill, underJudgmentIds) {
       + (bill.inBillingInstallments ? bill.inBillingInstallments.length : 0)
       + (bill.underJudgmentInstallments ? bill.underJudgmentInstallments.length : 0)
   };
+  const open = summarizeOpenDefaulterBill(mapped);
+  mapped.value = open.value;
+  mapped.interest = open.interest;
+  mapped.fine = open.fine;
+  mapped.daysDelay = open.daysDelay;
+  mapped.defaulterInstallments = open.installments || [];
+  return mapped;
 }
 
 function buildDefaulterQuery(cId, today, extraParams, billTypeParams) {
@@ -249,7 +327,7 @@ module.exports = async function handler(req, res) {
           log.push(`defaulters emp ${cId} lote ${state.batchIndex}: ${e.message}`);
         }
         const under = new Set(rawJudge.map((b) => String(b.receivableBillId || b.id)));
-        const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.daysDelay > 0);
+        const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
         const chunkId = `${today}_warmup_${cId}_${state.batchIndex}`;
         await setDoc(doc(db, "sienge_defaulters_history", chunkId), {
           date: today,
@@ -298,7 +376,7 @@ module.exports = async function handler(req, res) {
           const url = `${SIENGE_BULK_BASE}/bulk-data/v1/income?startDate=${p.start}&endDate=${p.end}&selectionType=P&companyId=${p.cid}`;
           const resInc = await siengeFetch(url);
           const rows = (resInc && resInc.data) || [];
-          paidEntries = rows.map((item) => [String(item.customerId || item.clientId || ""), item.paymentDate || item.receiptDate || ""]);
+          paidEntries = collectIncomePaidEntries(rows, today);
         } catch (e) {
           log.push("income: " + e.message);
         }
@@ -319,7 +397,7 @@ module.exports = async function handler(req, res) {
 
     if (state.step === "finalize") {
       const bills = [];
-      const paidMap = [];
+      const paidMerged = new Map();
       const toDelete = [...(state.warmupChunks || []), ...(state.incomeChunks || [])];
       for (const id of toDelete) {
         try {
@@ -329,10 +407,20 @@ module.exports = async function handler(req, res) {
           if (id.indexOf("_warmup_") >= 0) {
             try { bills.push(...JSON.parse(d.data || "[]")); } catch (e) {}
           } else {
-            try { paidMap.push(...JSON.parse(d.data || "[]")); } catch (e) {}
+            try {
+              JSON.parse(d.data || "[]").forEach((pair) => {
+                if (!pair || !pair[0]) return;
+                const days = Number(pair[1]);
+                if (!Number.isFinite(days)) return;
+                const key = String(pair[0]);
+                const cur = paidMerged.get(key);
+                if (cur === undefined || days < cur) paidMerged.set(key, days);
+              });
+            } catch (e) {}
           }
         } catch (e) {}
       }
+      const paidMap = Array.from(paidMerged.entries());
       const CHUNK = 100;
       const numChunks = Math.max(1, Math.ceil(bills.length / CHUNK));
       for (let i = 0; i < numChunks; i++) {

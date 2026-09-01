@@ -55,6 +55,107 @@ function getConfiguredInternalCompanyIds() {
   return [...ALLOWED_COMPANY_IDS];
 }
 
+function installmentDueIso(inst) {
+  return String((inst && inst.dueDate) || "").slice(0, 10);
+}
+
+function installmentIsSettled(inst) {
+  if (!inst) return true;
+  const sit = String(inst.installmentSituation || inst.situation || inst.status || "").toLowerCase();
+  if (sit === "2" || sit === "paid" || /quitad|paga/.test(sit)) return true;
+  if (inst.isValidReceipt === true) return true;
+  const cb = inst.currentBalance;
+  if (cb !== undefined && cb !== null && Number(cb) <= 0.009) return true;
+  const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+  const hasBaixa = recs.some((r) => {
+    const op = String(r.operationTypeId || r.typeId || r.type || "");
+    const val = Number(r.netReceiptValue || r.receiptValue || r.value || 0);
+    const dt = r.paymentDate || r.receiptDate || r.date;
+    return dt && (String(op) === "2" || val > 0.009);
+  });
+  return hasBaixa;
+}
+
+function installmentOverdueAmount(inst) {
+  if (inst.correctedValueWithAdditions !== undefined && inst.correctedValueWithAdditions !== null) {
+    return Number(inst.correctedValueWithAdditions) || 0;
+  }
+  if (inst.correctedValueWithoutAdditions !== undefined && inst.correctedValueWithoutAdditions !== null) {
+    return (Number(inst.correctedValueWithoutAdditions) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
+  }
+  return (Number(inst.value) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
+}
+
+function paidMapDaysForBill(bill, paidMap) {
+  if (!paidMap || typeof paidMap.get !== "function") return null;
+  const ids = [bill.id, bill.saleId, bill.receivableBillId, bill.billReceivableId]
+    .filter((v) => v !== undefined && v !== null && v !== "")
+    .map((v) => String(v));
+  for (const id of ids) {
+    if (!paidMap.has(id)) continue;
+    const v = paidMap.get(id);
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && /^\d{1,3}$/.test(v)) return Number(v);
+  }
+  return null;
+}
+
+function lastPayIsoFromDays(days, todayIso) {
+  const d = new Date(todayIso + "T12:00:00");
+  d.setDate(d.getDate() - Number(days));
+  return d.toISOString().slice(0, 10);
+}
+
+window.summarizeOpenDefaulterBill = function(bill) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const all = (bill && bill.defaulterInstallments) || [];
+  const paidMap = (typeof window !== "undefined" && window.advFilters && window.advFilters.paidMap) || null;
+  const paidInst = (typeof window !== "undefined" && window.advFilters && window.advFilters.paidInstallmentIds) || null;
+  const billIds = [bill && bill.id, bill && bill.saleId, bill && bill.receivableBillId]
+    .filter((v) => v !== undefined && v !== null && v !== "")
+    .map((v) => String(v));
+  const paidDays = paidMapDaysForBill(bill || {}, paidMap);
+  const lastPayIso = paidDays != null ? lastPayIsoFromDays(paidDays, todayIso) : null;
+
+  let open = all.filter((inst) => {
+    if (installmentIsSettled(inst)) return false;
+    const due = installmentDueIso(inst);
+    if (due && due > todayIso) return false;
+    const instKey = String(inst.installmentId || inst.installmentNumber || "");
+    if (paidInst && instKey && billIds.some((id) => paidInst.has(id + ":" + instKey))) return false;
+    return true;
+  });
+
+  if (lastPayIso && open.length === 1) {
+    const due = installmentDueIso(open[0]);
+    if (due && due <= lastPayIso) open = [];
+  }
+
+  let value = 0, interest = 0, fine = 0, daysDelay = 0;
+  open.forEach((inst) => {
+    value += installmentOverdueAmount(inst);
+    interest += Number(inst.interest) || 0;
+    fine += Number(inst.fine) || 0;
+    const delay = inst.daysOfDelay !== undefined ? inst.daysOfDelay : (inst.daysDelay || 0);
+    if (Number(delay) > daysDelay) daysDelay = Number(delay) || 0;
+  });
+
+  if (!all.length) {
+    value = Number(bill && (bill.value || bill.totalValue)) || 0;
+    daysDelay = Number(bill && bill.daysDelay) || 0;
+    open = [];
+  }
+
+  return {
+    skip: daysDelay <= 0 || value <= 0.009,
+    value,
+    interest,
+    fine,
+    daysDelay,
+    installments: open
+  };
+};
+
 function getBasicAuthHeader() {
   const credentials = `${SIENGE_CONFIG.user}:${SIENGE_CONFIG.pass}`;
   return "Basic " + btoa(credentials);
@@ -1027,21 +1128,8 @@ const SiengeApiService = {
         const underJudgmentIds = new Set(rawUnderJudgment.map(b => String(b.receivableBillId || b.id)));
 
         const normalizedArray = rawArray.map(bill => {
-          let value = 0, interest = 0, fine = 0, daysDelay = 0;
           const installments = bill.defaulterInstallments || [];
-          installments.forEach(inst => {
-            if (inst.correctedValueWithAdditions !== undefined) {
-              value += inst.correctedValueWithAdditions;
-            } else {
-              value    += inst.correctedValueWithoutAdditions !== undefined ? inst.correctedValueWithoutAdditions : (inst.value || 0);
-              interest += inst.interest || 0;
-              fine     += inst.fine || 0;
-            }
-            const delay = inst.daysOfDelay !== undefined ? inst.daysOfDelay : (inst.daysDelay || 0);
-            if (delay > daysDelay) daysDelay = delay;
-          });
-
-          return {
+          const mapped = {
             id:          bill.receivableBillId || String(bill.id),
             saleId:      bill.receivableBillId ? Number(bill.receivableBillId) : (bill.saleId || 100),
             realSaleId:  bill.saleId,
@@ -1051,7 +1139,7 @@ const SiengeApiService = {
             costCentersId: bill.costCentersId || [],
             costCenterId:  bill.costCenterId || (bill.costCentersId?.length > 0 ? bill.costCentersId[0] : null),
             units:       bill.units || 'N/D',
-            value, interest, fine, daysDelay,
+            value: 0, interest: 0, fine: 0, daysDelay: 0,
             slipStatus:  'Vencido',
             subjudice:   underJudgmentIds.has(String(bill.receivableBillId || bill.id)) ? 'S' : 'N',
             defaulterInstallments:      installments,
@@ -1061,10 +1149,29 @@ const SiengeApiService = {
                                     (bill.inBillingInstallments ? bill.inBillingInstallments.length : 0) +
                                     (bill.underJudgmentInstallments ? bill.underJudgmentInstallments.length : 0)
           };
+          const open = typeof window.summarizeOpenDefaulterBill === "function"
+            ? window.summarizeOpenDefaulterBill(mapped)
+            : null;
+          if (open) {
+            mapped.value = open.value;
+            mapped.interest = open.interest;
+            mapped.fine = open.fine;
+            mapped.daysDelay = open.daysDelay;
+            mapped.defaulterInstallments = open.installments || [];
+          } else {
+            installments.forEach(inst => {
+              mapped.value += installmentOverdueAmount(inst);
+              mapped.interest += inst.interest || 0;
+              mapped.fine += inst.fine || 0;
+              const delay = inst.daysOfDelay !== undefined ? inst.daysOfDelay : (inst.daysDelay || 0);
+              if (delay > mapped.daysDelay) mapped.daysDelay = delay;
+            });
+          }
+          return mapped;
         });
 
         console.log(`[Sienge] Retornou ${normalizedArray.length} títulos inadimplentes da empresa ${cId}`);
-        allNormalized.push(...normalizedArray.filter(b => b.daysDelay > 0));
+        allNormalized.push(...normalizedArray.filter(b => b.daysDelay > 0 && (b.value || 0) > 0.009));
 
       } catch (err) {
         console.error(`[Sienge] Erro na API Bulk Data da empresa ${cId}:`, err);

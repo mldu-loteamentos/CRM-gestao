@@ -466,6 +466,7 @@ const DashboardInadimplencia = (function() {
     const zeroPaidClients = [];
     
     bills.forEach(b => {
+      if ((Number(b.overdueValue) || 0) < 0.01) return;
       totalOverdue += b.overdueValue || 0;
       uniqueClients.add(b.customerId);
       totalBills += (b.titles && b.titles.length > 0) ? b.titles.length : 1;

@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=652">
+  <link rel="stylesheet" href="style.css?v=656">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1086,11 +1086,28 @@
           </ul>
         </li>
         <!-- RELACIONAMENTO -->
-        <li class="nav-item" data-tab="relacionamento_gestao" data-module="mod_rel">
-          <a onclick="switchTab('relacionamento_gestao', 'Relacionamento')" title="Relacionamento">
+        <li class="nav-item nav-group" data-module="mod_rel">
+          <a onclick="toggleNavMenu(event, 'submenu-relacionamento')" title="Relacionamento">
             <i data-lucide="users"></i>
             <span>Relacionamento</span>
+            <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
+          <ul class="nav-submenu" id="submenu-relacionamento" style="display: none;">
+            <li data-tab="relacionamento_gestao" data-module="sub_rel_geral_buscar_cliente_acessar">
+              <a onclick="switchTab('relacionamento_gestao', 'Buscar Cliente')">Buscar Cliente</a>
+            </li>
+            <li class="nav-item nav-group" data-module="sub_rel_docs">
+              <a onclick="toggleNavMenu(event, 'submenu-rel-docs')" title="Gerar documentos">
+                <span>Gerar documentos</span>
+                <i data-lucide="chevron-down" class="nav-chevron"></i>
+              </a>
+              <ul class="nav-submenu" id="submenu-rel-docs" style="display: none;">
+                <li data-tab="relacionamento_autorizacao" data-module="sub_rel_docs_autorizacao_escritura_acessar">
+                  <a onclick="switchTab('relacionamento_autorizacao', 'Autorização de escritura')">Autorização de escritura</a>
+                </li>
+              </ul>
+            </li>
+          </ul>
         </li>
         <!-- COMPROMISSÁRIO -->
         <li class="nav-item nav-group" data-module="mod_compromissario">
@@ -1204,7 +1221,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.652 &nbsp;&middot;&nbsp; 01/09/2026
+            v1.0.656 &nbsp;&middot;&nbsp; 01/09/2026
           </span>
         </div>
       </div>
@@ -1498,8 +1515,8 @@
               <div class="doc-menu-item" onclick="selectDocTemplate('distrato')" id="menu-doc-distrato">
                 <i data-lucide="file-x"></i> Distrato / Rescisão
               </div>
-              <div class="doc-menu-item" onclick="selectDocTemplate('suspensao')" id="menu-doc-suspensao">
-                <i data-lucide="file-warning"></i> Suspensão de Contrato
+              <div class="doc-menu-item" onclick="selectDocTemplate('escritura')" id="menu-doc-escritura">
+                <i data-lucide="scroll-text"></i> Autorização de Escritura
               </div>
             </div>
             
@@ -1851,6 +1868,51 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   </button>
                 </div>
               </div>
+
+              <div id="editor-escritura" class="doc-editor-form">
+                <h3 style="margin-top: 0; color: #1e293b; font-size: 1.3rem; margin-bottom: 20px;">Autorização para Lavratura de Escritura</h3>
+                <div class="form-group">
+                  <label>Título do Documento</label>
+                  <input type="text" class="form-control" id="doc-escritura-title" value="AUTORIZAÇÃO PARA LAVRATURA DE ESCRITURA">
+                </div>
+                <div class="form-group">
+                  <label>Texto Padrão</label>
+                  <div class="doc-fmt-bar">
+                    <button type="button" class="doc-fmt-btn" onclick="wrapDocPadraoBold('doc-escritura-corpo')" title="Negrito (Ctrl+B)"><b>N</b> Negrito</button>
+                    <span class="doc-fmt-hint">Usado em Relacionamento → Gerar documentos → Autorização de escritura.</span>
+                  </div>
+                  <textarea class="form-control" id="doc-escritura-corpo" rows="28" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.45; resize: vertical;">Autorizamos o(a) Senhor(a) Tabelião desta cidade de {{CIDADE_CARTORIO}} a lavrar a escritura definitiva de compra e venda do Lote nº {{QUADRA_LOTE}} do loteamento {{EMPREENDIMENTO}}, situado em {{CIDADE_LOTEAMENTO}}, assim descrito:
+
+**LOCALIZAÇÃO**
+{{LOCALIZACAO}}
+
+Matrícula nº {{MATRICULA}}, com a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}), em nome de {{NOME_CLIENTE}}{{PERCENTUAL_CLIENTE}}, no valor de {{VALOR_CONTRATO}} ({{VALOR_CONTRATO_EXTENSO}}), conforme contrato firmado em {{DATA_CONTRATO}}.
+
+O pagamento se deu através de boletos bancários, {{DADOS_BANCARIOS}}.
+
+As datas e valores dos pagamentos constam no extrato anexo.
+
+**ATENÇÃO:** A escritura deve ser lavrada em nome dos contratantes.
+
+**ATENÇÃO:** É necessário CND do exercício vigente e do anterior.
+
+**ATENÇÃO:** Este documento só tem validade acompanhado do extrato anexo.
+
+{{CIDADE_ATUAL}}, {{DATA_HOJE_EXTENSO}}
+
+
+____________________________________________
+REPRESENTANTE DA EMPRESA</textarea>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="saveDocPadrao('escritura')">
+                    <i data-lucide="save" style="width:18px;"></i> Salvar Modelo
+                  </button>
+                  <button class="btn btn-outline" onclick="previewDocPadrao('escritura')">
+                    <i data-lucide="eye" style="width:18px;"></i> Simular PDF
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Variáveis Lateral (Right Sidebar) -->
@@ -1933,7 +1995,16 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 <div class="var-pill" onclick="copyVar(this)">{{VALOR_PAGO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{VALOR_MULTA}}</div>
 
-                <div class="var-pill-group-title">Outros / Credor</div>
+                <div class="var-pill-group-title">Escritura</div>
+                <div class="var-pill" onclick="copyVar(this)">{{CIDADE_CARTORIO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{QUADRA_LOTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{LOCALIZACAO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{MATRICULA}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_CONTRATO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_CONTRATO_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{PERCENTUAL_CLIENTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{DADOS_BANCARIOS}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{PREAMBULO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_HOJE_EXTENSO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{PREAMBULO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_NOME}}</div>
@@ -2542,7 +2613,56 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
 
       <!-- SEÇÕES DO MÓDULO RELACIONAMENTO -->
       <section id="tab-relacionamento_autorizacao" class="tab-pane" style="display: none;">
-        <div id="relacionamento-autorizacao-root">Em desenvolvimento...</div>
+        <div class="crm-card" style="margin-bottom: 20px;">
+          <div class="crm-card-header" style="background-color: #f3f4f6; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0;">
+            <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Autorização para lavratura de escritura</h3>
+          </div>
+          <div style="padding: 16px 20px;">
+            <p style="font-size: 0.9rem; color: #64748b; margin: 0 0 16px;">Informe o título, o contrato ou o nome do cliente. O modelo padrão fica em Configurações → Documentos padrões.</p>
+            <div style="display: grid; grid-template-columns: 140px 160px 1fr auto; gap: 12px; align-items: end;">
+              <div class="form-group" style="margin: 0;">
+                <label>Título</label>
+                <input type="text" class="form-control" id="esc-filter-titulo" inputmode="numeric" placeholder="11425" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter') RelacionamentoApp.buscarEscritura()">
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label>Contrato</label>
+                <input type="text" class="form-control" id="esc-filter-contrato" placeholder="9714" onkeydown="if(event.key==='Enter') RelacionamentoApp.buscarEscritura()">
+              </div>
+              <div class="form-group" style="margin: 0; position: relative;">
+                <label>Nome do cliente</label>
+                <input type="text" class="form-control" id="esc-filter-nome" placeholder="Digite para buscar..." autocomplete="off" onkeydown="if(event.key==='Enter') RelacionamentoApp.buscarEscritura()" oninput="RelacionamentoApp.sugerirNomeEscritura(this.value)">
+                <div id="esc-nome-dropdown" style="display:none; position:absolute; z-index:20; background:#fff; border:1px solid #e5e7eb; border-radius:6px; max-height:220px; overflow:auto; width:100%; box-shadow:0 8px 20px rgba(0,0,0,0.08);"></div>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.buscarEscritura()" style="height: 38px; white-space: nowrap;">
+                <i data-lucide="search" style="width:16px;"></i> Buscar
+              </button>
+            </div>
+            <div id="esc-search-results" style="margin-top: 16px;"></div>
+          </div>
+        </div>
+        <div class="crm-card" id="esc-doc-card" style="display: none;">
+          <div style="padding: 16px 20px;">
+            <div id="esc-contrato-resumo" style="margin-bottom: 16px;"></div>
+            <div class="form-group">
+              <label>Cidade do cartório / tabelião</label>
+              <input type="text" class="form-control" id="esc-cidade-cartorio" placeholder="Boituva/SP">
+            </div>
+            <div class="form-group">
+              <label>Localização do lote (medidas e confrontações)</label>
+              <textarea class="form-control" id="esc-localizacao" rows="5" placeholder="Lote 16 da quadra C-2 do loteamento..., com área de 200,00 m²..."></textarea>
+            </div>
+            <div class="form-group">
+              <label>Dados bancários dos boletos</label>
+              <textarea class="form-control" id="esc-bancos" rows="3" placeholder="Banco Santander, agência ..., conta ... até dd/mm/aaaa; Banco Itaú ..."></textarea>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px;">
+              <button type="button" class="btn btn-cancel" onclick="RelacionamentoApp.limparEscritura()">Cancelar</button>
+              <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.gerarEscrituraPdf()">
+                <i data-lucide="file-text" style="width:16px;"></i> Gerar autorização
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
       <section id="tab-relacionamento_cessao" class="tab-pane" style="display: none;">
         <div id="relacionamento-cessao-root">Em desenvolvimento...</div>
@@ -6409,42 +6529,42 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=652"></script>
-  <script defer src="sienge-api.js?v=652"></script>
-  <script defer src="azure-auth.js?v=652"></script>
-  <script defer src="app.js?v=652"></script>
-  <script defer src="home-dashboard.js?v=652"></script>
-  <script defer src="anexos.js?v=652"></script>
-  <script defer src="contas-pagar.js?v=652"></script>
-  <script defer src="config-tags.js?v=652"></script>
-  <script defer src="config-users.js?v=652"></script>
-  <script defer src="construcao.js?v=652"></script>
-  <script defer src="empresas.js?v=652"></script>
-  <script defer src="relacionamento.js?v=652"></script>
+  <script defer src="data.js?v=656"></script>
+  <script defer src="sienge-api.js?v=656"></script>
+  <script defer src="azure-auth.js?v=656"></script>
+  <script defer src="app.js?v=656"></script>
+  <script defer src="home-dashboard.js?v=656"></script>
+  <script defer src="anexos.js?v=656"></script>
+  <script defer src="contas-pagar.js?v=656"></script>
+  <script defer src="config-tags.js?v=656"></script>
+  <script defer src="config-users.js?v=656"></script>
+  <script defer src="construcao.js?v=656"></script>
+  <script defer src="empresas.js?v=656"></script>
+  <script defer src="relacionamento.js?v=656"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=652"></script>
-  <script defer src="centros-custo.js?v=652"></script>
-  <script defer src="marketing.js?v=652"></script>
-  <script defer src="plano-financeiro.js?v=652"></script>
-  <script defer src="prestacao-contas.js?v=652"></script>
+  <script defer src="estoque-comercial.js?v=656"></script>
+  <script defer src="centros-custo.js?v=656"></script>
+  <script defer src="marketing.js?v=656"></script>
+  <script defer src="plano-financeiro.js?v=656"></script>
+  <script defer src="prestacao-contas.js?v=656"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=652"></script>
-  <script defer src="fluxo-caixa.js?v=652"></script>
-  <script defer src="caixa-diario.js?v=652"></script>
-  <script defer src="investimento.js?v=652"></script>
-  <script defer src="parametrizacao-parceiro.js?v=652"></script>
-  <script defer src="societario.js?v=652"></script>
-  <script defer src="participacoes.js?v=652"></script>
-  <script defer src="fiscal.js?v=652"></script>
-  <script defer src="indexadores.js?v=652"></script>
-  <script defer src="verificar-construcao.js?v=652"></script>
-  <script src="repactuacoes.js?v=652"></script>
-  <script defer src="repactuacao-lote.js?v=652"></script>
+  <script defer src="empresa-filter.js?v=656"></script>
+  <script defer src="fluxo-caixa.js?v=656"></script>
+  <script defer src="caixa-diario.js?v=656"></script>
+  <script defer src="investimento.js?v=656"></script>
+  <script defer src="parametrizacao-parceiro.js?v=656"></script>
+  <script defer src="societario.js?v=656"></script>
+  <script defer src="participacoes.js?v=656"></script>
+  <script defer src="fiscal.js?v=656"></script>
+  <script defer src="indexadores.js?v=656"></script>
+  <script defer src="verificar-construcao.js?v=656"></script>
+  <script src="repactuacoes.js?v=656"></script>
+  <script defer src="repactuacao-lote.js?v=656"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=652"></script>
+  <script defer src="dashboard-inadimplencia.js?v=656"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

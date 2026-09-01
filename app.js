@@ -1616,7 +1616,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
 
-  if (tabId !== 'relacionamento_gestao' && typeof window.clearRelacionamento === 'function') {
+  if (!String(tabId).startsWith('relacionamento_') && typeof window.clearRelacionamento === 'function') {
       window.clearRelacionamento();
   }
 
@@ -1698,7 +1698,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "indexadores": "Indexadores Financeiros",
     "compromissario_prefeitura": "Compromissário (Prefeituras)",
     "compromissario_associacoes": "Compromissário (Associações)",
-    "relacionamento_gestao": "Relacionamento com Cliente",
+    "relacionamento_gestao": "Buscar Cliente",
+    "relacionamento_autorizacao": "Autorização de escritura",
     "condicoes-pagamento": "Condições de Pagamento",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
@@ -1737,6 +1738,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_prefeitura": "building",
     "compromissario_associacoes": "users-round",
     "relacionamento_gestao": "users",
+    "relacionamento_autorizacao": "scroll-text",
     "condicoes-pagamento": "file-text",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
@@ -2124,7 +2126,20 @@ window.applyPermissions = function(profileName) {
           || modKey === 'sub_fin_cb_resultado_caixa_acessar'
         ) && perms.sub_fin_cb === true;
         const repacAlias = modKey === 'sub_fin_repac_repactuacao_acessar' && (perms.mod_fin === true || perms.sub_fin_repac === true);
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || window.permCoversMenuKey(perms, modKey)) {
+        const relLegacy = perms.mod_rel === true
+          || perms.sub_rel_geral === true
+          || perms.sub_rel_geral_relacionamento_acessar === true;
+        const relAlias = (
+          (modKey === "sub_rel_geral_buscar_cliente_acessar" && relLegacy)
+          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar") && (
+            relLegacy
+            || perms.sub_rel_docs === true
+            || perms.sub_rel_docs_autorizacao_escritura_acessar === true
+            || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
+            || perms.sub_rel_docs_autorizacao_escritura_editar === true
+          ))
+        );
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || relAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -2199,6 +2214,24 @@ window.permCoversMenuKey = function(perms, modKey) {
     return perms.mod_societario === true
       || perms.sub_soc_geral_estrutura_societaria_acessar === true
       || perms.sub_soc_geral_estrutura_societaria_visualizar === true;
+  }
+  if (modKey === "sub_rel_geral_buscar_cliente_acessar") {
+    return perms.mod_rel === true
+      || perms.sub_rel_geral === true
+      || perms.sub_rel_geral_relacionamento_acessar === true
+      || perms.sub_rel_geral_relacionamento_visualizar === true
+      || perms.sub_rel_geral_relacionamento_editar === true;
+  }
+  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar") {
+    return perms.mod_rel === true
+      || perms.sub_rel_geral === true
+      || perms.sub_rel_geral_relacionamento_acessar === true
+      || perms.sub_rel_geral_relacionamento_visualizar === true
+      || perms.sub_rel_geral_relacionamento_editar === true
+      || perms.sub_rel_docs === true
+      || perms.sub_rel_docs_autorizacao_escritura_acessar === true
+      || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
+      || perms.sub_rel_docs_autorizacao_escritura_editar === true;
   }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
@@ -4222,6 +4255,11 @@ document.addEventListener("click", function(e) {
   const todayStr = new Date().toISOString().split('T')[0];
 
   bills.forEach(bill => {
+    const openSum = (typeof window.summarizeOpenDefaulterBill === "function")
+      ? window.summarizeOpenDefaulterBill(bill)
+      : null;
+    if (openSum && openSum.skip) return;
+
     const customerId = bill.customerId;
     const saleId = bill.saleId;
     
@@ -4233,8 +4271,11 @@ document.addEventListener("click", function(e) {
     
     // Unificar valores utilizando correctedValueWithAdditions do defaulterInstallments
     let correctedValueWithAdditions = 0;
-    if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
-      bill.defaulterInstallments.forEach(inst => {
+    const instSource = (openSum && openSum.installments) ? openSum.installments : (bill.defaulterInstallments || []);
+    if (openSum && !openSum.skip) {
+      correctedValueWithAdditions = openSum.value;
+    } else if (instSource.length > 0) {
+      instSource.forEach(inst => {
         if (inst.correctedValueWithAdditions !== undefined && inst.correctedValueWithAdditions !== null) {
           correctedValueWithAdditions += inst.correctedValueWithAdditions;
         } else if (inst.correctedValueWithoutAdditions !== undefined && inst.correctedValueWithoutAdditions !== null) {
@@ -4249,13 +4290,13 @@ document.addEventListener("click", function(e) {
     const billVal = correctedValueWithAdditions;
     const interestVal = 0;
     const fineVal = 0;
-    const maxDelay = bill.daysDelay || 0;
+    const maxDelay = (openSum && openSum.daysDelay != null) ? openSum.daysDelay : (bill.daysDelay || 0);
     const trueBillCount = bill.totalInstallmentsCount || ((bill.defaulterInstallments && bill.defaulterInstallments.length > 0) ? bill.defaulterInstallments.length : 1);
     const billCount = trueBillCount > 0 ? trueBillCount : 1;
     
     let oldestDueDate = null;
-    if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
-        bill.defaulterInstallments.forEach(inst => {
+    if (instSource.length > 0) {
+        instSource.forEach(inst => {
             if (inst.dueDate) {
                 const instDate = new Date(inst.dueDate).getTime();
                 if (!oldestDueDate || instDate < oldestDueDate) {
@@ -4273,8 +4314,8 @@ document.addEventListener("click", function(e) {
 
     let hasUnpaidSinal = false;
     let hasAgreementOverdue = false;
-    if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
-      hasUnpaidSinal = bill.defaulterInstallments.some(inst => {
+    if (instSource.length > 0) {
+      hasUnpaidSinal = instSource.some(inst => {
         const condition = getInstallmentConditionCode(inst);
         return condition === 'SI' || condition === 'SINAL' || condition === 'PU';
       });
@@ -12677,6 +12718,7 @@ function applyDistratoTemplateVars(text, map) {
   });
   return s;
 }
+window.applyDistratoTemplateVars = applyDistratoTemplateVars;
 
 function isBlankLegalField(v) {
   const s = String(v || "").trim();
@@ -23372,6 +23414,7 @@ async function saveDocPadrao(tipo) {
     cec: ['doc-cec-assunto', 'doc-cec-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
+    escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -23426,6 +23469,7 @@ async function previewDocPadrao(tipo) {
     cec: 'Comunicação de Efetivação de Cancelamento',
     suspensao: 'Suspensão de Contrato',
     distrato: 'Distrato / Rescisão',
+    escritura: 'Autorização de Escritura',
   };
   const label = labelMap[tipo] || tipo;
   const fillLegalPreview = async (rawText) => {
@@ -23488,6 +23532,11 @@ async function previewDocPadrao(tipo) {
     let filled = await fillLegalPreview(clauses);
     filled = String(filled).replace(/\{\{#SE_RESTITUICAO\}\}/g, '<em style="color:#105436;">[Com restituição]</em> ').replace(/\{\{\/SE_RESTITUICAO\}\}/g, '').replace(/\{\{#SE_SEM_RESTITUICAO\}\}/g, '<em style="color:#92400e;">[Sem restituição]</em> ').replace(/\{\{\/SE_SEM_RESTITUICAO\}\}/g, '');
     content = `<h2 style="text-align:center;">${title}</h2><p><strong>Percentual de Retenção Padrão:</strong> ${pct}%</p><p style="font-size:12px;color:#64748b;">Na prévia os dois blocos da cláusula 5 aparecem. No PDF, só entra o trecho com restituição se o cálculo tiver valor a devolver; senão entra o trecho sem restituição.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${window.centerDistratoSignatures ? window.centerDistratoSignatures(filled) : filled}</div>`;
+  } else if (tipo === 'escritura') {
+    const title = document.getElementById('doc-escritura-title')?.value || '';
+    const corpo = document.getElementById('doc-escritura-corpo')?.value || '';
+    const filled = await fillLegalPreview(corpo);
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -23513,7 +23562,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -23521,6 +23570,7 @@ async function loadDocPadraoTemplates() {
     cec: ['doc-cec-assunto', 'doc-cec-corpo'],
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
+    escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {
@@ -26996,7 +27046,7 @@ window.openCustomerFromRelacionamento = function(customerId, contractId, titulo)
       
       // Hide details view and switch back to Relacionamento tab
       document.getElementById('view-customer-details').style.display = 'none';
-      switchTab('relacionamento_gestao', 'Relacionamento');
+      switchTab('relacionamento_gestao', 'Buscar Cliente');
     };
   }
   
@@ -28882,11 +28932,18 @@ window.applyAdvFilters = async function(keepOpen = false) {
 };
 
 window.hasPrefetchedPayments = false;
+window.paidMapHasBillDays = function(map) {
+    if (!map || typeof map.size !== "number" || map.size === 0) return false;
+    for (const v of map.values()) {
+        if (typeof v === "number" && Number.isFinite(v)) return true;
+        if (typeof v === "string" && /^\d{1,3}$/.test(v)) return true;
+    }
+    return false;
+};
 window.prefetchRecentPayments = async function(forceRefresh = false) {
     if (window.hasPrefetchedPayments && !forceRefresh) return;
     
-    // Se o paidMap já foi populado pelo Firebase Cache e tem dados, NÃO BUSQUE de novo!
-    if (!forceRefresh && window.advFilters && window.advFilters.paidMap && window.advFilters.paidMap.size > 0) {
+    if (!forceRefresh && window.paidMapHasBillDays(window.advFilters && window.advFilters.paidMap)) {
         window.hasPrefetchedPayments = true;
         return;
     }
@@ -28924,6 +28981,7 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         }
         
         window.advFilters.paidMap = window.advFilters.paidMap || new Map();
+        window.advFilters.paidInstallmentIds = window.advFilters.paidInstallmentIds || new Set();
         
         // Faz a busca empresa por empresa, bloco por bloco, de forma sequencial para não travar o navegador
         for (const companyId of uniqueCompanies) {
@@ -28932,7 +28990,11 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
                     const res = await window.SiengeApiService.getBulkIncome(chunk.start, chunk.end, companyId);
                     if (res && res.data) {
                         res.data.forEach(item => {
-                            const bId = item.billReceivableId || item.receivableBillId || item.billId || item.documentId || item.invoiceId || item.installmentId || item.id;
+                            const bId = item.billReceivableId || item.receivableBillId || item.billId || item.documentId || item.invoiceId || item.id;
+                            const instId = item.installmentId || item.installmentNumber || (item.receipts && item.receipts[0] && (item.receipts[0].installmentId || item.receipts[0].installmentNumber));
+                            if (bId && instId) {
+                                window.advFilters.paidInstallmentIds.add(String(bId) + ":" + String(instId));
+                            }
                             if (bId) {
                                 let validDates = [];
                                 
