@@ -3,61 +3,172 @@
   const MAX_IMAGES = 8;
   const MAX_BYTES = 6 * 1024 * 1024;
 
-  const MODULOS = [
+  const ABAS_DETALHES = [
+    { id: "ficha-cadastro", label: "Cadastro" },
+    { id: "ficha-conjuge", label: "Cônjuge" },
+    { id: "ficha-complemento", label: "Complemento" },
+    { id: "ficha-representante", label: "Representante legal" },
+    { id: "ficha-procuradores", label: "Procuradores" },
+    { id: "ficha-anexos", label: "Anexos (ficha)" },
+    { id: "ficha-score", label: "Score Interno" },
+    { id: "tab-contrato", label: "Contrato de Venda" },
+    { id: "tab-outros", label: "Outros Contratos" },
+    { id: "tab-quitacao", label: "Valor Quitação" },
+    { id: "tab-simulacao", label: "Simulação de Vencidas" },
+    { id: "tab-ocorrencias", label: "Ocorrências e Promessas" },
+    { id: "tab-boletos", label: "Boletos do Contrato" },
+    { id: "tab-historico-renegociacoes", label: "Histórico de Renegociações" },
+    { id: "tab-vizinhos", label: "Vizinhos" },
+    { id: "tab-comportamento", label: "Comportamento de Pgto" },
+    { id: "tab-repactuacoes", label: "Repactuações" },
+    { id: "tab-construcao", label: "Construção" },
+    { id: "tab-notificacoes", label: "Notificações (cliente)" },
+    { id: "tab-informe-rendimentos", label: "Informe de Rendimentos" },
+    { id: "extrato-cliente", label: "Visualizar Extrato" },
+    { id: "tab-anexos-juridico", label: "Anexos Jurídico" },
+    { id: "tab-cobranca-judicial", label: "Cobrança Judicial" }
+  ];
+
+  const MENU = [
     { id: "home", label: "Home" },
     { id: "engenharia", label: "Engenharia" },
-    { id: "vistoria", label: "Vistoria" },
+    { id: "vistoria", label: "Vistoria", subs: [
+      { id: "vistoria_tela", label: "Vistoria" },
+      { id: "verificar_construcao", label: "Verificar Construção" }
+    ]},
     { id: "compras", label: "Compras" },
-    { id: "financeiro_cr", label: "Financeiro — Contas a Receber" },
-    { id: "financeiro_cp", label: "Financeiro — Contas a Pagar" },
-    { id: "caixa_banco", label: "Financeiro — Caixa e Banco" },
-    { id: "repactuacao", label: "Repactuação" },
-    { id: "fiscal", label: "Fiscal / Contábil" },
+    { id: "financeiro", label: "Financeiro", subs: [
+      { id: "contas_receber", label: "Contas a Receber" },
+      { id: "dashboard", label: "Dashboard" },
+      { id: "fila", label: "Fila de Cobrança" },
+      { id: "agenda", label: "Agenda do Operador" },
+      { id: "zeropaid", label: "Clientes 0% Pago" },
+      { id: "subjudice", label: "Sub Judice" },
+      { id: "notificacoes", label: "Notificações", abas: [
+        { id: "followup", label: "Follow-up de NEX" },
+        { id: "elegiveis-zero", label: "Elegíveis 0% pago" },
+        { id: "elegiveis-61", label: "Demais clientes elegíveis" }
+      ]},
+      { id: "config_cr", label: "Configurações (CR)", abas: [
+        { id: "regra-regua", label: "Régua de Cobrança" },
+        { id: "regra-judiciais", label: "Etapas Judiciais" },
+        { id: "regra-atribuicao", label: "Atribuição de Operadores" },
+        { id: "regra-negociacao", label: "Regras de Negociação" },
+        { id: "regra-fila", label: "Fila de Cobrança" }
+      ]},
+      { id: "extrato", label: "Extrato" },
+      { id: "mapa", label: "Mapa jurídico" },
+      { id: "detalhes_cliente", label: "Detalhes do cliente", abas: ABAS_DETALHES, abaObrigatoria: true },
+      { id: "renegociacao", label: "Renegociação" },
+      { id: "distrato", label: "Distrato" },
+      { id: "cp_assistente", label: "Assistente de Contas a Pagar" },
+      { id: "prestacao_contas", label: "Prestação de Contas" },
+      { id: "param_parceiro", label: "Parametrização de Parceiro" },
+      { id: "caixa_mov", label: "Movimentações (Caixa e Banco)" },
+      { id: "investimento", label: "Aplicações e Investimentos" },
+      { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
+      { id: "fluxo_diario", label: "Fluxo de caixa diário" },
+      { id: "resultado_caixa", label: "Resultado de caixa" },
+      { id: "repactuacao", label: "Repactuação" }
+    ]},
+    { id: "fiscal", label: "Fiscal / Contábil", subs: [
+      { id: "pis_cofins", label: "PIS/COFINS" },
+      { id: "csll_irpj", label: "CSLL/IRPJ" }
+    ]},
     { id: "participacoes", label: "Participações" },
-    { id: "societario", label: "Societário" },
-    { id: "comercial", label: "Comercial" },
-    { id: "marketing", label: "Marketing" },
-    { id: "relacionamento", label: "Relacionamento" },
-    { id: "compromissario", label: "Compromissário" },
-    { id: "seguranca", label: "Segurança" },
-    { id: "configuracoes", label: "Configurações" },
+    { id: "societario", label: "Societário", subs: [
+      { id: "estrutura", label: "Estrutura Societária" }
+    ]},
+    { id: "comercial", label: "Comercial", subs: [
+      { id: "dash_com", label: "Dashboard" },
+      { id: "estoque", label: "Posição de estoque" },
+      { id: "anexos", label: "Assistente de Anexos" }
+    ]},
+    { id: "marketing", label: "Marketing", subs: [
+      { id: "budget", label: "Budget" },
+      { id: "eventos", label: "Eventos" }
+    ]},
+    { id: "relacionamento", label: "Relacionamento", subs: [
+      { id: "buscar", label: "Buscar Cliente" },
+      { id: "autorizacao", label: "Autorização de escritura" }
+    ]},
+    { id: "compromissario", label: "Compromissário", subs: [
+      { id: "prefeitura", label: "Prefeitura" },
+      { id: "associacoes", label: "Associações" }
+    ]},
+    { id: "seguranca", label: "Segurança", subs: [
+      { id: "auditoria", label: "Auditoria do Sistema" },
+      { id: "acessos", label: "Acessos" }
+    ]},
+    { id: "suporte", label: "Suporte" },
+    { id: "configuracoes", label: "Configurações", subs: [
+      { id: "preambulos", label: "Preâmbulos" },
+      { id: "tags", label: "Tags de Anexos" },
+      { id: "usuarios", label: "Usuários e Perfis" },
+      { id: "empresas", label: "Empresas" },
+      { id: "centro_custo", label: "Centro de Custo" },
+      { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
+      { id: "doc_padrao", label: "Documentos Padrões" },
+      { id: "upload_kmz", label: "Upload de KMZ" },
+      { id: "upload_mapa", label: "Projeto Urbanístico" },
+      { id: "indexadores", label: "Indexadores" }
+    ]},
     { id: "outro", label: "Outro / Geral" }
   ];
 
-  const TAB_TO_MODULO = {
-    "construcao-home": "home",
-    "construcao-engenharia": "engenharia",
-    vistoria: "vistoria",
-    "construcao-compras": "compras",
-    dashboard: "financeiro_cr",
-    agenda: "financeiro_cr",
-    zeropaid: "financeiro_cr",
-    subjudice: "financeiro_cr",
-    wesend: "financeiro_cr",
-    configuracoes: "financeiro_cr",
-    "contas-pagar": "financeiro_cp",
-    "prestacao-contas": "financeiro_cp",
-    "parametrizacao-parceiro": "financeiro_cp",
-    "fluxo-caixa": "caixa_banco",
-    "fluxo-caixa-diario": "caixa_banco",
-    "resultado-caixa": "caixa_banco",
-    investimento: "caixa_banco",
-    "repactuacao-lote": "repactuacao",
-    "construcao-fiscal": "fiscal",
-    csll: "fiscal",
-    participacoes: "participacoes",
-    "estrutura-societaria": "societario",
-    "dashboard-comercial": "comercial",
-    "estoque-comercial": "comercial",
-    anexos: "comercial",
-    "marketing-eventos": "marketing",
-    "marketing-budget": "marketing",
-    relacionamento_gestao: "relacionamento",
-    relacionamento_autorizacao: "relacionamento",
-    compromissario_prefeitura: "compromissario",
-    compromissario_associacoes: "compromissario",
-    auditoria: "seguranca",
-    acessos: "seguranca"
+  const TAB_TO_LOC = {
+    "construcao-home": { modulo: "home" },
+    "construcao-engenharia": { modulo: "engenharia" },
+    vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
+    "construcao-compras": { modulo: "compras" },
+    dashboard: { modulo: "financeiro", subitem: "fila" },
+    inadimplencia_dashboard: { modulo: "financeiro", subitem: "dashboard" },
+    agenda: { modulo: "financeiro", subitem: "agenda" },
+    zeropaid: { modulo: "financeiro", subitem: "zeropaid" },
+    subjudice: { modulo: "financeiro", subitem: "subjudice" },
+    wesend: { modulo: "financeiro", subitem: "notificacoes" },
+    configuracoes: { modulo: "financeiro", subitem: "config_cr" },
+    "contas-pagar": { modulo: "financeiro", subitem: "cp_assistente" },
+    "prestacao-contas": { modulo: "financeiro", subitem: "prestacao_contas" },
+    "parametrizacao-parceiro": { modulo: "financeiro", subitem: "param_parceiro" },
+    "construcao-caixa": { modulo: "financeiro", subitem: "caixa_mov" },
+    "fluxo-caixa": { modulo: "financeiro", subitem: "fluxo_caixa" },
+    "fluxo-caixa-diario": { modulo: "financeiro", subitem: "fluxo_diario" },
+    "resultado-caixa": { modulo: "financeiro", subitem: "resultado_caixa" },
+    investimento: { modulo: "financeiro", subitem: "investimento" },
+    "repactuacao-lote": { modulo: "financeiro", subitem: "repactuacao" },
+    "construcao-fiscal": { modulo: "fiscal", subitem: "pis_cofins" },
+    "construcao-fiscal-csll": { modulo: "fiscal", subitem: "csll_irpj" },
+    participacoes: { modulo: "participacoes" },
+    "estrutura-societaria": { modulo: "societario", subitem: "estrutura" },
+    "dashboard-comercial": { modulo: "comercial", subitem: "dash_com" },
+    "estoque-comercial": { modulo: "comercial", subitem: "estoque" },
+    anexos: { modulo: "comercial", subitem: "anexos" },
+    "marketing-eventos": { modulo: "marketing", subitem: "eventos" },
+    "marketing-budget": { modulo: "marketing", subitem: "budget" },
+    relacionamento_gestao: { modulo: "relacionamento", subitem: "buscar" },
+    relacionamento_autorizacao: { modulo: "relacionamento", subitem: "autorizacao" },
+    compromissario_prefeitura: { modulo: "compromissario", subitem: "prefeitura" },
+    compromissario_associacoes: { modulo: "compromissario", subitem: "associacoes" },
+    auditoria: { modulo: "seguranca", subitem: "auditoria" },
+    acessos: { modulo: "seguranca", subitem: "acessos" },
+    suporte: { modulo: "suporte" },
+    preambles: { modulo: "configuracoes", subitem: "preambulos" },
+    "config-tags": { modulo: "configuracoes", subitem: "tags" },
+    "config-users": { modulo: "configuracoes", subitem: "usuarios" },
+    parametrizacoes: { modulo: "configuracoes", subitem: "empresas" },
+    "centros-custo": { modulo: "configuracoes", subitem: "centro_custo" },
+    "plano-financeiro": { modulo: "configuracoes", subitem: "plano_financeiro" },
+    "doc-padrao": { modulo: "configuracoes", subitem: "doc_padrao" },
+    "upload-kmz": { modulo: "configuracoes", subitem: "upload_kmz" },
+    "upload-mapa": { modulo: "configuracoes", subitem: "upload_mapa" },
+    indexadores: { modulo: "configuracoes", subitem: "indexadores" }
+  };
+
+  const OLD_MODULO_LABEL = {
+    financeiro_cr: "Financeiro — Contas a Receber",
+    financeiro_cp: "Financeiro — Contas a Pagar",
+    caixa_banco: "Financeiro — Caixa e Banco"
   };
 
   const STATUS_LABEL = {
@@ -102,17 +213,71 @@
     return false;
   }
 
-  function moduloLabel(id) {
-    const found = MODULOS.find(m => m.id === id);
-    return found ? found.label : (id || "—");
+  function findModulo(id) {
+    return MENU.find(m => m.id === id);
   }
 
-  function suggestModulo() {
+  function findSub(modId, subId) {
+    const mods = findModulo(modId);
+    if (!mods || !mods.subs) return null;
+    return mods.subs.find(s => s.id === subId) || null;
+  }
+
+  function findAba(modId, subId, abaId) {
+    const sub = findSub(modId, subId);
+    if (!sub || !sub.abas) return null;
+    return sub.abas.find(a => a.id === abaId) || null;
+  }
+
+  function moduloLabel(id) {
+    const found = findModulo(id);
+    if (found) return found.label;
+    return OLD_MODULO_LABEL[id] || id || "—";
+  }
+
+  function localPathOf(t) {
+    if (t && t.localPath) return t.localPath;
+    const parts = [moduloLabel(t && t.modulo)];
+    const sub = findSub(t && t.modulo, t && t.subitem);
+    if (sub) parts.push(sub.label);
+    else if (t && t.subitemLabel) parts.push(t.subitemLabel);
+    const aba = findAba(t && t.modulo, t && t.subitem, t && t.aba);
+    if (aba) parts.push(aba.label);
+    else if (t && t.abaLabel) parts.push(t.abaLabel);
+    return parts.filter(Boolean).join(" › ");
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const st = window.getComputedStyle(el);
+    return st.display !== "none" && st.visibility !== "hidden";
+  }
+
+  function suggestLocation() {
+    const loc = { modulo: "outro", subitem: "", aba: "" };
+    const mapa = document.getElementById("mapa-juridico-overlay");
+    if (isVisible(mapa)) return { modulo: "financeiro", subitem: "mapa", aba: "" };
+    if (isVisible(document.getElementById("view-renegotiation"))) {
+      return { modulo: "financeiro", subitem: "renegociacao", aba: "" };
+    }
+    if (isVisible(document.getElementById("view-distrato"))) {
+      return { modulo: "financeiro", subitem: "distrato", aba: "" };
+    }
+    if (isVisible(document.getElementById("view-customer-details"))) {
+      const ficha = document.querySelector(".ficha-tab-btn.active");
+      const cust = document.querySelector(".customer-tabs-menu .customer-tab-btn.active");
+      let aba = "";
+      if (cust && cust.id === "btn-visualizar-extrato-ativo") aba = "extrato-cliente";
+      else if (cust && cust.getAttribute("data-target")) aba = cust.getAttribute("data-target");
+      else if (ficha && ficha.getAttribute("data-target")) aba = ficha.getAttribute("data-target");
+      return { modulo: "financeiro", subitem: "detalhes_cliente", aba: aba || "tab-contrato" };
+    }
     const tab = window.activeAppTab || "";
-    if (TAB_TO_MODULO[tab]) return TAB_TO_MODULO[tab];
-    if (String(tab).startsWith("construcao-")) return "engenharia";
-    if (String(tab).startsWith("config") || String(tab).startsWith("preamble") || tab === "parametrizacoes") return "configuracoes";
-    return "outro";
+    if (TAB_TO_LOC[tab]) return Object.assign(loc, TAB_TO_LOC[tab]);
+    if (String(tab).startsWith("construcao-") && tab !== "construcao-compras" && tab !== "construcao-fiscal" && tab !== "construcao-caixa") {
+      return { modulo: "engenharia", subitem: "", aba: "" };
+    }
+    return loc;
   }
 
   function fb() {
@@ -224,10 +389,66 @@
     menu.style.display = show ? "block" : "none";
   }
 
-  function moduloOptionsHtml(selected) {
-    return MODULOS.map(m =>
+  function optionList(items, selected, placeholder) {
+    const first = `<option value="">${esc(placeholder)}</option>`;
+    return first + items.map(m =>
       `<option value="${esc(m.id)}"${m.id === selected ? " selected" : ""}>${esc(m.label)}</option>`
     ).join("");
+  }
+
+  function refreshSubAba(pref) {
+    const modSel = document.getElementById("suporte-modulo");
+    const subWrap = document.getElementById("suporte-sub-wrap");
+    const abaWrap = document.getElementById("suporte-aba-wrap");
+    const subSel = document.getElementById("suporte-subitem");
+    const abaSel = document.getElementById("suporte-aba");
+    if (!modSel || !subWrap || !abaWrap) return;
+    const mod = findModulo(modSel.value);
+    const subs = (mod && mod.subs) || [];
+    if (!subs.length) {
+      subWrap.style.display = "none";
+      abaWrap.style.display = "none";
+      if (subSel) subSel.innerHTML = "";
+      if (abaSel) abaSel.innerHTML = "";
+      return;
+    }
+    subWrap.style.display = "";
+    const wantSub = (pref && pref.subitem) || (subSel && subSel.value) || "";
+    subSel.innerHTML = optionList(subs, wantSub, "Selecione o subitem");
+    if (wantSub && !subs.some(s => s.id === wantSub)) subSel.value = "";
+    refreshAba(pref);
+  }
+
+  function refreshAba(pref) {
+    const modSel = document.getElementById("suporte-modulo");
+    const subSel = document.getElementById("suporte-subitem");
+    const abaWrap = document.getElementById("suporte-aba-wrap");
+    const abaSel = document.getElementById("suporte-aba");
+    const abaLab = document.getElementById("suporte-aba-label");
+    if (!abaWrap || !abaSel) return;
+    const sub = findSub(modSel && modSel.value, subSel && subSel.value);
+    const abas = (sub && sub.abas) || [];
+    if (!abas.length) {
+      abaWrap.style.display = "none";
+      abaSel.innerHTML = "";
+      return;
+    }
+    abaWrap.style.display = "";
+    if (abaLab) abaLab.textContent = sub.abaObrigatoria ? "Aba *" : "Aba";
+    const wantAba = (pref && pref.aba) || abaSel.value || "";
+    abaSel.innerHTML = optionList(abas, wantAba, "Selecione a aba");
+  }
+
+  function bindLocationSelects(pref) {
+    const modSel = document.getElementById("suporte-modulo");
+    const subSel = document.getElementById("suporte-subitem");
+    if (modSel) {
+      modSel.addEventListener("change", () => refreshSubAba());
+    }
+    if (subSel) {
+      subSel.addEventListener("change", () => refreshAba());
+    }
+    refreshSubAba(pref);
   }
 
   function renderPreviews() {
@@ -276,6 +497,7 @@
       : opts.tipo === "interno" ? "Novo chamado interno"
       : "Relatar um problema";
     const imgReq = opts.tipo !== "interno";
+    const loc = suggestLocation();
     return `
       <div class="suporte-modal-head">
         <h2><i data-lucide="life-buoy"></i> ${esc(title)}</h2>
@@ -284,7 +506,15 @@
       <div class="suporte-modal-body">
         <div class="form-group">
           <label>Módulo *</label>
-          <select id="suporte-modulo" class="form-control">${moduloOptionsHtml(suggestModulo())}</select>
+          <select id="suporte-modulo" class="form-control">${optionList(MENU, loc.modulo, "Selecione o módulo")}</select>
+        </div>
+        <div class="form-group" id="suporte-sub-wrap">
+          <label>Subitem *</label>
+          <select id="suporte-subitem" class="form-control"></select>
+        </div>
+        <div class="form-group" id="suporte-aba-wrap" style="display:none;">
+          <label id="suporte-aba-label">Aba *</label>
+          <select id="suporte-aba" class="form-control"></select>
         </div>
         <div class="form-group">
           <label>Print da tela ${imgReq ? "*" : "(opcional)"}</label>
@@ -306,11 +536,13 @@
   function openForm(tipo) {
     ensureShell();
     draftFiles = [];
+    const loc = suggestLocation();
     const box = document.getElementById("suporte-modal-box");
     box.innerHTML = formHtml({ tipo });
     box.dataset.mode = "form";
     box.dataset.tipo = tipo;
     openModal();
+    bindLocationSelects(loc);
     bindFileInput();
     renderPreviews();
     document.getElementById("suporte-close-x").onclick = closeModal;
@@ -320,9 +552,21 @@
 
   async function submitTicket(tipo) {
     const modulo = (document.getElementById("suporte-modulo") || {}).value;
+    const subitem = (document.getElementById("suporte-subitem") || {}).value || "";
+    const aba = (document.getElementById("suporte-aba") || {}).value || "";
     const descricao = String((document.getElementById("suporte-desc") || {}).value || "").trim();
     if (!modulo) {
       alert("Escolha o módulo.");
+      return;
+    }
+    const modObj = findModulo(modulo);
+    if (modObj && modObj.subs && modObj.subs.length && !subitem) {
+      alert("Escolha o subitem.");
+      return;
+    }
+    const subObj = findSub(modulo, subitem);
+    if (subObj && subObj.abas && subObj.abas.length && !aba) {
+      alert("Escolha a aba.");
       return;
     }
     if (!descricao) {
@@ -345,6 +589,11 @@
       const payload = {
         tipo,
         modulo,
+        subitem,
+        aba,
+        subitemLabel: subObj ? subObj.label : "",
+        abaLabel: (findAba(modulo, subitem, aba) || {}).label || "",
+        localPath: localPathOf({ modulo, subitem, aba }),
         descricao,
         imagens: [],
         status: "pendente",
@@ -400,7 +649,7 @@
     return `<div class="suporte-list">${tickets.map(t => `
       <button type="button" class="suporte-card" data-id="${esc(t.id)}">
         <div class="suporte-card-top">
-          <strong>${esc(TIPO_LABEL[t.tipo] || t.tipo)} · ${esc(moduloLabel(t.modulo))}</strong>
+          <strong>${esc(TIPO_LABEL[t.tipo] || t.tipo)} · ${esc(localPathOf(t))}</strong>
           ${statusBadge(t.status)}
         </div>
         <p>${esc((t.descricao || "").slice(0, 160))}${(t.descricao || "").length > 160 ? "…" : ""}</p>
@@ -443,7 +692,7 @@
       <div class="suporte-detail-meta">
         ${statusBadge(t.status)}
         <span>${esc(TIPO_LABEL[t.tipo] || t.tipo)}</span>
-        <span>${esc(moduloLabel(t.modulo))}</span>
+        <span>${esc(localPathOf(t))}</span>
         <span>${esc(t.userName || t.userEmail || "")}</span>
         <span>${esc(fmtDate(t.createdAt))}</span>
       </div>

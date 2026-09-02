@@ -12784,11 +12784,24 @@ function applyDistratoConditionals(text, flags) {
 }
 
 function applyDistratoTemplateVars(text, map) {
-  let s = String(text || '');
-  Object.keys(map).forEach(key => {
-    const re = new RegExp('\\{\\{' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\}\\}', 'g');
-    s = s.replace(re, map[key] == null ? '' : String(map[key]));
+  let s = String(text || "");
+  const lookup = {};
+  Object.keys(map || {}).forEach(k => {
+    if (String(k).charAt(0) === "_") return;
+    lookup[String(k).replace(/[\s\u00a0]+/g, "").toUpperCase()] = map[k];
   });
+  s = s.replace(/\{\{([^}]+)\}\}/g, (full, inner) => {
+    const raw = String(inner).replace(/<[^>]+>/g, "").replace(/[\s\u00a0]+/g, "");
+    if (/^[#/]/.test(raw)) return full;
+    const key = raw.toUpperCase();
+    if (!Object.prototype.hasOwnProperty.call(lookup, key)) return full;
+    const v = lookup[key];
+    return v == null ? "" : String(v);
+  });
+  const signers = map && map._PREAMBLE_SIGNERS;
+  if (typeof window.expandPromitenteVendedorSignatures === "function" && Array.isArray(signers) && signers.length) {
+    s = window.expandPromitenteVendedorSignatures(s, signers);
+  }
   return s;
 }
 window.applyDistratoTemplateVars = applyDistratoTemplateVars;
@@ -12933,11 +12946,32 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
       : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
   }
   const dateExt = extras.dateExt || new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
-  return Object.assign({
+  const titulo =
+    extras.titulo
+    || saleObj.receivableBillId
+    || saleObj.billId
+    || saleObj.number
+    || saleObj.titulo
+    || (typeof AppState !== "undefined" && (AppState.selectedSaleId || AppState.selectedBillId))
+    || saleObj.id
+    || "____";
+  const unitName = String(unitObj.name || unitObj.commercialStockName || unitObj.grouping || saleObj.unitName || "").replace(/^U\s*-\s*/i, "").trim();
+  const blockLot = [unitObj.block || saleObj.block, unitObj.lot || saleObj.lot].filter(Boolean).join("-");
+  const unitShort = unitName || blockLot || "";
+  const unidade = extras.unidade || (
+    ccId && unitShort && !String(unitShort).startsWith(String(ccId))
+      ? (ccId + " - " + unitShort)
+      : (unitShort || unitObj.id || "____")
+  );
+  const signers = extras.signers
+    || (typeof window.getPreambleSignersForContract === "function"
+      ? window.getPreambleSignersForContract(unitObj, saleObj)
+      : []);
+  const out = Object.assign({
     QUADRA: unitObj.block || unitObj.quadra || saleObj.block || "____",
     LOTE: unitObj.lot || unitObj.lote || saleObj.lot || "____",
-    TITULO: saleObj.receivableBillId || saleObj.id || "____",
-    UNIDADE: unitObj.id || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "____",
+    TITULO: titulo,
+    UNIDADE: unidade,
     NOME_CLIENTE: cust.name || "",
     CPF_CNPJ: mask(cust.cpfCnpj),
     CPF_CLIENTE: mask(cust.cpfCnpj),
@@ -12952,6 +12986,8 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     EMPREENDIMENTO: empName || "____",
     EMPRESA_NOME: companyName || "MOURA LEITE DESENVOLVIMENTO & URBANIZAÇÃO LTDA",
     EMPRESA_CNPJ: mask(companyCnpj) || "01.066.134/0001-78",
+    PROMITENTES_VENDEDORES: (signers && signers.length) ? signers.join("\n") : (companyName || ""),
+    PROMITENTE_VENDEDOR: (signers && signers[0]) || companyName || "",
     CIDADE_LOTEAMENTO: cidadeLote,
     CIDADE_ATUAL: "Botucatu",
     DATA_HOJE_EXTENSO: dateExt,
@@ -12964,6 +13000,8 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     CREDOR_ESPOSA_RG: "",
     CREDOR_ESPOSA_CPF: ""
   }, extras.map || {});
+  out._PREAMBLE_SIGNERS = signers;
+  return out;
 };
 
 function isDistratoSignLine(line) {
@@ -18612,11 +18650,11 @@ window.generateSingleNEXHtml = async function(customerId, saleId, letterKind) {
             corpo = formatDocPadraoMarkup(corpo);
             const today = new Date();
             let dateStr = today.toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
-            corpo = corpo.replace(/{{CIDADE_ATUAL}}/g, 'Botucatu');
-            corpo = corpo.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
-            corpo = corpo.replace(/{{TITULO}}/g, sale.receivableBillId || saleId || 'N/D');
+            corpo = corpo.replace(/\{\{\s*CIDADE_ATUAL\s*\}\}/g, 'Botucatu');
+            corpo = corpo.replace(/\{\{\s*DATA_ATUAL_EXTENSO\s*\}\}/g, dateStr);
+            corpo = corpo.replace(/\{\{\s*TITULO\s*\}\}/g, sale.receivableBillId || saleId || 'N/D');
             
-            corpo = corpo.replace(/{{UNIDADE}}/g, unidadeDisplay);
+            corpo = corpo.replace(/\{\{\s*UNIDADE\s*\}\}/g, unidadeDisplay);
             corpo = corpo.replace(/{{QUADRA}}/g, quadra);
             corpo = corpo.replace(/{{LOTE}}/g, lote);
 
@@ -24186,7 +24224,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   text = text.replace(/{{LOTE}}/g, lote);
   
   let formattedUName = (uName || '').replace(/^U\s*-\s*/i, '');
-  text = text.replace(/{{UNIDADE}}/g, formattedUName);
+  text = text.replace(/\{\{\s*UNIDADE\s*\}\}/g, formattedUName);
   
   const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate || (rawSale ? rawSale.saleDate : null);
   
@@ -24233,10 +24271,10 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
   const headerCidade = 'Botucatu';
   
   // Substituir novas variáveis caso o usuário tenha adicionado no template
-  text = text.replace(/{{CIDADE_ATUAL}}/g, headerCidade);
-  text = text.replace(/{{DATA_ATUAL_EXTENSO}}/g, dateStr);
-  text = text.replace(/{{TITULO}}/g, tituloAReceber);
-  text = text.replace(/{{UNIDADE}}/g, uName);
+  text = text.replace(/\{\{\s*CIDADE_ATUAL\s*\}\}/g, headerCidade);
+  text = text.replace(/\{\{\s*DATA_ATUAL_EXTENSO\s*\}\}/g, dateStr);
+  text = text.replace(/\{\{\s*TITULO\s*\}\}/g, tituloAReceber);
+  text = text.replace(/\{\{\s*UNIDADE\s*\}\}/g, uName);
   
   const hasHeaderInTemplate = text.includes(headerCidade) && text.includes(dateStr);
   const tituloLineStr = `Título: ${tituloAReceber} - ${uName}`;
@@ -29860,7 +29898,16 @@ window.ensurePreamblesListLoaded = function() {
   return AppState.preamblesList;
 };
 
-window.getPreambleForContract = function(unit, sale) {
+window.parsePreambleResponsibles = function(p) {
+  if (!p) return [];
+  const raw = p.responsibles;
+  if (Array.isArray(raw)) {
+    return raw.map(x => String(x || "").trim()).filter(Boolean);
+  }
+  return String(raw || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+};
+
+window.getPreambleRecordForContract = function(unit, sale) {
   window.ensurePreamblesListLoaded();
   const candidates = window.collectPreambleCcCandidates(unit, sale);
   const companyId = (sale && sale.companyId) || (unit && unit.companyId) || AppState.currentCompanyId || null;
@@ -29875,12 +29922,33 @@ window.getPreambleForContract = function(unit, sale) {
   if (!hit && companyId != null && companyId !== "") {
     hit = list.find(p => String(p.empresaId) === String(companyId) && (!p.centrosCustoIds || !p.centrosCustoIds.length));
   }
+  return hit || null;
+};
+
+window.getPreambleSignersForContract = function(unit, sale) {
+  return window.parsePreambleResponsibles(window.getPreambleRecordForContract(unit, sale));
+};
+
+window.getPreambleForContract = function(unit, sale) {
+  const hit = window.getPreambleRecordForContract(unit, sale);
   if (hit && hit.text) return hit.text;
+  const candidates = window.collectPreambleCcCandidates(unit, sale);
   for (let i = 0; i < candidates.length; i++) {
     const cc = candidates[i];
     if (AppState.preambles && AppState.preambles[cc]) return AppState.preambles[cc];
   }
   return "PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO.";
+};
+
+window.expandPromitenteVendedorSignatures = function(text, signers) {
+  const names = (signers || []).map(n => String(n || "").trim()).filter(Boolean);
+  if (!names.length) return String(text || "");
+  const s = String(text || "");
+  const re = /(_{12,}[ \t]*\r?\n)([^\r\n]+)(\r?\n)(Promitente\(s\)\s+Vendedor\(es\))/i;
+  if (!re.test(s)) return s;
+  return s.replace(re, function (_, line, _oldName, nl, role) {
+    return names.map(n => line + n + nl + role).join(nl + nl);
+  });
 };
 
 window.planoVisoesAccountCount = function(str) {
