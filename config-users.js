@@ -186,6 +186,10 @@ const ConfigUsersApp = {
       ]
     },
     {
+      name: "Suporte", icon: "headphones", key: "mod_suporte",
+      submodules: [{ name: "Chamados", key: "sub_suporte_geral", actions: [{ id: "chamados", label: "Módulo de suporte" }] }]
+    },
+    {
       name: "Configurações", icon: "settings-2", key: "mod_cfg",
       submodules: [
         {

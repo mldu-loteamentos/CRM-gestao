@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=668">
+  <link rel="stylesheet" href="style.css?v=670">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1141,6 +1141,12 @@
             </li>
           </ul>
         </li>
+        <li class="nav-item" data-tab="suporte" data-module="mod_suporte">
+          <a onclick="switchTab('suporte', 'Suporte')" title="Suporte">
+            <i data-lucide="headphones"></i>
+            <span>Suporte</span>
+          </a>
+        </li>
         <!-- 9 - CONFIGURAÇÕES -->
         <li class="nav-item nav-group" data-module="mod_cfg">
           <a onclick="toggleNavMenu(event, 'submenu-configuracoes')" title="Configurações">
@@ -1221,7 +1227,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.668 &nbsp;&middot;&nbsp; 02/09/2026
+            v1.0.670 &nbsp;&middot;&nbsp; 02/09/2026
           </span>
         </div>
       </div>
@@ -1252,12 +1258,26 @@
           </div>
           <span id="ctx-subjudice-alert" style="display: flex; align-items: center; margin-left: 4px;"></span>
         </div>
-        <div class="topbar-actions" style="display: none;">
-          <div id="azure-status" class="auth-status-badge">
+        <div class="topbar-actions topbar-support-wrap">
+          <div id="azure-status" class="auth-status-badge" style="display: none;">
             <i data-lucide="shield-check" style="width: 16px;"></i> Azure Ativo
+          </div>
+          <div class="suporte-widget">
+            <button type="button" class="suporte-fab" id="suporte-btn" title="Suporte">
+              <i data-lucide="life-buoy"></i>
+            </button>
+            <div class="suporte-menu" id="suporte-menu">
+              <button type="button" data-action="problema">Relatar um problema</button>
+              <button type="button" data-action="melhoria">Sugerir uma melhoria</button>
+              <button type="button" data-action="meus">Acompanhar meus chamados</button>
+            </div>
           </div>
         </div>
       </header>
+
+      <section id="tab-suporte" class="tab-pane" style="display: none;">
+        <div id="suporte-admin-root" style="padding: 16px;"></div>
+      </section>
 
       <!-- TAB: DASHBOARD DE INADIMPLÊNCIA -->
       <section id="tab-inadimplencia_dashboard" class="tab-pane" style="display: none;">
@@ -6555,42 +6575,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=668"></script>
-  <script defer src="sienge-api.js?v=668"></script>
-  <script defer src="azure-auth.js?v=668"></script>
-  <script defer src="app.js?v=668"></script>
-  <script defer src="home-dashboard.js?v=668"></script>
-  <script defer src="anexos.js?v=668"></script>
-  <script defer src="contas-pagar.js?v=668"></script>
-  <script defer src="config-tags.js?v=668"></script>
-  <script defer src="config-users.js?v=668"></script>
-  <script defer src="construcao.js?v=668"></script>
-  <script defer src="empresas.js?v=668"></script>
-  <script defer src="relacionamento.js?v=668"></script>
+  <script defer src="data.js?v=670"></script>
+  <script defer src="sienge-api.js?v=670"></script>
+  <script defer src="azure-auth.js?v=670"></script>
+  <script defer src="app.js?v=670"></script>
+  <script defer src="home-dashboard.js?v=670"></script>
+  <script defer src="anexos.js?v=670"></script>
+  <script defer src="contas-pagar.js?v=670"></script>
+  <script defer src="config-tags.js?v=670"></script>
+  <script defer src="config-users.js?v=670"></script>
+  <script defer src="suporte.js?v=670"></script>
+  <script defer src="construcao.js?v=670"></script>
+  <script defer src="empresas.js?v=670"></script>
+  <script defer src="relacionamento.js?v=670"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=668"></script>
-  <script defer src="centros-custo.js?v=668"></script>
-  <script defer src="marketing.js?v=668"></script>
-  <script defer src="plano-financeiro.js?v=668"></script>
-  <script defer src="prestacao-contas.js?v=668"></script>
+  <script defer src="estoque-comercial.js?v=670"></script>
+  <script defer src="centros-custo.js?v=670"></script>
+  <script defer src="marketing.js?v=670"></script>
+  <script defer src="plano-financeiro.js?v=670"></script>
+  <script defer src="prestacao-contas.js?v=670"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=668"></script>
-  <script defer src="fluxo-caixa.js?v=668"></script>
-  <script defer src="caixa-diario.js?v=668"></script>
-  <script defer src="investimento.js?v=668"></script>
-  <script defer src="parametrizacao-parceiro.js?v=668"></script>
-  <script defer src="societario.js?v=668"></script>
-  <script defer src="participacoes.js?v=668"></script>
-  <script defer src="fiscal.js?v=668"></script>
-  <script defer src="indexadores.js?v=668"></script>
-  <script defer src="verificar-construcao.js?v=668"></script>
-  <script src="repactuacoes.js?v=668"></script>
-  <script defer src="repactuacao-lote.js?v=668"></script>
+  <script defer src="empresa-filter.js?v=670"></script>
+  <script defer src="fluxo-caixa.js?v=670"></script>
+  <script defer src="caixa-diario.js?v=670"></script>
+  <script defer src="investimento.js?v=670"></script>
+  <script defer src="parametrizacao-parceiro.js?v=670"></script>
+  <script defer src="societario.js?v=670"></script>
+  <script defer src="participacoes.js?v=670"></script>
+  <script defer src="fiscal.js?v=670"></script>
+  <script defer src="indexadores.js?v=670"></script>
+  <script defer src="verificar-construcao.js?v=670"></script>
+  <script src="repactuacoes.js?v=670"></script>
+  <script defer src="repactuacao-lote.js?v=670"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=668"></script>
+  <script defer src="dashboard-inadimplencia.js?v=670"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

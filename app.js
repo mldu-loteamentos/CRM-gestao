@@ -1618,6 +1618,14 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       return;
     }
   }
+  if (tabId === 'suporte' && typeof window.isCrmSuperAdmin === 'function' && !window.isCrmSuperAdmin()) {
+    const canSup = typeof window.hasCrmPerm === 'function'
+      && (window.hasCrmPerm('mod_suporte') || window.hasCrmPerm('sub_suporte_geral_chamados_acessar'));
+    if (!canSup) {
+      alert('Sem permissão para o módulo de suporte.');
+      return;
+    }
+  }
   if (tabId === 'configuracoes' && typeof window.hasFinCrAction === 'function') {
     const canCfg = window.hasFinCrAction('configuracoes', 'acessar')
       || window.hasFinCrAction('regras_cobranca', 'acessar')
@@ -1717,7 +1725,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "condicoes-pagamento": "Condições de Pagamento",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
-    "marketing-budget": "Budget"
+    "marketing-budget": "Budget",
+    suporte: "Suporte"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
   
@@ -1756,7 +1765,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "condicoes-pagamento": "file-text",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
-    "marketing-budget": "wallet"
+    "marketing-budget": "wallet",
+    suporte: "headphones"
   };
 
   // Esconder barra de contexto de cliente ao navegar para abas gerais
@@ -1845,6 +1855,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof ConfigTagsApp !== "undefined") ConfigTagsApp.loadTags();
   } else if (tabId === "config-users") {
     if (typeof ConfigUsersApp !== "undefined") ConfigUsersApp.loadUsers();
+  } else if (tabId === "suporte") {
+    if (window.SuporteApp && typeof window.SuporteApp.renderAdmin === "function") window.SuporteApp.renderAdmin();
   } else if (tabId === "plano-financeiro") {
     if (typeof PlanoFinanceiroApp !== "undefined") PlanoFinanceiroApp.init();
   } else if (tabId === "doc-padrao") {
@@ -2163,7 +2175,14 @@ window.applyPermissions = function(profileName) {
             || perms.sub_rel_docs_autorizacao_escritura_editar === true
           ))
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || relAlias || window.permCoversMenuKey(perms, modKey)) {
+        const suporteAlias = (modKey === "mod_suporte" || modKey === "sub_suporte_geral_chamados_acessar") && (
+          perms.mod_suporte === true
+          || perms.sub_suporte_geral === true
+          || perms.sub_suporte_geral_chamados_acessar === true
+          || perms.sub_suporte_geral_chamados_visualizar === true
+          || perms.sub_suporte_geral_chamados_editar === true
+        );
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || relAlias || suporteAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -2200,6 +2219,11 @@ window.applyPermissions = function(profileName) {
         item.style.display = 'none';
       }
     });
+  }
+
+  if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
+    const suporteMenu = document.querySelector('li[data-module="mod_suporte"]');
+    if (suporteMenu) suporteMenu.style.display = '';
   }
 }
 
