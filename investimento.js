@@ -109,6 +109,10 @@ const InvestimentoApp = {
     if (!geridas.length) return;
     const allowed = new Set(geridas.map(c => String(c.id)));
     const kept = (this.selectedCompanyIds || []).filter(id => allowed.has(String(id)));
+    if (this._clearedCompanies) {
+      this.selectedCompanyIds = kept;
+      return;
+    }
     if (kept.length) {
       this.selectedCompanyIds = kept;
       return;
@@ -131,23 +135,6 @@ const InvestimentoApp = {
     this.syncGeridasSelection();
     if (!window._invDropBound) {
       window._invDropBound = true;
-      document.addEventListener("click", (e) => {
-        const t = e.target;
-        if (!t || !t.closest) return;
-        const inEmp = t.closest("#inv-emp") || t.closest("#inv-emp-panel");
-        if (!inEmp) return;
-        if (t.closest(".ml-emp-filter-all")) {
-          e.preventDefault();
-          e.stopPropagation();
-          InvestimentoApp.selectAllGeridas();
-          return;
-        }
-        if (t.closest(".ml-emp-filter-none")) {
-          e.preventDefault();
-          e.stopPropagation();
-          InvestimentoApp.clearGeridas();
-        }
-      }, true);
       document.addEventListener("mousedown", (e) => {
         const t = e.target;
         if (t && t.closest && (
@@ -347,6 +334,28 @@ const InvestimentoApp = {
 
   accKey(companyId, accountNumber, extra) {
     return `${companyId}|${this.accIdentity(accountNumber, extra)}`;
+  },
+
+  movementCompanyId(mov) {
+    if (!mov) return "";
+    return mov.companyId != null && mov.companyId !== ""
+      ? mov.companyId
+      : (mov.idCompany != null && mov.idCompany !== "" ? mov.idCompany : "");
+  },
+
+  apiCompanyId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && String(n) === String(id).trim() ? n : id;
+  },
+
+  pruneAccountKeysToCompanies() {
+    const ids = new Set((this.selectedCompanyIds || []).map(String));
+    if (!ids.size) {
+      this.selectedAccountKeys = [];
+      return;
+    }
+    if (!Array.isArray(this.selectedAccountKeys)) return;
+    this.selectedAccountKeys = this.selectedAccountKeys.filter(k => ids.has(String(k).split("|")[0]));
   },
 
   siengeAccountType(acc) {
@@ -787,14 +796,6 @@ const InvestimentoApp = {
       this.render();
       return;
     }
-    if (this.catalogLoading) {
-      await this.refreshFilterCatalog();
-    }
-    if (!(this.selectedAccountKeys || []).length) {
-      this.error = "Selecione ao menos uma conta de investimento.";
-      this.render();
-      return;
-    }
     this.loading = true;
     this.error = "";
     this.consultStart = this.startDate;
@@ -802,12 +803,23 @@ const InvestimentoApp = {
     this.persistPeriod();
     this.render();
     this.months = this.monthKeys(this.startDate, this.endDate);
+    await this.refreshFilterCatalog();
+    this.pruneAccountKeysToCompanies();
+    if (!(this.selectedAccountKeys || []).length && (this.filterCatalog || []).length) {
+      this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
+    }
+    if (!(this.selectedAccountKeys || []).length) {
+      this.loading = false;
+      this.error = "Selecione ao menos uma conta de investimento.";
+      this.render();
+      return;
+    }
     await this.ensureCdi();
     const openingDate = this.addDaysIso(this.startDate, -1);
     const histStart = this.addDaysIso(this.startDate, -730);
     try {
-      const companyIds = this.selectedCompanyIds.slice();
-      const [accountsChunks, movChunks, balGlobal, balByCo] = await Promise.all([
+      const companyIds = this.selectedCompanyIds.map(id => String(id)).filter(Boolean);
+      const [accountsChunks, movChunks, balByCo] = await Promise.all([
         Promise.all(companyIds.map(id => this.fetchCompanyInvestmentAccounts(id))),
         (async () => {
           const rows = [];
@@ -818,19 +830,23 @@ const InvestimentoApp = {
               const id = companyIds[next++];
               const data = await SiengeApiService.getBankMovements(histStart, this.endDate, {
                 selectionType: "M",
-                companyId: id,
+                companyId: this.apiCompanyId(id),
                 concurrency: 3
               });
-              rows.push((data || []).map(m => ({ ...m, companyId: m.companyId || id })));
+              rows.push((data || [])
+                .filter(m => {
+                  const mid = this.movementCompanyId(m);
+                  return !mid || String(mid) === String(id);
+                })
+                .map(m => ({ ...m, companyId: this.movementCompanyId(m) || id })));
             }
           };
           await Promise.all(Array.from({ length: limit }, worker));
           return rows;
         })(),
-        SiengeApiService.getAccountBalances(openingDate),
-        Promise.all(companyIds.map(id => SiengeApiService.getAccountBalances(openingDate, { companyId: id })))
+        Promise.all(companyIds.map(id => SiengeApiService.getAccountBalances(openingDate, { companyId: this.apiCompanyId(id) })))
       ]);
-      const balances = [...(balGlobal || []), ...(balByCo || []).flat()];
+      const balances = (balByCo || []).flat();
 
       let catalog = accountsChunks.flat();
       const wantAcc = new Set(this.selectedAccountKeys || []);
@@ -853,9 +869,12 @@ const InvestimentoApp = {
         const key = this.accKey(m.companyId, raw, m);
         const idKey = m.checkingAccountId != null ? `${m.companyId}|id:${m.checkingAccountId}` : "";
         if (!this.accIdentity(raw, m) && !idKey) return false;
+        if (String(this.movementCompanyId(m) || m.companyId) && !this.selectedCompanyIds.includes(String(this.movementCompanyId(m) || m.companyId))) {
+          return false;
+        }
         if (!catalog.length) return false;
         if (!this.onlyInvestment) {
-          return this.selectedCompanyIds.includes(String(m.companyId));
+          return this.selectedCompanyIds.includes(String(this.movementCompanyId(m) || m.companyId));
         }
         return investKeys.has(key) || (idKey && investKeys.has(idKey));
       });
@@ -1165,7 +1184,6 @@ const InvestimentoApp = {
     if (!companies.length) {
       return `<div style="padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:0.8rem;">Nenhuma empresa com a flag <strong>Gerida pelo grupo</strong> no cadastro de empresas.</div>`;
     }
-    this.bindCompanyFilter();
     if (window.MlEmpresaFilter) {
       return MlEmpresaFilter.html({
         id: "inv-emp",
@@ -1316,11 +1334,11 @@ const InvestimentoApp = {
       if (!this.selectedCompanyIds.includes(sid)) this.selectedCompanyIds.push(sid);
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
-      this.selectedAccountKeys = (this.selectedAccountKeys || []).filter(k => String(k).split("|")[0] !== sid);
     }
+    this.pruneAccountKeysToCompanies();
     this.companyDropOpen = true;
     this.persistPeriod();
-    this.patchCompanyFilter();
+    this.render();
     this.refreshFilterCatalog().then(() => {
       if (!on) return;
       this.filterCatalog.forEach(a => {
@@ -1342,7 +1360,7 @@ const InvestimentoApp = {
     this.companyDropOpen = true;
     this.groupByCompany = true;
     this.persistPeriod();
-    this.patchCompanyFilter();
+    this.render();
     this.refreshFilterCatalog().then(() => {
       this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
       this.persistPeriod();
@@ -1358,7 +1376,7 @@ const InvestimentoApp = {
     this.filterCatalog = [];
     this.companyDropOpen = true;
     this.persistPeriod();
-    this.patchCompanyFilter();
+    this.render();
   },
 
   toggleGroupByCompany() {
@@ -1532,7 +1550,9 @@ const InvestimentoApp = {
     const q = (this.accountQuery || "").toLowerCase().trim();
     const nq = this.normAcc(this.accountQuery);
     const want = new Set(this.selectedAccountKeys || []);
+    const companies = new Set((this.selectedCompanyIds || []).map(String));
     return this.accounts.filter(r => {
+      if (companies.size && !companies.has(String(r.companyId))) return false;
       if (want.size && !want.has(r.key) && !want.has(this.accKey(r.companyId, r.accountNumber, r))) return false;
       if (!q) return true;
       const blob = `${r.accountNumber} ${r.accountName} ${r.companyName}`.toLowerCase();
