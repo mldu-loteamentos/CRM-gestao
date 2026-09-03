@@ -1375,7 +1375,8 @@ window.userIsCobrancaBackOffice = function() {
         || String(logged.role || "").toUpperCase().includes("ADMIN")
         || (logged.email && /israel@mouraleite\.com\.br|admin@mouraleite\.com\.br/i.test(logged.email));
     const isBackOffice = profile.includes("BACK OFFICE") || profile.includes("BACKOFFICE");
-    return { ok: isBackOffice || isAdmin, isAdmin, user: logged };
+    // Só Back Office de cobrança — administrador não recebe o popup
+    return { ok: isBackOffice && !isAdmin, isAdmin, user: logged };
 };
 
 window.getVistoriaAlertAckIds = function() {
@@ -1535,7 +1536,11 @@ window.ensureVistoriaValidationAlertModal = function() {
 
 window.checkVistoriasValidationAlerts = async function(isTest = false) {
     const gate = window.userIsCobrancaBackOffice();
-    if (!isTest && !gate.ok) return;
+    if (!isTest && (!gate.ok || gate.isAdmin)) {
+        const existing = document.getElementById("modal-vistoria-validation-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
 
     if (!isTest) {
         const snoozeUntil = window.getVistoriaAlertSnoozeUntil();
