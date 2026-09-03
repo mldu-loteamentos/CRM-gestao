@@ -3,7 +3,9 @@
 const FluxoCaixaApp = {
   startDate: "",
   endDate: "",
-  selectionType: "P",
+  // Sempre data do movimento/pagamento (M). Vencimento (P) não reflete o caixa
+  // e a API bank-movement rejeita P com 422.
+  selectionType: "M",
   selectedCompanyIds: [],
   companyDropOpen: false,
   companyQuery: "",
@@ -76,7 +78,7 @@ const FluxoCaixaApp = {
         name: cfg.nome_usual || c.name || `Empresa ${c.id}`,
         pct: Number(cfg.percentual_mldu) || 0
       };
-    });
+    }).sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   visao() {
@@ -143,9 +145,27 @@ const FluxoCaixaApp = {
     });
   },
 
+  cashDate(mov) {
+    const raw = mov.paymentDate
+      || mov.reconcileDate
+      || mov.bankMovementDate
+      || mov.date
+      || mov.dueDate
+      || "";
+    return String(raw).slice(0, 10);
+  },
+
   movMonth(mov) {
-    const d = String(mov.bankMovementDate || mov.date || "").slice(0, 7);
-    return d;
+    return this.cashDate(mov).slice(0, 7);
+  },
+
+  isCashOutflowGroup(id) {
+    const s = String(id || "");
+    return s === "g_02" || s.startsWith("g_02_")
+      || s === "g_04" || s.startsWith("g_04_")
+      || s === "g_05" || s.startsWith("g_05_")
+      || s === "g_07" || s.startsWith("g_07_")
+      || s === "g_09_02" || s === "g_09_05";
   },
 
   emptyMonths(keys) {
@@ -182,6 +202,7 @@ const FluxoCaixaApp = {
       const node = nid === "g_outros" ? outros : byId[nid];
       if (!node) return;
       if (node.redutora && a.amount > 0) a.amount = -a.amount;
+      if (this.isCashOutflowGroup(node.id) && a.amount > 0) a.amount = -a.amount;
       this.addInto(node, a.month, a.amount);
       if (!accIndex[a.categoryId]) {
         accIndex[a.categoryId] = { id: a.categoryId, name: a.categoryName, months: this.emptyMonths(this.months), total: 0, parentId: node.id };
@@ -292,7 +313,7 @@ const FluxoCaixaApp = {
     try {
       const chunks = await Promise.all(this.selectedCompanyIds.map(async id => {
         const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
-          selectionType: this.selectionType,
+          selectionType: "M",
           companyId: id
         });
         return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
@@ -433,12 +454,12 @@ const FluxoCaixaApp = {
               <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Seleção
-              <select onchange="FluxoCaixaApp.selectionType=this.value" style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
-                <option value="P" ${this.selectionType === "P" ? "selected" : ""}>Data de vencimento (P)</option>
-                <option value="M" ${this.selectionType === "M" ? "selected" : ""}>Data do movimento (M)</option>
-              </select>
-            </label>
+            <div style="font-size:0.75rem;font-weight:700;color:#475569;">Seleção
+              <div title="A API de caixa/banco usa a data em que o dinheiro saiu ou entrou, não o vencimento."
+                style="display:flex;align-items:center;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;margin-top:4px;background:#f8fafc;color:#0f172a;font-weight:600;white-space:nowrap;">
+                Data do pagamento / movimento
+              </div>
+            </div>
             <button class="btn btn-primary" onclick="FluxoCaixaApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>

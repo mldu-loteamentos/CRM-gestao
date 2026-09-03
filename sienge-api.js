@@ -725,9 +725,10 @@ const SiengeApiService = {
   },
 
   // 1.6. Movimentos Bancários (Fiscal / Prestação de Contas)
-  // selectionType M = data de movimento (caixa), P = data de pagamento/vencimento
+  // selectionType M = data do movimento/pagamento (caixa real).
+  // P (vencimento) não é válido neste endpoint (Sienge 422) e não reflete o caixa.
   async getBankMovements(startDate, endDate, opts = {}) {
-    const selectionType = opts.selectionType || "M";
+    const selectionType = opts.selectionType === "P" ? "M" : (opts.selectionType || "M");
     if (s_apiMode === "simulado") {
       const all = window.MOCK_DATA && window.MOCK_DATA.BANK_MOVEMENTS ? window.MOCK_DATA.BANK_MOVEMENTS : [];
       return all.filter(m => {

@@ -69,6 +69,17 @@ window.MlEmpresaFilter = {
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   },
 
+  sortByIdAsc(items) {
+    return (items || []).slice().sort((a, b) => {
+      const na = Number(a && a.id);
+      const nb = Number(b && b.id);
+      const aNum = Number.isFinite(na);
+      const bNum = Number.isFinite(nb);
+      if (aNum && bNum && na !== nb) return na - nb;
+      return String((a && a.id) || "").localeCompare(String((b && b.id) || ""), "pt-BR", { numeric: true });
+    });
+  },
+
   formatItemLabel(it) {
     if (it && it.label) return String(it.label);
     const id = it && it.id != null ? String(it.id) : "";
@@ -96,7 +107,7 @@ window.MlEmpresaFilter = {
   },
 
   listHtml(opts) {
-    const items = opts.items || [];
+    const items = this.sortByIdAsc(opts.items || []);
     const selected = new Set((opts.selectedIds || []).map(String));
     const q = String(opts.query || "").toLowerCase().trim();
     const filtered = items.filter((it) => {

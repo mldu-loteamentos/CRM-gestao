@@ -1768,11 +1768,15 @@ const InvestimentoApp = {
       const k = encodeURIComponent(kind || "");
       const m = encodeURIComponent(mk || "");
       const tip = this.esc(opts.title || "Clique para ver os lançamentos");
-      const color = abs
-        ? (v ? "#b91c1c" : "#94a3b8")
-        : (n < 0 ? "#b91c1c" : (n > 0 ? (opts.color || "#105436") : "#94a3b8"));
+      // Se opts.color é passado explicitamente (ex: linha de Saldo com texto branco), usa direto
+      const color = opts.color && !abs
+        ? opts.color
+        : (abs
+          ? (v ? "#b91c1c" : "#94a3b8")
+          : (n < 0 ? "#b91c1c" : (n > 0 ? "#105436" : "#94a3b8")));
+      const bgStyle = opts.bg ? `background:${opts.bg};` : "";
       return `<td onclick="event.stopPropagation();InvestimentoApp.openMovimentos('${src}','${k}','${m}')" title="${tip}"
-        style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:${color};font-weight:${bold ? 800 : 600};white-space:nowrap;cursor:pointer;text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px;">${this.fmt(v)}</td>`;
+        style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;${bgStyle}color:${color};font-weight:${bold ? 800 : 600};white-space:nowrap;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,0.3);text-underline-offset:2px;">${this.fmt(v)}</td>`;
     };
     const empty = `<td style="padding:6px 8px;text-align:right;color:#cbd5e1;">—</td>`;
 
@@ -1801,19 +1805,24 @@ const InvestimentoApp = {
       const movTd = (html, color, bg, extra) =>
         `<td style="padding:6px 10px;font-weight:700;color:${color};white-space:nowrap;${stickyMov}background:${bg};box-shadow:2px 0 0 #e2e8f0;${extra || ""}">${html}</td>`;
       const saldos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).closing || 0);
+      // Linha colapsada também usa fundo escuro para Saldo
+      const saldoBgCollapsed = isTotal ? "#475569" : "#64748b";
+      const saldoTextCollapsed = "#ffffff";
       if (collapsed) {
-        return `<tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
+        return `<tr style="background:${saldoBgCollapsed};border-top:2px solid #e2e8f0;">
           ${labelCell}
-          ${movTd("Saldo", "#0f172a", bgHead, "font-weight:800;")}
-          ${clickTd(opening, "opening", "", source, { bold: true })}
-          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
+          ${movTd("Saldo", saldoTextCollapsed, saldoBgCollapsed, "font-weight:800;")}
+          ${clickTd(opening, "opening", "", source, { bold: true, color: saldoTextCollapsed, bg: saldoBgCollapsed })}
+          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true, color: saldoTextCollapsed, bg: saldoBgCollapsed })).join("")}
         </tr>`;
       }
       const entradas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).aportes || 0);
       const saidas = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).resgates || 0);
       const impostos = months.map(mk => (monthFlow.find(f => f.month === mk) || {}).tarifas || 0);
       const rends = months.map(mk => monthFlow.find(f => f.month === mk) || { rendimento: 0, opening: 0, month: mk });
-      const saldoBg = isTotal ? "#d1fae5" : "#f1f5f9";
+      // Saldo: fundo escuro (igual ao Excel) com texto branco para alto contraste
+      const saldoBg = isTotal ? "#475569" : "#64748b";
+      const saldoTextColor = "#ffffff";
       return `
         <tr style="background:${bgHead};border-top:2px solid #e2e8f0;">
           ${labelCell}
@@ -1837,9 +1846,9 @@ const InvestimentoApp = {
           ${impostos.map((n, i) => clickTd(n, "tarifas", months[i], source, { abs: true })).join("")}
         </tr>
         <tr style="background:${saldoBg};">
-          ${movTd("Saldo", "#0f172a", saldoBg, "font-weight:800;")}
-          ${clickTd(opening, "opening", "", source, { bold: true })}
-          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true })).join("")}
+          ${movTd("Saldo", saldoTextColor, saldoBg, "font-weight:800;")}
+          ${clickTd(opening, "opening", "", source, { bold: true, color: saldoTextColor, bg: saldoBg })}
+          ${saldos.map((n, i) => clickTd(n, "saldo", months[i], source, { bold: true, color: saldoTextColor, bg: saldoBg })).join("")}
         </tr>`;
     };
 
