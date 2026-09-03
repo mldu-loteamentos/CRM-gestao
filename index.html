@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=678">
+  <link rel="stylesheet" href="style.css?v=679">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1227,7 +1227,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.678 &nbsp;&middot;&nbsp; 03/09/2026
+            v1.0.679 &nbsp;&middot;&nbsp; 03/09/2026
           </span>
         </div>
       </div>
@@ -1606,9 +1606,7 @@ Assim, por estarem justos e acertados, livre de coação e na melhor forma de di
 
 Botucatu, {{DATA_HOJE_EXTENSO}}
 
-__________________________________________________________________
-{{CREDOR_NOME}}
-Confitente(s) credor(es)
+{{ASSINATURAS_CREDORES}}
 
 __________________________________________________________________
 {{NOME_CLIENTE}}
@@ -1869,9 +1867,7 @@ E, por estarem justas e acordadas, as Partes firmam o presente instrumento em 2 
 
 {{CIDADE_LOTEAMENTO}}, {{DATA_HOJE_EXTENSO}}
 
-__________________________________________________________________
-{{EMPRESA_NOME}}
-Promitente(s) Vendedor(es)
+{{ASSINATURAS_VENDEDORES}}
 
 __________________________________________________________________
 {{NOME_CLIENTE}}
@@ -2033,8 +2029,8 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <div class="var-pill" onclick="copyVar(this)">{{VALOR_CONTRATO_EXTENSO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{PERCENTUAL_CLIENTE}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DADOS_BANCARIOS}}</div>
-                <div class="var-pill" onclick="copyVar(this)">{{PREAMBULO}}</div>
-                <div class="var-pill" onclick="copyVar(this)">{{DATA_HOJE_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{ASSINATURAS_VENDEDORES}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{ASSINATURAS_CREDORES}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{PREAMBULO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_NOME}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{CREDOR_CPF}}</div>
@@ -3631,11 +3627,12 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 </div>
 
                 <div class="form-group" style="margin-bottom: 15px;">
-                  <label>Responsáveis por assinar</label>
+                  <label>Responsáveis por assinar (promitentes vendedores)</label>
+                  <p style="margin: 0 0 8px; font-size: 0.8rem; color: #64748b;">Estes nomes saem no distrato e no acordo. Use 1, 2 ou no máximo 3 — um bloco de assinatura para cada.</p>
                   <div id="preamble-responsibles-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;">
                     <!-- Campos dinâmicos injetados por JS -->
                   </div>
-                  <button class="btn btn-secondary btn-sm" onclick="addResponsibleField()" style="align-self: flex-start;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="addResponsibleField()" style="align-self: flex-start;">
                     <i data-lucide="plus" style="width: 14px;"></i> Adicionar Responsável
                   </button>
                 </div>
@@ -6576,43 +6573,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=678"></script>
-  <script defer src="sienge-api.js?v=678"></script>
-  <script defer src="azure-auth.js?v=678"></script>
-  <script defer src="app.js?v=678"></script>
-  <script defer src="home-dashboard.js?v=678"></script>
-  <script defer src="anexos.js?v=678"></script>
-  <script defer src="contas-pagar.js?v=678"></script>
-  <script defer src="config-tags.js?v=678"></script>
-  <script defer src="config-users.js?v=678"></script>
-  <script defer src="suporte.js?v=678"></script>
-  <script defer src="construcao.js?v=678"></script>
-  <script defer src="empresas.js?v=678"></script>
-  <script defer src="relacionamento.js?v=678"></script>
+  <script defer src="data.js?v=679"></script>
+  <script defer src="sienge-api.js?v=679"></script>
+  <script defer src="azure-auth.js?v=679"></script>
+  <script defer src="app.js?v=679"></script>
+  <script defer src="home-dashboard.js?v=679"></script>
+  <script defer src="anexos.js?v=679"></script>
+  <script defer src="contas-pagar.js?v=679"></script>
+  <script defer src="config-tags.js?v=679"></script>
+  <script defer src="config-users.js?v=679"></script>
+  <script defer src="suporte.js?v=679"></script>
+  <script defer src="construcao.js?v=679"></script>
+  <script defer src="empresas.js?v=679"></script>
+  <script defer src="relacionamento.js?v=679"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=678"></script>
-  <script defer src="centros-custo.js?v=678"></script>
-  <script defer src="marketing.js?v=678"></script>
-  <script defer src="plano-financeiro.js?v=678"></script>
-  <script defer src="prestacao-contas.js?v=678"></script>
+  <script defer src="estoque-comercial.js?v=679"></script>
+  <script defer src="centros-custo.js?v=679"></script>
+  <script defer src="marketing.js?v=679"></script>
+  <script defer src="plano-financeiro.js?v=679"></script>
+  <script defer src="prestacao-contas.js?v=679"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=678"></script>
-  <script defer src="fluxo-caixa.js?v=678"></script>
-  <script defer src="caixa-diario.js?v=678"></script>
-  <script defer src="investimento.js?v=678"></script>
-  <script defer src="parametrizacao-parceiro.js?v=678"></script>
-  <script defer src="societario.js?v=678"></script>
-  <script defer src="participacoes.js?v=678"></script>
-  <script defer src="fiscal.js?v=678"></script>
-  <script defer src="indexadores.js?v=678"></script>
-  <script defer src="verificar-construcao.js?v=678"></script>
-  <script src="repactuacoes.js?v=678"></script>
-  <script defer src="repactuacao-lote.js?v=678"></script>
+  <script defer src="empresa-filter.js?v=679"></script>
+  <script defer src="fluxo-caixa.js?v=679"></script>
+  <script defer src="caixa-diario.js?v=679"></script>
+  <script defer src="investimento.js?v=679"></script>
+  <script defer src="parametrizacao-parceiro.js?v=679"></script>
+  <script defer src="societario.js?v=679"></script>
+  <script defer src="participacoes.js?v=679"></script>
+  <script defer src="fiscal.js?v=679"></script>
+  <script defer src="indexadores.js?v=679"></script>
+  <script defer src="verificar-construcao.js?v=679"></script>
+  <script src="repactuacoes.js?v=679"></script>
+  <script defer src="repactuacao-lote.js?v=679"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=678"></script>
+  <script defer src="dashboard-inadimplencia.js?v=679"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

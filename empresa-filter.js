@@ -3,6 +3,40 @@ window.MlEmpresaFilter = {
 
   bind(id, adapter) {
     this.adapters[id] = adapter || null;
+    this.ensureDelegates();
+  },
+
+  jsArg(v) {
+    return JSON.stringify(String(v == null ? "" : v))
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;");
+  },
+
+  ensureDelegates() {
+    if (this._delegates) return;
+    if (typeof document === "undefined" || !document.addEventListener) return;
+    this._delegates = true;
+    document.addEventListener("change", (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      const item = t.closest(".ml-emp-filter-item");
+      if (!item) return;
+      const input = t.matches && t.matches("input[type=checkbox]") ? t : item.querySelector("input[type=checkbox]");
+      if (!input) return;
+      const wrap = item.closest(".ml-emp-filter");
+      if (!wrap || !wrap.id) return;
+      const itemId = input.getAttribute("data-ml-item");
+      if (itemId == null || itemId === "") return;
+      this.toggleId(wrap.id, itemId, input.checked);
+    });
+    document.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      if (!t.closest(".ml-emp-filter-search")) return;
+      const wrap = t.closest(".ml-emp-filter");
+      if (wrap && wrap.id) this.setQuery(wrap.id, t.value);
+    });
   },
 
   toggleOpen(id) {
@@ -77,13 +111,14 @@ window.MlEmpresaFilter = {
       const itemId = String(it.id);
       const on = selected.has(itemId);
       return `<label class="ml-emp-filter-item">
-        <input type="checkbox" ${on ? "checked" : ""} onchange="MlEmpresaFilter.toggleId(${JSON.stringify(opts.id)}, ${JSON.stringify(itemId)}, this.checked)">
+        <input type="checkbox" data-ml-item="${this.esc(itemId)}" ${on ? "checked" : ""}>
         <span>${this.esc(this.formatItemLabel(it))}</span>
       </label>`;
     }).join("");
   },
 
   html(opts) {
+    this.ensureDelegates();
     const id = opts.id;
     const items = opts.items || [];
     const open = !!opts.open;
@@ -92,19 +127,18 @@ window.MlEmpresaFilter = {
     const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode);
     return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
-      <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${JSON.stringify(id)})`}">
+      <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${this.jsArg(id)})`}">
         <span>${this.esc(btn)}</span>
         <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;pointer-events:none;"></i>
       </button>
       <div class="ml-emp-filter-panel" id="${this.esc(id)}-panel">
         <div class="ml-emp-filter-search">
           <input id="${this.esc(id)}-search" type="text" placeholder="Buscar..." value="${this.esc(opts.query || "")}"
-            onclick="event.stopPropagation()"
-            oninput="MlEmpresaFilter.setQuery(${JSON.stringify(id)}, this.value)">
+            onclick="event.stopPropagation()">
         </div>
         <div class="ml-emp-filter-actions">
-          <button type="button" class="ml-emp-filter-all" onclick="event.preventDefault();event.stopPropagation();${opts.selectAllJs || `MlEmpresaFilter.selectAll(${JSON.stringify(id)})`}">Marcar Todos</button>
-          <button type="button" class="ml-emp-filter-none" onclick="event.preventDefault();event.stopPropagation();${opts.selectNoneJs || `MlEmpresaFilter.selectNone(${JSON.stringify(id)})`}">Desmarcar Todos</button>
+          <button type="button" class="ml-emp-filter-all" onclick="event.preventDefault();event.stopPropagation();${opts.selectAllJs || `MlEmpresaFilter.selectAll(${this.jsArg(id)})`}">Marcar Todos</button>
+          <button type="button" class="ml-emp-filter-none" onclick="event.preventDefault();event.stopPropagation();${opts.selectNoneJs || `MlEmpresaFilter.selectNone(${this.jsArg(id)})`}">Desmarcar Todos</button>
         </div>
         <div class="ml-emp-filter-list" id="${this.esc(id)}-list">${this.listHtml(opts)}</div>
       </div>

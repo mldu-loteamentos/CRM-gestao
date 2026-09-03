@@ -1089,7 +1089,12 @@ const InvestimentoApp = {
         : this.accountListHtml();
     }
     const accBtn = wrap.querySelector("button[type='button']");
-    if (accBtn) accBtn.disabled = !this.selectedCompanyIds.length;
+    if (accBtn) {
+      const disabled = !this.selectedCompanyIds.length;
+      accBtn.disabled = disabled;
+      accBtn.style.background = disabled ? "#f8fafc" : "#fff";
+      accBtn.style.cursor = disabled ? "not-allowed" : "pointer";
+    }
     this.applyDropOpenState();
   },
 
@@ -1338,7 +1343,7 @@ const InvestimentoApp = {
     this.pruneAccountKeysToCompanies();
     this.companyDropOpen = true;
     this.persistPeriod();
-    this.render();
+    this.patchCompanyFilter();
     this.refreshFilterCatalog().then(() => {
       if (!on) return;
       this.filterCatalog.forEach(a => {
@@ -1360,7 +1365,7 @@ const InvestimentoApp = {
     this.companyDropOpen = true;
     this.groupByCompany = true;
     this.persistPeriod();
-    this.render();
+    this.patchCompanyFilter();
     this.refreshFilterCatalog().then(() => {
       this.selectedAccountKeys = this.filterCatalog.map(a => this.filterAccKey(a));
       this.persistPeriod();
@@ -1376,7 +1381,7 @@ const InvestimentoApp = {
     this.filterCatalog = [];
     this.companyDropOpen = true;
     this.persistPeriod();
-    this.render();
+    this.patchCompanyFilter();
   },
 
   toggleGroupByCompany() {

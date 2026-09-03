@@ -11421,6 +11421,9 @@ function generateAgreementPDF() {
   textTemplate = textTemplate
     .replace(/{{PARCELAS_ACORDO}}/g, `<strong>${results.instQty}</strong>`)
     .replace(/{{DATA_PRIMEIRA_PARCELA}}/g, `<strong>${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</strong>`);
+  if (typeof window.centerDistratoSignatures === "function") {
+    textTemplate = window.centerDistratoSignatures(textTemplate);
+  }
   
   // Montar Documento
   const docHtml = `
@@ -11474,15 +11477,6 @@ function generateAgreementPDF() {
     <p style="text-align: right; margin-top: 3rem; margin-bottom: 3rem;">
       Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
     </p>
-
-    <div style="display: flex; justify-content: space-between; margin-top: 4rem;">
-      <div style="width: 45%; border-top: 1.5px solid #000; text-align: center; font-size: 10pt; padding-top: 5px;">
-        MOURA LEITE LOTEAMENTOS<br>Credora
-      </div>
-      <div style="width: 45%; border-top: 1.5px solid #000; text-align: center; font-size: 10pt; padding-top: 5px;">
-        ${g_renegCustomer.name.toUpperCase()}<br>Devedor
-      </div>
-    </div>
   `;
 
   document.getElementById("pdf-modal-title").textContent = "Termo de Acordo Jurídico - PDF";
@@ -12785,6 +12779,10 @@ function applyDistratoConditionals(text, flags) {
 
 function applyDistratoTemplateVars(text, map) {
   let s = String(text || "");
+  const signers = map && map._PREAMBLE_SIGNERS;
+  if (typeof window.expandPromitenteVendedorSignatures === "function" && Array.isArray(signers) && signers.length) {
+    s = window.expandPromitenteVendedorSignatures(s, signers);
+  }
   const lookup = {};
   Object.keys(map || {}).forEach(k => {
     if (String(k).charAt(0) === "_") return;
@@ -12798,10 +12796,6 @@ function applyDistratoTemplateVars(text, map) {
     const v = lookup[key];
     return v == null ? "" : String(v);
   });
-  const signers = map && map._PREAMBLE_SIGNERS;
-  if (typeof window.expandPromitenteVendedorSignatures === "function" && Array.isArray(signers) && signers.length) {
-    s = window.expandPromitenteVendedorSignatures(s, signers);
-  }
   return s;
 }
 window.applyDistratoTemplateVars = applyDistratoTemplateVars;
@@ -12963,10 +12957,13 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
       ? (ccId + " - " + unitShort)
       : (unitShort || unitObj.id || "____")
   );
-  const signers = extras.signers
+  const signersRaw = extras.signers
     || (typeof window.getPreambleSignersForContract === "function"
       ? window.getPreambleSignersForContract(unitObj, saleObj)
       : []);
+  const signers = (signersRaw && signersRaw.length)
+    ? signersRaw
+    : (companyName ? [companyName] : []);
   const out = Object.assign({
     QUADRA: unitObj.block || unitObj.quadra || saleObj.block || "____",
     LOTE: unitObj.lot || unitObj.lote || saleObj.lot || "____",
@@ -12988,12 +12985,18 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     EMPRESA_CNPJ: mask(companyCnpj) || "01.066.134/0001-78",
     PROMITENTES_VENDEDORES: (signers && signers.length) ? signers.join("\n") : (companyName || ""),
     PROMITENTE_VENDEDOR: (signers && signers[0]) || companyName || "",
+    ASSINATURAS_VENDEDORES: (signers && signers.length && typeof window.buildSignatureBlocksFromSigners === "function")
+      ? window.buildSignatureBlocksFromSigners(signers, "Promitente(s) Vendedor(es)")
+      : "",
+    ASSINATURAS_CREDORES: (signers && signers.length && typeof window.buildSignatureBlocksFromSigners === "function")
+      ? window.buildSignatureBlocksFromSigners(signers, "Confitente(s) credor(es)")
+      : "",
     CIDADE_LOTEAMENTO: cidadeLote,
     CIDADE_ATUAL: "Botucatu",
     DATA_HOJE_EXTENSO: dateExt,
     DATA_ATUAL_EXTENSO: dateExt,
     PREAMBULO: preamble,
-    CREDOR_NOME: companyName || preamble,
+    CREDOR_NOME: (signers && signers[0]) || companyName || "",
     CREDOR_CPF: mask(companyCnpj),
     CREDOR_RG: "",
     CREDOR_ESPOSA_NOME: "",
@@ -21426,9 +21429,13 @@ window.selectPreambleForEdit = async function(id) {
   if (container) container.innerHTML = "";
   
   if (p.responsibles) {
-    const resps = p.responsibles.split('\n').filter(r => r.trim() !== "");
+    const resps = Array.isArray(p.responsibles)
+      ? p.responsibles
+      : String(p.responsibles).split(/\r?\n|;/).filter(r => String(r).trim() !== "");
     if (resps.length > 0) {
-      resps.forEach(r => addResponsibleField(r.trim()));
+      resps.forEach(r => addResponsibleField(window.normalizePreambleSignerName
+        ? window.normalizePreambleSignerName(r)
+        : String(r).trim()));
     } else {
       addResponsibleField();
     }
@@ -21498,20 +21505,25 @@ window.deletePreamble = async function(idFromRow) {
 window.addResponsibleField = function(value = "") {
   const container = document.getElementById("preamble-responsibles-container");
   if (!container) return;
-  
+  const current = container.querySelectorAll(".resp-input").length;
+  if (current >= 3) {
+    alert("Cada preâmbulo pode ter no máximo 3 responsáveis para assinar (promitentes vendedores).");
+    return;
+  }
+  const safe = String(value || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
   const div = document.createElement("div");
   div.style.display = "flex";
   div.style.gap = "8px";
   div.style.alignItems = "center";
-  
   div.innerHTML = `
-    <input type="text" class="form-control resp-input" value="${value}" placeholder="Nome ou Empresa responsável" style="flex: 1;">
-    <button class="btn btn-danger btn-sm" onclick="removeResponsibleField(this)" title="Remover" style="padding: 6px 10px;">
+    <input type="text" class="form-control resp-input" value="${safe}" placeholder="Nome do promitente vendedor (empresa ou pessoa)" style="flex: 1;">
+    <button type="button" class="btn btn-danger btn-sm" onclick="removeResponsibleField(this)" title="Remover" style="padding: 6px 10px;">
       <i data-lucide="trash-2" style="width: 16px;"></i>
     </button>
   `;
   container.appendChild(div);
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 };
 
 window.removeResponsibleField = function(btn) {
@@ -29898,13 +29910,31 @@ window.ensurePreamblesListLoaded = function() {
   return AppState.preamblesList;
 };
 
+window.normalizePreambleSignerName = function(s) {
+  let t = String(s == null ? "" : s).replace(/&amp;/g, "&").replace(/&quot;/g, '"').trim();
+  t = t.replace(/^\s*RESPONS[ÁAÀ]VEI?S?\s*\d*\s*[:.\-–]\s*/i, "");
+  t = t.replace(/^\s*\d+\s*[:.\-–)]\s*/, "");
+  return t.trim();
+};
+
 window.parsePreambleResponsibles = function(p) {
   if (!p) return [];
-  const raw = p.responsibles;
-  if (Array.isArray(raw)) {
-    return raw.map(x => String(x || "").trim()).filter(Boolean);
+  let raw = p.responsibles;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    raw = Object.keys(raw).sort().map(k => raw[k]);
   }
-  return String(raw || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const parts = Array.isArray(raw) ? raw : String(raw || "").split(/\r?\n|;/);
+  const out = [];
+  const seen = new Set();
+  parts.forEach(item => {
+    const s = window.normalizePreambleSignerName(item);
+    if (!s) return;
+    const key = s.toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(s);
+  });
+  return out.slice(0, 3);
 };
 
 window.getPreambleRecordForContract = function(unit, sale) {
@@ -29926,7 +29956,14 @@ window.getPreambleRecordForContract = function(unit, sale) {
 };
 
 window.getPreambleSignersForContract = function(unit, sale) {
-  return window.parsePreambleResponsibles(window.getPreambleRecordForContract(unit, sale));
+  const rec = window.getPreambleRecordForContract(unit, sale);
+  const names = window.parsePreambleResponsibles(rec);
+  if (names.length) return names;
+  if (rec && rec.empresaId != null && typeof getCompanyName === "function") {
+    const n = String(getCompanyName(rec.empresaId) || "").trim();
+    if (n) return [n];
+  }
+  return [];
 };
 
 window.getPreambleForContract = function(unit, sale) {
@@ -29940,15 +29977,39 @@ window.getPreambleForContract = function(unit, sale) {
   return "PREÂMBULO NÃO CADASTRADO PARA ESTE CENTRO DE CUSTO.";
 };
 
+window.buildSignatureBlocksFromSigners = function(names, role, line) {
+  const list = (names || []).map(n => window.normalizePreambleSignerName(n)).filter(Boolean);
+  const bar = line || "__________________________________________________________________";
+  const roleLabel = role || "Promitente(s) Vendedor(es)";
+  return list.map(n => bar + "\n" + n + "\n" + roleLabel).join("\n\n");
+};
+
 window.expandPromitenteVendedorSignatures = function(text, signers) {
-  const names = (signers || []).map(n => String(n || "").trim()).filter(Boolean);
+  const names = (signers || []).map(n => window.normalizePreambleSignerName(n)).filter(Boolean);
   if (!names.length) return String(text || "");
-  const s = String(text || "");
-  const re = /(_{12,}[ \t]*\r?\n)([^\r\n]+)(\r?\n)(Promitente\(s\)\s+Vendedor\(es\))/i;
-  if (!re.test(s)) return s;
-  return s.replace(re, function (_, line, _oldName, nl, role) {
-    return names.map(n => line + n + nl + role).join(nl + nl);
-  });
+  let s = String(text || "");
+  const hasVend = /\{\{\s*ASSINATURAS_VENDEDORES\s*\}\}/i.test(s);
+  const hasCred = /\{\{\s*ASSINATURAS_CREDORES\s*\}\}/i.test(s);
+  if (hasVend) {
+    s = s.replace(/\{\{\s*ASSINATURAS_VENDEDORES\s*\}\}/gi, window.buildSignatureBlocksFromSigners(names, "Promitente(s) Vendedor(es)"));
+  }
+  if (hasCred) {
+    s = s.replace(/\{\{\s*ASSINATURAS_CREDORES\s*\}\}/gi, window.buildSignatureBlocksFromSigners(names, "Confitente(s) credor(es)"));
+  }
+  const replaceFirst = (re, roleFallback) => {
+    if (!re.test(s)) return;
+    re.lastIndex = 0;
+    s = s.replace(re, function (_, line, _oldName, nl, role) {
+      return names.map(n => line + n + nl + (role || roleFallback)).join(nl + nl);
+    });
+  };
+  if (!hasVend) {
+    replaceFirst(/(_{10,}[ \t]*\r?\n)([^\r\n]+)(\r?\n)(Promitente\(s\)\s+Vendedor\(es\))/i, "Promitente(s) Vendedor(es)");
+  }
+  if (!hasCred) {
+    replaceFirst(/(_{10,}[ \t]*\r?\n)([^\r\n]+)(\r?\n)(Confitente\(s\)\s+credor\(es\))/i, "Confitente(s) credor(es)");
+  }
+  return s;
 };
 
 window.planoVisoesAccountCount = function(str) {

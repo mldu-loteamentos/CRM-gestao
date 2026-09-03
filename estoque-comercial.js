@@ -43,13 +43,17 @@ const EstoqueComercialApp = {
     ccDone: [],
     status: "all",
     fetchedAt: null,
+    batimentoDate: null,
+    batimentoDone: false,
     complete: false,
     contractsEnriched: false,
     contractsCcDone: [],
     firebaseOk: false,
     inited: false,
     stopSync: false,
-    defaulterIndex: null
+    defaulterIndex: null,
+    _autoFinanceRunning: false,
+    _autoFinanceRanFor: null
   },
 
   todayStr() {
@@ -251,7 +255,9 @@ const EstoqueComercialApp = {
       complete: this.state.complete,
       contractsEnriched: this.state.contractsEnriched,
       contractsCcDone: this.state.contractsCcDone,
-      fetchedAt: this.state.fetchedAt || new Date().toISOString()
+      fetchedAt: this.state.fetchedAt || new Date().toISOString(),
+      batimentoDate: this.state.batimentoDate || null,
+      batimentoDone: !!this.state.batimentoDone
     };
     try {
       localStorage.setItem(this.CACHE_KEY, JSON.stringify(payload));
@@ -268,6 +274,8 @@ const EstoqueComercialApp = {
     this.state.contractsEnriched = !!data.contractsEnriched;
     this.state.contractsCcDone = Array.isArray(data.contractsCcDone) ? data.contractsCcDone.map(String) : [];
     this.state.fetchedAt = data.fetchedAt || null;
+    this.state.batimentoDate = data.batimentoDate || null;
+    this.state.batimentoDone = !!data.batimentoDone;
   },
 
   fbReady() {
@@ -306,7 +314,9 @@ const EstoqueComercialApp = {
         complete: meta.complete !== false,
         contractsEnriched: !!meta.contractsEnriched,
         contractsCcDone: Array.isArray(meta.contractsCcDone) ? meta.contractsCcDone.map(String) : [],
-        fetchedAt: meta.fetchedAt || null
+        fetchedAt: meta.fetchedAt || null,
+        batimentoDate: meta.batimentoDate || null,
+        batimentoDone: meta.batimentoDone === true || meta.batimentoDone === "true"
       };
     } catch (e) {
       console.error("[Estoque] leitura Firebase", e);
@@ -379,6 +389,8 @@ const EstoqueComercialApp = {
     const today = this.todayStr();
     this.state.fetchedAt = new Date().toISOString();
     this.state.lastSnapshotDate = today;
+    this.state.batimentoDate = today;
+    this.state.batimentoDone = true;
     this.saveCache();
     if (this.fbReady()) {
       try {
@@ -492,31 +504,140 @@ const EstoqueComercialApp = {
   },
 
   async loadFromCache() {
-    this.setProgress("Carregando estoque do Firebase…");
-    try {
-      await this.waitFirebase(8000);
-      const fb = await this.loadFirebase();
-      const local = this.loadCache();
-      if (fb && fb.units.length) {
-        this.applyCache(fb);
-        this.state.firebaseOk = true;
-      } else if (local && local.units && local.units.length) {
-        this.applyCache(local);
-      }
-    } catch (e) {
-      console.error("[Estoque] leitura cache", e);
+    // Primeiro renderiza cache local (evita travar esperando Firebase carregar todos os lotes).
+    const local = this.loadCache();
+    const hasLocal = !!(local && local.units && local.units.length);
+    if (hasLocal) {
+      this.applyCache(local);
+      this.state.firebaseOk = false;
+    } else {
+      this.setProgress("Carregando estoque do Firebase…");
     }
+
     this.fillEnterprisesFromUnits();
     this.fillUnitSelect();
     this.updateMeta();
     this.renderTable();
-    this.setProgress("");
     if (window.lucide) window.lucide.createIcons();
+
     this.state.inited = true;
     this.loadEnterprises().then(() => {
       this.fillEnterprisesFromUnits();
       this.fillUnitSelect();
+      this.updateMeta();
+      this.renderTable();
     }).catch(() => {});
+
+    // Atualiza do Firebase em background.
+    this.loadFirebaseInBackground().catch(() => {});
+  },
+
+  async loadFirebaseInBackground() {
+    if (this._fbBgPromise) return this._fbBgPromise;
+    this._fbBgPromise = (async () => {
+      try {
+        if (!this.fbReady()) await this.waitFirebase(6000);
+        const fb = await this.loadFirebase();
+        if (!fb || !fb.units || !fb.units.length) return;
+
+        // Se o batimento automático estiver rodando, adia a aplicação dos dados.
+        if (this.state._autoFinanceRunning) {
+          this._firebasePendingData = fb;
+          return;
+        }
+
+        this.applyCache(fb);
+        this.state.firebaseOk = true;
+        this.fillEnterprisesFromUnits();
+        this.fillUnitSelect();
+        this.updateMeta();
+        this.renderTable();
+        if (window.lucide) window.lucide.createIcons();
+      } catch (e) {
+        console.error("[Estoque] leitura Firebase (background)", e);
+      } finally {
+        this.setProgress("");
+      }
+    })();
+    return this._fbBgPromise;
+  },
+
+  async tryLoadBatimentoMetaOnly() {
+    if (!this.fbReady()) return null;
+    try {
+      await this.waitFirebase(2000);
+      if (!this.fbReady()) return null;
+      const { doc, getDoc } = window.firebaseCollections;
+      const metaSnap = await getDoc(doc(window.firebaseDb, this.FB_COL, "_meta"));
+      const meta = metaSnap.exists() ? metaSnap.data() : {};
+      const batimentoDate = meta.batimentoDate || null;
+      const batimentoDone = meta.batimentoDone === true || meta.batimentoDone === "true";
+      this.state.batimentoDate = batimentoDate;
+      this.state.batimentoDone = batimentoDone;
+      return { batimentoDate, batimentoDone };
+    } catch (e) {
+      return null;
+    }
+  },
+
+  hideManualFinanceButtons() {
+    const b1 = document.getElementById("est-btn-consultar");
+    if (b1 && b1.closest) {
+      const g = b1.closest(".est-stock-action-group");
+      if (g) g.style.display = "none";
+    }
+    const b2 = document.getElementById("est-btn-batimento");
+    if (b2 && b2.closest) {
+      const g = b2.closest(".est-stock-action-group");
+      if (g) g.style.display = "none";
+    }
+  },
+
+  hasFinanceFields() {
+    return (this.state.units || []).some(u => {
+      const pmpOk = u && u.pmp3m != null && Number.isFinite(Number(u.pmp3m));
+      const relOk = u && (u.relFin != null || u.quitado === true);
+      return pmpOk || relOk;
+    });
+  },
+
+  async autoStartDailyBatimento() {
+    const today = this.todayStr();
+    if (this.state._autoFinanceRunning) return;
+
+    this.hideManualFinanceButtons();
+
+    const meta = await this.tryLoadBatimentoMetaOnly();
+    if (meta && meta.batimentoDone && meta.batimentoDate === today) return;
+    if (this.state.batimentoDone && this.state.batimentoDate === today) return;
+
+    // Garante unidades para poder classificar/bater.
+    if (!this.state.units.length) {
+      await this.consultar(true);
+    }
+    if (!this.state.units.length) return;
+
+    const likelyReady = this.hasFinanceFields();
+    // Se não tem meta marcada e os campos financeiros parecem prontos, pode ser só “atualização do dia”.
+    // Mantemos o batimento se a meta não estiver marcada; evita ficar travado em hipótese.
+    if (likelyReady && this.state.batimentoDone && this.state.batimentoDate === today) return;
+
+    this._firebasePendingData = null;
+    try {
+      await this.batimentoFinanceiro();
+    } finally {
+      if (this._firebasePendingData) {
+        const fb = this._firebasePendingData;
+        this._firebasePendingData = null;
+        this.applyCache(fb);
+        this.state.firebaseOk = true;
+        this.fillEnterprisesFromUnits();
+        this.fillUnitSelect();
+        this.updateMeta();
+        this.renderTable();
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
   },
 
   async loadEnterprises() {
@@ -1872,6 +1993,9 @@ const EstoqueComercialApp = {
   async batimentoFinanceiro() {
     try {
       if (this.state.loading) return;
+      const today = this.todayStr();
+      if (this.state._autoFinanceRunning) return;
+      if (this.state.batimentoDone && this.state.batimentoDate === today) return;
       if (!this.state.units.length) await this.init();
       if (!this.state.units.length) {
         alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
@@ -1892,6 +2016,7 @@ const EstoqueComercialApp = {
         alert("Não há empreendimentos com unidades para bater. Baixe as unidades do Sienge ou escolha um centro que tenha lote.");
         return;
       }
+      this.state._autoFinanceRunning = true;
       this.state.stopSync = false;
       this.setBusy(true);
       await this.enrichContracts({ quiet: true, keepBusy: true });
@@ -1916,6 +2041,7 @@ const EstoqueComercialApp = {
       alert("Erro no batimento: " + (e.message || e));
     } finally {
       this.setBusy(false);
+      this.state._autoFinanceRunning = false;
       this.state.stopSync = false;
       this.updateMeta();
       this.renderTable();
@@ -2158,6 +2284,9 @@ window.EstoqueComercialApp = EstoqueComercialApp;
 
 document.addEventListener("tabChanged", function(e) {
   if (e.detail === "estoque-comercial") {
-    EstoqueComercialApp.init();
+    EstoqueComercialApp.init().then(() => {
+      // Automaticamente tenta deixar o batimento do dia pronto.
+      EstoqueComercialApp.autoStartDailyBatimento().catch(() => {});
+    }).catch(() => {});
   }
 });

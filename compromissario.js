@@ -10,6 +10,37 @@ const CompromissarioApp = {
     notifiedContracts: {}
   },
 
+  normalizeCityKey(city) {
+    if (city === null || city === undefined) return '';
+    const s = String(city).trim().toUpperCase();
+    // Remove acentos para evitar "TATUI" != "TATUÍ"
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  },
+
+  loadConfigs() {
+    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
+    let raw = {};
+    try {
+      raw = JSON.parse(configsStr) || {};
+    } catch (e) {
+      raw = {};
+    }
+
+    // Normaliza as chaves salvas no localStorage para reduzir inconsistências
+    const configs = {};
+    let changed = false;
+    for (const [key, val] of Object.entries(raw)) {
+      const cityKey = this.normalizeCityKey(key);
+      configs[cityKey] = val;
+      if (key !== cityKey) changed = true;
+    }
+
+    if (changed) {
+      localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs));
+    }
+    return configs;
+  },
+
   async init() {
     this.state.notifiedContracts = JSON.parse(localStorage.getItem('crm_compromissario_notified') || '{}');
     this.loadPrefeituras();
@@ -27,16 +58,16 @@ const CompromissarioApp = {
     });
     this.state.prefeituras = Array.from(cities).sort();
 
-    // Migrate existing configs to uppercase gracefully
+    // Migra chaves antigas (com acentos/capitalização) para uma chave normalizada
     const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
     try {
-      const raw = JSON.parse(configsStr);
+      const raw = JSON.parse(configsStr) || {};
       let configs = {};
       let changed = false;
       for (let key in raw) {
-        const upperKey = key.toUpperCase();
-        configs[upperKey] = raw[key];
-        if (key !== upperKey) changed = true;
+        const cityKey = this.normalizeCityKey(key);
+        configs[cityKey] = raw[key];
+        if (key !== cityKey) changed = true;
       }
       if (changed) localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs));
     } catch (e) {}
@@ -185,24 +216,23 @@ const CompromissarioApp = {
 
     // Agrupar por Cidade (parte antes do ' - ' no enterpriseName)
     const groups = {};
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
+    let configs = this.loadConfigs();
 
     let configsChanged = false;
 
     this.state.contracts.forEach(c => {
       const enterpriseName = c.enterpriseName || `Emp: ${c.enterpriseId}`;
       const cityName = enterpriseName.includes(' - ') ? enterpriseName.split(' - ')[0].trim().toUpperCase() : enterpriseName.toUpperCase();
+      const cityKey = this.normalizeCityKey(cityName);
       if (!groups[cityName]) groups[cityName] = [];
       groups[cityName].push(c);
       
       // Auto-ativar cidade se ela aparecer na busca
-      if (!configs[cityName]) {
-        configs[cityName] = { email: '', reqEspecial: false, ativo: true };
+      if (!configs[cityKey]) {
+        configs[cityKey] = { email: '', reqEspecial: false, ativo: true };
         configsChanged = true;
-      } else if (!configs[cityName].ativo) {
-        configs[cityName].ativo = true;
+      } else if (!configs[cityKey].ativo) {
+        configs[cityKey].ativo = true;
         configsChanged = true;
       }
     });
@@ -214,7 +244,10 @@ const CompromissarioApp = {
     let html = '';
     
     // Alerta de cidades sem e-mail
-    const missingEmails = Object.keys(groups).filter(city => !configs[city] || !configs[city].email);
+    const missingEmails = Object.keys(groups).filter(city => {
+      const cityKey = this.normalizeCityKey(city);
+      return !configs[cityKey] || !configs[cityKey].email;
+    });
     if (missingEmails.length > 0) {
       html += `
         <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 6px; padding: 12px 15px; margin-bottom: 20px; display: flex; align-items: flex-start; gap: 10px;">
@@ -245,11 +278,11 @@ const CompromissarioApp = {
             </div>
           </div>
           <div id="${accId}" style="display: ${isOpen ? 'block' : 'none'};">
-            ${(configs[cityName] && configs[cityName].agrupar) ? `
+            ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].agrupar) ? `
               <div style="padding: 12px 15px; background: #f0fdf4; border-bottom: 1px solid #e2e8f0; text-align: right; display: flex; justify-content: space-between; align-items: center;">
                 <span style="font-size: 0.8rem; color: #166534; font-weight: 600;"><i data-lucide="info" style="width: 14px; vertical-align: middle;"></i> Modo de Envio em Lote ativado para esta cidade.</span>
                 <button onclick="CompromissarioApp.sendGroupedEmail('${cityName}')" style="background: #105436; color: #fff; border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background 0.2s;" onmouseover="this.style.background='#166534'" onmouseout="this.style.background='#105436'" title="Abre a comunicação em lote">
-                  <i data-lucide="${(configs[cityName] && configs[cityName].hasPortal) ? 'external-link' : 'file-spreadsheet'}" style="width: 16px;"></i> ${(configs[cityName] && configs[cityName].hasPortal) ? 'Gerar Planilha e Acessar Portal' : 'Gerar Planilha e Notificar Todos'}
+                  <i data-lucide="${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'external-link' : 'file-spreadsheet'}" style="width: 16px;"></i> ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'Gerar Planilha e Acessar Portal' : 'Gerar Planilha e Notificar Todos'}
                 </button>
               </div>
             ` : ''}
@@ -316,14 +349,14 @@ const CompromissarioApp = {
               <input type="file" id="comp-file-${id}" style="display: none;" onchange="CompromissarioApp.onFileSelect(event, '${id}')">
             </td>
             <td style="padding: 12px 15px; text-align: center; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: center; height: 100%;">
-              ${(configs[cityName] && configs[cityName].agrupar) ? `
+              ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].agrupar) ? `
                 <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;"><i data-lucide="layers" style="width: 12px;"></i> Agrupado</span>
               ` : `
                 <button onclick="CompromissarioApp.sendEmail('${id}')" style="background: ${this.state.notifiedContracts[id] ? '#f1f5f9' : '#e0f2fe'}; color: ${this.state.notifiedContracts[id] ? '#64748b' : '#0284c7'}; border: 1px solid ${this.state.notifiedContracts[id] ? '#cbd5e1' : '#bae6fd'}; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="${this.state.notifiedContracts[id] ? 'Comunicação já realizada' : 'Iniciar Comunicação'}">
-                  <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : ((configs[cityName] && configs[cityName].hasPortal) ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : ((configs[cityName] && configs[cityName].hasPortal) ? 'Portal' : 'Notificar')}
+                  <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : ((configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : ((configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'Portal' : 'Notificar')}
                 </button>
               `}
-              ${(configs[cityName] && configs[cityName].reqEspecial) ? `
+              ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].reqEspecial) ? `
                 <button onclick="CompromissarioApp.generateRequirement('${id}')" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="Gerar Documento de Requerimento Especial">
                   <i data-lucide="file-text" style="width: 14px;"></i> Requerimento
                 </button>
@@ -354,28 +387,27 @@ const CompromissarioApp = {
     let existingModal = document.getElementById('comp-config-modal');
     if (existingModal) existingModal.remove();
 
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
+    let configs = this.loadConfigs();
 
     const currentMonthCities = new Set(this.state.contracts.map(c => {
       const entName = c.enterpriseName || '';
-      return entName.includes(' - ') ? entName.split(' - ')[0].trim().toUpperCase() : entName.toUpperCase();
+      const cityName = entName.includes(' - ') ? entName.split(' - ')[0].trim() : entName;
+      return this.normalizeCityKey(cityName);
     }));
 
     // Sort active cities first
     const sortedCities = [...this.state.prefeituras].filter(city => {
       if (this.state.contracts.length === 0) return false;
-      return currentMonthCities.has(city);
+      return currentMonthCities.has(this.normalizeCityKey(city));
     }).sort((a, b) => {
-      const activeA = configs[a]?.ativo ? 1 : 0;
-      const activeB = configs[b]?.ativo ? 1 : 0;
+      const activeA = configs[this.normalizeCityKey(a)]?.ativo ? 1 : 0;
+      const activeB = configs[this.normalizeCityKey(b)]?.ativo ? 1 : 0;
       if (activeA !== activeB) return activeB - activeA;
       return a.localeCompare(b);
     });
 
     const citiesListHtml = sortedCities.map(city => {
-      const cityCfg = configs[city] || {};
+      const cityCfg = configs[this.normalizeCityKey(city)] || {};
       const currentEmail = cityCfg.email || '';
       const currentReq = cityCfg.reqEspecial ? 'checked' : '';
       const isActive = cityCfg.ativo ? 'checked' : '';
@@ -446,11 +478,10 @@ const CompromissarioApp = {
   },
 
   saveConfigModal() {
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
+    let configs = this.loadConfigs();
 
     this.state.prefeituras.forEach(city => {
+      const cityKey = this.normalizeCityKey(city);
       const emailEl = document.getElementById(`cfg-email-${city}`);
       const reqEl = document.getElementById(`cfg-req-${city}`);
       const agruparEl = document.getElementById(`cfg-agrupar-${city}`);
@@ -461,8 +492,8 @@ const CompromissarioApp = {
       const senhaEl = document.getElementById(`cfg-senha-${city}`);
 
       if (emailEl) {
-        configs[city] = {
-          ...configs[city], // Keep previous properties like template
+        configs[cityKey] = {
+          ...(configs[cityKey] || {}), // Keep previous properties like template
           email: emailEl.value.trim(),
           reqEspecial: reqEl.checked,
           agrupar: agruparEl.checked,
@@ -551,11 +582,9 @@ const CompromissarioApp = {
       unitId = c.salesContractUnits[0].name || `Unidade ${c.salesContractUnits[0].id || ''}`;
     }
 
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
-
-    const cityConfig = configs[cityName] || {};
+    const configs = this.loadConfigs();
+    const cityKey = this.normalizeCityKey(cityName);
+    const cityConfig = configs[cityKey] || {};
     const defaultEmail = cityConfig.email || '';
     const hasSpecialReq = cityConfig.reqEspecial;
 
@@ -621,11 +650,9 @@ const CompromissarioApp = {
     const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const dateStr = `${today.getDate()} de ${months[today.getMonth()]} de ${today.getFullYear()}`;
 
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
-    
-    const cityConfig = configs[cityName] || {};
+    const configs = this.loadConfigs();
+    const cityKey = this.normalizeCityKey(cityName);
+    const cityConfig = configs[cityKey] || {};
     const defaultTemplate = `EXMO. SR. PREFEITO MUNICIPAL DE ${cityName.toUpperCase()} – SP
 N E S T A.
 
@@ -695,10 +722,11 @@ Botucatu, [DATA]
   },
 
   sendGroupedEmail(cityName) {
+    const cityKey = this.normalizeCityKey(cityName);
     const groupContracts = this.state.contracts.filter(c => {
       const entName = c.enterpriseName || '';
       const cName = entName.includes(' - ') ? entName.split(' - ')[0].trim().toUpperCase() : entName.toUpperCase();
-      return cName === cityName;
+      return this.normalizeCityKey(cName) === cityKey;
     });
 
     if (groupContracts.length === 0) return;
@@ -736,11 +764,8 @@ Botucatu, [DATA]
     document.body.removeChild(link);
 
     // Prepare Email
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
-
-    const cityConfig = configs[cityName] || {};
+    const configs = this.loadConfigs();
+    const cityConfig = configs[cityKey] || {};
     const defaultEmail = cityConfig.email || '';
     const hasSpecialReq = cityConfig.reqEspecial;
 
@@ -778,11 +803,9 @@ Botucatu, [DATA]
   },
 
   editTemplate(city) {
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
-
-    const cityConfig = configs[city] || {};
+    const configs = this.loadConfigs();
+    const cityKey = this.normalizeCityKey(city);
+    const cityConfig = configs[cityKey] || {};
     const defaultTemplate = `EXMO. SR. PREFEITO MUNICIPAL DE ${city.toUpperCase()} – SP
 N E S T A.
 
@@ -827,12 +850,11 @@ Botucatu, [DATA]`;
 
   saveTemplate(city) {
     const text = document.getElementById('comp-tpl-text').value;
-    const configsStr = localStorage.getItem('crm_compromissario_configs') || '{}';
-    let configs = {};
-    try { configs = JSON.parse(configsStr); } catch (e) {}
 
-    if (!configs[city]) configs[city] = { ativo: true };
-    configs[city].template = text;
+    let configs = this.loadConfigs();
+    const cityKey = this.normalizeCityKey(city);
+    if (!configs[cityKey]) configs[cityKey] = { ativo: true };
+    configs[cityKey].template = text;
     localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs));
 
     document.getElementById('comp-tpl-modal').remove();
