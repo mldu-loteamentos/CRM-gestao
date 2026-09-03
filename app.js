@@ -2026,6 +2026,12 @@ async function processSuccessfulLogin(loggedUser) {
       if (typeof window.checkMonthlyBilletAlerts === "function") {
         window.checkMonthlyBilletAlerts();
       }
+      if (typeof window.startVistoriaValidationAlertListener === "function") {
+        window.startVistoriaValidationAlertListener();
+      }
+      if (typeof window.checkVistoriasValidationAlerts === "function") {
+        window.checkVistoriasValidationAlerts();
+      }
     }, 2500);
   } catch (err) {
     const errorMsg = document.getElementById("login-error-msg");
@@ -3562,8 +3568,8 @@ window.nexAgingSpecialHtml = function(client) {
   const ccConfig = (typeof window.nexCcConfig === "function")
     ? window.nexCcConfig(client.costCenterId, client.unitName)
     : {};
-  const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31 };
-  const zeroDays = Number(regua.zero) || 31;
+  const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 30 };
+  const zeroDays = Number(regua.zero) || 30;
   const titleHint = String((client.billIds && client.billIds[0]) || client.saleId || "").replace(/^B-/, "").split("-")[0];
   const hasNex = typeof window.nexHasLetterForClient === "function"
     ? window.nexHasLetterForClient(client)
@@ -3580,9 +3586,14 @@ window.nexAgingSpecialHtml = function(client) {
       </button>
     `;
   }
-  if (isZero && days >= zeroDays && !ccConfig.clausula_suspensiva_ativa && !hasNex) {
+  // Controle 0% a partir de 03/09/2026: só entra quem atingiu a régua (30 dias) depois do corte.
+  // Backlog antigo (>31 dias sem NEX) deixa de mostrar a tag.
+  const crossedZero = typeof window.nexCrossedZeroAfterCutoff === "function"
+    ? window.nexCrossedZeroAfterCutoff(days, zeroDays)
+    : true;
+  if (isZero && days >= zeroDays && crossedZero && !ccConfig.clausula_suspensiva_ativa && !hasNex) {
     return `
-      <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Abrir Notificações — elegíveis 0% pago (régua: ${zeroDays} dias)">
+      <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Abrir Notificações — elegíveis 0% pago (régua: ${zeroDays} dias, controle a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff() : "hoje"})">
         <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${days} dias - Enviar Nex
       </button>
     `;
@@ -17959,7 +17970,8 @@ async function loadWeSendTab() {
     const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
     const suspensiva = !!cc.clausula_suspensiva_ativa;
     const hasNex = window.nexHasLetter(item.customerId, item.saleId);
-    if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex) {
+    if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex
+        && window.nexCrossedZeroAfterCutoff(item.maxDaysDelay, regua.zero)) {
       zeroList.push(item);
     } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex && window.nexCrossed61AfterCutoff(item.maxDaysDelay)) {
       d61List.push(item);
@@ -19453,6 +19465,42 @@ window.nexCrossed61AfterCutoff = function(maxDaysDelay) {
   return !!(reached && cutoff && reached >= cutoff);
 };
 
+// Controle NEX 0% pago: início em 03/09/2026. Backlog antigo (> régua sem NEX) não reaparece.
+window.NEX_ZERO_CUTOFF_DEFAULT = "2026-09-03";
+
+window.getNexZeroCutoff = function() {
+  try {
+    const v = localStorage.getItem("crm_nex_zero_cutoff");
+    if (v) return v;
+  } catch (e) {}
+  const cutoff = window.NEX_ZERO_CUTOFF_DEFAULT || window.nexTodayIso();
+  try { localStorage.setItem("crm_nex_zero_cutoff", cutoff); } catch (e) {}
+  return cutoff;
+};
+
+window.setNexZeroCutoff = function(iso) {
+  const v = window.nexParseIso(iso) || window.NEX_ZERO_CUTOFF_DEFAULT || window.nexTodayIso();
+  try { localStorage.setItem("crm_nex_zero_cutoff", v); } catch (e) {}
+  if (typeof window.loadWeSendTab === "function") window.loadWeSendTab();
+  if (typeof window.renderClientTable === "function") window.renderClientTable();
+  if (typeof window.renderZeroPaidTable === "function") window.renderZeroPaidTable();
+};
+
+window.nexReachedZeroIso = function(maxDaysDelay, zeroDays) {
+  const thr = Number(zeroDays) || 30;
+  const extra = Math.max(0, Number(maxDaysDelay || 0) - thr);
+  const today = window.nexTodayIso();
+  const d = new Date(today + "T12:00:00");
+  d.setDate(d.getDate() - extra);
+  return window.nexParseIso(d.toISOString());
+};
+
+window.nexCrossedZeroAfterCutoff = function(maxDaysDelay, zeroDays) {
+  const cutoff = window.getNexZeroCutoff();
+  const reached = window.nexReachedZeroIso(maxDaysDelay, zeroDays);
+  return !!(reached && cutoff && reached >= cutoff);
+};
+
 window.ensureNexTodayPurged = async function() {
   try {
     if (localStorage.getItem("crm_nex_purged_2026-08-27") === "1") return 0;
@@ -20041,7 +20089,7 @@ window.updateNexEligibleHelp = function() {
           }).join("")}
         </ul>`
       : `<p style="margin:0;">Nenhum empreendimento está com cláusula suspensiva ativa no cadastro de centros de custo.</p>`;
-    zeroEl.innerHTML = `Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>${zeroDays} dias</strong> (prazo da régua de cobrança), <strong>sem cláusula suspensiva</strong> e ainda <strong>sem NEX gerada</strong>.
+    zeroEl.innerHTML = `Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>${zeroDays} dias</strong> (régua), <strong>sem cláusula suspensiva</strong>, ainda <strong>sem NEX gerada</strong>, e que <strong>atingiram a régua a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff().split("-").reverse().join("/") : "03/09/2026"}</strong> (controle novo — backlog antigo sem NEX não reaparece).
       <button type="button" onclick="window.toggleNexSuspensivaHelp(event)" title="Ver empreendimentos com cláusula suspensiva" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:4px;padding:0;border:none;border-radius:50%;background:#e2e8f0;color:#475569;cursor:pointer;vertical-align:middle;">
         <i data-lucide="info" style="width:12px;height:12px;"></i>
       </button>
@@ -20111,8 +20159,12 @@ window.nexFindReguaNode = function(kind) {
 window.nexReguaDays = function() {
   const zeroNode = window.nexFindReguaNode("zero");
   const stdNode = window.nexFindReguaNode("standard");
+  // Controle 0% reiniciado em 03/09/2026: limiar 30 dias (antes 31).
+  // Se a régua na timeline ainda estiver em 31+, forçamos 30.
+  let zero = Number(zeroNode && zeroNode.dias) || 30;
+  if (zero > 30) zero = 30;
   return {
-    zero: Number(zeroNode && zeroNode.dias) || 31,
+    zero,
     standard: Number(stdNode && stdNode.dias) || 61
   };
 };

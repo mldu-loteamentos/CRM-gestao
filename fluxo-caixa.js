@@ -168,6 +168,12 @@ const FluxoCaixaApp = {
       || s === "g_09_02" || s === "g_09_05";
   },
 
+  // Contas do plano que começam com 2 (despesas/saídas) entram sempre negativas no DFC
+  isExpenseAccount(categoryId) {
+    const digits = String(categoryId || "").replace(/\D/g, "");
+    return digits.charAt(0) === "2";
+  },
+
   emptyMonths(keys) {
     const o = {};
     keys.forEach(k => { o[k] = 0; });
@@ -202,6 +208,7 @@ const FluxoCaixaApp = {
       const node = nid === "g_outros" ? outros : byId[nid];
       if (!node) return;
       if (node.redutora && a.amount > 0) a.amount = -a.amount;
+      if (this.isExpenseAccount(a.categoryId) && a.amount > 0) a.amount = -a.amount;
       if (this.isCashOutflowGroup(node.id) && a.amount > 0) a.amount = -a.amount;
       this.addInto(node, a.month, a.amount);
       if (!accIndex[a.categoryId]) {

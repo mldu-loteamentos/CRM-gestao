@@ -1354,3 +1354,266 @@ document.addEventListener('tabChanged', (e) => {
         window.VerificarConstrucaoApp.init();
     }
 });
+
+// ─── Alerta: vistorias aguardando validação (perfil Back Office) ─────────────
+
+window.VISTORIA_ALERT_SNOOZE_KEY = "crm_vistoria_validation_snooze_until";
+window.VISTORIA_ALERT_ACK_KEY = "crm_vistoria_validation_ack_ids";
+
+window.userIsCobrancaBackOffice = function() {
+    const u = (window.AppState && AppState.currentUser) || null;
+    let logged = u;
+    if (!logged) {
+        try { logged = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { logged = null; }
+    }
+    if (!logged) return { ok: false, isAdmin: false, user: null };
+    const profile = String(logged.profile_name || logged.nivel || logged.role || "")
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+    const isAdmin = profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
+        || String(logged.role || "").toUpperCase().includes("ADMIN")
+        || (logged.email && /israel@mouraleite\.com\.br|admin@mouraleite\.com\.br/i.test(logged.email));
+    const isBackOffice = profile.includes("BACK OFFICE") || profile.includes("BACKOFFICE");
+    return { ok: isBackOffice || isAdmin, isAdmin, user: logged };
+};
+
+window.getVistoriaAlertAckIds = function() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(window.VISTORIA_ALERT_ACK_KEY) || "[]");
+        return Array.isArray(raw) ? raw.map(String) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+window.setVistoriaAlertAckIds = function(ids) {
+    try {
+        localStorage.setItem(window.VISTORIA_ALERT_ACK_KEY, JSON.stringify((ids || []).map(String)));
+    } catch (e) {}
+};
+
+window.getVistoriaAlertSnoozeUntil = function() {
+    const n = Number(localStorage.getItem(window.VISTORIA_ALERT_SNOOZE_KEY) || 0);
+    return Number.isFinite(n) ? n : 0;
+};
+
+window.scheduleVistoriaAlertSnoozeWake = function() {
+    if (window._vistoriaAlertSnoozeTimer) {
+        clearTimeout(window._vistoriaAlertSnoozeTimer);
+        window._vistoriaAlertSnoozeTimer = null;
+    }
+    const until = window.getVistoriaAlertSnoozeUntil();
+    const delay = until - Date.now();
+    if (delay <= 0) return;
+    window._vistoriaAlertSnoozeTimer = setTimeout(function() {
+        window._vistoriaAlertSnoozeTimer = null;
+        if (typeof window.checkVistoriasValidationAlerts === "function") {
+            window.checkVistoriasValidationAlerts();
+        }
+    }, delay);
+};
+
+window.toggleVistoriaSnoozeMenu = function(ev) {
+    if (ev) ev.stopPropagation();
+    const menu = document.getElementById("vistoria-snooze-menu");
+    if (!menu) return;
+    const open = menu.style.display === "flex";
+    menu.style.display = open ? "none" : "flex";
+    if (!open) {
+        const close = function(e) {
+            if (menu.contains(e.target)) return;
+            menu.style.display = "none";
+            document.removeEventListener("click", close);
+        };
+        setTimeout(function() { document.addEventListener("click", close); }, 0);
+    }
+};
+
+window.snoozeVistoriaValidationAlert = function(choice) {
+    const now = new Date();
+    let until = new Date(now);
+    if (choice === "amanha") {
+        until.setDate(until.getDate() + 1);
+    } else {
+        const mins = parseInt(choice, 10);
+        if (!mins) return;
+        until = new Date(now.getTime() + mins * 60 * 1000);
+    }
+    try {
+        localStorage.setItem(window.VISTORIA_ALERT_SNOOZE_KEY, String(until.getTime()));
+    } catch (e) {}
+    const modal = document.getElementById("modal-vistoria-validation-alerts");
+    if (modal) modal.style.display = "none";
+    const menu = document.getElementById("vistoria-snooze-menu");
+    if (menu) menu.style.display = "none";
+    window.scheduleVistoriaAlertSnoozeWake();
+    const mins = parseInt(choice, 10);
+    const label = choice === "amanha"
+        ? "amanhã"
+        : (mins >= 60 ? ((mins / 60) + " h") : (mins + " min"));
+    if (typeof window.showToast === "function") {
+        window.showToast("Lembrete de vistorias adiado para " + label + ".", "info");
+    }
+};
+
+window.markVistoriaValidationAlertsSeen = function() {
+    const pending = window._vistoriaAlertPendingIds || [];
+    const ack = new Set(window.getVistoriaAlertAckIds());
+    pending.forEach(id => ack.add(String(id)));
+    window.setVistoriaAlertAckIds([...ack]);
+    try { localStorage.removeItem(window.VISTORIA_ALERT_SNOOZE_KEY); } catch (e) {}
+    if (window._vistoriaAlertSnoozeTimer) {
+        clearTimeout(window._vistoriaAlertSnoozeTimer);
+        window._vistoriaAlertSnoozeTimer = null;
+    }
+    const modal = document.getElementById("modal-vistoria-validation-alerts");
+    if (modal) modal.style.display = "none";
+};
+
+window.goToVistoriaValidationFromAlert = function() {
+    const modal = document.getElementById("modal-vistoria-validation-alerts");
+    if (modal) modal.style.display = "none";
+    if (typeof window.switchTab === "function") {
+        window.switchTab("vistoria", "Verificar Construção");
+    }
+    setTimeout(() => {
+        if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.init === "function") {
+            window.VerificarConstrucaoApp.init();
+        }
+    }, 300);
+};
+
+window.fetchVistoriasAguardandoValidacao = async function() {
+    if (!window.firebaseDb || !window.firebaseCollections) return [];
+    const { collection, getDocs, query, where } = window.firebaseCollections;
+    try {
+        const q = query(collection(window.firebaseDb, "vistorias"), where("status", "==", "aguardando_validacao"));
+        const snap = await getDocs(q);
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+        console.warn("[Vistoria alerta] falha ao buscar aguardando_validacao:", e);
+        return [];
+    }
+};
+
+window.ensureVistoriaValidationAlertModal = function() {
+    let modal = document.getElementById("modal-vistoria-validation-alerts");
+    if (modal && !document.getElementById("vistoria-snooze-menu")) {
+        modal.remove();
+        modal = null;
+    }
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.id = "modal-vistoria-validation-alerts";
+    modal.style.cssText = "display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;";
+    modal.innerHTML = `
+        <div style="background: white; width: 620px; max-width: 90vw; border-radius: 12px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-height: 85vh; display: flex; flex-direction: column;">
+            <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 1.25rem;">Vistorias aguardando validação</h2>
+            <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">O vistoriador respondeu o link. Há vistorias com fotos prontas para validação:</p>
+            <div id="vistoria-validation-alerts-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; padding-right: 5px;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                <div style="position: relative;">
+                    <button type="button" class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.toggleVistoriaSnoozeMenu(event)">Lembrar Mais Tarde ▾</button>
+                    <div id="vistoria-snooze-menu" style="display: none; flex-direction: column; position: absolute; bottom: calc(100% + 6px); right: 0; min-width: 180px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 24px rgba(15,23,42,0.15); overflow: hidden; z-index: 2;">
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert(15)">15 min</button>
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert(30)">30 min</button>
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert(60)">1 h</button>
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert(120)">2 h</button>
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert(180)">3 h</button>
+                        <button type="button" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:10px 14px;font-size:0.9rem;color:#0f172a;cursor:pointer;border-top:1px solid #e2e8f0;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" onclick="window.snoozeVistoriaValidationAlert('amanha')">Amanhã</button>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-outline" style="border: 1px solid #cbd5e1; background: #fff; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.markVistoriaValidationAlertsSeen()">Ciente</button>
+                <button type="button" class="btn btn-primary" style="background: #105436; color: white; border: none; cursor: pointer; padding: 8px 16px; border-radius: 6px;" onclick="window.goToVistoriaValidationFromAlert()">Ir para Validar Vistoria</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+};
+
+window.checkVistoriasValidationAlerts = async function(isTest = false) {
+    const gate = window.userIsCobrancaBackOffice();
+    if (!isTest && !gate.ok) return;
+
+    if (!isTest) {
+        const snoozeUntil = window.getVistoriaAlertSnoozeUntil();
+        if (snoozeUntil && Date.now() < snoozeUntil) {
+            window.scheduleVistoriaAlertSnoozeWake();
+            return;
+        }
+        if (snoozeUntil && Date.now() >= snoozeUntil) {
+            try { localStorage.removeItem(window.VISTORIA_ALERT_SNOOZE_KEY); } catch (e) {}
+        }
+    }
+
+    const all = await window.fetchVistoriasAguardandoValidacao();
+    const pendingIds = all.map(v => String(v.id));
+    const ack = window.getVistoriaAlertAckIds().filter(id => pendingIds.includes(String(id)));
+    window.setVistoriaAlertAckIds(ack);
+    const ackSet = new Set(ack);
+    const pending = all.filter(v => !ackSet.has(String(v.id)));
+
+    if (!pending.length) {
+        if (isTest) alert("Nenhuma vistoria aguardando validação no momento.");
+        const existing = document.getElementById("modal-vistoria-validation-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
+
+    window._vistoriaAlertPendingIds = pending.map(v => String(v.id));
+    const modal = window.ensureVistoriaValidationAlertModal();
+    const listEl = document.getElementById("vistoria-validation-alerts-list");
+    if (!listEl) return;
+
+    listEl.innerHTML = pending.map(v => {
+        const esc = (s) => String(s == null ? "" : s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const cidade = esc(String(v.cidade || "-").toUpperCase());
+        const emp = esc(v.empreendimento || "-");
+        const unidade = esc(v.unidade || v.contractId || "-");
+        const titulo = esc(v.titulo || v.tituloKey || v.contractId || "-");
+        return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;">
+            <div style="font-weight:700;color:#0f172a;font-size:0.92rem;">${unidade} · ${titulo}</div>
+            <div style="font-size:0.8rem;color:#64748b;margin-top:4px;">${cidade} — ${emp}</div>
+            <div style="margin-top:6px;font-size:0.75rem;font-weight:700;color:#7c3aed;">Aguardando Validação</div>
+        </div>`;
+    }).join("");
+
+    modal.style.display = "flex";
+};
+
+window.startVistoriaValidationAlertListener = function() {
+    if (window._vistoriaAlertListenerStarted) return;
+    const gate = window.userIsCobrancaBackOffice();
+    if (!gate.ok) return;
+    if (!window.firebaseDb || !window.firebaseCollections) return;
+    window._vistoriaAlertListenerStarted = true;
+    const { collection, onSnapshot, query, where } = window.firebaseCollections;
+    try {
+        const q = query(collection(window.firebaseDb, "vistorias"), where("status", "==", "aguardando_validacao"));
+        window._unsubscribeVistoriaValidationAlert = onSnapshot(q, () => {
+            clearTimeout(window._vistoriaAlertDebounce);
+            window._vistoriaAlertDebounce = setTimeout(() => {
+                if (typeof window.checkVistoriasValidationAlerts === "function") {
+                    window.checkVistoriasValidationAlerts();
+                }
+            }, 800);
+        }, (err) => console.warn("[Vistoria alerta] listener:", err));
+    } catch (e) {
+        console.warn("[Vistoria alerta] não foi possível iniciar listener:", e);
+        window._vistoriaAlertListenerStarted = false;
+    }
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+        if (typeof window.startVistoriaValidationAlertListener === "function") {
+            window.startVistoriaValidationAlertListener();
+        }
+        if (typeof window.checkVistoriasValidationAlerts === "function") {
+            window.checkVistoriasValidationAlerts();
+        }
+    }, 3000);
+});
