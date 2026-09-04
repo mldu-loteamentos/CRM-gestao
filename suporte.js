@@ -185,6 +185,7 @@
   };
 
   let draftFiles = [];
+  let replyDraftFiles = [];
   let adminFilter = "pendentes";
   let adminListCache = [];
 
@@ -330,13 +331,14 @@
     const out = [];
     for (let i = 0; i < files.length; i++) {
       const raw = files[i];
-      const file = await compressImage(raw);
-      const safe = String(file.name || "print").replace(/[^a-zA-Z0-9.]/g, "_");
+      const isImg = String(raw.type || "").startsWith("image/");
+      const file = isImg ? await compressImage(raw) : raw;
+      const safe = String(file.name || "anexo").replace(/[^a-zA-Z0-9.]/g, "_");
       const path = `suporte/${ticketId}/${Date.now()}_${i}_${safe}`;
       const storageRef = refFunc(window.firebaseStorage, path);
       await uploadBytesFunc(storageRef, file);
       const url = await getDownloadURLFunc(storageRef);
-      out.push({ url, name: raw.name || safe });
+      out.push({ url, name: raw.name || safe, type: raw.type || file.type || "" });
     }
     return out;
   }
@@ -373,7 +375,10 @@
   function closeModal() {
     const ov = document.getElementById("suporte-overlay");
     if (ov) ov.style.display = "none";
+    const box = document.getElementById("suporte-modal-box");
+    if (box) box.classList.remove("is-detail");
     draftFiles = [];
+    replyDraftFiles = [];
   }
 
   function openModal() {
@@ -451,44 +456,57 @@
     refreshSubAba(pref);
   }
 
-  function renderPreviews() {
-    const box = document.getElementById("suporte-preview-list");
+  function renderPreviews(opts) {
+    opts = opts || {};
+    const listId = opts.listId || "suporte-preview-list";
+    const files = opts.files || draftFiles;
+    const box = document.getElementById(listId);
     if (!box) return;
-    if (!draftFiles.length) {
-      box.innerHTML = `<span class="suporte-hint">Nenhuma imagem selecionada.</span>`;
+    if (!files.length) {
+      box.innerHTML = `<span class="suporte-hint">${opts.emptyHint || "Nenhuma imagem selecionada."}</span>`;
       return;
     }
-    box.innerHTML = draftFiles.map((f, i) => {
-      const url = URL.createObjectURL(f);
-      return `<div class="suporte-thumb">
-        <img src="${url}" alt="">
+    box.innerHTML = files.map((f, i) => {
+      const isImg = String(f.type || "").startsWith("image/");
+      const url = isImg ? URL.createObjectURL(f) : "";
+      return `<div class="suporte-thumb${isImg ? "" : " is-file"}">
+        ${isImg ? `<img src="${url}" alt="">` : `<span class="suporte-file-chip" title="${esc(f.name)}">${esc((f.name || "arquivo").slice(0, 18))}</span>`}
         <button type="button" class="suporte-thumb-x" data-i="${i}" title="Remover">×</button>
       </div>`;
     }).join("");
     box.querySelectorAll(".suporte-thumb-x").forEach(btn => {
       btn.addEventListener("click", () => {
-        draftFiles.splice(Number(btn.getAttribute("data-i")), 1);
-        renderPreviews();
+        files.splice(Number(btn.getAttribute("data-i")), 1);
+        renderPreviews(opts);
       });
     });
   }
 
-  function bindFileInput() {
-    const input = document.getElementById("suporte-files");
+  function bindFileInput(opts) {
+    opts = opts || {};
+    const inputId = opts.inputId || "suporte-files";
+    const files = opts.files || draftFiles;
+    const allowDocs = !!opts.allowDocs;
+    const input = document.getElementById(inputId);
     if (!input) return;
     input.addEventListener("change", () => {
       const added = Array.from(input.files || []);
       added.forEach(f => {
-        if (!String(f.type || "").startsWith("image/")) return;
+        const isImg = String(f.type || "").startsWith("image/");
+        const isPdf = String(f.type || "") === "application/pdf" || /\.pdf$/i.test(f.name || "");
+        if (!isImg && !(allowDocs && isPdf)) return;
         if (f.size > MAX_BYTES) {
-          alert("A imagem \"" + f.name + "\" passa de 6 MB.");
+          alert("O arquivo \"" + f.name + "\" passa de 6 MB.");
           return;
         }
-        if (draftFiles.length >= MAX_IMAGES) return;
-        draftFiles.push(f);
+        if (files.length >= MAX_IMAGES) {
+          alert("Limite de " + MAX_IMAGES + " anexos por envio.");
+          return;
+        }
+        files.push(f);
       });
       input.value = "";
-      renderPreviews();
+      renderPreviews(opts);
     });
   }
 
@@ -517,10 +535,10 @@
           <select id="suporte-aba" class="form-control"></select>
         </div>
         <div class="form-group">
-          <label>Print da tela ${imgReq ? "*" : "(opcional)"}</label>
+          <label>Prints / imagens ${imgReq ? "*" : "(opcional)"}</label>
           <input type="file" id="suporte-files" class="form-control" accept="image/*" multiple>
           <div id="suporte-preview-list" class="suporte-preview-list"></div>
-          <small class="suporte-hint">Envie uma ou mais imagens (até ${MAX_IMAGES}). ${imgReq ? "Obrigatório." : ""}</small>
+          <small class="suporte-hint">Pode selecionar vários arquivos de uma vez (até ${MAX_IMAGES}). ${imgReq ? "Pelo menos um print é obrigatório." : ""}</small>
         </div>
         <div class="form-group">
           <label>${opts.tipo === "melhoria" ? "Descreva a melhoria *" : "Descreva o problema *"}</label>
@@ -756,6 +774,18 @@
     if (window.lucide) lucide.createIcons();
   }
 
+  function anexosHtml(imgs) {
+    const list = Array.isArray(imgs) ? imgs : [];
+    if (!list.length) return "";
+    return `<div class="suporte-preview-list">${list.map(im => {
+      const isImg = !im.type || String(im.type).startsWith("image/") || /\.(jpe?g|png|gif|webp)$/i.test(im.name || im.url || "");
+      if (isImg) {
+        return `<a class="suporte-thumb" href="${esc(im.url)}" target="_blank" rel="noopener"><img src="${esc(im.url)}" alt="${esc(im.name || "")}"></a>`;
+      }
+      return `<a class="suporte-thumb is-file" href="${esc(im.url)}" target="_blank" rel="noopener"><span class="suporte-file-chip">${esc(im.name || "Anexo")}</span></a>`;
+    }).join("")}</div>`;
+  }
+
   function threadHtml(t) {
     const msgs = Array.isArray(t.mensagens) ? t.mensagens : [];
     const imgs = Array.isArray(t.imagens) ? t.imagens : [];
@@ -768,14 +798,13 @@
         <span>${esc(fmtDate(t.createdAt))}</span>
       </div>
       <p class="suporte-desc">${esc(t.descricao)}</p>
-      ${imgs.length ? `<div class="suporte-preview-list">${imgs.map(im =>
-        `<a class="suporte-thumb" href="${esc(im.url)}" target="_blank" rel="noopener"><img src="${esc(im.url)}" alt="${esc(im.name || "")}"></a>`
-      ).join("")}</div>` : ""}
+      ${anexosHtml(imgs)}
       <div class="suporte-thread">
         ${msgs.length ? msgs.map(m => `
           <div class="suporte-msg ${m.papel === "admin" ? "admin" : "user"}">
             <strong>${esc(m.autorNome || m.papel)} · ${esc(fmtDate(m.at))}</strong>
-            <p>${esc(m.texto)}</p>
+            ${m.texto ? `<p>${esc(m.texto)}</p>` : ""}
+            ${anexosHtml(m.imagens)}
           </div>`).join("") : `<p class="suporte-hint">Ainda não há respostas.</p>`}
       </div>`;
   }
@@ -789,7 +818,9 @@
 
   async function openDetail(id, ctx) {
     ensureShell();
+    replyDraftFiles = [];
     const box = document.getElementById("suporte-modal-box");
+    box.classList.add("is-detail");
     box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-hint">Carregando…</p></div>`;
     openModal();
     try {
@@ -797,6 +828,7 @@
       const mine = !!(ctx && ctx.mine);
       const adminView = !!(ctx && ctx.admin) || (isAdmin() && !mine);
       const canReplyUser = mine || userKey() === String(t.userId || "").toLowerCase() || userKey() === String(t.userEmail || "").toLowerCase();
+      const canAttach = adminView || (canReplyUser && t.status !== "atendido");
       box.innerHTML = `
         <div class="suporte-modal-head">
           <h2><i data-lucide="message-square"></i> Chamado</h2>
@@ -804,13 +836,28 @@
         </div>
         <div class="suporte-modal-body" id="suporte-detail-body">${threadHtml(t)}</div>
         <div class="suporte-modal-foot suporte-reply-foot">
-          <textarea id="suporte-reply" class="form-control" rows="3" placeholder="${adminView ? "Resposta ou pedido de mais informações" : "Sua resposta"}"></textarea>
+          ${canAttach ? `
+            <textarea id="suporte-reply" class="form-control" rows="3" placeholder="${adminView ? "Resposta ou pedido de mais informações" : "Sua resposta"}"></textarea>
+            <div class="suporte-reply-attach">
+              <div class="suporte-reply-attach-row">
+                <label class="suporte-attach-btn" for="suporte-reply-files">
+                  <i data-lucide="paperclip" style="width:16px;height:16px;"></i>
+                  ${adminView ? "Anexar prints ou PDF" : "Anexar mais prints"}
+                </label>
+                <input type="file" id="suporte-reply-files" accept="${adminView ? "image/*,application/pdf" : "image/*"}" multiple hidden>
+                <small class="suporte-hint">Até ${MAX_IMAGES} arquivos · máx. 6 MB cada</small>
+              </div>
+              <div id="suporte-reply-preview" class="suporte-preview-list"></div>
+            </div>
+          ` : ""}
           <div class="suporte-reply-actions">
             ${adminView ? `
               <button type="button" class="btn btn-cancel" id="suporte-back-admin">Voltar</button>
-              <button type="button" class="btn btn-outline" id="suporte-ask-info">Solicitar mais informações</button>
-              <button type="button" class="btn btn-primary" id="suporte-mark-done">Marcar como atendido</button>
-              <button type="button" class="btn btn-primary" id="suporte-send-admin">Enviar resposta</button>
+              <div class="suporte-reply-actions-main">
+                <button type="button" class="btn btn-outline" id="suporte-ask-info">Solicitar mais informações</button>
+                <button type="button" class="btn btn-outline suporte-btn-done" id="suporte-mark-done">Marcar como atendido</button>
+                <button type="button" class="btn btn-primary suporte-btn-send" id="suporte-send-admin">Enviar resposta</button>
+              </div>
             ` : `
               <button type="button" class="btn btn-cancel" id="suporte-back-mine">Voltar</button>
               ${canReplyUser && t.status !== "atendido" ? `<button type="button" class="btn btn-primary" id="suporte-send-user">Responder</button>` : ""}
@@ -819,9 +866,23 @@
         </div>`;
       document.getElementById("suporte-close-x").onclick = closeModal;
       const backAdmin = document.getElementById("suporte-back-admin");
-      if (backAdmin) backAdmin.onclick = () => { closeModal(); };
+      if (backAdmin) backAdmin.onclick = () => { box.classList.remove("is-detail"); closeModal(); };
       const backMine = document.getElementById("suporte-back-mine");
-      if (backMine) backMine.onclick = () => openMine();
+      if (backMine) backMine.onclick = () => { box.classList.remove("is-detail"); openMine(); };
+      if (canAttach) {
+        bindFileInput({
+          inputId: "suporte-reply-files",
+          listId: "suporte-reply-preview",
+          files: replyDraftFiles,
+          allowDocs: adminView,
+          emptyHint: "Nenhum anexo na resposta."
+        });
+        renderPreviews({
+          listId: "suporte-reply-preview",
+          files: replyDraftFiles,
+          emptyHint: "Nenhum anexo na resposta."
+        });
+      }
       const sendUser = document.getElementById("suporte-send-user");
       if (sendUser) sendUser.onclick = () => replyTicket(id, { asAdmin: false, status: "pendente" });
       const sendAdmin = document.getElementById("suporte-send-admin");
@@ -832,6 +893,7 @@
       if (done) done.onclick = () => replyTicket(id, { asAdmin: true, status: "atendido", allowEmpty: true });
       if (window.lucide) lucide.createIcons();
     } catch (err) {
+      box.classList.remove("is-detail");
       box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-empty">${esc(err.message)}</p></div>
         <div class="suporte-modal-foot"><button type="button" class="btn btn-cancel" onclick="document.getElementById('suporte-overlay').style.display='none'">Fechar</button></div>`;
     }
@@ -839,30 +901,49 @@
 
   async function replyTicket(id, opts) {
     const text = String((document.getElementById("suporte-reply") || {}).value || "").trim();
-    if (!opts.allowEmpty && !text) {
-      alert(opts.requireText ? "Escreva o que precisa do usuário." : "Escreva a mensagem.");
+    const filesToSend = replyDraftFiles.slice();
+    if (!opts.allowEmpty && !text && !filesToSend.length) {
+      alert(opts.requireText ? "Escreva o que precisa do usuário." : "Escreva a mensagem ou anexe um arquivo.");
       return;
     }
+    if (opts.requireText && !text) {
+      alert("Escreva o que precisa do usuário.");
+      return;
+    }
+    const sendBtns = ["suporte-send-admin", "suporte-send-user", "suporte-ask-info", "suporte-mark-done"]
+      .map((bid) => document.getElementById(bid))
+      .filter(Boolean);
+    sendBtns.forEach((b) => { b.disabled = true; });
     try {
       const t = await loadTicket(id);
       const u = currentUser();
+      let anexosMsg = [];
+      if (filesToSend.length) {
+        anexosMsg = await uploadImages(filesToSend, id);
+      }
       const mensagens = Array.isArray(t.mensagens) ? t.mensagens.slice() : [];
-      if (text) {
+      if (text || anexosMsg.length) {
         mensagens.push({
           autorNome: u.name || (opts.asAdmin ? "Administrador" : "Usuário"),
           autorEmail: String(u.email || "").toLowerCase(),
           papel: opts.asAdmin ? "admin" : "usuario",
-          texto: text,
+          texto: text || (anexosMsg.length ? "(anexos)" : ""),
+          imagens: anexosMsg,
           at: new Date().toISOString()
         });
       }
+      const imagens = (Array.isArray(t.imagens) ? t.imagens.slice() : []).concat(anexosMsg);
       const { db, c } = fb();
       await c.updateDoc(c.doc(db, COLLECTION, id), {
         mensagens,
+        imagens,
         status: opts.status || t.status,
         updatedAt: new Date().toISOString()
       });
+      replyDraftFiles = [];
       if (opts.asAdmin) {
+        const box = document.getElementById("suporte-modal-box");
+        if (box) box.classList.remove("is-detail");
         closeModal();
         if (window.activeAppTab === "suporte") renderAdmin();
         alert("Atualizado.");
@@ -871,6 +952,7 @@
       }
     } catch (err) {
       alert("Não foi possível responder: " + (err.message || err));
+      sendBtns.forEach((b) => { b.disabled = false; });
     }
   }
 
