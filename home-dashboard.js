@@ -241,7 +241,7 @@
   unfinishedYesterday(opName) {
     let cache = {};
     try {
-      cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
+      cache = JSON.parse(localStorage.getItem(window.CRM_DAILY_QUEUE_CACHE_KEY || 'crm_daily_queue_cache_v4') || localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
     } catch (e) { cache = {}; }
     const today = new Date().toISOString().split('T')[0];
     const prefixes = [opName, this.normalizeOperatorKey(opName)];
@@ -409,7 +409,7 @@
     const user = this.getViewUser();
     const opName = user?.sienge_user || user?.name || '';
     try {
-      const cache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
+      const cache = JSON.parse(localStorage.getItem(window.CRM_DAILY_QUEUE_CACHE_KEY || 'crm_daily_queue_cache_v4') || localStorage.getItem('crm_daily_queue_cache_v3') || localStorage.getItem('crm_daily_queue_cache_v2') || '{}') || {};
       const prefixes = [opName, this.normalizeOperatorKey(opName)];
       Object.keys(cache).forEach(k => {
         const d = k.split('_').pop();

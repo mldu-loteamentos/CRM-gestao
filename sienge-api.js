@@ -818,7 +818,14 @@ const SiengeApiService = {
                            console.log(`%c[Sienge] ✅ Último Pagamento restaurado do IndexedDB.`, 'color:#10b981;font-weight:bold;');
                        } catch(e) {}
                    }
-                   window._siengeLastFetchTime = { elapsed: "0.1", count: localCache.data.length, at: localCache.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
+                   window._siengeLastFetchTime = {
+                     elapsed: "0.1",
+                     count: localCache.data.length,
+                     at: localCache.timestampStr || new Date().toLocaleTimeString('pt-BR'),
+                     atFull: localCache.atFull || localCache.timestampStr || new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                     cached: true
+                   };
+                   if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
                    return localCache.data;
                }
            } catch (e) {
@@ -859,13 +866,21 @@ const SiengeApiService = {
 
                    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
                    console.log(`%c[Sienge] ✅ Base carregada do Firestore em ${elapsed}s — ${result.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
-                   window._siengeLastFetchTime = { elapsed, count: result.length, at: meta.timestampStr || new Date().toLocaleTimeString('pt-BR'), cached: true };
+                   window._siengeLastFetchTime = {
+                     elapsed,
+                     count: result.length,
+                     at: meta.timestampStr || new Date().toLocaleTimeString('pt-BR'),
+                     atFull: meta.atFull || meta.timestampStr || new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                     cached: true
+                   };
+                   if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
                    
                    // Salva no IndexedDB para as próximas vezes serem instantâneas!
                    IdbDefaultersCache.set(`defaulters_${todayStr}`, {
                        data: result,
                        paidMap: meta.paidMap,
-                       timestampStr: meta.timestampStr
+                       timestampStr: meta.timestampStr,
+                       atFull: meta.atFull || null
                    }).catch(() => {});
 
                    return result;
@@ -894,7 +909,9 @@ const SiengeApiService = {
           );
           
           const timestampStr = new Date().toLocaleTimeString('pt-BR');
-          window._siengeLastFetchTime = { elapsed, count: result.length, at: timestampStr, cached: false };
+          const atFull = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+          window._siengeLastFetchTime = { elapsed, count: result.length, at: timestampStr, atFull, cached: false };
+          if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
           
           if (window.firebaseDb && window.firebaseCollections) {
               const todayStr = new Date().toISOString().split('T')[0];
@@ -922,6 +939,7 @@ const SiengeApiService = {
                       date: todayStr, 
                       chunks: numChunks, 
                       timestampStr: timestampStr,
+                      atFull: atFull,
                       paidMap: paidMapStr,
                       createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
                   });
@@ -941,7 +959,8 @@ const SiengeApiService = {
                    await IdbDefaultersCache.set(`defaulters_${todayStr}`, {
                        data: result,
                        paidMap: paidMapStr,
-                       timestampStr: timestampStr
+                       timestampStr: timestampStr,
+                       atFull: atFull
                    });
                    console.log(`%c[IndexedDB] Cache diário salvo localmente com sucesso!`, 'color:#3b82f6;font-weight:bold;');
                 } catch(e) {

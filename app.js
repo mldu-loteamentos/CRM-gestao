@@ -1806,6 +1806,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "dashboard") {
     if (!AppState.dashboardRendered) {
       loadDashboardData();
+    } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
+      window.updateFilaCacheStatusIndicator();
     }
   } else if (tabId === "configuracoes" || tabId === "regras-negociacao" || tabId === "regras-cobranca") {
     if (typeof renderRulesSettingsTable === "function") renderRulesSettingsTable();
@@ -1830,6 +1832,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.loadMapaList) window.loadMapaList();
   } else if (tabId === "zeropaid") {
     loadZeroPaidTab();
+    if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
   } else if (tabId === "wesend") {
     loadWeSendTab();
   } else if (tabId === "preambles") {
@@ -3818,6 +3821,33 @@ window.getClientJudicialPhaseInfo = function(client) {
   return { fase, faseLabel, faseId: stage ? stage.id : (last.faseId || null), enteredAt, prazo: prazoDate, daysLeft, status };
 };
 
+window.updateFilaCacheStatusIndicator = function() {
+  const info = window._siengeLastFetchTime;
+  const targets = [
+    document.getElementById("cache-status-indicator"),
+    document.getElementById("zeropaid-cache-status-indicator")
+  ];
+  if (!info) {
+    targets.forEach(function(el) {
+      if (el) el.style.display = "none";
+    });
+    return;
+  }
+  const when = info.atFull || (info.at
+    ? (String(info.at).indexOf("/") !== -1 ? info.at : (`hoje às ${info.at}`))
+    : "");
+  const text = info.cached
+    ? `Base histórica · Atualizada em ${when}`
+    : `Nova atualização · ${when}`;
+  const color = info.cached ? "#10b981" : "#f59e0b";
+  targets.forEach(function(el) {
+    if (!el) return;
+    el.style.display = "block";
+    el.textContent = text;
+    el.style.color = color;
+  });
+};
+
 async function loadDashboardData(forceRefresh = false) {
     if (window._isDefaultersLoading) return;
     window._isDefaultersLoading = true;
@@ -4356,16 +4386,8 @@ document.addEventListener("click", function(e) {
           AppState.defaultersBills = bills;
           AppState.defaultersLoaded = true;
           
-          const cacheInd = document.getElementById("cache-status-indicator");
-          if (cacheInd && window._siengeLastFetchTime) {
-              cacheInd.style.display = 'block';
-              if (window._siengeLastFetchTime.cached) {
-                 cacheInd.textContent = `Base histórica carregada (Atualizada hoje às ${window._siengeLastFetchTime.at})`;
-                 cacheInd.style.color = '#10b981';
-              } else {
-                 cacheInd.textContent = `Nova atualização salva hoje às ${window._siengeLastFetchTime.at}`;
-                 cacheInd.style.color = '#f59e0b';
-              }
+          if (typeof window.updateFilaCacheStatusIndicator === "function") {
+            window.updateFilaCacheStatusIndicator();
           }
 
           if (typeof window.updateOperatorTabsUI === 'function') {
@@ -4385,6 +4407,8 @@ document.addEventListener("click", function(e) {
         setInputDone(zeroInput, zeroIcon);
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
+  } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
+    window.updateFilaCacheStatusIndicator();
   }
 
   if (bills.length === 0) {
@@ -15049,16 +15073,44 @@ window.getActiveQueueDate = function() {
     return window.localDateStr(current);
 };
 
+// v4: invalida filas do dia após remanejamento de cidades/operadores (2026-09-04)
+window.CRM_DAILY_QUEUE_CACHE_KEY = "crm_daily_queue_cache_v4";
+
+window.getCityAssignmentCacheSig = function() {
+  const rules = (window.AppState && AppState.rules) || {};
+  const parts = [];
+  Object.keys(rules).sort().forEach(function(key) {
+    if (!String(key).startsWith("CID_")) return;
+    const r = rules[key];
+    if (!r) return;
+    const ops = Array.isArray(r.operator) ? r.operator.slice().sort().join(",") : String(r.operator || "");
+    parts.push(key + "=" + ops + "@" + (r.opsUpdatedAt || 0));
+  });
+  return parts.join(";") + "|saved=" + (rules._rulesSavedAt || 0);
+};
+
+window.invalidateDailyQueueCache = function(reason) {
+  try {
+    window._dailyQueueCache = {};
+    window.agendaItemsCache = {};
+    localStorage.removeItem(window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v4");
+    localStorage.removeItem("crm_daily_queue_cache_v3");
+    localStorage.removeItem("crm_daily_queue_cache_v2");
+    console.log("[Fila] Cache diário invalidado" + (reason ? (": " + reason) : ""));
+  } catch (e) {}
+};
+
 window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const todayStr = window.localDateStr ? window.localDateStr() : new Date().toISOString().split("T")[0];
   const dateKey = window.promiseDateKey ? window.promiseDateKey(dateStr) : dateStr;
   const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === 'function'
       ? window.occurrenceAuthorMatchesOperator(a, b)
       : String(a) === String(b);
+  const cacheStorageKey = window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v4";
   
   if (!window._dailyQueueCache) {
       try {
-          window._dailyQueueCache = JSON.parse(localStorage.getItem('crm_daily_queue_cache_v3') || '{}');
+          window._dailyQueueCache = JSON.parse(localStorage.getItem(cacheStorageKey) || '{}');
           if (!window._dailyQueueCache || typeof window._dailyQueueCache !== 'object') window._dailyQueueCache = {};
       } catch(e) {
           window._dailyQueueCache = {};
@@ -15116,7 +15168,8 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const r6_pct = (opConfig.r6 || 0) / 100;
   const r7_pct = (opConfig.r7 || 0) / 100;
   const paymentDays = opConfig.paymentDays !== undefined ? opConfig.paymentDays : 15;
-  const configSig = [capacity, opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0, paymentDays].join('|');
+  const citySig = typeof window.getCityAssignmentCacheSig === "function" ? window.getCityAssignmentCacheSig() : "";
+  const configSig = [capacity, opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0, paymentDays, citySig].join('|');
 
   const cachedEntry = window._dailyQueueCache[cacheKey];
   const cachedItems = unwrapQueueCache(cachedEntry);
@@ -15464,7 +15517,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   
   window._dailyQueueCache[cacheKey] = { sig: configSig, items: resultQueue.slice(0, capacity) };
-  localStorage.setItem('crm_daily_queue_cache_v3', JSON.stringify(window._dailyQueueCache));
+  localStorage.setItem(cacheStorageKey, JSON.stringify(window._dailyQueueCache));
   return applyTouchedFilter(resultQueue.slice(0, capacity));
 };
 
@@ -21107,6 +21160,9 @@ window.markCityAssignmentManual = function(ruleId) {
   AppState.rules[id].opsUpdatedAt = Date.now();
   AppState.rules._rulesSavedAt = Date.now();
   try { localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules)); } catch (e) {}
+  if (typeof window.invalidateDailyQueueCache === "function") {
+    window.invalidateDailyQueueCache("atribuição de cidade alterada");
+  }
 };
 
 window.addOperatorToRule = function(ruleId, op) {
@@ -22062,9 +22118,14 @@ window.saveFilaConfig = function() {
   
   localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
   try {
-    window._dailyQueueCache = {};
-    localStorage.removeItem('crm_daily_queue_cache_v3');
-    window.agendaItemsCache = {};
+    if (typeof window.invalidateDailyQueueCache === "function") {
+      window.invalidateDailyQueueCache("configuração da fila alterada");
+    } else {
+      window._dailyQueueCache = {};
+      localStorage.removeItem('crm_daily_queue_cache_v4');
+      localStorage.removeItem('crm_daily_queue_cache_v3');
+      window.agendaItemsCache = {};
+    }
   } catch (e) {}
   alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso!`);
 };
@@ -22264,6 +22325,9 @@ window.saveRulesConfig = function(scope) {
         if (nameInput) etapa.nome = nameInput.value;
       });
       localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+    }
+    if (typeof window.invalidateDailyQueueCache === "function") {
+      window.invalidateDailyQueueCache("regras de cidades/operadores salvas");
     }
   }
 

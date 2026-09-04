@@ -2929,7 +2929,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
               </button>
               <div class="fila-align-side">
-                <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap;"></span>
+                <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap; line-height: 1.25;"></span>
               </div>
 
               <div id="operator-tabs-container" class="operator-tabs" style="min-width: 0; width: 100%;">
@@ -3275,22 +3275,35 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
           <!-- Painel de Busca e Filtros -->
           <div class="search-filter-panel" style="margin-top: 1.5rem; position: relative;">
-            <div style="display: flex; gap: 12px; width: 100%; align-items: center; flex-wrap: wrap;">
-              <div class="search-box-wrapper" style="flex: 1; min-width: 300px;">
+            <div class="search-filter-toolbar">
+              <div class="search-box-wrapper">
                 <input type="text" id="zeropaid-search-input" class="search-input"
                   placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" oninput="handleZeropaidAutocomplete(this.value)" autocomplete="off">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-zeropaid-adv-filters" class="btn btn-secondary" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('zeropaid')" style="background-color: #f97316; color: white; display: inline-flex; align-items: center; gap: 6px; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
-                <i data-lucide="filter" style="width:14px;height:14px;"></i> Filtros Avançados
-                <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold;">0</span>
+              <button id="btn-refresh-zeropaid" class="btn btn-primary fila-align-btn"
+                style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;"
+                onclick="(async function(){ AppState.defaultersBills=[]; AppState.defaultersLoaded=false; AppState.dashboardRendered=false; await loadDashboardData(true); if(typeof loadZeroPaidTab==='function') loadZeroPaidTab(); })()">
+                <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
               </button>
-              <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary" onclick="gerarMapaZeropaidPDF()" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none; height: 36px; min-width: 188px; box-sizing: border-box;" title="Gerar Mapa de Clientes 0% Pago">
-                <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa 0% Pago
+              <div class="fila-align-side">
+                <span id="zeropaid-cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap;"></span>
+              </div>
+
+              <div style="min-width: 0; width: 100%;"></div>
+              <button id="btn-zeropaid-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('zeropaid')" style="background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
+                <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
               </button>
-              <button class="btn btn-secondary" onclick="exportZeropaidToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer; height: 36px;" title="Exportar tabela atual para Excel">
-                <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
-              </button>
+              <div class="fila-align-side" style="gap: 8px;">
+                <div style="border-left: 2px solid #cbd5e1; height: 28px; flex-shrink: 0;"></div>
+                <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary" onclick="gerarMapaZeropaidPDF()" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none; height: 36px; white-space: nowrap; box-sizing: border-box;" title="Gerar Mapa de Clientes 0% Pago">
+                  <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa 0% Pago
+                </button>
+                <button class="btn btn-secondary" onclick="exportZeropaidToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer; height: 36px; white-space: nowrap;" title="Exportar tabela atual para Excel">
+                  <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
+                </button>
+              </div>
             </div>
             <div id="zeropaid-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
           </div>

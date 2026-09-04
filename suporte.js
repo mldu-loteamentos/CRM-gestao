@@ -616,11 +616,82 @@
       if (window.activeAppTab === "suporte") renderAdmin();
     } catch (err) {
       console.error(err);
-      alert("Não foi possível enviar o chamado: " + (err.message || err));
+      const msg = String((err && err.message) || err || "");
+      const isPerm = /insufficient permissions|permission-denied|PERMISSION_DENIED/i.test(msg)
+        || (err && err.code === "permission-denied");
+      if (isPerm) {
+        try {
+          queuePendingTicket({
+            tipo,
+            modulo,
+            subitem,
+            aba,
+            subitemLabel: subObj ? subObj.label : "",
+            abaLabel: (findAba(modulo, subitem, aba) || {}).label || "",
+            localPath: localPathOf({ modulo, subitem, aba }),
+            descricao,
+            filesCount: draftFiles.length,
+            userName: (currentUser() || {}).name || "",
+            userEmail: String((currentUser() || {}).email || "").toLowerCase(),
+            createdAt: new Date().toISOString()
+          });
+        } catch (e) {}
+        const mailOk = openTicketMailtoFallback({
+          tipo,
+          modulo,
+          subitem,
+          aba,
+          descricao,
+          filesCount: draftFiles.length
+        });
+        alert(
+          "O Firebase bloqueou o envio do chamado (regras de segurança / Missing or insufficient permissions).\n\n"
+          + "O chamado ficou salvo neste navegador para não se perder"
+          + (mailOk ? " e o e-mail de suporte foi aberto com o texto." : ".")
+          + "\n\nPeça ao administrador liberar escrita na collection \"suporte_chamados\" (e Storage em suporte/) no Console do Firebase."
+        );
+      } else {
+        alert("Não foi possível enviar o chamado: " + msg);
+      }
       if (btn) {
         btn.disabled = false;
         btn.textContent = "Enviar";
       }
+    }
+  }
+
+  function queuePendingTicket(ticket) {
+    const key = "crm_suporte_pending";
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(key) || "[]") || []; } catch (e) { list = []; }
+    if (!Array.isArray(list)) list = [];
+    list.unshift(Object.assign({ id: "local-" + Date.now() }, ticket));
+    localStorage.setItem(key, JSON.stringify(list.slice(0, 50)));
+  }
+
+  function openTicketMailtoFallback(ticket) {
+    try {
+      const to = "israel@mouraleite.com.br";
+      const tipoLabel = TIPO_LABEL[ticket.tipo] || ticket.tipo || "Chamado";
+      const subject = encodeURIComponent(`[CRM Suporte] ${tipoLabel} — ${ticket.modulo || ""}`);
+      const body = encodeURIComponent(
+        `Tipo: ${tipoLabel}\n`
+        + `Módulo: ${ticket.modulo || ""}\n`
+        + `Subitem: ${ticket.subitem || ""}\n`
+        + `Aba: ${ticket.aba || ""}\n`
+        + `Usuário: ${(currentUser() || {}).name || ""} <${(currentUser() || {}).email || ""}>\n`
+        + `Prints anexados no formulário: ${ticket.filesCount || 0} (reenvie manualmente se necessário)\n\n`
+        + `Descrição:\n${ticket.descricao || ""}\n`
+      );
+      const a = document.createElement("a");
+      a.href = `mailto:${to}?subject=${subject}&body=${body}`;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 

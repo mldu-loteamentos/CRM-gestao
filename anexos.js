@@ -16,6 +16,84 @@ const AnexosState = {
   downloadedFilesIds: new Set()
 };
 
+function anexosTodayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function anexosStoredToIso(stored) {
+  if (!stored) return "";
+  const t = String(stored).trim();
+  if (/^\d{4}[-.]\d{2}[-.]\d{2}$/.test(t)) return t.replace(/\./g, "-");
+  const br = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return "";
+}
+
+function anexosStoredToBr(stored) {
+  const iso = anexosStoredToIso(stored);
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function anexosIsoToStored(iso) {
+  if (!iso) return "";
+  return String(iso).slice(0, 10).replace(/-/g, ".");
+}
+
+function anexosBrToIso(br) {
+  const digits = String(br || "").replace(/\D/g, "");
+  if (digits.length !== 8) return "";
+  const d = digits.slice(0, 2);
+  const m = digits.slice(2, 4);
+  const y = digits.slice(4, 8);
+  const iso = `${y}-${m}-${d}`;
+  const dt = new Date(`${iso}T12:00:00`);
+  if (isNaN(dt.getTime()) || dt.getDate() !== Number(d) || (dt.getMonth() + 1) !== Number(m) || dt.getFullYear() !== Number(y)) {
+    return "";
+  }
+  if (iso > anexosTodayIso()) return "";
+  return iso;
+}
+
+function anexosApplyBrDateMask(raw) {
+  const digits = String(raw || "").replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function anexosDateFieldHtml({ textId, pickerId, stored, size = "normal" }) {
+  const iso = anexosStoredToIso(stored);
+  const br = anexosStoredToBr(stored);
+  const max = anexosTodayIso();
+  const pad = size === "sm" ? "6px 8px" : "8px 10px";
+  const font = size === "sm" ? "0.85rem" : "0.95rem";
+  const btnPad = size === "sm" ? "6px 8px" : "8px 10px";
+  return `
+    <div class="anexos-date-field" style="display:flex; align-items:center; gap:6px; width:100%; position:relative;">
+      <input type="text" id="${textId}" class="form-control" inputmode="numeric" autocomplete="off"
+        placeholder="dd/mm/aaaa" maxlength="10" value="${br}"
+        style="flex:1; min-width:0; padding:${pad}; font-size:${font}; letter-spacing:0.02em;"
+        oninput="AnexosApp.onDateTextInput('${textId}', '${pickerId}', this)"
+        onblur="AnexosApp.onDateTextBlur('${textId}', '${pickerId}', this)"
+        onkeydown="if(event.key==='Enter'){ event.preventDefault(); this.blur(); }">
+      <button type="button" class="btn btn-outline" title="Abrir calendário" aria-label="Abrir calendário"
+        style="padding:${btnPad}; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;"
+        onclick="AnexosApp.openDatePicker('${pickerId}')">
+        <i data-lucide="calendar" style="width:16px;height:16px;"></i>
+      </button>
+      <button type="button" class="btn btn-outline" title="Usar data de hoje" aria-label="Hoje"
+        style="padding:${btnPad}; font-size:0.75rem; font-weight:700; flex-shrink:0; white-space:nowrap;"
+        onclick="AnexosApp.setDateToday('${textId}', '${pickerId}')">Hoje</button>
+      <input type="date" id="${pickerId}" max="${max}" value="${iso}"
+        style="position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; border:0;"
+        onchange="AnexosApp.onDatePicked('${textId}', '${pickerId}', this)">
+    </div>
+  `;
+}
+
 function anexosApiUrl(path) {
   const host = window.location.hostname;
   const isLocal = !host || host === 'localhost' || host === '127.0.0.1';
@@ -235,14 +313,14 @@ function renderAnexosModule() {
               </div>
               <div class="form-group" style="flex: 1; margin-bottom: 0;">
                 <label>Data Global do Documento</label>
-                <input type="date" id="anexos-data" class="form-control" max="${new Date().toISOString().split('T')[0]}" onchange="AnexosApp.setData()" value="${AnexosState.dataDocumento ? AnexosState.dataDocumento.replace(/\./g, '-') : ''}">
+                ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
               </div>
             </div>
             ` : `
             <div style="display: flex; gap: 15px; margin-bottom: 0;">
               <div class="form-group" style="flex: 1; margin-bottom: 0;">
                 <label>Data Global do Documento</label>
-                <input type="date" id="anexos-data" class="form-control" max="${new Date().toISOString().split('T')[0]}" onchange="AnexosApp.setData()" value="${AnexosState.dataDocumento ? AnexosState.dataDocumento.replace(/\./g, '-') : ''}">
+                ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
               </div>
               <div style="flex: 1;"></div>
             </div>
@@ -643,9 +721,100 @@ const AnexosApp = {
   },
 
   setData() {
-    const val = document.getElementById('anexos-data').value;
-    AnexosState.dataDocumento = val ? val.replace(/-/g, '.') : '';
-    renderAnexosModule();
+    const textEl = document.getElementById("anexos-data");
+    const pickerEl = document.getElementById("anexos-data-picker");
+    const iso = (pickerEl && pickerEl.value) || anexosBrToIso(textEl && textEl.value);
+    AnexosState.dataDocumento = iso ? anexosIsoToStored(iso) : "";
+    if (AnexosState.files.length) this.renderFilesList();
+    else this.checkCanSend();
+  },
+
+  commitDateFields(textId, pickerId, iso) {
+    const textEl = document.getElementById(textId);
+    const pickerEl = document.getElementById(pickerId);
+    const safeIso = iso || "";
+    if (textEl) {
+      textEl.value = safeIso ? anexosStoredToBr(safeIso) : "";
+      textEl.style.borderColor = "";
+    }
+    if (pickerEl) pickerEl.value = safeIso;
+
+    if (textId === "anexos-data") {
+      AnexosState.dataDocumento = safeIso ? anexosIsoToStored(safeIso) : "";
+      if (AnexosState.files.length) this.renderFilesList();
+      else this.checkCanSend();
+      return;
+    }
+
+    const m = String(textId || "").match(/^anexo-file-date-(.+)$/);
+    if (m) {
+      const file = AnexosState.files.find((f) => String(f.id) === String(m[1]));
+      if (file) {
+        file.dateOverride = safeIso ? anexosIsoToStored(safeIso) : "";
+        this.renderFilesList();
+      }
+    }
+  },
+
+  onDateTextInput(textId, pickerId, el) {
+    if (!el) return;
+    const masked = anexosApplyBrDateMask(el.value);
+    el.value = masked;
+    if (masked.length === 10) {
+      const iso = anexosBrToIso(masked);
+      if (iso) {
+        el.style.borderColor = "#86efac";
+        this.commitDateFields(textId, pickerId, iso);
+      } else {
+        el.style.borderColor = "#fca5a5";
+      }
+    } else {
+      el.style.borderColor = "";
+    }
+  },
+
+  onDateTextBlur(textId, pickerId, el) {
+    if (!el) return;
+    const raw = String(el.value || "").trim();
+    if (!raw) {
+      this.commitDateFields(textId, pickerId, "");
+      return;
+    }
+    const iso = anexosBrToIso(raw);
+    if (!iso) {
+      el.style.borderColor = "#fca5a5";
+      alert("Data inválida. Use dd/mm/aaaa (não pode ser futura).");
+      el.focus();
+      return;
+    }
+    this.commitDateFields(textId, pickerId, iso);
+  },
+
+  onDatePicked(textId, pickerId, el) {
+    const iso = el && el.value ? el.value : "";
+    if (iso && iso > anexosTodayIso()) {
+      alert("A data não pode ser futura.");
+      if (el) el.value = anexosTodayIso();
+      this.commitDateFields(textId, pickerId, anexosTodayIso());
+      return;
+    }
+    this.commitDateFields(textId, pickerId, iso);
+  },
+
+  openDatePicker(pickerId) {
+    const picker = document.getElementById(pickerId);
+    if (!picker) return;
+    try {
+      if (typeof picker.showPicker === "function") picker.showPicker();
+      else picker.click();
+    } catch (e) {
+      picker.focus();
+      picker.click();
+    }
+  },
+
+  setDateToday(textId, pickerId) {
+    this.commitDateFields(textId, pickerId, anexosTodayIso());
   },
 
   setContexto(val) {
@@ -1203,8 +1372,15 @@ const AnexosApp = {
             <span class="badge ${badgeClass}" style="white-space: nowrap; display: inline-block;">${f.status}</span>
             <div style="display: flex; align-items: center; gap: 8px;">
               ${isModal ? '' : `
-              <label style="font-size: 0.8rem; color: var(--color-text-muted); margin: 0; white-space: nowrap;">Data Documento:</label>
-              <input type="date" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; width: 145px;" max="${new Date().toISOString().split('T')[0]}" value="${f.dateOverride ? f.dateOverride.replace(/\./g, '-') : (AnexosState.dataDocumento ? AnexosState.dataDocumento.replace(/\./g, '-') : '')}" onchange="AnexosApp.setFileDate('${f.id}', this.value)">
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:220px;">
+                <label style="font-size: 0.8rem; color: var(--color-text-muted); margin: 0; white-space: nowrap; align-self:flex-start;">Data Documento</label>
+                ${anexosDateFieldHtml({
+                  textId: `anexo-file-date-${f.id}`,
+                  pickerId: `anexo-file-picker-${f.id}`,
+                  stored: f.dateOverride || AnexosState.dataDocumento,
+                  size: "sm"
+                })}
+              </div>
               `}
               ${f.status === 'Processando' ? '' : `
                 <button class="btn btn-outline" style="border: none; color: var(--color-danger); padding: 5px; margin-left: 2px;" onclick="AnexosApp.removerFile('${f.id}')" title="Remover">
@@ -1267,7 +1443,9 @@ const AnexosApp = {
   setFileDate(id, val) {
     const file = AnexosState.files.find(f => f.id === id);
     if (file) {
-      file.dateOverride = val.replace(/-/g, '.');
+      const iso = anexosStoredToIso(val) || (String(val || "").includes("/") ? anexosBrToIso(val) : "");
+      file.dateOverride = iso ? anexosIsoToStored(iso) : (val ? String(val).replace(/-/g, ".") : "");
+      this.checkCanSend();
     }
   },
 
