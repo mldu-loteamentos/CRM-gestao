@@ -3694,25 +3694,74 @@ window.webroAgingTagHtml = function(client) {
     : 0;
   const overdue = elapsed > 3;
   const label = overdue ? "Pendente Repasse Webro" : "Aguardando Webro";
+  const days = Number(client && client.maxDaysDelay) || 0;
+  const daysLabel = `${days} dia${days === 1 ? "" : "s"}`;
+  const prazoIso = typeof window.addBusinessDaysIso === "function"
+    ? window.addBusinessDaysIso(baixa, 3)
+    : baixa;
+  const baixaBr = typeof window.formatIsoDateBr === "function"
+    ? window.formatIsoDateBr(baixa)
+    : baixa;
+  const prazoBr = typeof window.formatIsoDateBr === "function"
+    ? window.formatIsoDateBr(prazoIso)
+    : prazoIso;
   const bg = overdue ? "#fef3c7" : "#dcfce7";
   const border = overdue ? "#f59e0b" : "#86efac";
   const color = overdue ? "#92400e" : "#166534";
   const icon = overdue ? "alert-triangle" : "banknote";
-  const dateBr = typeof window.formatIsoDateBr === "function"
-    ? window.formatIsoDateBr(baixa)
-    : baixa;
+  const tipBaixa = String(baixaBr || "").replace(/'/g, "\\'");
+  const tipPrazo = String(prazoBr || "").replace(/'/g, "\\'");
+  const tipElapsed = String(elapsed);
   return `
-    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${border}; background-color: ${bg}; color: ${color}; font-weight: 700;" title="Baixa Webro em ${dateBr} · ${elapsed} dia(s) útil(eis)">
-      <i data-lucide="${icon}" style="width: 14px; height: 14px;"></i> ${label}
-    </span>
+    <div class="delay-badge" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${border}; background-color: ${bg}; color: ${color}; font-weight: 600; cursor: help; white-space: nowrap;"
+      onmouseenter="if(window.showWebroAgingTooltip) window.showWebroAgingTooltip(event, '${tipBaixa}', '${tipPrazo}', ${tipElapsed}, ${overdue ? "true" : "false"})"
+      onmouseleave="if(window.hideWebroAgingTooltip) window.hideWebroAgingTooltip()">
+      <i data-lucide="${icon}" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
+      <span>${label} · ${daysLabel}</span>
+    </div>
   `;
+};
+
+window.showWebroAgingTooltip = function(event, baixaBr, prazoBr, elapsedBiz, overdue) {
+  let tooltip = document.getElementById("webro-aging-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "webro-aging-tooltip";
+    tooltip.style.cssText = "position:fixed;z-index:99999;display:none;background:transparent;min-width:260px;max-width:340px;pointer-events:none;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);";
+    document.body.appendChild(tooltip);
+  }
+  const statusLine = overdue
+    ? `<div style="margin-top:8px;font-size:0.72rem;font-weight:700;color:#92400e;">Prazo de 3 dias úteis ultrapassado (${elapsedBiz} dia(s) útil(eis) desde a baixa).</div>`
+    : `<div style="margin-top:8px;font-size:0.72rem;color:#166534;">Dentro do prazo de 3 dias úteis (${elapsedBiz} decorrido(s)).</div>`;
+  tooltip.innerHTML = `
+    <div style="border-left:4px solid #f59e0b;padding:12px;background:#fff;border-radius:8px;">
+      <div style="font-size:0.72rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Baixa Webro</div>
+      <div style="font-size:0.8rem;color:#334155;line-height:1.45;">
+        <div><strong>Data da baixa:</strong> ${baixaBr || "—"}</div>
+        <div><strong>Prazo p/ financeiro:</strong> ${prazoBr || "—"}</div>
+      </div>
+      ${statusLine}
+    </div>
+  `;
+  tooltip.style.display = "block";
+  let top = event.clientY + 12;
+  let left = event.clientX + 12;
+  if (left + 360 > window.innerWidth) left = Math.max(8, event.clientX - 360);
+  if (top + tooltip.offsetHeight > window.innerHeight) top = Math.max(8, event.clientY - tooltip.offsetHeight - 12);
+  tooltip.style.top = top + "px";
+  tooltip.style.left = left + "px";
+};
+
+window.hideWebroAgingTooltip = function() {
+  const tooltip = document.getElementById("webro-aging-tooltip");
+  if (tooltip) tooltip.style.display = "none";
 };
 
 window.wrapAgingWithWebro = function(client, innerHtml) {
   const webro = typeof window.webroAgingTagHtml === "function" ? window.webroAgingTagHtml(client) : "";
   if (!webro) return innerHtml || "";
-  if (!innerHtml) return webro;
-  return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">${webro}${innerHtml}</div>`;
+  // Substitui a badge de aging: mesma forma, com tag Webro + dias de atraso
+  return webro;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
