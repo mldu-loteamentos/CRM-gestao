@@ -1521,6 +1521,23 @@ circle.donut-segment {
   letter-spacing: 0.03em;
   margin-bottom: 6px;
 }
+.anexos-mapa-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+.anexos-mapa-flag input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary, #105436);
+}
 .anexos-ctrl {
   height: 40px !important;
   box-sizing: border-box !important;

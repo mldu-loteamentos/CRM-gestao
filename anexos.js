@@ -688,10 +688,6 @@ function renderAnexosModule() {
                 <option value="">Selecione uma unidade...</option>
                 ${AnexosState.unidades.map(u => `<option value="${u.id}" ${AnexosState.selectedUnidade == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
               </select>
-              <label class="anexos-mapa-flag" style="margin-top:8px;text-transform:none;letter-spacing:0;font-size:0.82rem;font-weight:600;color:#334155;display:inline-flex;align-items:center;gap:8px;cursor:pointer;height:auto;">
-                <input type="checkbox" ${AnexosState.mapaUnidades ? 'checked' : ''} onchange="AnexosApp.setMapaUnidades(this.checked)">
-                Mapa de unidades (espelho)
-              </label>
               <div id="anexos-unidade-loading" style="display:none;font-size:12px;color:var(--color-primary);margin-top:4px;">Carregando unidades...</div>
             </div>
             <div class="form-group anexos-field" style="margin:0;">
@@ -709,6 +705,12 @@ function renderAnexosModule() {
             </div>
           `}
         </div>
+
+        ${AnexosState.contexto !== 'Cliente' ? `
+        <label class="anexos-mapa-flag">
+          <input type="checkbox" ${AnexosState.mapaUnidades ? 'checked' : ''} onchange="AnexosApp.setMapaUnidades(this.checked)">
+          Mapa de unidades (espelho)
+        </label>` : ''}
 
         ${(AnexosState.activeContract || AnexosState.ccName) ? `
         <div class="anexos-contract-info">
