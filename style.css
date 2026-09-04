@@ -1454,6 +1454,189 @@ circle.donut-segment {
 
 
 /* Assistente de Anexos */
+.anexos-container {
+  padding: 16px 20px 28px;
+  max-width: 1480px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+.anexos-id-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.anexos-id-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.anexos-contexto-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #334155;
+}
+.anexos-contexto-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  height: 40px;
+}
+.anexos-filters-grid {
+  display: grid;
+  gap: 12px 14px;
+  align-items: end;
+}
+.anexos-filters-grid.is-unidade {
+  grid-template-columns: minmax(280px, 1.4fr) minmax(180px, 0.9fr) minmax(240px, 1fr);
+}
+.anexos-filters-grid.is-cliente {
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+}
+@media (max-width: 980px) {
+  .anexos-filters-grid.is-unidade,
+  .anexos-filters-grid.is-cliente {
+    grid-template-columns: 1fr;
+  }
+}
+.anexos-field label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+}
+.anexos-ctrl {
+  height: 40px !important;
+  box-sizing: border-box !important;
+}
+.anexos-cc-combo {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  align-items: stretch;
+}
+.anexos-cc-combo #anexos-cc {
+  flex: 1;
+  min-width: 0;
+}
+.anexos-cc-chevron {
+  width: 40px;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.anexos-cc-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  z-index: 1200;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.anexos-contract-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+.anexos-contract-label {
+  display: block;
+  font-size: 0.72rem;
+  color: #64748b;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.anexos-contract-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  font-size: 0.92rem;
+  color: #0f172a;
+  font-weight: 500;
+}
+.anexos-contract-line span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.anexos-imported-badge {
+  color: #166534;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 8px 14px;
+  background: #eef8f2;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #c3e6cb;
+  height: 40px;
+  box-sizing: border-box;
+}
+.anexos-upload-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.anexos-dropzone {
+  border: 2px dashed var(--color-primary);
+  padding: 36px 24px;
+  text-align: center;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+.anexos-files-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 15px;
+  width: 100%;
+}
+.anexos-files-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: none;
+}
+
 .dropzone:hover {
   background: var(--color-background-alt);
   border-color: var(--color-secondary) !important;

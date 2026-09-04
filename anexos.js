@@ -68,24 +68,23 @@ function anexosDateFieldHtml({ textId, pickerId, stored, size = "normal" }) {
   const iso = anexosStoredToIso(stored);
   const br = anexosStoredToBr(stored);
   const max = anexosTodayIso();
-  const pad = size === "sm" ? "6px 8px" : "8px 10px";
-  const font = size === "sm" ? "0.85rem" : "0.95rem";
-  const btnPad = size === "sm" ? "6px 8px" : "8px 10px";
+  const h = size === "sm" ? "34px" : "40px";
+  const font = size === "sm" ? "0.85rem" : "0.9rem";
   return `
-    <div class="anexos-date-field" style="display:flex; align-items:center; gap:6px; width:100%; position:relative;">
-      <input type="text" id="${textId}" class="form-control" inputmode="numeric" autocomplete="off"
+    <div class="anexos-date-field" style="display:flex; align-items:stretch; gap:6px; width:100%; position:relative; height:${h};">
+      <input type="text" id="${textId}" class="form-control anexos-ctrl" inputmode="numeric" autocomplete="off"
         placeholder="dd/mm/aaaa" maxlength="10" value="${br}"
-        style="flex:1; min-width:0; padding:${pad}; font-size:${font}; letter-spacing:0.02em;"
+        style="flex:1; min-width:0; height:${h}; font-size:${font}; letter-spacing:0.02em; box-sizing:border-box;"
         oninput="AnexosApp.onDateTextInput('${textId}', '${pickerId}', this)"
         onblur="AnexosApp.onDateTextBlur('${textId}', '${pickerId}', this)"
         onkeydown="if(event.key==='Enter'){ event.preventDefault(); this.blur(); }">
-      <button type="button" class="btn btn-outline" title="Abrir calendário" aria-label="Abrir calendário"
-        style="padding:${btnPad}; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;"
+      <button type="button" class="btn btn-outline anexos-ctrl" title="Abrir calendário" aria-label="Abrir calendário"
+        style="height:${h}; width:${h}; padding:0; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; box-sizing:border-box;"
         onclick="AnexosApp.openDatePicker('${pickerId}')">
         <i data-lucide="calendar" style="width:16px;height:16px;"></i>
       </button>
-      <button type="button" class="btn btn-outline" title="Usar data de hoje" aria-label="Hoje"
-        style="padding:${btnPad}; font-size:0.75rem; font-weight:700; flex-shrink:0; white-space:nowrap;"
+      <button type="button" class="btn btn-outline anexos-ctrl" title="Usar data de hoje" aria-label="Hoje"
+        style="height:${h}; padding:0 12px; font-size:0.75rem; font-weight:700; flex-shrink:0; white-space:nowrap; box-sizing:border-box;"
         onclick="AnexosApp.setDateToday('${textId}', '${pickerId}')">Hoje</button>
       <input type="date" id="${pickerId}" max="${max}" value="${iso}"
         style="position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; border:0;"
@@ -248,13 +247,22 @@ function anexosNormAttachmentKey(att) {
   const id = String(att.attachmentid || att.attachmentId || att.id || '').trim();
   let name = String(att.fileName || att.name || '').toLowerCase().trim();
   let desc = String(att.description || '').toLowerCase().trim();
-  desc = desc.replace(/^\(cliente\s*\d+\)\s*/i, '').replace(/^\(unidade[^)]*\)\s*/i, '').trim();
-  // Nome gerado pelo CRM: "17701 F-247 - TAG 31.08.2024.pdf" → chave pela tag+data quando possível
-  const crmMatch = (desc || name).match(/-\s*([a-z0-9Á-ú /()-]+?)\s+(\d{2}[./]\d{2}[./]\d{4})/i);
-  const semantic = crmMatch
-    ? `${crmMatch[1].replace(/\s+/g, ' ').trim()}|${crmMatch[2].replace(/\//g, '.')}`
-    : '';
-  return { id, name, desc, semantic };
+  desc = desc
+    .replace(/^\(cliente\s*\d+\)\s*/i, '')
+    .replace(/^\(unidade[^)]*\)\s*/i, '')
+    .trim();
+  const size = Number(att.size || att.fileSize || att.length || 0) || 0;
+  // Nome gerado pelo CRM: "17701 F-247 - TAG 31.08.2024.pdf" → chave pela tag+data
+  const crmMatch = (desc || name).match(/-\s*([a-z0-9á-ú /()-]+?)\s+(\d{2}[./]\d{2}[./]\d{4})/i)
+    || (desc || name).match(/(\d{2,4}[./]\d{2}[./]\d{2,4})\s*-\s*(.+)$/i);
+  let semantic = '';
+  if (crmMatch) {
+    const a = String(crmMatch[1] || '').replace(/\s+/g, ' ').trim();
+    const b = String(crmMatch[2] || '').replace(/\s+/g, ' ').trim().replace(/\//g, '.');
+    semantic = `${a}|${b}`.toLowerCase();
+  }
+  const isSiengeAutoName = /^\d{14}_[a-z0-9]+\.[a-z0-9]+$/i.test(name);
+  return { id, name, desc, semantic, size, isSiengeAutoName, isCustomerAttachment: !!att.isCustomerAttachment, isUnitAttachment: !!att.isUnitAttachment };
 }
 
 /** Evita listar o mesmo documento 2x (contrato + ficha cliente/unidade). */
@@ -263,25 +271,51 @@ function anexosDedupeAttachments(list) {
   const seenName = new Set();
   const seenDesc = new Set();
   const seenSemantic = new Set();
+  const seenSizeDesc = new Set();
   const out = [];
-  // Preferir anexo já na ficha do cliente/unidade (envio do CRM) em vez da cópia do contrato
   const sorted = [...(list || [])].sort((a, b) => {
     const rank = (x) => (x.isCustomerAttachment || x.isUnitAttachment) ? 0 : 1;
     return rank(a) - rank(b);
   });
+  const hasCrmSource = sorted.some(a => a.isCustomerAttachment || a.isUnitAttachment);
   for (const att of sorted) {
     const k = anexosNormAttachmentKey(att);
+    // Se já temos anexos na ficha, ignora nomes automáticos do contrato (timestamp_hash)
+    if (hasCrmSource && !k.isCustomerAttachment && !k.isUnitAttachment && k.isSiengeAutoName) {
+      continue;
+    }
     if (k.id && seenId.has(k.id)) continue;
     if (k.name && k.name.length > 3 && seenName.has(k.name)) continue;
     if (k.desc && k.desc.length > 5 && seenDesc.has(k.desc)) continue;
     if (k.semantic && seenSemantic.has(k.semantic)) continue;
+    if (k.size > 0 && k.desc && seenSizeDesc.has(`${k.size}|${k.desc}`)) continue;
     if (k.id) seenId.add(k.id);
     if (k.name) seenName.add(k.name);
     if (k.desc) seenDesc.add(k.desc);
     if (k.semantic) seenSemantic.add(k.semantic);
+    if (k.size > 0 && k.desc) seenSizeDesc.add(`${k.size}|${k.desc}`);
     out.push(att);
   }
   return out;
+}
+
+function anexosGuessTagFromDescription(desc) {
+  const raw = String(desc || '')
+    .replace(/^\(Cliente\s*\d+\)\s*/i, '')
+    .replace(/^\(Unidade[^)]*\)\s*/i, '')
+    .trim();
+  if (!raw) return '';
+  const m = raw.match(/\d{1,4}[./]\d{1,2}[./]\d{2,4}\s*-\s*(.+)$/i)
+    || raw.match(/-\s*([A-ZÁÉÍÓÚÃÕÇ0-9][A-ZÁÉÍÓÚÃÕÇ0-9 /()-]{1,60})$/i);
+  if (!m) return '';
+  let tag = String(m[1] || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  tag = tag.replace(/\.(PDF|JPG|JPEG|PNG)$/i, '').trim();
+  if (!tag || tag === 'DOC' || tag === 'ARQUIVO' || tag === 'SEM_TAG') return '';
+  return tag;
+}
+
+function anexosAttId(att) {
+  return String((att && (att.attachmentid || att.attachmentId || att.id)) || '').trim();
 }
 
 function anexosSafeFileName(name) {
@@ -332,135 +366,106 @@ function renderAnexosModule() {
 
   const isModal = targetId === 'anexos-cliente-root';
 
+  const ccDisplay = AnexosState.cc
+    ? (AnexosState.ccName ? `${AnexosState.cc} - ${AnexosState.ccName}` : AnexosState.cc)
+    : '';
+
   root.innerHTML = `
-    <div class="anexos-container" style="padding: 20px; max-width: 1200px; margin: 0 auto;">
-      <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 20px; display: ${isModal ? 'none' : 'flex'};">
-        <button class="btn btn-secondary" onclick="AnexosApp.resetAndRender()"><i data-lucide="refresh-cw" style="width: 16px;"></i> Limpar Campos</button>
-      </div>
-      
+    <div class="anexos-container">
       ${isModal ? '' : `
-      <!-- ETAPA 1 e 2: Identificação e Data -->
-      <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--color-border); margin-bottom: 25px;">
-          <h4 style="margin: 0;">1. Identificação do Documento</h4>
-          <div style="display: flex; gap: 15px; font-weight: 500; font-size: 0.95rem;">
-            <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+      <div class="anexos-id-card">
+        <div class="anexos-id-toolbar">
+          <div class="anexos-contexto-group" role="radiogroup" aria-label="Destino do documento">
+            <label class="anexos-contexto-opt">
               <input type="radio" name="anexos-contexto" value="Unidade" onchange="AnexosApp.setContexto(this.value)" ${AnexosState.contexto === 'Unidade' ? 'checked' : ''}> Só Unidade
             </label>
-            <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+            <label class="anexos-contexto-opt">
               <input type="radio" name="anexos-contexto" value="Cliente" onchange="AnexosApp.setContexto(this.value)" ${AnexosState.contexto === 'Cliente' ? 'checked' : ''}> Só Cliente
             </label>
-            <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+            <label class="anexos-contexto-opt">
               <input type="radio" name="anexos-contexto" value="Ambos" onchange="AnexosApp.setContexto(this.value)" ${AnexosState.contexto === 'Ambos' ? 'checked' : ''}> Ambos
             </label>
           </div>
+          <button type="button" class="btn btn-secondary anexos-ctrl" onclick="AnexosApp.resetAndRender()" style="background:#f97316;border:none;color:#fff;font-weight:600;padding:0 14px;display:inline-flex;align-items:center;gap:6px;">
+            <i data-lucide="refresh-cw" style="width: 16px;"></i> Limpar Campos
+          </button>
         </div>
-        <div class="card-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px 25px; align-items: start;">
-             ${AnexosState.contexto !== 'Cliente' ? `
-            <div class="form-group" style="margin-bottom: 0;">
+
+        <div class="anexos-filters-grid ${AnexosState.contexto === 'Cliente' ? 'is-cliente' : 'is-unidade'}">
+          ${AnexosState.contexto !== 'Cliente' ? `
+            <div class="form-group anexos-field" style="margin:0;">
               <label>Centro de Custo (Empreendimento)</label>
-              <div style="display: flex; gap: 10px; position: relative;">
-                <input type="text" id="anexos-cc" class="form-control" placeholder="Buscar por Nome ou ID..." value="${AnexosState.cc}" style="flex: 1; min-width: 0;" oninput="AnexosApp.handleCostCenterAutocomplete(this.value)" autocomplete="off">
-                <button class="btn btn-primary" onclick="AnexosApp.buscarUnidades()" style="white-space: nowrap; flex-shrink: 0;"><i data-lucide="search" style="width:16px"></i> Buscar</button>
-                <div id="anexos-cc-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 80px; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
+              <div class="anexos-cc-combo">
+                <input type="text" id="anexos-cc" class="form-control anexos-ctrl" placeholder="Digite ID, nome ou escolha na lista..."
+                  value="${String(ccDisplay).replace(/"/g, '&quot;')}"
+                  onfocus="AnexosApp.openCostCenterList()"
+                  oninput="AnexosApp.handleCostCenterAutocomplete(this.value)"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarUnidades();}"
+                  autocomplete="off">
+                <button type="button" class="btn btn-outline anexos-ctrl anexos-cc-chevron" title="Abrir lista" onclick="AnexosApp.toggleCostCenterList()">
+                  <i data-lucide="chevron-down" style="width:16px;height:16px;"></i>
+                </button>
+                <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarUnidades()" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:0 14px;">
+                  <i data-lucide="search" style="width:16px"></i> Buscar
+                </button>
+                <div id="anexos-cc-suggestions" class="anexos-cc-suggestions" style="display:none;"></div>
               </div>
             </div>
-
-            <div style="display: flex; gap: 15px; margin-bottom: 0;">
-              <div class="form-group" style="flex: 1; margin-bottom: 0; position: relative;">
-                <label>Selecione a Unidade</label>
-                <select id="anexos-unidade" class="form-control" onchange="AnexosApp.selecionarUnidade(this.value)" ${AnexosState.unidades.length ? '' : 'disabled'}>
-                  <option value="">Selecione uma unidade...</option>
-                  ${AnexosState.unidades.map(u => `<option value="${u.id}" ${AnexosState.selectedUnidade == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
-                </select>
-                <div id="anexos-unidade-loading" style="display: none; font-size: 12px; color: var(--color-primary); margin-top: 5px; position: absolute; bottom: -20px; left: 0;">Carregando unidades...</div>
-              </div>
-              <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                <label>Data Global do Documento</label>
-                ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
-              </div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>Selecione a Unidade</label>
+              <select id="anexos-unidade" class="form-control anexos-ctrl" onchange="AnexosApp.selecionarUnidade(this.value)" ${AnexosState.unidades.length ? '' : 'disabled'}>
+                <option value="">Selecione uma unidade...</option>
+                ${AnexosState.unidades.map(u => `<option value="${u.id}" ${AnexosState.selectedUnidade == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
+              </select>
+              <div id="anexos-unidade-loading" style="display:none;font-size:12px;color:var(--color-primary);margin-top:4px;">Carregando unidades...</div>
             </div>
-            ` : `
-            <div style="display: flex; gap: 15px; margin-bottom: 0;">
-              <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                <label>Data Global do Documento</label>
-                ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
-              </div>
-              <div style="flex: 1;"></div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>Data Global do Documento</label>
+              ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
             </div>
-            `}
-
-            ${AnexosState.contexto === 'Cliente' ? `
-            <div class="form-group" style="margin-bottom: 0;">
+          ` : `
+            <div class="form-group anexos-field" style="margin:0;">
               <label>ID Cliente ou CPF/CNPJ</label>
-              <input type="text" id="anexos-idcliente" class="form-control" placeholder="ID ou CPF/CNPJ" value="${AnexosState.idCliente}" onchange="AnexosState.idCliente = this.value; renderAnexosModule();">
+              <input type="text" id="anexos-idcliente" class="form-control anexos-ctrl" placeholder="ID ou CPF/CNPJ" value="${AnexosState.idCliente}" onchange="AnexosState.idCliente = this.value; renderAnexosModule();">
             </div>
-            ` : ''}
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>Data Global do Documento</label>
+              ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
+            </div>
+          `}
+        </div>
 
-        </div>
-        </div>
+        ${(AnexosState.activeContract || AnexosState.ccName) ? `
+        <div class="anexos-contract-info">
+          <div class="anexos-contract-meta">
+            <span class="anexos-contract-label">Informações do contrato</span>
+            <div class="anexos-contract-line">
+              ${AnexosState.activeContract || AnexosState.idCliente ? `
+                <span><i data-lucide="user" style="width:15px;height:15px;color:var(--color-primary);"></i>
+                  ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : 'Cliente'}
+                </span>` : ''}
+              ${AnexosState.ccName ? `<span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.ccName}</span>` : ''}
+              ${AnexosState.activeContract ? `<span><i data-lucide="file-text" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractNumber}</span>` : ''}
+              ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `<span><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractDate}</span>` : ''}
+            </div>
+          </div>
+          <div>
+            ${AnexosState.activeContract ? (
+              AnexosState.contractAttachments.length > 0
+                ? (AnexosState.importedContracts.has(AnexosState.activeContract.id)
+                  ? `<span class="anexos-imported-badge"><i data-lucide="check-circle" style="width:16px;"></i> ${AnexosState.contractAttachments.length} Anexos Importados</span>`
+                  : `<button type="button" class="btn btn-outline anexos-ctrl" style="padding:0 14px;font-weight:600;border-color:var(--color-primary);color:var(--color-primary);display:inline-flex;align-items:center;gap:6px;" onclick="AnexosApp.importarAnexosDoContrato()"><i data-lucide="download" style="width:16px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
+                : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`
+            ) : ''}
+          </div>
+        </div>` : ''}
+      </div>
       `}
         
-      <!-- ETAPA 1.5: Informações Encontradas -->
-        <div style="margin-bottom: 25px; min-height: 110px; display: flex; flex-direction: column; justify-content: center;">
-          ${AnexosState.activeContract || AnexosState.ccName ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; padding: 10px 0;">
-              <div style="display: flex; flex-direction: column; gap: 6px;">
-                <span style="font-size: 0.8rem; color: var(--color-text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">INFORMAÇÕES DO CONTRATO</span>
-                <div style="font-size: 1.05rem; color: var(--color-text); font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
-                  ${AnexosState.activeContract || AnexosState.idCliente ? `
-                    <span style="font-weight: 600;">
-                      <i data-lucide="user" style="width: 16px; height: 16px; color: var(--color-primary); margin-right: 4px; vertical-align: text-bottom;"></i>
-                      ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : 'Cliente'}
-                    </span>
-                    <span style="color: var(--color-text-muted);">|</span>
-                  ` : ''}
-                  
-                  ${AnexosState.ccName ? `
-                    <span>
-                      <i data-lucide="map-pin" style="width: 16px; height: 16px; color: var(--color-primary); margin-right: 4px; vertical-align: text-bottom;"></i>
-                      ${AnexosState.ccName}
-                    </span>
-                  ` : ''}
-                  
-                  ${AnexosState.activeContract ? `
-                    <span style="color: var(--color-text-muted);">|</span>
-                    <span>
-                      <i data-lucide="file-text" style="width: 16px; height: 16px; color: var(--color-primary); margin-right: 4px; vertical-align: text-bottom;"></i>
-                      ${AnexosState.activeContract.contractNumber}
-                    </span>
-                  ` : ''}
-                  
-                  ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `
-                    <span style="color: var(--color-text-muted);">|</span>
-                    <span>
-                      <i data-lucide="calendar" style="width: 16px; height: 16px; color: var(--color-primary); margin-right: 4px; vertical-align: text-bottom;"></i>
-                      ${AnexosState.activeContract.contractDate}
-                    </span>
-                  ` : ''}
-                </div>
-              </div>
-
-              <div>
-                ${AnexosState.activeContract ? `
-                  ${AnexosState.contractAttachments.length > 0 ? 
-                    (AnexosState.importedContracts.has(AnexosState.activeContract.id) ? 
-                      `<span style="color: var(--color-success); font-weight: 500; font-size: 0.95rem; padding: 8px 16px; background: #eef8f2; border-radius: 6px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #c3e6cb;"><i data-lucide="check-circle" style="width:18px;"></i> ${AnexosState.contractAttachments.length} Anexos Importados</span>`
-                      : `<button class="btn btn-outline" style="padding: 8px 16px; font-weight: 500; font-size: 0.95rem; display: inline-flex; align-items: center; gap: 8px; border-color: var(--color-primary); color: var(--color-primary);" onclick="AnexosApp.importarAnexosDoContrato()"><i data-lucide="download" style="width:18px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
-                    : `<span style="color: var(--color-text-muted); font-size: 0.95rem; padding: 10px;">Nenhum anexo no contrato</span>`
-                  }
-                ` : ''}
-              </div>
-            </div>
-          ` : ''}
-        </div>
-
-        </div>
-
       <!-- ETAPA 3: Upload e Revisão -->
-      <div class="card" style="margin-bottom: 20px; transition: opacity 0.3s ease;">
+      <div class="card anexos-upload-card" style="margin-bottom: 20px; transition: opacity 0.3s ease;">
         <div class="card-body">
-          <div id="anexos-dropzone" class="dropzone" style="border: 2px dashed var(--color-primary); padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto;">
+          <div id="anexos-dropzone" class="dropzone anexos-dropzone">
             <i data-lucide="upload-cloud" style="width: 48px; height: 48px; color: var(--color-primary); margin-bottom: 10px;"></i>
             <h4>Arraste os arquivos aqui ou clique para selecionar</h4>
             <p style="color: var(--color-text-muted); font-size: 0.9rem;">Aceito: PDF, JPG, PNG (Max 70MB). Identificação automática de OCR ativa.</p>
@@ -468,11 +473,11 @@ function renderAnexosModule() {
           </div>
           
           <div id="anexos-preparados-section" style="display: ${AnexosState.files.length > 0 ? 'block' : 'none'};">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid var(--color-border); padding-bottom: 15px; max-width: 800px; margin-left: auto; margin-right: auto;">
+            <div class="anexos-files-head">
               <h4 style="margin: 0;">Arquivos ${isModal ? 'Encontrados' : 'Preparados'} (${AnexosState.files.length})</h4>
               ${isModal ? '' : `<button class="btn btn-outline" onclick="AnexosApp.solicitarTag()"><i data-lucide="tag" style="width:16px"></i> Solicitar Nova TAG</button>`}
             </div>
-            <div id="anexos-files-list" style="display: flex; flex-direction: column; margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto;">
+            <div id="anexos-files-list" class="anexos-files-list">
               <!-- Renderizado dinamicamente -->
             </div>
             
@@ -627,44 +632,76 @@ const AnexosApp = {
   },
 
   handleCostCenterAutocomplete(val) {
-    AnexosState.cc = val;
+    AnexosState.cc = String(val || '').split(' - ')[0].trim();
+    AnexosApp.renderCostCenterSuggestions(val, false);
+  },
+
+  openCostCenterList() {
+    AnexosApp.loadEnterprisesInBackground().then(() => {
+      const input = document.getElementById('anexos-cc');
+      AnexosApp.renderCostCenterSuggestions(input ? input.value : '', true);
+    });
+  },
+
+  toggleCostCenterList() {
+    const box = document.getElementById('anexos-cc-suggestions');
+    if (!box) return;
+    if (box.style.display === 'block') {
+      box.style.display = 'none';
+      return;
+    }
+    AnexosApp.openCostCenterList();
+  },
+
+  renderCostCenterSuggestions(val, showAll) {
     const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
-    if (!val || val.length < 2) {
-      suggestionsDiv.style.display = 'none';
-      return;
-    }
-    
+    if (!suggestionsDiv) return;
     if (!AnexosState.enterprises) AnexosState.enterprises = [];
-    
-    const term = val.toLowerCase().trim();
-    const filtered = AnexosState.enterprises.filter(e => {
-      const name = String(e.name || "").toLowerCase();
-      const id = String(e.id || "");
-      // Busca ID ou Nome
-      return name.includes(term) || id.includes(term);
-    }).slice(0, 10);
-    
-    if (filtered.length === 0) {
-      suggestionsDiv.style.display = 'none';
+
+    const term = String(val || '').toLowerCase().trim();
+    let filtered = AnexosState.enterprises.slice();
+    if (!showAll) {
+      if (!term || term.length < 1) {
+        suggestionsDiv.style.display = 'none';
+        return;
+      }
+    }
+    if (term) {
+      filtered = filtered.filter(e => {
+        const name = String(e.name || '').toLowerCase();
+        const id = String(e.id || '');
+        return name.includes(term) || id.includes(term) || `${id} - ${name}`.toLowerCase().includes(term);
+      });
+    }
+    filtered = filtered
+      .sort((a, b) => Number(a.id) - Number(b.id))
+      .slice(0, showAll && !term ? 80 : 20);
+
+    if (!filtered.length) {
+      suggestionsDiv.innerHTML = `<div style="padding:12px;color:#64748b;font-size:0.85rem;">Nenhum empreendimento encontrado</div>`;
+      suggestionsDiv.style.display = 'block';
       return;
     }
-    
-    suggestionsDiv.innerHTML = filtered.map(e => `
-      <div class="suggestion-item" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 10px;"
-           onclick="AnexosApp.selectCostCenter('${e.id}', '${e.name}')">
-        <div style="background: #eef8f2; color: var(--color-primary); padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem;">${e.id}</div>
+
+    suggestionsDiv.innerHTML = filtered.map(e => {
+      const safeName = String(e.name || '').replace(/'/g, "\\'");
+      return `
+      <div class="suggestion-item" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 10px;"
+           onmousedown="event.preventDefault(); AnexosApp.selectCostCenter('${e.id}', '${safeName}')">
+        <div style="background: #eef8f2; color: var(--color-primary); padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8rem; flex-shrink:0;">${e.id}</div>
         <div style="font-weight: 500; font-size: 0.9rem;">${e.name}</div>
-      </div>
-    `).join('');
-    
+      </div>`;
+    }).join('');
     suggestionsDiv.style.display = 'block';
   },
 
   selectCostCenter(id, name) {
-    AnexosState.cc = id;
+    AnexosState.cc = String(id);
     AnexosState.ccName = name;
-    document.getElementById('anexos-cc').value = id;
-    document.getElementById('anexos-cc-suggestions').style.display = 'none';
+    const input = document.getElementById('anexos-cc');
+    if (input) input.value = `${id} - ${name}`;
+    const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
+    if (suggestionsDiv) suggestionsDiv.style.display = 'none';
     AnexosApp.buscarUnidades();
   },
 
@@ -710,6 +747,15 @@ const AnexosApp = {
         }
         // Limpar o input para permitir selecionar o mesmo arquivo novamente
         e.target.value = '';
+      });
+    }
+
+    if (!window.anexosCcClickAwayBound) {
+      window.anexosCcClickAwayBound = true;
+      document.addEventListener('click', (e) => {
+        const combo = e.target && e.target.closest && e.target.closest('.anexos-cc-combo');
+        const box = document.getElementById('anexos-cc-suggestions');
+        if (!combo && box) box.style.display = 'none';
       });
     }
 
@@ -1044,7 +1090,8 @@ const AnexosApp = {
     }
 
     const attachmentsToImport = AnexosState.contractAttachments.filter(att => {
-        return !AnexosState.files.some(f => f.downloadedId === att.id);
+        const attId = anexosAttId(att);
+        return attId && !AnexosState.files.some(f => String(f.downloadedId) === attId);
     });
 
     if (attachmentsToImport.length === 0) {
@@ -1056,6 +1103,7 @@ const AnexosApp = {
       const fName = att.fileName || att.description || 'Anexo Sienge.pdf';
       const extMatch = fName.match(/\.([a-zA-Z0-9]+)$/);
       const ext = extMatch ? extMatch[1].toLowerCase() : 'pdf';
+      const guessedTag = anexosGuessTagFromDescription(att.description || fName);
       
       const fileObj = {
         id: 'imported_' + Math.random().toString(36).substr(2, 9),
@@ -1064,19 +1112,19 @@ const AnexosApp = {
         base64: null,
         ext: ext,
         size: 0,
-        tagOriginal: att.description ? att.description.split(' ')[0] : 'DOC',
-        tags: [],
-        status: 'Baixando arquivo...',
+        tagOriginal: guessedTag || (att.description ? att.description.split(' ')[0] : 'DOC'),
+        tags: guessedTag ? [guessedTag] : [],
+        status: guessedTag ? 'Pronto' : 'Baixando arquivo...',
         uploadProgress: 0,
         previewUrl: null,
         dateOverride: '',
-        downloadedId: att.attachmentid || att.attachmentId || att.id
+        downloadedId: anexosAttId(att)
       };
 
       // Inicia download assíncrono para obter o blob do arquivo pelo proxy
       setTimeout(async () => {
         try {
-          const attId = att.attachmentid || att.attachmentId || att.id;
+          const attId = anexosAttId(att);
           let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${attId}`);
           if (att.isCustomerAttachment) {
              url = anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`);
@@ -1095,8 +1143,9 @@ const AnexosApp = {
               if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
                 fileObj.previewUrl = URL.createObjectURL(blob);
               }
-              fileObj.status = 'Revisar';
+              fileObj.status = (fileObj.tags && fileObj.tags.length && !fileObj.tags.includes('DOC')) ? 'Pronto' : 'Revisar';
               AnexosApp.renderFilesList();
+              AnexosApp.checkCanSend();
             };
             reader.readAsDataURL(blob);
           } else {
@@ -1154,18 +1203,36 @@ const AnexosApp = {
 
   async buscarUnidades() {
     const ccInput = document.getElementById('anexos-cc');
-    const cc = ccInput ? ccInput.value.trim() : AnexosState.cc;
+    let cc = ccInput ? ccInput.value.trim() : AnexosState.cc;
+    // Aceita "17701", "17701 - NOME" ou só o nome (resolve pelo cadastro)
+    if (cc.includes(' - ')) cc = cc.split(' - ')[0].trim();
+    if (!/^\d+$/.test(cc) && AnexosState.enterprises && AnexosState.enterprises.length) {
+      const term = String(ccInput ? ccInput.value : cc).toLowerCase().trim();
+      const hit = AnexosState.enterprises.find(e =>
+        String(e.id) === cc ||
+        String(e.name || '').toLowerCase() === term ||
+        String(e.name || '').toLowerCase().includes(term)
+      );
+      if (hit) {
+        cc = String(hit.id);
+        AnexosState.ccName = hit.name;
+        if (ccInput) ccInput.value = `${hit.id} - ${hit.name}`;
+      }
+    }
     if (!cc) {
       alert("Por favor, informe o Centro de Custo.");
       return;
     }
     AnexosState.cc = cc;
+    const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
+    if (suggestionsDiv) suggestionsDiv.style.display = 'none';
     
     try {
       if (window.SiengeApiService) {
         const ccData = await window.SiengeApiService.getCostCenter(cc);
         if (ccData && ccData.name) {
           AnexosState.ccName = ccData.name;
+          if (ccInput) ccInput.value = `${cc} - ${ccData.name}`;
           renderAnexosModule();
         }
       }

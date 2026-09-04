@@ -258,6 +258,7 @@ window.updateOperatorTabsUI = function(useActualData = true) {
 
 document.addEventListener("DOMContentLoaded", () => {
     window.updateOperatorTabsUI();
+    if (typeof window.syncWebroHideToggleUI === "function") window.syncWebroHideToggleUI();
     setTimeout(() => {
       if (typeof window.ensureAllNexCleared === "function") window.ensureAllNexCleared();
       if (typeof window.ensureNexTodayPurged === "function") window.ensureNexTodayPurged();
@@ -3681,18 +3682,22 @@ window.getActiveWebroBaixaOccurrence = function(client) {
 };
 
 window.webroAgingTagHtml = function(client) {
+  const status = typeof window.getWebroBaixaStatus === "function"
+    ? window.getWebroBaixaStatus(client)
+    : null;
+  if (!status) return "";
   const occ = typeof window.getActiveWebroBaixaOccurrence === "function"
     ? window.getActiveWebroBaixaOccurrence(client)
     : null;
   if (!occ || !occ.promiseDate) return "";
+  const baixa = String(occ.promiseDate).slice(0, 10);
   const today = (typeof window.localDateStr === "function")
     ? window.localDateStr(new Date())
     : new Date().toISOString().slice(0, 10);
-  const baixa = String(occ.promiseDate).slice(0, 10);
   const elapsed = typeof window.countBusinessDaysElapsedIso === "function"
     ? window.countBusinessDaysElapsedIso(baixa, today)
     : 0;
-  const overdue = elapsed > 3;
+  const overdue = status === "PENDENTE";
   const label = overdue ? "Pendente Repasse Webro" : "Aguardando Webro";
   const days = Number(client && client.maxDaysDelay) || 0;
   const daysLabel = `${days} dia${days === 1 ? "" : "s"}`;
@@ -3720,6 +3725,61 @@ window.webroAgingTagHtml = function(client) {
       <span>${label} · ${daysLabel}</span>
     </div>
   `;
+};
+
+/** null | 'AGUARDANDO' | 'PENDENTE' */
+window.getWebroBaixaStatus = function(client) {
+  const occ = typeof window.getActiveWebroBaixaOccurrence === "function"
+    ? window.getActiveWebroBaixaOccurrence(client)
+    : null;
+  if (!occ || !occ.promiseDate) return null;
+  const today = (typeof window.localDateStr === "function")
+    ? window.localDateStr(new Date())
+    : new Date().toISOString().slice(0, 10);
+  const baixa = String(occ.promiseDate).slice(0, 10);
+  const elapsed = typeof window.countBusinessDaysElapsedIso === "function"
+    ? window.countBusinessDaysElapsedIso(baixa, today)
+    : 0;
+  return elapsed > 3 ? "PENDENTE" : "AGUARDANDO";
+};
+
+window.hideWebroPendingFila = false;
+window.hideWebroPendingZero = false;
+
+window.toggleHideWebroPending = function(context) {
+  const ctx = context === "zeropaid" ? "zeropaid" : "fila";
+  if (ctx === "zeropaid") {
+    window.hideWebroPendingZero = !window.hideWebroPendingZero;
+  } else {
+    window.hideWebroPendingFila = !window.hideWebroPendingFila;
+  }
+  if (typeof window.syncWebroHideToggleUI === "function") window.syncWebroHideToggleUI();
+  if (window.lucide) lucide.createIcons();
+  if (ctx === "zeropaid") {
+    if (typeof loadZeroPaidTab === "function") loadZeroPaidTab();
+  } else if (typeof loadDashboardData === "function") {
+    loadDashboardData();
+  }
+};
+
+window.syncWebroHideToggleUI = function() {
+  const sync = (id, on) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.classList.toggle("active", !!on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on
+      ? "Mostrando sem Baixa Webro (clique para exibir de novo os que aguardam repasse)"
+      : "Ocultar da lista e da contagem quem já pagou e aguarda repasse Webro";
+  };
+  sync("btn-toggle-hide-webro-fila", window.hideWebroPendingFila);
+  sync("btn-toggle-hide-webro-zeropaid", window.hideWebroPendingZero);
+};
+
+window.filterOutHiddenWebro = function(list, context) {
+  const hide = context === "zeropaid" ? window.hideWebroPendingZero : window.hideWebroPendingFila;
+  if (!hide || !Array.isArray(list)) return list;
+  return list.filter(c => !window.getWebroBaixaStatus(c));
 };
 
 window.showWebroAgingTooltip = function(event, baixaBr, prazoBr, elapsedBiz, overdue) {
@@ -3914,7 +3974,7 @@ async function loadDashboardData(forceRefresh = false) {
 const defaultAdvFilterState = {
     lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
     cidade: [], empresa: [], ccusto: [], operador: [],
-    contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: [],
+    contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
     faseProcessual: [], dataFase: [], dataFaseNDias: ''
 };
 window.advFiltersFila = JSON.parse(JSON.stringify(defaultAdvFilterState));
@@ -4109,6 +4169,20 @@ window.applyAdvFiltersTo = (sourceList) => {
             } else if (window.advFilters.zeropaid === 'APENAS') {
                 filteredList = filteredList.filter(c => c.isZeroPaid);
             }
+        }
+
+        if (window.advFilters.webro && window.advFilters.webro !== 'TODOS') {
+            const st = window.advFilters.webro;
+            filteredList = filteredList.filter(c => {
+                const w = typeof window.getWebroBaixaStatus === "function"
+                  ? window.getWebroBaixaStatus(c)
+                  : null;
+                if (st === 'OCULTAR') return !w;
+                if (st === 'AGUARDANDO') return w === 'AGUARDANDO';
+                if (st === 'PENDENTE') return w === 'PENDENTE';
+                if (st === 'COM_WEBRO') return !!w;
+                return true;
+            });
         }
         
         if (window.advFilters.contato) {
@@ -4895,6 +4969,9 @@ document.addEventListener("click", function(e) {
   const originalAdvFilters = window.advFilters;
   window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
+  clientList = typeof window.filterOutHiddenWebro === "function"
+    ? window.filterOutHiddenWebro(clientList, "fila")
+    : clientList;
 
   const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
   const thresholdJuridico = juridicoNode ? juridicoNode.dias : 151;
@@ -17550,6 +17627,9 @@ async function _loadZeroPaidTab_Impl() {
       zeroPaidList = window.applyAdvFiltersTo(zeroPaidList);
       window.advFilters = originalAdvFilters;
   }
+  zeroPaidList = typeof window.filterOutHiddenWebro === "function"
+    ? window.filterOutHiddenWebro(zeroPaidList, "zeropaid")
+    : zeroPaidList;
   
   // ========================================================
   // CALCULO E RENDERIZAÇÃO DE KPIs 0% PAGO
@@ -29469,6 +29549,20 @@ window.openAdvFiltersModal = function(context = 'fila') {
         if (faseGroup) faseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
         if (dataFaseGroup) dataFaseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
 
+        const syncSinglePillGroup = (groupId, value, fallback) => {
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            const current = value || fallback;
+            group.querySelectorAll('.adv-pill').forEach(p => {
+                const pv = p.dataset.value;
+                const isDefault = !pv || pv === fallback;
+                p.classList.toggle('active', current === fallback ? isDefault : pv === current);
+            });
+        };
+        syncSinglePillGroup('adv-pills-zeropaid', window.advFilters.zeropaid, 'TODOS');
+        syncSinglePillGroup('adv-pills-webro', window.advFilters.webro, 'TODOS');
+        syncSinglePillGroup('adv-pills-contato', window.advFilters.contato, '');
+
         if (isSubjudiceCtx) {
             const faseContainer = document.getElementById('adv-pills-fase-processual');
             if (faseContainer) {
@@ -29585,6 +29679,9 @@ window.applyAdvFilters = async function(keepOpen = false) {
     
     const zpPills = getPills('adv-pills-zeropaid');
     window.advFilters.zeropaid = zpPills.length > 0 ? zpPills[0] : 'TODOS';
+
+    const webroPills = getPills('adv-pills-webro');
+    window.advFilters.webro = webroPills.length > 0 ? webroPills[0] : 'TODOS';
     
     window.advFilters.pagamentoRecente = getPills('adv-pills-pagamento-recente');
     window.advFilters.faseProcessual = getPills('adv-pills-fase-processual');
@@ -29640,7 +29737,10 @@ window.applyAdvFilters = async function(keepOpen = false) {
     let count = window.advFilters.lotes.length + window.advFilters.aging.length + window.advFilters.parcelas.length + 
                 window.advFilters.dueday.length + window.advFilters.idade.length + window.advFilters.cidade.length + window.advFilters.empresa.length + window.advFilters.ccusto.length;
     if (window.advFilters.contato) count++;
+    if (window.advFilters.zeropaid && window.advFilters.zeropaid !== 'TODOS') count++;
+    if (window.advFilters.webro && window.advFilters.webro !== 'TODOS') count++;
     if (window.advFilters.subjudice && window.advFilters.subjudice !== 'TODOS') count++;
+    if (window.advFilters.statusJuridico && window.advFilters.statusJuridico !== 'TODOS') count++;
     if (window.advFilters.pagamentoRecente && window.advFilters.pagamentoRecente.length > 0) count++;
     if (window.advFilters.faseProcessual && window.advFilters.faseProcessual.length > 0) count++;
     if (window.advFilters.dataFase && window.advFilters.dataFase.length > 0) count++;
@@ -29813,7 +29913,7 @@ window.clearAdvFilters = function() {
     const defaultState = {
         lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
         cidade: [], empresa: [], ccusto: [], operador: [],
-        contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', pagamentoRecente: [],
+        contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
         faseProcessual: [], dataFase: [], dataFaseNDias: ''
     };
     if (window.currentAdvFilterContext === 'fila') window.advFiltersFila = defaultState;
