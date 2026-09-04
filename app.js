@@ -12691,6 +12691,650 @@ function distPermutaFmt(v) {
   return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function quitacaoFmtMoney(v) {
+  return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function quitacaoFmtPct(v, digits) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: digits != null ? digits : 2, maximumFractionDigits: digits != null ? digits : 2 }) + "%";
+}
+
+function quitacaoFmtDate(d) {
+  const iso = String(d || "").slice(0, 10);
+  const p = iso.split("-");
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (d || "—");
+}
+
+function quitacaoTodayIso() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function quitacaoDaysBetween(isoA, isoB) {
+  const a = String(isoA || "").slice(0, 10);
+  const b = String(isoB || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+  const da = new Date(a + "T12:00:00");
+  const db = new Date(b + "T12:00:00");
+  return Math.round((db - da) / 86400000);
+}
+
+/** Taxa mensal decimal do parcelamento (ex.: 0.008 = 0,80% a.m. Price). */
+function quitacaoGetMonthlyInterestRate(sale) {
+  if (!sale) return null;
+  if (sale.interestPercentage != null && sale.interestPercentage !== "") {
+    const raw = Number(sale.interestPercentage);
+    if (Number.isFinite(raw)) return raw / 100;
+  }
+  if (sale.interestRate != null && Number.isFinite(Number(sale.interestRate))) {
+    return Number(sale.interestRate);
+  }
+  return null;
+}
+
+/** Ex.: 0,80%P — P = Tabela Price */
+function quitacaoFormatJurosLabel(sale) {
+  const rate = quitacaoGetMonthlyInterestRate(sale);
+  if (rate == null || !Number.isFinite(rate)) return null;
+  const pct = rate * 100;
+  return pct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P";
+}
+
+window.updateQuitacaoJurosDisplay = function(sale) {
+  const labelEl = document.getElementById("quitacao-juros-label");
+  const hintEl = document.getElementById("quitacao-juros-hint");
+  const badge = document.getElementById("quitacao-juros-badge");
+  const s = sale || (typeof window.getQuitacaoCurrentSale === "function" ? window.getQuitacaoCurrentSale() : null);
+  const label = quitacaoFormatJurosLabel(s);
+  const rate = quitacaoGetMonthlyInterestRate(s);
+  if (labelEl) labelEl.textContent = label || "—";
+  if (hintEl) {
+    if (label && rate != null) {
+      hintEl.textContent = `${(rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% a.m. · Tabela Price (P)`;
+    } else {
+      hintEl.textContent = "Juros do parcelamento indisponível neste contrato";
+    }
+  }
+  if (badge) badge.title = label ? `Juros embutidos do parcelamento: ${label} (Price)` : "Sem taxa de juros no contrato";
+  window._quitacaoState = window._quitacaoState || {};
+  window._quitacaoState.jurosLabel = label;
+  window._quitacaoState.monthlyRate = rate;
+};
+
+window.getQuitacaoCurrentSale = function() {
+  const billKey = String(AppState.selectedSaleId || AppState.selectedTitulo || "").replace(/^B-/, "").split("-")[0];
+  const sales = (AppState && AppState.sales) || [];
+  return sales.find((s) =>
+    String(s.receivableBillId) === billKey ||
+    String(s.id) === billKey ||
+    String(s.receivableBillId) === String(AppState.selectedSaleId) ||
+    String(s.id) === String(AppState.selectedSaleId)
+  ) || null;
+};
+
+window.getQuitacaoCurrentBillId = function() {
+  const sale = window.getQuitacaoCurrentSale();
+  if (sale && (sale.receivableBillId || sale.id)) {
+    return String(sale.receivableBillId || sale.id).replace(/^B-/, "").split("-")[0];
+  }
+  const raw = String(AppState.selectedSaleId || AppState.selectedTitulo || "").replace(/^B-/, "").split("-")[0];
+  return raw || "";
+};
+
+function quitacaoMapDebtRow(inst, monthlyRate) {
+  const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+  const today = quitacaoTodayIso();
+  const overdue = typeof distPermutaIsOverdue === "function" ? distPermutaIsOverdue(inst) : (due && due < today);
+  const original = Number(inst.originalValue != null ? inst.originalValue : inst.value) || 0;
+  const corrected = Number(
+    inst.correctedValue != null ? inst.correctedValue
+      : (inst.currentBalance != null ? inst.currentBalance
+        : (inst.updatedValue != null ? inst.updatedValue : original))
+  ) || 0;
+  const additions = Number(
+    inst.additionsValue != null ? inst.additionsValue
+      : (inst.additionValue != null ? inst.additionValue
+        : (inst.interestValue != null ? inst.interestValue : inst.additionalValue))
+  ) || 0;
+  const finePct = Number(inst.finePercentage != null ? inst.finePercentage : inst.fineRate);
+  const interestLatePct = Number(inst.interestPercentage != null ? inst.interestPercentage : inst.lateInterestPercentage);
+  const daysApi = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay);
+  let daysOverdue = 0;
+  let daysDisc = 0;
+  if (overdue) {
+    const d = quitacaoDaysBetween(due, today);
+    daysOverdue = d != null ? Math.max(0, d) : (Number.isFinite(daysApi) ? Math.abs(daysApi) : 0);
+  } else {
+    const d = quitacaoDaysBetween(today, due);
+    daysDisc = d != null ? Math.max(0, d) : 0;
+  }
+  const vp = typeof distPermutaInstVp === "function" ? distPermutaInstVp(inst) : (Number(inst.presentValue) || corrected);
+  const baseForVp = corrected > 0.009 ? corrected : original;
+  let jurosVpPct = null;
+  if (!overdue && baseForVp > 0.009 && vp > 0.009 && Math.abs(baseForVp - vp) > 0.009) {
+    jurosVpPct = ((baseForVp / vp) - 1) * 100;
+  } else if (!overdue && monthlyRate != null && daysDisc > 0) {
+    const months = daysDisc / 30;
+    jurosVpPct = (Math.pow(1 + monthlyRate, months) - 1) * 100;
+  }
+  const tipo = inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || "Parcelas";
+  const jurosParcelamento = monthlyRate != null
+    ? ((monthlyRate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P")
+    : (window._quitacaoState && window._quitacaoState.jurosLabel) || "—";
+  return {
+    raw: inst,
+    due,
+    number: inst.installmentNumber || inst.installmentId || inst.id || "—",
+    tipo,
+    original,
+    corrected,
+    additions,
+    vp: Number(vp) || 0,
+    overdue: !!overdue,
+    daysOverdue,
+    daysForDiscount: overdue ? 0 : daysDisc,
+    jurosVpPct,
+    valorComDesconto: Number(vp) || corrected,
+    jurosParcelamento,
+    finePct: Number.isFinite(finePct) ? finePct : 2,
+    interestLatePct: Number.isFinite(interestLatePct) ? interestLatePct : 1
+  };
+}
+
+window.loadQuitacaoDebtReport = async function(force) {
+  const statusEl = document.getElementById("quitacao-report-status");
+  const bodyEl = document.getElementById("quitacao-report-body");
+  let sale = window.getQuitacaoCurrentSale();
+  const billId = window.getQuitacaoCurrentBillId();
+  // Garante taxa do contrato (cache da fila às vezes não traz interestPercentage)
+  if (sale && quitacaoGetMonthlyInterestRate(sale) == null && AppState.selectedCustomerId && SiengeApiService.getSales) {
+    try {
+      const sales = await SiengeApiService.getSales(AppState.selectedCustomerId);
+      const list = Array.isArray(sales) ? sales : [];
+      const fresh = list.find((s) =>
+        String(s.receivableBillId) === String(billId) || String(s.id) === String(billId)
+      );
+      if (fresh) {
+        sale = { ...sale, ...fresh };
+        if (AppState.sales) {
+          const idx = AppState.sales.findIndex((s) => String(s.receivableBillId) === String(billId) || String(s.id) === String(billId));
+          if (idx >= 0) AppState.sales[idx] = { ...AppState.sales[idx], ...fresh };
+          else AppState.sales.push(fresh);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+  window.updateQuitacaoJurosDisplay(sale);
+  if (!billId) {
+    if (statusEl) statusEl.textContent = "Sem título selecionado.";
+    if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#94a3b8;font-size:0.85rem;">Selecione um contrato para gerar o relatório.</div>`;
+    return;
+  }
+  window._quitacaoState = window._quitacaoState || {};
+  if (!force && window._quitacaoState.billId === billId && Array.isArray(window._quitacaoState.rows) && window._quitacaoState.rows.length) {
+    window.renderQuitacaoDebtReport();
+    return;
+  }
+  if (statusEl) statusEl.textContent = "Buscando saldo devedor presente no Sienge...";
+  if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#64748b;font-size:0.85rem;">Carregando parcelas a valor presente...</div>`;
+  try {
+    const companyId = (sale && sale.companyId) || AppState.currentCompanyId || "";
+    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
+    const monthlyRate = quitacaoGetMonthlyInterestRate(sale);
+    const rows = flattenCustomerDebtBalance(res)
+      .filter((inst) => typeof distPermutaInstOpen === "function" ? distPermutaInstOpen(inst) : true)
+      .map((inst) => quitacaoMapDebtRow(inst, monthlyRate))
+      .filter((r) => (r.vp > 0.009) || (r.corrected > 0.009) || (r.original > 0.009))
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const vencidas = rows.filter((r) => r.overdue);
+    const aVencer = rows.filter((r) => !r.overdue);
+    const sumVencVp = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    const sumFutVp = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    const sumFutCorr = aVencer.reduce((s, r) => s + (Number(r.corrected) || 0), 0);
+    const sumVencCorr = vencidas.reduce((s, r) => s + (Number(r.corrected) || r.vp || 0), 0);
+    window._quitacaoState.billId = billId;
+    window._quitacaoState.companyId = companyId;
+    window._quitacaoState.rows = rows;
+    window._quitacaoState.vencidas = vencidas;
+    window._quitacaoState.aVencer = aVencer;
+    window._quitacaoState.saldoPresente = sumVencVp + sumFutVp;
+    window._quitacaoState.vencidasAtualizado = sumVencVp;
+    window._quitacaoState.aVencerVp = sumFutVp;
+    window._quitacaoState.valorFuturo = sumVencCorr + sumFutCorr;
+    // Atualiza KPIs a partir do relatório detalhado (mais fiel ao Saldo Devedor Presente)
+    const leftVencidasCount = document.getElementById("quitacao-left-vencidas-count");
+    const leftVencidasVal = document.getElementById("quitacao-left-vencidas-val");
+    const leftAvencerCount = document.getElementById("quitacao-left-avencer-count");
+    const leftAvencerVal = document.getElementById("quitacao-left-avencer-val");
+    const leftTotalCount = document.getElementById("quitacao-left-total-count");
+    const leftTotalVal = document.getElementById("quitacao-left-total-val");
+    const n = rows.length;
+    if (leftVencidasCount) leftVencidasCount.textContent = vencidas.length === 1 ? "1 parcela" : `${vencidas.length} parcelas`;
+    if (leftVencidasVal) leftVencidasVal.textContent = quitacaoFmtMoney(sumVencVp);
+    if (leftAvencerCount) leftAvencerCount.textContent = aVencer.length === 1 ? "1 parcela" : `${aVencer.length} parcelas`;
+    if (leftAvencerVal) leftAvencerVal.textContent = quitacaoFmtMoney(sumFutCorr > 0.009 ? sumFutCorr : sumFutVp);
+    if (leftTotalCount) leftTotalCount.textContent = n === 1 ? "1 parcela" : `${n} parcelas`;
+    if (leftTotalVal) leftTotalVal.textContent = quitacaoFmtMoney(sumVencCorr + sumFutCorr);
+    const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
+    if (qVpRightCountEl) qVpRightCountEl.textContent = n === 1 ? "1 parcela" : `${n} parcelas`;
+    // Se a API total ainda não preencheu VP, usa soma do detalhe
+    const vpApi = Number(window.funnelCurrentVP) || 0;
+    if (!(vpApi > 0.009) && (sumVencVp + sumFutVp) > 0.009) {
+      const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
+      const totalVp = sumVencVp + sumFutVp;
+      if (qVpRightEl) qVpRightEl.textContent = quitacaoFmtMoney(totalVp);
+      window.funnelCurrentVP = totalVp;
+      const discVal = (sumVencCorr + sumFutCorr) - totalVp;
+      const discPct = (sumVencCorr + sumFutCorr) > 0 ? (discVal / (sumVencCorr + sumFutCorr)) * 100 : 0;
+      const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
+      const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
+      if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
+      if (funnelDiscountEl) funnelDiscountEl.textContent = `${discPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% OFF`;
+      if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
+    }
+    window.renderQuitacaoDebtReport();
+    window.syncQuitacaoAbateLiquido();
+    if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(sale) || "—"}`;
+  } catch (e) {
+    console.error("Erro relatório quitação:", e);
+    if (statusEl) statusEl.textContent = "Falha ao obter saldo devedor presente.";
+    if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#b91c1c;font-size:0.85rem;">Não foi possível carregar o relatório. Tente Atualizar.</div>`;
+  }
+};
+
+window.renderQuitacaoDebtReport = function() {
+  const bodyEl = document.getElementById("quitacao-report-body");
+  if (!bodyEl) return;
+  const st = window._quitacaoState || {};
+  const vencidas = st.vencidas || [];
+  const aVencer = st.aVencer || [];
+  const jurosLabel = st.jurosLabel || "—";
+  if (!vencidas.length && !aVencer.length) {
+    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
+    return;
+  }
+  const rowVenc = (r, i) => `
+    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f8fafc" : "#fff"};">
+      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
+      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
+      <td style="padding:6px 8px;">${r.tipo}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.corrected)}</td>
+      <td style="padding:6px 8px;text-align:center;font-weight:700;color:#166534;" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
+      <td style="padding:6px 8px;text-align:center;">${r.daysOverdue || "—"}</td>
+      <td style="padding:6px 8px;text-align:right;color:#b91c1c;">${quitacaoFmtMoney(r.additions)}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:800;color:#b91c1c;">${quitacaoFmtMoney(r.vp)}</td>
+    </tr>`;
+  const rowFut = (r, i) => `
+    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f8fafc" : "#fff"};">
+      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
+      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
+      <td style="padding:6px 8px;">${r.tipo}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.corrected)}</td>
+      <td style="padding:6px 8px;text-align:center;font-weight:700;color:#166534;" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
+      <td style="padding:6px 8px;text-align:center;">${r.daysForDiscount || "—"}</td>
+      <td style="padding:6px 8px;text-align:right;">${r.jurosVpPct != null ? quitacaoFmtPct(r.jurosVpPct) : "—"}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:800;color:var(--color-primary);">${quitacaoFmtMoney(r.vp)}</td>
+      <td style="padding:6px 8px;text-align:right;color:#166534;">${quitacaoFmtMoney(r.valorComDesconto)}</td>
+    </tr>`;
+  const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+  const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+  const sumFutCorr = aVencer.reduce((s, r) => s + (Number(r.corrected) || 0), 0);
+  bodyEl.innerHTML = `
+    ${vencidas.length ? `
+    <div style="padding:10px 12px;background:#450a0a;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;">Valores a pagar (vencidas)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+      <thead>
+        <tr style="background:#64748b;color:#fff;">
+          <th style="padding:8px;text-align:left;">Dt. Venc</th>
+          <th style="padding:8px;text-align:center;">Par</th>
+          <th style="padding:8px;text-align:left;">Tipo</th>
+          <th style="padding:8px;text-align:right;">Valor original</th>
+          <th style="padding:8px;text-align:right;">Valor corrigido</th>
+          <th style="padding:8px;text-align:center;">Juros</th>
+          <th style="padding:8px;text-align:center;">Dias atraso</th>
+          <th style="padding:8px;text-align:right;">Acréscimo</th>
+          <th style="padding:8px;text-align:right;">Valor atualizado</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${vencidas.map(rowVenc).join("")}
+        <tr style="background:#334155;color:#fff;">
+          <td colspan="8" style="padding:8px;text-align:right;font-weight:800;">Total vencidas</td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumVenc)}</td>
+        </tr>
+      </tbody>
+    </table>` : ""}
+    ${aVencer.length ? `
+    <div style="padding:10px 12px;background:#14532d;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;${vencidas.length ? "margin-top:0;" : ""}">Valores a pagar (a vencer) — valor presente</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+      <thead>
+        <tr style="background:#64748b;color:#fff;">
+          <th style="padding:8px;text-align:left;">Dt. Venc</th>
+          <th style="padding:8px;text-align:center;">Par</th>
+          <th style="padding:8px;text-align:left;">Tipo</th>
+          <th style="padding:8px;text-align:right;">Valor original</th>
+          <th style="padding:8px;text-align:right;">Valor corrigido</th>
+          <th style="padding:8px;text-align:center;">Juros</th>
+          <th style="padding:8px;text-align:center;">Dias p/ desconto</th>
+          <th style="padding:8px;text-align:right;">Juros VP</th>
+          <th style="padding:8px;text-align:right;">VP</th>
+          <th style="padding:8px;text-align:right;">Valor c/ desconto</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${aVencer.map(rowFut).join("")}
+        <tr style="background:#166534;color:#fff;">
+          <td colspan="4" style="padding:8px;text-align:right;font-weight:800;">Totais a vencer</td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFutCorr)}</td>
+          <td colspan="3"></td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFut)}</td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFut)}</td>
+        </tr>
+      </tbody>
+    </table>` : ""}
+    <div style="padding:12px 14px;background:#0f172a;color:#fff;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:0.85rem;font-weight:800;">
+      <span>Total saldo devedor presente</span>
+      <span>${quitacaoFmtMoney(st.saldoPresente || (sumVenc + sumFut))}</span>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+};
+
+window.syncQuitacaoAbateUi = function() {
+  const on = !!(document.getElementById("quitacao-abate-toggle") && document.getElementById("quitacao-abate-toggle").checked);
+  const label = document.getElementById("quitacao-abate-label");
+  const panel = document.getElementById("quitacao-abate-panel");
+  if (label) {
+    label.style.background = on ? "#ea580c" : "#fff";
+    label.style.color = on ? "#fff" : "#9a3412";
+    label.style.borderColor = on ? "#c2410c" : "#fdba74";
+  }
+  if (panel) panel.style.display = on ? "block" : "none";
+};
+
+window.syncQuitacaoAbateLiquido = function() {
+  const vp = Number(window.funnelCurrentVP) || Number((window._quitacaoState && window._quitacaoState.saldoPresente)) || 0;
+  const abate = Number((window._quitacaoAbateState && window._quitacaoAbateState.selectedVp)) || 0;
+  const liquido = Math.max(0, vp - abate);
+  const wrap = document.getElementById("quitacao-vp-liquido-wrap");
+  const valEl = document.getElementById("quitacao-vp-liquido-val");
+  const liqEl = document.getElementById("quitacao-abate-liquido");
+  const on = !!(document.getElementById("quitacao-abate-toggle") && document.getElementById("quitacao-abate-toggle").checked);
+  if (wrap) wrap.style.display = (on && abate > 0.009) ? "block" : "none";
+  if (valEl) valEl.textContent = quitacaoFmtMoney(liquido);
+  if (liqEl) {
+    liqEl.textContent = "Quitação líquida: " + quitacaoFmtMoney(liquido);
+    liqEl.style.color = abate > 0.009 ? "#166534" : "#9a3412";
+  }
+  const sdEl = document.getElementById("quitacao-abate-sd-presente");
+  const selEl = document.getElementById("quitacao-abate-selecionado");
+  if (sdEl) sdEl.textContent = quitacaoFmtMoney((window._quitacaoAbateState && window._quitacaoAbateState.saldoPresente) || 0);
+  if (selEl) selEl.textContent = quitacaoFmtMoney(abate);
+};
+
+window.toggleQuitacaoAbatimento = function() {
+  const on = !!(document.getElementById("quitacao-abate-toggle") && document.getElementById("quitacao-abate-toggle").checked);
+  window.syncQuitacaoAbateUi();
+  if (on) {
+    window.loadQuitacaoAbateContracts();
+  } else {
+    window._quitacaoAbateState = { installments: [], selectedVp: 0, saldoPresente: 0 };
+    const body = document.getElementById("quitacao-abate-parcelas-body");
+    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Ative o abatimento e selecione um contrato.</div>`;
+    const selectEl = document.getElementById("quitacao-abate-contract");
+    if (selectEl) selectEl.innerHTML = `<option value="">Selecione o contrato do cliente...</option>`;
+    window.syncQuitacaoAbateLiquido();
+  }
+};
+
+window.loadQuitacaoAbateContracts = async function() {
+  const selectEl = document.getElementById("quitacao-abate-contract");
+  if (!selectEl) return;
+  const customerId = AppState.selectedCustomerId;
+  const currentIds = new Set(
+    [window.getQuitacaoCurrentBillId(), AppState.selectedSaleId, AppState.selectedTitulo]
+      .filter((v) => v != null && String(v) !== "")
+      .map((v) => String(v).replace(/^B-/, "").split("-")[0])
+  );
+  selectEl.innerHTML = `<option value="">Carregando contratos...</option>`;
+  selectEl.disabled = true;
+  try {
+    const [sales, billsRes] = await Promise.all([
+      (typeof SiengeApiService !== "undefined" && SiengeApiService.getSales)
+        ? SiengeApiService.getSales(customerId).catch(() => [])
+        : Promise.resolve([]),
+      (typeof SiengeApiService !== "undefined" && SiengeApiService.getReceivableBills)
+        ? SiengeApiService.getReceivableBills(customerId).catch(() => ({ results: [] }))
+        : Promise.resolve({ results: [] })
+    ]);
+    const saleList = Array.isArray(sales) ? sales : [];
+    let bills = (billsRes && billsRes.results) || [];
+    if (!bills.length && saleList.length) {
+      bills = saleList.map((s) => ({
+        receivableBillId: s.receivableBillId || s.id,
+        id: s.id,
+        documentId: "CT",
+        companyId: s.companyId,
+        units: s.unitId || s.unitName,
+        situation: s.status,
+        payOffDate: s.status === "Quitado" ? s.lastPaymentDate : null
+      }));
+    }
+    const ctBills = bills.filter((b) => {
+      const doc = String(b.documentId || b.documentType || "").trim().toUpperCase();
+      return !doc || doc === "CT";
+    });
+    const pool = (ctBills.length ? ctBills : bills).filter((b) => {
+      const billId = String(b.receivableBillId || b.id || "").replace(/^B-/, "").split("-")[0];
+      if (currentIds.has(billId)) return false;
+      if (b.payOffDate || b.payoffDate) return false;
+      const sit = String(b.situation || b.status || "").toLowerCase();
+      if (sit.includes("distrat") || sit.includes("cancel") || sit.includes("quitad")) return false;
+      const sale = saleList.find((s) => String(s.receivableBillId) === String(billId) || String(s.id) === String(billId));
+      if (sale && (sale.status === "Distratado" || sale.status === "Quitado" || sale.active === false)) return false;
+      return true;
+    });
+    const options = pool.map((b) => {
+      const billId = String(b.receivableBillId || b.id || "").replace(/^B-/, "").split("-")[0];
+      const sale = saleList.find((s) => String(s.receivableBillId) === String(billId) || String(s.id) === String(billId));
+      const unit = b.units || b.unitName || (sale && (sale.unitName || sale.unitId)) || "N/D";
+      const companyId = b.companyId || (sale && sale.companyId) || "";
+      return { billId, companyId, unit, label: `Título ${billId} · ${unit}` };
+    });
+    window._quitacaoAbateState = window._quitacaoAbateState || {};
+    window._quitacaoAbateState.contracts = options;
+    if (!options.length) {
+      selectEl.innerHTML = `<option value="">Nenhum outro contrato CT ativo</option>`;
+      selectEl.disabled = true;
+      const body = document.getElementById("quitacao-abate-parcelas-body");
+      if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Este cliente não possui outro contrato ativo para abatimento.</div>`;
+      return;
+    }
+    selectEl.innerHTML = `<option value="">Selecione o contrato do cliente...</option>` + options.map((o) =>
+      `<option value="${o.billId}" data-company="${o.companyId}" data-unit="${String(o.unit).replace(/"/g, "&quot;")}">${o.label}</option>`
+    ).join("");
+    selectEl.disabled = false;
+  } catch (e) {
+    console.error("Erro ao listar contratos para abatimento quitação:", e);
+    selectEl.innerHTML = `<option value="">Erro ao buscar contratos</option>`;
+    selectEl.disabled = false;
+  }
+};
+
+window.onQuitacaoAbateContractChange = async function() {
+  const selectEl = document.getElementById("quitacao-abate-contract");
+  const body = document.getElementById("quitacao-abate-parcelas-body");
+  const billId = selectEl ? selectEl.value : "";
+  const opt = selectEl && selectEl.selectedOptions && selectEl.selectedOptions[0];
+  const unit = opt ? (opt.getAttribute("data-unit") || "") : "";
+  const companyId = opt ? (opt.getAttribute("data-company") || "") : "";
+  window._quitacaoAbateState = window._quitacaoAbateState || {};
+  window._quitacaoAbateState.selectedVp = 0;
+  window._quitacaoAbateState.installments = [];
+  if (!billId) {
+    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+    window.syncQuitacaoAbateLiquido();
+    return;
+  }
+  if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Buscando parcelas a valor presente no Sienge...</div>`;
+  try {
+    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
+    const rows = flattenCustomerDebtBalance(res)
+      .filter(distPermutaInstOpen)
+      .map((inst) => {
+        const due = inst.dueDate || inst.due || "";
+        const original = Number(inst.originalValue || inst.value || 0) || 0;
+        return {
+          id: inst.installmentId || inst.installmentNumber || inst.id,
+          number: inst.installmentNumber || inst.installmentId || inst.id,
+          due,
+          original,
+          balance: Number(inst.currentBalance != null ? inst.currentBalance : original) || 0,
+          vp: distPermutaInstVp(inst),
+          overdue: distPermutaIsOverdue(inst)
+        };
+      })
+      .filter((r) => r.vp > 0.009)
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    window._quitacaoAbateState.installments = rows;
+    window._quitacaoAbateState.billId = billId;
+    window._quitacaoAbateState.unit = unit;
+    const sumVp = rows.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    window._quitacaoAbateState.saldoPresente = sumVp;
+    if (!rows.length) {
+      body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
+    } else {
+      const vencidas = rows.filter((r) => r.overdue);
+      const aVencer = rows.filter((r) => !r.overdue);
+      const rowHtml = (r, i) => `
+        <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
+          <td style="padding:6px;text-align:center;">
+            <input type="checkbox" class="quitacao-abate-inst-check" data-idx="${i}" onchange="onQuitacaoAbateInstToggle()">
+          </td>
+          <td style="padding:6px;font-weight:700;">${r.number}</td>
+          <td style="padding:6px;text-align:center;">${quitacaoFmtDate(r.due)}</td>
+          <td style="padding:6px;text-align:right;">${quitacaoFmtMoney(r.original || r.balance)}</td>
+          <td style="padding:6px;text-align:right;font-weight:800;color:${r.overdue ? "#9a3412" : "#1d4ed8"};">${quitacaoFmtMoney(r.vp)}</td>
+        </tr>`;
+      const section = (title, list) => {
+        if (!list.length) return "";
+        const total = list.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+        const idxs = list.map((r) => rows.indexOf(r));
+        return `
+          <tr style="background:#fff7ed;">
+            <td colspan="5" style="padding:8px 8px 4px;font-size:0.72rem;font-weight:800;color:#9a3412;text-transform:uppercase;">${title}</td>
+          </tr>
+          ${list.map((r, k) => rowHtml(r, idxs[k])).join("")}
+          <tr style="background:#ffedd5;">
+            <td colspan="4" style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">Totais</td>
+            <td style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">${quitacaoFmtMoney(total)}</td>
+          </tr>`;
+      };
+      body.innerHTML = `
+        <div style="padding:10px 12px;background:#fff;border-bottom:1px solid #fed7aa;">
+          <div style="font-size:0.78rem;font-weight:800;color:#9a3412;">Saldo devedor presente deste título</div>
+          <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${quitacaoFmtMoney(sumVp)}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+          <thead>
+            <tr style="background:#9a3412;color:#fff;">
+              <th style="padding:8px;width:36px;text-align:center;"></th>
+              <th style="padding:8px;text-align:left;">Parcela</th>
+              <th style="padding:8px;text-align:center;">Vencimento</th>
+              <th style="padding:8px;text-align:right;">Valor original</th>
+              <th style="padding:8px;text-align:right;">Valor presente</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${section("Valores a pagar (vencidas)", vencidas)}
+            ${section("Valores a pagar (a vencer)", aVencer)}
+          </tbody>
+        </table>`;
+    }
+  } catch (e) {
+    console.error("Erro ao carregar VP abatimento quitação:", e);
+    if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#b91c1c;font-size:0.85rem;">Não foi possível obter o valor presente deste contrato.</div>`;
+  }
+  window.syncQuitacaoAbateLiquido();
+};
+
+window.onQuitacaoAbateInstToggle = function() {
+  const rows = (window._quitacaoAbateState && window._quitacaoAbateState.installments) || [];
+  const checks = document.querySelectorAll(".quitacao-abate-inst-check");
+  const selected = [];
+  checks.forEach((chk) => {
+    if (!chk.checked) return;
+    const inst = rows[Number(chk.getAttribute("data-idx"))];
+    if (inst) selected.push(inst);
+  });
+  const sum = selected.reduce((acc, r) => acc + (Number(r.vp) || 0), 0);
+  window._quitacaoAbateState = window._quitacaoAbateState || {};
+  window._quitacaoAbateState.selectedVp = sum;
+  window._quitacaoAbateState.selection = selected;
+  window.syncQuitacaoAbateLiquido();
+};
+
+window.exportQuitacaoSaldoDevedorExcel = function() {
+  if (typeof XLSX === "undefined") {
+    alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+    return;
+  }
+  const st = window._quitacaoState || {};
+  const sale = window.getQuitacaoCurrentSale();
+  const customer = (AppState.customers && AppState.selectedCustomerId) ? AppState.customers[AppState.selectedCustomerId] : null;
+  const juros = quitacaoFormatJurosLabel(sale) || "—";
+  const header = [
+    ["Saldo Devedor Presente — Quitação"],
+    ["Cliente", (customer && (customer.name || customer.customerName)) || ""],
+    ["CPF/CNPJ", (customer && customer.cpfCnpj) || ""],
+    ["Título", st.billId || window.getQuitacaoCurrentBillId() || ""],
+    ["Unidade", (sale && (sale.unitId || sale.unitName)) || ""],
+    ["Juros parcelamento", juros, "Tabela Price (P) — % a.m."],
+    ["Gerado em", new Date().toLocaleString("pt-BR")],
+    []
+  ];
+  const aoa = [...header];
+  const pushSection = (title, rows, mode) => {
+    if (!rows || !rows.length) return;
+    aoa.push([title]);
+    if (mode === "vencidas") {
+      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Valor corrigido", "Juros", "Dias atraso", "Acréscimo", "Valor atualizado"]);
+      rows.forEach((r) => aoa.push([
+        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.corrected, r.jurosParcelamento || juros,
+        r.daysOverdue, r.additions, r.vp
+      ]));
+      const tot = rows.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+      aoa.push(["", "", "", "", "", "", "", "Total vencidas", tot]);
+    } else {
+      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Valor corrigido", "Juros", "Dias p/ desconto", "Juros VP %", "VP", "Valor c/ desconto"]);
+      rows.forEach((r) => aoa.push([
+        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.corrected, r.jurosParcelamento || juros,
+        r.daysForDiscount, r.jurosVpPct != null ? Number(r.jurosVpPct) : "", r.vp, r.valorComDesconto
+      ]));
+      const tot = rows.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+      aoa.push(["", "", "", "", "", "", "", "Total a vencer VP", tot, tot]);
+    }
+    aoa.push([]);
+  };
+  pushSection("VALORES A PAGAR (VENCIDAS)", st.vencidas || [], "vencidas");
+  pushSection("VALORES A PAGAR (A VENCER)", st.aVencer || [], "avencer");
+  aoa.push(["Total saldo devedor presente", st.saldoPresente || 0]);
+  const abate = Number((window._quitacaoAbateState && window._quitacaoAbateState.selectedVp)) || 0;
+  if (abate > 0.009) {
+    aoa.push(["Abatimento (2º contrato VP)", abate]);
+    aoa.push(["Quitação líquida", Math.max(0, (Number(window.funnelCurrentVP) || st.saldoPresente || 0) - abate)]);
+    aoa.push(["Título abatimento", (window._quitacaoAbateState && window._quitacaoAbateState.billId) || ""]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Saldo Devedor Presente");
+  const dateStr = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `saldo_devedor_presente_${st.billId || "contrato"}_${dateStr}.xlsx`);
+};
+
 function distPermutaTargetRefund() {
   if (AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet != null) {
     return Number(AppState.currentDistratoResult.refundNet) || 0;
@@ -13024,21 +13668,31 @@ function syncDistratoWitnessSelects() {
   const s1 = document.getElementById("dist-testemunha-1");
   const s2 = document.getElementById("dist-testemunha-2");
   if (!s1 || !s2) return;
-  const v1 = String(s1.value || "");
-  const v2 = String(s2.value || "");
+  let v1 = String(s1.value || "");
+  let v2 = String(s2.value || "");
   if (v1 && v2 && v1 === v2) {
+    v2 = "";
     s2.value = "";
   }
-  const taken1 = String(s1.value || "");
-  const taken2 = String(s2.value || "");
-  Array.from(s1.options).forEach(opt => {
-    if (!opt.value) { opt.disabled = false; return; }
-    opt.disabled = String(opt.value) === taken2;
-  });
-  Array.from(s2.options).forEach(opt => {
-    if (!opt.value) { opt.disabled = false; return; }
-    opt.disabled = String(opt.value) === taken1;
-  });
+  const users = getDistratoWitnessUsers();
+  const buildOpts = (excludeId, keepId) => {
+    const list = users.filter((u) => {
+      const id = String(u.id);
+      if (keepId && id === keepId) return true;
+      if (excludeId && id === excludeId) return false;
+      return true;
+    });
+    return ['<option value="">Selecione...</option>'].concat(list.map((u) => {
+      const rg = u.doc_rg || u.rg || "";
+      return `<option value="${u.id}">${u.name}${rg ? " — RG " + rg : ""}</option>`;
+    })).join("");
+  };
+  s1.innerHTML = buildOpts(v2, v1);
+  s2.innerHTML = buildOpts(v1, v2);
+  s1.value = v1;
+  s2.value = v2;
+  if (v1 && !Array.from(s1.options).some((o) => o.value === v1)) s1.value = "";
+  if (v2 && !Array.from(s2.options).some((o) => o.value === v2)) s2.value = "";
 }
 
 function populateDistratoWitnessSelects() {
