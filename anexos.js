@@ -17,8 +17,15 @@ const AnexosState = {
   /** Espelho de lotes: só clicáveis com contrato ativo; enviado por contractId (permite reenvio após distrato). */
   mapaUnidades: false,
   mapaLoading: false,
-  mapaMeta: {}, // unitId -> { active, contractId, contractNumber, sentTags: string[] }
-  mapaEnvios: {} // key `${contractId}_${TAG}` -> record
+  mapaMeta: {}, // unitId -> { active, contractId, contractNumber, sentTags: string[], enterpriseId?, enterpriseName?, unitName? }
+  mapaEnvios: {}, // key `${contractId}_${TAG}` -> record
+  tituloReceber: null, // { id, number, balance, statusLabel }
+  periodoMode: false,
+  periodoStart: '',
+  periodoEnd: '',
+  periodoOpen: false,
+  periodoMapa: [], // [{ enterpriseId, enterpriseName, units: [{id,name,...}] }]
+  tagMemory: [] // fingerprints aprendidos
 };
 
 function anexosTodayIso() {
@@ -351,7 +358,8 @@ function anexosResolveActiveTag(suggested) {
     if (al.some(a => sn === a || sn.includes(a) || a.includes(sn))) return t;
     if (sn.includes(tn) || tn.includes(sn)) return t;
   }
-  return s;
+  // Só tags da lista ativa — nunca inventar DOC/avulso
+  return '';
 }
 
 function anexosAttId(att) {
@@ -495,7 +503,127 @@ async function anexosSaveMapaEnvio(record) {
   }
 }
 
+async function anexosLoadTagMemory() {
+  if (!window.firebaseCollections || !window.firebaseDb) return [];
+  try {
+    const { collection, getDocs } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, 'anexos_tag_memory'));
+    const rows = [];
+    snap.forEach((d) => rows.push({ id: d.id, ...(d.data() || {}) }));
+    AnexosState.tagMemory = rows;
+    return rows;
+  } catch (e) {
+    console.warn('[Anexos] tag memory', e);
+    return AnexosState.tagMemory || [];
+  }
+}
+
+async function anexosSaveTagMemory(entry) {
+  if (!entry || !window.firebaseCollections || !window.firebaseDb) return;
+  try {
+    const { doc, setDoc } = window.firebaseCollections;
+    const id = entry.id || `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const payload = { ...entry, id, updatedAt: new Date().toISOString() };
+    await setDoc(doc(window.firebaseDb, 'anexos_tag_memory', id), payload, { merge: true });
+    const list = AnexosState.tagMemory || [];
+    const ix = list.findIndex((x) => x.id === id);
+    if (ix >= 0) list[ix] = payload;
+    else list.push(payload);
+    AnexosState.tagMemory = list;
+  } catch (e) {
+    console.warn('[Anexos] save tag memory', e);
+  }
+}
+
+function anexosFingerprintFromImageDataUrl(dataUrl, ocrText) {
+  const phrases = String(ocrText || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4)
+    .slice(0, 40);
+  let colors = [];
+  let aspect = 0;
+  try {
+    const img = document.createElement('img');
+    // sync path only works if already loaded; we compute aspect from data url size later via canvas in caller
+    aspect = 0;
+  } catch (e) {}
+  return {
+    phrases,
+    phraseKey: phrases.slice(0, 12).join(' '),
+    colors,
+    aspect,
+    sample: String(dataUrl || '').slice(0, 120)
+  };
+}
+
+async function anexosFingerprintFromCanvas(canvas, ocrText) {
+  const phrases = String(ocrText || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4)
+    .slice(0, 40);
+  const aspect = canvas && canvas.width && canvas.height ? Number((canvas.width / canvas.height).toFixed(3)) : 0;
+  const colors = [];
+  try {
+    const ctx = canvas.getContext('2d');
+    const w = Math.min(canvas.width, 80);
+    const h = Math.min(canvas.height, 80);
+    const tmp = document.createElement('canvas');
+    tmp.width = w;
+    tmp.height = h;
+    tmp.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    const data = tmp.getContext('2d').getImageData(0, 0, w, h).data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      r += data[i]; g += data[i + 1]; b += data[i + 2]; n += 1;
+    }
+    if (n) colors.push(`rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`);
+  } catch (e) {}
+  return { phrases, phraseKey: phrases.slice(0, 12).join(' '), colors, aspect };
+}
+
+function anexosMatchTagMemory(fp) {
+  const mem = AnexosState.tagMemory || [];
+  if (!fp || !mem.length) return '';
+  const key = String(fp.phraseKey || '');
+  let best = null;
+  let bestScore = 0;
+  mem.forEach((m) => {
+    if (!m.tag) return;
+    let score = 0;
+    const mk = String(m.phraseKey || '');
+    if (key && mk) {
+      const a = new Set(key.split(' '));
+      const b = mk.split(' ');
+      const hit = b.filter((w) => a.has(w)).length;
+      score += hit * 2;
+    }
+    if (fp.aspect && m.aspect && Math.abs(Number(fp.aspect) - Number(m.aspect)) < 0.15) score += 2;
+    if (fp.colors && m.colors && fp.colors[0] && m.colors[0] && fp.colors[0] === m.colors[0]) score += 3;
+    if (score > bestScore) {
+      bestScore = score;
+      best = m;
+    }
+  });
+  if (best && bestScore >= 4) return anexosResolveActiveTag(best.tag);
+  return '';
+}
+
+function anexosFmtMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
 function anexosBuildMapaHtml() {
+  if (AnexosState.periodoMode && AnexosState.periodoMapa && AnexosState.periodoMapa.length) {
+    return anexosBuildPeriodoMapaHtml();
+  }
   const units = AnexosState.unidades || [];
   if (!units.length) {
     return '<div class="anexos-mapa-empty">Busque o empreendimento para carregar o espelho de lotes.</div>';
@@ -557,6 +685,43 @@ function anexosBuildMapaHtml() {
     return m.active && m.sentTags && m.sentTags.length;
   }).length;
   html += `<div class="anexos-mapa-foot">${clickable} lotes com contrato ativo · ${enviados} com envio no contrato atual · clique para taguear</div>`;
+  return html;
+}
+
+function anexosBuildPeriodoMapaHtml() {
+  const groups = AnexosState.periodoMapa || [];
+  if (AnexosState.mapaLoading) {
+    return '<div class="anexos-mapa-empty">Buscando vendas do período…</div>';
+  }
+  if (!groups.length) {
+    return '<div class="anexos-mapa-empty">Nenhuma venda pendente de anexo no período.</div>';
+  }
+  let html = '<div class="anexos-mapa-legend">'
+    + '<span class="anexos-mapa-pill is-pendente">Pendente de envio</span>'
+    + '<span class="anexos-mapa-pill is-enviado">Já enviado</span>'
+    + '<span class="anexos-mapa-pill is-sel">Selecionado</span>'
+    + '</div>';
+  html += '<div class="anexos-mapa-wrap">';
+  groups.forEach((emp) => {
+    html += `<div class="anexos-mapa-quadra"><div class="anexos-mapa-quadra-title">${anexosEsc(emp.enterpriseId)} — ${anexosEsc(emp.enterpriseName || '')}</div><div class="anexos-mapa-grid">`;
+    (emp.units || []).forEach((u) => {
+      const meta = AnexosState.mapaMeta[String(u.id)] || {};
+      const selected = String(AnexosState.selectedUnidade) === String(u.id) && String(AnexosState.cc) === String(emp.enterpriseId);
+      const sent = Array.isArray(meta.sentTags) && meta.sentTags.length > 0;
+      let cls = 'anexos-mapa-tile ' + (sent ? 'is-enviado' : 'is-pendente');
+      if (selected) cls += ' is-sel';
+      const parsed = anexosParseUnitName(u.name);
+      html += `<button type="button" class="${cls}" title="${anexosEsc(u.name)}" onclick="AnexosApp.selecionarUnidadePeriodo('${String(emp.enterpriseId).replace(/'/g, '')}','${String(u.id).replace(/'/g, '')}')">`
+        + `<span class="anexos-mapa-lot">${anexosEsc(parsed.lot)}</span>`
+        + `<span class="anexos-mapa-name">${anexosEsc(parsed.label)}</span>`
+        + `<span class="anexos-mapa-status">${sent ? 'Enviado' : 'Pendente'}</span>`
+        + `</button>`;
+    });
+    html += '</div></div>';
+  });
+  html += '</div>';
+  const total = groups.reduce((n, g) => n + (g.units || []).length, 0);
+  html += `<div class="anexos-mapa-foot">${groups.length} empreendimento(s) · ${total} unidade(s) no período</div>`;
   return html;
 }
 
@@ -657,10 +822,27 @@ function renderAnexosModule() {
               <input type="radio" name="anexos-contexto" value="Ambos" onchange="AnexosApp.setContexto(this.value)" ${AnexosState.contexto === 'Ambos' ? 'checked' : ''}> Ambos
             </label>
           </div>
-          <button type="button" class="btn btn-secondary anexos-ctrl" onclick="AnexosApp.resetAndRender()" style="background:#f97316;border:none;color:#fff;font-weight:600;padding:0 14px;display:inline-flex;align-items:center;gap:6px;">
-            <i data-lucide="refresh-cw" style="width: 16px;"></i> Limpar Campos
-          </button>
+          <div class="anexos-toolbar-actions">
+            ${AnexosState.contexto !== 'Cliente' ? `
+            <button type="button" class="btn btn-outline anexos-ctrl anexos-btn-periodo" onclick="AnexosApp.togglePeriodoPanel()">
+              <i data-lucide="calendar-range" style="width:16px;"></i> Vendas do período
+            </button>` : ''}
+            <button type="button" class="btn btn-secondary anexos-ctrl" onclick="AnexosApp.resetAndRender()" style="background:#f97316;border:none;color:#fff;font-weight:600;padding:0 14px;display:inline-flex;align-items:center;gap:6px;">
+              <i data-lucide="refresh-cw" style="width: 16px;"></i> Limpar Campos
+            </button>
+          </div>
         </div>
+
+        ${AnexosState.periodoOpen && AnexosState.contexto !== 'Cliente' ? `
+        <div class="anexos-periodo-bar">
+          <label>Início <input type="date" id="anexos-periodo-ini" value="${AnexosState.periodoStart || ''}" onchange="AnexosState.periodoStart=this.value"></label>
+          <label>Fim <input type="date" id="anexos-periodo-fim" value="${AnexosState.periodoEnd || ''}" onchange="AnexosState.periodoEnd=this.value"></label>
+          <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarVendasPeriodo()">
+            <i data-lucide="search" style="width:16px;"></i> Buscar vendas
+          </button>
+          <button type="button" class="btn btn-outline anexos-ctrl" onclick="AnexosApp.fecharPeriodoMode()">Fechar período</button>
+          <span class="anexos-periodo-hint">Não precisa escolher empreendimento/unidade — o espelho lista o que falta enviar.</span>
+        </div>` : ''}
 
         <div class="anexos-filters-grid ${AnexosState.contexto === 'Cliente' ? 'is-cliente' : 'is-unidade'}">
           ${AnexosState.contexto !== 'Cliente' ? `
@@ -726,7 +908,19 @@ function renderAnexosModule() {
               ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `<span><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractDate}</span>` : ''}
             </div>
           </div>
-          <div>
+          <div class="anexos-contract-side">
+            <div class="anexos-titulo-receber">
+              <span class="anexos-contract-label">Título a receber</span>
+              ${AnexosState.tituloReceber ? `
+                <div class="anexos-titulo-line">
+                  <strong>${anexosEsc(AnexosState.tituloReceber.number || AnexosState.tituloReceber.id || '—')}</strong>
+                  <span>${anexosEsc(AnexosState.tituloReceber.statusLabel || '')}</span>
+                  <em>${anexosEsc(anexosFmtMoney(AnexosState.tituloReceber.balance))}</em>
+                </div>
+              ` : (AnexosState.activeContract
+                ? `<span class="anexos-titulo-empty">Carregando título…</span>`
+                : `<span class="anexos-titulo-empty">Selecione a unidade</span>`)}
+            </div>
             ${AnexosState.activeContract ? (
               AnexosState.contractAttachments.length > 0
                 ? (AnexosState.importedContracts.has(AnexosState.activeContract.id)
@@ -737,11 +931,13 @@ function renderAnexosModule() {
           </div>
         </div>` : ''}
 
-        ${AnexosState.mapaUnidades && AnexosState.contexto !== 'Cliente' ? `
+        ${(AnexosState.mapaUnidades || AnexosState.periodoMode) && AnexosState.contexto !== 'Cliente' ? `
         <div class="anexos-mapa-panel" id="anexos-mapa-panel">
           <div class="anexos-mapa-head">
-            <strong>Mapa de unidades</strong>
-            <span>Só lotes com contrato ativo. Após distrato + nova venda, o lote volta a ficar disponível para novo envio.</span>
+            <strong>${AnexosState.periodoMode ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
+            <span>${AnexosState.periodoMode
+              ? 'Empreendimentos e unidades com venda no período que precisam envio de anexos.'
+              : 'Só lotes com contrato ativo. Após distrato + nova venda, o lote volta a ficar disponível para novo envio.'}</span>
           </div>
           ${anexosBuildMapaHtml()}
         </div>` : ''}
@@ -838,6 +1034,7 @@ function renderAnexosModule() {
   lucide.createIcons();
   AnexosApp.loadTagsAtivas();
   AnexosApp.loadEnterprisesInBackground();
+  anexosLoadTagMemory();
 }
 
 // --- LOGICA DE NEGOCIO ---
@@ -906,7 +1103,123 @@ const AnexosApp = {
     AnexosState.mapaLoading = false;
     AnexosState.mapaMeta = {};
     AnexosState.mapaEnvios = {};
+    AnexosState.tituloReceber = null;
+    AnexosState.periodoMode = false;
+    AnexosState.periodoOpen = false;
+    AnexosState.periodoMapa = [];
     renderAnexosModule();
+  },
+
+  togglePeriodoPanel() {
+    AnexosState.periodoOpen = !AnexosState.periodoOpen;
+    if (AnexosState.periodoOpen && !AnexosState.periodoStart) {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      AnexosState.periodoStart = `${y}-${m}-01`;
+      AnexosState.periodoEnd = anexosTodayIso();
+    }
+    renderAnexosModule();
+  },
+
+  fecharPeriodoMode() {
+    AnexosState.periodoMode = false;
+    AnexosState.periodoOpen = false;
+    AnexosState.periodoMapa = [];
+    renderAnexosModule();
+  },
+
+  async buscarVendasPeriodo() {
+    const ini = AnexosState.periodoStart || ((document.getElementById('anexos-periodo-ini') || {}).value || '');
+    const fim = AnexosState.periodoEnd || ((document.getElementById('anexos-periodo-fim') || {}).value || '');
+    if (!ini || !fim) {
+      alert('Informe início e fim do período.');
+      return;
+    }
+    AnexosState.periodoStart = ini;
+    AnexosState.periodoEnd = fim;
+    AnexosState.periodoMode = true;
+    AnexosState.mapaUnidades = false;
+    AnexosState.mapaLoading = true;
+    AnexosState.periodoMapa = [];
+    renderAnexosModule();
+    try {
+      await anexosLoadTagMemory();
+      const byEmp = {};
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const url = anexosApiUrl(`/sienge-proxy/sales-contracts?limit=200&offset=${offset}&situation=2&initialIssueDate=${encodeURIComponent(ini)}&finalIssueDate=${encodeURIComponent(fim)}`);
+        const res = await fetch(url, { headers: { Authorization: getBasicAuthHeader() } });
+        if (!res.ok) break;
+        const data = await res.json();
+        const results = data.results || [];
+        for (const c of results) {
+          if (!anexosContractIsActive(c)) continue;
+          const enterpriseId = String(c.enterpriseId || '').trim();
+          if (!enterpriseId) continue;
+          if (!byEmp[enterpriseId]) {
+            byEmp[enterpriseId] = {
+              enterpriseId,
+              enterpriseName: c.enterpriseName || '',
+              units: [],
+              _seen: new Set()
+            };
+          }
+          const envios = AnexosState._periodoEnviosCache && AnexosState._periodoEnviosCache[enterpriseId]
+            ? AnexosState._periodoEnviosCache[enterpriseId]
+            : await anexosLoadMapaEnvios(enterpriseId);
+          if (!AnexosState._periodoEnviosCache) AnexosState._periodoEnviosCache = {};
+          AnexosState._periodoEnviosCache[enterpriseId] = envios;
+
+          const units = c.salesContractUnits || c.units || [];
+          units.forEach((su) => {
+            const uid = String(su.id || su.unitId || '');
+            if (!uid || byEmp[enterpriseId]._seen.has(uid)) return;
+            byEmp[enterpriseId]._seen.add(uid);
+            const key = anexosEnvioKey(c.id, 'CONTRATO');
+            const sent = !!(envios[key]);
+            AnexosState.mapaMeta[uid] = {
+              active: true,
+              contractId: c.id,
+              contractNumber: c.contractNumber || c.number || c.id,
+              sentTags: sent ? ['CONTRATO'] : [],
+              enterpriseId,
+              enterpriseName: c.enterpriseName || '',
+              unitName: su.name || ''
+            };
+            // Só lista pendentes no espelho do período
+            if (!sent) {
+              byEmp[enterpriseId].units.push({ id: uid, name: su.name || uid, contractId: c.id });
+            }
+          });
+        }
+        if (results.length < 200) hasMore = false;
+        else offset += results.length;
+      }
+      AnexosState.periodoMapa = Object.values(byEmp)
+        .filter((e) => e.units.length)
+        .map(({ _seen, ...rest }) => rest)
+        .sort((a, b) => Number(a.enterpriseId) - Number(b.enterpriseId));
+    } catch (e) {
+      console.error('[Anexos] vendas período', e);
+      alert('Falha ao buscar vendas do período: ' + (e.message || e));
+    } finally {
+      AnexosState.mapaLoading = false;
+      renderAnexosModule();
+    }
+  },
+
+  async selecionarUnidadePeriodo(enterpriseId, unitId) {
+    AnexosState.cc = String(enterpriseId || '').trim();
+    const emp = (AnexosState.periodoMapa || []).find((e) => String(e.enterpriseId) === String(enterpriseId));
+    AnexosState.ccName = emp ? emp.enterpriseName : AnexosState.ccName;
+    // Garante unidade na lista local
+    if (!(AnexosState.unidades || []).some((u) => String(u.id) === String(unitId))) {
+      const hit = emp && (emp.units || []).find((u) => String(u.id) === String(unitId));
+      AnexosState.unidades = [{ id: unitId, name: (hit && hit.name) || String(unitId), enterpriseId }];
+    }
+    await this.selecionarUnidade(unitId);
   },
 
   setMapaUnidades(on) {
@@ -990,12 +1303,151 @@ const AnexosApp = {
       AnexosState.mapaMeta = meta;
       AnexosState.mapaEnvios = await anexosLoadMapaEnvios(cc);
       this.applyMapaMetaFromEnvios();
+
+      // Detecta CONTRATO já na unidade (Sienge) e grava no ledger — marca Enviado
+      await this.syncEnviadoFromSiengeAttachments(cc);
+
+      // Implantação do espelho: 17701 já teve documentos enviados → seed Enviado
+      if (String(cc) === '17701') {
+        await this.seedEnviadoEmpreendimento(cc, 'CONTRATO');
+      }
+      this.applyMapaMetaFromEnvios();
     } catch (e) {
       console.error('[Anexos] enrichMapaMeta', e);
     } finally {
       AnexosState.mapaLoading = false;
       renderAnexosModule();
     }
+  },
+
+  async syncEnviadoFromSiengeAttachments(enterpriseId) {
+    const auth = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
+    const activeIds = Object.keys(AnexosState.mapaMeta || {}).filter((uid) => {
+      const m = AnexosState.mapaMeta[uid];
+      return m && m.active && m.contractId && !(m.sentTags && m.sentTags.includes('CONTRATO'));
+    });
+    const concurrency = 4;
+    let i = 0;
+    const run = async () => {
+      while (i < activeIds.length) {
+        const idx = i++;
+        const uid = activeIds[idx];
+        const meta = AnexosState.mapaMeta[uid];
+        if (!meta) continue;
+        try {
+          const res = await fetch(anexosApiUrl(`/sienge-proxy/units/${uid}/attachments`), {
+            headers: { Authorization: auth, Accept: 'application/json' }
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const rows = data.results || data || [];
+          const hasContrato = (Array.isArray(rows) ? rows : []).some((a) => {
+            const t = `${a.description || ''} ${a.name || ''} ${a.fileName || ''}`.toUpperCase();
+            return t.includes('CONTRATO') && !t.includes('DISTRATO');
+          });
+          if (!hasContrato) continue;
+          await anexosSaveMapaEnvio({
+            enterpriseId,
+            unitId: uid,
+            unitName: meta.unitName || '',
+            contractId: meta.contractId,
+            contractNumber: meta.contractNumber,
+            tag: 'CONTRATO',
+            destination: 'Unidade',
+            description: 'detectado-sienge',
+            fileName: '',
+            sentAt: new Date().toISOString(),
+            source: 'sienge_sync'
+          });
+        } catch (e) { /* ignore unit */ }
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => run()));
+  },
+
+  async seedEnviadoEmpreendimento(enterpriseId, tag) {
+    const t = String(tag || 'CONTRATO').toUpperCase();
+    const seededKey = `anexos_seed_enviado_${enterpriseId}_${t}`;
+    try {
+      if (localStorage.getItem(seededKey) === '1') {
+        // ainda reaplica meta a partir do ledger
+        return;
+      }
+    } catch (e) {}
+    const entries = Object.keys(AnexosState.mapaMeta || {});
+    for (const uid of entries) {
+      const meta = AnexosState.mapaMeta[uid];
+      if (!meta || !meta.active || !meta.contractId) continue;
+      const key = anexosEnvioKey(meta.contractId, t);
+      if (AnexosState.mapaEnvios[key]) continue;
+      await anexosSaveMapaEnvio({
+        enterpriseId,
+        unitId: uid,
+        unitName: meta.unitName || '',
+        contractId: meta.contractId,
+        contractNumber: meta.contractNumber,
+        tag: t,
+        destination: 'Unidade',
+        description: 'seed-implantacao-espelho',
+        fileName: '',
+        sentAt: new Date().toISOString(),
+        source: 'seed_17701'
+      });
+    }
+    try { localStorage.setItem(seededKey, '1'); } catch (e) {}
+  },
+
+  async loadTituloReceber(contract) {
+    AnexosState.tituloReceber = null;
+    if (!contract || !contract.customerId) {
+      renderAnexosModule();
+      return;
+    }
+    try {
+      let bills = [];
+      if (window.SiengeApiService && typeof SiengeApiService.getReceivableBills === 'function') {
+        const res = await SiengeApiService.getReceivableBills(contract.customerId);
+        bills = (res && res.results) || res || [];
+      } else {
+        const res = await fetch(anexosApiUrl(`/sienge-proxy/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(contract.customerId)}&limit=100&offset=0`), {
+          headers: { Authorization: getBasicAuthHeader() }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          bills = data.results || [];
+        }
+      }
+      if (!Array.isArray(bills)) bills = [];
+      const unitId = String(contract.unitId || '');
+      const unitName = String(contract.unitName || '').toUpperCase().replace(/\s+/g, '');
+      const contractId = String(contract.id || '');
+      let bill = bills.find((b) => String(b.salesContractId || b.contractId || '') === contractId)
+        || bills.find((b) => {
+          const u = b.units || b.salesContractUnits || [];
+          return u.some((x) => String(x.id || x.unitId) === unitId);
+        })
+        || bills.find((b) => {
+          const blob = `${b.unitName || ''} ${b.notes || ''} ${b.documentNumber || ''}`.toUpperCase().replace(/\s+/g, '');
+          return unitName && blob.includes(unitName);
+        })
+        || bills[0];
+      if (!bill) {
+        AnexosState.tituloReceber = { id: '', number: '—', balance: null, statusLabel: 'Sem título' };
+      } else {
+        const bal = bill.balanceAmount ?? bill.outstandingBalance ?? bill.totalBalance ?? bill.value ?? bill.originalAmount;
+        const sit = String(bill.situation || bill.status || bill.billStatus || '').toUpperCase();
+        AnexosState.tituloReceber = {
+          id: bill.id,
+          number: bill.documentNumber || bill.number || bill.id,
+          balance: bal,
+          statusLabel: sit || 'Ativo'
+        };
+      }
+    } catch (e) {
+      console.warn('[Anexos] título a receber', e);
+      AnexosState.tituloReceber = { id: '', number: '—', balance: null, statusLabel: 'Indisponível' };
+    }
+    renderAnexosModule();
   },
 
   async loadEnterprisesInBackground() {
@@ -1325,6 +1777,7 @@ const AnexosApp = {
     if (!unitId) {
       AnexosState.files = [];
       AnexosState.importedContracts.clear();
+      AnexosState.tituloReceber = null;
       renderAnexosModule();
       return;
     }
@@ -1393,9 +1846,12 @@ const AnexosApp = {
         customers: mainC.salesContractCustomers || [],
         unitId: unitId,
         enterpriseId: enterpriseId,
-        unitName: nomeUnidade
+        unitName: nomeUnidade,
+        receivableBillId: mainC.receivableBillId || mainC.billReceivableId || null
       };
+      AnexosState.tituloReceber = null;
       await anexosHydrateContractPeople();
+      this.loadTituloReceber(AnexosState.activeContract);
 
       if (AnexosState.contexto === 'Ambos' && !AnexosState.idCliente) {
         let doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj;
@@ -1500,6 +1956,10 @@ const AnexosApp = {
     const ext = String(fileObj.ext || '').toLowerCase();
     if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext)) return '';
 
+    if (!(AnexosState.tagMemory || []).length) {
+      await anexosLoadTagMemory();
+    }
+
     let ocrImageB64 = fileObj.base64;
     if (!ocrImageB64) {
       ocrImageB64 = await new Promise((resolve, reject) => {
@@ -1511,6 +1971,7 @@ const AnexosApp = {
       fileObj.base64 = ocrImageB64;
     }
 
+    let fingerprintCanvas = null;
     if (ext === 'pdf' && window['pdfjs-dist/build/pdf']) {
       fileObj.status = 'Convertendo PDF para OCR...';
       this.renderFilesList();
@@ -1527,23 +1988,53 @@ const AnexosApp = {
         canvas.width = viewport.width;
         await page.render({ canvasContext: context, viewport }).promise;
         ocrImageB64 = canvas.toDataURL('image/jpeg', 0.8);
+        fingerprintCanvas = canvas;
       } finally {
         URL.revokeObjectURL(pdfUrl);
       }
+    } else if (['jpg', 'jpeg', 'png'].includes(ext)) {
+      try {
+        fingerprintCanvas = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.width;
+            c.height = img.height;
+            c.getContext('2d').drawImage(img, 0, 0);
+            resolve(c);
+          };
+          img.onerror = reject;
+          img.src = ocrImageB64;
+        });
+      } catch (e) {}
     }
 
     fileObj.status = 'Lendo documento (OCR)...';
     this.renderFilesList();
 
+    const tagNames = (AnexosState.tagsAtivas || []).map((t) => t.name).filter(Boolean);
     const res = await fetch(anexosApiUrl('/api/ocr/classify'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_data: ocrImageB64 })
+      body: JSON.stringify({ image_data: ocrImageB64, tags: tagNames })
     });
     const ocrData = await res.json().catch(() => ({}));
     const rawTag = String(ocrData.tag || '').trim();
+    const ocrText = String(ocrData.text || ocrData.raw || '');
+    const fp = fingerprintCanvas
+      ? await anexosFingerprintFromCanvas(fingerprintCanvas, ocrText || rawTag)
+      : anexosFingerprintFromImageDataUrl(ocrImageB64, ocrText || rawTag);
+    fileObj._fingerprint = fp;
+
+    const fromMemory = anexosMatchTagMemory(fp);
+    if (fromMemory) return fromMemory;
+
     const resolved = anexosResolveActiveTag(rawTag);
-    if (!resolved || resolved.toUpperCase() === 'DOC') return '';
+    if (!resolved || resolved.toUpperCase() === 'DOC') {
+      // Memória para aprendizado futuro (sem tag ainda)
+      fileObj._pendingMemory = { ...fp, tag: '', pending: true };
+      return '';
+    }
     return resolved;
   },
 
@@ -1571,11 +2062,9 @@ const AnexosApp = {
       console.error('Erro no OCR:', err);
     }
 
-    if (fromName) {
-      fileObj.tags = [fromName];
-      fileObj.status = 'Revisar';
-      anexosAssignClientTarget(fileObj, { autoDefault: true });
-      return fromName;
+    // Sem identificação: deixa Revisar e grava rascunho de memória
+    if (fileObj._pendingMemory) {
+      anexosSaveTagMemory({ ...fileObj._pendingMemory, originalName: fileObj.originalName || '' });
     }
     fileObj.tags = [];
     fileObj.status = 'Revisar';
@@ -2044,14 +2533,30 @@ const AnexosApp = {
 
   addTag(fileId, tag) {
     if (!tag) return;
+    const resolved = anexosResolveActiveTag(tag) || tag;
+    if (!(AnexosState.tagsAtivas || []).some((t) => String(t.name) === String(resolved))) {
+      alert('Escolha uma TAG da lista ativa.');
+      return;
+    }
     const file = AnexosState.files.find(f => f.id === fileId);
     if (!file) return;
 
-    if (!file.tags.includes(tag)) {
-      file.tags = [tag];
+    if (!file.tags.includes(resolved)) {
+      file.tags = [resolved];
       anexosAssignClientTarget(file, { autoDefault: true });
       this.evalFileStatus(file);
       this.renderFilesList();
+    }
+    // Aprende fingerprint → tag para o próximo documento parecido
+    const fp = file._fingerprint || file._pendingMemory;
+    if (fp) {
+      anexosSaveTagMemory({
+        ...fp,
+        tag: resolved,
+        pending: false,
+        originalName: file.originalName || '',
+        learnedAt: new Date().toISOString()
+      });
     }
   },
 

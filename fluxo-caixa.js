@@ -16,6 +16,9 @@ const FluxoCaixaApp = {
   rows: [],
   expanded: new Set(),
   categories: [],
+  unmatchedInfo: { total: 0, samples: [], months: {} },
+
+  unmatchedInfo: { total: 0, samples: [] },
 
   init() {
     const now = new Date();
@@ -127,10 +130,14 @@ const FluxoCaixaApp = {
   allocate(mov, factor) {
     const amount = (Number(mov.bankMovementAmount) || 0) * factor;
     const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
-    if (!cats.length) {
-      return [{ amount, categoryId: "SEM_CONTA", categoryName: "Sem plano financeiro", month: this.movMonth(mov) }];
-    }
+    // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
+    if (!cats.length) return [];
+    const ignored = this.ignoredAccountKeys();
     return cats.map(fc => {
+      const categoryId = String(fc.financialCategoryId || "").trim();
+      if (!categoryId) return null;
+      const nk = this.normAccountKey(categoryId);
+      if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
       const rate = Number(fc.financialCategoryRate);
       let share = 1;
       if (rate > 1) share = rate / 100;
@@ -138,11 +145,25 @@ const FluxoCaixaApp = {
       else share = 1 / cats.length;
       return {
         amount: amount * share,
-        categoryId: String(fc.financialCategoryId || "SEM_CONTA"),
+        categoryId,
         categoryName: fc.financialCategoryName || this.catName(fc.financialCategoryId) || "Sem nome",
+        reducer: fc.financialCategoryReducer,
         month: this.movMonth(mov)
       };
+    }).filter(Boolean);
+  },
+
+  ignoredAccountKeys() {
+    const set = new Set();
+    const v = this.visao();
+    (v.ignoredAccounts || []).forEach(id => {
+      const sid = String(id || "").trim();
+      if (!sid) return;
+      set.add(sid);
+      const nk = this.normAccountKey(sid);
+      if (nk) set.add(nk);
     });
+    return set;
   },
 
   cashDate(mov) {
@@ -200,14 +221,13 @@ const FluxoCaixaApp = {
   },
 
   /**
-   * Ajusta o sinal do lançamento para o DFC.
-   * Redutoras / despesas / saídas: se vier positivo, inverte para negativo (sem double-negate).
+   * Sinal no DFC: a API de caixa já manda crédito/débito com sinal.
+   * Só inverte positivo quando for redutora (nó, nome, flag Sienge ou 2.x sob RECEITAS).
    */
-  signedAmount(node, categoryId, categoryName, amount) {
+  signedAmount(node, categoryId, categoryName, amount, reducerFlag) {
     let amt = Number(amount) || 0;
-    const reduce = this.isReducingAccount(categoryId, categoryName, node)
-      || this.isExpenseAccount(categoryId)
-      || this.isCashOutflowGroup(node && node.id);
+    const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
+    const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
     if (reduce && amt > 0) amt = -amt;
     return amt;
   },
@@ -256,23 +276,40 @@ const FluxoCaixaApp = {
     const accToNode = {};
     groups.forEach(g => {
       (g.accounts || []).forEach(id => {
-        const sid = String(id);
+        const sid = String(id).trim();
+        if (!sid) return;
         accToNode[sid] = g.id;
         const nk = this.normAccountKey(sid);
         if (nk) accToNode[nk] = g.id;
+        const dotted = this.formatAccountCode(sid);
+        if (dotted) {
+          accToNode[dotted] = g.id;
+          const nk2 = this.normAccountKey(dotted);
+          if (nk2) accToNode[nk2] = g.id;
+        }
       });
     });
 
-    const outros = { id: "g_outros", name: "CONTAS NÃO CLASSIFICADAS", type: "resultado", parentId: null, months: this.emptyMonths(this.months), total: 0, accountRows: [] };
+    // Não cria mais linha "CONTAS NÃO CLASSIFICADAS" — só alerta lateral
+    const unmatched = { months: this.emptyMonths(this.months), total: 0, accountRows: [], samples: [] };
 
     const accIndex = {};
     allocs.forEach(a => {
-      const rawId = String(a.categoryId || "");
+      const rawId = String(a.categoryId || "").trim();
+      if (!rawId) return;
       const nk = this.normAccountKey(rawId);
-      const nid = accToNode[rawId] || (nk && accToNode[nk]) || "g_outros";
-      const node = nid === "g_outros" ? outros : byId[nid];
-      if (!node) return;
-      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount);
+      const dotted = this.formatAccountCode(rawId);
+      const nid = accToNode[rawId] || (nk && accToNode[nk]) || (dotted && accToNode[dotted]) || null;
+      if (!nid || !byId[nid]) {
+        const amount = Number(a.amount) || 0;
+        this.addInto(unmatched, a.month, amount);
+        if (unmatched.samples.length < 12) {
+          unmatched.samples.push({ id: rawId, name: a.categoryName, amount });
+        }
+        return;
+      }
+      const node = byId[nid];
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer);
       this.addInto(node, a.month, amount);
       const idxKey = nk || rawId;
       if (!accIndex[idxKey]) {
@@ -283,15 +320,17 @@ const FluxoCaixaApp = {
           months: this.emptyMonths(this.months),
           total: 0,
           parentId: node.id,
-          redutora: !!(node.redutora || this.isReducingAccount(a.categoryId, a.categoryName, node))
+          redutora: !!(node.redutora || this.isReducingAccount(a.categoryId, a.categoryName, node)
+            || /^(S|SIM|TRUE|1|Y|R)$/i.test(String(a.reducer || "").trim()))
         };
       }
       this.addInto(accIndex[idxKey], a.month, amount);
       accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
     });
+    this.unmatchedInfo = unmatched;
 
     Object.values(accIndex).forEach(acc => {
-      const node = acc.parentId === "g_outros" ? outros : byId[acc.parentId];
+      const node = byId[acc.parentId];
       if (node) node.accountRows.push(acc);
     });
 
@@ -375,15 +414,6 @@ const FluxoCaixaApp = {
       });
     };
     groups.filter(g => !g.parentId).forEach(g => pushNode(g, 0));
-    if (outros.total !== 0) {
-      rows.push({ ...outros, level: 0, hasKids: outros.accountRows.length > 0, isAccount: false });
-      if (this.expanded.has("g_outros")) {
-        outros.accountRows.forEach(acc => {
-          const code = acc.displayId || this.formatAccountCode(acc.id);
-          rows.push({ ...acc, level: 1, isAccount: true, hasKids: false, name: `${code} ${acc.name || ""}`.trim() });
-        });
-      }
-    }
     this.rows = rows;
   },
 
@@ -433,14 +463,7 @@ const FluxoCaixaApp = {
   toggle(id) {
     if (this.expanded.has(id)) this.expanded.delete(id);
     else this.expanded.add(id);
-    const allocs = [];
-    this.movements.forEach(mov => {
-      const factor = this.factorForCompany(mov.companyId);
-      if (factor <= 0) return;
-      this.allocate(mov, factor).forEach(a => allocs.push(a));
-    });
-    this.build(allocs);
-    this.render();
+    this.rebuildFromCache();
   },
 
   toggleCompany(id, on) {
@@ -514,67 +537,122 @@ const FluxoCaixaApp = {
     return "";
   },
 
+  expandAll() {
+    (this.rows || []).forEach(r => {
+      if (r && r.hasKids && r.id) this.expanded.add(r.id);
+    });
+    this.rebuildFromCache();
+  },
+
+  collapseAll() {
+    this.expanded.clear();
+    this.rebuildFromCache();
+  },
+
+  rebuildFromCache() {
+    const allocs = [];
+    this.movements.forEach(mov => {
+      const factor = this.factorForCompany(mov.companyId);
+      if (factor <= 0) return;
+      this.allocate(mov, factor).forEach(a => allocs.push(a));
+    });
+    this.build(allocs);
+    this.render();
+  },
+
   cellStyle(val, isTotal) {
     const n = Number(val) || 0;
     const color = n < 0 ? "#b91c1c" : (n > 0 ? "#105436" : "#94a3b8");
     return `text-align:right;font-variant-numeric:tabular-nums;color:${color};font-weight:${isTotal ? 800 : 600};white-space:nowrap;`;
   },
 
+  nodeChrome(r) {
+    if (r.isAccount) return { bg: "#f8fafc", border: "#cbd5e1", icon: "hash" };
+    if (r.type === "formula") return { bg: "#ecfdf5", border: "#105436", icon: "calculator" };
+    if (r.type === "total_n1") return { bg: "#f8fafc", border: "#0f766e", icon: "layers" };
+    if (r.type === "resultado") return { bg: "#fff", border: "#eab308", icon: "file-text" };
+    return { bg: "#fff", border: "#cbd5e1", icon: "folder" };
+  },
+
   render() {
     const root = document.getElementById("fluxo-caixa-root");
     if (!root) return;
-    const monthHeads = this.months.map(k => `<th style="padding:8px 10px;text-align:right;font-size:0.72rem;white-space:nowrap;">${this.monthLabel(k)}</th>`).join("");
+    const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
+    const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
     root.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
-        <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:12px 12px 0 0;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-              <i data-lucide="git-branch" style="width:18px;height:18px;color:#fff;"></i>
-            </div>
+      <div class="fc-shell">
+        <div class="fc-head">
+          <div class="fc-head-left">
+            <div class="fc-head-icon"><i data-lucide="git-branch"></i></div>
             <div>
-              <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Fluxo de caixa (DFC)</h2>
-              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">DFC mensal · API caixa e banco · consolidação pelo % MLDU</p>
+              <h2>Fluxo de caixa (DFC)</h2>
+              <p>Mesma estrutura do cadastro de visões · API caixa e banco · % MLDU</p>
             </div>
           </div>
+          <button type="button" class="btn btn-outline fc-link-visoes" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">
+            <i data-lucide="settings-2" style="width:14px;height:14px;"></i> Cadastro de visões
+          </button>
         </div>
-        <div style="flex:1;min-height:0;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;display:flex;flex-direction:column;">
-          <div style="padding:14px 16px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Início
-              <input type="date" value="${this.startDate}" onchange="FluxoCaixaApp.startDate=this.value"
-                style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
+        <div class="fc-body">
+          <div class="fc-filters">
+            <label class="fc-field">Início
+              <input type="date" value="${this.startDate}" onchange="FluxoCaixaApp.startDate=this.value">
             </label>
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Fim
-              <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value"
-                style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
+            <label class="fc-field">Fim
+              <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value">
             </label>
-            <div style="font-size:0.75rem;font-weight:700;color:#475569;">Seleção
-              <div title="A API de caixa/banco usa a data em que o dinheiro saiu ou entrou, não o vencimento."
-                style="display:flex;align-items:center;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;margin-top:4px;background:#f8fafc;color:#0f172a;font-weight:600;white-space:nowrap;">
-                Data do pagamento / movimento
-              </div>
+            <div class="fc-field">Seleção
+              <div class="fc-selection-pill" title="Data em que o dinheiro saiu ou entrou">Data do pagamento / movimento</div>
             </div>
             <button class="btn btn-primary" onclick="FluxoCaixaApp.load()" style="height:34px;">
               ${this.loading ? "Consultando..." : "Consultar"}
             </button>
             ${this.companyDropHtml()}
           </div>
-          ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}
-          <div style="flex:1;overflow:auto;padding:12px 16px;">
-            ${this.loading ? `<div style="text-align:center;padding:40px;color:#64748b;">Carregando movimentos de caixa e banco...</div>` : `
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
-              <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
-                <thead>
-                  <tr style="background:#f8fafc;position:sticky;top:0;z-index:1;">
-                    <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e2e8f0;">Conta / nó</th>
-                    ${monthHeads}
-                    <th style="padding:8px 12px;text-align:right;border-bottom:2px solid #e2e8f0;">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${(this.rows || []).map(r => this.rowHtml(r)).join("") || `<tr><td colspan="${2 + this.months.length}" style="padding:24px;text-align:center;color:#94a3b8;">Informe o período e consulte a API.</td></tr>`}
-                </tbody>
-              </table>
-            </div>`}
+          ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
+          <div class="fc-board">
+            <div class="fc-tree-pane">
+              <div class="fc-tree-toolbar">
+                <strong>Estrutura DFC Padrão</strong>
+                <div class="fc-tree-actions">
+                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.expandAll()">Expandir todos</button>
+                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.collapseAll()">Recolher todos</button>
+                </div>
+              </div>
+              <div class="fc-tree-scroll">
+                ${this.loading
+                  ? `<div class="fc-empty">Carregando movimentos de caixa e banco...</div>`
+                  : ((this.rows || []).length
+                    ? (this.rows || []).map(r => this.rowHtml(r)).join("")
+                    : `<div class="fc-empty">Informe o período e consulte a API.</div>`)}
+              </div>
+            </div>
+            <div class="fc-side-pane">
+              <div class="fc-side-head">
+                <strong>Sienge / visão</strong>
+              </div>
+              <div class="fc-side-body">
+                <p class="fc-side-hint">Movimentos sem plano financeiro (transferências/aplicações) não entram no DFC. Contas desconsideradas no cadastro de visões também são ignoradas.</p>
+                ${hasUnmatched ? `
+                  <div class="fc-warn">
+                    <i data-lucide="alert-triangle" style="width:14px;height:14px;"></i>
+                    Há ${this.fmt(unmatched.total)} em contas do movimento ainda não vinculadas à visão (não entram na variação).
+                  </div>
+                  <div class="fc-unmatched-list">
+                    ${(unmatched.samples || []).map(s => `
+                      <div class="fc-unmatched-item">
+                        <strong>${this.esc(this.formatAccountCode(s.id) || s.id)}</strong>
+                        <span>${this.esc(s.name || "")}</span>
+                        <em style="${this.cellStyle(s.amount, false)}">${this.fmt(s.amount)}</em>
+                      </div>`).join("")}
+                  </div>
+                  <button type="button" class="btn btn-outline fc-mini" style="width:100%;margin-top:8px;"
+                    onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no cadastro de visões</button>
+                ` : `
+                  <div class="fc-ok">Nenhuma conta órfã no período — a estrutura segue o cadastro de visões.</div>
+                `}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -583,21 +661,28 @@ const FluxoCaixaApp = {
   },
 
   rowHtml(r) {
-    const pad = 10 + (r.level || 0) * 16;
-    const isFormula = r.type === "formula";
-    const isHead = r.type === "total_n1" || isFormula;
-    const bg = r.isAccount ? "#fff" : (isFormula ? "#ecfdf5" : (r.type === "total_n1" ? "#f8fafc" : "#fff"));
+    const chrome = this.nodeChrome(r);
+    const pad = (r.level || 0) * 18;
+    const isHead = r.type === "total_n1" || r.type === "formula";
     const chevron = r.hasKids
-      ? `<button onclick="FluxoCaixaApp.toggle('${r.id}')" style="border:none;background:none;cursor:pointer;padding:0 4px 0 0;color:#64748b;"><i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i></button>`
-      : `<span style="display:inline-block;width:18px;"></span>`;
-    const monthCells = this.months.map(m => `<td style="padding:6px 10px;${this.cellStyle(r.months && r.months[m], isHead)}">${this.fmt(r.months && r.months[m])}</td>`).join("");
-    return `<tr style="background:${bg};border-bottom:1px solid #f1f5f9;">
-      <td style="padding:6px 12px;padding-left:${pad}px;font-weight:${isHead ? 800 : (r.isAccount ? 500 : 700)};color:${r.isAccount ? "#475569" : "#0f172a"};">
-        ${chevron}${this.esc(r.name)}
-      </td>
-      ${monthCells}
-      <td style="padding:6px 12px;${this.cellStyle(r.total, true)}">${this.fmt(r.total)}</td>
-    </tr>`;
+      ? `<button type="button" class="fc-chevron" onclick="FluxoCaixaApp.toggle('${r.id}')"><i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i></button>`
+      : `<span class="fc-chevron-spacer"></span>`;
+    const monthVals = this.months.map(m => {
+      const v = r.months && r.months[m];
+      return `<span class="fc-val" style="${this.cellStyle(v, isHead)}">${this.fmt(v)}</span>`;
+    }).join("");
+    return `
+      <div class="fc-node" style="margin-left:${pad}px;background:${chrome.bg};border-left-color:${chrome.border};">
+        <div class="fc-node-main">
+          ${chevron}
+          <i data-lucide="${chrome.icon}" class="fc-node-icon" style="color:${chrome.border};"></i>
+          <span class="fc-node-name" style="font-weight:${isHead ? 800 : (r.isAccount ? 500 : 700)};">${this.esc(r.name)}</span>
+        </div>
+        <div class="fc-node-vals">
+          ${monthVals}
+          <span class="fc-val fc-val-total" style="${this.cellStyle(r.total, true)}">${this.fmt(r.total)}</span>
+        </div>
+      </div>`;
   },
 
   esc(s) {

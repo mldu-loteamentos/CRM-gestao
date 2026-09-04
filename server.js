@@ -687,6 +687,16 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 200, { tag: 'DOC' });
         }
 
+        const tagList = Array.isArray(body.tags) && body.tags.length
+          ? body.tags.map((t) => String(t || '').trim()).filter(Boolean)
+          : [
+              'RG', 'CNH', 'CPF', 'TCD', 'CONTRATO', 'DISTRATO',
+              'COMPROVANTE DE RESIDÊNCIA', 'COMPROVANTE DE ENDEREÇO',
+              'ADITAMENTO', 'CESSÃO DE DIREITOS', 'CERTIDÃO DE CASAMENTO',
+              'CERTIDÃO DE NASCIMENTO', 'ANÁLISE DE CRÉDITO', 'CND'
+            ];
+        const tagListText = tagList.join(', ');
+
         const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -701,8 +711,8 @@ const server = http.createServer(async (req, res) => {
                 content: [
                   { 
                     type: "text", 
-                    text: `Analise esta imagem de documento e classifique usando APENAS UMA das seguintes tags exatas:
-RG, CNH, CPF, TCD, CONTRATO, DISTRATO, COMPROVANTE DE RESIDÊNCIA, COMPROVANTE DE ENDEREÇO, ADITAMENTO, CESSÃO DE DIREITOS, CERTIDÃO DE CASAMENTO, CERTIDÃO DE NASCIMENTO, ANÁLISE DE CRÉDITO, CND.
+                    text: `Analise esta imagem de documento e classifique usando APENAS UMA das seguintes tags exatas da lista do sistema:
+${tagListText}
 Se não for nenhuma dessas com certeza, retorne exatamente: DOC.
 Regras:
 - COMPROVANTE DE RESIDÊNCIA / COMPROVANTE DE ENDEREÇO: conta de energia, água, internet, telefone, fatura de cartão, boleto de condomínio.
