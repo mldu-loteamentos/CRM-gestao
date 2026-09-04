@@ -5,7 +5,7 @@ const CentrosCustoState = {
   loading: false,
   selectedFilterIds: [], // IDs of cost centers to show (empty = show all)
   tiposCc: [
-    'Loteamento Aberto', 'Loteamento Fechado', 'Frota', 
+    'Loteamento Aberto', 'Loteamento Fechado', 'Incorporação', 'Frota',
     'Corporativo', 'Diretoria', 'Sócios', 'Contrapartida'
   ]
 };
@@ -31,6 +31,10 @@ const CentrosCustoApp = {
         try {
           CentrosCustoState.tiposCc = JSON.parse(localTipos);
         } catch(e) {}
+      }
+      if (!CentrosCustoState.tiposCc.includes('Incorporação')) {
+        CentrosCustoState.tiposCc.splice(2, 0, 'Incorporação');
+        localStorage.setItem('crm_centros_custo_tipos', JSON.stringify(CentrosCustoState.tiposCc));
       }
 
       // Fetch Cost Centers
@@ -108,11 +112,132 @@ const CentrosCustoApp = {
     const suspensivaDiasEl = document.getElementById(`edit-suspensiva-dias-${id}`);
     if (suspensivaDiasEl) custom.clausula_suspensiva_dias = parseInt(suspensivaDiasEl.value) || 30;
 
+    const isIncorp = String(custom.tipo_cc || '') === 'Incorporação';
+    const lotesPropriosEl = document.getElementById(`edit-incorp-lotes-proprios-${id}`);
+    custom.incorporacao_lotes_proprios = isIncorp && !!(lotesPropriosEl && lotesPropriosEl.checked);
+    const lotesTipoEl = document.querySelector(`input[name="edit-incorp-lotes-tipo-${id}"]:checked`);
+    custom.incorporacao_lotes_tipo = (isIncorp && custom.incorporacao_lotes_proprios && lotesTipoEl)
+      ? lotesTipoEl.value
+      : '';
+    if (isIncorp && custom.incorporacao_lotes_proprios) {
+      const checks = document.querySelectorAll(`.edit-incorp-excecao-${id}:checked`);
+      custom.incorporacao_lotes_excecao = Array.from(checks).map((chk) => ({
+        id: chk.getAttribute('data-unit-id') || '',
+        name: chk.getAttribute('data-unit-name') || chk.value || ''
+      })).filter((x) => x.name);
+    } else {
+      custom.incorporacao_lotes_excecao = [];
+    }
+
     CentrosCustoState.customFields[id] = custom;
     localStorage.setItem('crm_centros_custo_custom', JSON.stringify(CentrosCustoState.customFields));
     
     this.closeModal();
     this.render();
+  },
+
+  syncIncorporacaoUi(id) {
+    const tipoEl = document.getElementById(`edit-tipo-cc-${id}`);
+    const panel = document.getElementById(`edit-incorp-panel-${id}`);
+    if (!panel) return;
+    const isIncorp = tipoEl && String(tipoEl.value) === 'Incorporação';
+    panel.style.display = isIncorp ? 'block' : 'none';
+    if (isIncorp) this.syncIncorporacaoLotesSub(id);
+  },
+
+  syncIncorporacaoLotesSub(id) {
+    const onEl = document.getElementById(`edit-incorp-lotes-proprios-${id}`);
+    const sub = document.getElementById(`edit-incorp-lotes-sub-${id}`);
+    if (!sub) return;
+    const on = !!(onEl && onEl.checked);
+    sub.style.display = on ? 'block' : 'none';
+    if (on) this.loadIncorporacaoUnitsList(id);
+  },
+
+  normalizeUnitKey(name) {
+    return String(name || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  },
+
+  async loadIncorporacaoUnitsList(id) {
+    const listEl = document.getElementById(`edit-incorp-lotes-list-${id}`);
+    const statusEl = document.getElementById(`edit-incorp-lotes-status-${id}`);
+    if (!listEl) return;
+    const custom = CentrosCustoState.customFields[id] || {};
+    const selected = new Set(
+      (Array.isArray(custom.incorporacao_lotes_excecao) ? custom.incorporacao_lotes_excecao : [])
+        .map((x) => this.normalizeUnitKey(typeof x === 'string' ? x : (x && x.name)))
+        .filter(Boolean)
+    );
+    if (listEl.dataset.loaded === String(id) && listEl.querySelectorAll('label').length) {
+      return;
+    }
+    if (statusEl) statusEl.textContent = 'Carregando lotes do empreendimento...';
+    listEl.innerHTML = `<div style="padding:12px;color:#64748b;font-size:0.8rem;">Buscando unidades no Sienge...</div>`;
+    try {
+      let units = [];
+      if (window.EstoqueComercialApp && Array.isArray(EstoqueComercialApp.state && EstoqueComercialApp.state.units)) {
+        units = EstoqueComercialApp.state.units
+          .filter((u) => String(u.enterpriseId) === String(id))
+          .map((u) => ({ id: u.id || u.unitId || '', name: u.name || u.unitName || '' }));
+      }
+      if (!units.length && typeof siengeFetchWithRetry === 'function') {
+        const collected = [];
+        let offset = 0;
+        let hasMore = true;
+        while (hasMore) {
+          const path = `/units?limit=200&offset=${offset}&enterpriseId=${encodeURIComponent(id)}&additionalData=NONE`;
+          const data = await siengeFetchWithRetry(path);
+          const results = (data && data.results) || [];
+          results.forEach((u) => collected.push({
+            id: u.id != null ? String(u.id) : '',
+            name: u.name || u.commercialName || `Unidade ${u.id || ''}`
+          }));
+          if (results.length < 200) hasMore = false;
+          else offset += results.length;
+          if (offset > 5000) break;
+        }
+        units = collected;
+      }
+      units = units
+        .filter((u) => u && u.name)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+      if (!units.length) {
+        listEl.innerHTML = `<div style="padding:12px;color:#9a3412;font-size:0.8rem;">Nenhum lote encontrado para este empreendimento.</div>`;
+        if (statusEl) statusEl.textContent = 'Sem lotes';
+        return;
+      }
+      listEl.dataset.loaded = String(id);
+      listEl.innerHTML = units.map((u) => {
+        const key = this.normalizeUnitKey(u.name);
+        const checked = selected.has(key) ? 'checked' : '';
+        const safeName = String(u.name).replace(/"/g, '&quot;');
+        return `
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:0.8rem;cursor:pointer;">
+            <input type="checkbox" class="edit-incorp-excecao-${id}" data-unit-id="${u.id}" data-unit-name="${safeName}" value="${safeName}" ${checked} style="width:15px;height:15px;accent-color:#105436;">
+            <span>${u.name}</span>
+          </label>`;
+      }).join('');
+      if (statusEl) statusEl.textContent = `${units.length} lote(s) · marque os que estão fora da incorporação (ainda notificam)`;
+    } catch (e) {
+      console.error('Erro ao carregar lotes Incorporação:', e);
+      listEl.innerHTML = `<div style="padding:12px;color:#b91c1c;font-size:0.8rem;">Falha ao carregar lotes. Tente novamente.</div>`;
+      if (statusEl) statusEl.textContent = 'Erro ao carregar';
+    }
+  },
+
+  filterIncorporacaoLotes(id, q) {
+    const listEl = document.getElementById(`edit-incorp-lotes-list-${id}`);
+    if (!listEl) return;
+    const needle = this.normalizeUnitKey(q);
+    listEl.querySelectorAll('label').forEach((lab) => {
+      const txt = this.normalizeUnitKey(lab.textContent);
+      lab.style.display = (!needle || txt.includes(needle)) ? 'flex' : 'none';
+    });
   },
 
   openEditModal(id) {
@@ -121,22 +246,24 @@ const CentrosCustoApp = {
     
     const custom = CentrosCustoState.customFields[id] || {};
     const vgv = custom.valor_vgv || 0;
-    const preambulo = custom.preambulo_id || '';
     const perc_ml = custom.perc_ml || 0;
     const perc_terrenista = custom.perc_terrenista || 0;
     const tipo_cc = custom.tipo_cc || '';
     const imposto_pago = custom.imposto_pago_empresa === true;
     const suspensiva_ativa = custom.clausula_suspensiva_ativa === true;
     const suspensiva_dias = custom.clausula_suspensiva_dias || 30;
+    const incorpLotesProprios = custom.incorporacao_lotes_proprios === true;
+    const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
+    const showIncorp = tipo_cc === 'Incorporação';
 
     const modalHtml = `
       <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
-        <div style="background: white; border-radius: 8px; width: 700px; max-width: 95%; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+        <div style="background: white; border-radius: 8px; width: 720px; max-width: 95%; max-height: 92vh; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
           <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Editar Centro de Custo: ${cc.id} - ${cc.name}</h3>
             <button onclick="CentrosCustoApp.closeModal()" style="background: none; border: none; cursor: pointer; font-size: 1.2rem; color: #999;">&times;</button>
           </div>
-          <div style="padding: 20px; display: flex; flex-direction: column; gap: 20px;">
+          <div style="padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
               <div>
                 <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Valor VGV (R$)</label>
@@ -145,7 +272,7 @@ const CentrosCustoApp = {
               <div>
                 <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Tipo de Centro de Custo</label>
                 <div style="display: flex; gap: 8px;">
-                  <select id="edit-tipo-cc-${id}" class="form-control" style="flex: 1;">
+                  <select id="edit-tipo-cc-${id}" class="form-control" style="flex: 1;" onchange="CentrosCustoApp.syncIncorporacaoUi(${id})">
                     <option value="">Selecione...</option>
                     ${CentrosCustoState.tiposCc.map(t => `<option value="${t}" ${tipo_cc === t ? 'selected' : ''}>${t}</option>`).join('')}
                   </select>
@@ -168,6 +295,41 @@ const CentrosCustoApp = {
             <div style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="edit-imposto-pago-${id}" ${imposto_pago ? 'checked' : ''} style="width: 16px; height: 16px;">
                 <label for="edit-imposto-pago-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">Imposto pago pela empresa?</label>
+            </div>
+
+            <div id="edit-incorp-panel-${id}" style="display:${showIncorp ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+              <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Incorporação</h4>
+              <p style="margin:0 0 12px 0; font-size:0.75rem; color:#166534; line-height:1.4;">
+                Empreendimentos de incorporação não notificam prefeitura/associação sobre troca de compromissário,
+                exceto vendas, distratos e cessões dos lotes marcados abaixo como fora da incorporação.
+              </p>
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                <input type="checkbox" id="edit-incorp-lotes-proprios-${id}" ${incorpLotesProprios ? 'checked' : ''} style="width:16px;height:16px;accent-color:#105436;" onchange="CentrosCustoApp.syncIncorporacaoLotesSub(${id})">
+                <label for="edit-incorp-lotes-proprios-${id}" style="font-weight:700; font-size:0.85rem; cursor:pointer; color:#14532d;">Há lotes próprios neste empreendimento?</label>
+              </div>
+              <div id="edit-incorp-lotes-sub-${id}" style="display:${incorpLotesProprios ? 'block' : 'none'};">
+                <div style="margin-bottom:12px;">
+                  <div style="font-size:0.8rem; font-weight:700; color:#334155; margin-bottom:6px;">Esses lotes próprios são:</div>
+                  <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;">
+                      <input type="radio" name="edit-incorp-lotes-tipo-${id}" value="abertos" ${incorpLotesTipo !== 'fechados' ? 'checked' : ''} style="accent-color:#105436;"> Abertos
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;">
+                      <input type="radio" name="edit-incorp-lotes-tipo-${id}" value="fechados" ${incorpLotesTipo === 'fechados' ? 'checked' : ''} style="accent-color:#105436;"> Fechados
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+                    <label style="font-size:0.8rem; font-weight:700; color:#334155;">Lotes fora da incorporação (exceções que notificam)</label>
+                    <span id="edit-incorp-lotes-status-${id}" style="font-size:0.72rem; color:#64748b;"></span>
+                  </div>
+                  <input type="text" class="form-control" placeholder="Filtrar lote..." style="margin-bottom:8px; font-size:0.85rem;" oninput="CentrosCustoApp.filterIncorporacaoLotes(${id}, this.value)">
+                  <div id="edit-incorp-lotes-list-${id}" style="max-height:220px; overflow:auto; background:#fff; border:1px solid #bbf7d0; border-radius:6px;">
+                    <div style="padding:12px;color:#64748b;font-size:0.8rem;">Ative “lotes próprios” para carregar a lista.</div>
+                  </div>
+                </div>
+              </div>
             </div>
             
             <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0;">
@@ -199,6 +361,7 @@ const CentrosCustoApp = {
     }
     container.innerHTML = modalHtml;
     if (window.lucide) window.lucide.createIcons();
+    this.syncIncorporacaoUi(id);
   },
 
   closeModal() {
@@ -250,6 +413,7 @@ const CentrosCustoApp = {
           const val = select.value;
           select.innerHTML = '<option value="">Selecione...</option>' + 
              CentrosCustoState.tiposCc.map(t => `<option value="${t}" ${val === t ? 'selected' : ''}>${t}</option>`).join('');
+          CentrosCustoApp.syncIncorporacaoUi(currentCcId);
        }
     }
   },
@@ -376,13 +540,19 @@ const CentrosCustoApp = {
       const percMl = custom.perc_ml ? custom.perc_ml + '%' : '-';
       const percTerr = custom.perc_terrenista ? custom.perc_terrenista + '%' : '-';
       const tipoCc = custom.tipo_cc || '-';
+      const exCount = (tipoCc === 'Incorporação' && Array.isArray(custom.incorporacao_lotes_excecao))
+        ? custom.incorporacao_lotes_excecao.length
+        : 0;
+      const tipoBadge = tipoCc === 'Incorporação'
+        ? `<span style="background:#ecfdf5;border:1px solid #86efac;padding:2px 6px;border-radius:4px;font-size:0.8rem;color:#166534;">${tipoCc}${exCount ? ` · ${exCount} exc.` : ''}</span>`
+        : `<span style="background: #f0f2f5; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #555;">${tipoCc}</span>`;
 
       html += `
         <tr>
           <td>${cc.idCompany || cc.companyId || '-'}</td>
           <td><strong>${cc.id}</strong></td>
           <td>${cc.name}</td>
-          <td><span style="background: #f0f2f5; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #555;">${tipoCc}</span></td>
+          <td>${tipoBadge}</td>
           <td style="text-align: right; font-weight: 500; color: #1b8253;">${vgv}</td>
           <td style="text-align: center;">${preambulo}</td>
           <td style="text-align: center;">${percMl}</td>

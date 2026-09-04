@@ -43,7 +43,7 @@ const PlanoFinanceiroApp = {
     await this.loadCategories();
   },
 
-  DFC_TEMPLATE_VER: 3,
+  DFC_TEMPLATE_VER: 4,
   ACCOUNTS_MAP_VER: 1,
 
   dfcTemplateGroups() {
@@ -143,6 +143,9 @@ const PlanoFinanceiroApp = {
       if (t.type === 'resultado') {
         node.accounts = [...new Set(merged[t.id] || [])];
       }
+      // Preserva redutora do template (e não perde se já estava marcada no nó antigo)
+      const old = (visao.groups || []).find(g => g.id === t.id);
+      if (t.redutora || (old && old.redutora)) node.redutora = true;
       return node;
     });
     visao.name = 'DFC Padrão';
@@ -842,6 +845,14 @@ const PlanoFinanceiroApp = {
       const pid = node._parentId;
       node = pid ? this.categories.find(x => String(x.id) === String(pid)) : null;
     }
+    if (chain.length <= 1 && /^\d+$/.test(raw) && raw.length >= 3) {
+      // Fallback Sienge: classe (1 dígito) + segmentos de 2 dígitos → 1.02.01.01
+      const first = raw.charAt(0);
+      let rest = raw.slice(1);
+      if (rest.length % 2 === 1) rest = '0' + rest;
+      const pairs = rest.match(/.{1,2}/g) || [];
+      return [first].concat(pairs).join('.');
+    }
     const segs = [];
     let prevId = '';
     chain.forEach((n, i) => {
@@ -861,6 +872,16 @@ const PlanoFinanceiroApp = {
       prevId = sid;
     });
     return segs.join('.');
+  },
+
+  toggleRedutora(nodeId) {
+    const v = this.getVisao();
+    if (!v) return;
+    const node = (v.groups || []).find(g => g.id === nodeId);
+    if (!node || node.type !== 'resultado') return;
+    node.redutora = !node.redutora;
+    this.saveToStorage();
+    this.renderBoard();
   },
 
   sortAccountsTree() {
@@ -1224,10 +1245,11 @@ const PlanoFinanceiroApp = {
             </div>
             
             <i data-lucide="${icon}" style="width:14px;height:14px;color:${borderLeft};"></i>
-            <span style="font-weight:${node.type==='total_n1'?'700':'600'}; font-size:0.85rem; color:#1e293b; cursor:pointer;" onclick="PlanoFinanceiroApp.editNodeName('${node.id}')">${node.name}</span>
+            <span style="font-weight:${node.type==='total_n1'?'700':'600'}; font-size:0.85rem; color:#1e293b; cursor:pointer;" onclick="PlanoFinanceiroApp.editNodeName('${node.id}')">${node.name}${node.redutora ? ' <span style="color:#b91c1c;font-size:0.7rem;">(redutora)</span>' : ''}</span>
           </div>
           
           <div style="display:flex; align-items:center; gap:5px;">
+            ${node.type === 'resultado' ? `<button onclick="PlanoFinanceiroApp.toggleRedutora('${node.id}')" title="${node.redutora ? 'Conta redutora (subtrai do pai) — clique para desligar' : 'Marcar como conta redutora (subtrai do pai)'}" style="background:${node.redutora ? '#fef2f2' : 'none'};border:1px solid ${node.redutora ? '#fca5a5' : '#e2e8f0'};border-radius:4px;color:${node.redutora ? '#b91c1c' : '#94a3b8'};cursor:pointer;padding:1px 6px;font-size:0.65rem;font-weight:800;">${node.redutora ? '− RED' : 'RED'}</button>` : ''}
             ${canAddChild ? `<button onclick="PlanoFinanceiroApp.addNode('${node.id}')" title="Adicionar Sub-nível" style="background:none;border:none;color:#10b981;cursor:pointer;padding:2px;"><i data-lucide="plus-circle" style="width:14px;height:14px;"></i></button>` : ''}
             <button onclick="PlanoFinanceiroApp.deleteNode('${node.id}')" title="Excluir" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
           </div>

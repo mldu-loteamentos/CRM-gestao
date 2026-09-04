@@ -130,6 +130,47 @@ const CompromissarioApp = {
     if (window.lucide) window.lucide.createIcons();
   },
 
+  normalizeUnitKey(name) {
+    return String(name || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  },
+
+  /**
+   * Incorporação: não notifica prefeitura/associação, salvo lotes marcados
+   * como exceção (fora da incorporação) no Centro de Custo.
+   */
+  shouldNotifyContract(c) {
+    if (!c) return false;
+    let unitName = '';
+    if (c.salesContractUnits && c.salesContractUnits.length > 0) {
+      unitName = c.salesContractUnits[0].name || '';
+    }
+    const enterpriseId = c.enterpriseId;
+    const cfg = (typeof window.nexCcConfig === 'function')
+      ? window.nexCcConfig(enterpriseId, unitName)
+      : {};
+    if (String(cfg.tipo_cc || '') !== 'Incorporação') return true;
+
+    const exceptions = Array.isArray(cfg.incorporacao_lotes_excecao)
+      ? cfg.incorporacao_lotes_excecao
+      : [];
+    if (!exceptions.length) return false;
+
+    const unitKey = this.normalizeUnitKey(unitName);
+    if (!unitKey) return false;
+    return exceptions.some((ex) => {
+      const exName = typeof ex === 'string' ? ex : (ex && ex.name);
+      const exId = typeof ex === 'object' && ex ? String(ex.id || '') : '';
+      if (exId && c.salesContractUnits && c.salesContractUnits.some((u) => String(u.id) === exId)) return true;
+      const exKey = this.normalizeUnitKey(exName);
+      return exKey && (unitKey === exKey || unitKey.includes(exKey) || exKey.includes(unitKey));
+    });
+  },
+
   async fetchContracts() {
     if (this.state.loading) return;
     
@@ -184,6 +225,11 @@ const CompromissarioApp = {
 
       let mergedResults = [...vendasValidas, ...distratosValidos];
 
+      const beforeFilter = mergedResults.length;
+      mergedResults = mergedResults.filter((c) => this.shouldNotifyContract(c));
+      const skippedIncorp = beforeFilter - mergedResults.length;
+      this.state._skippedIncorporacao = skippedIncorp;
+
       this.state.contracts = mergedResults;
 
       this.renderTable();
@@ -203,9 +249,11 @@ const CompromissarioApp = {
     const countLabel = document.getElementById('comp-pref-count');
 
     if (!this.state.contracts || this.state.contracts.length === 0) {
+      const skippedEmpty = Number(this.state._skippedIncorporacao) || 0;
       tbody.innerHTML = `
         <div style="text-align: center; padding: 40px; color: #94a3b8;">
           Nenhum contrato encontrado para este período.
+          ${skippedEmpty > 0 ? `<div style="margin-top:12px;color:#166534;font-size:0.85rem;">${skippedEmpty} contrato(s) de Incorporação foram omitidos (sem lotes de exceção).</div>` : ''}
         </div>
       `;
       countLabel.textContent = '0 encontrados';
@@ -213,6 +261,7 @@ const CompromissarioApp = {
     }
 
     countLabel.textContent = `${this.state.contracts.length} encontrados`;
+    const skipped = Number(this.state._skippedIncorporacao) || 0;
 
     // Agrupar por Cidade (parte antes do ' - ' no enterpriseName)
     const groups = {};
@@ -242,7 +291,18 @@ const CompromissarioApp = {
     }
 
     let html = '';
-    
+
+    if (skipped > 0) {
+      html += `
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #16a34a; border-radius: 6px; padding: 12px 15px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px;">
+          <i data-lucide="building-2" style="width: 20px; color: #16a34a; margin-top: 2px;"></i>
+          <div>
+            <h4 style="margin: 0 0 5px 0; color: #14532d; font-size: 0.9rem;">Incorporação — notificação dispensada</h4>
+            <p style="margin: 0; color: #166534; font-size: 0.8rem;">${skipped} contrato(s) de empreendimento(s) tipo Incorporação foram ocultados. Só entram na fila lotes marcados como exceção (fora da incorporação) no Centro de Custo.</p>
+          </div>
+        </div>
+      `;
+    } 
     // Alerta de cidades sem e-mail
     const missingEmails = Object.keys(groups).filter(city => {
       const cityKey = this.normalizeCityKey(city);

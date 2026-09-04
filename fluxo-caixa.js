@@ -168,10 +168,68 @@ const FluxoCaixaApp = {
       || s === "g_09_02" || s === "g_09_05";
   },
 
+  isRevenueGroup(id) {
+    const s = String(id || "");
+    return s === "g_01" || s.startsWith("g_01_");
+  },
+
   // Contas do plano que começam com 2 (despesas/saídas) entram sempre negativas no DFC
   isExpenseAccount(categoryId) {
     const digits = String(categoryId || "").replace(/\D/g, "");
     return digits.charAt(0) === "2";
+  },
+
+  /** Chave só dígitos para casar 1.02.01.01 com 1020101 */
+  normAccountKey(id) {
+    return String(id || "").replace(/\D/g, "");
+  },
+
+  /**
+   * Conta redutora: reduz o total do nó pai (desconto, cancelamento, retenção, etc.).
+   * Também cobre contas 2.x alocadas sob RECEITAS (ex.: Desconto de Juros em 01.01).
+   */
+  isReducingAccount(categoryId, categoryName, node) {
+    if (node && node.redutora) return true;
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    if (/DESCONTO|CANCELAMENTO|RETENCAO|DEDUCAO|ESTORNO DE (VENDA|RECEITA)|REDUTOR|\(\-\)|^\-\s/.test(n)) return true;
+    if (node && this.isRevenueGroup(node.id) && this.isExpenseAccount(categoryId)) return true;
+    return false;
+  },
+
+  /**
+   * Ajusta o sinal do lançamento para o DFC.
+   * Redutoras / despesas / saídas: se vier positivo, inverte para negativo (sem double-negate).
+   */
+  signedAmount(node, categoryId, categoryName, amount) {
+    let amt = Number(amount) || 0;
+    const reduce = this.isReducingAccount(categoryId, categoryName, node)
+      || this.isExpenseAccount(categoryId)
+      || this.isCashOutflowGroup(node && node.id);
+    if (reduce && amt > 0) amt = -amt;
+    return amt;
+  },
+
+  formatAccountCode(id) {
+    const raw = String(id || "").trim();
+    if (!raw) return "";
+    if (typeof PlanoFinanceiroApp !== "undefined" && typeof PlanoFinanceiroApp.formatAccountCode === "function") {
+      const cat = (this.categories || []).find(c => String(c.id) === raw)
+        || { id: raw, _parentId: null };
+      const formatted = PlanoFinanceiroApp.formatAccountCode(cat);
+      if (formatted && formatted.includes(".")) return formatted;
+    }
+    if (raw.includes(".")) return raw.replace(/^\.+|\.+$/g, "");
+    if (/^\d+$/.test(raw) && raw.length >= 3) {
+      const first = raw.charAt(0);
+      let rest = raw.slice(1);
+      if (rest.length % 2 === 1) rest = "0" + rest;
+      const pairs = rest.match(/.{1,2}/g) || [];
+      return [first].concat(pairs).join(".");
+    }
+    return raw;
   },
 
   emptyMonths(keys) {
@@ -197,25 +255,39 @@ const FluxoCaixaApp = {
     const byId = Object.fromEntries(groups.map(g => [g.id, g]));
     const accToNode = {};
     groups.forEach(g => {
-      (g.accounts || []).forEach(id => { accToNode[String(id)] = g.id; });
+      (g.accounts || []).forEach(id => {
+        const sid = String(id);
+        accToNode[sid] = g.id;
+        const nk = this.normAccountKey(sid);
+        if (nk) accToNode[nk] = g.id;
+      });
     });
 
     const outros = { id: "g_outros", name: "CONTAS NÃO CLASSIFICADAS", type: "resultado", parentId: null, months: this.emptyMonths(this.months), total: 0, accountRows: [] };
 
     const accIndex = {};
     allocs.forEach(a => {
-      const nid = accToNode[a.categoryId] || "g_outros";
+      const rawId = String(a.categoryId || "");
+      const nk = this.normAccountKey(rawId);
+      const nid = accToNode[rawId] || (nk && accToNode[nk]) || "g_outros";
       const node = nid === "g_outros" ? outros : byId[nid];
       if (!node) return;
-      if (node.redutora && a.amount > 0) a.amount = -a.amount;
-      if (this.isExpenseAccount(a.categoryId) && a.amount > 0) a.amount = -a.amount;
-      if (this.isCashOutflowGroup(node.id) && a.amount > 0) a.amount = -a.amount;
-      this.addInto(node, a.month, a.amount);
-      if (!accIndex[a.categoryId]) {
-        accIndex[a.categoryId] = { id: a.categoryId, name: a.categoryName, months: this.emptyMonths(this.months), total: 0, parentId: node.id };
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount);
+      this.addInto(node, a.month, amount);
+      const idxKey = nk || rawId;
+      if (!accIndex[idxKey]) {
+        accIndex[idxKey] = {
+          id: rawId,
+          displayId: this.formatAccountCode(rawId),
+          name: a.categoryName,
+          months: this.emptyMonths(this.months),
+          total: 0,
+          parentId: node.id,
+          redutora: !!(node.redutora || this.isReducingAccount(a.categoryId, a.categoryName, node))
+        };
       }
-      this.addInto(accIndex[a.categoryId], a.month, a.amount);
-      accIndex[a.categoryId].name = a.categoryName || accIndex[a.categoryId].name;
+      this.addInto(accIndex[idxKey], a.month, amount);
+      accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
     });
 
     Object.values(accIndex).forEach(acc => {
@@ -225,19 +297,24 @@ const FluxoCaixaApp = {
 
     groups.forEach(g => {
       (g.accounts || []).forEach(id => {
-        if (accIndex[String(id)]) return;
+        const sid = String(id);
+        const nk = this.normAccountKey(sid);
+        if (accIndex[sid] || (nk && accIndex[nk])) return;
         g.accountRows.push({
-          id: String(id),
+          id: sid,
+          displayId: this.formatAccountCode(sid),
           name: this.catName(id),
           months: this.emptyMonths(this.months),
           total: 0,
           parentId: g.id,
-          zero: true
+          zero: true,
+          redutora: !!(g.redutora || this.isReducingAccount(sid, this.catName(id), g))
         });
       });
-      g.accountRows.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+      g.accountRows.sort((a, b) => String(a.displayId || a.id).localeCompare(String(b.displayId || b.id), "pt-BR", { numeric: true }));
     });
 
+    // Rollup bottom-up: pai = soma dos filhos (já com sinal correto das redutoras)
     const depthOf = (g) => {
       let d = 0, cur = g;
       while (cur && cur.parentId && byId[cur.parentId]) { d++; cur = byId[cur.parentId]; }
@@ -286,7 +363,15 @@ const FluxoCaixaApp = {
       if (!this.expanded.has(node.id)) return;
       children.forEach(ch => pushNode(ch, level + 1));
       (node.accountRows || []).forEach(acc => {
-        rows.push({ ...acc, level: level + 1, isAccount: true, hasKids: false, name: `${acc.id} ${acc.name || ""}`.trim() });
+        const code = acc.displayId || this.formatAccountCode(acc.id);
+        const redFlag = acc.redutora ? " (−)" : "";
+        rows.push({
+          ...acc,
+          level: level + 1,
+          isAccount: true,
+          hasKids: false,
+          name: `${code} ${acc.name || ""}${redFlag}`.trim()
+        });
       });
     };
     groups.filter(g => !g.parentId).forEach(g => pushNode(g, 0));
@@ -294,7 +379,8 @@ const FluxoCaixaApp = {
       rows.push({ ...outros, level: 0, hasKids: outros.accountRows.length > 0, isAccount: false });
       if (this.expanded.has("g_outros")) {
         outros.accountRows.forEach(acc => {
-          rows.push({ ...acc, level: 1, isAccount: true, hasKids: false, name: `${acc.id} ${acc.name || ""}`.trim() });
+          const code = acc.displayId || this.formatAccountCode(acc.id);
+          rows.push({ ...acc, level: 1, isAccount: true, hasKids: false, name: `${code} ${acc.name || ""}`.trim() });
         });
       }
     }

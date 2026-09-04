@@ -1,4 +1,4 @@
-﻿const HomeDashboard = {
+const HomeDashboard = {
   // Mascotes disponíveis
   pets: [
     { id: '3d_iael', is3DModel: true, glbUrl: 'assets/pets/IA.eL.glb', icon: '🤖', name: 'IA.EL' },
