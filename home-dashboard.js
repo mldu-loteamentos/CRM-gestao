@@ -175,6 +175,8 @@
     if (info && info.fase && info.fase !== 'Sem Fase') return false;
     return true;
   },
+
+  clientKey(c) {
     return String(c.customerId) + '-' + String(c.saleId);
   },
 

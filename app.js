@@ -4407,7 +4407,9 @@ document.addEventListener("click", function(e) {
         setInputDone(zeroInput, zeroIcon);
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
-  } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
+  }
+
+  if (dataAlreadyLoaded && typeof window.updateFilaCacheStatusIndicator === "function") {
     window.updateFilaCacheStatusIndicator();
   }
 
@@ -9501,16 +9503,6 @@ function formatCpfCnpj(val) {
     document.getElementById("sim-charges").textContent = "R$ 0,00";
     document.getElementById("sim-discount").textContent = "R$ 0,00";
     document.getElementById("sim-total-due").textContent = "R$ 0,00";
-  }
-  
-  if (document.getElementById("simulador-principal")) {
-    document.getElementById("simulador-principal").textContent = "R$ 0,00";
-  }
-  if (document.getElementById("simulador-juros")) {
-    document.getElementById("simulador-juros").textContent = "R$ 0,00";
-  }
-  if (document.getElementById("simulador-total")) {
-    document.getElementById("simulador-total").textContent = "R$ 0,00";
   }
 
   // Set min promise date to today
