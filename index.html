@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=693">
+  <link rel="stylesheet" href="style.css?v=694">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1251,7 +1251,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.693 &nbsp;&middot;&nbsp; 04/09/2026
+            v1.0.694 &nbsp;&middot;&nbsp; 04/09/2026
           </span>
         </div>
       </div>
@@ -2314,9 +2314,10 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                   </button>
                 </div>
               </div>
+              <div id="est-batimento-pause" class="est-batimento-pause" style="display:none;" role="status"></div>
               <div class="est-stock-action-group">
                 <span class="est-stock-action-label">2. Situação financeira</span>
-                <p class="est-stock-action-hint">Diário às 6:30 (dia útil). Com Todos os empreendimentos, percorre só os centros que têm lote. Contrato quitado sai das consultas auxiliares. Primeiro vincula o CV; depois classifica Adimplente, Inadimplente ou Quitado (sem vencido e sem a vencer = quitado, com a data da última baixa).</p>
+                <p class="est-stock-action-hint">Automático pausado (cota API Sienge). Por enquanto: filtre <strong>um empreendimento</strong> e use Vincular / Classificar. Não use “Todos”. Quitados não reconsultam. Quando a nova régua de APIs estiver definida, reativamos o cron das 6:30.</p>
                 <div class="est-stock-action-btns">
                   <button type="button" class="est-btn-contratos" id="est-btn-contratos" onclick="EstoqueComercialApp.cruzarContratos()" title="Preenche a coluna Contrato (número do CV) nas unidades vendidas deste empreendimento.">
                     <i data-lucide="link" style="width: 16px;"></i> Vincular contratos
@@ -6698,43 +6699,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=693"></script>
-  <script defer src="sienge-api.js?v=693"></script>
-  <script defer src="azure-auth.js?v=693"></script>
-  <script defer src="app.js?v=693"></script>
-  <script defer src="home-dashboard.js?v=693"></script>
-  <script defer src="anexos.js?v=693"></script>
-  <script defer src="contas-pagar.js?v=693"></script>
-  <script defer src="config-tags.js?v=693"></script>
-  <script defer src="config-users.js?v=693"></script>
-  <script defer src="suporte.js?v=693"></script>
-  <script defer src="construcao.js?v=693"></script>
-  <script defer src="empresas.js?v=693"></script>
-  <script defer src="relacionamento.js?v=693"></script>
-  <script defer src="compromissario.js?v=693"></script>
+  <script defer src="data.js?v=694"></script>
+  <script defer src="sienge-api.js?v=694"></script>
+  <script defer src="azure-auth.js?v=694"></script>
+  <script defer src="app.js?v=694"></script>
+  <script defer src="home-dashboard.js?v=694"></script>
+  <script defer src="anexos.js?v=694"></script>
+  <script defer src="contas-pagar.js?v=694"></script>
+  <script defer src="config-tags.js?v=694"></script>
+  <script defer src="config-users.js?v=694"></script>
+  <script defer src="suporte.js?v=694"></script>
+  <script defer src="construcao.js?v=694"></script>
+  <script defer src="empresas.js?v=694"></script>
+  <script defer src="relacionamento.js?v=694"></script>
+  <script defer src="compromissario.js?v=694"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=693"></script>
-  <script defer src="centros-custo.js?v=693"></script>
-  <script defer src="marketing.js?v=693"></script>
-  <script defer src="plano-financeiro.js?v=693"></script>
-  <script defer src="prestacao-contas.js?v=693"></script>
+  <script defer src="estoque-comercial.js?v=694"></script>
+  <script defer src="centros-custo.js?v=694"></script>
+  <script defer src="marketing.js?v=694"></script>
+  <script defer src="plano-financeiro.js?v=694"></script>
+  <script defer src="prestacao-contas.js?v=694"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=693"></script>
-  <script defer src="fluxo-caixa.js?v=693"></script>
-  <script defer src="caixa-diario.js?v=693"></script>
-  <script defer src="investimento.js?v=693"></script>
-  <script defer src="parametrizacao-parceiro.js?v=693"></script>
-  <script defer src="societario.js?v=693"></script>
-  <script defer src="participacoes.js?v=693"></script>
-  <script defer src="fiscal.js?v=693"></script>
-  <script defer src="indexadores.js?v=693"></script>
-  <script defer src="verificar-construcao.js?v=693"></script>
-  <script src="repactuacoes.js?v=693"></script>
-  <script defer src="repactuacao-lote.js?v=693"></script>
+  <script defer src="empresa-filter.js?v=694"></script>
+  <script defer src="fluxo-caixa.js?v=694"></script>
+  <script defer src="caixa-diario.js?v=694"></script>
+  <script defer src="investimento.js?v=694"></script>
+  <script defer src="parametrizacao-parceiro.js?v=694"></script>
+  <script defer src="societario.js?v=694"></script>
+  <script defer src="participacoes.js?v=694"></script>
+  <script defer src="fiscal.js?v=694"></script>
+  <script defer src="indexadores.js?v=694"></script>
+  <script defer src="verificar-construcao.js?v=694"></script>
+  <script src="repactuacoes.js?v=694"></script>
+  <script defer src="repactuacao-lote.js?v=694"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=693"></script>
+  <script defer src="dashboard-inadimplencia.js?v=694"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

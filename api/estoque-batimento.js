@@ -35,6 +35,9 @@ const STATE_ID = "_batimento_state";
 const FB_CHUNK = 400;
 const BUDGET_MS = 42000;
 
+/** Pausado até nova régua de APIs Sienge (pacote diário estourando). force=1 ignora. */
+const BATIMENTO_PAUSED = process.env.BATIMENTO_PAUSED !== "0";
+
 function authorized(req) {
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET;
   if (!secret) return true;
@@ -125,6 +128,15 @@ module.exports = async function handler(req, res) {
 
   const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
   const day = isBusinessDaySP();
+  if (!force && BATIMENTO_PAUSED) {
+    return res.status(200).json({
+      skipped: true,
+      paused: true,
+      reason: "batimento_pausado_cota_api",
+      date: todayIsoSP(),
+      message: "Batimento automático pausado temporariamente (consumo de API Sienge acima do pacote). Use force=1 só se necessário, ou classifique um empreendimento por vez na tela."
+    });
+  }
   if (!force && !day.ok) {
     return res.status(200).json({
       skipped: true,

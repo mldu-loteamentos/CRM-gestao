@@ -5,6 +5,8 @@ const EstoqueComercialApp = {
   CC_EMPTY_KEY: "crm_cc_ids_sem_unidade",
   LIMIT: 200,
   FB_CHUNK: 400,
+  /** Pausado até nova régua de APIs Sienge (pacote ~75k/dia estourando). */
+  BATIMENTO_AUTO_PAUSED: true,
   SOLD_CODES: ["V", "O", "G", "P", "L"],
   STATUS_PILLS: [
     { id: "all", label: "Todas" },
@@ -385,33 +387,39 @@ const EstoqueComercialApp = {
     return this.saveFirebase();
   },
 
-  async persistTodayResult() {
+  async persistTodayResult(opts) {
+    opts = opts || {};
     const today = this.todayStr();
     this.state.fetchedAt = new Date().toISOString();
     this.state.lastSnapshotDate = today;
     this.state.batimentoDate = today;
-    this.state.batimentoDone = true;
+    // Com pausa + 1 empreendimento, não marca o dia inteiro como concluído (evita pular cron ao reativar).
+    const markDone = opts.markDone !== false && !this.BATIMENTO_AUTO_PAUSED;
+    if (markDone) this.state.batimentoDone = true;
     this.saveCache();
     if (this.fbReady()) {
       try {
         const { doc, setDoc } = window.firebaseCollections;
-        await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+        const meta = {
           date: today,
           batimentoAt: new Date().toISOString(),
           batimentoDate: today,
-          batimentoDone: true,
           fetchedAt: this.state.fetchedAt,
           unitCount: this.state.units.length,
           updatedAt: new Date().toISOString()
-        }, { merge: true });
-        await setDoc(doc(window.firebaseDb, this.FB_COL, "_batimento_state"), {
-          date: today,
-          cursor: 999999,
-          processed: this.state.units.filter(u => this.isFinanceUnit(u)).length,
-          skippedSettled: this.state.units.filter(u => this.isSettledUnit(u)).length,
-          done: true,
-          source: "manual"
-        });
+        };
+        if (markDone) meta.batimentoDone = true;
+        await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), meta, { merge: true });
+        if (markDone) {
+          await setDoc(doc(window.firebaseDb, this.FB_COL, "_batimento_state"), {
+            date: today,
+            cursor: 999999,
+            processed: this.state.units.filter(u => this.isFinanceUnit(u)).length,
+            skippedSettled: this.state.units.filter(u => this.isSettledUnit(u)).length,
+            done: true,
+            source: "manual"
+          });
+        }
       } catch (e) {
         console.warn("[Estoque] meta do batimento do dia", e);
       }
@@ -467,6 +475,7 @@ const EstoqueComercialApp = {
     this.state.loading = false;
     this.setBusy(false);
     this.renderPills();
+    this.paintBatimentoPauseBanner();
     if (this.state.inited && this.state.units.length) {
       this.fillEnterprisesFromUnits();
       this.fillUnitSelect();
@@ -601,7 +610,31 @@ const EstoqueComercialApp = {
     });
   },
 
+  paintBatimentoPauseBanner() {
+    const el = document.getElementById("est-batimento-pause");
+    if (!el) return;
+    if (!this.BATIMENTO_AUTO_PAUSED) {
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
+    el.style.display = "block";
+    el.innerHTML = "<strong>Batimento automático pausado</strong> — consumo de API Sienge acima do pacote diário (~75k). Até a nova régua: escolha <em>um empreendimento</em> e use Vincular / Classificar. Não rode em “Todos”.";
+  },
+
+  requireEmpForApiHeavy() {
+    const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
+    if (this.BATIMENTO_AUTO_PAUSED && !empSel) {
+      alert("Batimento pausado por cota de API. Selecione um empreendimento (não “Todos”) e tente de novo.");
+      return null;
+    }
+    return empSel;
+  },
+
   async autoStartDailyBatimento() {
+    this.paintBatimentoPauseBanner();
+    if (this.BATIMENTO_AUTO_PAUSED) return;
+
     const today = this.todayStr();
     if (this.state._autoFinanceRunning) return;
 
@@ -1977,7 +2010,7 @@ const EstoqueComercialApp = {
         this.saveCache();
         this.renderTable();
       }
-      await this.sleep(90);
+      await this.sleep(this.BATIMENTO_AUTO_PAUSED ? 220 : 90);
     }
     this.state.units = this.state.units.map(u => {
       if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u) || u.relFin || this.isSettledUnit(u)) return u;
@@ -1995,13 +2028,14 @@ const EstoqueComercialApp = {
       if (this.state.loading) return;
       const today = this.todayStr();
       if (this.state._autoFinanceRunning) return;
-      if (this.state.batimentoDone && this.state.batimentoDate === today) return;
+      if (this.state.batimentoDone && this.state.batimentoDate === today && !this.BATIMENTO_AUTO_PAUSED) return;
       if (!this.state.units.length) await this.init();
       if (!this.state.units.length) {
         alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
         return;
       }
-      const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
+      const empSel = this.requireEmpForApiHeavy();
+      if (empSel === null) return;
       if (!this.state.enterprises.length) await this.loadEnterprises();
       let ccIds = empSel
         ? [empSel]
@@ -2035,7 +2069,10 @@ const EstoqueComercialApp = {
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
       const day = await this.persistTodayResult();
-      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado. Amanhã o batimento automático começa às 6:30.`);
+      const autoHint = this.BATIMENTO_AUTO_PAUSED
+        ? " Automático pausado (cota API) — rode um empreendimento por vez."
+        : " Amanhã o batimento automático começa às 6:30.";
+      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado.${autoHint}`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
@@ -2171,6 +2208,7 @@ const EstoqueComercialApp = {
         alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
         return;
       }
+      if (this.requireEmpForApiHeavy() === null) return;
       await this.enrichContracts();
     } catch (e) {
       console.error("[Estoque] cruzar", e);
