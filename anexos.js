@@ -300,13 +300,15 @@ function anexosDedupeAttachments(list) {
 }
 
 function anexosGuessTagFromDescription(desc) {
-  const raw = String(desc || '')
+  let raw = String(desc || '')
     .replace(/^\(Cliente\s*\d+\)\s*/i, '')
     .replace(/^\(Unidade[^)]*\)\s*/i, '')
     .trim();
   if (!raw) return '';
-  const m = raw.match(/\d{1,4}[./]\d{1,2}[./]\d{2,4}\s*-\s*(.+)$/i)
-    || raw.match(/-\s*([A-ZÁÉÍÓÚÃÕÇ0-9][A-ZÁÉÍÓÚÃÕÇ0-9 /()-]{1,60})$/i);
+  // "17701 F 265 - ANÁLISE DE CRÉDITO CLIENTE.pdf" ou "31.08.2024 - TAG"
+  const m = raw.match(/^\d{4,5}\s+[A-Z0-9][-\s]?\d{0,4}\s*-\s*(.+)$/i)
+    || raw.match(/\d{1,4}[./]\d{1,2}[./]\d{2,4}\s*-\s*(.+)$/i)
+    || raw.match(/-\s*([A-ZÁÉÍÓÚÃÕÇ0-9][A-ZÁÉÍÓÚÃÕÇ0-9 /()-]{1,80})$/i);
   if (!m) return '';
   let tag = String(m[1] || '').trim().toUpperCase().replace(/\s+/g, ' ');
   tag = tag.replace(/\.(PDF|JPG|JPEG|PNG)$/i, '').trim();
@@ -314,8 +316,81 @@ function anexosGuessTagFromDescription(desc) {
   return tag;
 }
 
+/** Encaixa sugestão OCR/nome na TAG ativa do cadastro (com aliases). */
+function anexosResolveActiveTag(suggested) {
+  const s = String(suggested || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!s || s === 'DOC') return '';
+  const tags = (AnexosState.tagsAtivas || []).map(t => String(t.name || '').trim()).filter(Boolean);
+  if (!tags.length) return s;
+
+  const norm = (x) => String(x || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/\s+/g, ' ').trim();
+  const sn = norm(s);
+
+  const aliases = {
+    'COMPROVANTE DE RESIDENCIA': ['COMPROVANTE DE ENDERECO', 'COMP ENDERECO', 'COMPROVANTE RESIDENCIA'],
+    'COMPROVANTE DE ENDERECO': ['COMPROVANTE DE RESIDENCIA', 'COMP ENDERECO'],
+    'ANALISE DE CREDITO': ['ANALISE DE CREDITO CLIENTE', 'ANALISE CREDITO'],
+    'CERTIDAO DE CASAMENTO': ['CERTIDAO CASAMENTO'],
+    'CERTIDAO DE NASCIMENTO': ['CERTIDAO NASCIMENTO'],
+    'CESSAO DE DIREITOS': ['CESSAO', 'TERMO DE CESSAO']
+  };
+
+  let hit = tags.find(t => norm(t) === sn);
+  if (hit) return hit;
+
+  for (const t of tags) {
+    const tn = norm(t);
+    const al = aliases[tn] || [];
+    if (al.some(a => sn === a || sn.includes(a) || a.includes(sn))) return t;
+    if (sn.includes(tn) || tn.includes(sn)) return t;
+  }
+  return s;
+}
+
 function anexosAttId(att) {
   return String((att && (att.attachmentid || att.attachmentId || att.id)) || '').trim();
+}
+
+/**
+ * Anexos da ficha do cliente: só entram se forem pessoais (sem lote)
+ * ou se a descrição citar o empreendimento/unidade atuais.
+ * Evita puxar docs de outros lotes do mesmo cliente.
+ */
+function anexosAttachmentBelongsToUnit(att, ctx) {
+  const text = `${att.fileName || ''} ${att.description || ''} ${att.name || ''}`.toUpperCase();
+  const unitName = String((ctx && ctx.unitName) || '').toUpperCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+  const enterpriseId = String((ctx && ctx.enterpriseId) || '').trim();
+  const unitCompact = unitName.replace(/\s+/g, '');
+
+  // Padrão CRM: "17701 F 265 - TAG ..."
+  const unitRefs = text.match(/\b\d{4,5}\s+[A-Z0-9]\s*\d{1,4}\b/g)
+    || text.match(/\b\d{4,5}\s+[A-Z]-?\d{1,4}\b/g)
+    || [];
+  if (unitRefs.length) {
+    const ok = unitRefs.some((ref) => {
+      const r = ref.replace(/\s+/g, '').replace(/-/g, '');
+      const want = `${enterpriseId}${unitCompact}`.replace(/-/g, '');
+      const want2 = unitCompact.replace(/-/g, '');
+      return (want && r.includes(want2) && (!enterpriseId || r.startsWith(enterpriseId))) || r.includes(want2);
+    });
+    if (!ok) return false;
+    return true;
+  }
+
+  if (unitName && text.includes(unitCompact)) return true;
+  if (enterpriseId && unitName && text.includes(enterpriseId) && text.includes(unitName.split(/\s/)[0])) return true;
+
+  // Documento pessoal (RG, CPF, etc.) sem referência a outro lote → ok
+  if (/RG|CPF|CNH|CERTID[AÃ]O|COMPROVANTE DE ENDERE|ANALISE DE CREDITO|AN[AÁ]LISE DE CR[EÉ]DITO|PROCURAC|CASAMENTO|NASCIMENTO/.test(text)) {
+    return true;
+  }
+
+  // Sem indicação de lote: incluir (doc genérico da ficha)
+  if (!/\b\d{4,5}\b/.test(text) || !/[A-Z]-?\d{2,4}/.test(text)) return true;
+
+  return false;
 }
 
 function anexosSafeFileName(name) {
@@ -933,149 +1008,274 @@ const AnexosApp = {
   },
 
   async selecionarUnidade(unitId) {
+    const prevUnit = AnexosState.selectedUnidade;
     AnexosState.selectedUnidade = unitId;
     AnexosState.activeContract = null;
     AnexosState.contractAttachments = [];
+    // Troca de lote: limpa arquivos preparados (o nome na tela usa o lote atual e mascarava conteúdo antigo)
+    if (prevUnit && String(prevUnit) !== String(unitId || '') && AnexosState.files.length) {
+      AnexosState.files = [];
+      AnexosState.importedContracts.clear();
+      AnexosState.downloadedFilesIds.clear();
+    }
+    if (!unitId) {
+      AnexosState.files = [];
+      AnexosState.importedContracts.clear();
+      renderAnexosModule();
+      return;
+    }
     renderAnexosModule();
 
-    if (!unitId) return;
-
     try {
-      // Find active contract
       const ccInput = document.getElementById('anexos-cc');
-      const ccStr = AnexosState.cc || (ccInput ? ccInput.value : '');
-      if (!ccStr) return;
-      // To get contract for unit, we can use the backend proxy directly
-      
-      const scRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts?unitId=${unitId}`), {
-        headers: { 'Authorization': getBasicAuthHeader() }
+      const ccRaw = AnexosState.cc || (ccInput ? ccInput.value : '');
+      const enterpriseId = String(ccRaw || '').split(' - ')[0].trim();
+      if (!enterpriseId) return;
+
+      const matchUnit = AnexosState.unidades ? AnexosState.unidades.find(u => String(u.id) === String(unitId)) : null;
+      const nomeUnidade = matchUnit ? String(matchUnit.name || '') : '';
+
+      // Sempre filtrar por empreendimento + unidade (unitId sozinho devolve contrato errado no Sienge)
+      let scUrl = anexosApiUrl(`/sienge-proxy/sales-contracts?limit=100&offset=0&enterpriseId=${encodeURIComponent(enterpriseId)}&unitId=${encodeURIComponent(unitId)}`);
+      let scRes = await fetch(scUrl, { headers: { 'Authorization': getBasicAuthHeader() } });
+      let scData = scRes.ok ? await scRes.json() : { results: [] };
+      let activeContracts = (scData.results || []).filter(c => {
+        const sit = String(c.situation || c.status || '').toUpperCase();
+        return sit !== 'CANCELED' && sit !== 'CANCELADO' && sit !== 'DISTRATADO';
       });
-      if (scRes.ok) {
-        const scData = await scRes.json();
-        let activeContracts = (scData.results || []).filter(c => c.status !== 'CANCELED');
-        if (activeContracts.length === 0 && scData.results && scData.results.length > 0) {
-            activeContracts = [scData.results[0]];
-        }
-        if (activeContracts.length > 0) {
-          const mainC = activeContracts[0];
-          const mainCust = mainC.salesContractCustomers?.find(cust => cust.main === true) || mainC.salesContractCustomers?.[0] || {};
-          let fmtDate = '';
-          if (mainC.contractDate || mainC.saleDate) {
-            const rawD = mainC.contractDate || mainC.saleDate;
-            const parts = rawD.split('-');
-            if (parts.length === 3) fmtDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-            else fmtDate = rawD;
-          }
 
-          AnexosState.activeContract = {
-            id: mainC.id,
-            contractNumber: mainC.contractNumber || mainC.number || mainC.id,
-            customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
-            contractDate: fmtDate,
-            customerId: mainCust.customerId || mainCust.id,
-            customers: mainC.salesContractCustomers || []
-          };
-          await anexosHydrateContractPeople();
+      // Confirma que a unidade do contrato bate com a selecionada
+      const unitMatches = (c) => {
+        const units = c.salesContractUnits || c.units || [];
+        if (!units.length) return true;
+        return units.some(u => {
+          if (u.id != null && String(u.id) === String(unitId)) return true;
+          if (nomeUnidade && u.name && String(u.name).replace(/\s+/g, '').toUpperCase() === nomeUnidade.replace(/\s+/g, '').toUpperCase()) return true;
+          return false;
+        });
+      };
+      activeContracts = activeContracts.filter(unitMatches);
 
-          if (AnexosState.contexto === 'Ambos' && !AnexosState.idCliente) {
-            let doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj;
-            if (!doc && (mainCust.id || mainCust.customerId) && window.SiengeApiService) {
-              try {
-                const cData = await window.SiengeApiService.getCustomer(mainCust.id || mainCust.customerId);
-                if (cData) doc = cData.cpfCnpj || cData.cpf || cData.cnpj;
-              } catch(e) {}
-            }
-            if (doc) {
-              const cleanDoc = String(doc).replace(/\D/g, '');
-              if (cleanDoc.length === 11) AnexosState.idCliente = cleanDoc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-              else if (cleanDoc.length === 14) AnexosState.idCliente = cleanDoc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
-              else AnexosState.idCliente = doc;
-            }
-          }
+      if (!activeContracts.length && (scData.results || []).length) {
+        activeContracts = (scData.results || []).filter(unitMatches);
+      }
 
-          renderAnexosModule();
+      if (activeContracts.length === 0) {
+        AnexosState.activeContract = null;
+        AnexosState.contractAttachments = [];
+        renderAnexosModule();
+        console.warn('[Anexos] Nenhum contrato para enterpriseId=', enterpriseId, 'unitId=', unitId);
+        return;
+      }
 
-          let allAttachments = [];
-          // Fetch attachments do contrato atual
-          const attRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`), {
-            headers: { 'Authorization': getBasicAuthHeader() }
-          });
-          if (attRes.ok) {
-            const attData = await attRes.json();
-            allAttachments = allAttachments.concat(attData.results || []);
-          }
+      // Preferir contrato ativo (não quitado/distratado) mais recente
+      activeContracts.sort((a, b) => String(b.contractDate || b.issueDate || '').localeCompare(String(a.contractDate || a.issueDate || '')));
+      const mainC = activeContracts[0];
+      const mainCust = mainC.salesContractCustomers?.find(cust => cust.main === true) || mainC.salesContractCustomers?.[0] || {};
+      let fmtDate = '';
+      if (mainC.contractDate || mainC.saleDate) {
+        const rawD = mainC.contractDate || mainC.saleDate;
+        const parts = rawD.split('-');
+        if (parts.length === 3) fmtDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        else fmtDate = rawD;
+      }
 
-          // Fetch Histórico de Cessão para pegar antigos compradores (Puppeteer)
-          let historicCustomers = [];
+      AnexosState.activeContract = {
+        id: mainC.id,
+        contractNumber: mainC.contractNumber || mainC.number || mainC.id,
+        customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
+        contractDate: fmtDate,
+        customerId: mainCust.customerId || mainCust.id,
+        customers: mainC.salesContractCustomers || [],
+        unitId: unitId,
+        enterpriseId: enterpriseId,
+        unitName: nomeUnidade
+      };
+      await anexosHydrateContractPeople();
+
+      if (AnexosState.contexto === 'Ambos' && !AnexosState.idCliente) {
+        let doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj;
+        if (!doc && (mainCust.id || mainCust.customerId) && window.SiengeApiService) {
           try {
-            const matchUnit = AnexosState.unidades ? AnexosState.unidades.find(u => u.id == unitId) : null;
-            const nomeUnidade = matchUnit ? matchUnit.name : "";
-            const numContrato = mainC.contractNumber || mainC.number || mainC.id;
-            
-            if (ccStr && nomeUnidade && numContrato) {
-                const histRes = await fetch(anexosApiUrl(`/api/sienge/historico-cessao?unidade=${encodeURIComponent(nomeUnidade)}&empreendimento=${encodeURIComponent(ccStr)}&contrato=${encodeURIComponent(numContrato)}`));
-                if (histRes.ok) {
-                   historicCustomers = await histRes.json();
-                }
-            }
-          } catch(err) {
-            console.error("Erro ao buscar histórico de cessões via puppeteer:", err);
-          }
-
-          // Adicionar clientes antigos + cliente atual à lista de busca
-          const customersToFetch = new Set();
-          if (mainCust.customerId || mainCust.id) customersToFetch.add(mainCust.customerId || mainCust.id);
-          historicCustomers.forEach(hc => customersToFetch.add(hc.customerId));
-
-          // Fetch attachments das fichas dos clientes
-          for (const custId of customersToFetch) {
-            try {
-              const cAttRes = await fetch(anexosApiUrl(`/sienge-proxy/customers/${custId}/attachments`), {
-                headers: { 'Authorization': getBasicAuthHeader() }
-              });
-              if (cAttRes.ok) {
-                 const cAttData = await cAttRes.json();
-                 const custResults = (cAttData.results || []).map(a => ({ 
-                    ...a, 
-                    isCustomerAttachment: true, 
-                    customerId: custId,
-                    description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
-                 }));
-                 allAttachments = allAttachments.concat(custResults);
-              }
-            } catch(e) {
-               console.error(`Erro buscando anexos do cliente ${custId}:`, e);
-            }
-          }
-
-          // Anexos já gravados na unidade (envio do CRM)
-          if (unitId) {
-            try {
-              const uAttRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${unitId}/attachments`), {
-                headers: { 'Authorization': getBasicAuthHeader() }
-              });
-              if (uAttRes.ok) {
-                const uAttData = await uAttRes.json();
-                const unitResults = (uAttData.results || []).map(a => ({
-                  ...a,
-                  isUnitAttachment: true,
-                  unitId,
-                  description: a.description ? `(Unidade) ${a.description}` : `(Unidade) Arquivo`
-                }));
-                allAttachments = allAttachments.concat(unitResults);
-              }
-            } catch (e) {
-              console.error(`Erro buscando anexos da unidade ${unitId}:`, e);
-            }
-          }
-
-          AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
-          renderAnexosModule();
+            const cData = await window.SiengeApiService.getCustomer(mainCust.id || mainCust.customerId);
+            if (cData) doc = cData.cpfCnpj || cData.cpf || cData.cnpj;
+          } catch(e) {}
+        }
+        if (doc) {
+          const cleanDoc = String(doc).replace(/\D/g, '');
+          if (cleanDoc.length === 11) AnexosState.idCliente = cleanDoc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+          else if (cleanDoc.length === 14) AnexosState.idCliente = cleanDoc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+          else AnexosState.idCliente = doc;
         }
       }
+
+      renderAnexosModule();
+
+      let allAttachments = [];
+      const attRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`), {
+        headers: { 'Authorization': getBasicAuthHeader() }
+      });
+      if (attRes.ok) {
+        const attData = await attRes.json();
+        allAttachments = allAttachments.concat((attData.results || []).map(a => ({
+          ...a,
+          _sourceContractId: mainC.id
+        })));
+      }
+
+      let historicCustomers = [];
+      try {
+        const numContrato = mainC.contractNumber || mainC.number || mainC.id;
+        if (enterpriseId && nomeUnidade && numContrato) {
+          const histRes = await fetch(anexosApiUrl(`/api/sienge/historico-cessao?unidade=${encodeURIComponent(nomeUnidade)}&empreendimento=${encodeURIComponent(enterpriseId)}&contrato=${encodeURIComponent(numContrato)}`));
+          if (histRes.ok) historicCustomers = await histRes.json();
+        }
+      } catch(err) {
+        console.error("Erro ao buscar histórico de cessões via puppeteer:", err);
+      }
+
+      const customersToFetch = new Set();
+      if (mainCust.customerId || mainCust.id) customersToFetch.add(mainCust.customerId || mainCust.id);
+      historicCustomers.forEach(hc => customersToFetch.add(hc.customerId));
+
+      for (const custId of customersToFetch) {
+        try {
+          const cAttRes = await fetch(anexosApiUrl(`/sienge-proxy/customers/${custId}/attachments`), {
+            headers: { 'Authorization': getBasicAuthHeader() }
+          });
+          if (cAttRes.ok) {
+             const cAttData = await cAttRes.json();
+             const custResults = (cAttData.results || [])
+               .filter(a => anexosAttachmentBelongsToUnit(a, { enterpriseId, unitName: nomeUnidade, unitId }))
+               .map(a => ({
+                  ...a,
+                  isCustomerAttachment: true,
+                  customerId: custId,
+                  description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
+               }));
+             allAttachments = allAttachments.concat(custResults);
+          }
+        } catch(e) {
+           console.error(`Erro buscando anexos do cliente ${custId}:`, e);
+        }
+      }
+
+      if (unitId) {
+        try {
+          const uAttRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${unitId}/attachments`), {
+            headers: { 'Authorization': getBasicAuthHeader() }
+          });
+          if (uAttRes.ok) {
+            const uAttData = await uAttRes.json();
+            const unitResults = (uAttData.results || []).map(a => ({
+              ...a,
+              isUnitAttachment: true,
+              unitId,
+              description: a.description ? `(Unidade) ${a.description}` : `(Unidade) Arquivo`
+            }));
+            allAttachments = allAttachments.concat(unitResults);
+          }
+        } catch (e) {
+          console.error(`Erro buscando anexos da unidade ${unitId}:`, e);
+        }
+      }
+
+      AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
+      renderAnexosModule();
     } catch (e) {
       console.error('Erro ao buscar contrato vigente:', e);
     }
+  },
+
+  /**
+   * Lê a 1ª página (PDF) ou a imagem e classifica a TAG via /api/ocr/classify.
+   * Retorna o nome da tag ativa (ou string vazia se DOC/falha).
+   */
+  async runOcrOnFileObj(fileObj) {
+    if (!fileObj || !fileObj.file || !(fileObj.file.size > 0)) return '';
+    const ext = String(fileObj.ext || '').toLowerCase();
+    if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext)) return '';
+
+    let ocrImageB64 = fileObj.base64;
+    if (!ocrImageB64) {
+      ocrImageB64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileObj.file);
+      });
+      fileObj.base64 = ocrImageB64;
+    }
+
+    if (ext === 'pdf' && window['pdfjs-dist/build/pdf']) {
+      fileObj.status = 'Convertendo PDF para OCR...';
+      this.renderFilesList();
+      const pdfjsLib = window['pdfjs-dist/build/pdf'];
+      const pdfUrl = URL.createObjectURL(fileObj.file);
+      try {
+        const pdfDoc = await pdfjsLib.getDocument(pdfUrl).promise;
+        const page = await pdfDoc.getPage(1);
+        const scale = 1.5;
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({ canvasContext: context, viewport }).promise;
+        ocrImageB64 = canvas.toDataURL('image/jpeg', 0.8);
+      } finally {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    }
+
+    fileObj.status = 'Lendo documento (OCR)...';
+    this.renderFilesList();
+
+    const res = await fetch(anexosApiUrl('/api/ocr/classify'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_data: ocrImageB64 })
+    });
+    const ocrData = await res.json().catch(() => ({}));
+    const rawTag = String(ocrData.tag || '').trim();
+    const resolved = anexosResolveActiveTag(rawTag);
+    if (!resolved || resolved.toUpperCase() === 'DOC') return '';
+    return resolved;
+  },
+
+  async applyTagFromOcrOrName(fileObj, nameHint) {
+    const fromName = anexosResolveActiveTag(nameHint || anexosGuessTagFromDescription(fileObj.originalName || ''));
+    const knownActive = fromName && (AnexosState.tagsAtivas || []).some(t => String(t.name).toUpperCase() === fromName.toUpperCase());
+
+    // Nome já casa com TAG ativa → usa (rápido). Senão lê o documento.
+    if (knownActive) {
+      fileObj.tags = [fromName];
+      fileObj.status = 'Pronto';
+      anexosAssignClientTarget(fileObj, { autoDefault: true });
+      return fromName;
+    }
+
+    try {
+      const ocrTag = await this.runOcrOnFileObj(fileObj);
+      if (ocrTag) {
+        fileObj.tags = [ocrTag];
+        fileObj.status = 'Pronto';
+        anexosAssignClientTarget(fileObj, { autoDefault: true });
+        return ocrTag;
+      }
+    } catch (err) {
+      console.error('Erro no OCR:', err);
+    }
+
+    if (fromName) {
+      fileObj.tags = [fromName];
+      fileObj.status = 'Revisar';
+      anexosAssignClientTarget(fileObj, { autoDefault: true });
+      return fromName;
+    }
+    fileObj.tags = [];
+    fileObj.status = 'Revisar';
+    return '';
   },
 
   importarAnexosDoContrato() {
@@ -1103,7 +1303,7 @@ const AnexosApp = {
       const fName = att.fileName || att.description || 'Anexo Sienge.pdf';
       const extMatch = fName.match(/\.([a-zA-Z0-9]+)$/);
       const ext = extMatch ? extMatch[1].toLowerCase() : 'pdf';
-      const guessedTag = anexosGuessTagFromDescription(att.description || fName);
+      const guessedTag = anexosResolveActiveTag(anexosGuessTagFromDescription(att.description || fName));
       
       const fileObj = {
         id: 'imported_' + Math.random().toString(36).substr(2, 9),
@@ -1112,9 +1312,9 @@ const AnexosApp = {
         base64: null,
         ext: ext,
         size: 0,
-        tagOriginal: guessedTag || (att.description ? att.description.split(' ')[0] : 'DOC'),
+        tagOriginal: guessedTag || '',
         tags: guessedTag ? [guessedTag] : [],
-        status: guessedTag ? 'Pronto' : 'Baixando arquivo...',
+        status: 'Baixando arquivo...',
         uploadProgress: 0,
         previewUrl: null,
         dateOverride: '',
@@ -1125,29 +1325,35 @@ const AnexosApp = {
       setTimeout(async () => {
         try {
           const attId = anexosAttId(att);
-          let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${attId}`);
+          const contractId = att._sourceContractId || (AnexosState.activeContract && AnexosState.activeContract.id);
+          let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${contractId}/attachments/${attId}`);
           if (att.isCustomerAttachment) {
              url = anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`);
           } else if (att.isUnitAttachment) {
              url = anexosApiUrl(`/sienge-proxy/units/${att.unitId || AnexosState.selectedUnidade}/attachments/${attId}`);
           }
+          fileObj._downloadUnitId = AnexosState.selectedUnidade;
+          fileObj._downloadContractId = contractId;
           const res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
+          if (String(fileObj._downloadUnitId) !== String(AnexosState.selectedUnidade)) {
+            AnexosState.files = AnexosState.files.filter(f => f.id !== fileObj.id);
+            AnexosApp.renderFilesList();
+            return;
+          }
           if (res.ok) {
             const blob = await res.blob();
             fileObj.size = blob.size;
-            fileObj.file = new File([blob], fName, { type: blob.type });
+            fileObj.file = new File([blob], fName, { type: blob.type || (ext === 'pdf' ? 'application/pdf' : 'image/jpeg') });
             
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              fileObj.base64 = e.target.result;
-              if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
-                fileObj.previewUrl = URL.createObjectURL(blob);
-              }
-              fileObj.status = (fileObj.tags && fileObj.tags.length && !fileObj.tags.includes('DOC')) ? 'Pronto' : 'Revisar';
-              AnexosApp.renderFilesList();
-              AnexosApp.checkCanSend();
-            };
-            reader.readAsDataURL(blob);
+            if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
+              fileObj.previewUrl = URL.createObjectURL(blob);
+            }
+            fileObj.status = 'Identificando TAG...';
+            AnexosApp.renderFilesList();
+
+            await AnexosApp.applyTagFromOcrOrName(fileObj, guessedTag || fName);
+            AnexosApp.renderFilesList();
+            AnexosApp.checkCanSend();
           } else {
             const errText = await res.text();
             fileObj.status = `Erro: ${res.status} ${errText.substring(0, 30)}`;
@@ -1333,56 +1539,15 @@ const AnexosApp = {
         const b64 = e.target.result;
         fileObj.base64 = b64;
         
-        // Criar preview url (para exibir na UI)
         if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
           fileObj.previewUrl = URL.createObjectURL(file);
         }
 
-        // Chamar OCR
         try {
-          let ocrImageB64 = b64; // Default para JPG/PNG
-
-          // Se for PDF, extrai a primeira página como imagem usando PDF.js
-          if (ext === 'pdf' && window['pdfjs-dist/build/pdf']) {
-            fileObj.status = 'Convertendo PDF para OCR...';
-            this.renderFilesList();
-            
-            const pdfjsLib = window['pdfjs-dist/build/pdf'];
-            const pdfUrl = URL.createObjectURL(file);
-            const loadingTask = pdfjsLib.getDocument(pdfUrl);
-            const pdfDoc = await loadingTask.promise;
-            const page = await pdfDoc.getPage(1);
-            
-            const scale = 1.5;
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            
-            await page.render({ canvasContext: context, viewport: viewport }).promise;
-            ocrImageB64 = canvas.toDataURL('image/jpeg', 0.8); // Converte primeira página para JPG base64
-            URL.revokeObjectURL(pdfUrl);
-            
-            fileObj.status = 'Analisando documento...';
-            this.renderFilesList();
-          }
-
-          const res = await fetch(anexosApiUrl('/api/ocr/classify'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_data: ocrImageB64 })
-          });
-          const ocrData = await res.json();
-          const detectedTag = ocrData.tag || 'DOC';
-          
-          fileObj.tags = [detectedTag];
-          fileObj.status = detectedTag === 'DOC' ? 'Revisar' : 'Pronto';
-          anexosAssignClientTarget(fileObj, { autoDefault: true });
-          
+          await AnexosApp.applyTagFromOcrOrName(fileObj, file.name);
         } catch (err) {
           console.error("Erro no OCR:", err);
-          fileObj.tags = ['DOC'];
+          fileObj.tags = [];
           fileObj.status = 'Revisar';
         }
 

@@ -701,11 +701,15 @@ const server = http.createServer(async (req, res) => {
                 content: [
                   { 
                     type: "text", 
-                    text: `Analise esta imagem de documento e classifique usando APENAS UMA das seguintes tags exatas: RG, CNH, CPF, TCD, CONTRATO, DISTRATO, COMPROVANTE DE RESIDÊNCIA, ADITAMENTO, CESSÃO DE DIREITOS. 
-                    Se não for nenhuma dessas com certeza, retorne exatamente: DOC. 
-                    Regra para COMPROVANTE DE RESIDÊNCIA: Conta de energia, água, internet, telefone, fatura de cartão bancário, boleto de condomínio.
-                    Regra para TCD: Termo de Confissão de Dívida ou Reparcelamento.
-                    Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto extra.` 
+                    text: `Analise esta imagem de documento e classifique usando APENAS UMA das seguintes tags exatas:
+RG, CNH, CPF, TCD, CONTRATO, DISTRATO, COMPROVANTE DE RESIDÊNCIA, COMPROVANTE DE ENDEREÇO, ADITAMENTO, CESSÃO DE DIREITOS, CERTIDÃO DE CASAMENTO, CERTIDÃO DE NASCIMENTO, ANÁLISE DE CRÉDITO, CND.
+Se não for nenhuma dessas com certeza, retorne exatamente: DOC.
+Regras:
+- COMPROVANTE DE RESIDÊNCIA / COMPROVANTE DE ENDEREÇO: conta de energia, água, internet, telefone, fatura de cartão, boleto de condomínio.
+- TCD: Termo de Confissão de Dívida ou Reparcelamento.
+- ANÁLISE DE CRÉDITO: score, restrição, consulta SPC/Serasa, ficha de crédito.
+- CERTIDÃO DE CASAMENTO / NASCIMENTO: certidões civis.
+Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto extra.` 
                   },
                   {
                     type: "image_url",
