@@ -212,12 +212,76 @@ function anexosContractPeople() {
   return people;
 }
 
-function anexosAssignClientTarget(file) {
+function anexosAssignClientTarget(file, opts) {
   if (!file) return;
+  const autoDefault = !!(opts && opts.autoDefault);
   const mainTag = AnexosState.tagsAtivas.find(t => t.name === file.tags[0]);
-  if (!mainTag || mainTag.destino !== 'Cliente') return;
+  if (!mainTag || mainTag.destino !== 'Cliente') {
+    file.targetCustomerIds = [];
+    file.targetCustomerId = '';
+    return;
+  }
+  if ((!file.targetCustomerIds || !file.targetCustomerIds.length) && file.targetCustomerId) {
+    file.targetCustomerIds = [String(file.targetCustomerId)];
+  }
+  file.targetCustomerIds = Array.isArray(file.targetCustomerIds)
+    ? file.targetCustomerIds.map(String).filter(Boolean)
+    : [];
   const people = anexosContractPeople();
-  if (people.length === 1) file.targetCustomerId = people[0].id;
+  if (autoDefault && !file.targetCustomerIds.length && people.length) {
+    if (people.length === 1) {
+      file.targetCustomerIds = [people[0].id];
+    } else {
+      const main = people.find(p => p.role === 'Principal') || people[0];
+      file.targetCustomerIds = main ? [main.id] : [];
+    }
+  }
+  // Remove IDs que não estão mais no contrato
+  if (people.length) {
+    const allowed = new Set(people.map(p => String(p.id)));
+    file.targetCustomerIds = file.targetCustomerIds.filter(id => allowed.has(String(id)));
+  }
+  file.targetCustomerId = file.targetCustomerIds[0] || '';
+}
+
+function anexosNormAttachmentKey(att) {
+  const id = String(att.attachmentid || att.attachmentId || att.id || '').trim();
+  let name = String(att.fileName || att.name || '').toLowerCase().trim();
+  let desc = String(att.description || '').toLowerCase().trim();
+  desc = desc.replace(/^\(cliente\s*\d+\)\s*/i, '').replace(/^\(unidade[^)]*\)\s*/i, '').trim();
+  // Nome gerado pelo CRM: "17701 F-247 - TAG 31.08.2024.pdf" → chave pela tag+data quando possível
+  const crmMatch = (desc || name).match(/-\s*([a-z0-9Á-ú /()-]+?)\s+(\d{2}[./]\d{2}[./]\d{4})/i);
+  const semantic = crmMatch
+    ? `${crmMatch[1].replace(/\s+/g, ' ').trim()}|${crmMatch[2].replace(/\//g, '.')}`
+    : '';
+  return { id, name, desc, semantic };
+}
+
+/** Evita listar o mesmo documento 2x (contrato + ficha cliente/unidade). */
+function anexosDedupeAttachments(list) {
+  const seenId = new Set();
+  const seenName = new Set();
+  const seenDesc = new Set();
+  const seenSemantic = new Set();
+  const out = [];
+  // Preferir anexo já na ficha do cliente/unidade (envio do CRM) em vez da cópia do contrato
+  const sorted = [...(list || [])].sort((a, b) => {
+    const rank = (x) => (x.isCustomerAttachment || x.isUnitAttachment) ? 0 : 1;
+    return rank(a) - rank(b);
+  });
+  for (const att of sorted) {
+    const k = anexosNormAttachmentKey(att);
+    if (k.id && seenId.has(k.id)) continue;
+    if (k.name && k.name.length > 3 && seenName.has(k.name)) continue;
+    if (k.desc && k.desc.length > 5 && seenDesc.has(k.desc)) continue;
+    if (k.semantic && seenSemantic.has(k.semantic)) continue;
+    if (k.id) seenId.add(k.id);
+    if (k.name) seenName.add(k.name);
+    if (k.desc) seenDesc.add(k.desc);
+    if (k.semantic) seenSemantic.add(k.semantic);
+    out.push(att);
+  }
+  return out;
 }
 
 function anexosSafeFileName(name) {
@@ -938,7 +1002,28 @@ const AnexosApp = {
             }
           }
 
-          AnexosState.contractAttachments = allAttachments;
+          // Anexos já gravados na unidade (envio do CRM)
+          if (unitId) {
+            try {
+              const uAttRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${unitId}/attachments`), {
+                headers: { 'Authorization': getBasicAuthHeader() }
+              });
+              if (uAttRes.ok) {
+                const uAttData = await uAttRes.json();
+                const unitResults = (uAttData.results || []).map(a => ({
+                  ...a,
+                  isUnitAttachment: true,
+                  unitId,
+                  description: a.description ? `(Unidade) ${a.description}` : `(Unidade) Arquivo`
+                }));
+                allAttachments = allAttachments.concat(unitResults);
+              }
+            } catch (e) {
+              console.error(`Erro buscando anexos da unidade ${unitId}:`, e);
+            }
+          }
+
+          AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
           renderAnexosModule();
         }
       }
@@ -995,6 +1080,8 @@ const AnexosApp = {
           let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${attId}`);
           if (att.isCustomerAttachment) {
              url = anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`);
+          } else if (att.isUnitAttachment) {
+             url = anexosApiUrl(`/sienge-proxy/units/${att.unitId || AnexosState.selectedUnidade}/attachments/${attId}`);
           }
           const res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
           if (res.ok) {
@@ -1224,7 +1311,7 @@ const AnexosApp = {
           
           fileObj.tags = [detectedTag];
           fileObj.status = detectedTag === 'DOC' ? 'Revisar' : 'Pronto';
-          anexosAssignClientTarget(fileObj);
+          anexosAssignClientTarget(fileObj, { autoDefault: true });
           
         } catch (err) {
           console.error("Erro no OCR:", err);
@@ -1347,21 +1434,37 @@ const AnexosApp = {
                 if (!isClienteDest) return '';
                 anexosAssignClientTarget(f);
                 const people = anexosContractPeople();
-                let optionsHtml = people.length === 1
-                  ? ''
-                  : '<option value="">Selecione a pessoa alvo do documento...</option>';
-                people.forEach(p => {
-                  const sel = String(f.targetCustomerId) === String(p.id) ? 'selected' : '';
-                  optionsHtml += `<option value="${p.id}" ${sel}>${p.name} (${p.role}) - ID: ${p.id}</option>`;
-                });
-                const borderOk = f.targetCustomerId ? 'var(--color-border)' : 'var(--color-danger)';
-                const colorOk = f.targetCustomerId ? 'var(--color-text)' : 'var(--color-danger)';
+                const selected = new Set((f.targetCustomerIds || []).map(String));
+                const hasSel = selected.size > 0;
+                if (!people.length) {
+                  return `
+                  <div style="display:flex;align-items:center;gap:8px;background:#fef2f2;padding:6px 8px;border-radius:4px;border:1px solid #fecaca;width:100%;font-size:0.78rem;color:#991b1b;">
+                    <i data-lucide="user-x" style="width:14px;"></i>
+                    Nenhum cliente no contrato para vincular este documento.
+                  </div>`;
+                }
+                const checks = people.map(p => {
+                  const checked = selected.has(String(p.id)) ? 'checked' : '';
+                  return `<label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer;padding:2px 0;color:var(--color-text);">
+                    <input type="checkbox" ${checked} onchange="AnexosApp.toggleTargetCustomer('${f.id}', '${p.id}', this.checked)" style="width:14px;height:14px;accent-color:var(--color-primary);">
+                    <span><strong>${p.name}</strong> <span style="color:var(--color-text-muted);">(${p.role}) · ID ${p.id}</span></span>
+                  </label>`;
+                }).join('');
                 return `
-                  <div style="display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid ${borderOk}; width: 100%;">
-                    <i data-lucide="user" style="width:14px; color:${f.targetCustomerId ? 'var(--color-primary)' : 'var(--color-danger)'};"></i>
-                    <select class="form-control" style="padding: 2px 4px; font-size: 0.8rem; flex: 1; border: none; background: transparent; outline: none; color: ${colorOk}; font-weight: ${f.targetCustomerId ? 'normal' : '500'}; cursor: pointer;" onchange="AnexosApp.setTargetCustomer('${f.id}', this.value)">
-                      ${optionsHtml}
-                    </select>
+                  <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.02); padding: 8px; border-radius: 4px; border: 1px solid ${hasSel ? 'var(--color-border)' : 'var(--color-danger)'}; width: 100%;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                      <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;font-weight:600;color:${hasSel ? 'var(--color-text)' : 'var(--color-danger)'};">
+                        <i data-lucide="users" style="width:14px;color:${hasSel ? 'var(--color-primary)' : 'var(--color-danger)'};"></i>
+                        Clientes que receberão o anexo ${hasSel ? `(${selected.size})` : '(obrigatório)'}
+                      </div>
+                      <div style="display:flex;gap:8px;">
+                        <button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.7rem;height:auto;" onclick="AnexosApp.setAllTargetCustomers('${f.id}', true)">Marcar todos</button>
+                        <button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.7rem;height:auto;" onclick="AnexosApp.setAllTargetCustomers('${f.id}', false)">Desmarcar</button>
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:2px;max-height:140px;overflow-y:auto;">
+                      ${checks}
+                    </div>
                   </div>
                 `;
               })()}
@@ -1404,7 +1507,7 @@ const AnexosApp = {
 
     if (!file.tags.includes(tag)) {
       file.tags = [tag];
-      anexosAssignClientTarget(file);
+      anexosAssignClientTarget(file, { autoDefault: true });
       this.evalFileStatus(file);
       this.renderFilesList();
     }
@@ -1436,8 +1539,36 @@ const AnexosApp = {
     const file = AnexosState.files.find(f => f.id === id);
     if (file) {
       file.targetCustomerId = customerId ? String(customerId) : '';
+      file.targetCustomerIds = customerId ? [String(customerId)] : [];
       this.renderFilesList();
     }
+  },
+
+  toggleTargetCustomer(id, customerId, checked) {
+    const file = AnexosState.files.find(f => f.id === id);
+    if (!file) return;
+    const cid = String(customerId);
+    let ids = Array.isArray(file.targetCustomerIds) ? file.targetCustomerIds.map(String) : [];
+    if (checked) {
+      if (!ids.includes(cid)) ids.push(cid);
+    } else {
+      ids = ids.filter(x => x !== cid);
+    }
+    file.targetCustomerIds = ids;
+    file.targetCustomerId = ids[0] || '';
+    this.renderFilesList();
+  },
+
+  setAllTargetCustomers(id, markAll) {
+    const file = AnexosState.files.find(f => f.id === id);
+    if (!file) return;
+    if (markAll) {
+      file.targetCustomerIds = anexosContractPeople().map(p => String(p.id));
+    } else {
+      file.targetCustomerIds = [];
+    }
+    file.targetCustomerId = file.targetCustomerIds[0] || '';
+    this.renderFilesList();
   },
 
   setFileDate(id, val) {
@@ -1536,17 +1667,22 @@ const AnexosApp = {
         let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
         let isClienteDest = mainTag && mainTag.destino === 'Cliente';
         
-        if (isClienteDest && !f.targetCustomerId) {
-          hasMissingTarget = true;
+        if (isClienteDest) {
+          anexosAssignClientTarget(f);
+          const ids = (f.targetCustomerIds && f.targetCustomerIds.length)
+            ? f.targetCustomerIds
+            : (f.targetCustomerId ? [f.targetCustomerId] : []);
+          if (!ids.length) hasMissingTarget = true;
+          ids.forEach(cid => {
+            const uniqueKey = `${f.tags.join('-')}__${cid}`;
+            if (seenKeys.has(uniqueKey)) hasDuplicates = true;
+            seenKeys.add(uniqueKey);
+          });
+        } else {
+          let uniqueKey = `${f.tags.join('-')}__unidade`;
+          if (seenKeys.has(uniqueKey)) hasDuplicates = true;
+          seenKeys.add(uniqueKey);
         }
-        
-        let targetKey = isClienteDest ? f.targetCustomerId : 'unidade';
-        let uniqueKey = `${f.tags.join('-')}__${targetKey}`;
-        
-        if (seenKeys.has(uniqueKey)) {
-          hasDuplicates = true;
-        }
-        seenKeys.add(uniqueKey);
       }
     });
 
@@ -1574,7 +1710,7 @@ const AnexosApp = {
         if (missingDates && !isModal) {
           hint.innerText = 'Preencha a data em todos os arquivos para enviar';
         } else if (hasMissingTarget) {
-          hint.innerText = 'Selecione a pessoa alvo para todos os documentos de Cliente';
+          hint.innerText = 'Selecione ao menos um cliente alvo para os documentos de Pessoa/Cliente';
         } else if (hasDuplicates) {
           hint.innerText = 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.';
         } else if (!isModal) {
@@ -1660,12 +1796,30 @@ const AnexosApp = {
     const cc = AnexosState.cc;
 
     const filesToSend = [...AnexosState.files.filter(f => f.status === 'Pronto' && !f.sentOk)];
-    
-    // Não usamos mais finalCustomerId global. Cada arquivo de Cliente usa seu targetCustomerId.
-    const needsCustomerAPI = filesToSend.some(f => {
-      const mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
-      return mainTag && mainTag.destino === 'Cliente';
+
+    // Expande arquivos de Cliente em um envio por ID selecionado
+    const uploadJobs = [];
+    filesToSend.forEach(fileObj => {
+      const mainTag = AnexosState.tagsAtivas.find(t => t.name === fileObj.tags[0]);
+      const destinoAPI = mainTag ? mainTag.destino : 'Unidade';
+      if (destinoAPI === 'Cliente') {
+        anexosAssignClientTarget(fileObj);
+        const ids = (fileObj.targetCustomerIds && fileObj.targetCustomerIds.length)
+          ? fileObj.targetCustomerIds.map(String)
+          : (fileObj.targetCustomerId ? [String(fileObj.targetCustomerId)] : []);
+        if (!ids.length) {
+          fileObj.sentOk = false;
+          fileObj.status = 'Erro: selecione ao menos um cliente';
+          return;
+        }
+        ids.forEach(cid => uploadJobs.push({ fileObj, destinoAPI, targetCustId: cid }));
+      } else {
+        uploadJobs.push({ fileObj, destinoAPI, targetCustId: null });
+      }
     });
+    
+    // Não usamos mais finalCustomerId global. Cada arquivo de Cliente usa seus targetCustomerIds.
+    const needsCustomerAPI = uploadJobs.some(j => j.destinoAPI === 'Cliente');
 
     let finalCustomerId = AnexosState.activeContract ? AnexosState.activeContract.customerId : null;
     if (needsCustomerAPI && !finalCustomerId && AnexosState.idCliente) {
@@ -1694,13 +1848,16 @@ const AnexosApp = {
       }
     }
 
-    const totalFiles = filesToSend.length;
+    const totalFiles = uploadJobs.length || filesToSend.length;
     let sentFiles = 0;
+    const sentFileIds = new Set();
+    const failedFileIds = new Set();
 
-    for (let i = 0; i < filesToSend.length; i++) {
+    for (let i = 0; i < uploadJobs.length; i++) {
       if (!AnexosState.isUploading) break; // Cancelado
       
-      const fileObj = filesToSend[i];
+      const { fileObj, destinoAPI } = uploadJobs[i];
+      let targetCustId = uploadJobs[i].targetCustId || finalCustomerId;
 
       document.getElementById('upload-arquivo-atual').innerText = `Enviando arquivo ${sentFiles + 1} de ${totalFiles}`;
       if (sentFiles === 0) {
@@ -1737,18 +1894,15 @@ const AnexosApp = {
         if (parts.length === 3) dataSuffix = ` ${parts[2]}.${parts[1]}.${parts[0]}`;
       }
       
-      const idClienteStr = AnexosState.idCliente ? `[${AnexosState.idCliente}]` : '';
-      const prefix = AnexosState.contexto === 'Cliente' ? idClienteStr : `${cc} ${unitName}`;
+      const idClienteStr = targetCustId
+        ? `[${targetCustId}]`
+        : (AnexosState.idCliente ? `[${AnexosState.idCliente}]` : '');
+      const prefix = destinoAPI === 'Cliente' ? idClienteStr : `${cc} ${unitName}`;
       const extFinal = fileObj.ext === 'jpeg' ? 'jpg' : fileObj.ext;
       const nomeFinalArquivo = anexosSafeFileName(`${prefix} - ${tagLabel}${duplicateSuffix}${dataSuffix}.${extFinal}`);
       const descricaoSienge = `${dataFormatada} - ${String(tagLabel).replace(/[\\/]+/g, ' ')}`.replace(/\s+/g, ' ').trim();
       
-      // Identificar Destino da API baseada na primeira TAG do arquivo
-      const mainTag = AnexosState.tagsAtivas.find(t => t.name === fileObj.tags[0]);
-      const destinoAPI = mainTag ? mainTag.destino : 'Unidade';
       let apiUrl = '';
-      
-      let targetCustId = fileObj.targetCustomerId || finalCustomerId;
       
       if (destinoAPI === 'Cliente' && targetCustId) {
         apiUrl = anexosApiUrl(`/sienge-proxy/customers/${targetCustId}/attachments?description=${encodeURIComponent(descricaoSienge)}`);
@@ -1761,7 +1915,16 @@ const AnexosApp = {
         let fileBlob = fileObj.file;
         if (fileObj.downloadedId && (!fileBlob || !fileBlob.size)) {
            document.getElementById('upload-status-text').innerText = "Baixando arquivo do contrato...";
-           const dRes = await fetch(anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${fileObj.downloadedId}/file`), {
+           let dlUrl = anexosApiUrl(`/sienge-proxy/sales-contracts/${AnexosState.activeContract.id}/attachments/${fileObj.downloadedId}/file`);
+           const srcAtt = (AnexosState.contractAttachments || []).find(a =>
+             String(a.attachmentid || a.attachmentId || a.id) === String(fileObj.downloadedId)
+           );
+           if (srcAtt && srcAtt.isCustomerAttachment) {
+             dlUrl = anexosApiUrl(`/sienge-proxy/customers/${srcAtt.customerId}/attachments/${fileObj.downloadedId}/file`);
+           } else if (srcAtt && srcAtt.isUnitAttachment) {
+             dlUrl = anexosApiUrl(`/sienge-proxy/units/${srcAtt.unitId || AnexosState.selectedUnidade}/attachments/${fileObj.downloadedId}/file`);
+           }
+           const dRes = await fetch(dlUrl, {
              headers: { 'Authorization': getBasicAuthHeader() }
            });
            if (dRes.ok) {
@@ -1771,7 +1934,9 @@ const AnexosApp = {
            }
         }
 
-        document.getElementById('upload-status-text').innerText = "Enviando arquivo...";
+        document.getElementById('upload-status-text').innerText = destinoAPI === 'Cliente'
+          ? `Enviando para cliente ${targetCustId}...`
+          : "Enviando arquivo...";
         const multipart = await anexosMultipartBody(fileBlob, nomeFinalArquivo);
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -1790,8 +1955,6 @@ const AnexosApp = {
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              fileObj.sentOk = true;
-              fileObj.status = 'Enviado';
               sentFiles++;
               const summaryEl = document.getElementById('upload-summary');
               if (destinoAPI === 'Cliente') {
@@ -1817,30 +1980,42 @@ const AnexosApp = {
         });
 
       } catch (err) {
-        fileObj.sentOk = false;
+        failedFileIds.add(fileObj.id);
         fileObj.status = 'Erro: ' + err.message;
+        const summaryEl = document.getElementById('upload-summary');
+        if (summaryEl) {
+          summaryEl.innerHTML += `<div style="color: var(--color-danger); margin-bottom: 4px; font-weight: 500;">✗ Falha (${destinoAPI === 'Cliente' ? 'cliente ' + targetCustId : 'unidade'}): ${err.message}</div>`;
+        }
       }
 
       // Atualizar progresso geral
-      const overallPercent = Math.round((sentFiles / totalFiles) * 100);
+      const overallPercent = Math.round((sentFiles / Math.max(totalFiles, 1)) * 100);
       document.getElementById('upload-progress-bar').style.width = `${overallPercent}%`;
-      document.getElementById('upload-status-text').innerText = `${sentFiles} de ${totalFiles} arquivos enviados com sucesso! (${overallPercent}%)`;
+      document.getElementById('upload-status-text').innerText = `${sentFiles} de ${totalFiles} envios concluídos (${overallPercent}%)`;
       
-      if (fileObj.status === 'Enviado') {
-        // Remover o arquivo da tela
+      // Só remove o arquivo da tela quando todos os destinos dele tiverem rodado sem falha
+      const remainingForFile = uploadJobs.slice(i + 1).some(j => j.fileObj.id === fileObj.id);
+      if (!remainingForFile && !failedFileIds.has(fileObj.id)) {
+        fileObj.sentOk = true;
+        fileObj.status = 'Enviado';
+        sentFileIds.add(fileObj.id);
         AnexosState.files = AnexosState.files.filter(f => f.id !== fileObj.id);
         this.renderFilesList();
       }
 
-      // Delay 2000ms entre uploads
-      if (i < filesToSend.length - 1) {
+      // Delay entre uploads
+      if (i < uploadJobs.length - 1) {
         await new Promise(r => setTimeout(r, 250));
       }
     }
 
     if (AnexosState.isUploading) {
-      document.getElementById('upload-status-text').innerText = "Upload Concluído! Todos os arquivos foram enviados.";
-      document.getElementById('upload-progress-bar').style.background = "linear-gradient(90deg, #1e8e3e 0%, #34a853 100%)";
+      document.getElementById('upload-status-text').innerText = failedFileIds.size
+        ? `Upload finalizado com ${failedFileIds.size} arquivo(s) em erro.`
+        : "Upload Concluído! Todos os arquivos foram enviados.";
+      document.getElementById('upload-progress-bar').style.background = failedFileIds.size
+        ? "linear-gradient(90deg, #b45309 0%, #f59e0b 100%)"
+        : "linear-gradient(90deg, #1e8e3e 0%, #34a853 100%)";
       
       const btnCancel = document.getElementById('btn-cancelar-upload');
       const btnClose = document.getElementById('btn-fechar-upload');
