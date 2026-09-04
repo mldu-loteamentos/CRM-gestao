@@ -328,7 +328,7 @@ const ResultadoCaixaApp = {
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);">
         <div style="background:#105436;padding:16px 20px;border-radius:12px 12px 0 0;">
           <h2 style="margin:0;color:#fff;font-size:1.15rem;">Resultado de caixa</h2>
-          <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Posição diária no Firebase: unidade, cliente, CPF, recebido, vencido, a vencer e valor presente. O cron das 7:30 grava após o batimento.</p>
+          <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Posição diária no Firebase: unidade, cliente, CPF, recebido, vencido, a vencer e valor presente. O cron das 6:30 grava após o batimento.</p>
         </div>
         <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:14px 16px;overflow:auto;">
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
@@ -358,7 +358,7 @@ const ResultadoCaixaApp = {
                 <th>Unidade</th><th>Cliente</th><th>CPF</th>
                 <th>Recebido</th><th>Vencido</th><th>A vencer</th><th>Valor presente</th><th>PMP 3m</th>
               </tr></thead>
-              <tbody>${body || `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Sem posição nesta data. Grave hoje ou aguarde o batimento das 7:30.</td></tr>`}</tbody>
+              <tbody>${body || `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Sem posição nesta data. Grave hoje ou aguarde o batimento das 6:30.</td></tr>`}</tbody>
             </table>
           </div>
           ${this.rows.length > 400 ? `<p style="font-size:0.8rem;color:#64748b;">Exibindo 400 de ${this.rows.length} contratos.</p>` : ""}`}

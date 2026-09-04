@@ -191,25 +191,29 @@ window.updateOperatorTabsUI = function(useActualData = true) {
     opsToShow = dynOps.filter(op => inRules.has(normOp(op)));
   }
 
-  const filaTabs = document.getElementById("operator-tabs-container");
-  if (filaTabs) {
-     const existingOpBtns = filaTabs.querySelectorAll(".operator-tab-btn");
-     existingOpBtns.forEach(btn => btn.remove());
-     const prev = String(window.activeOperatorFilter || (typeof activeOperatorFilter !== "undefined" ? activeOperatorFilter : "TODOS") || "TODOS");
-     const stillVisible = prev === "TODOS" || opsToShow.some(op => normOp(op) === normOp(prev));
-     const activeName = stillVisible ? (opsToShow.find(op => normOp(op) === normOp(prev)) || prev) : "TODOS";
-     if (!stillVisible) {
-       window.activeOperatorFilter = "TODOS";
-       try { activeOperatorFilter = "TODOS"; } catch (e) {}
-     }
+  const fillOperatorTabs = (containerId, filterStateKey) => {
+    const tabs = document.getElementById(containerId);
+    if (!tabs) return;
+    const existingOpBtns = tabs.querySelectorAll(".operator-tab-btn");
+    existingOpBtns.forEach(btn => btn.remove());
+    const prev = String(window[filterStateKey] || "TODOS");
+    const stillVisible = prev === "TODOS" || opsToShow.some(op => normOp(op) === normOp(prev));
+    const activeName = stillVisible ? (opsToShow.find(op => normOp(op) === normOp(prev)) || prev) : "TODOS";
+    if (!stillVisible) window[filterStateKey] = "TODOS";
+    if (filterStateKey === "activeOperatorFilter") {
+      try { activeOperatorFilter = window[filterStateKey]; } catch (e) {}
+    }
 
-     let opBtnsHtml = `<button class="operator-tab-btn${activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
-     opsToShow.forEach(op => {
-         opBtnsHtml += `<button class="operator-tab-btn${activeName === op ? " active" : ""}" data-operator="${op}">${op}</button>`;
-     });
+    let opBtnsHtml = `<button class="operator-tab-btn${normOp(activeName) === "TODOS" || activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
+    opsToShow.forEach(op => {
+      const isActive = normOp(op) === normOp(activeName);
+      opBtnsHtml += `<button class="operator-tab-btn${isActive ? " active" : ""}" data-operator="${op}">${op}</button>`;
+    });
+    tabs.insertAdjacentHTML("afterbegin", opBtnsHtml);
+  };
 
-     filaTabs.insertAdjacentHTML('afterbegin', opBtnsHtml);
-  }
+  fillOperatorTabs("operator-tabs-container", "activeOperatorFilter");
+  fillOperatorTabs("zeropaid-operator-tabs-container", "activeZeroOperatorFilter");
 
   const _cu = window.AppState ? window.AppState.currentUser : null;
   const isAdmin = (_cu && (
@@ -1831,6 +1835,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "upload-mapa") {
     if (window.loadMapaList) window.loadMapaList();
   } else if (tabId === "zeropaid") {
+    if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI(true);
     loadZeroPaidTab();
     if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
   } else if (tabId === "wesend") {
@@ -3193,6 +3198,9 @@ function changeApiMode(mode) {
 // 5. DASHBOARD OPERADOR: REGISTROS & PESQUISA
 // ----------------------------------------------------
 let activeOperatorFilter = "TODOS";
+window.activeOperatorFilter = "TODOS";
+let activeZeroOperatorFilter = "TODOS";
+window.activeZeroOperatorFilter = "TODOS";
 
 window.toggleSort = function(col) {
   if (AppState.currentSortCol === col) {
@@ -5194,7 +5202,9 @@ document.addEventListener("click", function(e) {
         const notesNormal = AppState.notes[client.customerId] || [];
         const notesJud = AppState.judNotes ? (AppState.judNotes[client.customerId] || []) : [];
         const customerNotes = [...notesNormal, ...notesJud];
-        const lastContactStr = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+        const lastContactHtml = (typeof window.lastContactCellInnerHtml === "function")
+          ? window.lastContactCellInnerHtml(client.customerId)
+          : `<span>${customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato"}</span>`;
 
         const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
 
@@ -5295,7 +5305,7 @@ document.addEventListener("click", function(e) {
             <span>${formattedVal}</span>
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%; padding-left: 5px !important; padding-right: 5px !important;">
-            <span>${lastContactStr}</span>
+            ${lastContactHtml}
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             ${ultimoPagamentoStr}
@@ -5920,15 +5930,14 @@ document.addEventListener("DOMContentLoaded", () => {
     tabsContainer.addEventListener("click", (e) => {
       const btn = e.target.closest(".operator-tab-btn");
       if (btn && btn.id !== "btn-adv-filters" && !btn.classList.contains("quick-filter-btn")) {
-        document.querySelectorAll(".operator-tab-btn:not(#btn-adv-filters):not(.quick-filter-btn)").forEach(b => b.classList.remove("active"));
+        tabsContainer.querySelectorAll(".operator-tab-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         
         // Define a variável global (assumindo que está no escopo)
         if (typeof activeOperatorFilter !== 'undefined') {
             activeOperatorFilter = btn.getAttribute("data-operator");
-        } else {
-            window.activeOperatorFilter = btn.getAttribute("data-operator");
         }
+        window.activeOperatorFilter = btn.getAttribute("data-operator");
         
         // Limpar o filtro avançado de operador para não conflitar
         if (window.advFilters) {
@@ -6002,6 +6011,23 @@ document.addEventListener("DOMContentLoaded", () => {
           updateAdvFiltersBadge();
           loadDashboardData();
       }
+    });
+  }
+
+  const zeroTabsContainer = document.getElementById("zeropaid-operator-tabs-container");
+  if (zeroTabsContainer) {
+    zeroTabsContainer.addEventListener("click", (e) => {
+      const btn = e.target.closest(".operator-tab-btn");
+      if (!btn) return;
+      zeroTabsContainer.querySelectorAll(".operator-tab-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const op = btn.getAttribute("data-operator") || "TODOS";
+      activeZeroOperatorFilter = op;
+      window.activeZeroOperatorFilter = op;
+      if (window.advFiltersZeroPaid) {
+        window.advFiltersZeroPaid.operador = [];
+      }
+      if (typeof loadZeroPaidTab === "function") loadZeroPaidTab();
     });
   }
   
@@ -10397,6 +10423,14 @@ async function saveCustomerOccurrence() {
         alert("A data de promessa não pode ser no passado.");
         return;
       }
+    } else {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const pDate = new Date(promiseDate + "T00:00:00");
+      if (pDate > today) {
+        alert("A data da baixa Webro não pode ser futura. Informe a data do pagamento (pode ser retroativa).");
+        return;
+      }
     }
   }
   
@@ -10714,6 +10748,10 @@ window.validateOccurrenceForm = function() {
     
     const pDateLabel = document.getElementById('label-promise-date');
     if (pDateLabel) pDateLabel.innerHTML = 'Data de Retorno <span style="color: var(--color-danger);">*</span>';
+    if (pDateEl) {
+      pDateEl.min = new Date().toISOString().split("T")[0];
+      pDateEl.removeAttribute("max");
+    }
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     
@@ -10730,7 +10768,15 @@ window.validateOccurrenceForm = function() {
     if (textEl) textEl.placeholder = "Observação da baixa Webro...";
 
     const pDateLabel = document.getElementById('label-promise-date');
-    if (pDateLabel) pDateLabel.innerHTML = 'Data da Baixa Webro <span style="color: var(--color-danger);">*</span>';
+    if (pDateLabel) {
+      pDateLabel.innerHTML = 'Data da Baixa Webro <span style="color: var(--color-danger);">*</span>'
+        + ' <span style="font-weight:500;text-transform:none;letter-spacing:0;color:#64748b;">(pode ser retroativa)</span>';
+    }
+    // Baixa Webro: permite data no passado (data do pagamento); bloqueia só futuro
+    if (pDateEl) {
+      pDateEl.removeAttribute("min");
+      pDateEl.max = new Date().toISOString().split("T")[0];
+    }
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
@@ -10747,6 +10793,10 @@ window.validateOccurrenceForm = function() {
     
     const pDateLabel = document.getElementById('label-promise-date');
     if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
+    if (pDateEl) {
+      pDateEl.min = new Date().toISOString().split("T")[0];
+      pDateEl.removeAttribute("max");
+    }
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     const reminder = reminderEl ? reminderEl.value : "";
@@ -16063,6 +16113,114 @@ window.hideJudTooltip = function() {
   if (tooltip) tooltip.style.display = 'none';
 }
 
+/** Última ocorrência/nota de cobrança ou judicial do cliente (para fila / 0% pago). */
+window.getLatestCustomerContact = function(customerId) {
+  if (customerId == null || customerId === "") return null;
+  const notesFn = typeof window.getCustomerNotesList === "function" ? window.getCustomerNotesList : null;
+  const notesNormal = notesFn
+    ? notesFn(AppState.notes, customerId)
+    : ((AppState.notes && AppState.notes[customerId]) || []);
+  const notesJud = notesFn
+    ? notesFn(AppState.judNotes, customerId)
+    : ((AppState.judNotes && AppState.judNotes[customerId]) || []);
+  let latest = null;
+  (Array.isArray(notesNormal) ? notesNormal : []).forEach(n => {
+    if (!n || !n.date) return;
+    if (!latest || new Date(n.date) > new Date(latest.date)) latest = n;
+  });
+  (Array.isArray(notesJud) ? notesJud : []).forEach(n => {
+    if (!n || !n.date) return;
+    if (!latest || new Date(n.date) > new Date(latest.date)) latest = n;
+  });
+  return latest;
+};
+
+window.getLastContactExportFields = function(customerId) {
+  const note = typeof window.getLatestCustomerContact === "function"
+    ? window.getLatestCustomerContact(customerId)
+    : null;
+  if (!note) {
+    return { date: "Sem Contato", text: "" };
+  }
+  const dt = new Date(note.date);
+  return {
+    date: Number.isNaN(dt.getTime()) ? "Sem Contato" : dt.toLocaleDateString("pt-BR"),
+    text: String(note.text || "").trim()
+  };
+};
+
+window.lastContactCellInnerHtml = function(customerId) {
+  const note = typeof window.getLatestCustomerContact === "function"
+    ? window.getLatestCustomerContact(customerId)
+    : null;
+  if (!note) {
+    return `<span style="color: var(--color-text-muted);">Sem Contato</span>`;
+  }
+  const dateStr = new Date(note.date).toLocaleDateString("pt-BR");
+  const cid = String(customerId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `<span style="border-bottom: 1px dashed var(--color-primary); cursor: help;"
+            onmouseenter="if(window.showContactTooltip) window.showContactTooltip(event, '${cid}')"
+            onmouseleave="if(window.hideContactTooltip) window.hideContactTooltip()">${dateStr}</span>`;
+};
+
+window.showContactTooltip = function(event, custId) {
+  let tooltip = document.getElementById("contact-hover-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "contact-hover-tooltip";
+    tooltip.style.cssText = "position:fixed; z-index:99999; display:none; background:transparent; width:400px; pointer-events:none; border-radius: 8px; box-shadow:0 8px 24px rgba(0,0,0,0.12);";
+    document.body.appendChild(tooltip);
+  }
+
+  const occ = typeof window.getLatestCustomerContact === "function"
+    ? window.getLatestCustomerContact(custId)
+    : null;
+  if (!occ) return;
+
+  const dateStr = new Date(occ.date).toLocaleString("pt-BR");
+  const typeLabel = occ.canal || occ.fase || (occ.type === "Judicial" ? "Judicial" : "Ocorrência");
+  const safeText = String(occ.text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const safeAuthor = String(occ.author || "Sistema")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const safeType = String(typeLabel)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  tooltip.innerHTML = `
+    <div style="border-left: 4px solid var(--color-primary); padding: 12px; background: white; border-radius: 8px;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px; gap: 8px;">
+        <div style="font-size:0.75rem; color:var(--color-text-muted);">
+          <span style="font-weight:700; color:var(--color-text-dark);">Por: ${safeAuthor}</span>
+          <span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: var(--color-text-muted); margin-left:6px;"><i data-lucide="info" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${safeType}</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--color-text-muted); white-space:nowrap;">${dateStr}</div>
+      </div>
+      <div style="font-size:0.8rem; color:var(--color-text-dark); white-space:pre-wrap;">${safeText || "<em style='color:#94a3b8;'>Sem texto</em>"}</div>
+    </div>
+  `;
+
+  if (window.lucide) lucide.createIcons({ root: tooltip });
+
+  tooltip.style.display = "block";
+  let top = event.clientY + 15;
+  let left = event.clientX + 15;
+  if (left + 450 > window.innerWidth) left = event.clientX - 465;
+  if (top + tooltip.offsetHeight > window.innerHeight) top = event.clientY - tooltip.offsetHeight - 15;
+  tooltip.style.top = top + "px";
+  tooltip.style.left = left + "px";
+};
+
+window.hideContactTooltip = function() {
+  const tooltip = document.getElementById("contact-hover-tooltip");
+  if (tooltip) tooltip.style.display = "none";
+};
+
 window.isRecurringNoteActiveOnDate = function(note, dateStr) {
     if (!note || !note.recorrencia || note.recorrencia.tipo === 'nenhuma') return false;
     
@@ -17322,6 +17480,19 @@ async function _loadZeroPaidTab_Impl() {
   });
   
   let zeroPaidList = Object.values(consolidated);
+
+  const zeroOpFilter = window.activeZeroOperatorFilter || activeZeroOperatorFilter || "TODOS";
+  if (zeroOpFilter !== "TODOS") {
+    const want = (typeof window.normalizeOperatorName === "function")
+      ? window.normalizeOperatorName(zeroOpFilter)
+      : String(zeroOpFilter || "").toUpperCase();
+    zeroPaidList = zeroPaidList.filter(c => {
+      const got = (typeof window.normalizeOperatorName === "function")
+        ? window.normalizeOperatorName(c.assignedOperator)
+        : String(c.assignedOperator || "").toUpperCase();
+      return got === want;
+    });
+  }
   
   // Aplica os filtros avançados também na lista de 0% Pago!
   if (typeof window.applyAdvFiltersTo === 'function') {
@@ -17632,7 +17803,9 @@ async function _loadZeroPaidTab_Impl() {
     const notesNormal = AppState.notes[client.customerId] || [];
     const notesJud = AppState.judNotes ? (AppState.judNotes[client.customerId] || []) : [];
     const customerNotes = [...notesNormal, ...notesJud];
-    const lastContactStr = customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato";
+    const lastContactHtml = (typeof window.lastContactCellInnerHtml === "function")
+      ? window.lastContactCellInnerHtml(client.customerId)
+      : `<span>${customerNotes.length > 0 ? new Date(Math.max(...customerNotes.map(n => new Date(n.date)))).toLocaleDateString('pt-BR') : "Sem Contato"}</span>`;
 
     const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
 
@@ -17679,7 +17852,7 @@ async function _loadZeroPaidTab_Impl() {
         <span id="saledate-cell-${client.customerId}-${client.saleId}">${client.saleDate ? new Date(client.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : "N/D"}</span>
       </td>
       <td style="white-space: nowrap; text-align: center; width: 1%;">
-        <span>${lastContactStr}</span>
+        ${lastContactHtml}
       </td>
       <td style="white-space: nowrap; text-align: center;">
         <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
@@ -29706,6 +29879,10 @@ window.exportFilteredToExcel = function() {
                 }
             }
 
+            const lastContact = (typeof window.getLastContactExportFields === "function")
+              ? window.getLastContactExportFields(c.customerId)
+              : { date: "Sem Contato", text: "" };
+
             return {
                 "Empresa ID": c.companyId,
                 "Cliente ID": c.customerId,
@@ -29719,6 +29896,8 @@ window.exportFilteredToExcel = function() {
                 "Parcelas Vencidas": c.billCount || (Array.isArray(c.billIds) ? c.billIds.length : 1),
                 "Valor Atrasado (R$)": (typeof c.overdueValue === 'number' ? c.overdueValue : 0) + (typeof c.overdueCharges === 'number' ? c.overdueCharges : 0),
                 "Sub judice": (c.subjudice === "S" || c.subjudice === true) ? "S" : "N",
+                "Último Contato": lastContact.date,
+                "Última Ocorrência / Nota": lastContact.text,
                 "Telefones": phonesStr,
                 "E-mails": emailsStr
             };
@@ -29743,6 +29922,8 @@ window.exportFilteredToExcel = function() {
             { wch: 12 }, // Parcelas Vencidas
             { wch: 16 }, // Valor Atrasado (R$)
             { wch: 10 }, // Sub judice
+            { wch: 14 }, // Último Contato
+            { wch: 50 }, // Última Ocorrência / Nota
             { wch: 25 }, // Telefones
             { wch: 30 }  // E-mails
         ];

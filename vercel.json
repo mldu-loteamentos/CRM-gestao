@@ -12,11 +12,11 @@
   "crons": [
     {
       "path": "/api/morning-warmup",
-      "schedule": "30 10 * * 1-5"
+      "schedule": "30 9 * * 1-5"
     },
     {
       "path": "/api/estoque-batimento",
-      "schedule": "30 10 * * 1-5"
+      "schedule": "30 9 * * 1-5"
     }
   ]
 }

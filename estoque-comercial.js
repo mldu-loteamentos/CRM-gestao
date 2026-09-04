@@ -2035,7 +2035,7 @@ const EstoqueComercialApp = {
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
       const day = await this.persistTodayResult();
-      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado. Amanhã o batimento automático começa às 7:30.`);
+      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado. Amanhã o batimento automático começa às 6:30.`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
