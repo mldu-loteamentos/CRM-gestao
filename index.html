@@ -7,7 +7,7 @@
   <title>Moura Leite Loteamentos - CRM de Cobrança</title>
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=690">
+  <link rel="stylesheet" href="style.css?v=691">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -1251,7 +1251,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.690 &nbsp;&middot;&nbsp; 04/09/2026
+            v1.0.691 &nbsp;&middot;&nbsp; 04/09/2026
           </span>
         </div>
       </div>
@@ -4691,6 +4691,38 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
               <!-- TAB 3: VALOR QUITAÇÃO -->
               <div id="tab-quitacao" class="customer-tab-pane" style="display: none;">
                 <div class="crm-card" style="padding: 1.5rem;">
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:1rem;">
+                    <div>
+                      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <h3 style="margin:0; font-size:1.05rem; color:var(--color-text-dark);">Saldo Devedor Presente</h3>
+                        <span id="quitacao-juros-badge"
+                          style="display:inline-flex; align-items:center; gap:6px; background:#ecfdf5; color:#166534; border:1px solid #86efac; border-radius:999px; padding:4px 12px; font-size:0.8rem; font-weight:800;"
+                          title="Juros do parcelamento (Tabela Price)">
+                          Juros: <span id="quitacao-juros-label">—</span>
+                        </span>
+                        <span id="quitacao-juros-hint" style="font-size:0.75rem; color:var(--color-text-muted);">a.m. · Tabela Price (P)</span>
+                      </div>
+                      <div style="font-size:0.78rem; color:var(--color-text-muted); margin-top:4px;">VP do contrato atual via saldo devedor presente · opcional abater com outro CT do cliente</div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                      <label id="quitacao-abate-label" for="quitacao-abate-toggle" title="Abater com outro contrato"
+                        style="display:inline-flex;align-items:center;gap:8px;margin:0;cursor:pointer;background:#fff;color:#9a3412;border:2px solid #fdba74;border-radius:999px;padding:5px 12px;font-size:0.75rem;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;line-height:1;">
+                        <input type="checkbox" id="quitacao-abate-toggle" onchange="toggleQuitacaoAbatimento()" style="width:16px;height:16px;accent-color:#ea580c;flex-shrink:0;">
+                        Abatimento
+                      </label>
+                      <button type="button" class="btn btn-secondary" onclick="exportQuitacaoSaldoDevedorExcel()"
+                        style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;height:36px;border-radius:4px;cursor:pointer;"
+                        title="Exportar relatório Saldo Devedor Presente">
+                        <i data-lucide="file-spreadsheet" style="width:16px;height:16px;"></i> Exportar Excel
+                      </button>
+                      <button type="button" class="btn btn-secondary" onclick="loadQuitacaoDebtReport(true)"
+                        style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;height:36px;border-radius:4px;cursor:pointer;"
+                        title="Recarregar saldo devedor presente">
+                        <i data-lucide="refresh-cw" style="width:16px;height:16px;"></i> Atualizar
+                      </button>
+                    </div>
+                  </div>
+
                   <div
                     style="display: flex; gap: 1rem; align-items: stretch; justify-content: space-between; flex-wrap: wrap;">
 
@@ -4739,6 +4771,9 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                       <h3 id="quitacao-right-val-quitacao"
                         style="margin: 0; font-size: 1.25rem; color: var(--color-primary); font-weight: 800;">R$ 0,00
                       </h3>
+                      <div id="quitacao-vp-liquido-wrap" style="display:none; margin-top:6px; font-size:0.72rem; color:#9a3412; font-weight:700;">
+                        Líquido após abate: <span id="quitacao-vp-liquido-val">R$ 0,00</span>
+                      </div>
                     </div>
 
                     <!-- KPI Desconto Total -->
@@ -4754,6 +4789,40 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                         OFF</h4>
                     </div>
 
+                  </div>
+
+                  <!-- Abatimento com 2º contrato (padrão permuta) -->
+                  <div id="quitacao-abate-panel" style="display:none; margin-top:1.25rem; padding:14px; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;">
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+                      <div style="flex:1; min-width:260px;">
+                        <label for="quitacao-abate-contract" style="font-size:0.8rem; font-weight:600; color:#334155; display:block; margin-bottom:4px;">Contrato para abatimento</label>
+                        <select id="quitacao-abate-contract" class="form-control" onchange="onQuitacaoAbateContractChange()" style="min-width:260px; font-weight:600; border-color:#fdba74;">
+                          <option value="">Selecione o contrato do cliente...</option>
+                        </select>
+                      </div>
+                      <div style="font-size:0.78rem; color:#9a3412; max-width:420px; line-height:1.35;">
+                        Escolha outro CT ativo do mesmo cliente e marque parcelas a VP para abater do valor de quitação.
+                      </div>
+                    </div>
+                    <div id="quitacao-abate-parcelas-body" style="margin-top:12px; max-height:280px; overflow:auto; background:#fff; border:1px solid #fed7aa; border-radius:6px;">
+                      <div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Ative o abatimento e selecione um contrato.</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:10px; font-size:0.85rem; font-weight:700;">
+                      <span>Saldo presente do título: <span id="quitacao-abate-sd-presente">R$ 0,00</span></span>
+                      <span>Selecionado VP: <span id="quitacao-abate-selecionado">R$ 0,00</span></span>
+                      <span id="quitacao-abate-liquido" style="color:#166534;">Quitação líquida: R$ 0,00</span>
+                    </div>
+                  </div>
+
+                  <!-- Relatório detalhado -->
+                  <div id="quitacao-report-wrap" style="margin-top:1.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                      <h4 style="margin:0; font-size:0.9rem; color:var(--color-text-dark); text-transform:uppercase; letter-spacing:0.03em;">Valores a pagar</h4>
+                      <span id="quitacao-report-status" style="font-size:0.75rem; color:var(--color-text-muted);">Carregando saldo devedor presente...</span>
+                    </div>
+                    <div id="quitacao-report-body" style="overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; max-height:520px;">
+                      <div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">Abra o contrato para carregar o relatório.</div>
+                    </div>
                   </div>
                 </div>
               </div> <!-- FIM TAB 3 -->
@@ -6629,43 +6698,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=690"></script>
-  <script defer src="sienge-api.js?v=690"></script>
-  <script defer src="azure-auth.js?v=690"></script>
-  <script defer src="app.js?v=690"></script>
-  <script defer src="home-dashboard.js?v=690"></script>
-  <script defer src="anexos.js?v=690"></script>
-  <script defer src="contas-pagar.js?v=690"></script>
-  <script defer src="config-tags.js?v=690"></script>
-  <script defer src="config-users.js?v=690"></script>
-  <script defer src="suporte.js?v=690"></script>
-  <script defer src="construcao.js?v=690"></script>
-  <script defer src="empresas.js?v=690"></script>
-  <script defer src="relacionamento.js?v=690"></script>
+  <script defer src="data.js?v=691"></script>
+  <script defer src="sienge-api.js?v=691"></script>
+  <script defer src="azure-auth.js?v=691"></script>
+  <script defer src="app.js?v=691"></script>
+  <script defer src="home-dashboard.js?v=691"></script>
+  <script defer src="anexos.js?v=691"></script>
+  <script defer src="contas-pagar.js?v=691"></script>
+  <script defer src="config-tags.js?v=691"></script>
+  <script defer src="config-users.js?v=691"></script>
+  <script defer src="suporte.js?v=691"></script>
+  <script defer src="construcao.js?v=691"></script>
+  <script defer src="empresas.js?v=691"></script>
+  <script defer src="relacionamento.js?v=691"></script>
   <script defer src="compromissario.js"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=690"></script>
-  <script defer src="centros-custo.js?v=690"></script>
-  <script defer src="marketing.js?v=690"></script>
-  <script defer src="plano-financeiro.js?v=690"></script>
-  <script defer src="prestacao-contas.js?v=690"></script>
+  <script defer src="estoque-comercial.js?v=691"></script>
+  <script defer src="centros-custo.js?v=691"></script>
+  <script defer src="marketing.js?v=691"></script>
+  <script defer src="plano-financeiro.js?v=691"></script>
+  <script defer src="prestacao-contas.js?v=691"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=690"></script>
-  <script defer src="fluxo-caixa.js?v=690"></script>
-  <script defer src="caixa-diario.js?v=690"></script>
-  <script defer src="investimento.js?v=690"></script>
-  <script defer src="parametrizacao-parceiro.js?v=690"></script>
-  <script defer src="societario.js?v=690"></script>
-  <script defer src="participacoes.js?v=690"></script>
-  <script defer src="fiscal.js?v=690"></script>
-  <script defer src="indexadores.js?v=690"></script>
-  <script defer src="verificar-construcao.js?v=690"></script>
-  <script src="repactuacoes.js?v=690"></script>
-  <script defer src="repactuacao-lote.js?v=690"></script>
+  <script defer src="empresa-filter.js?v=691"></script>
+  <script defer src="fluxo-caixa.js?v=691"></script>
+  <script defer src="caixa-diario.js?v=691"></script>
+  <script defer src="investimento.js?v=691"></script>
+  <script defer src="parametrizacao-parceiro.js?v=691"></script>
+  <script defer src="societario.js?v=691"></script>
+  <script defer src="participacoes.js?v=691"></script>
+  <script defer src="fiscal.js?v=691"></script>
+  <script defer src="indexadores.js?v=691"></script>
+  <script defer src="verificar-construcao.js?v=691"></script>
+  <script src="repactuacoes.js?v=691"></script>
+  <script defer src="repactuacao-lote.js?v=691"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=690"></script>
+  <script defer src="dashboard-inadimplencia.js?v=691"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

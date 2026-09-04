@@ -795,6 +795,10 @@ function switchCustomerTab(tabId) {
     window.loadCustomerBoletos(AppState.selectedCustomerId, AppState.selectedSaleId || AppState.selectedTitulo);
   }
 
+  if (tabId === 'tab-quitacao' && typeof window.loadQuitacaoDebtReport === 'function') {
+    window.loadQuitacaoDebtReport(false);
+  }
+
   if (tabId === 'tab-notificacoes' && typeof window.renderNexHistory === 'function') {
     window.renderNexHistory();
   }
@@ -9054,6 +9058,7 @@ function formatCpfCnpj(val) {
             
             window.funnelCurrentVP = val;
             window.updateFunnelChart();
+            if (typeof window.syncQuitacaoAbateLiquido === "function") window.syncQuitacaoAbateLiquido();
           } else {
             quitacaoEl.textContent = "Indisponível";
             const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
@@ -9071,6 +9076,13 @@ function formatCpfCnpj(val) {
           if (qVpRightCountEl) qVpRightCountEl.textContent = "- parcelas";
         });
       }
+    }
+
+    if (typeof window.updateQuitacaoJurosDisplay === "function") {
+      window.updateQuitacaoJurosDisplay(sale);
+    }
+    if (typeof window.loadQuitacaoDebtReport === "function" && sale.status !== "Quitado") {
+      window.loadQuitacaoDebtReport(true);
     }
 
     // 2. Simulador de Vencidas
