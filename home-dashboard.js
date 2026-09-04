@@ -155,7 +155,26 @@
     return String(user?.name || user?.sienge_user || 'Operador').split(' ')[0].toUpperCase();
   },
 
-  clientKey(c) {
+  isInFilaCobrancaInsight(c) {
+    if (!c) return false;
+    if (c.subjudice === 'S' || c.subjudice === true) return false;
+    if (c.hasOverdueAgreement) return false;
+    if (typeof window.clientIsRecenteJuridico === 'function' && window.clientIsRecenteJuridico(c)) return false;
+    const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
+    const thresholdJuridico = juridicoNode ? Number(juridicoNode.dias) : 151;
+    const group = typeof window.getFilaQueueGroup === 'function'
+      ? window.getFilaQueueGroup(c, thresholdJuridico)
+      : 5;
+    // 0 = 0% pago, 5 = fila de cobrança. 1–4 são Sub Judice / acordo / recente / enviar jurídico
+    if (group !== 0 && group !== 5) return false;
+    const rule = String(c.appliedRule || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (/JURIDICO|ADVOGADO|APOIO_JURIDICO/.test(rule)) return false;
+    const info = typeof window.getClientJudicialPhaseInfo === 'function'
+      ? window.getClientJudicialPhaseInfo(c)
+      : null;
+    if (info && info.fase && info.fase !== 'Sem Fase') return false;
+    return true;
+  },
     return String(c.customerId) + '-' + String(c.saleId);
   },
 
@@ -283,7 +302,7 @@
     const leftover = this.unfinishedYesterday(opName);
     const leftoverKeys = new Set(leftover.map(i => String(i.customerId) + '-' + String(i.saleId)));
     const leftoverClients = scopeClients.filter(c => leftoverKeys.has(this.clientKey(c)));
-    const mais91 = scopeClients.filter(c => (Number(c.maxDaysDelay) || 0) >= 91);
+    const mais91 = scopeClients.filter(c => (Number(c.maxDaysDelay) || 0) >= 91 && this.isInFilaCobrancaInsight(c));
 
     groups.push({ id: 'suspender', label: uniqueCust.size + ' clientes 0% pago para suspender', items: suspender, hideIfEmpty: true, count: uniqueCust.size });
     groups.push({ id: 'enviar-nex', label: enviar.length + ' títulos 0% pago enviar Nex', items: enviar, hideIfEmpty: true });

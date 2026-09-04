@@ -1168,27 +1168,30 @@ window.dedupeAccentCityRules = function() {
   Object.keys(groups).forEach(function(canon) {
     const keys = groups[canon];
     const names = [];
-    const opParts = [];
+    let pickKey = keys[0];
     keys.forEach(function(k) {
       const r = rules[k];
       if (!r) return;
       if (r.desc) names.push(r.desc);
       names.push(String(k).replace(/^CID_/, "").replace(/_/g, " "));
-      opParts.push(r.operator);
+      const pT = Number((rules[pickKey] && rules[pickKey].opsUpdatedAt) || 0);
+      const rT = Number((r && r.opsUpdatedAt) || 0);
+      if (rT > pT) pickKey = k;
+      else if (rT === pT && r && r.manual && !(rules[pickKey] && rules[pickKey].manual)) pickKey = k;
     });
-    const mergedOps = window.mergeCityOperatorValues.apply(null, opParts);
+    const pick = rules[pickKey] || rules[keys[0]] || {};
     const pretty = window.prettierCityLabel(names) || canon.replace(/^CID_/, "").replace(/_/g, " ");
     const prev = rules[canon];
-    const operator = mergedOps.length
-      ? mergedOps
-      : (prev && prev.operator != null ? prev.operator : (rules[keys[0]] && rules[keys[0]].operator != null ? rules[keys[0]].operator : "OUTROS"));
-    const keepManual = keys.some(function(k) { return rules[k] && rules[k].manual; });
-    const base = Object.assign({}, rules[keys[0]] || {}, prev || {});
-    rules[canon] = Object.assign({}, base, {
+    const maxOpsAt = keys.reduce(function(max, k) {
+      return Math.max(max, Number((rules[k] && rules[k].opsUpdatedAt) || 0));
+    }, 0);
+    const keepManual = keys.some(function(k) { return rules[k] && rules[k].manual; }) || !!pick.manual;
+    rules[canon] = Object.assign({}, pick, {
       id: canon,
       desc: pretty,
-      operator: operator,
-      manual: keepManual || !!base.manual
+      operator: (pick.operator != null ? pick.operator : "OUTROS"),
+      manual: keepManual,
+      opsUpdatedAt: maxOpsAt || Number(pick.opsUpdatedAt || 0) || undefined
     });
     keys.forEach(function(k) {
       if (k !== canon) {
@@ -1196,7 +1199,7 @@ window.dedupeAccentCityRules = function() {
         changed = true;
       }
     });
-    if (!prev || prev.desc !== pretty) changed = true;
+    if (!prev || prev.desc !== pretty || JSON.stringify(prev.operator) !== JSON.stringify(rules[canon].operator)) changed = true;
   });
   if (changed) {
     try { localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules)); } catch (e) {}
@@ -3556,8 +3559,8 @@ function getDelayBadgeHtml(days, isZeroPaid = false) {
 
 window.nexAgingActionHtml = function(client) {
   const special = (typeof window.nexAgingSpecialHtml === "function") ? window.nexAgingSpecialHtml(client) : "";
-  if (special) return special;
-  return getDelayBadgeHtml(Number(client && client.maxDaysDelay) || 0, !!(client && client.isZeroPaid));
+  const base = special || getDelayBadgeHtml(Number(client && client.maxDaysDelay) || 0, !!(client && client.isZeroPaid));
+  return (typeof window.wrapAgingWithWebro === "function") ? window.wrapAgingWithWebro(client, base) : base;
 };
 
 window.nexAgingSpecialHtml = function(client) {
@@ -3599,6 +3602,106 @@ window.nexAgingSpecialHtml = function(client) {
     `;
   }
   return "";
+};
+
+window.isWebroBaixaCanal = function(canal) {
+  const n = String(canal || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+  return n === "aguardando baixa webro" || (n.indexOf("baixa") !== -1 && n.indexOf("webro") !== -1);
+};
+
+window.countBusinessDaysElapsedIso = function(fromIso, toIso) {
+  const from = String(fromIso || "").slice(0, 10);
+  const to = String(toIso || "").slice(0, 10);
+  if (!from || !to || from > to) return 0;
+  let cursor = from;
+  let count = 0;
+  let guard = 0;
+  while (cursor < to && guard < 400) {
+    cursor = window.addDaysIso(cursor, 1);
+    if (window.isBusinessDayIso(cursor)) count++;
+    guard++;
+  }
+  return count;
+};
+
+window.getActiveWebroBaixaOccurrence = function(client) {
+  if (!client || !window.AppState) return null;
+  const cid = client.customerId;
+  if (cid == null) return null;
+  const notesNormal = AppState.notes && AppState.notes[cid] ? AppState.notes[cid] : [];
+  const notesJud = AppState.judNotes && AppState.judNotes[cid] ? AppState.judNotes[cid] : [];
+  const notes = [].concat(notesNormal, notesJud);
+  if (!notes.length) return null;
+
+  const idSet = new Set();
+  const pushId = (v) => {
+    if (v == null || v === "") return;
+    const raw = String(v);
+    idSet.add(raw);
+    if (typeof window.normalizeContractIdToken === "function") {
+      const tok = window.normalizeContractIdToken(raw);
+      if (tok) idSet.add(tok);
+    }
+  };
+  pushId(client.saleId);
+  (client.billIds || []).forEach(pushId);
+
+  const matches = notes.filter((occ) => {
+    if (!window.isWebroBaixaCanal(occ && occ.canal)) return false;
+    if (occ.status === "Cancelada") return false;
+    if (occ.promiseStatus === "Cumprido" || occ.promiseStatus === "Quebrado") return false;
+    if (!occ.promiseDate) return false;
+    if (!occ.saleId) return true;
+    const raw = String(occ.saleId);
+    if (idSet.has(raw)) return true;
+    if (typeof window.normalizeContractIdToken === "function") {
+      const tok = window.normalizeContractIdToken(raw);
+      if (tok && idSet.has(tok)) return true;
+    }
+    return false;
+  });
+  if (!matches.length) return null;
+  matches.sort((a, b) => String(b.promiseDate || "").localeCompare(String(a.promiseDate || "")) || String(b.date || "").localeCompare(String(a.date || "")));
+  return matches[0];
+};
+
+window.webroAgingTagHtml = function(client) {
+  const occ = typeof window.getActiveWebroBaixaOccurrence === "function"
+    ? window.getActiveWebroBaixaOccurrence(client)
+    : null;
+  if (!occ || !occ.promiseDate) return "";
+  const today = (typeof window.localDateStr === "function")
+    ? window.localDateStr(new Date())
+    : new Date().toISOString().slice(0, 10);
+  const baixa = String(occ.promiseDate).slice(0, 10);
+  const elapsed = typeof window.countBusinessDaysElapsedIso === "function"
+    ? window.countBusinessDaysElapsedIso(baixa, today)
+    : 0;
+  const overdue = elapsed > 3;
+  const label = overdue ? "Pendente Repasse Webro" : "Aguardando Webro";
+  const bg = overdue ? "#fef3c7" : "#dcfce7";
+  const border = overdue ? "#f59e0b" : "#86efac";
+  const color = overdue ? "#92400e" : "#166534";
+  const icon = overdue ? "alert-triangle" : "banknote";
+  const dateBr = typeof window.formatIsoDateBr === "function"
+    ? window.formatIsoDateBr(baixa)
+    : baixa;
+  return `
+    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${border}; background-color: ${bg}; color: ${color}; font-weight: 700;" title="Baixa Webro em ${dateBr} · ${elapsed} dia(s) útil(eis)">
+      <i data-lucide="${icon}" style="width: 14px; height: 14px;"></i> ${label}
+    </span>
+  `;
+};
+
+window.wrapAgingWithWebro = function(client, innerHtml) {
+  const webro = typeof window.webroAgingTagHtml === "function" ? window.webroAgingTagHtml(client) : "";
+  if (!webro) return innerHtml || "";
+  if (!innerHtml) return webro;
+  return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">${webro}${innerHtml}</div>`;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
@@ -5125,7 +5228,8 @@ document.addEventListener("click", function(e) {
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
-              ${client.subjudice === "S" ? `
+              ${(() => {
+                  const agingInner = client.subjudice === "S" ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
@@ -5151,6 +5255,10 @@ document.addEventListener("click", function(e) {
                     <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Enviar Jurídico - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
                   </button>
                   ` : getDelayBadgeHtml(client.maxDaysDelay, client.isZeroPaid);
+              })();
+                  return (typeof window.wrapAgingWithWebro === "function")
+                    ? window.wrapAgingWithWebro(client, agingInner)
+                    : agingInner;
               })()}
             </div>
           </td>
@@ -9591,12 +9699,19 @@ function renderCustomerOccurrences() {
       card.style.setProperty('border-left', '4px solid #f59e0b', 'important');
       card.style.setProperty('box-shadow', '2px 2px 6px rgba(0,0,0,0.05)', 'important');
     }
+    const isWebroBaixa = !!(occ.webroBaixa || (typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(occ.canal)));
     if (isNexLocked) {
       card.style.setProperty('position', 'relative', 'important');
       card.style.setProperty('background-color', '#fef2f2', 'important');
       card.style.setProperty('border', '1px solid #fecaca', 'important');
       card.style.setProperty('border-left', '4px solid #ef4444', 'important');
       card.style.cursor = 'pointer';
+    } else if (isWebroBaixa) {
+      card.style.setProperty('position', 'relative', 'important');
+      card.style.setProperty('background-color', '#ecfdf5', 'important');
+      card.style.setProperty('border', '1px solid #86efac', 'important');
+      card.style.setProperty('border-left', '4px solid #16a34a', 'important');
+      card.style.setProperty('box-shadow', '0 0 0 1px rgba(22,163,74,0.10)', 'important');
     } else if (checkPayWaiting) {
       card.style.setProperty('position', 'relative', 'important');
       card.style.setProperty('background-color', '#ecfeff', 'important');
@@ -9618,8 +9733,9 @@ function renderCustomerOccurrences() {
       else if (occ.canal.toLowerCase() === 'e-mail' || occ.canal.toLowerCase() === 'email') canalIcon = 'mail';
       else if (occ.canal.toLowerCase() === 'presencial') canalIcon = 'user';
       else if (isNotaInterna) canalIcon = 'sticky-note';
+      else if (isWebroBaixa) canalIcon = 'banknote';
       else if (isNexLocked) canalIcon = 'mail';
-      tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: var(--color-text-muted);"><i data-lucide="${canalIcon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.canal}</span>`;
+      tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${isWebroBaixa ? '#166534' : 'var(--color-text-muted)'}; font-weight: ${isWebroBaixa ? '700' : '400'};"><i data-lucide="${canalIcon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.canal}</span>`;
     }
     if (occ.iniciativa) {
       const icon = occ.iniciativa === 'Ativo' ? 'arrow-right' : 'arrow-left';
@@ -9673,7 +9789,7 @@ function renderCustomerOccurrences() {
         `;
       }
       
-      const promiseLabel = isCheckPay ? "Checar pagamento" : "Promessa";
+      const promiseLabel = isCheckPay ? "Checar pagamento" : (isWebroBaixa ? "Baixa Webro" : "Promessa");
       promiseInlineHtml = `
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size:0.75rem; font-weight:700;">${promiseLabel}: ${pdStr}</span>
@@ -10212,6 +10328,7 @@ async function saveCustomerOccurrence() {
       const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
   
   const canal = canalEl ? canalEl.value : "";
+  const isWebroBaixa = typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal);
   
   if (canal === "Proposta de renegociação") {
       if (typeof window.applyRenegotiationText === 'function') {
@@ -10232,7 +10349,7 @@ async function saveCustomerOccurrence() {
   const iniciativa = iniciativaEl ? iniciativaEl.value : "";
   
   if (!text) {
-    alert("Descreva o que foi falado na conversa.");
+    alert(isWebroBaixa ? "Preencha a observação da baixa Webro." : "Descreva o que foi falado na conversa.");
     return;
   }
   if (!canalEl || !canalEl.value) {
@@ -10242,24 +10359,28 @@ async function saveCustomerOccurrence() {
   
   if (canal !== "Nota interna") {
     if (!promiseDate) {
-      alert(canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória.");
+      alert(isWebroBaixa
+        ? "A data da baixa Webro é obrigatória."
+        : (canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória."));
       return;
     }
-    if (canal !== "Retorno Agendado" && !reminder) {
+    if (!isWebroBaixa && canal !== "Retorno Agendado" && !reminder) {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
-    if (canal !== "Retorno Agendado" && !iniciativaEl) {
+    if (!isWebroBaixa && canal !== "Retorno Agendado" && !iniciativaEl) {
       alert("O campo Iniciativa é obrigatório.");
       return;
     }
   
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const pDate = new Date(promiseDate + "T00:00:00");
-    if (pDate < today) {
-      alert("A data de promessa não pode ser no passado.");
-      return;
+    if (!isWebroBaixa) {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const pDate = new Date(promiseDate + "T00:00:00");
+      if (pDate < today) {
+        alert("A data de promessa não pode ser no passado.");
+        return;
+      }
     }
   }
   
@@ -10287,13 +10408,14 @@ async function saveCustomerOccurrence() {
     text: text,
     promiseDate: (canal === "Nota interna") ? null : promiseDate,
     promiseStatus: (canal === "Nota interna" || !promiseDate) ? null : "Pendente",
-    reminder: (canal === "Nota interna") ? null : reminder,
+    reminder: (canal === "Nota interna" || isWebroBaixa) ? null : reminder,
     canal: canal,
-    iniciativa: (canal === "Nota interna") ? null : iniciativa,
-    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna"
+    iniciativa: (canal === "Nota interna" || isWebroBaixa) ? null : iniciativa,
+    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && !isWebroBaixa
       ? AppState.selectedPromisedInstallments.map(item => window.getPromisedInstallmentLabel(item) || item)
       : [],
-    pinned: (canal === "Nota interna") ? isPinned : false
+    pinned: (canal === "Nota interna") ? isPinned : false,
+    webroBaixa: !!isWebroBaixa
   };
   
   // Always reload from localStorage to prevent overwriting from multiple tabs
@@ -10580,6 +10702,22 @@ window.validateOccurrenceForm = function() {
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     
     isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
+  } else if (typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal)) {
+    if (iniciativaGroup) iniciativaGroup.style.display = "none";
+    if (promiseRow) promiseRow.style.display = "grid";
+    if (installmentsGroup) installmentsGroup.style.display = "none";
+    if (pinGroup) pinGroup.style.display = "none";
+    if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
+
+    if (labelNoteText) labelNoteText.innerHTML = 'Observação <span style="color: var(--color-danger);">*</span>';
+    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Baixa Webro';
+    if (textEl) textEl.placeholder = "Observação da baixa Webro...";
+
+    const pDateLabel = document.getElementById('label-promise-date');
+    if (pDateLabel) pDateLabel.innerHTML = 'Data da Baixa Webro <span style="color: var(--color-danger);">*</span>';
+
+    const pDate = pDateEl ? pDateEl.value.trim() : "";
+    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
   } else {
     if (iniciativaGroup) iniciativaGroup.style.display = "block";
     if (promiseRow) promiseRow.style.display = "grid";
@@ -10589,6 +10727,7 @@ window.validateOccurrenceForm = function() {
     
     if (labelNoteText) labelNoteText.innerHTML = 'Conversa com o Cliente <span style="color: var(--color-danger);">*</span>';
     if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Ocorrência';
+    if (textEl) textEl.placeholder = "Registrar tratativa de cobrança...";
     
     const pDateLabel = document.getElementById('label-promise-date');
     if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
@@ -20966,6 +21105,8 @@ window.markCityAssignmentManual = function(ruleId) {
   if (!AppState.rules || !AppState.rules[id]) return;
   AppState.rules[id].manual = true;
   AppState.rules[id].opsUpdatedAt = Date.now();
+  AppState.rules._rulesSavedAt = Date.now();
+  try { localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules)); } catch (e) {}
 };
 
 window.addOperatorToRule = function(ruleId, op) {
@@ -22093,6 +22234,15 @@ window.saveRulesConfig = function(scope) {
   }
 
   if (canEditCob && !onlyNeg) {
+    if (AppState.rules) {
+      AppState.rules._rulesSavedAt = Date.now();
+      Object.keys(AppState.rules).forEach(function(key) {
+        if (!String(key).startsWith("CID_")) return;
+        const rule = AppState.rules[key];
+        if (!rule || typeof rule !== "object") return;
+        if (rule.manual && !rule.opsUpdatedAt) rule.opsUpdatedAt = Date.now();
+      });
+    }
     localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
     const params = {
       email: document.getElementById("rule-param-email")?.value || 5,
@@ -27446,7 +27596,7 @@ function getCanonicalOptionList(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
   const canonical = isCanal
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Retorno Agendado']
+    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Proposta de renegociação', 'Retorno Agendado', 'Aguardando Baixa Webro']
     : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
 
   try {
@@ -30159,41 +30309,61 @@ window.mergeCityAssignmentRules = function(localStr, cloudStr) {
   try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
   const merged = {};
   const cityBucket = {};
-  const addCity = function(key, rule) {
+  const addCity = function(key, rule, source) {
     if (!rule) return;
     const canon = typeof window.canonicalCityRuleId === "function" ? window.canonicalCityRuleId(key) : key;
     if (!cityBucket[canon]) cityBucket[canon] = [];
-    cityBucket[canon].push(rule);
+    cityBucket[canon].push({ rule: rule, source: source || "local" });
   };
   const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
   keys.forEach(key => {
     if (!String(key).startsWith("CID_")) {
-      merged[key] = cloud[key] !== undefined ? cloud[key] : local[key];
+      // Preferir o mais recente quando houver marca de tempo; senão manter local se existir
+      if (key === "filaConfig" && local[key] && cloud[key] && typeof local[key] === "object" && typeof cloud[key] === "object") {
+        merged[key] = Object.assign({}, cloud[key], local[key]);
+      } else {
+        merged[key] = local[key] !== undefined ? local[key] : cloud[key];
+      }
       return;
     }
-    if (local[key]) addCity(key, local[key]);
-    if (cloud[key] && cloud[key] !== local[key]) addCity(key, cloud[key]);
+    if (local[key]) addCity(key, local[key], "local");
+    if (cloud[key]) addCity(key, cloud[key], "cloud");
   });
   Object.keys(cityBucket).forEach(function(canon) {
     const list = cityBucket[canon];
     let pick = list[0];
-    list.forEach(function(r) {
-      const pT = Number((pick && pick.opsUpdatedAt) || 0);
+    list.forEach(function(item) {
+      const p = pick && pick.rule;
+      const r = item && item.rule;
+      const pT = Number((p && p.opsUpdatedAt) || 0);
       const rT = Number((r && r.opsUpdatedAt) || 0);
-      if (rT > pT) pick = r;
-      else if (rT === pT && r && r.manual && !(pick && pick.manual)) pick = r;
+      if (rT > pT) pick = item;
+      else if (rT === pT && r && r.manual && !(p && p.manual)) pick = item;
+      else if (rT === pT && item.source === "local" && pick.source !== "local") pick = item;
     });
-    const ops = typeof window.mergeCityOperatorValues === "function"
-      ? window.mergeCityOperatorValues.apply(null, list.map(function(r) { return r && r.operator; }))
-      : (pick && pick.operator);
-    const names = list.map(function(r) { return r && r.desc; }).filter(Boolean);
+    const winner = pick && pick.rule ? pick.rule : {};
+    // Last-write-wins: NÃO unir operadores de versões diferentes (isso reintroduzia atribuições antigas da nuvem)
+    let operator = winner.operator;
+    if (typeof window.cityOpsLooksForcedDefault === "function" && window.cityOpsLooksForcedDefault(operator)) {
+      const better = list.find(function(item) {
+        const r = item && item.rule;
+        return r && r.manual && !window.cityOpsLooksForcedDefault(r.operator);
+      });
+      if (better && better.rule) {
+        operator = better.rule.operator;
+        pick = better;
+      }
+    }
+    const names = list.map(function(item) { return item && item.rule && item.rule.desc; }).filter(Boolean);
     const pretty = typeof window.prettierCityLabel === "function"
       ? window.prettierCityLabel(names)
-      : (pick && pick.desc);
-    merged[canon] = Object.assign({}, pick, {
+      : (winner && winner.desc);
+    merged[canon] = Object.assign({}, winner, {
       id: canon,
-      desc: pretty || (pick && pick.desc) || canon.replace(/^CID_/, "").replace(/_/g, " "),
-      operator: (ops && ops.length) ? ops : (pick && pick.operator) || "OUTROS"
+      desc: pretty || (winner && winner.desc) || canon.replace(/^CID_/, "").replace(/_/g, " "),
+      operator: (operator != null ? operator : "OUTROS"),
+      manual: !!(winner && winner.manual),
+      opsUpdatedAt: Number((winner && winner.opsUpdatedAt) || 0) || undefined
     });
   });
   return JSON.stringify(merged);
@@ -30352,6 +30522,14 @@ window.forceUploadLocalConfig = async function(silent = true) {
           }
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
             payload.crm_moura_cartorios_list = window.mergeCartoriosList(payload.crm_moura_cartorios_list || "[]", cloud.crm_moura_cartorios_list || "[]");
+          }
+          if (payload.crm_moura_rules || cloud.crm_moura_rules) {
+            payload.crm_moura_rules = window.mergeCityAssignmentRules(
+              payload.crm_moura_rules || "{}",
+              cloud.crm_moura_rules || "{}"
+            );
+            try { _originalSetItem.call(localStorage, "crm_moura_rules", payload.crm_moura_rules); } catch (e) {}
+            try { AppState.rules = JSON.parse(payload.crm_moura_rules); } catch (e) {}
           }
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
