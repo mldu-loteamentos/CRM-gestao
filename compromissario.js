@@ -233,6 +233,7 @@ const CompromissarioApp = {
       this.state.contracts = mergedResults;
 
       this.renderTable();
+      this.hydrateTermosFromAnexos().catch((e) => console.warn('[Compromissario] hydrate termos', e));
 
     } catch (e) {
       console.error("[Compromissario] Erro ao buscar contratos", e);
@@ -242,6 +243,38 @@ const CompromissarioApp = {
       btn.innerHTML = '<i data-lucide="search" style="width: 16px;"></i> <span>Buscar Contratos</span>';
       if (window.lucide) window.lucide.createIcons();
     }
+  },
+
+  /** Baixa CONTRATO/DISTRATO já enviados pelo Assistente de Anexos (unidade no Sienge). */
+  async hydrateTermosFromAnexos() {
+    const list = this.state.contracts || [];
+    if (!list.length) return;
+    const fetchFn = window.anexosFetchTermoBlobForContract;
+    if (typeof fetchFn !== 'function') {
+      console.warn('[Compromissario] anexosFetchTermoBlobForContract indisponível');
+      return;
+    }
+    const concurrency = 3;
+    let i = 0;
+    const run = async () => {
+      while (i < list.length) {
+        const idx = i++;
+        const c = list[idx];
+        const id = String(c.id || '');
+        if (!id || this.state.files[id]) continue;
+        try {
+          const file = await fetchFn(c);
+          if (file) {
+            file._fromAnexos = true;
+            this.state.files[id] = file;
+          }
+        } catch (e) {
+          console.warn('[Compromissario] termo', id, e);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => run()));
+    this.renderTable();
   },
 
   renderTable() {
@@ -375,11 +408,18 @@ const CompromissarioApp = {
         }
 
         const fileLoaded = this.state.files[id] ? true : false;
-        const fileName = fileLoaded ? this.state.files[id].name : 'Arraste o termo aqui ou clique...';
+        const fromAnexos = !!(fileLoaded && this.state.files[id]._fromAnexos);
+        const fileName = fileLoaded
+          ? (fromAnexos ? `Assistente: ${this.state.files[id].name}` : this.state.files[id].name)
+          : 'Buscando do Assistente / arraste o termo...';
 
         const opType = c._operationType || 'Desconhecido';
         const badgeColor = opType === 'Venda' ? '#10b981' : '#f43f5e';
         const badgeBg = opType === 'Venda' ? '#ecfdf5' : '#fff1f2';
+        const dropBorder = fileLoaded ? (fromAnexos ? '#0ea5e9' : '#10b981') : '#cbd5e1';
+        const dropBg = fileLoaded ? (fromAnexos ? '#f0f9ff' : '#ecfdf5') : '#f8fafc';
+        const dropColor = fileLoaded ? (fromAnexos ? '#0369a1' : '#047857') : '#64748b';
+        const dropIcon = fileLoaded ? (fromAnexos ? 'cloud-download' : 'check-circle') : 'upload-cloud';
 
         return `
           <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.1s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -397,13 +437,13 @@ const CompromissarioApp = {
             <td style="padding: 12px 15px;">
               <div 
                 id="comp-drop-${id}"
-                style="border: 1.5px dashed ${fileLoaded ? '#10b981' : '#cbd5e1'}; background: ${fileLoaded ? '#ecfdf5' : '#f8fafc'}; border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; color: ${fileLoaded ? '#047857' : '#64748b'}; text-align: center; cursor: pointer; transition: all 0.2s;"
+                style="border: 1.5px dashed ${dropBorder}; background: ${dropBg}; border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; color: ${dropColor}; text-align: center; cursor: pointer; transition: all 0.2s;"
                 ondragover="CompromissarioApp.onDragOver(event, '${id}')"
                 ondragleave="CompromissarioApp.onDragLeave(event, '${id}')"
                 ondrop="CompromissarioApp.onDrop(event, '${id}')"
                 onclick="document.getElementById('comp-file-${id}').click()"
               >
-                ${fileLoaded ? '<i data-lucide="check-circle" style="width: 14px; vertical-align: middle; margin-right: 4px;"></i>' : '<i data-lucide="upload-cloud" style="width: 14px; vertical-align: middle; margin-right: 4px;"></i>'}
+                <i data-lucide="${dropIcon}" style="width: 14px; vertical-align: middle; margin-right: 4px;"></i>
                 ${fileName}
               </div>
               <input type="file" id="comp-file-${id}" style="display: none;" onchange="CompromissarioApp.onFileSelect(event, '${id}')">
@@ -605,13 +645,17 @@ const CompromissarioApp = {
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      this.state.files[id] = e.dataTransfer.files[0];
+      const f = e.dataTransfer.files[0];
+      f._fromAnexos = false;
+      this.state.files[id] = f;
       this.renderTable();
     }
   },
   onFileSelect(e, id) {
     if (e.target.files && e.target.files.length > 0) {
-      this.state.files[id] = e.target.files[0];
+      const f = e.target.files[0];
+      f._fromAnexos = false;
+      this.state.files[id] = f;
       this.renderTable();
     }
   },
@@ -661,8 +705,23 @@ const CompromissarioApp = {
     // Trigger action
     if (cityConfig.hasPortal && cityConfig.portalUrl) {
       let msg = `ATENÇÃO OPERADOR:\n\nEsta prefeitura exige protocolo diretamente no site.\nUma nova aba será aberta agora.\n\nLogin: ${cityConfig.portalLogin || 'Não configurado'}\nSenha: ${cityConfig.portalSenha || 'Não configurado'}`;
+      if (this.state.files[id]) msg += `\n\nO termo do Assistente/Sienge será baixado para você anexar no portal.`;
       if (hasSpecialReq) msg += `\n\n⚠️ ALERTA IMPORTANTE ⚠️\nA prefeitura de ${cityName} exige um REQUERIMENTO ESPECIAL. Lembre-se de gerar e anexar.`;
       alert(msg);
+
+      if (this.state.files[id]) {
+        try {
+          const f = this.state.files[id];
+          const url = URL.createObjectURL(f);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = f.name || `termo-${id}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (e) {}
+      }
       
       this.state.notifiedContracts[id] = true;
       localStorage.setItem('crm_compromissario_notified', JSON.stringify(this.state.notifiedContracts));
@@ -672,12 +731,30 @@ const CompromissarioApp = {
       return;
     }
 
-    let alertMsg = `ATENÇÃO OPERADOR:\n\nUm rascunho de e-mail será aberto agora. Não se esqueça de anexar manualmente o arquivo da listagem.`;
+    let alertMsg = this.state.files[id]
+      ? `ATENÇÃO OPERADOR:\n\nO termo já foi carregado do Assistente/Sienge e será baixado agora. Anexe esse arquivo no rascunho de e-mail.`
+      : `ATENÇÃO OPERADOR:\n\nUm rascunho de e-mail será aberto agora. Não se esqueça de anexar manualmente o arquivo da listagem.`;
     if (hasSpecialReq) {
       alertMsg += `\n\n⚠️ ALERTA IMPORTANTE ⚠️\nA prefeitura de ${cityName} exige um REQUERIMENTO ESPECIAL. Verifique se ele está preenchido e assinado corretamente antes de enviar.`;
     }
 
     alert(alertMsg);
+
+    if (this.state.files[id]) {
+      try {
+        const f = this.state.files[id];
+        const url = URL.createObjectURL(f);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = f.name || `termo-${id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) {
+        console.warn('[Compromissario] download termo', e);
+      }
+    }
 
     // Save state
     this.state.notifiedContracts[id] = true;
