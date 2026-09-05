@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=721">
+  <link rel="stylesheet" href="style.css?v=727">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=721" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=727" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1262,7 +1262,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.721 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.727 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2452,7 +2452,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="em_construcao.png" alt="Em Construção" style="max-width: 400px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=727" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">uma ferramenta incrivel está
             nascendo aqui</h2>
           <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
@@ -2703,7 +2703,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="em_construcao.png" alt="Em Construção" style="max-width: 400px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=727" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
           <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
             Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
@@ -2715,7 +2715,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="em_construcao.png" alt="Em Construção" style="max-width: 400px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=727" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
           <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
             Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
@@ -2882,8 +2882,9 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
             <div class="filters-container audit-filters">
               <div class="form-group">
                 <label for="audit-filter-cc">Empreendimento</label>
-                <input type="text" id="audit-filter-cc" class="form-control" placeholder="ID ou nome do centro de custo..."
-                  onkeyup="renderAuditLogs()">
+                <input type="text" id="audit-filter-cc" class="form-control" list="audit-cc-list" placeholder="ID ou nome do centro de custo..."
+                  onkeyup="renderAuditLogs()" onchange="renderAuditLogs()">
+                <datalist id="audit-cc-list"></datalist>
               </div>
               <div class="form-group">
                 <label for="audit-filter-unit">Unidade</label>
@@ -2927,7 +2928,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="em_construcao.png" alt="Em Construção" style="max-width: 400px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=727" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
             <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
               Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
@@ -4875,79 +4876,37 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                     </div>
                   </div>
 
-                  <div
-                    style="display: flex; gap: 1rem; align-items: stretch; justify-content: space-between; flex-wrap: wrap;">
-
-                    <div class="kpi-card"
-                      style="flex: 1; min-width: 150px; border-left: 4px solid #166534; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">Recebidas</span>
-                      <h4 id="quitacao-left-pagas-count"
-                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">0 parcelas</h4>
-                      <h3 id="quitacao-left-pagas-val"
-                        style="margin: 0; font-size: 1.15rem; color: #166534;">R$ 0,00</h3>
+                  <div class="quitacao-kpis">
+                    <div class="quitacao-kpi">
+                      <span>Recebidas</span>
+                      <h4 id="quitacao-left-pagas-count">0 parcelas</h4>
+                      <strong id="quitacao-left-pagas-val">0,00</strong>
                     </div>
-
-                    <!-- KPI Vencidas -->
-                    <div class="kpi-card"
-                      style="flex: 1; min-width: 150px; border-left: 4px solid var(--color-danger); padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">Vencidas</span>
-                      <h4 id="quitacao-left-vencidas-count"
-                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">0 parcelas</h4>
-                      <h3 id="quitacao-left-vencidas-val"
-                        style="margin: 0; font-size: 1.15rem; color: var(--color-danger);">R$ 0,00</h3>
+                    <div class="quitacao-kpi quitacao-kpi--late">
+                      <span>Vencidas</span>
+                      <h4 id="quitacao-left-vencidas-count">0 parcelas</h4>
+                      <strong id="quitacao-left-vencidas-val">0,00</strong>
                     </div>
-
-                    <!-- KPI A Vencer -->
-                    <div class="kpi-card"
-                      style="flex: 1; min-width: 150px; border-left: 4px solid var(--color-primary); padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">A
-                        Vencer</span>
-                      <h4 id="quitacao-left-avencer-count"
-                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">0 parcelas</h4>
-                      <h3 id="quitacao-left-avencer-val"
-                        style="margin: 0; font-size: 1.15rem; color: var(--color-primary);">R$ 0,00</h3>
+                    <div class="quitacao-kpi">
+                      <span>A vencer</span>
+                      <h4 id="quitacao-left-avencer-count">0 parcelas</h4>
+                      <strong id="quitacao-left-avencer-val">0,00</strong>
                     </div>
-
-                    <!-- KPI Total Atualizado -->
-                    <div class="kpi-card"
-                      style="flex: 1; min-width: 150px; border-left: 4px solid #666; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">Valor
-                        Futuro Atualizado</span>
-                      <h4 id="quitacao-left-total-count"
-                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">0 parcelas</h4>
-                      <h3 id="quitacao-left-total-val" style="margin: 0; font-size: 1.15rem; color: #333;">R$ 0,00</h3>
+                    <div class="quitacao-kpi">
+                      <span>Valor futuro</span>
+                      <h4 id="quitacao-left-total-count">0 parcelas</h4>
+                      <strong id="quitacao-left-total-val">0,00</strong>
                     </div>
-
-                    <!-- KPI Valor Presente (Piscando) -->
-                    <div class="kpi-card pulse-highlight"
-                      style="flex: 1; min-width: 150px; border-left: 5px solid var(--color-primary); padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(16, 84, 54, 0.05); text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-primary); font-weight: 800; text-transform: uppercase;">Valor
-                        para Quitação (VP)</span>
-                      <h4 id="quitacao-right-count-quitacao"
-                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">Carregando...</h4>
-                      <h3 id="quitacao-right-val-quitacao"
-                        style="margin: 0; font-size: 1.25rem; color: var(--color-primary); font-weight: 800;">R$ 0,00
-                      </h3>
+                    <div class="quitacao-kpi quitacao-kpi--vp">
+                      <span>Quitação (VP)</span>
+                      <h4 id="quitacao-right-count-quitacao">Carregando...</h4>
+                      <strong id="quitacao-right-val-quitacao">0,00</strong>
                     </div>
-
-                    <!-- KPI Desconto Total -->
-                    <div class="kpi-card"
-                      style="flex: 1; min-width: 150px; border-left: 4px solid var(--color-success); padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
-                      <span
-                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">Desconto
-                        Total</span>
-                      <h3 id="quitacao-right-desconto-val"
-                        style="margin: 0; font-size: 1.15rem; color: var(--color-success);">R$ 0,00</h3>
-                      <h4 id="quitacao-right-desconto-pct"
-                        style="margin: 4px 0 0 0; font-size: 0.85rem; color: var(--color-success); opacity: 0.8;">0,00%
-                        OFF</h4>
+                    <div class="quitacao-kpi quitacao-kpi--disc">
+                      <span>Desconto do contrato</span>
+                      <strong id="quitacao-right-desconto-val">0,00</strong>
+                      <h4 id="quitacao-right-desconto-pct">0,00%</h4>
                     </div>
-
                   </div>
 
                   <!-- Relatório detalhado -->
@@ -4956,7 +4915,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                       <h4 style="margin:0; font-size:0.9rem; color:var(--color-text-dark); text-transform:uppercase; letter-spacing:0.03em;">Valores a pagar</h4>
                       <span id="quitacao-report-status" style="font-size:0.75rem; color:var(--color-text-muted);">Carregando saldo devedor presente...</span>
                     </div>
-                    <div id="quitacao-report-body" style="overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; max-height:520px;">
+                    <div id="quitacao-report-body" class="quitacao-report-body">
                       <div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">Abra o contrato para carregar o relatório.</div>
                     </div>
                   </div>
@@ -6832,44 +6791,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=721"></script>
-  <script defer src="sienge-api.js?v=721"></script>
-  <script defer src="azure-auth.js?v=721"></script>
-  <script defer src="app.js?v=721"></script>
-  <script defer src="cartao-taxas.js?v=721"></script>
-  <script defer src="home-dashboard.js?v=721"></script>
-  <script defer src="anexos.js?v=721"></script>
-  <script defer src="contas-pagar.js?v=721"></script>
-  <script defer src="config-tags.js?v=721"></script>
-  <script defer src="config-users.js?v=721"></script>
-  <script defer src="suporte.js?v=721"></script>
-  <script defer src="construcao.js?v=721"></script>
-  <script defer src="empresas.js?v=721"></script>
-  <script defer src="relacionamento.js?v=721"></script>
-  <script defer src="compromissario.js?v=721"></script>
-  <script defer src="comercial.js?v=721"></script>
-  <script defer src="estoque-comercial.js?v=721"></script>
-  <script defer src="centros-custo.js?v=721"></script>
-  <script defer src="marketing.js?v=721"></script>
-  <script defer src="plano-financeiro.js?v=721"></script>
-  <script defer src="prestacao-contas.js?v=721"></script>
+  <script defer src="data.js?v=727"></script>
+  <script defer src="sienge-api.js?v=727"></script>
+  <script defer src="azure-auth.js?v=727"></script>
+  <script defer src="app.js?v=727"></script>
+  <script defer src="cartao-taxas.js?v=727"></script>
+  <script defer src="home-dashboard.js?v=727"></script>
+  <script defer src="anexos.js?v=727"></script>
+  <script defer src="contas-pagar.js?v=727"></script>
+  <script defer src="config-tags.js?v=727"></script>
+  <script defer src="config-users.js?v=727"></script>
+  <script defer src="suporte.js?v=727"></script>
+  <script defer src="construcao.js?v=727"></script>
+  <script defer src="empresas.js?v=727"></script>
+  <script defer src="relacionamento.js?v=727"></script>
+  <script defer src="compromissario.js?v=727"></script>
+  <script defer src="comercial.js?v=727"></script>
+  <script defer src="estoque-comercial.js?v=727"></script>
+  <script defer src="centros-custo.js?v=727"></script>
+  <script defer src="marketing.js?v=727"></script>
+  <script defer src="plano-financeiro.js?v=727"></script>
+  <script defer src="prestacao-contas.js?v=727"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=721"></script>
-  <script defer src="fluxo-caixa.js?v=721"></script>
-  <script defer src="caixa-diario.js?v=721"></script>
-  <script defer src="investimento.js?v=721"></script>
-  <script defer src="parametrizacao-parceiro.js?v=721"></script>
-  <script defer src="societario.js?v=721"></script>
-  <script defer src="participacoes.js?v=721"></script>
-  <script defer src="fiscal.js?v=721"></script>
-  <script defer src="indexadores.js?v=721"></script>
-  <script defer src="verificar-construcao.js?v=721"></script>
-  <script src="repactuacoes.js?v=721"></script>
-  <script defer src="repactuacao-lote.js?v=721"></script>
+  <script defer src="empresa-filter.js?v=727"></script>
+  <script defer src="fluxo-caixa.js?v=727"></script>
+  <script defer src="caixa-diario.js?v=727"></script>
+  <script defer src="investimento.js?v=727"></script>
+  <script defer src="parametrizacao-parceiro.js?v=727"></script>
+  <script defer src="societario.js?v=727"></script>
+  <script defer src="participacoes.js?v=727"></script>
+  <script defer src="fiscal.js?v=727"></script>
+  <script defer src="indexadores.js?v=727"></script>
+  <script defer src="verificar-construcao.js?v=727"></script>
+  <script src="repactuacoes.js?v=727"></script>
+  <script defer src="repactuacao-lote.js?v=727"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=721"></script>
+  <script defer src="dashboard-inadimplencia.js?v=727"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

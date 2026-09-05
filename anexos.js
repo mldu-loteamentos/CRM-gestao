@@ -813,6 +813,55 @@ function anexosEsc(s) {
     .replace(/"/g, '&quot;');
 }
 
+async function anexosPdfPageThumb(src, maxEdge) {
+  const pdfjsLib = window['pdfjs-dist/build/pdf'];
+  if (!pdfjsLib || !src) return '';
+  const isFile = typeof Blob !== 'undefined' && src instanceof Blob;
+  const url = isFile ? URL.createObjectURL(src) : String(src);
+  try {
+    const pdf = await pdfjsLib.getDocument(url).promise;
+    const page = await pdf.getPage(1);
+    const base = page.getViewport({ scale: 1 });
+    const edge = maxEdge || 280;
+    const scale = edge / Math.max(base.width, base.height);
+    const viewport = page.getViewport({ scale: Math.min(Math.max(scale, 0.2), 1.4) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(viewport.width));
+    canvas.height = Math.max(1, Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } finally {
+    if (isFile) URL.revokeObjectURL(url);
+  }
+}
+
+async function anexosEnsurePdfThumb(fileObj) {
+  if (!fileObj || fileObj.thumbUrl) return (fileObj && fileObj.thumbUrl) || '';
+  if (String(fileObj.ext || '').toLowerCase() !== 'pdf') return '';
+  const src = (fileObj.file instanceof Blob && fileObj.file.size) ? fileObj.file : fileObj.previewUrl;
+  if (!src) return '';
+  try {
+    fileObj.thumbUrl = await anexosPdfPageThumb(src, 280);
+  } catch (e) {
+    fileObj.thumbUrl = '';
+  }
+  return fileObj.thumbUrl || '';
+}
+
+function anexosThumbHtml(fileObj) {
+  const href = fileObj.previewUrl || fileObj.thumbUrl || '#';
+  const imgSrc = fileObj.thumbUrl || (['jpg', 'jpeg', 'png'].includes(String(fileObj.ext || '').toLowerCase()) ? fileObj.previewUrl : '');
+  if (imgSrc) {
+    return `<a href="${href}" target="_blank" title="Clique para ampliar" class="anexos-file-thumb">
+      <img src="${imgSrc}" alt="">
+    </a>`;
+  }
+  return `<div class="anexos-file-thumb anexos-file-thumb--empty"><i data-lucide="file" style="width:28px;height:28px;color:#94a3b8"></i></div>`;
+}
+
 /** Usado pelo Compromissário: baixa CONTRATO/DISTRATO da unidade no Sienge. */
 async function anexosFetchTermoBlobForContract(contract) {
   if (!contract) return null;
@@ -921,7 +970,6 @@ function renderAnexosModule() {
             ${anexosBuscarBtnHtml(AnexosState.mapaLoading, 'Buscar vendas')}
           </button>
           <button type="button" class="btn btn-outline anexos-ctrl" onclick="AnexosApp.fecharPeriodoMode()">Fechar período</button>
-          <span class="anexos-periodo-hint">Não precisa escolher empreendimento/unidade — o espelho lista o que falta enviar. Incorporação fica de fora, exceto lotes próprios.</span>
         </div>` : ''}
 
         <div class="anexos-filters-grid ${AnexosState.contexto === 'Cliente' ? 'is-cliente' : 'is-unidade'} ${AnexosState.periodoOpen ? 'is-periodo-locked' : ''}">
@@ -1007,12 +1055,10 @@ function renderAnexosModule() {
 
         ${(AnexosState.mapaUnidades || AnexosState.periodoMode || AnexosState.periodoOpen) && AnexosState.contexto !== 'Cliente' ? `
         <div class="anexos-mapa-panel" id="anexos-mapa-panel">
+          ${AnexosState.periodoMode || AnexosState.periodoOpen ? '' : `
           <div class="anexos-mapa-head">
-            <strong>${AnexosState.periodoMode || AnexosState.periodoOpen ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
-            ${AnexosState.periodoMode || AnexosState.periodoOpen
-              ? '<span>Empreendimentos e unidades com venda no período que precisam envio de anexos. Incorporação não entra, exceto lotes próprios.</span>'
-              : ''}
-          </div>
+            <strong>Mapa de unidades</strong>
+          </div>`}
           ${anexosBuildMapaHtml()}
         </div>` : ''}
       </div>
@@ -2156,6 +2202,22 @@ const AnexosApp = {
         await page.render({ canvasContext: context, viewport }).promise;
         ocrImageB64 = canvas.toDataURL('image/jpeg', 0.8);
         fingerprintCanvas = canvas;
+        if (!fileObj.thumbUrl) {
+          const edge = 280;
+          const s = edge / Math.max(canvas.width, canvas.height);
+          if (s >= 1) {
+            fileObj.thumbUrl = canvas.toDataURL('image/jpeg', 0.82);
+          } else {
+            const mini = document.createElement('canvas');
+            mini.width = Math.max(1, Math.round(canvas.width * s));
+            mini.height = Math.max(1, Math.round(canvas.height * s));
+            const mctx = mini.getContext('2d');
+            mctx.fillStyle = '#ffffff';
+            mctx.fillRect(0, 0, mini.width, mini.height);
+            mctx.drawImage(canvas, 0, 0, mini.width, mini.height);
+            fileObj.thumbUrl = mini.toDataURL('image/jpeg', 0.82);
+          }
+        }
       } finally {
         URL.revokeObjectURL(pdfUrl);
       }
@@ -2558,15 +2620,14 @@ const AnexosApp = {
       if (f.status === 'Revisar') badgeClass = "badge-warning";
       if (f.status.includes('Erro')) badgeClass = "badge-danger";
 
-      let previewHtml = `<div style="width: 160px; height: 160px; background: #f0f0f0; display:flex; align-items:center; justify-content:center; border-radius: 6px;"><i data-lucide="file" style="width:28px;height:28px;color:#999"></i></div>`;
-      if (f.previewUrl && ['jpg', 'jpeg', 'png'].includes(f.ext)) {
-        previewHtml = `<a href="${f.previewUrl}" target="_blank" title="Clique para ampliar"><img src="${f.previewUrl}" style="width: 160px; height: 160px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; cursor: pointer;"></a>`;
-      } else if (f.ext === 'pdf') {
-        previewHtml = `<a href="${f.previewUrl}" target="_blank" title="Clique para visualizar o PDF" style="display: block; width: 160px; height: 160px; border-radius: 6px; overflow: hidden; border: 1px solid #ddd; position: relative;">
-          <embed src="${f.previewUrl}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" style="width: 160px; height: 160px; pointer-events: none;">
-          <div style="position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0); cursor:pointer;"></div>
-        </a>`;
+      if (f.ext === 'pdf' && !f.thumbUrl && !f._thumbPending && (f.file || f.previewUrl)) {
+        f._thumbPending = true;
+        anexosEnsurePdfThumb(f).finally(function() {
+          f._thumbPending = false;
+          if (window.AnexosApp && typeof AnexosApp.renderFilesList === 'function') AnexosApp.renderFilesList();
+        });
       }
+      const previewHtml = anexosThumbHtml(f);
 
       const tagLabel = f.tags.join('-') || 'SEM_TAG';
       let duplicateSuffix = '';
@@ -3274,6 +3335,10 @@ const AnexosApp = {
                   customerLabel: destinoAPI === 'Cliente'
                     ? ((targetCustId || '') + (custName ? ' — ' + custName : ''))
                     : (unitNameStr || ('Unidade ' + (AnexosState.selectedUnidade || ''))),
+                  enterpriseId: cc,
+                  enterpriseName: AnexosState.ccName || '',
+                  unitId: AnexosState.selectedUnidade,
+                  unitName: unitNameStr,
                   summary: `${tagLabel} · ${nomeFinalArquivo} → ${destinoAPI === 'Cliente' ? 'Cliente' : 'Unidade'}`,
                   details: {
                     tag: tagLabel,
@@ -3282,6 +3347,8 @@ const AnexosApp = {
                     unitId: AnexosState.selectedUnidade,
                     unitName: unitNameStr,
                     enterpriseId: cc,
+                    enterpriseName: AnexosState.ccName || '',
+                    costCenterId: cc,
                     contractId: AnexosState.activeContract && AnexosState.activeContract.id,
                     contractNumber: AnexosState.activeContract && AnexosState.activeContract.contractNumber,
                     httpStatus: xhr.status
@@ -3334,13 +3401,20 @@ const AnexosApp = {
             module: 'GED / Anexos',
             status: 'erro',
             customerId: targetCustId || AnexosState.idCliente || '',
+            enterpriseId: cc,
+            enterpriseName: AnexosState.ccName || '',
+            unitId: AnexosState.selectedUnidade,
+            unitName: unitNameStr || '',
             summary: `Falha ${tagLabel || 'anexo'} · ${err.message}`,
             details: {
               tag: tagLabel,
               fileName: nomeFinalArquivo,
               destino: destinoAPI,
               unitId: AnexosState.selectedUnidade,
+              unitName: unitNameStr || '',
               enterpriseId: cc,
+              enterpriseName: AnexosState.ccName || '',
+              costCenterId: cc,
               contractId: AnexosState.activeContract && AnexosState.activeContract.id,
               error: String(err.message || err)
             }

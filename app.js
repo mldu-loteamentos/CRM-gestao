@@ -2012,7 +2012,7 @@ function auditEsc(s) {
 }
 
 function auditNorm(s) {
-  return String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  return String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function auditRowContext(row) {
@@ -2030,8 +2030,11 @@ function auditRowContext(row) {
 function auditIntegraUsers() {
   let users = [];
   try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
-  if (window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users) && ConfigUsersApp.users.length) {
-    users = ConfigUsersApp.users;
+  const cfg = (typeof ConfigUsersApp !== "undefined" && ConfigUsersApp)
+    || window.ConfigUsersApp
+    || null;
+  if ((!users || !users.length) && cfg && Array.isArray(cfg.users)) {
+    users = cfg.users;
   }
   const seen = new Set();
   return users.filter(function(u) {
@@ -2061,10 +2064,26 @@ function populateAuditUserFilter() {
   if (current && [...sel.options].some(function(o) { return o.value === current; })) sel.value = current;
 }
 
+function populateAuditCcDatalist() {
+  const list = document.getElementById("audit-cc-list");
+  if (!list) return;
+  const ccs = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+  if (!ccs.length) return;
+  list.innerHTML = ccs.map(function(cc) {
+    if (!cc) return "";
+    const id = String(cc.id || cc.code || "").trim();
+    const name = String(cc.name || "").trim();
+    const label = [id, name].filter(Boolean).join(" - ");
+    if (!label) return "";
+    return '<option value="' + auditEsc(label) + '"></option>';
+  }).join("");
+}
+
 window.renderAuditLogs = async function(forceReload) {
   const tbody = document.getElementById("audit-table-body");
   if (!tbody) return;
   populateAuditUserFilter();
+  populateAuditCcDatalist();
 
   const force = forceReload === true;
   const now = Date.now();
@@ -9330,14 +9349,21 @@ function formatCpfCnpj(val) {
         const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
         const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
         
-        if (vp > 0 && vf > 0 && vf > vp) {
+        const qMoney = (typeof quitacaoFmtMoney === "function")
+          ? quitacaoFmtMoney
+          : (n) => (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const st = window._quitacaoState || {};
+        if (st.descontoContrato != null) {
+           if (funnelDiffEl) funnelDiffEl.textContent = qMoney(st.descontoContrato);
+           if (funnelDiscountEl) funnelDiscountEl.textContent = `${Number(st.descontoPct || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+        } else if (vp > 0 && vf > 0 && vf > vp) {
            const diff = vf - vp;
            const pct = (diff / vf) * 100;
-           if (funnelDiffEl) funnelDiffEl.textContent = kpiFmt(diff);
-           if (funnelDiscountEl) funnelDiscountEl.textContent = `${pct.toFixed(2)}% OFF`;
+           if (funnelDiffEl) funnelDiffEl.textContent = qMoney(diff);
+           if (funnelDiscountEl) funnelDiscountEl.textContent = `${pct.toFixed(2).replace(".", ",")}%`;
         } else {
-           if (funnelDiffEl) funnelDiffEl.textContent = kpiFmt(0);
-           if (funnelDiscountEl) funnelDiscountEl.textContent = `0,00% OFF`;
+           if (funnelDiffEl) funnelDiffEl.textContent = qMoney(0);
+           if (funnelDiscountEl) funnelDiscountEl.textContent = `0,00%`;
         }
     };
 
@@ -9419,9 +9445,9 @@ function formatCpfCnpj(val) {
     const quitacaoEl = document.getElementById("quitacao-right-val-quitacao");
     if (quitacaoEl && customer && customer.cpfCnpj) {
       if (sale.status === "Quitado") {
-        quitacaoEl.textContent = kpiFmt(0);
+        quitacaoEl.textContent = quitacaoFmtMoney(0);
         const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
-        if (qVpRightEl) qVpRightEl.textContent = kpiFmt(0);
+        if (qVpRightEl) qVpRightEl.textContent = quitacaoFmtMoney(0);
         const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
         if (qVpRightCountEl) qVpRightCountEl.textContent = "0 parcelas";
       } else {
@@ -9440,12 +9466,12 @@ function formatCpfCnpj(val) {
           }
           
           if (val !== null) {
-            quitacaoEl.textContent = kpiFmt(val);
+            quitacaoEl.textContent = quitacaoFmtMoney(val);
             const qVpSumEl = document.getElementById("quitacao-bar-vp");
             if (qVpSumEl) qVpSumEl.textContent = kpiFmt(val);
             
             const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
-            if (qVpRightEl) qVpRightEl.textContent = kpiFmt(val);
+            if (qVpRightEl) qVpRightEl.textContent = quitacaoFmtMoney(val);
             
             const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
             if (qVpRightCountEl) qVpRightCountEl.textContent = countN + (countN === 1 ? " parcela" : " parcelas");
@@ -9788,12 +9814,12 @@ function formatCpfCnpj(val) {
             }, 0);
 
             if (leftVencidasCount) leftVencidasCount.textContent = countVencidas === 1 ? '1 parcela' : `${countVencidas} parcelas`;
-            if (leftVencidasVal) leftVencidasVal.textContent = kpiFmt(totalAtualizadoKPI);
+            if (leftVencidasVal) leftVencidasVal.textContent = quitacaoFmtMoney(totalAtualizadoKPI);
             if (leftAvencerCount) leftAvencerCount.textContent = countAVencer === 1 ? '1 parcela' : `${countAVencer} parcelas`;
-            if (leftAvencerVal) leftAvencerVal.textContent = kpiFmt(kpiAVencer);
+            if (leftAvencerVal) leftAvencerVal.textContent = quitacaoFmtMoney(kpiAVencer);
             
             if (leftTotalCount) leftTotalCount.textContent = totalCount === 1 ? '1 parcela' : `${totalCount} parcelas`;
-            if (leftTotalVal) leftTotalVal.textContent = kpiFmt(totalVal);
+            if (leftTotalVal) leftTotalVal.textContent = quitacaoFmtMoney(totalVal);
             
             // Desenha a rosca antiga caso exista, e o novo gauge
             if (document.getElementById("quitacao-doughnut-chart")) {
@@ -13086,7 +13112,7 @@ function distPermutaFmt(v) {
 }
 
 function quitacaoFmtMoney(v) {
-  return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function quitacaoFmtPct(v, digits) {
@@ -13258,6 +13284,9 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
   const jurosParcelamento = monthlyRate != null
     ? ((monthlyRate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P")
     : (window._quitacaoState && window._quitacaoState.jurosLabel) || "—";
+  const vpNum = Number(vp) || 0;
+  const face = original > 0.009 ? original : corrected;
+  const desconto = (!overdue && face > vpNum) ? (face - vpNum) : 0;
   return {
     raw: inst,
     due,
@@ -13266,12 +13295,13 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
     original,
     corrected,
     additions,
-    vp: Number(vp) || 0,
+    vp: vpNum,
     overdue: !!overdue,
     daysOverdue,
     daysForDiscount: overdue ? 0 : daysDisc,
     jurosVpPct,
-    valorComDesconto: Number(vp) || corrected,
+    desconto,
+    valorComDesconto: vpNum,
     jurosParcelamento,
     finePct: Number.isFinite(finePct) ? finePct : 2,
     interestLatePct: Number.isFinite(interestLatePct) ? interestLatePct : 1
@@ -13301,6 +13331,11 @@ function quitacaoMapPaidRow(inst) {
   });
   if (!(valorBaixa > 0.009)) valorBaixa = Number(inst.receiptValue) || original;
   if (!(liquido > 0.009)) liquido = Number(inst.receiptValue) || valorBaixa;
+  let desconto = Number(inst.discount || inst.discountValue || 0) || 0;
+  recs.forEach((r) => {
+    desconto += Number(r.discountValue || r.discount || 0);
+  });
+  if (!(desconto > 0.009) && original > liquido + 0.009) desconto = original - liquido;
   return {
     due: String(inst.dueDate || inst.due || "").slice(0, 10),
     number: inst.installmentNumber || inst.installmentId || inst.id || "—",
@@ -13310,7 +13345,7 @@ function quitacaoMapPaidRow(inst) {
     valorBaixa,
     liquido,
     juros: Number(inst.extra || inst.interest || 0) || 0,
-    desconto: Number(inst.discount || 0) || 0
+    desconto
   };
 }
 
@@ -13415,21 +13450,26 @@ window.loadQuitacaoDebtReport = async function(force) {
     if (paidValEl) paidValEl.textContent = quitacaoFmtMoney(sumPago);
     const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
     if (qVpRightCountEl) qVpRightCountEl.textContent = n === 1 ? "1 parcela" : `${n} parcelas`;
-    // Se a API total ainda não preencheu VP, usa soma do detalhe
+    const totalVp = sumVencVp + sumFutVp;
     const vpApi = Number(window.funnelCurrentVP) || 0;
-    if (!(vpApi > 0.009) && (sumVencVp + sumFutVp) > 0.009) {
+    if (!(vpApi > 0.009) && totalVp > 0.009) {
       const qVpRightEl = document.getElementById("quitacao-right-val-quitacao");
-      const totalVp = sumVencVp + sumFutVp;
       if (qVpRightEl) qVpRightEl.textContent = quitacaoFmtMoney(totalVp);
       window.funnelCurrentVP = totalVp;
-      const discVal = (sumVencCorr + sumFutCorr) - totalVp;
-      const discPct = (sumVencCorr + sumFutCorr) > 0 ? (discVal / (sumVencCorr + sumFutCorr)) * 100 : 0;
-      const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
-      const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
-      if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
-      if (funnelDiscountEl) funnelDiscountEl.textContent = `${discPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% OFF`;
-      if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     }
+    const discFut = aVencer.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
+    const discPaid = paidRows.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
+    const discVal = discFut + discPaid;
+    const discBase = aVencer.reduce((s, r) => s + (Number(r.original) || 0), 0)
+      + paidRows.reduce((s, r) => s + (Number(r.original) || 0), 0);
+    const discPct = discBase > 0 ? (discVal / discBase) * 100 : 0;
+    window._quitacaoState.descontoContrato = discVal;
+    window._quitacaoState.descontoPct = discPct;
+    const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
+    const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
+    if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
+    if (funnelDiscountEl) funnelDiscountEl.textContent = `${discPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     window.renderQuitacaoDebtReport();
     window.syncQuitacaoAbateLiquido();
     if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(sale) || "—"}`;
@@ -13449,130 +13489,128 @@ window.renderQuitacaoDebtReport = function() {
   const paidRows = st.paidRows || [];
   const jurosLabel = st.jurosLabel || "—";
   if (!vencidas.length && !aVencer.length && !paidRows.length) {
-    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela encontrada neste contrato.</div>`;
+    bodyEl.innerHTML = `<div class="quitacao-empty">Nenhuma parcela encontrada neste contrato.</div>`;
     return;
   }
-  const rowVenc = (r, i) => `
-    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f8fafc" : "#fff"};">
-      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
-      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
-      <td style="padding:6px 8px;">${r.tipo}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.corrected)}</td>
-      <td style="padding:6px 8px;text-align:center;font-weight:700;color:#166534;" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
-      <td style="padding:6px 8px;text-align:center;">${r.daysOverdue || "—"}</td>
-      <td style="padding:6px 8px;text-align:right;color:#b91c1c;">${quitacaoFmtMoney(r.additions)}</td>
-      <td style="padding:6px 8px;text-align:right;font-weight:800;color:#b91c1c;">${quitacaoFmtMoney(r.vp)}</td>
+  const rowVenc = (r) => `
+    <tr>
+      <td>${quitacaoFmtDate(r.due)}</td>
+      <td class="quitacao-num">${r.number}</td>
+      <td>${r.tipo}</td>
+      <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
+      <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
+      <td class="quitacao-center">${r.daysOverdue || "—"}</td>
+      <td class="quitacao-val quitacao-val--late">${quitacaoFmtMoney(r.additions)}</td>
+      <td class="quitacao-val quitacao-val--late quitacao-val--strong">${quitacaoFmtMoney(r.vp)}</td>
     </tr>`;
-  const rowFut = (r, i) => `
-    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f8fafc" : "#fff"};">
-      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
-      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
-      <td style="padding:6px 8px;">${r.tipo}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.corrected)}</td>
-      <td style="padding:6px 8px;text-align:center;font-weight:700;color:#166534;" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
-      <td style="padding:6px 8px;text-align:center;">${r.daysForDiscount || "—"}</td>
-      <td style="padding:6px 8px;text-align:right;">${r.jurosVpPct != null ? quitacaoFmtPct(r.jurosVpPct) : "—"}</td>
-      <td style="padding:6px 8px;text-align:right;font-weight:800;color:var(--color-primary);">${quitacaoFmtMoney(r.vp)}</td>
-      <td style="padding:6px 8px;text-align:right;color:#166534;">${quitacaoFmtMoney(r.valorComDesconto)}</td>
+  const rowFut = (r) => `
+    <tr>
+      <td>${quitacaoFmtDate(r.due)}</td>
+      <td class="quitacao-num">${r.number}</td>
+      <td>${r.tipo}</td>
+      <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
+      <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
+      <td class="quitacao-center">${r.daysForDiscount || "—"}</td>
+      <td class="quitacao-val">${r.jurosVpPct != null ? quitacaoFmtPct(r.jurosVpPct) : "—"}</td>
+      <td class="quitacao-val quitacao-val--vp">${quitacaoFmtMoney(r.vp)}</td>
+      <td class="quitacao-val quitacao-val--disc">${quitacaoFmtMoney(r.desconto)}</td>
     </tr>`;
   const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
   const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-  const sumFutCorr = aVencer.reduce((s, r) => s + (Number(r.corrected) || 0), 0);
+  const sumFutOrig = aVencer.reduce((s, r) => s + (Number(r.original) || 0), 0);
+  const sumFutDisc = aVencer.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
   const sumPago = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
   const sumBaixa = paidRows.reduce((s, r) => s + (Number(r.valorBaixa) || 0), 0);
-  const rowPago = (r, i) => `
-    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f0fdf4" : "#fff"};">
-      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
-      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
-      <td style="padding:6px 8px;">${r.tipo}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
-      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.payDate)}</td>
-      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.valorBaixa)}</td>
-      <td style="padding:6px 8px;text-align:right;font-weight:800;color:#166534;">${quitacaoFmtMoney(r.liquido)}</td>
-      <td style="padding:6px 8px;text-align:center;"><span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Pago</span></td>
+  const sumPagoDisc = paidRows.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
+  const rowPago = (r) => `
+    <tr>
+      <td>${quitacaoFmtDate(r.due)}</td>
+      <td class="quitacao-num">${r.number}</td>
+      <td>${r.tipo}</td>
+      <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
+      <td>${quitacaoFmtDate(r.payDate)}</td>
+      <td class="quitacao-val">${quitacaoFmtMoney(r.valorBaixa)}</td>
+      <td class="quitacao-val quitacao-val--vp">${quitacaoFmtMoney(r.liquido)}</td>
+      <td class="quitacao-val">${quitacaoFmtMoney(r.desconto)}</td>
     </tr>`;
   bodyEl.innerHTML = `
     ${paidRows.length ? `
-    <div style="padding:10px 12px;background:#166534;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;">Valores pagos (parcelas recebidas)</div>
-    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+    <div class="quitacao-sec-head">Valores pagos</div>
+    <table class="quitacao-table">
       <thead>
-        <tr style="background:#64748b;color:#fff;">
-          <th style="padding:8px;text-align:left;">Dt. Venc</th>
-          <th style="padding:8px;text-align:center;">Par</th>
-          <th style="padding:8px;text-align:left;">Tipo</th>
-          <th style="padding:8px;text-align:right;">Valor original</th>
-          <th style="padding:8px;text-align:left;">Data baixa</th>
-          <th style="padding:8px;text-align:right;">Valor baixa</th>
-          <th style="padding:8px;text-align:right;">Receb. líquido</th>
-          <th style="padding:8px;text-align:center;">Status</th>
+        <tr>
+          <th>Dt. Venc</th>
+          <th class="quitacao-center">Par</th>
+          <th>Tipo</th>
+          <th class="quitacao-val">Valor original</th>
+          <th>Data baixa</th>
+          <th class="quitacao-val">Valor baixa</th>
+          <th class="quitacao-val">Receb. líquido</th>
+          <th class="quitacao-val">Desconto</th>
         </tr>
       </thead>
       <tbody>
         ${paidRows.map(rowPago).join("")}
-        <tr style="background:#14532d;color:#fff;">
-          <td colspan="5" style="padding:8px;text-align:right;font-weight:800;">Totais recebidos</td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumBaixa)}</td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumPago)}</td>
-          <td></td>
+        <tr class="quitacao-subtotal">
+          <td colspan="5">Totais recebidos</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumBaixa)}</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumPago)}</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumPagoDisc)}</td>
         </tr>
       </tbody>
     </table>` : ""}
     ${vencidas.length ? `
-    <div style="padding:10px 12px;background:#450a0a;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;">Valores a pagar (vencidas)</div>
-    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+    <div class="quitacao-sec-head quitacao-sec-head--late">Valores a pagar · vencidas</div>
+    <table class="quitacao-table">
       <thead>
-        <tr style="background:#64748b;color:#fff;">
-          <th style="padding:8px;text-align:left;">Dt. Venc</th>
-          <th style="padding:8px;text-align:center;">Par</th>
-          <th style="padding:8px;text-align:left;">Tipo</th>
-          <th style="padding:8px;text-align:right;">Valor original</th>
-          <th style="padding:8px;text-align:right;">Valor corrigido</th>
-          <th style="padding:8px;text-align:center;">Juros</th>
-          <th style="padding:8px;text-align:center;">Dias atraso</th>
-          <th style="padding:8px;text-align:right;">Acréscimo</th>
-          <th style="padding:8px;text-align:right;">Valor atualizado</th>
+        <tr>
+          <th>Dt. Venc</th>
+          <th class="quitacao-center">Par</th>
+          <th>Tipo</th>
+          <th class="quitacao-val">Valor original</th>
+          <th class="quitacao-center">Juros</th>
+          <th class="quitacao-center">Dias atraso</th>
+          <th class="quitacao-val">Acréscimo</th>
+          <th class="quitacao-val">Valor atualizado</th>
         </tr>
       </thead>
       <tbody>
         ${vencidas.map(rowVenc).join("")}
-        <tr style="background:#334155;color:#fff;">
-          <td colspan="8" style="padding:8px;text-align:right;font-weight:800;">Total vencidas</td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumVenc)}</td>
+        <tr class="quitacao-subtotal quitacao-subtotal--late">
+          <td colspan="7">Total vencidas</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumVenc)}</td>
         </tr>
       </tbody>
     </table>` : ""}
     ${aVencer.length ? `
-    <div style="padding:10px 12px;background:#14532d;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;${vencidas.length ? "margin-top:0;" : ""}">Valores a pagar (a vencer) — valor presente</div>
-    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+    <div class="quitacao-sec-head">Valores a pagar · a vencer (valor presente)</div>
+    <table class="quitacao-table">
       <thead>
-        <tr style="background:#64748b;color:#fff;">
-          <th style="padding:8px;text-align:left;">Dt. Venc</th>
-          <th style="padding:8px;text-align:center;">Par</th>
-          <th style="padding:8px;text-align:left;">Tipo</th>
-          <th style="padding:8px;text-align:right;">Valor original</th>
-          <th style="padding:8px;text-align:right;">Valor corrigido</th>
-          <th style="padding:8px;text-align:center;">Juros</th>
-          <th style="padding:8px;text-align:center;">Dias p/ desconto</th>
-          <th style="padding:8px;text-align:right;">Juros VP</th>
-          <th style="padding:8px;text-align:right;">VP</th>
-          <th style="padding:8px;text-align:right;">Valor c/ desconto</th>
+        <tr>
+          <th>Dt. Venc</th>
+          <th class="quitacao-center">Par</th>
+          <th>Tipo</th>
+          <th class="quitacao-val">Valor original</th>
+          <th class="quitacao-center">Juros</th>
+          <th class="quitacao-center">Dias p/ VP</th>
+          <th class="quitacao-val">Juros VP</th>
+          <th class="quitacao-val">VP</th>
+          <th class="quitacao-val">Desconto</th>
         </tr>
       </thead>
       <tbody>
         ${aVencer.map(rowFut).join("")}
-        <tr style="background:#166534;color:#fff;">
-          <td colspan="4" style="padding:8px;text-align:right;font-weight:800;">Totais a vencer</td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFutCorr)}</td>
+        <tr class="quitacao-subtotal">
+          <td colspan="3">Totais a vencer</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumFutOrig)}</td>
           <td colspan="3"></td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFut)}</td>
-          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumFut)}</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumFut)}</td>
+          <td class="quitacao-val">${quitacaoFmtMoney(sumFutDisc)}</td>
         </tr>
       </tbody>
     </table>` : ""}
-    <div style="padding:12px 14px;background:#0f172a;color:#fff;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:0.85rem;font-weight:800;">
-      <span>Total saldo devedor presente</span>
+    <div class="quitacao-grand">
+      <span>Saldo devedor presente</span>
       <span>${quitacaoFmtMoney(st.saldoPresente || (sumVenc + sumFut))}</span>
     </div>`;
   if (window.lucide) lucide.createIcons();
@@ -13836,31 +13874,33 @@ window.exportQuitacaoSaldoDevedorExcel = function() {
     if (!rows || !rows.length) return;
     aoa.push([title]);
     if (mode === "vencidas") {
-      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Valor corrigido", "Juros", "Dias atraso", "Acréscimo", "Valor atualizado"]);
+      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Juros", "Dias atraso", "Acréscimo", "Valor atualizado"]);
       rows.forEach((r) => aoa.push([
-        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.corrected, r.jurosParcelamento || juros,
+        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.jurosParcelamento || juros,
         r.daysOverdue, r.additions, r.vp
       ]));
       const tot = rows.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-      aoa.push(["", "", "", "", "", "", "", "Total vencidas", tot]);
+      aoa.push(["", "", "", "", "", "", "Total vencidas", tot]);
     } else {
-      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Valor corrigido", "Juros", "Dias p/ desconto", "Juros VP %", "VP", "Valor c/ desconto"]);
+      aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Juros", "Dias p/ VP", "Juros VP %", "VP", "Desconto"]);
       rows.forEach((r) => aoa.push([
-        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.corrected, r.jurosParcelamento || juros,
-        r.daysForDiscount, r.jurosVpPct != null ? Number(r.jurosVpPct) : "", r.vp, r.valorComDesconto
+        quitacaoFmtDate(r.due), r.number, r.tipo, r.original, r.jurosParcelamento || juros,
+        r.daysForDiscount, r.jurosVpPct != null ? Number(r.jurosVpPct) : "", r.vp, r.desconto
       ]));
       const tot = rows.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-      aoa.push(["", "", "", "", "", "", "", "Total a vencer VP", tot, tot]);
+      const totDisc = rows.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
+      aoa.push(["", "", "", "", "", "", "Total a vencer", tot, totDisc]);
     }
     aoa.push([]);
   };
   if ((st.paidRows || []).length) {
     aoa.push(["VALORES PAGOS (PARCELAS RECEBIDAS)"]);
-    aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Data baixa", "Valor baixa", "Receb. líquido"]);
+    aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Data baixa", "Valor baixa", "Receb. líquido", "Desconto"]);
     st.paidRows.forEach((r) => aoa.push([
-      quitacaoFmtDate(r.due), r.number, r.tipo, r.original, quitacaoFmtDate(r.payDate), r.valorBaixa, r.liquido
+      quitacaoFmtDate(r.due), r.number, r.tipo, r.original, quitacaoFmtDate(r.payDate), r.valorBaixa, r.liquido, r.desconto
     ]));
-    aoa.push(["", "", "", "", "Totais recebidos", st.pagoBaixa || 0, st.pagoLiquido || 0]);
+    const paidDisc = st.paidRows.reduce((s, r) => s + (Number(r.desconto) || 0), 0);
+    aoa.push(["", "", "", "", "Totais recebidos", st.pagoBaixa || 0, st.pagoLiquido || 0, paidDisc]);
     aoa.push([]);
   }
   pushSection("VALORES A PAGAR (VENCIDAS)", st.vencidas || [], "vencidas");
@@ -15922,11 +15962,24 @@ window.submitReprocessBoleto = async function() {
 
     if (typeof window.logCrmAudit === "function") {
       const accountLabel = (selectedOpt && selectedOpt.textContent) || account;
+      const unit = sale && AppState.units && sale.unitId ? AppState.units[sale.unitId] : null;
+      const enterpriseId = currentReprocessCostCenterId
+        || (sale && (sale.costCenterId || sale.enterpriseId))
+        || (unit && unit.costCenterId)
+        || "";
+      const unitId = (sale && sale.unitId) || (unit && unit.id) || "";
+      const unitName = (sale && sale.unitName)
+        || (unit && (unit.name || [unit.block, unit.lot].filter(Boolean).join(" / ")))
+        || "";
       window.logCrmAudit({
         action: "BOLETO_GERADO",
         module: "Financeiro",
         status: "ok",
         customerId: customerId,
+        titleId: billId,
+        enterpriseId: enterpriseId,
+        unitId: unitId,
+        unitName: unitName,
         summary: `Título ${billId} · ${parcelasPart} · Venc. ${dueDateBr}`,
         details: {
           receivableBillId: billId,
@@ -15938,7 +15991,11 @@ window.submitReprocessBoleto = async function() {
           interestPercentage: interest,
           source: (typeof source !== "undefined" && source) || currentReprocessSource || "",
           contractNumber: sale && (sale.contractNumber || sale.number || ""),
-          saleId: AppState.selectedSaleId || ""
+          saleId: AppState.selectedSaleId || "",
+          enterpriseId: enterpriseId,
+          costCenterId: enterpriseId,
+          unitId: unitId,
+          unitName: unitName
         }
       });
     }
@@ -15973,17 +16030,34 @@ window.submitReprocessBoleto = async function() {
     if (pdfWin && !pdfWin.closed) try { pdfWin.close(); } catch (err) {}
     window._pendingBoletoPdfWin = null;
     if (typeof window.logCrmAudit === "function") {
+      const errSale = (AppState.sales || []).find(s =>
+        String(s.receivableBillId) === String(currentReprocessBillId) ||
+        String(s.id) === String(currentReprocessBillId)
+      );
+      const errUnit = errSale && AppState.units && errSale.unitId ? AppState.units[errSale.unitId] : null;
+      const enterpriseId = currentReprocessCostCenterId
+        || (errSale && (errSale.costCenterId || errSale.enterpriseId))
+        || (errUnit && errUnit.costCenterId)
+        || "";
       window.logCrmAudit({
         action: "BOLETO_ERRO",
         module: "Financeiro",
         status: "erro",
         customerId: AppState.selectedCustomerId,
+        titleId: currentReprocessBillId,
+        enterpriseId: enterpriseId,
+        unitId: (errSale && errSale.unitId) || "",
+        unitName: (errSale && errSale.unitName) || "",
         summary: "Falha ao gerar boleto do título " + (currentReprocessBillId || ""),
         details: {
           receivableBillId: currentReprocessBillId,
           installmentIds: currentReprocessInstId,
           error: String((e && e.message) || e),
-          source: typeof currentReprocessSource !== "undefined" ? currentReprocessSource : ""
+          source: typeof currentReprocessSource !== "undefined" ? currentReprocessSource : "",
+          enterpriseId: enterpriseId,
+          costCenterId: enterpriseId,
+          unitId: (errSale && errSale.unitId) || "",
+          unitName: (errSale && errSale.unitName) || ""
         }
       });
     }
