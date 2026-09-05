@@ -3703,6 +3703,43 @@ window.nexAgingSpecialHtml = function(client) {
   return "";
 };
 
+window.webroOccurrenceWasReceived = function(occ, client) {
+  if (!occ) return false;
+  if (occ.promiseStatus === "Cumprido" || occ.webroRecebido || occ.receivedAt) return true;
+  const baixa = String(occ.promiseDate || occ.date || "").slice(0, 10);
+  const ids = [];
+  const pushId = (v) => {
+    if (v == null || v === "") return;
+    ids.push(String(v));
+  };
+  if (client) {
+    pushId(client.saleId);
+    (client.billIds || []).forEach(pushId);
+  }
+  pushId(occ.saleId);
+  const maps = [
+    window.advFiltersFila && window.advFiltersFila.paidMap,
+    window.advFiltersZeroPaid && window.advFiltersZeroPaid.paidMap,
+    window.advFilters && window.advFilters.paidMap
+  ].filter(m => m && typeof m.has === "function");
+  const today = (typeof window.localDateStr === "function")
+    ? window.localDateStr(new Date())
+    : new Date().toISOString().slice(0, 10);
+  for (const map of maps) {
+    for (const id of ids) {
+      if (!map.has(id)) continue;
+      const daysAgo = Number(map.get(id));
+      if (!Number.isFinite(daysAgo)) continue;
+      if (!baixa) return true;
+      const payIso = (typeof window.addDaysIso === "function")
+        ? window.addDaysIso(today, -daysAgo)
+        : today;
+      if (payIso >= baixa) return true;
+    }
+  }
+  return false;
+};
+
 window.isWebroBaixaCanal = function(canal) {
   const n = String(canal || "")
     .toLowerCase()
@@ -3753,6 +3790,7 @@ window.getActiveWebroBaixaOccurrence = function(client) {
     if (!window.isWebroBaixaCanal(occ && occ.canal)) return false;
     if (occ.status === "Cancelada") return false;
     if (occ.promiseStatus === "Cumprido" || occ.promiseStatus === "Quebrado") return false;
+    if (typeof window.webroOccurrenceWasReceived === "function" && window.webroOccurrenceWasReceived(occ, client)) return false;
     if (!occ.promiseDate) return false;
     if (!occ.saleId) return true;
     const raw = String(occ.saleId);
@@ -4255,16 +4293,14 @@ window.applyAdvFiltersTo = (sourceList) => {
             }
         }
 
-        if (window.advFilters.webro && window.advFilters.webro !== 'TODOS') {
+        if (window.advFilters === window.advFiltersZeroPaid && window.advFilters.webro && window.advFilters.webro !== 'TODOS') {
             const st = window.advFilters.webro;
             filteredList = filteredList.filter(c => {
                 const w = typeof window.getWebroBaixaStatus === "function"
                   ? window.getWebroBaixaStatus(c)
                   : null;
-                if (st === 'OCULTAR') return !w;
                 if (st === 'AGUARDANDO') return w === 'AGUARDANDO';
                 if (st === 'PENDENTE') return w === 'PENDENTE';
-                if (st === 'COM_WEBRO') return !!w;
                 return true;
             });
         }
@@ -30301,10 +30337,14 @@ window.openAdvFiltersModal = function(context = 'fila') {
         renderDropdown('adv-dropdown-ccusto-container', ccItems, window.advFilters.ccusto, true);
 
         const isSubjudiceCtx = context === 'subjudice';
+        const isZeropaidCtx = context === 'zeropaid';
         const faseGroup = document.getElementById('adv-filter-fase-processual-group');
         const dataFaseGroup = document.getElementById('adv-filter-data-fase-group');
+        const webroGroup = document.getElementById('adv-filter-webro-group');
         if (faseGroup) faseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
         if (dataFaseGroup) dataFaseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
+        if (webroGroup) webroGroup.style.display = isZeropaidCtx ? 'block' : 'none';
+        if (!isZeropaidCtx && window.advFilters) window.advFilters.webro = 'TODOS';
 
         const syncSinglePillGroup = (groupId, value, fallback) => {
             const group = document.getElementById(groupId);
