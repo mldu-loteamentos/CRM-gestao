@@ -2637,7 +2637,7 @@ window.hasFinCrAction = function(actionId, flag) {
 window.setRulesSectionMode = function(root, canView, canEdit) {
   if (!root) return;
   root.querySelectorAll("input, select, textarea, button").forEach(el => {
-    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-cartao-taxas") return;
+    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-cartao-taxas" || el.id === "btn-save-alcada-desconto") return;
     if (el.closest && el.closest("#regras-tabs-menu")) return;
     el.disabled = !canEdit;
     el.style.pointerEvents = canEdit ? "" : "none";
@@ -2658,7 +2658,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "atribuicao", "fila", "cartao"].forEach(id => {
+  ["regua", "judiciais", "atribuicao", "fila", "cartao", "alcada"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -2670,6 +2670,7 @@ window.applyRulesModulePermissions = function() {
   window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-alcada"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-negociacao"), canViewNeg, canEditNeg);
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
@@ -2680,6 +2681,8 @@ window.applyRulesModulePermissions = function() {
   if (btnFila) btnFila.disabled = !canEditCob;
   const btnSaveCard = document.getElementById("btn-save-cartao-taxas");
   if (btnSaveCard) btnSaveCard.disabled = !canEditCob;
+  const btnSaveAlcada = document.getElementById("btn-save-alcada-desconto");
+  if (btnSaveAlcada) btnSaveAlcada.disabled = !canEditCob;
 
   let hint = document.getElementById("regras-perm-hint");
   if (!hint) {
@@ -2733,7 +2736,14 @@ window.switchRegrasTab = function(tabId) {
   if (tabId === "regra-cartao" && typeof window.renderCardFeesTab === "function") {
     window.renderCardFeesTab();
   }
+  if (tabId === "regra-alcada" && typeof window.renderAlcadaDescontoTab === "function") {
+    window.renderAlcadaDescontoTab();
+  }
+  if (tabId === "regra-negociacao" && typeof window.paintRenegotiationBlockSummary === "function") {
+    window.paintRenegotiationBlockSummary();
+  }
   window.applyRulesModulePermissions();
+  if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
 };
 
 // ----------------------------------------------------
@@ -11582,6 +11592,10 @@ let g_renegSale = null;
 let g_renegBills = [];
 
 function showRenegotiationView(customer, sale, allUnpaidBills) {
+  if (window._renegotiationBlockedMsg) {
+    alert(window._renegotiationBlockedMsg);
+    return;
+  }
   g_renegCustomer = customer;
   g_renegSale = sale;
   
@@ -13469,6 +13483,19 @@ window.loadQuitacaoDebtReport = async function(force) {
     const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
     if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
     if (funnelDiscountEl) funnelDiscountEl.textContent = `${discPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    const alcadaBanner = document.getElementById("quitacao-alcada-banner");
+    if (alcadaBanner && typeof window.resolveQuitacaoAlcada === "function") {
+      const allZero = typeof window.quitacaoUpcomingAllZeroRate === "function"
+        ? window.quitacaoUpcomingAllZeroRate((window.AppState && AppState.currentContractInstallments) || [])
+        : false;
+      const alcada = window.resolveQuitacaoAlcada(discPct, allZero);
+      window._quitacaoState.alcada = alcada;
+      alcadaBanner.style.display = "block";
+      alcadaBanner.className = "quitacao-alcada-banner " + (alcada.within ? "is-ok" : "is-warn");
+      alcadaBanner.textContent = allZero
+        ? ("Alçada taxa 0: desconto máximo " + (alcada.maxPct != null ? alcada.maxPct.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%" : "—") + (alcada.within ? "." : " — o desconto atual ultrapassa o teto."))
+        : ("Alçada aplicável: " + alcada.label + (alcada.within ? "." : " — o desconto atual está fora da faixa cadastrada."));
+    }
     if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     window.renderQuitacaoDebtReport();
     window.syncQuitacaoAbateLiquido();
@@ -23810,6 +23837,86 @@ window.saveFilaConfig = function() {
   alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso!`);
 };
 
+window.DEFAULT_RENEG_BLOCK_MONTHS = 24;
+
+window.getRenegotiationBlockMonths = function() {
+  const read = (key) => {
+    try {
+      const obj = JSON.parse(localStorage.getItem(key) || "{}") || {};
+      const n = parseInt(obj.bloqueio_meses, 10);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    } catch (e) {
+      return null;
+    }
+  };
+  const fromRegras = read("crm_moura_regras_negociacao");
+  if (fromRegras !== null) return fromRegras;
+  const fromRules = read("crm_moura_negotiation_rules");
+  if (fromRules !== null) return fromRules;
+  return window.DEFAULT_RENEG_BLOCK_MONTHS;
+};
+
+window.persistRenegotiationBlockMonths = function(months) {
+  const n = parseInt(months, 10);
+  const val = Number.isFinite(n) && n >= 0 ? n : window.DEFAULT_RENEG_BLOCK_MONTHS;
+  try {
+    const a = JSON.parse(localStorage.getItem("crm_moura_regras_negociacao") || "{}") || {};
+    a.bloqueio_meses = val;
+    a.updatedAt = Date.now();
+    localStorage.setItem("crm_moura_regras_negociacao", JSON.stringify(a));
+  } catch (e) {}
+  try {
+    const b = JSON.parse(localStorage.getItem("crm_moura_negotiation_rules") || "{}") || {};
+    b.bloqueio_meses = val;
+    localStorage.setItem("crm_moura_negotiation_rules", JSON.stringify(b));
+  } catch (e) {}
+  return val;
+};
+
+window.paintRenegotiationBlockSummary = function() {
+  const months = window.getRenegotiationBlockMonths();
+  const el = document.getElementById("reneg-block-months-summary");
+  if (el) el.textContent = months + (months === 1 ? " mês" : " meses");
+};
+
+window.openRenegotiationBlockModal = function() {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
+    alert("Sem permissão para editar Regras de Negociação.");
+    return;
+  }
+  const modal = document.getElementById("reneg-block-modal");
+  const input = document.getElementById("reneg-block-months");
+  if (!modal || !input) return;
+  input.value = window.getRenegotiationBlockMonths();
+  modal.style.display = "flex";
+};
+
+window.saveRenegotiationBlockMonths = function() {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
+    alert("Sem permissão para editar Regras de Negociação.");
+    return;
+  }
+  const input = document.getElementById("reneg-block-months");
+  const n = parseInt(input && input.value, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    alert("Informe um período válido em meses (0 ou mais).");
+    return;
+  }
+  window.persistRenegotiationBlockMonths(n);
+  window.paintRenegotiationBlockSummary();
+  const modal = document.getElementById("reneg-block-modal");
+  if (modal) modal.style.display = "none";
+  if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+};
+
+window.monthsSinceDate = function(dateObj) {
+  if (!dateObj || isNaN(dateObj.getTime())) return 0;
+  const now = new Date();
+  let months = (now.getFullYear() - dateObj.getFullYear()) * 12 + (now.getMonth() - dateObj.getMonth());
+  if (now.getDate() < dateObj.getDate()) months -= 1;
+  return Math.max(0, months);
+};
+
 window.addNegotiationRule = function(profile, rule = {}) {
     if (!window._seedingNegotiationRules && typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
         alert("Sem permissão para editar Regras de Negociação.");
@@ -23926,7 +24033,9 @@ window.saveNegotiationRules = function() {
             });
         });
     });
+    rulesConfig.bloqueio_meses = window.getRenegotiationBlockMonths();
     localStorage.setItem("crm_moura_negotiation_rules", JSON.stringify(rulesConfig));
+    window.persistRenegotiationBlockMonths(rulesConfig.bloqueio_meses);
 };
 
 window.initializeNegotiationRules = function() {
@@ -23953,6 +24062,7 @@ window.initializeNegotiationRules = function() {
         }
     });
     window._seedingNegotiationRules = false;
+    if (window.paintRenegotiationBlockSummary) window.paintRenegotiationBlockSummary();
 };
 
 setTimeout(() => {
@@ -26307,7 +26417,16 @@ function saveRegrasNegociacao() {
   
   const regras = {
     juros_pmt: getVal('regra-juros-pmt'),
-    bloqueio_meses: getVal('regra-bloqueio-meses'),
+    bloqueio_meses: (function() {
+      const el = document.getElementById('regra-bloqueio-meses');
+      if (el) {
+        const n = parseInt(el.value, 10);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      return typeof window.getRenegotiationBlockMonths === "function"
+        ? window.getRenegotiationBlockMonths()
+        : 24;
+    })(),
     operador: { sinal: getVal('regra-sinal-operador'), prazo: getVal('regra-prazo-operador') },
     supervisor: { sinal: getVal('regra-sinal-supervisor'), prazo: getVal('regra-prazo-supervisor') },
     gerente: { sinal: getVal('regra-sinal-gerente'), prazo: getVal('regra-prazo-gerente') }
@@ -27250,33 +27369,31 @@ async function loadRenegotiationHistory(customerId, saleId) {
             if (isLastRenegotiationOverdue) {
                 const parts = lastDateStr.split('/');
                 const lastDateObj = new Date(parts[2], parts[1]-1, parts[0]);
-                const monthsAgo = Math.floor((new Date() - lastDateObj) / (1000 * 60 * 60 * 24 * 30));
-                
-
-                
-                // Lógica de Bloqueio
-                let regrasStr = localStorage.getItem('crm_moura_regras_negociacao');
-                let configRegras = regrasStr ? JSON.parse(regrasStr) : {};
-                let blockMonths = configRegras.bloqueio_meses !== undefined ? parseInt(configRegras.bloqueio_meses) : 12;
+                const monthsAgo = typeof window.monthsSinceDate === "function"
+                  ? window.monthsSinceDate(lastDateObj)
+                  : Math.floor((new Date() - lastDateObj) / (1000 * 60 * 60 * 24 * 30));
+                const blockMonths = typeof window.getRenegotiationBlockMonths === "function"
+                  ? window.getRenegotiationBlockMonths()
+                  : 24;
                 
                 let profile = localStorage.getItem('mockProfile') || 'Operador';
                 let canBypass = profile === 'Supervisor' || profile === 'Gerente';
+                const blockMsg = `Nova renegociação bloqueada: acordo anterior quebrado há ${monthsAgo} ${monthsAgo === 1 ? "mês" : "meses"} (mínimo: ${blockMonths} meses).`;
 
                 if (btnRenegotiate) {
                     if (monthsAgo < blockMonths && !canBypass) {
+                        window._renegotiationBlockedMsg = blockMsg;
                         btnRenegotiate.disabled = true;
                         btnRenegotiate.style.opacity = '0.5';
                         btnRenegotiate.style.cursor = 'not-allowed';
-                        btnRenegotiate.title = `Nova renegociação bloqueada: Acordo anterior quebrado há ${monthsAgo} meses (mínimo exigido: ${blockMonths} meses).`;
-                        // Impede o clique mantendo o tooltip
-                        btnRenegotiate.onclick = (e) => { e.preventDefault(); e.stopPropagation(); return false; };
+                        btnRenegotiate.title = blockMsg;
+                        btnRenegotiate.onclick = (e) => { e.preventDefault(); e.stopPropagation(); alert(blockMsg); return false; };
                     } else {
+                        window._renegotiationBlockedMsg = "";
                         btnRenegotiate.disabled = false;
                         btnRenegotiate.style.opacity = '1';
                         btnRenegotiate.style.cursor = 'pointer';
                         btnRenegotiate.title = '';
-                        // O onclick original é atribuído em viewCustomerCard, então se foi sobrescrito precisaremos recriar
-                        // Para evitar problemas, vamos depender do window.location.reload() que o select do perfil faz.
                     }
                 }
 
@@ -27434,6 +27551,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
 
     // Remover badge se não caiu na condição acima
     if (!isLastRenegotiationOverdue) {
+        window._renegotiationBlockedMsg = "";
         document.querySelectorAll(".renegotiation-warning-badge").forEach(el => el.remove());
         const btnRenegotiate = document.getElementById("btn-renegotiate-page");
         if (btnRenegotiate) {
@@ -31686,6 +31804,8 @@ window.SYNC_KEYS = [
     "crm_moura_profiles",
     "crm_moura_rules",
     "crm_moura_rules_params",
+    "crm_moura_negotiation_rules",
+    "crm_moura_regras_negociacao",
     "crm_empresas_custom",
     "crm_plano_impostos",
     "crm_impostos_custom",
@@ -31700,6 +31820,7 @@ window.SYNC_KEYS = [
     "crm_moura_preambles_list",
     "crm_moura_cartorios_list",
     "crm_moura_cartao_taxas",
+    "crm_moura_alcada_desconto",
     "crm_compromissario_configs"
 ];
 

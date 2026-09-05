@@ -1,4 +1,49 @@
 // Lógica para a aba de Repactuações
+// Indexador 0 / REAL em parcela = acordo (não repactua). O contrato pode ter outro indexador (ex.: 8).
+
+function isRealIndexer(id, name) {
+    const sid = id == null || id === "" ? "" : String(id).trim();
+    const n = String(name || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toUpperCase()
+        .trim();
+    return sid === "0" || n === "REAL" || n === "0" || n === "0 - REAL" || n.endsWith(" - REAL");
+}
+
+function readIndexerRef(obj) {
+    if (!obj) return { id: null, name: "" };
+    const nested = obj.indexer && typeof obj.indexer === "object" ? obj.indexer : null;
+    const id = obj.indexerId != null && obj.indexerId !== ""
+        ? obj.indexerId
+        : (nested && (nested.id != null && nested.id !== "" ? nested.id : nested.indexerId));
+    const name = obj.indexerName || obj.indexerDescription || (nested && (nested.description || nested.name)) || "";
+    return { id: id == null || id === "" ? null : id, name: name || "" };
+}
+
+function pickContractIndexer(refs) {
+    const buckets = new Map();
+    (refs || []).forEach(ref => {
+        if (!ref || (ref.id == null && !ref.name)) return;
+        const key = String(ref.id != null ? ref.id : ref.name);
+        const prev = buckets.get(key) || { id: ref.id, name: ref.name || "", n: 0 };
+        prev.n += 1;
+        if (!prev.name && ref.name) prev.name = ref.name;
+        if ((prev.id == null || isRealIndexer(prev.id, prev.name)) && ref.id != null && !isRealIndexer(ref.id, ref.name)) {
+            prev.id = ref.id;
+            if (ref.name) prev.name = ref.name;
+        }
+        buckets.set(key, prev);
+    });
+    const all = [...buckets.values()];
+    const adjusting = all.filter(x => !isRealIndexer(x.id, x.name));
+    if (adjusting.length) {
+        adjusting.sort((a, b) => b.n - a.n);
+        return { chosen: adjusting[0], realCount: all.filter(x => isRealIndexer(x.id, x.name)).reduce((s, x) => s + x.n, 0), adjustCount: adjusting.reduce((s, x) => s + x.n, 0) };
+    }
+    const real = all.find(x => isRealIndexer(x.id, x.name));
+    return { chosen: real || { id: 0, name: "REAL" }, realCount: all.reduce((s, x) => s + x.n, 0), adjustCount: 0 };
+}
 
 async function loadRepactuacoes(isBackground = false) {
     const loadingEl = document.getElementById("repactuacoes-loading");
@@ -174,47 +219,45 @@ async function loadRepactuacoes(isBackground = false) {
             let indexerId = null;
             let indexerNameBackup = "Índice Contratual";
             let allInstallments = [];
+            const indexerRefs = [];
+            let acordoParcelCount = 0;
             
-            // 1. Extrair data da venda e indexador
+            // 1. Extrair data da venda e indexador por parcela (0/REAL = acordo, não define o contrato)
             items.forEach(item => {
                 let em = item.emissionDate || item.issueDate || item.contractDate || item.saleDate;
                 if (!emissionDate && em) emissionDate = String(em).split('T')[0];
                 
-                if (item.indexer?.description || item.indexerDescription) {
-                    let desc = item.indexer?.description || item.indexerDescription;
-                    if (!indexerNameBackup || indexerNameBackup === "Índice Contratual" || indexerNameBackup.toUpperCase() === "REAL" || indexerNameBackup === "0") {
-                        indexerNameBackup = desc;
-                    }
-                }
+                const itemIdx = readIndexerRef(item);
+                if (itemIdx.id != null || itemIdx.name) indexerRefs.push(itemIdx);
                 
                 const installments = item.installments || [];
                 for (const inst of installments) {
-                    if (inst.indexerId) {
-                        // Prioriza indexador válido (se for 0 ou REAL, pode ser sobrescrito se houver um indexador real depois)
-                        let isInstReal = String(inst.indexerId) === "0" || String(inst.indexerName || inst.indexerDescription).toUpperCase() === "REAL";
-                        if (!indexerId || indexerId === 0 || String(indexerNameBackup).toUpperCase() === "REAL") {
-                            indexerId = inst.indexerId;
-                            indexerNameBackup = inst.indexerName || inst.indexerDescription || indexerNameBackup;
-                        } else if (!isInstReal) {
-                            // Se achou um indexador de verdade, e o que tínhamos era REAL, atualiza
-                            indexerId = inst.indexerId;
-                            indexerNameBackup = inst.indexerName || inst.indexerDescription || indexerNameBackup;
-                        }
-                    }
+                    const instIdx = readIndexerRef(inst);
+                    const resolvedId = instIdx.id != null ? instIdx.id : itemIdx.id;
+                    const resolvedName = instIdx.name || itemIdx.name;
+                    if (resolvedId != null || resolvedName) indexerRefs.push({ id: resolvedId, name: resolvedName });
                     if (inst.dueDate && inst.installmentNumber) {
                         const val = parseFloat(inst.currentValue || inst.installmentValue || inst.originalValue || inst.principalValue || inst.value || 0);
+                        const isAcordo = isRealIndexer(resolvedId, resolvedName);
+                        if (isAcordo) acordoParcelCount += 1;
                         allInstallments.push({
                             id: inst.id || inst.document || inst.installmentNumber,
                             number: inst.installmentNumber,
                             dueDate: inst.dueDate,
                             value: val,
                             annualCorrection: inst.annualCorrection,
-                            indexerName: inst.indexerName || inst.indexerDescription,
-                            indexerId: inst.indexerId
+                            indexerName: resolvedName,
+                            indexerId: resolvedId,
+                            acordoSemRepactuacao: isAcordo
                         });
                     }
                 }
             });
+            const picked = pickContractIndexer(indexerRefs);
+            if (picked.chosen) {
+                indexerId = picked.chosen.id;
+                indexerNameBackup = picked.chosen.name || indexerNameBackup;
+            }
 
             if (!emissionDate && typeof window.sale !== 'undefined' && window.sale) {
                  const saleDateRaw = window.sale.saleDate || window.sale.contractDate || window.sale.issueDate;
@@ -226,10 +269,10 @@ async function loadRepactuacoes(isBackground = false) {
             // Se ainda não achou emissionDate, usa 01/01/2020 como fallback pra não quebrar a tela inteira
             if (!emissionDate) emissionDate = "2020-01-01";
             
-            // Se não achar indexador, assume REAL/0 para poder exibir a tela com aviso
-            if (!indexerId) {
-                indexerId = 0;
-                indexerNameBackup = "REAL";
+            // Só assume contrato sem reajuste se nenhuma parcela tiver indexador de correção
+            if (picked.adjustCount === 0 && (indexerId == null || indexerId === "" || isRealIndexer(indexerId, indexerNameBackup))) {
+                indexerId = indexerId != null && indexerId !== "" ? indexerId : 0;
+                if (!indexerNameBackup || indexerNameBackup === "Índice Contratual") indexerNameBackup = "REAL";
             }
 
             // 2. Buscar informações do indexador no Sienge (para pegar revenueRetroactivity)
@@ -253,6 +296,13 @@ async function loadRepactuacoes(isBackground = false) {
                         IndexadoresState.allSiengeIndexers = allIndexers;
                     }
                 }
+            }
+
+            if ((!indexerDetails || isRealIndexer(indexerDetails.id, indexerDetails.name)) && picked.adjustCount > 0 && picked.chosen && !isRealIndexer(picked.chosen.id, picked.chosen.name)) {
+                const altId = picked.chosen.id;
+                const pool = (typeof IndexadoresState !== "undefined" && IndexadoresState.allSiengeIndexers) ? IndexadoresState.allSiengeIndexers : [];
+                indexerDetails = pool.find(i => String(i.id) === String(altId)) || indexerDetails;
+                indexerId = altId;
             }
 
             if (!indexerDetails) {
@@ -295,12 +345,14 @@ async function loadRepactuacoes(isBackground = false) {
             let bcbCode = null;
             const nameUpper = indexerName.toUpperCase();
             
-            if (nameUpper === 'REAL') {
+            if (nameUpper === 'REAL' && picked.adjustCount === 0) {
                 const meta = {
                     emissionDate: emissionDate,
                     indexerName: indexerName,
                     indexerId: indexerId,
-                    revenueRetroactivity: retro
+                    revenueRetroactivity: retro,
+                    acordoParcelCount: acordoParcelCount,
+                    adjustParcelCount: 0
                 };
                 renderRepactuacoes([], meta);
                 loadingEl.style.display = "none";
@@ -429,11 +481,13 @@ async function loadRepactuacoes(isBackground = false) {
                     let beforeInst = null;
                     let afterInst = null;
 
-                    // Filtrar apenas as parcelas que têm correção anual (se a propriedade existir)
-                    const hasAnyAnnualCorrection = allInstallments.some(i => i.annualCorrection === true);
-                    const validInstallments = hasAnyAnnualCorrection 
-                        ? allInstallments.filter(i => i.annualCorrection === true)
-                        : allInstallments;
+                    // Parcelas de acordo (indexador 0/REAL) não entram na repactuação
+                    const adjustableInst = allInstallments.filter(i => !i.acordoSemRepactuacao && !isRealIndexer(i.indexerId, i.indexerName));
+                    const pool = adjustableInst.length ? adjustableInst : allInstallments.filter(i => !i.acordoSemRepactuacao);
+                    const hasAnyAnnualCorrection = pool.some(i => i.annualCorrection === true);
+                    const validInstallments = hasAnyAnnualCorrection
+                        ? pool.filter(i => i.annualCorrection === true)
+                        : pool;
 
                     const adjustDateStart = new Date(Date.UTC(y, emMonth, 1));
                     
@@ -488,7 +542,9 @@ async function loadRepactuacoes(isBackground = false) {
                 indexerName: indexerName,
                 retro: retro,
                 baseMonthName: new Date(Date.UTC(emYear, emMonth + retro, 1)).toLocaleDateString('pt-BR', {month:'long', timeZone: 'UTC'}),
-                upcoming: upcomingReadjustment
+                upcoming: upcomingReadjustment,
+                acordoParcelCount: acordoParcelCount,
+                adjustParcelCount: picked.adjustCount
             };
             
             renderRepactuacoes(data, meta);
@@ -522,7 +578,9 @@ function renderRepactuacoes(historico, meta) {
     }
 
     let explanationHtml = "";
-    const isReal = String(meta.indexerId) === "0" || String(meta.indexerName).toUpperCase() === "REAL";
+    const hasAdjusting = Number(meta.adjustParcelCount) > 0;
+    const isReal = !hasAdjusting && (String(meta.indexerId) === "0" || String(meta.indexerName || "").toUpperCase() === "REAL");
+    const acordoN = Number(meta.acordoParcelCount) || 0;
     
     if (isReal) {
         explanationHtml = `
@@ -532,10 +590,13 @@ function renderRepactuacoes(historico, meta) {
             </div>
         `;
     } else {
+        const acordoNote = acordoN
+            ? ` ${acordoN} parcela(s) de acordo estão com indexador <strong>0 / REAL</strong> e não entram na repactuação.`
+            : "";
         explanationHtml = `
             <div style="flex: 1; padding-left: 20px; border-left: 1px solid #cbd5e1; font-size: 0.85rem; color: #475569; line-height: 1.4;">
                 <i data-lucide="info" style="width: 14px; margin-right: 4px; vertical-align: middle; color: #10b981;"></i>
-                A data base do indexador <strong>${meta.indexerName}</strong> é <strong>${meta.retro} meses</strong> da data da venda, ou seja, reajustará em <strong>${meta.emissionMonthName}</strong> (mês da venda), mas com o <strong>${meta.indexerName}</strong> acumulado de 12 meses até <strong>${meta.baseMonthName}</strong>.
+                A data base do indexador <strong>${meta.indexerName}</strong> é <strong>${meta.retro} meses</strong> da data da venda, ou seja, reajustará em <strong>${meta.emissionMonthName}</strong> (mês da venda), mas com o <strong>${meta.indexerName}</strong> acumulado de 12 meses até <strong>${meta.baseMonthName}</strong>.${acordoNote}
             </div>
         `;
     }

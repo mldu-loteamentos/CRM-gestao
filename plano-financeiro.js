@@ -44,7 +44,7 @@ const PlanoFinanceiroApp = {
   },
 
   DFC_TEMPLATE_VER: 4,
-  ACCOUNTS_MAP_VER: 1,
+  ACCOUNTS_MAP_VER: 2,
 
   dfcTemplateGroups() {
     const n = (id, name, type, parentId, extra = {}) => ({
@@ -100,9 +100,9 @@ const PlanoFinanceiroApp = {
   dfcAccountRemap() {
     return {
       g_01_01: 'g_01_01',
-      g_01_02: 'g_01_03',
-      g_01_03: 'g_01_02',
-      g_01_04: 'g_01_03',
+      g_01_02: 'g_01_02',
+      g_01_03: 'g_01_03',
+      g_01_04: 'g_01_04',
       g_01_05: 'g_01_04',
       g_02_01: 'g_02_01',
       g_02_02: 'g_02_02',
@@ -168,6 +168,54 @@ const PlanoFinanceiroApp = {
       this.applyDfcTemplate(visao);
       this.saveToStorage({ silent: true });
     }
+    if (this.correctSwappedReceitaNodes(visao)) {
+      this.saveToStorage({ silent: true });
+    }
+  },
+
+  // 1.02.01 (administração/serviços) → 01.02; 1.04.01 (venda/reembolso) → 01.03.
+  // O remap antigo invertia g_01_02 ↔ g_01_03 e o Caixa lia essa alocação trocada.
+  correctSwappedReceitaNodes(visao) {
+    if (!visao || !Array.isArray(visao.groups)) return false;
+    const serv = visao.groups.find(g => g.id === 'g_01_02');
+    const naoOp = visao.groups.find(g => g.id === 'g_01_03');
+    if (!serv || !naoOp) return false;
+    serv.accounts = Array.isArray(serv.accounts) ? serv.accounts.map(String) : [];
+    naoOp.accounts = Array.isArray(naoOp.accounts) ? naoOp.accounts.map(String) : [];
+
+    const destOf = (id) => {
+      const byCode = this.lookupDfcByCode(id);
+      if (byCode === 'g_01_02' || byCode === 'g_01_03') return byCode;
+      const cat = (this.categories || []).find(c => String(c.id) === String(id));
+      if (cat) {
+        const byName = this.suggestGroup(cat);
+        if (byName === 'g_01_02' || byName === 'g_01_03') return byName;
+      }
+      return null;
+    };
+
+    let changed = false;
+    const move = (from, to, id) => {
+      from.accounts = from.accounts.filter(a => String(a) !== String(id));
+      if (!to.accounts.includes(String(id))) to.accounts.push(String(id));
+      changed = true;
+    };
+
+    [...serv.accounts].forEach(id => {
+      if (destOf(id) === 'g_01_03') move(serv, naoOp, id);
+    });
+    [...naoOp.accounts].forEach(id => {
+      if (destOf(id) === 'g_01_02') move(naoOp, serv, id);
+    });
+
+    if (changed) {
+      const sortIds = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true });
+      serv.accounts.sort(sortIds);
+      naoOp.accounts.sort(sortIds);
+      visao.accountsMapVer = this.ACCOUNTS_MAP_VER;
+      visao.updatedAt = Date.now();
+    }
+    return changed;
   },
 
   _normTxt(s) {
@@ -532,7 +580,12 @@ const PlanoFinanceiroApp = {
       });
       this.buildAccountTreeMeta();
       this.sortAccountsTree();
-      
+      const dfc = (this.visoes || []).find(v => v.id === 'dfc_default');
+      if (dfc && this.correctSwappedReceitaNodes(dfc)) {
+        this.saveToStorage({ silent: true });
+        if (this.selectedVisaoId === 'dfc_default') this.renderBoard();
+      }
+
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
 
@@ -1071,14 +1124,17 @@ const PlanoFinanceiroApp = {
         : (cloud.crm_plano_visoes_v2 || local);
       if (merged && merged !== local) {
         try { this.visoes = JSON.parse(merged) || this.visoes; } catch (e) {}
-        this.ensureDfcDefault();
+      }
+      this.ensureDfcDefault();
+      const next = JSON.stringify(this.visoes || []);
+      if (next !== local) {
         this.saveToStorage({ silent: true });
         this.renderVisoesList();
         if (this.selectedVisaoId) this.renderBoard();
         else this.renderTable();
       }
-      if (merged && merged !== cloud.crm_plano_visoes_v2) {
-        await setDoc(docRef, { crm_plano_visoes_v2: merged }, { merge: true });
+      if (next !== (cloud.crm_plano_visoes_v2 || "")) {
+        await setDoc(docRef, { crm_plano_visoes_v2: next }, { merge: true });
       }
     } catch (e) {
       console.warn("[Plano Financeiro] Sync visões:", e);

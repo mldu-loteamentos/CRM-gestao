@@ -185,28 +185,19 @@
   function passSwitchHtml(productId, passFee) {
     const on = passFee !== false;
     return (
-      '<button type="button" id="cartao-taxas-pass-' + productId + '" class="cartao-taxas-switch cartao-taxas-switch--row' + (on ? ' is-on' : '') + '" onclick="window.toggleCardFeePolicy(\'' + productId + '\')" aria-pressed="' + (on ? 'true' : 'false') + '" title="' + (on ? 'Repassar a taxa ao cliente' : 'Isentar a taxa nesta faixa') + '">' +
-        '<span class="cartao-taxas-switch-off">Isentar</span>' +
-        '<span class="cartao-taxas-switch-track" aria-hidden="true"><span class="cartao-taxas-switch-knob"></span></span>' +
-        '<span class="cartao-taxas-switch-on">Repassar</span>' +
-      '</button>'
+      '<label class="moura-switch">' +
+        '<input type="checkbox" id="cartao-taxas-pass-' + productId + '"' + (on ? ' checked' : '') + '>' +
+        '<span class="moura-switch-track" aria-hidden="true"></span>' +
+        '<span class="moura-switch-text">Repassar para cliente</span>' +
+      '</label>'
     );
   }
-
-  window.toggleCardFeePolicy = function (productId) {
-    const btn = document.getElementById("cartao-taxas-pass-" + productId);
-    if (!btn) return;
-    const next = !btn.classList.contains("is-on");
-    btn.classList.toggle("is-on", next);
-    btn.setAttribute("aria-pressed", next ? "true" : "false");
-    btn.title = next ? "Repassar a taxa ao cliente" : "Isentar a taxa nesta faixa";
-  };
 
   function collectPassFeesFromToggles() {
     const map = defaultPassFees();
     PRODUCTS.forEach(function (p) {
-      const btn = document.getElementById("cartao-taxas-pass-" + p.id);
-      if (btn) map[p.id] = btn.classList.contains("is-on");
+      const input = document.getElementById("cartao-taxas-pass-" + p.id);
+      if (input) map[p.id] = !!input.checked;
     });
     return map;
   }

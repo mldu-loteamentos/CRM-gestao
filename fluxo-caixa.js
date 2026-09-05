@@ -85,12 +85,20 @@ const FluxoCaixaApp = {
   },
 
   visao() {
+    if (typeof PlanoFinanceiroApp !== "undefined") {
+      if (!Array.isArray(PlanoFinanceiroApp.visoes) || !PlanoFinanceiroApp.visoes.length) {
+        try {
+          PlanoFinanceiroApp.visoes = JSON.parse(localStorage.getItem(PlanoFinanceiroApp.STORAGE_KEY || "crm_plano_visoes_v2") || "[]") || [];
+        } catch (e) {
+          PlanoFinanceiroApp.visoes = [];
+        }
+      }
+      if (typeof PlanoFinanceiroApp.ensureDfcDefault === "function") PlanoFinanceiroApp.ensureDfcDefault();
+      const dfc = (PlanoFinanceiroApp.visoes || []).find(v => v.id === "dfc_default");
+      if (dfc) return dfc;
+    }
     let visoes = [];
     try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
-    if (typeof PlanoFinanceiroApp !== "undefined") {
-      if (typeof PlanoFinanceiroApp.ensureDfcDefault === "function") PlanoFinanceiroApp.ensureDfcDefault();
-      if (Array.isArray(PlanoFinanceiroApp.visoes) && PlanoFinanceiroApp.visoes.length) visoes = PlanoFinanceiroApp.visoes;
-    }
     return visoes.find(v => v.id === "dfc_default") || visoes[0] || { groups: [] };
   },
 
