@@ -25,6 +25,8 @@ const AnexosState = {
   periodoEnd: '',
   periodoOpen: false,
   periodoMapa: [], // [{ enterpriseId, enterpriseName, units: [{id,name,...}] }]
+  periodoSkippedIncorp: 0,
+  unidadesLoading: false,
   tagMemory: [] // fingerprints aprendidos
 };
 
@@ -700,7 +702,8 @@ function anexosBuildPeriodoMapaHtml() {
       + '</div>';
   }
   if (!groups.length) {
-    return '<div class="anexos-mapa-empty">Nenhuma venda pendente de anexo no período.</div>';
+    const skippedEmpty = Number(AnexosState.periodoSkippedIncorp) || 0;
+    return `<div class="anexos-mapa-empty">Nenhuma venda pendente de anexo no período.${skippedEmpty ? ` ${skippedEmpty} lote(s) de incorporação foram ocultados (só lotes próprios entram).` : ''}</div>`;
   }
   let html = '<div class="anexos-mapa-legend">'
     + '<span class="anexos-mapa-pill is-pendente">Pendente de envio</span>'
@@ -727,7 +730,8 @@ function anexosBuildPeriodoMapaHtml() {
   });
   html += '</div>';
   const total = groups.reduce((n, g) => n + (g.units || []).length, 0);
-  html += `<div class="anexos-mapa-foot">${groups.length} empreendimento(s) · ${total} unidade(s) no período</div>`;
+  const skipped = Number(AnexosState.periodoSkippedIncorp) || 0;
+  html += `<div class="anexos-mapa-foot">${groups.length} empreendimento(s) · ${total} unidade(s) no período${skipped ? ` · ${skipped} lote(s) de incorporação ocultados` : ''}</div>`;
   return html;
 }
 
@@ -843,37 +847,42 @@ function renderAnexosModule() {
         <div class="anexos-periodo-bar">
           <label>Início <input type="date" id="anexos-periodo-ini" value="${AnexosState.periodoStart || ''}" onchange="AnexosState.periodoStart=this.value"></label>
           <label>Fim <input type="date" id="anexos-periodo-fim" value="${AnexosState.periodoEnd || ''}" onchange="AnexosState.periodoEnd=this.value"></label>
-          <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarVendasPeriodo()">
-            <i data-lucide="search" style="width:16px;"></i> Buscar vendas
+          <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarVendasPeriodo()" ${AnexosState.mapaLoading ? 'disabled' : ''} style="display:inline-flex;align-items:center;gap:6px;">
+            ${AnexosState.mapaLoading
+              ? '<span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Buscando'
+              : '<i data-lucide="search" style="width:16px;"></i> Buscar vendas'}
           </button>
           <button type="button" class="btn btn-outline anexos-ctrl" onclick="AnexosApp.fecharPeriodoMode()">Fechar período</button>
-          <span class="anexos-periodo-hint">Não precisa escolher empreendimento/unidade — o espelho lista o que falta enviar.</span>
+          <span class="anexos-periodo-hint">Não precisa escolher empreendimento/unidade — o espelho lista o que falta enviar. Incorporação fica de fora, exceto lotes próprios.</span>
         </div>` : ''}
 
-        <div class="anexos-filters-grid ${AnexosState.contexto === 'Cliente' ? 'is-cliente' : 'is-unidade'}">
+        <div class="anexos-filters-grid ${AnexosState.contexto === 'Cliente' ? 'is-cliente' : 'is-unidade'} ${AnexosState.periodoOpen ? 'is-periodo-locked' : ''}">
           ${AnexosState.contexto !== 'Cliente' ? `
             <div class="form-group anexos-field" style="margin:0;">
               <label>Centro de Custo (Empreendimento)</label>
               <div class="anexos-cc-combo">
-                <input type="text" id="anexos-cc" class="form-control anexos-ctrl" placeholder="Digite ID, nome ou escolha na lista..."
+                <input type="text" id="anexos-cc" class="form-control anexos-ctrl" placeholder="${AnexosState.periodoOpen ? 'Clique no lote do mapa abaixo…' : 'Digite ID, nome ou escolha na lista...'}"
                   value="${String(ccDisplay).replace(/"/g, '&quot;')}"
+                  ${AnexosState.periodoOpen ? 'disabled' : ''}
                   onfocus="AnexosApp.openCostCenterList()"
                   oninput="AnexosApp.handleCostCenterAutocomplete(this.value)"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarUnidades();}"
                   autocomplete="off">
-                <button type="button" class="btn btn-outline anexos-ctrl anexos-cc-chevron" title="Abrir lista" onclick="AnexosApp.toggleCostCenterList()">
+                <button type="button" class="btn btn-outline anexos-ctrl anexos-cc-chevron" title="Abrir lista" onclick="AnexosApp.toggleCostCenterList()" ${AnexosState.periodoOpen ? 'disabled' : ''}>
                   <i data-lucide="chevron-down" style="width:16px;height:16px;"></i>
                 </button>
-                <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarUnidades()" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:0 14px;">
-                  <i data-lucide="search" style="width:16px"></i> Buscar
+                <button type="button" class="btn btn-primary anexos-ctrl" id="anexos-btn-buscar-cc" onclick="AnexosApp.buscarUnidades()" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:0 14px;" ${AnexosState.periodoOpen || AnexosState.unidadesLoading ? 'disabled' : ''}>
+                  ${AnexosState.unidadesLoading
+                    ? '<span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Buscando'
+                    : '<i data-lucide="search" style="width:16px"></i> Buscar'}
                 </button>
                 <div id="anexos-cc-suggestions" class="anexos-cc-suggestions" style="display:none;"></div>
               </div>
             </div>
             <div class="form-group anexos-field" style="margin:0;">
               <label>Selecione a Unidade</label>
-              <select id="anexos-unidade" class="form-control anexos-ctrl" onchange="AnexosApp.selecionarUnidade(this.value)" ${AnexosState.unidades.length ? '' : 'disabled'}>
-                <option value="">Selecione uma unidade...</option>
+              <select id="anexos-unidade" class="form-control anexos-ctrl" onchange="AnexosApp.selecionarUnidade(this.value)" ${AnexosState.periodoOpen || !AnexosState.unidades.length ? 'disabled' : ''}>
+                <option value="">${AnexosState.periodoOpen ? 'Clique no lote do mapa abaixo…' : 'Selecione uma unidade...'}</option>
                 ${AnexosState.unidades.map(u => `<option value="${u.id}" ${AnexosState.selectedUnidade == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
               </select>
               <div id="anexos-unidade-loading" style="display:none;font-size:12px;color:var(--color-primary);margin-top:4px;">Carregando unidades...</div>
@@ -894,7 +903,7 @@ function renderAnexosModule() {
           `}
         </div>
 
-        ${AnexosState.contexto !== 'Cliente' ? `
+        ${AnexosState.contexto !== 'Cliente' && !AnexosState.periodoOpen ? `
         <label class="anexos-mapa-flag">
           <input type="checkbox" ${AnexosState.mapaUnidades ? 'checked' : ''} onchange="AnexosApp.setMapaUnidades(this.checked)">
           Mapa de unidades (espelho)
@@ -912,21 +921,12 @@ function renderAnexosModule() {
               ${AnexosState.ccName ? `<span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.ccName}</span>` : ''}
               ${AnexosState.activeContract ? `<span><i data-lucide="file-text" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractNumber}</span>` : ''}
               ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `<span><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractDate}</span>` : ''}
+              ${AnexosState.tituloReceber && AnexosState.tituloReceber.number && AnexosState.tituloReceber.number !== '—'
+                ? `<span><i data-lucide="receipt" style="width:15px;height:15px;color:var(--color-primary);"></i> ${anexosEsc(AnexosState.tituloReceber.number)}</span>`
+                : (AnexosState.activeContract ? `<span><span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Título…</span>` : '')}
             </div>
           </div>
           <div class="anexos-contract-side">
-            <div class="anexos-titulo-receber">
-              <span class="anexos-contract-label">Título a receber</span>
-              ${AnexosState.tituloReceber ? `
-                <div class="anexos-titulo-line">
-                  <strong>${anexosEsc(AnexosState.tituloReceber.number || AnexosState.tituloReceber.id || '—')}</strong>
-                  <span>${anexosEsc(AnexosState.tituloReceber.statusLabel || '')}</span>
-                  <em>${anexosEsc(anexosFmtMoney(AnexosState.tituloReceber.balance))}</em>
-                </div>
-              ` : (AnexosState.activeContract
-                ? `<span class="anexos-titulo-empty">Carregando título…</span>`
-                : `<span class="anexos-titulo-empty">Selecione a unidade</span>`)}
-            </div>
             ${AnexosState.activeContract ? (
               AnexosState.contractAttachments.length > 0
                 ? (AnexosState.importedContracts.has(AnexosState.activeContract.id)
@@ -942,7 +942,7 @@ function renderAnexosModule() {
           <div class="anexos-mapa-head">
             <strong>${AnexosState.periodoMode ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
             <span>${AnexosState.periodoMode
-              ? 'Empreendimentos e unidades com venda no período que precisam envio de anexos.'
+              ? 'Empreendimentos e unidades com venda no período que precisam envio de anexos. Incorporação não entra, exceto lotes próprios.'
               : 'Só lotes com contrato ativo. Após distrato + nova venda, o lote volta a ficar disponível para novo envio.'}</span>
           </div>
           ${anexosBuildMapaHtml()}
@@ -1113,6 +1113,8 @@ const AnexosApp = {
     AnexosState.periodoMode = false;
     AnexosState.periodoOpen = false;
     AnexosState.periodoMapa = [];
+    AnexosState.periodoSkippedIncorp = 0;
+    AnexosState.unidadesLoading = false;
     renderAnexosModule();
   },
 
@@ -1132,6 +1134,7 @@ const AnexosApp = {
     AnexosState.periodoMode = false;
     AnexosState.periodoOpen = false;
     AnexosState.periodoMapa = [];
+    AnexosState.periodoSkippedIncorp = 0;
     renderAnexosModule();
   },
 
@@ -1148,12 +1151,14 @@ const AnexosApp = {
     AnexosState.mapaUnidades = false;
     AnexosState.mapaLoading = true;
     AnexosState.periodoMapa = [];
+    AnexosState.periodoSkippedIncorp = 0;
     renderAnexosModule();
     try {
       await anexosLoadTagMemory();
       const byEmp = {};
       let offset = 0;
       let hasMore = true;
+      let skippedIncorp = 0;
       while (hasMore) {
         const url = anexosApiUrl(`/sienge-proxy/sales-contracts?limit=200&offset=${offset}&situation=2&initialIssueDate=${encodeURIComponent(ini)}&finalIssueDate=${encodeURIComponent(fim)}`);
         const res = await fetch(url, { headers: { Authorization: getBasicAuthHeader() } });
@@ -1164,6 +1169,16 @@ const AnexosApp = {
           if (!anexosContractIsActive(c)) continue;
           const enterpriseId = String(c.enterpriseId || '').trim();
           if (!enterpriseId) continue;
+          const units = c.salesContractUnits || c.units || [];
+          const eligibleUnits = units.filter((su) => {
+            const uid = String(su.id || su.unitId || '');
+            const ok = typeof window.incorporacaoUnitUsesNormalFlow === 'function'
+              ? window.incorporacaoUnitUsesNormalFlow(enterpriseId, su.name || '', uid)
+              : true;
+            if (!ok) skippedIncorp++;
+            return ok;
+          });
+          if (!eligibleUnits.length) continue;
           if (!byEmp[enterpriseId]) {
             byEmp[enterpriseId] = {
               enterpriseId,
@@ -1178,8 +1193,7 @@ const AnexosApp = {
           if (!AnexosState._periodoEnviosCache) AnexosState._periodoEnviosCache = {};
           AnexosState._periodoEnviosCache[enterpriseId] = envios;
 
-          const units = c.salesContractUnits || c.units || [];
-          units.forEach((su) => {
+          eligibleUnits.forEach((su) => {
             const uid = String(su.id || su.unitId || '');
             if (!uid || byEmp[enterpriseId]._seen.has(uid)) return;
             byEmp[enterpriseId]._seen.add(uid);
@@ -1203,6 +1217,7 @@ const AnexosApp = {
         if (results.length < 200) hasMore = false;
         else offset += results.length;
       }
+      AnexosState.periodoSkippedIncorp = skippedIncorp;
       AnexosState.periodoMapa = Object.values(byEmp)
         .filter((e) => e.units.length)
         .map(({ _seen, ...rest }) => rest)
@@ -2229,8 +2244,10 @@ const AnexosApp = {
       return;
     }
     AnexosState.cc = cc;
+    AnexosState.unidadesLoading = true;
     const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
     if (suggestionsDiv) suggestionsDiv.style.display = 'none';
+    renderAnexosModule();
     
     try {
       if (window.SiengeApiService) {
@@ -2292,6 +2309,7 @@ const AnexosApp = {
       console.error("Erro ao buscar unidades:", e);
       alert("Falha ao buscar unidades. O CC está correto?");
     } finally {
+      AnexosState.unidadesLoading = false;
       const loadEl = document.getElementById('anexos-unidade-loading');
       if (loadEl) loadEl.style.display = 'none';
       if (!AnexosState.mapaLoading) renderAnexosModule();

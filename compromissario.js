@@ -48,6 +48,35 @@ const CompromissarioApp = {
     // A renderização de Associações fica em placeholder no HTML por enquanto
   },
 
+  isPlaceholderOperator(name) {
+    const n = this.normalizeCityKey(name);
+    return !n || n === 'NAO ATRIBUIDO' || n === 'SEM CARTEIRA INADIMPLENTE' || n === 'NAO COBRAR' || n === 'OUTROS' || n === 'TODOS';
+  },
+
+  cityRuleHasOperator(rule) {
+    if (!rule) return false;
+    const ops = Array.isArray(rule.operator) ? rule.operator : [rule.operator];
+    return ops.some((o) => !this.isPlaceholderOperator(o));
+  },
+
+  getCitiesWithAssignedOperator() {
+    this.loadPrefeituras();
+    const cities = new Set();
+    const rules = (typeof AppState !== 'undefined' && AppState.rules) || {};
+    Object.values(rules).forEach((rule) => {
+      if (!rule || !rule.id || !String(rule.id).startsWith('CID_')) return;
+      if (!this.cityRuleHasOperator(rule)) return;
+      const name = String(rule.desc || String(rule.id).replace(/^CID_/, '').replace(/_/g, ' ')).trim().toUpperCase();
+      if (name) cities.add(name);
+    });
+    const configs = this.loadConfigs();
+    Object.keys(configs || {}).forEach((key) => {
+      const match = (this.state.prefeituras || []).find((c) => this.normalizeCityKey(c) === this.normalizeCityKey(key));
+      cities.add(match || String(key).toUpperCase());
+    });
+    return Array.from(cities).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+
   loadPrefeituras() {
     if (!AppState.rules) return;
     const cities = new Set();
@@ -150,6 +179,10 @@ const CompromissarioApp = {
       unitName = c.salesContractUnits[0].name || '';
     }
     const enterpriseId = c.enterpriseId;
+    const unitId = (c.salesContractUnits && c.salesContractUnits[0] && c.salesContractUnits[0].id) || '';
+    if (typeof window.incorporacaoUnitUsesNormalFlow === 'function') {
+      return window.incorporacaoUnitUsesNormalFlow(enterpriseId, unitName, unitId);
+    }
     const cfg = (typeof window.nexCcConfig === 'function')
       ? window.nexCcConfig(enterpriseId, unitName)
       : {};
@@ -489,17 +522,7 @@ const CompromissarioApp = {
 
     let configs = this.loadConfigs();
 
-    const currentMonthCities = new Set(this.state.contracts.map(c => {
-      const entName = c.enterpriseName || '';
-      const cityName = entName.includes(' - ') ? entName.split(' - ')[0].trim() : entName;
-      return this.normalizeCityKey(cityName);
-    }));
-
-    // Sort active cities first
-    const sortedCities = [...this.state.prefeituras].filter(city => {
-      if (this.state.contracts.length === 0) return false;
-      return currentMonthCities.has(this.normalizeCityKey(city));
-    }).sort((a, b) => {
+    const sortedCities = this.getCitiesWithAssignedOperator().sort((a, b) => {
       const activeA = configs[this.normalizeCityKey(a)]?.ativo ? 1 : 0;
       const activeB = configs[this.normalizeCityKey(b)]?.ativo ? 1 : 0;
       if (activeA !== activeB) return activeB - activeA;
@@ -565,7 +588,7 @@ const CompromissarioApp = {
             <button onclick="document.getElementById('comp-config-modal').remove()" style="background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">&times;</button>
           </div>
           <div style="padding: 20px; overflow-y: auto; flex: 1;">
-            ${sortedCities.length === 0 ? '<p style="color:#64748b; font-size:0.9rem;">Para configurar, realize uma busca primeiro. Apenas cidades com contratos na tela serão exibidas aqui para organização.</p>' : citiesListHtml}
+            ${sortedCities.length === 0 ? '<p style="color:#64748b; font-size:0.9rem;">Nenhuma cidade com operador atrelado. Cadastre a carteira em Atribuição de Operadores para configurar as prefeituras com antecedência.</p>' : citiesListHtml}
           </div>
           <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; text-align: right; background: #f8fafc; border-radius: 0 0 8px 8px;">
             <button onclick="CompromissarioApp.saveConfigModal()" style="padding: 8px 20px; background: #105436; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Salvar Configurações</button>
@@ -580,7 +603,8 @@ const CompromissarioApp = {
   saveConfigModal() {
     let configs = this.loadConfigs();
 
-    this.state.prefeituras.forEach(city => {
+    const citiesToSave = this.getCitiesWithAssignedOperator();
+    citiesToSave.forEach(city => {
       const cityKey = this.normalizeCityKey(city);
       const emailEl = document.getElementById(`cfg-email-${city}`);
       const reqEl = document.getElementById(`cfg-req-${city}`);

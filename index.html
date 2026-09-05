@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=704">
+  <link rel="stylesheet" href="style.css?v=705">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -36,11 +36,11 @@
     .adv-pill.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
     .webro-hide-toggle {
       height: 36px;
-      padding: 0 12px;
+      padding: 0 16px;
       border-radius: 4px;
-      border: 1px solid #86efac;
-      background: #f0fdf4;
-      color: #166534;
+      border: none;
+      background: #f97316;
+      color: #fff;
       font-weight: 600;
       font-size: 0.8rem;
       cursor: pointer;
@@ -52,10 +52,9 @@
       flex-shrink: 0;
       transition: all 0.15s ease;
     }
-    .webro-hide-toggle:hover { background: #dcfce7; border-color: #4ade80; }
+    .webro-hide-toggle:hover { background: #ea580c; }
     .webro-hide-toggle.active {
-      background: var(--color-primary);
-      border-color: var(--color-primary);
+      background: #9a3412;
       color: #fff;
     }
     
@@ -875,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=704" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=705" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1267,7 +1266,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.704 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.705 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -3315,38 +3314,34 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
           <!-- Painel de Busca e Filtros -->
           <div class="search-filter-panel" style="margin-top: 1.5rem; position: relative;">
-            <div class="search-filter-toolbar">
+            <div class="search-filter-toolbar zeropaid-filter-toolbar">
               <div class="search-box-wrapper">
                 <input type="text" id="zeropaid-search-input" class="search-input"
                   placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" oninput="handleZeropaidAutocomplete(this.value)" autocomplete="off">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
-              <button id="btn-refresh-zeropaid" class="btn btn-primary fila-align-btn"
-                style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;"
-                onclick="(async function(){ AppState.defaultersBills=[]; AppState.defaultersLoaded=false; AppState.dashboardRendered=false; await loadDashboardData(true); if(typeof loadZeroPaidTab==='function') loadZeroPaidTab(); })()">
-                <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
-              </button>
-              <div class="fila-align-side">
-                <span id="zeropaid-cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap;"></span>
-              </div>
-
-              <div id="zeropaid-operator-tabs-container" class="operator-tabs" style="min-width: 0; width: 100%;"></div>
-              <button type="button" id="btn-toggle-hide-webro-zeropaid" class="webro-hide-toggle" onclick="window.toggleHideWebroPending('zeropaid')" aria-pressed="false" title="Ocultar da lista e da contagem quem já pagou e aguarda repasse Webro">
-                <i data-lucide="banknote" style="width:14px;height:14px;flex-shrink:0;"></i> Ocultar Webro
-              </button>
-              <button id="btn-zeropaid-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('zeropaid')" style="background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
-                <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
-                <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
-              </button>
-              <div class="fila-align-side" style="gap: 8px;">
-                <div style="border-left: 2px solid #cbd5e1; height: 28px; flex-shrink: 0;"></div>
-                <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary" onclick="gerarMapaZeropaidPDF()" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none; height: 36px; white-space: nowrap; box-sizing: border-box;" title="Gerar Mapa de Clientes 0% Pago">
-                  <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa 0% Pago
+              <div class="zeropaid-toolbar-actions">
+                <button type="button" id="btn-toggle-hide-webro-zeropaid" class="webro-hide-toggle" onclick="window.toggleHideWebroPending('zeropaid')" aria-pressed="false" title="Ocultar da lista e da contagem quem já pagou e aguarda repasse Webro">
+                  <i data-lucide="banknote" style="width:14px;height:14px;flex-shrink:0;"></i> Ocultar Webro
                 </button>
-                <button class="btn btn-secondary" onclick="exportZeropaidToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer; height: 36px; white-space: nowrap;" title="Exportar tabela atual para Excel">
+                <button id="btn-zeropaid-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('zeropaid')" style="background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                  <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
+                  <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
+                </button>
+                <button class="btn btn-secondary fila-align-btn" onclick="exportZeropaidToExcel()" style="background-color: #f8fafc; border: 1px solid #cbd5e1; color: #334155; font-weight: 600; padding: 0 16px; height: 36px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
                   <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
                 </button>
+                <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary fila-align-btn" onclick="gerarMapaZeropaidPDF()" style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;" title="Gerar Mapa de Clientes 0% Pago">
+                  <i data-lucide="map" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Gerar Mapa 0% Pago
+                </button>
+                <button id="btn-refresh-zeropaid" class="btn btn-primary fila-align-btn"
+                  style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;"
+                  onclick="(async function(){ AppState.defaultersBills=[]; AppState.defaultersLoaded=false; AppState.dashboardRendered=false; await loadDashboardData(true); if(typeof loadZeroPaidTab==='function') loadZeroPaidTab(); })()">
+                  <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
+                </button>
+                <span id="zeropaid-cache-status-indicator" class="fila-cache-status" style="display: none;"></span>
               </div>
+              <div id="zeropaid-operator-tabs-container" class="operator-tabs"></div>
             </div>
             <div id="zeropaid-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
           </div>
@@ -6709,43 +6704,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=704"></script>
-  <script defer src="sienge-api.js?v=704"></script>
-  <script defer src="azure-auth.js?v=704"></script>
-  <script defer src="app.js?v=704"></script>
-  <script defer src="home-dashboard.js?v=704"></script>
-  <script defer src="anexos.js?v=704"></script>
-  <script defer src="contas-pagar.js?v=704"></script>
-  <script defer src="config-tags.js?v=704"></script>
-  <script defer src="config-users.js?v=704"></script>
-  <script defer src="suporte.js?v=704"></script>
-  <script defer src="construcao.js?v=704"></script>
-  <script defer src="empresas.js?v=704"></script>
-  <script defer src="relacionamento.js?v=704"></script>
-  <script defer src="compromissario.js?v=704"></script>
+  <script defer src="data.js?v=705"></script>
+  <script defer src="sienge-api.js?v=705"></script>
+  <script defer src="azure-auth.js?v=705"></script>
+  <script defer src="app.js?v=705"></script>
+  <script defer src="home-dashboard.js?v=705"></script>
+  <script defer src="anexos.js?v=705"></script>
+  <script defer src="contas-pagar.js?v=705"></script>
+  <script defer src="config-tags.js?v=705"></script>
+  <script defer src="config-users.js?v=705"></script>
+  <script defer src="suporte.js?v=705"></script>
+  <script defer src="construcao.js?v=705"></script>
+  <script defer src="empresas.js?v=705"></script>
+  <script defer src="relacionamento.js?v=705"></script>
+  <script defer src="compromissario.js?v=705"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=704"></script>
-  <script defer src="centros-custo.js?v=704"></script>
-  <script defer src="marketing.js?v=704"></script>
-  <script defer src="plano-financeiro.js?v=704"></script>
-  <script defer src="prestacao-contas.js?v=704"></script>
+  <script defer src="estoque-comercial.js?v=705"></script>
+  <script defer src="centros-custo.js?v=705"></script>
+  <script defer src="marketing.js?v=705"></script>
+  <script defer src="plano-financeiro.js?v=705"></script>
+  <script defer src="prestacao-contas.js?v=705"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=704"></script>
-  <script defer src="fluxo-caixa.js?v=704"></script>
-  <script defer src="caixa-diario.js?v=704"></script>
-  <script defer src="investimento.js?v=704"></script>
-  <script defer src="parametrizacao-parceiro.js?v=704"></script>
-  <script defer src="societario.js?v=704"></script>
-  <script defer src="participacoes.js?v=704"></script>
-  <script defer src="fiscal.js?v=704"></script>
-  <script defer src="indexadores.js?v=704"></script>
-  <script defer src="verificar-construcao.js?v=704"></script>
-  <script src="repactuacoes.js?v=704"></script>
-  <script defer src="repactuacao-lote.js?v=704"></script>
+  <script defer src="empresa-filter.js?v=705"></script>
+  <script defer src="fluxo-caixa.js?v=705"></script>
+  <script defer src="caixa-diario.js?v=705"></script>
+  <script defer src="investimento.js?v=705"></script>
+  <script defer src="parametrizacao-parceiro.js?v=705"></script>
+  <script defer src="societario.js?v=705"></script>
+  <script defer src="participacoes.js?v=705"></script>
+  <script defer src="fiscal.js?v=705"></script>
+  <script defer src="indexadores.js?v=705"></script>
+  <script defer src="verificar-construcao.js?v=705"></script>
+  <script src="repactuacoes.js?v=705"></script>
+  <script defer src="repactuacao-lote.js?v=705"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=704"></script>
+  <script defer src="dashboard-inadimplencia.js?v=705"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

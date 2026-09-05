@@ -21466,6 +21466,33 @@ window.nexCcConfig = function(costCenterId, unitName) {
   }
 };
 
+window.normalizeIncorporacaoUnitKey = function(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+};
+
+/** Incorporação: some do fluxo de anexos/notificação. Lotes próprios (fora da incorporação) seguem o fluxo normal. */
+window.incorporacaoUnitUsesNormalFlow = function(costCenterId, unitName, unitId) {
+  const cfg = typeof window.nexCcConfig === "function" ? window.nexCcConfig(costCenterId, unitName) : {};
+  if (String(cfg.tipo_cc || "") !== "Incorporação") return true;
+  if (!cfg.incorporacao_lotes_proprios) return false;
+  const exceptions = Array.isArray(cfg.incorporacao_lotes_excecao) ? cfg.incorporacao_lotes_excecao : [];
+  if (!exceptions.length) return false;
+  const unitKey = window.normalizeIncorporacaoUnitKey(unitName);
+  const uid = unitId != null && unitId !== "" ? String(unitId) : "";
+  return exceptions.some((ex) => {
+    const exName = typeof ex === "string" ? ex : (ex && ex.name);
+    const exId = typeof ex === "object" && ex ? String(ex.id || "") : "";
+    if (uid && exId && uid === exId) return true;
+    const exKey = window.normalizeIncorporacaoUnitKey(exName);
+    return !!(exKey && unitKey && (unitKey === exKey || unitKey.includes(exKey) || exKey.includes(unitKey)));
+  });
+};
+
 window.nexHasLetter = function(customerId, saleId) {
   const cid = String(customerId || "");
   const sid = String(saleId || "").replace(/^B-/, "").split("-")[0];
