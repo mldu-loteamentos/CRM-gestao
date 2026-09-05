@@ -732,92 +732,49 @@
         flex: 1 1 33.333%;
         width: 33.333%;
         max-width: 33.333%;
+        height: 100%;
         background: #ffffff;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-        padding: 0 0 40px;
+        display: grid;
+        grid-template-rows: repeat(4, minmax(0, 1fr));
+        align-items: stretch;
         box-sizing: border-box;
         z-index: 2;
         position: relative;
-        overflow-x: hidden;
-        overflow-y: auto;
+        overflow: hidden;
       }
-      .login-cables {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 0;
+      .login-band {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 0;
+        padding: 0 36px;
+        box-sizing: border-box;
       }
-      .cable-line {
-        fill: none;
-        stroke: #1b8253;
-        stroke-width: 1.2;
-        stroke-linecap: round;
-        filter: url(#cable-glow);
-        stroke-dasharray: 10 18;
-        animation: cableFlow 5.5s linear infinite;
+      .login-band-logo img {
+        display: block;
+        width: auto;
+        max-width: min(340px, 92%);
+        max-height: 92%;
+        height: auto;
+        object-fit: contain;
       }
-      .cable-line.slow { animation-duration: 8s; stroke: #2cb17a; }
-      .cable-line.fast { animation-duration: 3.6s; stroke: #7dffb2; }
-      .cable-line.orange { animation-duration: 6.5s; stroke: #f37021; stroke-width: 1.1; }
-      .cable-line.reverse { animation-direction: reverse; }
-      .cable-node {
-        fill: #3dff8a;
-        filter: url(#cable-glow);
-        animation: cablePulse 2.4s ease-in-out infinite;
+      .login-band-action {
+        flex-direction: column;
+        gap: 12px;
       }
-      .cable-node.orange { fill: #f37021; animation-delay: 0.6s; }
-      @keyframes cableFlow {
-        to { stroke-dashoffset: -280; }
-      }
-      @keyframes cablePulse {
-        0%, 100% { opacity: 0.45; r: 2.2; }
-        50% { opacity: 1; r: 3.4; }
-      }
-      .login-integra-hero {
-        width: 100%;
-        position: relative;
-        z-index: 1;
+      .login-band-action #mock-login-fields {
+        width: auto;
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 36px 28px 8px;
       }
-      .login-tree-badge {
-        width: 280px;
-        max-width: 88%;
-        background: transparent;
-        border-radius: 0;
-        padding: 0;
-        box-shadow: none;
-      }
-      .login-tree-badge img {
-        width: 100%;
-        height: auto;
+      .login-band-30 img {
         display: block;
-      }
-      .login-integra-name {
-        margin: 18px 0 0;
-        color: #0c291d;
-        font-family: 'Outfit', 'Metropolis', sans-serif;
-        font-size: 2rem;
-        font-weight: 800;
-        letter-spacing: 0.06em;
-        line-height: 1.1;
-        text-align: center;
-      }
-      .login-integra-sub {
-        margin: 6px 0 0;
-        color: #f37021;
-        font-family: 'Outfit', 'Metropolis', sans-serif;
-        font-size: 1.05rem;
-        font-weight: 700;
-        letter-spacing: 0.14em;
-        text-align: center;
+        width: auto;
+        max-width: min(260px, 78%);
+        max-height: 72%;
+        height: auto;
+        object-fit: contain;
       }
       .login-pane-video {
         flex: 2 1 66.666%;
@@ -837,45 +794,16 @@
         object-position: left center;
       }
 
-      .login-center-card {
-        width: 100%;
-        max-width: 360px;
-        background: transparent;
-        padding: 0 36px;
-        margin-top: 52px;
-        box-shadow: none;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        position: relative;
-        z-index: 1;
-      }
-      
-      .login-center-card .ml-logo-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        margin-bottom: 40px;
-        gap: 12px;
-        width: 100%;
-      }
-      .login-30-logo {
-        width: 100%;
-        max-width: 280px;
-        height: auto;
-        object-fit: contain;
-        display: block;
-      }
-
       .login-input {
-        width: 100%;
-        padding: 16px 20px;
-        border-radius: 12px;
+        width: 260px;
+        max-width: 80vw;
+        padding: 12px 16px;
+        border-radius: 10px;
         border: 1px solid #e2e8f0;
-        font-size: 1.05rem;
+        font-size: 0.95rem;
         outline: none;
         background: #f8fafc;
-        margin-bottom: 20px;
+        margin-bottom: 10px;
         font-weight: 500;
         color: #1e293b;
         transition: border-color 0.3s, box-shadow 0.3s;
@@ -890,33 +818,34 @@
       }
 
       .btn-login-action {
-        width: 100%;
-        padding: 16px 20px;
-        border-radius: 12px;
+        width: 240px;
+        max-width: 80vw;
+        padding: 12px 20px;
+        border-radius: 10px;
         border: none;
         background: #2cb17a;
         color: white;
         font-weight: 700;
-        font-size: 1.1rem;
+        font-size: 0.95rem;
         cursor: pointer;
         transition: background 0.3s, transform 0.2s;
       }
       .btn-login-action:hover {
         background: #249968;
-        transform: translateY(-2px);
+        transform: translateY(-1px);
       }
 
       #login-error-msg {
         color: #ef4444;
-        font-size: 0.95rem;
+        font-size: 0.85rem;
         font-weight: 700;
         display: none;
-        margin-bottom: 20px;
         text-align: center;
         background: #fee2e2;
-        padding: 12px;
+        padding: 8px 12px;
         border-radius: 8px;
-        width: 100%;
+        width: 240px;
+        max-width: 80vw;
         box-sizing: border-box;
       }
 
@@ -931,15 +860,9 @@
           flex: none;
         }
         .login-pane-brand {
-          min-height: 58vh;
-          padding: 0 0 28px;
+          min-height: 100vh;
+          height: 100vh;
         }
-        .login-center-card {
-          padding: 0 24px;
-          margin-top: 24px;
-        }
-        .login-integra-name { font-size: 1.65rem; }
-        .login-tree-badge { width: 220px; }
         .login-pane-video {
           min-height: 48vh;
         }
@@ -947,52 +870,22 @@
     </style>
 
     <div class="login-pane-brand">
-      <svg class="login-cables" viewBox="0 0 400 900" preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <filter id="cable-glow" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="2.2" result="blur"/>
-            <feMerge>
-              <feMergeNode in="blur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        <path class="cable-line slow" d="M 70 900 C 90 720, 50 520, 110 360 S 80 160, 140 20"/>
-        <path class="cable-line reverse" d="M 330 900 C 310 740, 360 540, 300 360 S 340 160, 280 20"/>
-        <path class="cable-line orange reverse" d="M 200 900 C 170 700, 230 480, 190 280 S 220 120, 200 10"/>
-        <circle class="cable-node" cx="110" cy="360" r="2.6"/>
-        <circle class="cable-node orange" cx="190" cy="280" r="2.6"/>
-        <circle class="cable-node" cx="300" cy="360" r="2.6"/>
-        <circle r="3" fill="#2cb17a" filter="url(#cable-glow)">
-          <animateMotion dur="6s" repeatCount="indefinite" path="M 70 900 C 90 720, 50 520, 110 360 S 80 160, 140 20"/>
-        </circle>
-        <circle r="2.6" fill="#f37021" filter="url(#cable-glow)">
-          <animateMotion dur="7s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="M 200 900 C 170 700, 230 480, 190 280 S 220 120, 200 10"/>
-        </circle>
-      </svg>
+      <div class="login-band login-band-top" aria-hidden="true"></div>
 
-      <div class="login-integra-hero">
-        <div class="login-tree-badge">
-          <img src="i.ntegr.a/arvore.png?v=702" alt="Logo I.ntegr.A">
-        </div>
-        <div class="login-integra-name">I.ntegr.A</div>
-        <div class="login-integra-sub">Moura Leite</div>
+      <div class="login-band login-band-logo">
+        <img src="i.ntegr.a/logo-oficial.png?v=702" alt="I.ntegr.A Moura Leite">
       </div>
 
-      <div class="login-center-card">
-        <div class="ml-logo-container">
-          <img class="login-30-logo" src="Banner/logo preta comemorativa.png" alt="Moura Leite 30 anos" onerror="this.onerror=null; this.src='Banner/logo comemorativa.png';">
-          <p style="font-family: 'Metropolis', sans-serif; font-weight: 300; font-size: 0.9rem; text-align: center; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
-            Transformar lugares para as pessoas transformarem suas vidas
-          </p>
-        </div>
-
+      <div class="login-band login-band-action">
         <div id="login-error-msg"></div>
-        
-        <div id="mock-login-fields" style="width: 100%; display: flex; flex-direction: column;">
+        <div id="mock-login-fields">
           <input type="email" id="login-email" class="login-input" placeholder="seuemail@mouraleite.com.br" value="israel@mouraleite.com.br">
           <button id="btn-submit-login" class="btn-login-action">Entrar no CRM</button>
         </div>
+      </div>
+
+      <div class="login-band login-band-30">
+        <img class="login-30-logo" src="Banner/logo preta comemorativa.png" alt="Moura Leite 30 anos" onerror="this.onerror=null; this.src='Banner/logo comemorativa.png';">
       </div>
     </div>
 
