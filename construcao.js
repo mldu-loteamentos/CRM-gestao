@@ -1144,19 +1144,33 @@ window.saveNovaVistoria = async function() {
         }
 
         const { collection, addDoc, doc, updateDoc } = window.firebaseCollections;
+        const ccId = window.ConstrucaoApp.extractCostCenterId(contractObj);
+        const unitName = window.ConstrucaoApp.extractUnitName(contractObj);
         const allKeys = new Set([
             String(contractNumber),
-            String(saleId)
+            String(saleId),
+            String(customerId)
         ]);
         if (contractObj) {
             if (contractObj.receivableBillId) allKeys.add(String(contractObj.receivableBillId));
             if (contractObj.id) allKeys.add(String(contractObj.id));
+            if (contractObj.saleCode) allKeys.add(String(contractObj.saleCode));
+            if (contractObj.contractCode) allKeys.add(String(contractObj.contractCode));
+            if (contractObj.contractNumber) allKeys.add(String(contractObj.contractNumber));
+            if (contractObj.realSaleId) allKeys.add(String(contractObj.realSaleId));
+            if (contractObj.titulo) allKeys.add(String(contractObj.titulo));
+        }
+        if (ccId && unitName) {
+            allKeys.add(`unit:${ccId}:${String(unitName).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
         }
 
         const checkData = {
             customerId: String(customerId),
             contractId: String(contractNumber),
             contractKeys: Array.from(allKeys),
+            tituloKey: String(contractNumber),
+            costCenterId: ccId || '',
+            unidade: unitName || '',
             companyId: String(companyId),
             date: date,
             responsible: responsible,

@@ -1382,6 +1382,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
 }
 
 window.APOIO_JURIDICO_RETORNO_DIAS = 180;
+window.APOIO_JURIDICO_RECENTE_LUCELIA_DIAS = 90;
 
 function formatOperatorUserName(u) {
   if (!u) return "";
@@ -1453,11 +1454,31 @@ function daysSinceSubjudiceExit(memory, customerId) {
   return Math.round((today - start) / (1000 * 60 * 60 * 24));
 }
 
-function isRetornoPosJuridico(memory, customerId) {
+function isWithinSubjudiceExitDays(memory, customerId, maxDays) {
   const days = daysSinceSubjudiceExit(memory, customerId);
   if (days == null || days < 0) return false;
-  return days <= (window.APOIO_JURIDICO_RETORNO_DIAS || 180);
+  return days <= maxDays;
 }
+
+function isRetornoPosJuridico(memory, customerId) {
+  return isWithinSubjudiceExitDays(memory, customerId, window.APOIO_JURIDICO_RETORNO_DIAS || 180);
+}
+
+function isRecenteJuridicoComLucelia(memory, customerId) {
+  return isWithinSubjudiceExitDays(memory, customerId, window.APOIO_JURIDICO_RECENTE_LUCELIA_DIAS || 90);
+}
+
+function formatSubjudiceExitDateLabel(exitDate) {
+  if (!exitDate) return "";
+  const raw = String(exitDate);
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const [y, m, d] = raw.slice(0, 10).split("-");
+    return `${d}/${m}/${y}`;
+  }
+  return raw.split("-").reverse().join("/");
+}
+
+window.daysSinceSubjudiceExit = daysSinceSubjudiceExit;
 
 window.clientPassedJuridicoRecently = function(client, history) {
   if (!client) return false;
@@ -1473,6 +1494,12 @@ window.clientIsAcordoInternoQuebrado = function(client, history) {
   if (!client || !client.hasOverdueAgreement) return false;
   if (client.subjudice === "S" || client.subjudice === true) return false;
   return !window.clientPassedJuridicoRecently(client, history);
+};
+
+window.clientIsAcordoJudicialQuebrado = function(client, history) {
+  if (!client || !client.hasOverdueAgreement) return false;
+  if (client.subjudice === "S" || client.subjudice === true) return false;
+  return !!window.clientPassedJuridicoRecently(client, history);
 };
 
 function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
@@ -1499,17 +1526,27 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     let ruleSuffix = requiredType.toUpperCase();
 
     const passedJuridico = isRetornoPosJuridico(subjudiceMemory, c.customerId);
+    const recenteLucelia = isRecenteJuridicoComLucelia(subjudiceMemory, c.customerId);
     c.isInternalBrokenAgreement = !!(c.hasOverdueAgreement && !passedJuridico && c.subjudice !== "S");
+    c.isAcordoJudicialQuebrado = !!(c.hasOverdueAgreement && passedJuridico && c.subjudice !== "S");
 
     if (c.subjudice === "S") {
       requiredType = "advogado";
       ruleSuffix = "JURÍDICO";
     } else if (c.hasOverdueAgreement && passedJuridico) {
       requiredType = "apoio_juridico";
-      ruleSuffix = "APOIO_JURIDICO / ACORDO JURIDICO";
-    } else if (passedJuridico) {
+      ruleSuffix = "APOIO_JURIDICO / ACORDO JUDICIAL QUEBRADO";
+    } else if (passedJuridico && recenteLucelia) {
       requiredType = "apoio_juridico";
-      ruleSuffix = "APOIO_JURIDICO / RETORNO 180D";
+      ruleSuffix = "APOIO_JURIDICO / RECENTE 90D";
+    } else if (passedJuridico) {
+      if (c.maxDaysDelay >= threshTerceirizada) {
+        requiredType = "externo";
+        ruleSuffix = "EXTERNO / RECENTE JURIDICO 90-180";
+      } else {
+        requiredType = "interno";
+        ruleSuffix = "INTERNO / RECENTE JURIDICO 90-180";
+      }
     } else if (c.isInternalBrokenAgreement) {
       if (c.maxDaysDelay >= threshTerceirizada) {
         requiredType = "externo";
@@ -3262,6 +3299,9 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   }
   if (client && client.isZeroPaid) return G.ZERO_PAGO;
   if (client && (client.subjudice === "S" || client.subjudice === true)) return G.SUBJUDICE;
+  if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
+    return G.ACORDO_JURIDICO;
+  }
   if (client && client.hasOverdueAgreement) return G.ACORDO_JURIDICO;
   if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return G.RECENTE_JURIDICO;
   if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return G.ENVIAR_JURIDICO;
@@ -3274,7 +3314,7 @@ window.getFilaQueueGroupMeta = function(group) {
     [G.ACORDO_INTERNO_QUEBRADO]: { label: 'Acordo Interno Quebrado', bg: '#ffedd5', color: '#9a3412' },
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     [G.SUBJUDICE]: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
-    [G.ACORDO_JURIDICO]: { label: 'Acordo Jurídico', bg: '#fef3c7', color: '#92400e' },
+    [G.ACORDO_JURIDICO]: { label: 'Acordo Judicial Quebrado', bg: '#fef3c7', color: '#92400e' },
     [G.RECENTE_JURIDICO]: { label: 'Recente Jurídico', bg: '#e0e7ff', color: '#3730a3' },
     [G.ENVIAR_JURIDICO]: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
     [G.SEM_CATEGORIA]: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
@@ -3282,29 +3322,21 @@ window.getFilaQueueGroupMeta = function(group) {
   return map[group] || map[G.SEM_CATEGORIA];
 };
 
-window.clientIsRecenteJuridico = function(client, history, retroLimitDate) {
-  if (!client || client.subjudice === "S" || client.subjudice === true) return false;
+window.clientIsRecenteJuridico = function(client, history) {
+  if (!client || client.hasOverdueAgreement) return false;
+  if (client.subjudice === "S" || client.subjudice === true) return false;
   let hist = history;
   if (!hist) {
     try { hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { hist = {}; }
   }
-  const mem = hist[client.customerId] || hist[String(client.customerId)] || hist[Number(client.customerId)];
-  if (!mem || !mem.exitDate) return false;
-  let limit = retroLimitDate;
-  if (!limit) {
-    const retroDaysAgo = parseInt(window.advFilters?.retroMeses || "90", 10);
-    limit = new Date();
-    limit.setDate(limit.getDate() - (Number.isFinite(retroDaysAgo) ? retroDaysAgo : 90));
-  }
-  const ed = typeof parseSafeDate === "function" ? parseSafeDate(mem.exitDate) : new Date(mem.exitDate);
-  return ed && ed >= limit;
+  return isRetornoPosJuridico(hist, client.customerId);
 };
 
 window.getAcordoJuridicoAgingHtml = function(client) {
   const days = Number(client && client.maxDaysDelay) || 0;
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo em atraso (SA, A1, A2…). Cliente que passou pelo jurídico nos últimos 180 dias.">
-    <i data-lucide="handshake" style="width: 14px; height: 14px;"></i> Acordo Jurídico - ${dayLabel}
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo (SA, A1, A2…) vencida E cliente saiu do jurídico nos últimos 180 dias.">
+    <i data-lucide="handshake" style="width: 14px; height: 14px;"></i> Acordo Judicial Quebrado - ${dayLabel}
   </span>`;
 };
 
@@ -3321,7 +3353,7 @@ window.getRecenteJuridicoAgingHtml = function(client, diffDays) {
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
   const saida = Number.isFinite(diffDays) ? diffDays : "";
   const title = saida !== ""
-    ? `Saiu do jurídico há ${saida} dia${saida === 1 ? "" : "s"} sem parcela de acordo (SA/A1…). Pode ter liquidado e voltou a atrasar.`
+    ? `Saiu do jurídico há ${saida} dia${saida === 1 ? "" : "s"} sem parcela de acordo (SA/A1…). Lucelia nos primeiros 90 dias; depois volta à carteira com esta tag até 180 dias.`
     : "Saiu do jurídico sem parcela de acordo e voltou a atrasar.";
   return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #818cf8; background-color: #e0e7ff; color: #3730a3; font-weight: 600;" title="${title}">
     <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Recente Jurídico - ${dayLabel}
@@ -5359,9 +5391,6 @@ document.addEventListener("click", function(e) {
       body.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
     } else {
       const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
-      const retroDaysAgo = parseInt(window.advFilters?.retroMeses || '90', 10);
-      const retroLimitDate = new Date();
-      retroLimitDate.setDate(retroLimitDate.getDate() - retroDaysAgo);
 
       let lastQueueGroup = null;
       clientList.forEach(client => {
@@ -5451,17 +5480,17 @@ document.addEventListener("click", function(e) {
                   if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) {
                       return window.getAcordoQuebradoAgingHtml(client);
                   }
+                  if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
+                      return window.getAcordoJuridicoAgingHtml(client);
+                  }
                   if (client.hasOverdueAgreement) {
                       return window.getAcordoJuridicoAgingHtml(client);
                   }
-                  const mem = subjudiceHistory[client.customerId] || subjudiceHistory[String(client.customerId)];
-                  if (mem && mem.exitDate) {
-                      const ed = parseSafeDate(mem.exitDate);
-                      if (ed >= retroLimitDate) {
-                          const diffTime = Math.abs(new Date() - ed);
-                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          return window.getRecenteJuridicoAgingHtml(client, diffDays);
-                      }
+                  if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client, subjudiceHistory)) {
+                      const diffDays = typeof window.daysSinceSubjudiceExit === "function"
+                        ? window.daysSinceSubjudiceExit(subjudiceHistory, client.customerId)
+                        : null;
+                      return window.getRecenteJuridicoAgingHtml(client, diffDays);
                   }
                   if (typeof window.nexAgingSpecialHtml === "function") {
                       const nexSpecial = window.nexAgingSpecialHtml(client);
@@ -6693,7 +6722,8 @@ function formatCpfCnpj(val) {
 
   if (mem) {
     if (mem.exitDate) {
-      subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Saiu em: ${mem.exitDate.split('-').reverse().join('/')}">⚠️ JÁ PASSOU PELO SUB JUDICE</span>`;
+      const saidaLabel = formatSubjudiceExitDateLabel(mem.exitDate);
+      subjudiceAlertHtml = `<span style="background-color: var(--color-warning); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Cliente já passou pelo jurídico e saiu em ${saidaLabel}">⚠️ JÁ PASSOU PELO JURÍDICO · SAIU EM ${saidaLabel}</span>`;
     } else {
       const entryTitle = mem.entryDate ? ` title="Entrou em: ${mem.entryDate.split('-').reverse().join('/')}"` : '';
       subjudiceAlertHtml = `<span style="background-color: var(--color-danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;"${entryTitle}>🚨 ATIVO NO SUB JUDICE</span>`;
@@ -6704,7 +6734,9 @@ function formatCpfCnpj(val) {
     String(c.customerId) === String(customerId) &&
     (saleId == null || String(c.saleId) === String(saleId) || (Array.isArray(c.billIds) && c.billIds.some(id => String(id).replace(/^B-/i, "").split("-")[0] === String(saleId))))
   ) || (window.rawClientList || []).find(c => String(c.customerId) === String(customerId));
-  if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(filaMatch)) {
+  if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(filaMatch)) {
+    subjudiceAlertHtml += `<span style="background-color: #d97706; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo (SA, A1, A2…) vencida e saída do jurídico nos últimos 180 dias.">Acordo Judicial Quebrado</span>`;
+  } else if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(filaMatch)) {
     subjudiceAlertHtml += `<span style="background-color: #ea580c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo interno (SA, A1, A2…) vencida. Não passou pelo jurídico nos últimos 180 dias.">Acordo quebrado</span>`;
   }
 

@@ -79,20 +79,51 @@ function _vcIsPendingSuperseded(pendingDoc, latestCheckDate) {
     return checkDate >= pendingDate;
 }
 
+function _vcNormalizeKey(val) {
+    const k = String(val == null ? '' : val).trim();
+    if (!k || k === 'undefined' || k === 'null') return '';
+    return k;
+}
+
+function _vcUnitKey(costCenterId, unidade) {
+    const cc = _vcNormalizeKey(costCenterId);
+    const unit = String(unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase();
+    if (!cc || !unit) return '';
+    return `unit:${cc}:${unit}`;
+}
+
+function _vcDocIdentityKeys(data) {
+    if (!data) return [];
+    const keys = [
+        data.contractId, data.tituloKey, data.titulo, data.customerId,
+        data.saleId, data.realSaleId, data.contractNumber, data.saleCode
+    ];
+    if (Array.isArray(data.contractKeys)) keys.push(...data.contractKeys);
+    if (Array.isArray(data.billIds)) keys.push(...data.billIds);
+    const unitKey = _vcUnitKey(data.costCenterId, data.unidade || data.unitName || data.unit);
+    if (unitKey) keys.push(unitKey);
+    return [...new Set(keys.map(_vcNormalizeKey).filter(Boolean))];
+}
+
+function _vcLinkWasAnswered(docObj) {
+    if (!docObj) return false;
+    if (docObj.status === 'aguardando_validacao' || docObj.status === 'concluida') return true;
+    return !!(docObj.fotoFrente || docObj.enviadoEm || docObj.respostasFormulario);
+}
+
 function _vcClientLookupKeys(c) {
     if (!c) return [];
     const contractId = c.saleId || c.contractId || c.id;
     let fallbackTitle = contractId;
     if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
     const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
-    const unit = String(c.unitName || c.unit || c.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase();
-    const cc = _vcExtractCostCenterId(c);
     const keys = [
         contractId, tituloKey, c.contractNumber, c.realSaleId, c.customerId, c.saleCode, c.saleId
     ];
     if (Array.isArray(c.billIds)) keys.push(...c.billIds);
-    if (cc && unit) keys.push(`unit:${cc}:${unit}`);
-    return [...new Set(keys.map(k => String(k == null ? '' : k).trim()).filter(k => k && k !== 'undefined' && k !== 'null'))];
+    const unitKey = _vcUnitKey(_vcExtractCostCenterId(c), c.unitName || c.unit || c.unidade);
+    if (unitKey) keys.push(unitKey);
+    return [...new Set(keys.map(_vcNormalizeKey).filter(Boolean))];
 }
 
 function _vcResolvePendingVistoria(keys, checksByContract, latestCheckDateByContract) {
@@ -104,7 +135,7 @@ function _vcResolvePendingVistoria(keys, checksByContract, latestCheckDateByCont
 }
 
 window.closePendingLinkVistorias = async function(contractKeys, reason) {
-    const keys = [...new Set((contractKeys || []).map(String).filter(k => k && k !== 'undefined' && k !== 'null' && k.trim() !== ''))];
+    const keys = [...new Set((contractKeys || []).map(_vcNormalizeKey).filter(Boolean))];
     if (!keys.length || !window.firebaseDb || !window.firebaseCollections) return 0;
     const { collection, getDocs, query, where, doc, updateDoc } = window.firebaseCollections;
     const pendingStatuses = new Set(['aguardando_fotos', 'aguardando_validacao']);
@@ -116,7 +147,7 @@ window.closePendingLinkVistorias = async function(contractKeys, reason) {
         snap.forEach(d => {
             const data = d.data();
             if (data.isTest || !pendingStatuses.has(data.status)) return;
-            const docKeys = [data.contractId, data.tituloKey, data.titulo, data.customerId, ...(data.contractKeys || [])].map(String);
+            const docKeys = _vcDocIdentityKeys(data);
             if (!docKeys.some(k => keySet.has(k))) return;
             updates.push(updateDoc(doc(window.firebaseDb, 'vistorias', d.id), {
                 status: 'concluida',
@@ -519,16 +550,7 @@ window.VerificarConstrucaoApp = {
                             const nextDate = _vcPendingRequestDate(docObj);
                             if (!prevDate || (nextDate && nextDate >= prevDate)) checksByContract[k] = docObj;
                         };
-                        register(data.contractId);
-                        register(data.tituloKey);
-                        register(data.titulo);
-                        register(data.customerId);
-                        if (data.costCenterId && data.unidade) {
-                            register(`unit:${data.costCenterId}:${String(data.unidade).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
-                        }
-                        if (data.contractKeys && Array.isArray(data.contractKeys)) {
-                            data.contractKeys.forEach(register);
-                        }
+                        _vcDocIdentityKeys(data).forEach(register);
                     });
 
                     const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
@@ -537,13 +559,8 @@ window.VerificarConstrucaoApp = {
                         if (data.stage && data.stage.trim() !== '') {
                             const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
                             
-                            const keysToSet = data.contractKeys ? [...data.contractKeys] : [String(data.contractId)];
-                            if (data.realSaleId) keysToSet.push(String(data.realSaleId));
-                            if (data.tituloKey) keysToSet.push(String(data.tituloKey));
-                            if (data.customerId) keysToSet.push(String(data.customerId));
-                            if (data.costCenterId && data.unidade) {
-                                keysToSet.push(`unit:${data.costCenterId}:${String(data.unidade).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
-                            }
+                            const keysToSet = _vcDocIdentityKeys(data);
+                            if (!keysToSet.length && data.contractId) keysToSet.push(String(data.contractId));
                             
                             keysToSet.forEach(key => {
                                 const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
@@ -565,7 +582,7 @@ window.VerificarConstrucaoApp = {
                     Object.values(checksByContract).forEach(pending => {
                         if (!pending || !pending.id || seenPending.has(pending.id)) return;
                         seenPending.add(pending.id);
-                        const keys = [pending.contractId, pending.tituloKey, pending.titulo, ...(pending.contractKeys || [])].filter(Boolean);
+                        const keys = _vcDocIdentityKeys(pending);
                         const latestCheck = _vcLatestDateAmong(keys, latestCheckDateByContract);
                         if (_vcIsPendingSuperseded(pending, latestCheck)) {
                             staleKeys.push(...keys);
@@ -594,16 +611,10 @@ window.VerificarConstrucaoApp = {
                 const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
                 const pendingRaw = contractLookupKeys.map(k => checksByContract[String(k)]).find(Boolean) || null;
                 const daysSinceCheck = _vcDaysSince(latestCheckDate);
-                const linkAfterCheck = !!(pendingRaw && !_vcIsPendingSuperseded(pendingRaw, latestCheckDate));
+                const answered = _vcLinkWasAnswered(pendingRaw);
+                const linkAfterCheck = !!(pendingRaw && !answered && !_vcIsPendingSuperseded(pendingRaw, latestCheckDate));
                 if (pendingRaw && latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !linkAfterCheck) {
-                    supersededLinkKeys.push(
-                        ...contractLookupKeys,
-                        pendingRaw.contractId,
-                        pendingRaw.tituloKey,
-                        pendingRaw.titulo,
-                        pendingRaw.customerId,
-                        ...(pendingRaw.contractKeys || [])
-                    );
+                    supersededLinkKeys.push(...contractLookupKeys, ..._vcDocIdentityKeys(pendingRaw));
                 }
                 if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) {
                     return linkAfterCheck;
@@ -676,10 +687,7 @@ window.VerificarConstrucaoApp = {
 
                 let lastCheckDateStr = '-';
                 let lastCheckDays = '-';
-                const contractKeys = [String(contractId)];
-                if (tituloKey) contractKeys.push(String(tituloKey));
-                if (contractNumberStr) contractKeys.push(String(contractNumberStr));
-                if (realSaleIdStr) contractKeys.push(String(realSaleIdStr));
+                const contractKeys = contractLookupKeys.slice();
                 
                 let maxDate = latestCheckDate && latestCheckDate !== '1970-01-01' ? latestCheckDate : null;
                 contractLookupKeys.forEach(k => {
