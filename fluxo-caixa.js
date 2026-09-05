@@ -390,8 +390,17 @@ const FluxoCaixaApp = {
     applySum("g_10", ["g_08", "g_09"]);
     applySum("g_12", ["g_10", "g_11"]);
 
-    if (this.expanded.size === 0) {
-      groups.filter(g => !g.parentId).forEach(g => this.expanded.add(g.id));
+    this.treeNodes = [];
+    const walkMeta = (node, level) => {
+      const children = groups.filter(g => g.parentId === node.id);
+      const hasKids = children.length > 0 || (node.accountRows && node.accountRows.length > 0);
+      this.treeNodes.push({ id: node.id, level, hasKids });
+      children.forEach(ch => walkMeta(ch, level + 1));
+    };
+    groups.filter(g => !g.parentId).forEach(g => walkMeta(g, 0));
+    if (!this._expandInited) {
+      this.treeNodes.filter(n => n.hasKids && n.level === 0).forEach(n => this.expanded.add(n.id));
+      this._expandInited = true;
     }
 
     const rows = [];
@@ -537,16 +546,41 @@ const FluxoCaixaApp = {
     return "";
   },
 
-  expandAll() {
-    (this.rows || []).forEach(r => {
-      if (r && r.hasKids && r.id) this.expanded.add(r.id);
+  expandableByLevel() {
+    const map = new Map();
+    (this.treeNodes || []).forEach(n => {
+      if (!n || !n.hasKids || !n.id) return;
+      const list = map.get(n.level) || [];
+      list.push(n.id);
+      map.set(n.level, list);
     });
-    this.rebuildFromCache();
+    return map;
+  },
+
+  expandAll() {
+    const byLevel = this.expandableByLevel();
+    const levels = [...byLevel.keys()].sort((a, b) => a - b);
+    for (const level of levels) {
+      const missing = (byLevel.get(level) || []).filter(id => !this.expanded.has(id));
+      if (missing.length) {
+        missing.forEach(id => this.expanded.add(id));
+        this.rebuildFromCache();
+        return;
+      }
+    }
   },
 
   collapseAll() {
-    this.expanded.clear();
-    this.rebuildFromCache();
+    const byLevel = this.expandableByLevel();
+    const levels = [...byLevel.keys()].sort((a, b) => b - a);
+    for (const level of levels) {
+      const open = (byLevel.get(level) || []).filter(id => this.expanded.has(id));
+      if (open.length) {
+        open.forEach(id => this.expanded.delete(id));
+        this.rebuildFromCache();
+        return;
+      }
+    }
   },
 
   rebuildFromCache() {
@@ -579,6 +613,9 @@ const FluxoCaixaApp = {
     if (!root) return;
     const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
     const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
+    const byLevel = this.expandableByLevel();
+    const canExpand = [...byLevel.values()].some(ids => ids.some(id => !this.expanded.has(id)));
+    const canCollapse = [...byLevel.values()].some(ids => ids.some(id => this.expanded.has(id)));
     root.innerHTML = `
       <div class="fc-shell">
         <div class="fc-head">
@@ -615,42 +652,22 @@ const FluxoCaixaApp = {
               <div class="fc-tree-toolbar">
                 <strong>Estrutura DFC Padrão</strong>
                 <div class="fc-tree-actions">
-                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.expandAll()">Expandir todos</button>
-                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.collapseAll()">Recolher todos</button>
+                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"}>Expandir todos</button>
+                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"}>Recolher todos</button>
                 </div>
               </div>
+              ${hasUnmatched ? `
+                <div class="fc-warn fc-warn-bar">
+                  <i data-lucide="alert-triangle" style="width:14px;height:14px;"></i>
+                  Há ${this.fmt(unmatched.total)} em contas ainda não vinculadas à visão.
+                  <button type="button" class="btn btn-outline fc-mini" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar</button>
+                </div>` : ""}
               <div class="fc-tree-scroll">
                 ${this.loading
                   ? `<div class="fc-empty">Carregando movimentos de caixa e banco...</div>`
                   : ((this.rows || []).length
                     ? (this.rows || []).map(r => this.rowHtml(r)).join("")
                     : `<div class="fc-empty">Informe o período e consulte a API.</div>`)}
-              </div>
-            </div>
-            <div class="fc-side-pane">
-              <div class="fc-side-head">
-                <strong>Sienge / visão</strong>
-              </div>
-              <div class="fc-side-body">
-                <p class="fc-side-hint">Movimentos sem plano financeiro (transferências/aplicações) não entram no DFC. Contas desconsideradas no cadastro de visões também são ignoradas.</p>
-                ${hasUnmatched ? `
-                  <div class="fc-warn">
-                    <i data-lucide="alert-triangle" style="width:14px;height:14px;"></i>
-                    Há ${this.fmt(unmatched.total)} em contas do movimento ainda não vinculadas à visão (não entram na variação).
-                  </div>
-                  <div class="fc-unmatched-list">
-                    ${(unmatched.samples || []).map(s => `
-                      <div class="fc-unmatched-item">
-                        <strong>${this.esc(this.formatAccountCode(s.id) || s.id)}</strong>
-                        <span>${this.esc(s.name || "")}</span>
-                        <em style="${this.cellStyle(s.amount, false)}">${this.fmt(s.amount)}</em>
-                      </div>`).join("")}
-                  </div>
-                  <button type="button" class="btn btn-outline fc-mini" style="width:100%;margin-top:8px;"
-                    onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no cadastro de visões</button>
-                ` : `
-                  <div class="fc-ok">Nenhuma conta órfã no período — a estrutura segue o cadastro de visões.</div>
-                `}
               </div>
             </div>
           </div>
