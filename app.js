@@ -2402,7 +2402,7 @@ window.hasFinCrAction = function(actionId, flag) {
 window.setRulesSectionMode = function(root, canView, canEdit) {
   if (!root) return;
   root.querySelectorAll("input, select, textarea, button").forEach(el => {
-    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config") return;
+    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-cartao-taxas") return;
     if (el.closest && el.closest("#regras-tabs-menu")) return;
     el.disabled = !canEdit;
     el.style.pointerEvents = canEdit ? "" : "none";
@@ -2423,7 +2423,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "atribuicao", "fila"].forEach(id => {
+  ["regua", "judiciais", "atribuicao", "fila", "cartao"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -2434,6 +2434,7 @@ window.applyRulesModulePermissions = function() {
   window.setRulesSectionMode(document.getElementById("content-regra-judiciais"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-negociacao"), canViewNeg, canEditNeg);
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
@@ -2442,6 +2443,8 @@ window.applyRulesModulePermissions = function() {
   if (btnSaveNeg) btnSaveNeg.disabled = !canEditNeg;
   const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
   if (btnFila) btnFila.disabled = !canEditCob;
+  const btnSaveCard = document.getElementById("btn-save-cartao-taxas");
+  if (btnSaveCard) btnSaveCard.disabled = !canEditCob;
 
   let hint = document.getElementById("regras-perm-hint");
   if (!hint) {
@@ -2491,6 +2494,9 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-fila" && typeof window.populateFilaOperators === "function") {
     window.populateFilaOperators();
+  }
+  if (tabId === "regra-cartao" && typeof window.renderCardFeesTab === "function") {
+    window.renderCardFeesTab();
   }
   window.applyRulesModulePermissions();
 };
@@ -31132,7 +31138,8 @@ window.SYNC_KEYS = [
     "crm_centros_custo_tipos",
     "crm_plano_visoes_v2",
     "crm_moura_preambles_list",
-    "crm_moura_cartorios_list"
+    "crm_moura_cartorios_list",
+    "crm_moura_cartao_taxas"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {

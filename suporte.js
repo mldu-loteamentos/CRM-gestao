@@ -54,7 +54,8 @@
         { id: "regra-judiciais", label: "Etapas Judiciais" },
         { id: "regra-atribuicao", label: "Atribuição de Operadores" },
         { id: "regra-negociacao", label: "Regras de Negociação" },
-        { id: "regra-fila", label: "Fila de Cobrança" }
+        { id: "regra-fila", label: "Fila de Cobrança" },
+        { id: "regra-cartao", label: "Cartão de Crédito" }
       ]},
       { id: "extrato", label: "Extrato" },
       { id: "mapa", label: "Mapa jurídico" },

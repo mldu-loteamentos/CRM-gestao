@@ -2636,3 +2636,230 @@ circle.donut-segment {
   .fc-side-pane { width: 100%; max-height: 220px; border-top: 1px solid #e2e8f0; }
 }
 
+/* Taxas de Cartão — Configurações */
+.cartao-taxas-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.cartao-taxas-head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cartao-taxas-head h3 i { color: var(--color-primary); width: 20px; height: 20px; }
+.cartao-taxas-head p {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+  max-width: 640px;
+}
+.cartao-taxas-updated {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+.cartao-taxas-brands {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.cartao-brand-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+.cartao-brand-card.is-master { background: linear-gradient(135deg, #fff 0%, #fff7ed 100%); }
+.cartao-brand-card.is-elo { background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); }
+.cartao-brand-card strong { display: block; font-size: 0.95rem; color: #0f172a; }
+.cartao-brand-card span { font-size: 0.78rem; color: #64748b; }
+.cartao-brand-marks {
+  width: 52px;
+  height: 36px;
+  position: relative;
+  flex-shrink: 0;
+}
+.cartao-mark {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  top: 4px;
+}
+.mark-master { left: 0; background: #eb001b; }
+.mark-visa { left: 16px; background: #1a1f71; }
+.mark-elo { left: 0; background: linear-gradient(180deg, #ffcb05 0%, #000 100%); }
+.mark-amex { left: 16px; background: #016fd0; }
+.cartao-taxas-table-wrap {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(16, 84, 54, 0.06);
+}
+.cartao-taxas-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.cartao-taxas-table th {
+  background: #004E33;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 12px 16px;
+  text-align: center;
+}
+.cartao-taxas-table th:first-child { text-align: left; }
+.cartao-taxas-table td {
+  padding: 12px 16px;
+  border-top: 1px solid #edf2f0;
+  text-align: center;
+  vertical-align: middle;
+}
+.cartao-taxas-table td:first-child { text-align: left; }
+.cartao-taxas-table tr.is-alt td { background: #faf6f1; }
+.cartao-prod {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cartao-prod i {
+  width: 18px;
+  height: 18px;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.cartao-prod strong { display: block; color: #1e293b; font-size: 0.92rem; }
+.cartao-prod span { display: block; color: #94a3b8; font-size: 0.75rem; font-weight: 500; }
+.cartao-rate-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1.5px solid #dbe4de;
+  border-radius: 8px;
+  padding: 4px 10px 4px 4px;
+}
+.cartao-rate-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(16, 84, 54, 0.12);
+}
+.cartao-rate-field input {
+  width: 88px;
+  border: none;
+  outline: none;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0f172a;
+  background: transparent;
+  font-family: inherit;
+}
+.cartao-rate-field span {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+.cartao-taxas-sim {
+  margin-top: 22px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  background: #f8faf9;
+}
+.cartao-taxas-sim-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.cartao-taxas-sim-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cartao-taxas-sim-head h4 i { width: 16px; height: 16px; color: var(--color-primary); }
+.cartao-taxas-sim-head p { margin: 4px 0 0; font-size: 0.8rem; color: #64748b; }
+.cartao-taxas-sim-value {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.cartao-taxas-sim-value input {
+  width: 180px;
+  height: 40px;
+  border: 1.5px solid #dbe4de;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0f172a;
+  background: #fff;
+  font-family: inherit;
+}
+.cartao-taxas-sim-value input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.cartao-taxas-sim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.cartao-sim-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cartao-sim-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 10px;
+}
+.cartao-sim-card header i { width: 14px; height: 14px; color: var(--color-primary); }
+.cartao-sim-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.cartao-sim-cols small { display: block; color: #64748b; font-size: 0.7rem; font-weight: 600; }
+.cartao-sim-cols strong { display: block; color: #105436; font-size: 0.95rem; margin-top: 2px; }
+.cartao-sim-cols em { display: block; color: #f37021; font-size: 0.72rem; font-style: normal; font-weight: 600; }
+.cartao-taxas-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+@media (max-width: 860px) {
+  .cartao-taxas-brands,
+  .cartao-taxas-sim-grid { grid-template-columns: 1fr; }
+  .cartao-taxas-head,
+  .cartao-taxas-sim-head { flex-direction: column; align-items: flex-start; }
+}
+

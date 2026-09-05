@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=705">
+  <link rel="stylesheet" href="style.css?v=706">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=705" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=706" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1266,7 +1266,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.705 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.706 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -3809,6 +3809,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <button class="customer-tab-btn" onclick="switchRegrasTab('regra-atribuicao')" id="btn-regra-atribuicao">Atribuição de Operadores</button>
                 <button class="customer-tab-btn" onclick="switchRegrasTab('regra-negociacao')" id="btn-regra-negociacao">Regras de Negociação</button>
                 <button class="customer-tab-btn" onclick="switchRegrasTab('regra-fila')" id="btn-regra-fila">Fila de Cobrança</button>
+                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-cartao')" id="btn-regra-cartao">Cartão de Crédito</button>
             </div>
             
             <!-- Conteúdos -->
@@ -4268,6 +4269,79 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
                   <button class="btn btn-primary" onclick="window.saveFilaConfig()">
                     <i data-lucide="save" style="width: 16px;"></i> Salvar Configuração de Fila
+                  </button>
+                </div>
+              </div>
+
+              <!-- ABA: Cartão de Crédito -->
+              <div id="content-regra-cartao" class="regra-tab-content" style="display: none;">
+                <div class="cartao-taxas-head">
+                  <div>
+                    <h3>
+                      <i data-lucide="credit-card"></i>
+                      Taxas de Cartão
+                    </h3>
+                    <p>Configure as taxas por produto e bandeira. O valor líquido é o recebido após a taxa da adquirente.</p>
+                  </div>
+                  <span id="cartao-taxas-updated" class="cartao-taxas-updated"></span>
+                </div>
+
+                <div class="cartao-taxas-brands">
+                  <div class="cartao-brand-card is-master">
+                    <div class="cartao-brand-marks" aria-hidden="true">
+                      <span class="cartao-mark mark-master"></span>
+                      <span class="cartao-mark mark-visa"></span>
+                    </div>
+                    <div>
+                      <strong>Master e Visa</strong>
+                      <span>Mastercard e Visa</span>
+                    </div>
+                  </div>
+                  <div class="cartao-brand-card is-elo">
+                    <div class="cartao-brand-marks" aria-hidden="true">
+                      <span class="cartao-mark mark-elo"></span>
+                      <span class="cartao-mark mark-amex"></span>
+                    </div>
+                    <div>
+                      <strong>Elo e Amex</strong>
+                      <span>Elo e American Express</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="cartao-taxas-table-wrap">
+                  <table class="cartao-taxas-table" id="cartao-taxas-table">
+                    <thead>
+                      <tr>
+                        <th>produtos</th>
+                        <th>Master e Visa</th>
+                        <th>Elo e Amex</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cartao-taxas-table-body"></tbody>
+                  </table>
+                </div>
+
+                <div class="cartao-taxas-sim">
+                  <div class="cartao-taxas-sim-head">
+                    <div>
+                      <h4><i data-lucide="calculator"></i> Simular recebimento</h4>
+                      <p>Veja a taxa e o valor líquido para cada produto.</p>
+                    </div>
+                    <label class="cartao-taxas-sim-value">
+                      Valor da venda
+                      <input type="text" id="cartao-taxas-sim-amount" inputmode="decimal" value="10.000,00" oninput="if (window.updateCardFeesSimulator) window.updateCardFeesSimulator()">
+                    </label>
+                  </div>
+                  <div id="cartao-taxas-sim-grid" class="cartao-taxas-sim-grid"></div>
+                </div>
+
+                <div class="cartao-taxas-actions">
+                  <button type="button" class="btn btn-outline" onclick="window.resetCardFeesToDefault()">
+                    <i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i> Restaurar padrão
+                  </button>
+                  <button type="button" class="btn btn-primary" id="btn-save-cartao-taxas" onclick="window.saveCardFeesConfig()">
+                    <i data-lucide="save" style="width:16px;height:16px;"></i> Salvar Taxas
                   </button>
                 </div>
               </div>
@@ -6704,43 +6778,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=705"></script>
-  <script defer src="sienge-api.js?v=705"></script>
-  <script defer src="azure-auth.js?v=705"></script>
-  <script defer src="app.js?v=705"></script>
-  <script defer src="home-dashboard.js?v=705"></script>
-  <script defer src="anexos.js?v=705"></script>
-  <script defer src="contas-pagar.js?v=705"></script>
-  <script defer src="config-tags.js?v=705"></script>
-  <script defer src="config-users.js?v=705"></script>
-  <script defer src="suporte.js?v=705"></script>
-  <script defer src="construcao.js?v=705"></script>
-  <script defer src="empresas.js?v=705"></script>
-  <script defer src="relacionamento.js?v=705"></script>
-  <script defer src="compromissario.js?v=705"></script>
+  <script defer src="data.js?v=706"></script>
+  <script defer src="sienge-api.js?v=706"></script>
+  <script defer src="azure-auth.js?v=706"></script>
+  <script defer src="app.js?v=706"></script>
+  <script defer src="cartao-taxas.js?v=706"></script>
+  <script defer src="home-dashboard.js?v=706"></script>
+  <script defer src="anexos.js?v=706"></script>
+  <script defer src="contas-pagar.js?v=706"></script>
+  <script defer src="config-tags.js?v=706"></script>
+  <script defer src="config-users.js?v=706"></script>
+  <script defer src="suporte.js?v=706"></script>
+  <script defer src="construcao.js?v=706"></script>
+  <script defer src="empresas.js?v=706"></script>
+  <script defer src="relacionamento.js?v=706"></script>
+  <script defer src="compromissario.js?v=706"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=705"></script>
-  <script defer src="centros-custo.js?v=705"></script>
-  <script defer src="marketing.js?v=705"></script>
-  <script defer src="plano-financeiro.js?v=705"></script>
-  <script defer src="prestacao-contas.js?v=705"></script>
+  <script defer src="estoque-comercial.js?v=706"></script>
+  <script defer src="centros-custo.js?v=706"></script>
+  <script defer src="marketing.js?v=706"></script>
+  <script defer src="plano-financeiro.js?v=706"></script>
+  <script defer src="prestacao-contas.js?v=706"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=705"></script>
-  <script defer src="fluxo-caixa.js?v=705"></script>
-  <script defer src="caixa-diario.js?v=705"></script>
-  <script defer src="investimento.js?v=705"></script>
-  <script defer src="parametrizacao-parceiro.js?v=705"></script>
-  <script defer src="societario.js?v=705"></script>
-  <script defer src="participacoes.js?v=705"></script>
-  <script defer src="fiscal.js?v=705"></script>
-  <script defer src="indexadores.js?v=705"></script>
-  <script defer src="verificar-construcao.js?v=705"></script>
-  <script src="repactuacoes.js?v=705"></script>
-  <script defer src="repactuacao-lote.js?v=705"></script>
+  <script defer src="empresa-filter.js?v=706"></script>
+  <script defer src="fluxo-caixa.js?v=706"></script>
+  <script defer src="caixa-diario.js?v=706"></script>
+  <script defer src="investimento.js?v=706"></script>
+  <script defer src="parametrizacao-parceiro.js?v=706"></script>
+  <script defer src="societario.js?v=706"></script>
+  <script defer src="participacoes.js?v=706"></script>
+  <script defer src="fiscal.js?v=706"></script>
+  <script defer src="indexadores.js?v=706"></script>
+  <script defer src="verificar-construcao.js?v=706"></script>
+  <script src="repactuacoes.js?v=706"></script>
+  <script defer src="repactuacao-lote.js?v=706"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=705"></script>
+  <script defer src="dashboard-inadimplencia.js?v=706"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
