@@ -665,13 +665,10 @@ const FluxoCaixaApp = {
             <label class="fc-field">Fim
               <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value">
             </label>
-            <div class="fc-field">Seleção
-              <div class="fc-selection-pill" title="Data em que o dinheiro saiu ou entrou">Data do pagamento / movimento</div>
-            </div>
-            <button class="btn btn-primary" onclick="FluxoCaixaApp.load()" style="height:34px;">
-              ${this.loading ? "Consultando..." : "Consultar"}
-            </button>
             ${this.companyDropHtml()}
+            <button type="button" class="btn btn-primary fc-consult-btn" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""}>
+              Consultar
+            </button>
           </div>
           ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
           <div class="fc-board">
@@ -691,10 +688,10 @@ const FluxoCaixaApp = {
                 </div>` : ""}
               <div class="fc-tree-scroll">
                 ${this.loading
-                  ? `<div class="fc-empty">Carregando movimentos de caixa e banco...</div>`
+                  ? `<div class="fc-loading"><span class="fc-loading-spin" aria-hidden="true"></span><span>buscando lançamentos</span></div>`
                   : ((this.rows || []).length
                     ? (this.rows || []).map(r => this.rowHtml(r)).join("")
-                    : `<div class="fc-empty">Informe o período e consulte a API.</div>`)}
+                    : "")}
               </div>
             </div>
           </div>

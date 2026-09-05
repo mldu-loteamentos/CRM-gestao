@@ -260,7 +260,8 @@ const ConfigTagsApp = {
 
     const email = (typeof AppState !== "undefined" && AppState.currentUser && AppState.currentUser.email)
       ? AppState.currentUser.email
-      : "admin@mouraleite.com.br";
+      : ((typeof window.listCrmAdministrators === "function" && window.listCrmAdministrators()[0] && window.listCrmAdministrators()[0].email)
+        || "");
 
     try {
       const ready = await this.waitFirebase(3000);

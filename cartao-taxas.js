@@ -169,7 +169,7 @@
     const el = document.getElementById("cartao-taxas-updated");
     if (!el) return;
     if (!updatedAt) {
-      el.textContent = "Valores padrão da adquirente";
+      el.textContent = "";
       return;
     }
     const d = new Date(updatedAt);

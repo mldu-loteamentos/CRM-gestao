@@ -216,11 +216,11 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   fillOperatorTabs("zeropaid-operator-tabs-container", "activeZeroOperatorFilter");
 
   const _cu = window.AppState ? window.AppState.currentUser : null;
-  const isAdmin = (_cu && (
+  const isAdmin = window.isCrmAgendaSupervisor
+    ? window.isCrmAgendaSupervisor(_cu)
+    : (_cu && (
       (_cu.role && _cu.role.toUpperCase().includes('ADMIN')) || 
-      (_cu.profile_name && (_cu.profile_name.toUpperCase().includes('ADMIN') || _cu.profile_name.toUpperCase().includes('GESTOR') || _cu.profile_name.toUpperCase().includes('GERENTE'))) ||
-      (_cu.email && (_cu.email.toLowerCase() === 'admin@mouraleite.com.br' || _cu.email.toLowerCase() === 'israel@mouraleite.com.br' || _cu.email.toLowerCase() === 'atendimento@mouraleite.com.br')) ||
-      (_cu.name && _cu.name.toUpperCase().includes('ISRAEL'))
+      (_cu.profile_name && (_cu.profile_name.toUpperCase().includes('ADMIN') || _cu.profile_name.toUpperCase().includes('GESTOR') || _cu.profile_name.toUpperCase().includes('GERENTE')))
   ));
 
   const agendaTabs = document.getElementById("agenda-operator-tabs-container");
@@ -1679,6 +1679,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
+  if (tabId === 'acessos') tabId = 'auditoria';
   if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
   if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
     let perms = {};
@@ -2353,7 +2354,7 @@ window.renderAuditLogs = async function(forceReload) {
 
   if (!rows.length) {
     const total = window._auditCache.rows.length;
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:28px;">${
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#5b7264;padding:36px;">${
       total
         ? "Nenhum log neste filtro. Há " + total + " registro(s) no total — limpe o usuário, o tipo ou o período."
         : "Nenhum log encontrado. Gere um boleto ou envie um anexo e clique em Atualizar."
@@ -2366,23 +2367,28 @@ window.renderAuditLogs = async function(forceReload) {
     const ctx = auditRowContext(row);
     const ok = String(row.status || "ok") !== "erro";
     const statusHtml = ok
-      ? `<span style="color:#15803d;font-weight:700;">OK</span>`
-      : `<span style="color:#b91c1c;font-weight:700;">Erro</span>`;
-    const who = row.userEmail ? (auditEsc(row.user) + "<br><span style=\"color:#64748b;font-size:0.75rem;\">" + auditEsc(row.userEmail) + "</span>") : auditEsc(row.user || "—");
+      ? `<span class="audit-status is-ok">OK</span>`
+      : `<span class="audit-status is-err">Erro</span>`;
+    const who = row.userEmail
+      ? (auditEsc(row.user) + "<span class=\"audit-user-mail\">" + auditEsc(row.userEmail) + "</span>")
+      : auditEsc(row.user || "—");
     const emp = [ctx.enterpriseId, ctx.enterpriseName].filter(Boolean).join(" — ") || "—";
     const uni = [ctx.unitId, ctx.unitName].filter(Boolean).join(" — ");
-    const local = uni && uni !== emp ? (emp + "<br><span style=\"color:#64748b;font-size:0.75rem;\">" + auditEsc(uni) + "</span>") : auditEsc(emp);
+    const local = uni && uni !== emp
+      ? (auditEsc(emp) + "<span class=\"audit-place-sub\">" + auditEsc(uni) + "</span>")
+      : auditEsc(emp);
     const cliente = ctx.customerLabel || (ctx.customerId ? ("Cliente " + ctx.customerId) : "—");
     const titulo = ctx.titleId || "—";
+    const detalhe = String(row.summary || "").replace(/\s+/g, " ").trim();
     return `<tr>
-      <td style="white-space:nowrap;">${auditEsc(auditFormatWhen(row.timestamp))}</td>
-      <td>${who}</td>
-      <td>${auditEsc(meta.label)}</td>
-      <td>${auditEsc(cliente)}</td>
-      <td>${auditEsc(titulo)}</td>
-      <td>${local}</td>
-      <td style="max-width:360px;">${auditEsc(row.summary || "")}</td>
-      <td>${statusHtml}</td>
+      <td class="audit-col-when">${auditEsc(auditFormatWhen(row.timestamp))}</td>
+      <td class="audit-col-user">${who}</td>
+      <td class="audit-col-action">${auditEsc(meta.label)}</td>
+      <td class="audit-col-client">${auditEsc(cliente)}</td>
+      <td class="audit-col-title">${auditEsc(titulo)}</td>
+      <td class="audit-col-place">${local}</td>
+      <td class="audit-col-detail"><span class="audit-detail" title="${auditEsc(detalhe)}">${auditEsc(detalhe)}</span></td>
+      <td class="audit-col-status">${statusHtml}</td>
     </tr>`;
   }).join("");
 };
@@ -2482,31 +2488,18 @@ function validateAndLoadCrmUser(user) {
     crmUsers = JSON.parse(localStorage.getItem('crm_users')) || [];
   } catch(e) {}
   
-  let matchedUser = crmUsers.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+  let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
   
-  // Se o usuário não existir na base, vamos auto-registrar
   if (!matchedUser) {
-    // israel@mouraleite.com.br é o super-admin padrão
-    if (user.email.toLowerCase() === "israel@mouraleite.com.br") {
       matchedUser = {
         id: "usr_" + Date.now(),
         name: user.name,
-        email: user.email.toLowerCase(),
-        role: "ADMIN",
-        status: "ATIVO",
-        createdAt: new Date().toISOString()
-      };
-    } else {
-      // Outros usuários entram como ATIVO automaticamente (OPERADOR)
-      matchedUser = {
-        id: "usr_" + Date.now(),
-        name: user.name,
-        email: user.email.toLowerCase(),
+      email: String(user.email || "").toLowerCase(),
+      profile_name: "OPERADOR",
         role: "OPERADOR",
         status: "ATIVO",
         createdAt: new Date().toISOString()
       };
-    }
     crmUsers.push(matchedUser);
     localStorage.setItem('crm_users', JSON.stringify(crmUsers));
   }
@@ -2537,13 +2530,11 @@ async function processSuccessfulLogin(loggedUser) {
     window.updateOperatorTabsUI();
     
     // Determine admin/gestor status based on role OR profile_name
-    const _profileNameUp = (validatedUser.profile_name || '').toUpperCase();
-    const _roleUp = (validatedUser.role || '').toUpperCase();
-    const _isAdminOrGestor = _roleUp.includes('ADMIN') ||
-        _profileNameUp.includes('ADMIN') ||
-        _profileNameUp.includes('GESTOR') ||
-        _profileNameUp.includes('GERENTE') ||
-        (validatedUser.email && (validatedUser.email === 'admin@mouraleite.com.br' || validatedUser.email === 'israel@mouraleite.com.br'));
+    const _isAdminOrGestor = window.isCrmAgendaSupervisor
+      ? window.isCrmAgendaSupervisor(validatedUser)
+      : ((validatedUser.profile_name || '').toUpperCase().includes('ADMIN')
+        || (validatedUser.profile_name || '').toUpperCase().includes('GESTOR')
+        || (validatedUser.profile_name || '').toUpperCase().includes('GERENTE'));
 
     if (_isAdminOrGestor) {
         window.AgendaSelectedOperator = "Todos";
@@ -2785,12 +2776,53 @@ window.applyPermissions = function(profileName) {
   }
 }
 
-window.isCrmSuperAdmin = function() {
-  const u = window.AppState && AppState.currentUser;
+window.getCrmUsersList = function() {
+  let users = [];
+  try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
+  if ((!users || !users.length) && window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users)) {
+    users = ConfigUsersApp.users;
+  }
+  return Array.isArray(users) ? users : [];
+};
+
+window.isCrmAdminProfileName = function(name) {
+  const n = String(name || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n === "ADMINISTRADOR";
+};
+
+window.findCrmRegisteredUser = function(userOrEmail) {
+  const email = String((typeof userOrEmail === "string" ? userOrEmail : (userOrEmail && userOrEmail.email)) || "").toLowerCase().trim();
+  if (!email) return null;
+  return window.getCrmUsersList().find(function(u) {
+    return String((u && u.email) || "").toLowerCase() === email;
+  }) || null;
+};
+
+window.isCrmAdministrator = function(user) {
+  if (!user) return false;
+  const rec = window.findCrmRegisteredUser(user);
+  const status = String((rec && rec.status) || user.status || "ATIVO").toUpperCase();
+  if (status === "INATIVO") return false;
+  return window.isCrmAdminProfileName((rec && rec.profile_name) || user.profile_name || user.profile || user.role);
+};
+
+window.listCrmAdministrators = function() {
+  return window.getCrmUsersList().filter(function(u) {
   if (!u) return false;
-  if (u.profile_name && String(u.profile_name).toUpperCase() === "ADMINISTRADOR") return true;
-  const email = String(u.email || "").toLowerCase();
-  return email === "israel@mouraleite.com.br" || email === "admin@mouraleite.com.br";
+    const status = String(u.status || "ATIVO").toUpperCase();
+    return status !== "INATIVO" && window.isCrmAdminProfileName(u.profile_name);
+  });
+};
+
+window.isCrmAgendaSupervisor = function(user) {
+  if (!user) return false;
+  if (window.isCrmAdministrator(user)) return true;
+  const profile = String(user.profile_name || user.profile || user.role || "").toUpperCase();
+  return profile.includes("GESTOR") || profile.includes("GERENTE");
+};
+
+window.isCrmSuperAdmin = function() {
+  return window.isCrmAdministrator(window.AppState && AppState.currentUser);
 };
 
 window.permCoversMenuKey = function(perms, modKey) {
@@ -3701,8 +3733,7 @@ async function loadAndApplyPermissions() {
          let permsObj = JSON.parse(permsStr);
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
          
-         // Forçar permissões de ADMIN para o Israel e Admin (fallback de segurança)
-         if (AppState.currentUser.email && (AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br')) {
+         if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
              AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
          }
       } else {
@@ -3722,10 +3753,7 @@ async function loadAndApplyPermissions() {
   // Aplicar permissões no Menu
   document.querySelectorAll('[data-permission]').forEach(el => {
     const reqPerm = el.getAttribute('data-permission');
-    const isSuperAdmin = AppState.currentUser && (
-      (AppState.currentUser.profile_name && AppState.currentUser.profile_name.toUpperCase() === 'ADMINISTRADOR') ||
-      (AppState.currentUser.email && (AppState.currentUser.email.toLowerCase() === 'israel@mouraleite.com.br' || AppState.currentUser.email.toLowerCase() === 'admin@mouraleite.com.br'))
-    );
+    const isSuperAdmin = window.isCrmSuperAdmin && window.isCrmSuperAdmin();
 
     if (isSuperAdmin || (AppState.currentUser.permissions && AppState.currentUser.permissions.includes(reqPerm))) {
       el.style.display = ''; // mostrar
@@ -6032,7 +6060,7 @@ document.addEventListener("click", function(e) {
                       const diffDays = typeof window.daysSinceSubjudiceExit === "function"
                         ? window.daysSinceSubjudiceExit(subjudiceHistory, client.customerId)
                         : null;
-                      return window.getRecenteJuridicoAgingHtml(client, diffDays);
+                          return window.getRecenteJuridicoAgingHtml(client, diffDays);
                   }
                   if (typeof window.nexAgingSpecialHtml === "function") {
                       const nexSpecial = window.nexAgingSpecialHtml(client);
@@ -13734,9 +13762,9 @@ window.loadQuitacaoDebtReport = async function(force) {
     const discPct = discBase > 0 ? (discVal / discBase) * 100 : 0;
     window._quitacaoState.descontoContrato = discVal;
     window._quitacaoState.descontoPct = discPct;
-    const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
-    const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
-    if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
+      const funnelDiffEl = document.getElementById("quitacao-right-desconto-val");
+      const funnelDiscountEl = document.getElementById("quitacao-right-desconto-pct");
+      if (funnelDiffEl) funnelDiffEl.textContent = quitacaoFmtMoney(Math.max(0, discVal));
     if (funnelDiscountEl) funnelDiscountEl.textContent = `${discPct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
     const alcadaBanner = document.getElementById("quitacao-alcada-banner");
     if (alcadaBanner && typeof window.resolveQuitacaoAlcada === "function") {
@@ -13749,7 +13777,7 @@ window.loadQuitacaoDebtReport = async function(force) {
       alcadaBanner.className = "quitacao-alcada-banner " + (alcada.within ? "is-ok" : "is-warn");
       alcadaBanner.textContent = allZero
         ? ("Alçada taxa 0: desconto máximo " + (alcada.maxPct != null ? alcada.maxPct.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%" : "—") + (alcada.within ? "." : " — o desconto atual ultrapassa o teto."))
-        : ("Alçada aplicável: " + alcada.label + (alcada.within ? "." : " — o desconto atual está fora da faixa cadastrada."));
+        : ((alcada.roleLabel ? ("Alçada " + alcada.roleLabel + ": ") : "Alçada aplicável: ") + alcada.label + (alcada.within ? "." : " — o desconto atual ultrapassa o teto do seu perfil."));
     }
     if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     window.renderQuitacaoDebtReport();
@@ -15630,10 +15658,10 @@ window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
       for (const oneId of instIds) {
         for (const oneBill of billIds) {
           const data = await SiengeApiService.getPaymentSlipNotification(oneBill, oneId);
-          if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
-            boletoInfo = data.results[0];
-            break;
-          }
+        if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
+          boletoInfo = data.results[0];
+          break;
+        }
         }
         if (boletoInfo) break;
       }
@@ -16412,15 +16440,16 @@ async function loadAgendaTab(showLoader = false) {
   
   // Compute isAdmin locally so we don't reference undefined outer scope
   const _currentUser = window.AppState && window.AppState.currentUser;
-  const _isAdminInAgenda = _currentUser && (
+  const _isAdminInAgenda = window.isCrmAgendaSupervisor
+    ? window.isCrmAgendaSupervisor(_currentUser)
+    : (_currentUser && (
       (_currentUser.role && _currentUser.role.toUpperCase().includes('ADMIN')) ||
       (_currentUser.profile_name && (
           _currentUser.profile_name.toUpperCase().includes('ADMIN') ||
           _currentUser.profile_name.toUpperCase().includes('GESTOR') ||
           _currentUser.profile_name.toUpperCase().includes('GERENTE')
-      )) ||
-      (_currentUser.email && (_currentUser.email === 'admin@mouraleite.com.br' || _currentUser.email === 'israel@mouraleite.com.br'))
-  );
+      ))
+    ));
   
   // Determine which operator's agenda to show.
   // Priority: window.AgendaSelectedOperator (set at login or by tab click).
@@ -22855,12 +22884,13 @@ function loadPreamblesConfigTab() {
   checkAdminPermissions();
   renderRulesSettingsTable();
   
-  // Configurações do Azure
+  if (typeof MouraAuth !== "undefined" && document.getElementById("azure-enable-chk")) {
   const config = MouraAuth.getAuthConfig();
   document.getElementById("azure-enable-chk").checked = config.enabled;
   document.getElementById("azure-client-id").value = config.clientId;
   document.getElementById("azure-tenant-id").value = config.tenantId;
   document.getElementById("azure-redirect-uri").value = config.redirectUri;
+  }
   
   lucide.createIcons();
 }
@@ -23257,11 +23287,7 @@ window.toggleCityEnterprises = function(index) {
 };
 
 function checkAdminPermissions() {
-  const adminEmail = localStorage.getItem("crm_moura_admin_email") || "leticia@mouraleite.com";
-  const emailInput = document.getElementById("admin-email-config");
-  if (emailInput) emailInput.value = adminEmail;
-  
-  const isCurrentAdmin = AppState.currentUser && AppState.currentUser.email.toLowerCase() === adminEmail.toLowerCase();
+  const isCurrentAdmin = window.isCrmSuperAdmin ? window.isCrmSuperAdmin() : false;
   
   const alertEl = document.getElementById("admin-permission-alert");
   if (alertEl) {
@@ -24134,6 +24160,13 @@ window.paintRenegotiationBlockSummary = function() {
   if (el) el.textContent = months + (months === 1 ? " mês" : " meses");
 };
 
+window.closeRenegotiationBlockModal = function() {
+  const modal = document.getElementById("reneg-block-modal");
+  if (!modal) return;
+  modal.classList.remove("active");
+  modal.style.display = "none";
+};
+
 window.openRenegotiationBlockModal = function() {
   if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) {
     alert("Sem permissão para editar Regras de Negociação.");
@@ -24144,6 +24177,7 @@ window.openRenegotiationBlockModal = function() {
   if (!modal || !input) return;
   input.value = window.getRenegotiationBlockMonths();
   modal.style.display = "flex";
+  modal.classList.add("active");
 };
 
 window.saveRenegotiationBlockMonths = function() {
@@ -24159,8 +24193,7 @@ window.saveRenegotiationBlockMonths = function() {
   }
   window.persistRenegotiationBlockMonths(n);
   window.paintRenegotiationBlockSummary();
-  const modal = document.getElementById("reneg-block-modal");
-  if (modal) modal.style.display = "none";
+  window.closeRenegotiationBlockModal();
   if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
 };
 
@@ -25551,9 +25584,13 @@ window.removerEtapaJudicial = function(id) {
 };
 
 window.saveAzureConfig = function() {
-  const enabled = document.getElementById("azure-enable-chk").checked;
-  const clientId = document.getElementById("azure-client-id").value.trim();
-  const tenantId = document.getElementById("azure-tenant-id").value.trim();
+  const enabledEl = document.getElementById("azure-enable-chk");
+  const clientEl = document.getElementById("azure-client-id");
+  const tenantEl = document.getElementById("azure-tenant-id");
+  if (!enabledEl || !clientEl || !tenantEl) return;
+  const enabled = enabledEl.checked;
+  const clientId = clientEl.value.trim();
+  const tenantId = tenantEl.value.trim();
   
   if (enabled && (!clientId || !tenantId)) {
     alert("Para habilitar o login Microsoft real, informe o Client ID e Tenant ID.");
@@ -29589,11 +29626,11 @@ document.addEventListener('tabChanged', async (e) => {
          if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
             ccs = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(ccs);
          } else {
-            ccs = ccs.filter(c => {
-               const custom = customFields[c.id] || {};
-               const tipo = custom.tipo_cc || '';
-               return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'Incorporação';
-            });
+         ccs = ccs.filter(c => {
+            const custom = customFields[c.id] || {};
+            const tipo = custom.tipo_cc || '';
+            return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'Incorporação';
+         });
          }
          
          // Sort by ID ascending
@@ -33308,9 +33345,9 @@ window.userHasResendBilletFlag = function() {
     }
     if (!logged) return { ok: false, isAdmin: false, user: null };
     const profile = String(logged.profile_name || logged.nivel || logged.role || "").toUpperCase();
-    const isAdmin = profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
-      || String(logged.role || "").toUpperCase().includes("ADMIN")
-      || (logged.email && /israel@mouraleite\.com\.br|admin@mouraleite\.com\.br/i.test(logged.email));
+    const isAdmin = (window.isCrmAgendaSupervisor && window.isCrmAgendaSupervisor(logged))
+      || profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
+      || String(logged.role || "").toUpperCase().includes("ADMIN");
     let flag = !!logged.resend_billet;
     if (!flag && logged.email) {
       try {

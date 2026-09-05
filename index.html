@@ -4,12 +4,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>I.ntegr.A Moura Leite</title>
+  <title>IntegrA Moura Leite</title>
   <link rel="icon" type="image/png" href="i.ntegr.a/arvore.png">
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=734">
+  <link rel="stylesheet" href="style.css?v=741">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=734" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=741" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1171,9 +1171,6 @@
             <li data-tab="auditoria" data-module="sub_seg_geral_auditoria_acessar">
               <a onclick="switchTab('auditoria', 'Auditoria do Sistema')">Auditoria do Sistema</a>
             </li>
-            <li data-tab="acessos" data-module="sub_seg_geral_acessos_acessar">
-              <a onclick="switchTab('acessos', 'Acessos e Segurança')">Acessos</a>
-            </li>
           </ul>
         </li>
         <li class="nav-item" data-tab="suporte" data-module="mod_suporte">
@@ -1262,7 +1259,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.734 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.741 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2452,7 +2449,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=741" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -2701,7 +2698,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=741" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2710,7 +2707,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=741" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2834,93 +2831,89 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
         <!-- 8. AUDITORIA DO SISTEMA -->
         <section id="tab-auditoria" class="tab-pane" style="display: none;">
-          <div class="card" style="padding: 20px;">
-            <h2
-              style="font-size: 1.5rem; color: var(--color-primary); margin-bottom: 20px; border-bottom: 2px solid var(--color-gray-200); padding-bottom: 10px;">
-              <i data-lucide="shield"></i> Auditoria do Sistema
-            </h2>
+          <div class="audit-page">
+            <header class="audit-head">
+              <div>
+                <h2><i data-lucide="shield"></i> Auditoria do Sistema</h2>
+                <p>Quem gerou boleto e quem enviou anexo ao Sienge, incluindo o histórico das ocorrências.</p>
+              </div>
+            </header>
 
-            <p style="margin:-8px 0 18px;color:#64748b;font-size:0.9rem;">Demonstrativo de quem gerou boleto e quem enviou anexo ao Sienge, inclusive o histórico gravado nas ocorrências. Filtre por período, usuário do I.ntegr.A, empreendimento, unidade, título ou cliente.</p>
-
-            <div class="filters-container audit-filters">
-              <div class="form-group">
-                <label for="audit-filter-action">Tipo</label>
-                <select id="audit-filter-action" class="form-control" onchange="renderAuditLogs()">
-                  <option value="principais">Boleto e Anexo</option>
-                  <option value="boleto">Geração de Boleto</option>
-                  <option value="anexo">Envio de Anexo</option>
-                  <option value="ALL">Tudo</option>
-                </select>
+            <div class="audit-panel">
+              <div class="audit-filters">
+                <div class="form-group">
+                  <label for="audit-filter-action">Tipo</label>
+                  <select id="audit-filter-action" class="form-control" onchange="renderAuditLogs()">
+                    <option value="principais">Boleto e Anexo</option>
+                    <option value="boleto">Geração de Boleto</option>
+                    <option value="anexo">Envio de Anexo</option>
+                    <option value="ALL">Tudo</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-user">Usuário I.ntegr.A</label>
+                  <select id="audit-filter-user" class="form-control" onchange="renderAuditLogs()">
+                    <option value="">Todos</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-from">Data inicial</label>
+                  <input type="date" id="audit-filter-from" class="form-control" onchange="renderAuditLogs()">
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-to">Data final</label>
+                  <input type="date" id="audit-filter-to" class="form-control" onchange="renderAuditLogs()">
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-cc">Empreendimento</label>
+                  <input type="text" id="audit-filter-cc" class="form-control" list="audit-cc-list" placeholder="ID ou nome do centro de custo..."
+                    onkeyup="renderAuditLogs()" onchange="renderAuditLogs()">
+                  <datalist id="audit-cc-list"></datalist>
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-unit">Unidade</label>
+                  <input type="text" id="audit-filter-unit" class="form-control" placeholder="ID ou nome da unidade..."
+                    onkeyup="renderAuditLogs()">
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-titulo">Título</label>
+                  <input type="text" id="audit-filter-titulo" class="form-control" placeholder="Número do título..."
+                    onkeyup="renderAuditLogs()">
+                </div>
+                <div class="form-group">
+                  <label for="audit-filter-cliente">Cliente</label>
+                  <input type="text" id="audit-filter-cliente" class="form-control" placeholder="ID ou nome..."
+                    onkeyup="renderAuditLogs()">
+                </div>
               </div>
-              <div class="form-group">
-                <label for="audit-filter-user">Usuário I.ntegr.A</label>
-                <select id="audit-filter-user" class="form-control" onchange="renderAuditLogs()">
-                  <option value="">Todos</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="audit-filter-from">Data inicial</label>
-                <input type="date" id="audit-filter-from" class="form-control" onchange="renderAuditLogs()">
-              </div>
-              <div class="form-group">
-                <label for="audit-filter-to">Data final</label>
-                <input type="date" id="audit-filter-to" class="form-control" onchange="renderAuditLogs()">
-              </div>
-              <div class="form-group audit-filters-actions">
-                <button type="button" class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i>
-                  Atualizar</button>
-                <button type="button" class="btn btn-outline" onclick="clearAuditFilters()"><i data-lucide="eraser"></i>
-                  Limpar filtros</button>
-                <button type="button" class="btn btn-primary" onclick="exportAuditExcel()"><i data-lucide="download"></i>
-                  Exportar Excel</button>
-              </div>
-            </div>
-            <div class="filters-container audit-filters">
-              <div class="form-group">
-                <label for="audit-filter-cc">Empreendimento</label>
-                <input type="text" id="audit-filter-cc" class="form-control" list="audit-cc-list" placeholder="ID ou nome do centro de custo..."
-                  onkeyup="renderAuditLogs()" onchange="renderAuditLogs()">
-                <datalist id="audit-cc-list"></datalist>
-              </div>
-              <div class="form-group">
-                <label for="audit-filter-unit">Unidade</label>
-                <input type="text" id="audit-filter-unit" class="form-control" placeholder="ID ou nome da unidade..."
-                  onkeyup="renderAuditLogs()">
-              </div>
-              <div class="form-group">
-                <label for="audit-filter-titulo">Título</label>
-                <input type="text" id="audit-filter-titulo" class="form-control" placeholder="Número do título..."
-                  onkeyup="renderAuditLogs()">
-              </div>
-              <div class="form-group">
-                <label for="audit-filter-cliente">Cliente</label>
-                <input type="text" id="audit-filter-cliente" class="form-control" placeholder="ID ou nome..."
-                  onkeyup="renderAuditLogs()">
+              <div class="audit-filters-actions">
+                <button type="button" class="btn btn-outline" onclick="clearAuditFilters()"><i data-lucide="eraser"></i> Limpar filtros</button>
+                <button type="button" class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i> Atualizar</button>
+                <button type="button" class="btn btn-primary" onclick="exportAuditExcel()"><i data-lucide="download"></i> Exportar Excel</button>
               </div>
             </div>
 
-            <div class="audit-result-bar">
-              <span id="audit-result-count">Nenhum registro</span>
-            </div>
-
-            <div class="table-responsive">
-              <table class="data-table" id="audit-table">
-                <thead>
-                  <tr>
-                    <th>Data / Hora</th>
-                    <th>Usuário</th>
-                    <th>Ação</th>
-                    <th>Cliente</th>
-                    <th>Título</th>
-                    <th>Empreendimento / Unidade</th>
-                    <th>Detalhe</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="audit-table-body">
-                  <!-- Logs rendered by JS -->
-                </tbody>
-              </table>
+            <div class="audit-table-card">
+              <div class="audit-result-bar">
+                <span id="audit-result-count">Nenhum registro</span>
+              </div>
+              <div class="table-responsive audit-table-wrap">
+                <table class="data-table audit-table" id="audit-table">
+                  <thead>
+                    <tr>
+                      <th>Data / Hora</th>
+                      <th>Usuário</th>
+                      <th>Ação</th>
+                      <th>Cliente</th>
+                      <th>Título</th>
+                      <th>Empreendimento / Unidade</th>
+                      <th>Detalhe</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-table-body"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -2928,7 +2921,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=741" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -3797,92 +3790,6 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
           </div>
       </section>
 
-      <!-- TAB: ACESSOS E SEGURANÇA -->
-      <section id="tab-acessos" class="tab-pane" style="display: none;">
-        <div style="display: flex; flex-direction: column; gap: 1.5rem; margin-top: 1.5rem;">
-          <!-- Controle de Acesso do Administrador -->
-          <div class="crm-card">
-            <div class="crm-header">
-              <h2>Controle Administrativo</h2>
-            </div>
-            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 1.5rem;">
-              Cadastre o e-mail principal que terá privilégios para editar as regras e os preâmbulos.
-            </p>
-            <div class="form-group">
-              <label for="admin-email-config">E-mail do Administrador Autorizado</label>
-              <input type="email" id="admin-email-config" class="form-control" placeholder="admin@mouraleite.com">
-            </div>
-            <button class="btn btn-primary" id="btn-save-admin-email" onclick="saveAdminEmailConfig()"
-              style="width: 100%; margin-top: 12px;">
-              <i data-lucide="shield-check" style="width: 16px;"></i> Gravar E-mail Admin
-            </button>
-          </div>
-          <!-- Sincronização Firebase -->
-          <div class="crm-card" id="firebase-sync-card">
-            <div class="crm-header" style="background: #1a365d;">
-              <h2 style="display:flex; align-items:center; gap:8px;">
-                <i data-lucide="cloud-upload" style="width:18px;"></i>
-                Sincronização de Dados com a Nuvem
-              </h2>
-            </div>
-            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 1rem;">
-              Use estes botões para sincronizar dados entre esta máquina e o Firebase (nuvem). 
-              <strong>Faça isto sempre que criar dados localmente que precisam aparecer para outros usuários na Vercel.</strong>
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-              <button class="btn btn-primary" onclick="window.syncAllNotesToFirebase()" style="flex:1; min-width:220px;">
-                <i data-lucide="calendar-clock" style="width: 16px;"></i>
-                Subir Todas as Ocorrências/Agenda
-              </button>
-              <button class="btn btn-secondary" onclick="window.forceUploadLocalConfig()" style="flex:1; min-width:220px;">
-                <i data-lucide="settings-2" style="width: 16px;"></i>
-                Subir Configurações (Regras, Usuários)
-              </button>
-            </div>
-            <div id="firebase-sync-status" style="margin-top:12px; font-size:0.85rem; color:#64748b;"></div>
-          </div>
-
-          <!-- Configuração Azure Active Directory -->
-
-          <div class="crm-card">
-            <div class="crm-header">
-              <h2>Configuração Microsoft Azure AD</h2>
-            </div>
-            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 1.5rem;">
-              Ative e gerencie a integração de login real de operador via Microsoft Entra ID.
-            </p>
-
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-              <div class="form-group">
-                <label
-                  style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 700; font-size: 0.85rem;">
-                  <input type="checkbox" id="azure-enable-chk" style="width: 18px; height: 18px;">
-                  Habilitar Autenticação MSAL Real
-                </label>
-              </div>
-              <div class="form-group">
-                <label for="azure-client-id">Application (Client) ID</label>
-                <input type="text" id="azure-client-id" class="form-control"
-                  placeholder="00000000-0000-0000-0000-000000000000">
-              </div>
-              <div class="form-group">
-                <label for="azure-tenant-id">Directory (Tenant) ID</label>
-                <input type="text" id="azure-tenant-id" class="form-control"
-                  placeholder="00000000-0000-0000-0000-000000000000">
-              </div>
-              <div class="form-group">
-                <label for="azure-redirect-uri">Redirect URI</label>
-                <input type="text" id="azure-redirect-uri" class="form-control" readonly>
-              </div>
-
-              <button class="btn btn-secondary" id="btn-save-azure" onclick="saveAzureConfig()">
-                <i data-lucide="settings" style="width: 16px;"></i> Gravar Configurações MSAL
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- TAB: REGRAS DE COBRANÇA -->
       <section id="tab-regras-cobranca" class="tab-pane" style="display: none;">
         <div class="crm-card" style="margin-top: 1.5rem;">
@@ -4385,7 +4292,6 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                       <i data-lucide="credit-card"></i>
                       Taxas de Cartão
                     </h3>
-                    <p>Configure as taxas por produto e bandeira. O valor líquido é o recebido após a taxa da adquirente.</p>
                   </div>
                   <span id="cartao-taxas-updated" class="cartao-taxas-updated"></span>
                 </div>
@@ -4428,9 +4334,6 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 </div>
 
                 <div class="cartao-taxas-actions">
-                  <button type="button" class="btn btn-outline" onclick="window.resetCardFeesToDefault()">
-                    <i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i> Restaurar padrão
-                  </button>
                   <button type="button" class="btn btn-primary" id="btn-save-cartao-taxas" onclick="window.saveCardFeesConfig()">
                     <i data-lucide="save" style="width:16px;height:16px;"></i> Salvar Taxas
                   </button>
@@ -4445,46 +4348,51 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                       <i data-lucide="badge-percent"></i>
                       Alçada para Desconto
                     </h3>
-                    <p>Limites de desconto usados no Valor Quitação. Clientes com todas as parcelas a vencer em taxa 0 têm um teto próprio. Os demais entram nos níveis.</p>
                   </div>
                   <span id="alcada-desconto-updated" class="alcada-updated"></span>
                 </div>
 
-                <div class="alcada-zero-card">
+                <div class="alcada-zero-bar">
                   <div>
-                    <strong>Parcelas a vencer com taxa 0</strong>
-                    <span>Se todas as parcelas a vencer do contrato tiverem taxa 0%, o desconto máximo da quitação é este percentual.</span>
+                    <strong>Teto taxa 0</strong>
+                    <span>Quando todas as parcelas a vencer estão em taxa 0%</span>
                   </div>
                   <label class="alcada-pct-field alcada-pct-field--lg">
-                    <input type="text" inputmode="decimal" id="alcada-taxa-zero-max" placeholder="Ex: 5">
+                    <input type="text" inputmode="decimal" id="alcada-taxa-zero-max" placeholder="0">
                     <span>%</span>
                   </label>
                 </div>
 
-                <div class="alcada-levels-wrap">
-                  <div class="alcada-levels-toolbar">
-                    <strong>Níveis de alçada</strong>
-                    <button type="button" class="btn-alcada-add" onclick="window.addAlcadaDescontoLevel()">
-                      <i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar nível
-                    </button>
-                  </div>
-                  <table class="alcada-table">
-                    <thead>
-                      <tr>
-                        <th>Nível</th>
-                        <th>De</th>
-                        <th>Até</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody id="alcada-levels-body"></tbody>
-                  </table>
+                <div class="alcada-layout">
+                  <section class="alcada-card">
+                    <div class="alcada-card-h">
+                      <span>Níveis</span>
+                      <button type="button" class="btn-alcada-add" onclick="window.addAlcadaDescontoLevel()">
+                        <i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar
+                      </button>
+                    </div>
+                    <table class="alcada-table">
+                      <thead>
+                        <tr>
+                          <th>Nível</th>
+                          <th>De</th>
+                          <th>Até</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="alcada-levels-body"></tbody>
+                    </table>
+                  </section>
+
+                  <section class="alcada-card">
+                    <div class="alcada-card-h">
+                      <span>Nível por perfil</span>
+                    </div>
+                    <div id="alcada-roles-body" class="alcada-roles"></div>
+                  </section>
                 </div>
 
                 <div class="alcada-actions">
-                  <button type="button" class="btn btn-outline" onclick="window.resetAlcadaDescontoToDefault()">
-                    <i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i> Restaurar padrão
-                  </button>
                   <button type="button" class="btn btn-primary" id="btn-save-alcada-desconto" onclick="window.saveAlcadaDescontoConfig()">
                     <i data-lucide="save" style="width:16px;height:16px;"></i> Salvar Alçadas
                   </button>
@@ -6506,7 +6414,7 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       <label for="reneg-block-months" style="display: block; color: #475569; font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Tempo mínimo (meses)</label>
       <input type="number" id="reneg-block-months" class="form-control" min="0" step="1" value="24">
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button type="button" class="btn btn-cancel" onclick="document.getElementById('reneg-block-modal').style.display='none'">Cancelar</button>
+        <button type="button" class="btn btn-cancel" onclick="window.closeRenegotiationBlockModal()">Cancelar</button>
         <button type="button" class="btn btn-primary" onclick="window.saveRenegotiationBlockMonths()">Salvar</button>
       </div>
     </div>
@@ -6874,45 +6782,45 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=734"></script>
-  <script defer src="sienge-api.js?v=734"></script>
-  <script defer src="azure-auth.js?v=734"></script>
-  <script defer src="app.js?v=734"></script>
-  <script defer src="cartao-taxas.js?v=734"></script>
-  <script defer src="alcada-desconto.js?v=734"></script>
-  <script defer src="home-dashboard.js?v=734"></script>
-  <script defer src="anexos.js?v=734"></script>
-  <script defer src="contas-pagar.js?v=734"></script>
-  <script defer src="config-tags.js?v=734"></script>
-  <script defer src="config-users.js?v=734"></script>
-  <script defer src="suporte.js?v=734"></script>
-  <script defer src="construcao.js?v=734"></script>
-  <script defer src="empresas.js?v=734"></script>
-  <script defer src="relacionamento.js?v=734"></script>
-  <script defer src="compromissario.js?v=734"></script>
-  <script defer src="comercial.js?v=734"></script>
-  <script defer src="estoque-comercial.js?v=734"></script>
-  <script defer src="centros-custo.js?v=734"></script>
-  <script defer src="marketing.js?v=734"></script>
-  <script defer src="plano-financeiro.js?v=734"></script>
-  <script defer src="prestacao-contas.js?v=734"></script>
+  <script defer src="data.js?v=741"></script>
+  <script defer src="sienge-api.js?v=741"></script>
+  <script defer src="azure-auth.js?v=741"></script>
+  <script defer src="app.js?v=741"></script>
+  <script defer src="cartao-taxas.js?v=741"></script>
+  <script defer src="alcada-desconto.js?v=741"></script>
+  <script defer src="home-dashboard.js?v=741"></script>
+  <script defer src="anexos.js?v=741"></script>
+  <script defer src="contas-pagar.js?v=741"></script>
+  <script defer src="config-tags.js?v=741"></script>
+  <script defer src="config-users.js?v=741"></script>
+  <script defer src="suporte.js?v=741"></script>
+  <script defer src="construcao.js?v=741"></script>
+  <script defer src="empresas.js?v=741"></script>
+  <script defer src="relacionamento.js?v=741"></script>
+  <script defer src="compromissario.js?v=741"></script>
+  <script defer src="comercial.js?v=741"></script>
+  <script defer src="estoque-comercial.js?v=741"></script>
+  <script defer src="centros-custo.js?v=741"></script>
+  <script defer src="marketing.js?v=741"></script>
+  <script defer src="plano-financeiro.js?v=741"></script>
+  <script defer src="prestacao-contas.js?v=741"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=734"></script>
-  <script defer src="fluxo-caixa.js?v=734"></script>
-  <script defer src="caixa-diario.js?v=734"></script>
-  <script defer src="investimento.js?v=734"></script>
-  <script defer src="parametrizacao-parceiro.js?v=734"></script>
-  <script defer src="societario.js?v=734"></script>
-  <script defer src="participacoes.js?v=734"></script>
-  <script defer src="fiscal.js?v=734"></script>
-  <script defer src="indexadores.js?v=734"></script>
-  <script defer src="verificar-construcao.js?v=734"></script>
-  <script src="repactuacoes.js?v=734"></script>
-  <script defer src="repactuacao-lote.js?v=734"></script>
+  <script defer src="empresa-filter.js?v=741"></script>
+  <script defer src="fluxo-caixa.js?v=741"></script>
+  <script defer src="caixa-diario.js?v=741"></script>
+  <script defer src="investimento.js?v=741"></script>
+  <script defer src="parametrizacao-parceiro.js?v=741"></script>
+  <script defer src="societario.js?v=741"></script>
+  <script defer src="participacoes.js?v=741"></script>
+  <script defer src="fiscal.js?v=741"></script>
+  <script defer src="indexadores.js?v=741"></script>
+  <script defer src="verificar-construcao.js?v=741"></script>
+  <script src="repactuacoes.js?v=741"></script>
+  <script defer src="repactuacao-lote.js?v=741"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=734"></script>
+  <script defer src="dashboard-inadimplencia.js?v=741"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

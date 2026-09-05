@@ -190,8 +190,7 @@ const ConfigUsersApp = {
     {
       name: "Segurança", icon: "shield", key: "mod_seg",
       submodules: [
-        { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [{ id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" }] },
-        { name: "Acessos", key: "sub_seg_acc", actions: [{ id: "acessos", label: "Acessos", permBase: "sub_seg_geral_acessos" }] }
+        { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [{ id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" }] }
       ]
     },
     {
@@ -237,15 +236,42 @@ const ConfigUsersApp = {
         { id: "admin", name: "ADMINISTRADOR" },
         { id: "operador_pagadoria", name: "OPERADOR PAGADORIA" },
         { id: "operador_cobranca", name: "OPERADOR COBRANÇA" },
+        { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE" },
+        { id: "time_relacionamento", name: "TIME RELACIONAMENTO" },
+        { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO" },
+        { id: "supervisor_tesouraria", name: "SUPERVISOR TESOURARIA" },
+        { id: "gerente_fpa", name: "GERENTE FP&A" },
         { id: "engenharia", name: "ENGENHARIA" }
       ];
       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
     }
 
+    this.ensureAlcadaProfiles();
     this.seedBackOfficePermsFromCobranca();
     
     // Aqui no futuro poderia fazer um fetch para a API de usuários
     this.render();
+  },
+
+  ensureAlcadaProfiles() {
+    if (!Array.isArray(this.profiles)) this.profiles = [];
+    const norm = (name) => String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " E ").replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    const extras = [
+      { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE", match: (n) => n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n)) },
+      { id: "time_relacionamento", name: "TIME RELACIONAMENTO", match: (n) => n === "TIME RELACIONAMENTO" || (n.includes("TIME") && n.includes("RELACIONAMENTO")) },
+      { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO", match: (n) => n.includes("SUPERVISOR") && n.includes("RELACIONAMENTO") },
+      { id: "supervisor_tesouraria", name: "SUPERVISOR TESOURARIA", match: (n) => n.includes("SUPERVISOR") && n.includes("TESOURARIA") },
+      { id: "gerente_fpa", name: "GERENTE FP&A", match: (n) => n.includes("GERENTE") && (n.includes("FP E A") || n.includes("FPA") || n.includes("FP A")) }
+    ];
+    let changed = false;
+    extras.forEach((ex) => {
+      const exists = this.profiles.some((p) => p.id === ex.id || ex.match(norm(p.name)));
+      if (!exists) {
+        this.profiles.push({ id: ex.id, name: ex.name });
+        changed = true;
+      }
+    });
+    if (changed) localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
   },
 
   seedBackOfficePermsFromCobranca() {

@@ -52,10 +52,9 @@ const HomeDashboard = {
   },
 
   isAdminUser(user) {
+    if (typeof window.isCrmAgendaSupervisor === 'function') return window.isCrmAgendaSupervisor(user);
     const profile = (user?.profile_name || '').toUpperCase();
-    const email = (user?.email || '').toLowerCase();
-    return profile.includes('ADMIN') || profile.includes('GESTOR') || profile.includes('GERENTE')
-      || email === 'israel@mouraleite.com.br' || email === 'admin@mouraleite.com.br';
+    return profile.includes('ADMIN') || profile.includes('GESTOR') || profile.includes('GERENTE');
   },
 
   getCrmUsers() {

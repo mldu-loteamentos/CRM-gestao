@@ -1496,9 +1496,9 @@ window.userIsCobrancaBackOffice = function() {
         .toUpperCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
-    const isAdmin = profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
-        || String(logged.role || "").toUpperCase().includes("ADMIN")
-        || (logged.email && /israel@mouraleite\.com\.br|admin@mouraleite\.com\.br/i.test(logged.email));
+    const isAdmin = (window.isCrmAgendaSupervisor && window.isCrmAgendaSupervisor(logged))
+        || profile.includes("ADMIN") || profile.includes("GESTOR") || profile.includes("GERENTE")
+        || String(logged.role || "").toUpperCase().includes("ADMIN");
     const isBackOffice = profile.includes("BACK OFFICE") || profile.includes("BACKOFFICE");
     // Só Back Office de cobrança — administrador não recebe o popup
     return { ok: isBackOffice && !isAdmin, isAdmin, user: logged };
