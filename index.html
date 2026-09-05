@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=732">
+  <link rel="stylesheet" href="style.css?v=734">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=732" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=734" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1262,7 +1262,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.732 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.734 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2452,11 +2452,9 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=732" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
-          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">uma ferramenta incrivel está
-            nascendo aqui</h2>
-          <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
-            Logo a IA.eL estará a sua disposição
+          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
+            Inteligência - Integração - Agilidade
           </p>
         </div>
 
@@ -2703,11 +2701,8 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=732" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
-          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
-          <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
-            Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
-          </p>
+          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
 
@@ -2715,11 +2710,8 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=732" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
-          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
-          <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
-            Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
-          </p>
+          <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
 
@@ -2848,7 +2840,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
               <i data-lucide="shield"></i> Auditoria do Sistema
             </h2>
 
-            <p style="margin:-8px 0 18px;color:#64748b;font-size:0.9rem;">Registro de quem gerou boleto e quem enviou anexo ao Sienge. Filtre por período, usuário do I.ntegr.A, empreendimento, unidade, título ou cliente.</p>
+            <p style="margin:-8px 0 18px;color:#64748b;font-size:0.9rem;">Demonstrativo de quem gerou boleto e quem enviou anexo ao Sienge, inclusive o histórico gravado nas ocorrências. Filtre por período, usuário do I.ntegr.A, empreendimento, unidade, título ou cliente.</p>
 
             <div class="filters-container audit-filters">
               <div class="form-group">
@@ -2875,8 +2867,12 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <input type="date" id="audit-filter-to" class="form-control" onchange="renderAuditLogs()">
               </div>
               <div class="form-group audit-filters-actions">
-                <button class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i>
+                <button type="button" class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i>
                   Atualizar</button>
+                <button type="button" class="btn btn-outline" onclick="clearAuditFilters()"><i data-lucide="eraser"></i>
+                  Limpar filtros</button>
+                <button type="button" class="btn btn-primary" onclick="exportAuditExcel()"><i data-lucide="download"></i>
+                  Exportar Excel</button>
               </div>
             </div>
             <div class="filters-container audit-filters">
@@ -2901,6 +2897,10 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <input type="text" id="audit-filter-cliente" class="form-control" placeholder="ID ou nome..."
                   onkeyup="renderAuditLogs()">
               </div>
+            </div>
+
+            <div class="audit-result-bar">
+              <span id="audit-result-count">Nenhum registro</span>
             </div>
 
             <div class="table-responsive">
@@ -2928,11 +2928,8 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=732" alt="I.ntegr.A" style="max-width: 280px; margin-bottom: 2rem;">
-            <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 1rem;">Módulo em Construção</h2>
-            <p style="color: var(--color-text-muted); font-size: 1rem; max-width: 500px;">
-              Este módulo está sendo preparado e estará disponível nas próximas atualizações do CRM Moura Leite.
-            </p>
+            <img src="i.ntegr.a/arvore.png?v=734" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
 
@@ -6877,45 +6874,45 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=732"></script>
-  <script defer src="sienge-api.js?v=732"></script>
-  <script defer src="azure-auth.js?v=732"></script>
-  <script defer src="app.js?v=732"></script>
-  <script defer src="cartao-taxas.js?v=732"></script>
-  <script defer src="alcada-desconto.js?v=732"></script>
-  <script defer src="home-dashboard.js?v=732"></script>
-  <script defer src="anexos.js?v=732"></script>
-  <script defer src="contas-pagar.js?v=732"></script>
-  <script defer src="config-tags.js?v=732"></script>
-  <script defer src="config-users.js?v=732"></script>
-  <script defer src="suporte.js?v=732"></script>
-  <script defer src="construcao.js?v=732"></script>
-  <script defer src="empresas.js?v=732"></script>
-  <script defer src="relacionamento.js?v=732"></script>
-  <script defer src="compromissario.js?v=732"></script>
-  <script defer src="comercial.js?v=732"></script>
-  <script defer src="estoque-comercial.js?v=732"></script>
-  <script defer src="centros-custo.js?v=732"></script>
-  <script defer src="marketing.js?v=732"></script>
-  <script defer src="plano-financeiro.js?v=732"></script>
-  <script defer src="prestacao-contas.js?v=732"></script>
+  <script defer src="data.js?v=734"></script>
+  <script defer src="sienge-api.js?v=734"></script>
+  <script defer src="azure-auth.js?v=734"></script>
+  <script defer src="app.js?v=734"></script>
+  <script defer src="cartao-taxas.js?v=734"></script>
+  <script defer src="alcada-desconto.js?v=734"></script>
+  <script defer src="home-dashboard.js?v=734"></script>
+  <script defer src="anexos.js?v=734"></script>
+  <script defer src="contas-pagar.js?v=734"></script>
+  <script defer src="config-tags.js?v=734"></script>
+  <script defer src="config-users.js?v=734"></script>
+  <script defer src="suporte.js?v=734"></script>
+  <script defer src="construcao.js?v=734"></script>
+  <script defer src="empresas.js?v=734"></script>
+  <script defer src="relacionamento.js?v=734"></script>
+  <script defer src="compromissario.js?v=734"></script>
+  <script defer src="comercial.js?v=734"></script>
+  <script defer src="estoque-comercial.js?v=734"></script>
+  <script defer src="centros-custo.js?v=734"></script>
+  <script defer src="marketing.js?v=734"></script>
+  <script defer src="plano-financeiro.js?v=734"></script>
+  <script defer src="prestacao-contas.js?v=734"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=732"></script>
-  <script defer src="fluxo-caixa.js?v=732"></script>
-  <script defer src="caixa-diario.js?v=732"></script>
-  <script defer src="investimento.js?v=732"></script>
-  <script defer src="parametrizacao-parceiro.js?v=732"></script>
-  <script defer src="societario.js?v=732"></script>
-  <script defer src="participacoes.js?v=732"></script>
-  <script defer src="fiscal.js?v=732"></script>
-  <script defer src="indexadores.js?v=732"></script>
-  <script defer src="verificar-construcao.js?v=732"></script>
-  <script src="repactuacoes.js?v=732"></script>
-  <script defer src="repactuacao-lote.js?v=732"></script>
+  <script defer src="empresa-filter.js?v=734"></script>
+  <script defer src="fluxo-caixa.js?v=734"></script>
+  <script defer src="caixa-diario.js?v=734"></script>
+  <script defer src="investimento.js?v=734"></script>
+  <script defer src="parametrizacao-parceiro.js?v=734"></script>
+  <script defer src="societario.js?v=734"></script>
+  <script defer src="participacoes.js?v=734"></script>
+  <script defer src="fiscal.js?v=734"></script>
+  <script defer src="indexadores.js?v=734"></script>
+  <script defer src="verificar-construcao.js?v=734"></script>
+  <script src="repactuacoes.js?v=734"></script>
+  <script defer src="repactuacao-lote.js?v=734"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=732"></script>
+  <script defer src="dashboard-inadimplencia.js?v=734"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

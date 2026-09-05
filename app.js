@@ -1986,14 +1986,201 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 }
 
 window._auditCache = { at: 0, rows: [] };
+window._auditFilteredRows = [];
 
-function auditActionMeta(action) {
+function auditActionMeta(action, summary) {
   const key = String(action || "HTTP");
-  if (key === "BOLETO_GERADO") return { group: "boleto", label: "Geração de Boleto" };
-  if (key === "BOLETO_ERRO") return { group: "boleto", label: "Falha ao gerar boleto" };
-  if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
+  const blob = (key + " " + String(summary || "")).toLowerCase();
+  if (key === "BOLETO_GERADO" || /boleto gerado/.test(blob)) return { group: "boleto", label: "Geração de Boleto" };
+  if (key === "BOLETO_ERRO" || /falha ao gerar boleto/.test(blob)) return { group: "boleto", label: "Falha ao gerar boleto" };
+  if (key === "ANEXO_ENVIADO" || /anexo/.test(key.toLowerCase()) && /envi/.test(blob)) return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
   return { group: "outros", label: key === "HTTP" ? "Requisição" : key };
+}
+
+function auditParseTs(value) {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number" && isFinite(value)) return value < 1e12 ? value * 1000 : value;
+  const s = String(value).trim();
+  if (!s) return 0;
+  const dayOnly = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dayOnly) return new Date(+dayOnly[1], +dayOnly[2] - 1, +dayOnly[3]).getTime();
+  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (br) return new Date(+br[3], +br[2] - 1, +br[1], +(br[4] || 0), +(br[5] || 0), +(br[6] || 0)).getTime();
+  const ms = Date.parse(s);
+  return isNaN(ms) ? 0 : ms;
+}
+
+function auditUserAliases(userQ) {
+  const q = String(userQ || "").toLowerCase().trim();
+  const aliases = new Set();
+  if (!q) return aliases;
+  aliases.add(q);
+  aliases.add(q.split("@")[0]);
+  const qNorm = auditNorm(q.split("@")[0].replace(/[._]/g, " "));
+  if (qNorm) aliases.add(qNorm);
+  try {
+    auditIntegraUsers().forEach(function(u) {
+      const em = String(u.email || "").toLowerCase();
+      const sienge = String(u.sienge_user || "").toLowerCase();
+      const name = String(u.name || "");
+      const local = em.split("@")[0];
+      const hit = em === q || local === q.split("@")[0] || sienge === q
+        || sienge.replace(/[.\s]/g, "") === q.replace(/[.\s@]/g, "")
+        || auditNorm(name) === auditNorm(userQ)
+        || auditNorm(sienge) === qNorm;
+      if (!hit) return;
+      if (em) aliases.add(em);
+      if (local) aliases.add(local);
+      if (sienge) aliases.add(sienge);
+      if (name) aliases.add(auditNorm(name));
+    });
+  } catch (e) {}
+  return aliases;
+}
+
+function auditUserMatches(row, userQ) {
+  if (!userQ) return true;
+  const aliases = auditUserAliases(userQ);
+  const email = String((row && row.userEmail) || "").toLowerCase();
+  const name = auditNorm((row && row.user) || "");
+  const rowIds = [email, email.split("@")[0], name].filter(Boolean);
+  try {
+    auditIntegraUsers().forEach(function(u) {
+      const em = String(u.email || "").toLowerCase();
+      const sienge = String(u.sienge_user || "").toLowerCase();
+      const uname = auditNorm(u.name);
+      if ((email && (em === email || em.split("@")[0] === email.split("@")[0])) || (name && uname === name)) {
+        if (em) rowIds.push(em, em.split("@")[0]);
+        if (sienge) rowIds.push(sienge);
+        if (uname) rowIds.push(uname);
+      }
+    });
+  } catch (e) {}
+  for (let i = 0; i < rowIds.length; i++) {
+    const id = String(rowIds[i] || "").toLowerCase();
+    if (!id) continue;
+    if (aliases.has(id)) return true;
+    const it = aliases.values();
+    let step = it.next();
+    while (!step.done) {
+      const alias = step.value;
+      if (alias && (id.indexOf(alias) !== -1 || alias.indexOf(id) !== -1)) return true;
+      step = it.next();
+    }
+  }
+  const qNorm = auditNorm(String(userQ).split("@")[0].replace(/[._]/g, " "));
+  const qTokens = qNorm.split(" ").filter(function(t) { return t.length > 2 && t !== "com" && t !== "br"; });
+  const nameTokens = name.split(" ").filter(function(t) { return t.length > 2; });
+  if (qTokens.length && nameTokens.length && qTokens.every(function(t) {
+    return nameTokens.some(function(n) { return n.indexOf(t) === 0 || t.indexOf(n) === 0; });
+  })) return true;
+  return false;
+}
+
+function auditResolveAuthorEmail(author, existing) {
+  if (existing) return String(existing).toLowerCase();
+  const name = auditNorm(author);
+  if (!name) return "";
+  try {
+    const hit = auditIntegraUsers().find(function(u) {
+      return auditNorm(u.name) === name
+        || auditNorm(u.sienge_user) === name
+        || String(u.email || "").toLowerCase().split("@")[0] === name.replace(/\s+/g, ".");
+    });
+    return hit ? String(hit.email || "").toLowerCase() : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function auditIsBoletoNote(occ) {
+  if (!occ) return false;
+  if (occ.checkPayment) return true;
+  const text = String(occ.text || occ.reminder || "");
+  const rem = String(occ.reminder || "");
+  return /boleto gerado/i.test(text) || /checar pagamento/i.test(rem) || /boleto gerado/i.test(rem);
+}
+
+function auditNoteToRow(custId, occ) {
+  if (!auditIsBoletoNote(occ)) return null;
+  const text = String((occ && (occ.text || occ.reminder)) || "");
+  const author = (occ && (occ.author || occ.userName)) || "—";
+  return {
+    id: "note-" + String((occ && occ.id) || (custId + "-" + ((occ && occ.date) || ""))),
+    timestamp: (occ && (occ.date || occ.createdAt)) || "",
+    user: author,
+    userEmail: auditResolveAuthorEmail(author, occ && (occ.authorEmail || occ.userEmail)),
+    action: "BOLETO_GERADO",
+    module: "Financeiro",
+    status: "ok",
+    summary: text.replace(/\s+/g, " ").trim().slice(0, 280) || "Boleto gerado",
+    customerId: String(custId),
+    customerLabel: (typeof AuditService !== "undefined" && AuditService.customerLabel)
+      ? AuditService.customerLabel(custId)
+      : ("Cliente " + custId),
+    titleId: String((occ && (occ.saleId || occ.receivableBillId)) || "").replace(/^B-/, ""),
+    enterpriseId: "",
+    enterpriseName: "",
+    unitId: "",
+    unitName: "",
+    details: { source: "ocorrencia", receivableBillId: (occ && occ.saleId) || "" }
+  };
+}
+
+function auditNotesBag() {
+  let bag = {};
+  try { bag = (window.AppState && AppState.notes) || {}; } catch (e) { bag = {}; }
+  if (!bag || !Object.keys(bag).length) {
+    try { bag = JSON.parse(localStorage.getItem("crm_moura_notes") || "{}") || {}; } catch (e) { bag = {}; }
+  }
+  return bag || {};
+}
+
+function auditRowsFromNotes() {
+  const bag = auditNotesBag();
+  const rows = [];
+  Object.keys(bag).forEach(function(custId) {
+    const list = (typeof window.getCustomerNotesList === "function")
+      ? window.getCustomerNotesList(bag, custId)
+      : (Array.isArray(bag[custId]) ? bag[custId] : []);
+    list.forEach(function(occ) {
+      const row = auditNoteToRow(custId, occ);
+      if (row) rows.push(row);
+    });
+  });
+  return rows;
+}
+
+async function auditCollectNoteRows(fromCloud) {
+  const localRows = auditRowsFromNotes();
+  if (!fromCloud || !window.firebaseDb || !window.firebaseCollections) return localRows;
+  try {
+    const { collection, getDocs } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "customer_notes_shards"));
+    const cloud = [];
+    snap.forEach(function(docu) {
+      const data = docu.data() || {};
+      Object.keys(data).forEach(function(custId) {
+        const list = Array.isArray(data[custId]) ? data[custId] : [];
+        list.forEach(function(occ) {
+          const row = auditNoteToRow(custId, occ);
+          if (row) cloud.push(row);
+        });
+      });
+    });
+    return cloud.concat(localRows);
+  } catch (e) {
+    console.warn("[Auditoria] ocorrências na nuvem", e);
+    return localRows;
+  }
+}
+
+function auditLooseKey(row) {
+  const t = auditParseTs(row && row.timestamp);
+  const bucket = t ? new Date(t).toISOString().slice(0, 16) : "";
+  const ctx = auditRowContext(row);
+  return [row && row.action, ctx.customerId, ctx.titleId, bucket, auditNorm(row && row.user)].join("|");
 }
 
 function auditFormatWhen(iso) {
@@ -2094,14 +2281,17 @@ window.renderAuditLogs = async function(forceReload) {
     if (window.AuditService && typeof AuditService.loadRemote === "function") {
       try { remote = await AuditService.loadRemote(800); } catch (e) { remote = []; }
     }
+    const localNotes = auditRowsFromNotes();
+    const fromNotes = await auditCollectNoteRows(force || !localNotes.length);
     const byId = {};
-    [].concat(remote, local).forEach(function(row) {
+    [].concat(remote, local, fromNotes).forEach(function(row) {
       if (!row) return;
-      const id = String(row.id || row.timestamp || Math.random());
-      if (!byId[id]) byId[id] = row;
+      const id = String(row.id || "");
+      const key = (id && id.indexOf("note-") !== 0) ? ("id:" + id) : auditLooseKey(row);
+      if (!byId[key]) byId[key] = row;
     });
     window._auditCache.rows = Object.keys(byId).map(function(k) { return byId[k]; })
-      .sort(function(a, b) { return String(b.timestamp || "").localeCompare(String(a.timestamp || "")); });
+      .sort(function(a, b) { return auditParseTs(b.timestamp) - auditParseTs(a.timestamp); });
     window._auditCache.at = Date.now();
   }
 
@@ -2117,21 +2307,17 @@ window.renderAuditLogs = async function(forceReload) {
   const toTs = toVal ? new Date(toVal + "T23:59:59").getTime() : 0;
 
   const rows = window._auditCache.rows.filter(function(row) {
-    const meta = auditActionMeta(row.action);
+    const meta = auditActionMeta(row.action, row.summary);
     if (actionFilter === "principais" && meta.group === "outros") return false;
     if (actionFilter === "boleto" && meta.group !== "boleto") return false;
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
-    if (userQ) {
-      const email = String(row.userEmail || "").toLowerCase();
-      const name = auditNorm(row.user);
-      if (email !== userQ && name !== auditNorm(userQ) && email.indexOf(userQ) === -1) return false;
-    }
+    if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
-      const t = new Date(row.timestamp || 0).getTime();
+      const t = auditParseTs(row.timestamp);
       if (!t || t < fromTs) return false;
     }
     if (toTs && !isNaN(toTs)) {
-      const t = new Date(row.timestamp || 0).getTime();
+      const t = auditParseTs(row.timestamp);
       if (!t || t > toTs) return false;
     }
     const ctx = auditRowContext(row);
@@ -2154,13 +2340,29 @@ window.renderAuditLogs = async function(forceReload) {
     return true;
   });
 
+  const countEl = document.getElementById("audit-result-count");
+  if (countEl) {
+    countEl.textContent = rows.length
+      ? (rows.length + " registro(s)")
+      : (window._auditCache.rows.length
+        ? ("Nenhum no filtro · " + window._auditCache.rows.length + " no total")
+        : "Nenhum registro");
+  }
+
+  window._auditFilteredRows = rows;
+
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:28px;">Nenhum log encontrado para este filtro.</td></tr>`;
+    const total = window._auditCache.rows.length;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:28px;">${
+      total
+        ? "Nenhum log neste filtro. Há " + total + " registro(s) no total — limpe o usuário, o tipo ou o período."
+        : "Nenhum log encontrado. Gere um boleto ou envie um anexo e clique em Atualizar."
+    }</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(function(row) {
-    const meta = auditActionMeta(row.action);
+    const meta = auditActionMeta(row.action, row.summary);
     const ctx = auditRowContext(row);
     const ok = String(row.status || "ok") !== "erro";
     const statusHtml = ok
@@ -2183,6 +2385,59 @@ window.renderAuditLogs = async function(forceReload) {
       <td>${statusHtml}</td>
     </tr>`;
   }).join("");
+};
+
+window.clearAuditFilters = function() {
+  const action = document.getElementById("audit-filter-action");
+  const user = document.getElementById("audit-filter-user");
+  const from = document.getElementById("audit-filter-from");
+  const to = document.getElementById("audit-filter-to");
+  const cc = document.getElementById("audit-filter-cc");
+  const unit = document.getElementById("audit-filter-unit");
+  const titulo = document.getElementById("audit-filter-titulo");
+  const cliente = document.getElementById("audit-filter-cliente");
+  if (action) action.value = "principais";
+  if (user) user.value = "";
+  if (from) from.value = "";
+  if (to) to.value = "";
+  if (cc) cc.value = "";
+  if (unit) unit.value = "";
+  if (titulo) titulo.value = "";
+  if (cliente) cliente.value = "";
+  if (typeof window.renderAuditLogs === "function") window.renderAuditLogs();
+};
+
+window.exportAuditExcel = function() {
+  const rows = window._auditFilteredRows || [];
+  if (!rows.length) {
+    alert("Não há registros para exportar neste filtro.");
+    return;
+  }
+  if (typeof XLSX === "undefined") {
+    alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+    return;
+  }
+  const aoa = [["Data/Hora", "Usuário", "E-mail", "Ação", "Cliente", "Título", "Empreendimento", "Unidade", "Detalhe", "Status"]];
+  rows.forEach(function(row) {
+    const meta = auditActionMeta(row.action, row.summary);
+    const ctx = auditRowContext(row);
+    aoa.push([
+      auditFormatWhen(row.timestamp),
+      row.user || "",
+      row.userEmail || "",
+      meta.label,
+      ctx.customerLabel || ctx.customerId || "",
+      ctx.titleId || "",
+      [ctx.enterpriseId, ctx.enterpriseName].filter(Boolean).join(" — "),
+      [ctx.unitId, ctx.unitName].filter(Boolean).join(" — "),
+      row.summary || "",
+      String(row.status || "ok") === "erro" ? "Erro" : "OK"
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Auditoria");
+  XLSX.writeFile(wb, "auditoria_sistema_" + new Date().toISOString().slice(0, 10) + ".xlsx");
 };
 
 // ----------------------------------------------------
