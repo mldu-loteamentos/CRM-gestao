@@ -3235,8 +3235,9 @@ const AnexosApp = {
             if (xhr.status >= 200 && xhr.status < 300) {
               sentFiles++;
               const summaryEl = document.getElementById('upload-summary');
+              let custName = '';
               if (destinoAPI === 'Cliente') {
-                 let custName = 'Cliente';
+                 custName = 'Cliente';
                  const matchedCust = anexosContractPeople().find(c => String(c.id) === String(targetCustId));
                  if (matchedCust) custName = matchedCust.name;
                  const summaryMsg = `✅ Enviado p/ Cliente: <strong>${custName} (ID: ${targetCustId})</strong>`;
@@ -3246,6 +3247,29 @@ const AnexosApp = {
               } else {
                  const summaryMsg = `✓ Enviado p/ Unidade: <strong>${unitName.trim()}</strong>`;
                  if (summaryEl) summaryEl.innerHTML += `<div style="color: var(--color-success); margin-bottom: 4px; font-weight: 500;">${summaryMsg}</div>`;
+              }
+              if (typeof window.logCrmAudit === 'function') {
+                window.logCrmAudit({
+                  action: 'ANEXO_ENVIADO',
+                  module: 'GED / Anexos',
+                  status: 'ok',
+                  customerId: targetCustId || AnexosState.idCliente || '',
+                  customerLabel: destinoAPI === 'Cliente'
+                    ? ((targetCustId || '') + (custName ? ' — ' + custName : ''))
+                    : (unitNameStr || ('Unidade ' + (AnexosState.selectedUnidade || ''))),
+                  summary: `${tagLabel} · ${nomeFinalArquivo} → ${destinoAPI === 'Cliente' ? 'Cliente' : 'Unidade'}`,
+                  details: {
+                    tag: tagLabel,
+                    fileName: nomeFinalArquivo,
+                    destino: destinoAPI,
+                    unitId: AnexosState.selectedUnidade,
+                    unitName: unitNameStr,
+                    enterpriseId: cc,
+                    contractId: AnexosState.activeContract && AnexosState.activeContract.id,
+                    contractNumber: AnexosState.activeContract && AnexosState.activeContract.contractNumber,
+                    httpStatus: xhr.status
+                  }
+                });
               }
               resolve();
             } else {
@@ -3286,6 +3310,24 @@ const AnexosApp = {
         const summaryEl = document.getElementById('upload-summary');
         if (summaryEl) {
           summaryEl.innerHTML += `<div style="color: var(--color-danger); margin-bottom: 4px; font-weight: 500;">✗ Falha (${destinoAPI === 'Cliente' ? 'cliente ' + targetCustId : 'unidade'}): ${err.message}</div>`;
+        }
+        if (typeof window.logCrmAudit === 'function') {
+          window.logCrmAudit({
+            action: 'ANEXO_ERRO',
+            module: 'GED / Anexos',
+            status: 'erro',
+            customerId: targetCustId || AnexosState.idCliente || '',
+            summary: `Falha ${tagLabel || 'anexo'} · ${err.message}`,
+            details: {
+              tag: tagLabel,
+              fileName: nomeFinalArquivo,
+              destino: destinoAPI,
+              unitId: AnexosState.selectedUnidade,
+              enterpriseId: cc,
+              contractId: AnexosState.activeContract && AnexosState.activeContract.id,
+              error: String(err.message || err)
+            }
+          });
         }
       }
 
@@ -3429,7 +3471,29 @@ window.anexosUploadCustomerAttachment = async function(customerId, file, tagLabe
     },
     body: multipart.body
   });
-  if (!res.ok) throw new Error("HTTP " + res.status);
+  if (!res.ok) {
+    if (typeof window.logCrmAudit === "function") {
+      window.logCrmAudit({
+        action: "ANEXO_ERRO",
+        module: "GED / Anexos",
+        status: "erro",
+        customerId: id,
+        summary: "Falha no anexo de distrato · HTTP " + res.status,
+        details: { tag: tag, fileName: nomeFinalArquivo, destino: "Cliente", context: "distrato", httpStatus: res.status }
+      });
+    }
+    throw new Error("HTTP " + res.status);
+  }
+  if (typeof window.logCrmAudit === "function") {
+    window.logCrmAudit({
+      action: "ANEXO_ENVIADO",
+      module: "GED / Anexos",
+      status: "ok",
+      customerId: id,
+      summary: tag + " · " + nomeFinalArquivo + " → Cliente",
+      details: { tag: tag, fileName: nomeFinalArquivo, destino: "Cliente", context: "distrato" }
+    });
+  }
   return true;
 };
 

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=709">
+  <link rel="stylesheet" href="style.css?v=714">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=709" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=714" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1262,7 +1262,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.709 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.714 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2797,27 +2797,30 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
               <i data-lucide="shield"></i> Auditoria do Sistema
             </h2>
 
-            <div class="filters-container" style="display: flex; gap: 15px; margin-bottom: 20px;">
-              <div class="form-group" style="flex: 1;">
-                <label for="audit-filter-module">Módulo</label>
-                <select id="audit-filter-module" class="form-control" onchange="renderAuditLogs()">
-                  <option value="ALL">Todos os Módulos</option>
-                  <option value="Comercial">Comercial</option>
-                  <option value="Compras/Contas a Pagar">Compras/Contas a Pagar</option>
-                  <option value="Financeiro">Financeiro</option>
-                  <option value="Engenharia">Engenharia</option>
-                  <option value="GED / Anexos">GED / Anexos</option>
-                  <option value="Relacionamento">Relacionamento</option>
-                  <option value="Sistema">Sistema</option>
+            <p style="margin:-8px 0 18px;color:#64748b;font-size:0.9rem;">Registro de quem gerou boleto e quem enviou anexo ao Sienge.</p>
+
+            <div class="filters-container" style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 180px;">
+                <label for="audit-filter-action">Tipo</label>
+                <select id="audit-filter-action" class="form-control" onchange="renderAuditLogs()">
+                  <option value="principais">Boleto e Anexo</option>
+                  <option value="boleto">Geração de Boleto</option>
+                  <option value="anexo">Envio de Anexo</option>
+                  <option value="ALL">Tudo</option>
                 </select>
               </div>
-              <div class="form-group" style="flex: 1;">
+              <div class="form-group" style="flex: 1; min-width: 180px;">
                 <label for="audit-filter-user">Usuário</label>
-                <input type="text" id="audit-filter-user" class="form-control" placeholder="Buscar por nome..."
+                <input type="text" id="audit-filter-user" class="form-control" placeholder="Nome ou e-mail..."
+                  onkeyup="renderAuditLogs()">
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 180px;">
+                <label for="audit-filter-text">Busca</label>
+                <input type="text" id="audit-filter-text" class="form-control" placeholder="Cliente, título, arquivo..."
                   onkeyup="renderAuditLogs()">
               </div>
               <div class="form-group" style="display: flex; align-items: flex-end;">
-                <button class="btn btn-secondary" onclick="renderAuditLogs()"><i data-lucide="refresh-cw"></i>
+                <button class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i>
                   Atualizar</button>
               </div>
             </div>
@@ -2828,10 +2831,10 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                   <tr>
                     <th>Data / Hora</th>
                     <th>Usuário</th>
-                    <th>Módulo</th>
-                    <th>Método</th>
-                    <th>Endpoint</th>
-                    <th>Ação / Dados</th>
+                    <th>Ação</th>
+                    <th>Cliente / Título</th>
+                    <th>Detalhe</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="audit-table-body">
@@ -6785,44 +6788,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=709"></script>
-  <script defer src="sienge-api.js?v=709"></script>
-  <script defer src="azure-auth.js?v=709"></script>
-  <script defer src="app.js?v=709"></script>
-  <script defer src="cartao-taxas.js?v=709"></script>
-  <script defer src="home-dashboard.js?v=709"></script>
-  <script defer src="anexos.js?v=709"></script>
-  <script defer src="contas-pagar.js?v=709"></script>
-  <script defer src="config-tags.js?v=709"></script>
-  <script defer src="config-users.js?v=709"></script>
-  <script defer src="suporte.js?v=709"></script>
-  <script defer src="construcao.js?v=709"></script>
-  <script defer src="empresas.js?v=709"></script>
-  <script defer src="relacionamento.js?v=709"></script>
-  <script defer src="compromissario.js?v=709"></script>
-  <script defer src="comercial.js?v=709"></script>
-  <script defer src="estoque-comercial.js?v=709"></script>
-  <script defer src="centros-custo.js?v=709"></script>
-  <script defer src="marketing.js?v=709"></script>
-  <script defer src="plano-financeiro.js?v=709"></script>
-  <script defer src="prestacao-contas.js?v=709"></script>
+  <script defer src="data.js?v=714"></script>
+  <script defer src="sienge-api.js?v=714"></script>
+  <script defer src="azure-auth.js?v=714"></script>
+  <script defer src="app.js?v=714"></script>
+  <script defer src="cartao-taxas.js?v=714"></script>
+  <script defer src="home-dashboard.js?v=714"></script>
+  <script defer src="anexos.js?v=714"></script>
+  <script defer src="contas-pagar.js?v=714"></script>
+  <script defer src="config-tags.js?v=714"></script>
+  <script defer src="config-users.js?v=714"></script>
+  <script defer src="suporte.js?v=714"></script>
+  <script defer src="construcao.js?v=714"></script>
+  <script defer src="empresas.js?v=714"></script>
+  <script defer src="relacionamento.js?v=714"></script>
+  <script defer src="compromissario.js?v=714"></script>
+  <script defer src="comercial.js?v=714"></script>
+  <script defer src="estoque-comercial.js?v=714"></script>
+  <script defer src="centros-custo.js?v=714"></script>
+  <script defer src="marketing.js?v=714"></script>
+  <script defer src="plano-financeiro.js?v=714"></script>
+  <script defer src="prestacao-contas.js?v=714"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=709"></script>
-  <script defer src="fluxo-caixa.js?v=709"></script>
-  <script defer src="caixa-diario.js?v=709"></script>
-  <script defer src="investimento.js?v=709"></script>
-  <script defer src="parametrizacao-parceiro.js?v=709"></script>
-  <script defer src="societario.js?v=709"></script>
-  <script defer src="participacoes.js?v=709"></script>
-  <script defer src="fiscal.js?v=709"></script>
-  <script defer src="indexadores.js?v=709"></script>
-  <script defer src="verificar-construcao.js?v=709"></script>
-  <script src="repactuacoes.js?v=709"></script>
-  <script defer src="repactuacao-lote.js?v=709"></script>
+  <script defer src="empresa-filter.js?v=714"></script>
+  <script defer src="fluxo-caixa.js?v=714"></script>
+  <script defer src="caixa-diario.js?v=714"></script>
+  <script defer src="investimento.js?v=714"></script>
+  <script defer src="parametrizacao-parceiro.js?v=714"></script>
+  <script defer src="societario.js?v=714"></script>
+  <script defer src="participacoes.js?v=714"></script>
+  <script defer src="fiscal.js?v=714"></script>
+  <script defer src="indexadores.js?v=714"></script>
+  <script defer src="verificar-construcao.js?v=714"></script>
+  <script src="repactuacoes.js?v=714"></script>
+  <script defer src="repactuacao-lote.js?v=714"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=709"></script>
+  <script defer src="dashboard-inadimplencia.js?v=714"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

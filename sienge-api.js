@@ -177,50 +177,149 @@ function getApiMode() {
 // AUDITORIA DO SISTEMA (Segurança)
 // -----------------------------------------------
 const AuditService = {
+  COLLECTION: "auditoria_logs",
+  MAX_LOCAL: 800,
+
+  currentUser: function() {
+    const u = window.AppState && AppState.currentUser;
+    if (u && (u.name || u.email)) {
+      return { name: u.name || "", email: String(u.email || "").toLowerCase() };
+    }
+    try {
+      const s = JSON.parse(localStorage.getItem("crm_moura_user_session") || "null");
+      if (s) return { name: s.name || "", email: String(s.email || "").toLowerCase() };
+    } catch (e) {}
+    return { name: "Desconhecido", email: "" };
+  },
+
+  customerLabel: function(customerId) {
+    const id = customerId == null ? "" : String(customerId).trim();
+    if (!id) return "";
+    try {
+      const c = window.AppState && AppState.customers && (AppState.customers[id] || AppState.customers[customerId]);
+      const name = c && (c.name || c.customerName || c.clientName);
+      if (name) return id + " — " + name;
+    } catch (e) {}
+    return "Cliente " + id;
+  },
+
+  slim: function(value) {
+    try {
+      const s = JSON.stringify(value);
+      if (s && s.length > 3500) return { truncated: true, preview: s.slice(0, 1800) };
+      return value;
+    } catch (e) {
+      return null;
+    }
+  },
+
   getLogs: function() {
     try {
-      const logs = localStorage.getItem('crm_audit_logs');
+      const logs = localStorage.getItem("crm_audit_logs");
       return logs ? JSON.parse(logs) : [];
     } catch (e) {
       return [];
     }
   },
-  
-  logAction: function(module, endpoint, method, payload) {
+
+  _saveLocal: function(rec) {
+    const logs = this.getLogs();
+    logs.unshift(rec);
+    if (logs.length > this.MAX_LOCAL) logs.length = this.MAX_LOCAL;
+    localStorage.setItem("crm_audit_logs", JSON.stringify(logs));
+  },
+
+  _persistRemote: function(rec) {
     try {
-      const logs = this.getLogs();
-      const userName = document.getElementById('login-name')?.value || localStorage.getItem('crm_user_name') || 'Desconhecido';
-      
-      const newLog = {
-        id: Date.now() + Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toISOString(),
-        user: userName,
-        module: module,
-        endpoint: endpoint,
-        method: method,
-        payload: payload
-      };
-      
-      // Keep only last 500 logs to prevent localStorage quota issues
-      logs.unshift(newLog);
-      if (logs.length > 500) logs.pop();
-      
-      localStorage.setItem('crm_audit_logs', JSON.stringify(logs));
+      if (!window.firebaseDb || !window.firebaseCollections) return;
+      const { doc, setDoc } = window.firebaseCollections;
+      setDoc(doc(window.firebaseDb, this.COLLECTION, String(rec.id)), rec).catch(function(e) {
+        console.warn("[Auditoria] Firestore", e);
+      });
     } catch (e) {
-      console.error("Erro ao salvar log de auditoria", e);
+      console.warn("[Auditoria] Firestore", e);
     }
   },
-  
+
+  logEvent: function(entry) {
+    try {
+      const user = this.currentUser();
+      const rec = {
+        id: Date.now() + "-" + Math.random().toString(36).slice(2, 9),
+        timestamp: new Date().toISOString(),
+        user: user.name || "Desconhecido",
+        userEmail: user.email || "",
+        action: (entry && entry.action) || "HTTP",
+        module: (entry && entry.module) || "Sistema",
+        status: (entry && entry.status) || "ok",
+        summary: (entry && entry.summary) || "",
+        customerId: entry && entry.customerId != null ? String(entry.customerId) : "",
+        customerLabel: (entry && entry.customerLabel) || this.customerLabel(entry && entry.customerId),
+        details: this.slim((entry && entry.details) || {}),
+        endpoint: (entry && entry.endpoint) || "",
+        method: (entry && entry.method) || ""
+      };
+      this._saveLocal(rec);
+      this._persistRemote(rec);
+      return rec;
+    } catch (e) {
+      console.error("Erro ao salvar log de auditoria", e);
+      return null;
+    }
+  },
+
+  logAction: function(module, endpoint, method, payload) {
+    this.logEvent({
+      action: "HTTP",
+      module: module,
+      endpoint: endpoint,
+      method: method,
+      summary: (method || "") + " " + (endpoint || ""),
+      details: { payload: this.slim(payload) }
+    });
+  },
+
   inferModuleFromUrl: function(url) {
-    url = url.toLowerCase();
-    if (url.includes('/sales-contracts') || url.includes('/sales-contracts-renegotiations')) return 'Comercial';
-    if (url.includes('/payable-bills') || url.includes('/creditors')) return 'Compras/Contas a Pagar';
-    if (url.includes('/receivable-bills') || url.includes('/overdue-receivable-bill')) return 'Financeiro';
-    if (url.includes('/units') || url.includes('/enterprises')) return 'Engenharia';
-    if (url.includes('/tags') || url.includes('/ocr')) return 'GED / Anexos';
-    if (url.includes('/relacionamento')) return 'Relacionamento';
-    return 'Sistema';
+    url = String(url || "").toLowerCase();
+    if (url.includes("/attachments")) return "GED / Anexos";
+    if (url.includes("/sales-contracts") || url.includes("/sales-contracts-renegotiations")) return "Comercial";
+    if (url.includes("/payable-bills") || url.includes("/creditors")) return "Compras/Contas a Pagar";
+    if (url.includes("/receivable-bills") || url.includes("/overdue-receivable-bill")) return "Financeiro";
+    if (url.includes("/units") || url.includes("/enterprises")) return "Engenharia";
+    if (url.includes("/tags") || url.includes("/ocr")) return "GED / Anexos";
+    if (url.includes("/relacionamento")) return "Relacionamento";
+    return "Sistema";
+  },
+
+  loadRemote: async function(maxRows) {
+    const limitN = maxRows || 400;
+    if (!window.firebaseDb || !window.firebaseCollections) return [];
+    try {
+      const { collection, getDocs, query, orderBy, limit } = window.firebaseCollections;
+      const q = query(collection(window.firebaseDb, this.COLLECTION), orderBy("timestamp", "desc"), limit(limitN));
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach(function(d) { rows.push(d.data() || {}); });
+      return rows;
+    } catch (e) {
+      try {
+        const { collection, getDocs } = window.firebaseCollections;
+        const snap = await getDocs(collection(window.firebaseDb, this.COLLECTION));
+        const rows = [];
+        snap.forEach(function(d) { rows.push(d.data() || {}); });
+        rows.sort(function(a, b) { return String(b.timestamp || "").localeCompare(String(a.timestamp || "")); });
+        return rows.slice(0, limitN);
+      } catch (err) {
+        console.warn("[Auditoria] leitura Firestore", err);
+        return [];
+      }
+    }
   }
+};
+
+window.AuditService = AuditService;
+window.logCrmAudit = function(entry) {
+  return AuditService.logEvent(entry);
 };
 
 // Cache Local via IndexedDB para evitar dependência total do Firebase e limites de Quota
@@ -267,8 +366,10 @@ window.fetch = async function(...args) {
   const options = args[1] || {};
   const method = (options.method || 'GET').toUpperCase();
   
-  if ((method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') && 
-      (url.includes('sienge-proxy') || url.includes('/api/') || url.includes('sienge'))) {
+  const urlStr = String(url || "");
+  const skipSemantic = /overdue-receivable-bill|\/attachments/i.test(urlStr);
+  if (!skipSemantic && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') && 
+      (urlStr.includes('sienge-proxy') || urlStr.includes('/api/') || urlStr.includes('sienge'))) {
       
       let payload = null;
       if (options.body && typeof options.body === 'string') {
@@ -277,8 +378,8 @@ window.fetch = async function(...args) {
           payload = "FormData (Arquivo/Multimídia)";
       }
       
-      const moduleName = AuditService.inferModuleFromUrl(url);
-      AuditService.logAction(moduleName, url, method, payload);
+      const moduleName = AuditService.inferModuleFromUrl(urlStr);
+      AuditService.logAction(moduleName, urlStr, method, payload);
   }
   
   return await originalFetch.apply(this, args);

@@ -1802,7 +1802,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
     "marketing-budget": "Budget",
-    suporte: "Suporte"
+    suporte: "Suporte",
+    auditoria: "Auditoria do Sistema",
+    acessos: "Acessos"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
   
@@ -1842,7 +1844,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
-    suporte: "headphones"
+    suporte: "headphones",
+    auditoria: "shield",
+    acessos: "key-round"
   };
 
   // Esconder barra de contexto de cliente ao navegar para abas gerais
@@ -1976,8 +1980,105 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof SocietarioApp !== "undefined") SocietarioApp.init();
   } else if (tabId === "participacoes") {
     if (typeof ParticipacoesApp !== "undefined") ParticipacoesApp.init();
+  } else if (tabId === "auditoria") {
+    if (typeof window.renderAuditLogs === "function") window.renderAuditLogs(true);
   }
 }
+
+window._auditCache = { at: 0, rows: [] };
+
+function auditActionMeta(action) {
+  const key = String(action || "HTTP");
+  if (key === "BOLETO_GERADO") return { group: "boleto", label: "Geração de Boleto" };
+  if (key === "BOLETO_ERRO") return { group: "boleto", label: "Falha ao gerar boleto" };
+  if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
+  if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
+  return { group: "outros", label: key === "HTTP" ? "Requisição" : key };
+}
+
+function auditFormatWhen(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function auditEsc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+window.renderAuditLogs = async function(forceReload) {
+  const tbody = document.getElementById("audit-table-body");
+  if (!tbody) return;
+
+  const force = forceReload === true;
+  const now = Date.now();
+  if (force || !window._auditCache.rows.length || (now - window._auditCache.at) > 20000) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">Carregando logs...</td></tr>`;
+    const local = (window.AuditService && AuditService.getLogs()) || [];
+    let remote = [];
+    if (window.AuditService && typeof AuditService.loadRemote === "function") {
+      try { remote = await AuditService.loadRemote(400); } catch (e) { remote = []; }
+    }
+    const byId = {};
+    [].concat(remote, local).forEach(function(row) {
+      if (!row) return;
+      const id = String(row.id || row.timestamp || Math.random());
+      if (!byId[id]) byId[id] = row;
+    });
+    window._auditCache.rows = Object.keys(byId).map(function(k) { return byId[k]; })
+      .sort(function(a, b) { return String(b.timestamp || "").localeCompare(String(a.timestamp || "")); });
+    window._auditCache.at = Date.now();
+  }
+
+  const actionFilter = (document.getElementById("audit-filter-action") || {}).value || "principais";
+  const userQ = String((document.getElementById("audit-filter-user") || {}).value || "").trim().toLowerCase();
+  const textQ = String((document.getElementById("audit-filter-text") || {}).value || "").trim().toLowerCase();
+
+  const rows = window._auditCache.rows.filter(function(row) {
+    const meta = auditActionMeta(row.action);
+    if (actionFilter === "principais" && meta.group === "outros") return false;
+    if (actionFilter === "boleto" && meta.group !== "boleto") return false;
+    if (actionFilter === "anexo" && meta.group !== "anexo") return false;
+    const userBlob = ((row.user || "") + " " + (row.userEmail || "")).toLowerCase();
+    if (userQ && userBlob.indexOf(userQ) === -1) return false;
+    if (textQ) {
+      const hay = [
+        row.summary, row.customerLabel, row.customerId, row.endpoint,
+        JSON.stringify(row.details || {})
+      ].join(" ").toLowerCase();
+      if (hay.indexOf(textQ) === -1) return false;
+    }
+    return true;
+  });
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:28px;">Nenhum log encontrado para este filtro.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(function(row) {
+    const meta = auditActionMeta(row.action);
+    const ok = String(row.status || "ok") !== "erro";
+    const statusHtml = ok
+      ? `<span style="color:#15803d;font-weight:700;">OK</span>`
+      : `<span style="color:#b91c1c;font-weight:700;">Erro</span>`;
+    const who = row.userEmail ? (auditEsc(row.user) + "<br><span style=\"color:#64748b;font-size:0.75rem;\">" + auditEsc(row.userEmail) + "</span>") : auditEsc(row.user || "—");
+    const alvo = row.customerLabel || (row.details && row.details.receivableBillId ? ("Título " + row.details.receivableBillId) : "—");
+    return `<tr>
+      <td style="white-space:nowrap;">${auditEsc(auditFormatWhen(row.timestamp))}</td>
+      <td>${who}</td>
+      <td>${auditEsc(meta.label)}</td>
+      <td>${auditEsc(alvo)}</td>
+      <td style="max-width:420px;">${auditEsc(row.summary || "")}</td>
+      <td>${statusHtml}</td>
+    </tr>`;
+  }).join("");
+};
 
 // ----------------------------------------------------
 // 3. FLUXO DE LOGIN E RENDER DO USUÃRIO
@@ -6070,10 +6171,50 @@ window.buildFichaPdfFilename = function(tipo, opts) {
   return raw.replace(/\|/g, '\uFF5C').replace(/[<>:"/\\?*\u0000-\u001F]/g, '-').replace(/\s+/g, ' ').trim();
 };
 
-window.openNamedSiengePdf = function(url, filename) {
-  if (!url) return;
+window.openBoletoWaitWindow = function() {
+  let w = null;
+  try { w = window.open("", "crm-boleto-pdf"); } catch (e) { w = null; }
+  if (!w) return null;
+  try {
+    w.document.open();
+    w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Boleto</title><style>body{font-family:Segoe UI,sans-serif;background:#f8fafc;color:#105436;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{text-align:center;padding:32px;max-width:420px}.spin{width:28px;height:28px;border:3px solid #cfe3d8;border-top-color:#105436;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}p{color:#64748b;font-size:14px;line-height:1.45}</style></head><body><div class=\"box\"><div class=\"spin\"></div><div style=\"font-weight:700;margin-bottom:8px\">Aguardando o PDF do boleto</div><p>O boleto já está sendo gerado no Sienge. Esta guia abre o PDF assim que o arquivo ficar disponível.</p></div></body></html>");
+    w.document.close();
+  } catch (e) {}
+  return w;
+};
+
+window.openNamedSiengePdf = function(url, filename, existingWin) {
+  if (!url) return null;
   const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
-  window.open(proxyUrl, '_blank');
+  if (existingWin && !existingWin.closed) {
+    try { existingWin.location.href = proxyUrl; existingWin.focus(); } catch (e) {}
+    return existingWin;
+  }
+  return window.open(proxyUrl, "_blank");
+};
+
+window.showBoletoPdfFallback = function(url, filename) {
+  if (!url) return;
+  const proxyUrl = `/api/proxy-download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename || "Boleto.pdf")}`;
+  let modal = document.getElementById("boleto-pdf-fallback");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "boleto-pdf-fallback";
+    modal.style.cssText = "position:fixed;inset:0;z-index:12000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px;";
+    modal.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:520px;width:100%;padding:22px 24px;box-shadow:0 20px 50px rgba(0,0,0,.25);">
+      <div style="font-weight:800;color:#105436;font-size:1.05rem;margin-bottom:8px;">Boleto pronto</div>
+      <p style="color:#475569;font-size:0.9rem;line-height:1.45;margin:0 0 16px;">O navegador bloqueou a nova guia. Abra o PDF por aqui. Senha: CPF/CNPJ (já copiado, Ctrl+V).</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" class="btn btn-cancel" id="boleto-pdf-fallback-close">Cancelar</button>
+        <a class="btn btn-primary" id="boleto-pdf-fallback-open" target="_blank" rel="noopener">Abrir PDF</a>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector("#boleto-pdf-fallback-close").onclick = function() { modal.style.display = "none"; };
+  }
+  const link = modal.querySelector("#boleto-pdf-fallback-open");
+  link.href = proxyUrl;
+  modal.style.display = "flex";
 };
 
 window.visualizarExtratoDireto = function(btn) {
@@ -14903,19 +15044,44 @@ window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
 
   const instIds = (Array.isArray(instId) ? instId : [instId]).filter(id => id != null && id !== "");
   const retries = Math.max(1, Number(opts.retries) || 1);
+  const targetWin = opts.targetWin || window._pendingBoletoPdfWin || null;
+  const billIds = [];
+  const pushBill = (v) => {
+    const s = v == null ? "" : String(v).trim();
+    if (s && billIds.indexOf(s) === -1) billIds.push(s);
+  };
+  pushBill(billId);
+  pushBill(AppState.selectedSaleId);
+  try {
+    const sale = (AppState.sales || []).find(s =>
+      String(s.id) === String(billId) ||
+      String(s.saleId) === String(billId) ||
+      String(s.receivableBillId) === String(billId) ||
+      String(s.id) === String(AppState.selectedSaleId) ||
+      String(s.receivableBillId) === String(AppState.selectedSaleId)
+    );
+    if (sale) {
+      pushBill(sale.receivableBillId);
+      pushBill(sale.id);
+      pushBill(sale.saleId);
+    }
+  } catch (e) {}
 
   try {
     let boletoInfo = null;
     for (let attempt = 0; attempt < retries && !boletoInfo; attempt++) {
       for (const oneId of instIds) {
-        const data = await SiengeApiService.getPaymentSlipNotification(billId, oneId);
-        if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
-          boletoInfo = data.results[0];
-          break;
+        for (const oneBill of billIds) {
+          const data = await SiengeApiService.getPaymentSlipNotification(oneBill, oneId);
+          if (data && data.results && data.results.length > 0 && data.results[0].urlReport) {
+            boletoInfo = data.results[0];
+            break;
+          }
         }
+        if (boletoInfo) break;
       }
       if (!boletoInfo && attempt < retries - 1) {
-        await new Promise(r => setTimeout(r, 1800));
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
@@ -14940,7 +15106,10 @@ window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
             titulo: getDomText("det-bill-id") || billId,
             nome: customerName
         });
-        window.openNamedSiengePdf(urlReport, fileName);
+        const openedWin = window.openNamedSiengePdf(urlReport, fileName, targetWin);
+        if (!openedWin && typeof window.showBoletoPdfFallback === "function") {
+          window.showBoletoPdfFallback(urlReport, fileName);
+        }
       }
       return true;
     }
@@ -15380,6 +15549,9 @@ window.submitReprocessBoleto = async function() {
     return;
   }
 
+  const pdfWin = typeof window.openBoletoWaitWindow === "function" ? window.openBoletoWaitWindow() : null;
+  window._pendingBoletoPdfWin = pdfWin;
+
   const btn = document.getElementById('btn-submit-reprocess');
   const originalHtml = btn.innerHTML;
   btn.innerHTML = `<div class="loading-spinner" style="width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 1s linear infinite; margin-right: 4px;"></div> Gerando...`;
@@ -15408,6 +15580,8 @@ window.submitReprocessBoleto = async function() {
       ? window.resolvePromisedInstallmentIds(rawInst)
       : rawInst.map(Number)).filter(id => !isNaN(id));
     if (resolvedInstIds.length === 0) {
+      if (pdfWin && !pdfWin.closed) try { pdfWin.close(); } catch (e) {}
+      window._pendingBoletoPdfWin = null;
       alert("Não foi possível identificar as parcelas para gerar o boleto. Selecione novamente e tente de novo.");
       btn.innerHTML = originalHtml;
       btn.disabled = false;
@@ -15511,6 +15685,29 @@ window.submitReprocessBoleto = async function() {
     window._lastGeneratedBoletoBillId = billId;
     window._lastGeneratedBoletoAt = Date.now();
 
+    if (typeof window.logCrmAudit === "function") {
+      const accountLabel = (selectedOpt && selectedOpt.textContent) || account;
+      window.logCrmAudit({
+        action: "BOLETO_GERADO",
+        module: "Financeiro",
+        status: "ok",
+        customerId: customerId,
+        summary: `Título ${billId} · ${parcelasPart} · Venc. ${dueDateBr}`,
+        details: {
+          receivableBillId: billId,
+          installmentIds: instIds,
+          companyId: companyId,
+          checkingAccount: accountLabel,
+          newDueDate: dueDate,
+          finePercentage: fine,
+          interestPercentage: interest,
+          source: (typeof source !== "undefined" && source) || currentReprocessSource || "",
+          contractNumber: sale && (sale.contractNumber || sale.number || ""),
+          saleId: AppState.selectedSaleId || ""
+        }
+      });
+    }
+
     if (typeof window.refreshSimuladorAfterBoleto === "function") {
       try { window.refreshSimuladorAfterBoleto(instIds); } catch (e) { console.warn(e); }
     }
@@ -15521,15 +15718,40 @@ window.submitReprocessBoleto = async function() {
       try { window.loadCustomerBoletos(AppState.selectedCustomerId, billId); } catch (e) {}
     }
 
-    const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 5 });
+    const opened = await window.openBoletoPdf(billId, instIds, null, { quiet: true, retries: 8, targetWin: pdfWin });
+    window._pendingBoletoPdfWin = null;
     if (opened) {
-      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V). Confira na Simulação de Vencidas.");
+      alert("Boleto gerado. A ocorrência e o lembrete 'Checar pagamento' foram gravados. O PDF abre em nova guia (senha: CPF/CNPJ, Ctrl+V).");
     } else {
-      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela Simulação de Vencidas em alguns segundos.");
+      if (pdfWin && !pdfWin.closed) {
+        try {
+          pdfWin.document.body.innerHTML = "<div style=\"font-family:Segoe UI,sans-serif;padding:40px;color:#334155;max-width:480px\"><b style=\"color:#105436\">Boleto gerado</b><p>O PDF ainda não ficou disponível no Sienge. Abra em <b>Boletos do Contrato</b> ou clique em <b>Ver</b> na Simulação de Vencidas em alguns segundos.</p></div>";
+        } catch (e) {
+          try { pdfWin.close(); } catch (err) {}
+        }
+      }
+      alert("Boleto gerado e ocorrência gravada. O PDF ainda não ficou disponível no Sienge — abra pela Simulação de Vencidas ou em Boletos do Contrato em alguns segundos.");
     }
 
   } catch (e) {
     console.error("Erro ao gerar boleto:", e);
+    if (pdfWin && !pdfWin.closed) try { pdfWin.close(); } catch (err) {}
+    window._pendingBoletoPdfWin = null;
+    if (typeof window.logCrmAudit === "function") {
+      window.logCrmAudit({
+        action: "BOLETO_ERRO",
+        module: "Financeiro",
+        status: "erro",
+        customerId: AppState.selectedCustomerId,
+        summary: "Falha ao gerar boleto do título " + (currentReprocessBillId || ""),
+        details: {
+          receivableBillId: currentReprocessBillId,
+          installmentIds: currentReprocessInstId,
+          error: String((e && e.message) || e),
+          source: typeof currentReprocessSource !== "undefined" ? currentReprocessSource : ""
+        }
+      });
+    }
     btn.innerHTML = originalHtml;
     btn.disabled = false;
     const rate = e && (e.status === 429 || /429|rate limit/i.test(String(e.message || "")));

@@ -665,7 +665,7 @@ const SocietarioApp = {
       <div style="display:flex;flex-direction:column;height:calc(100vh - 120px);min-height:520px;background:#f4f6f4;border-radius:8px;overflow:hidden;border:1px solid #d1e3d6;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#105436;color:#fff;">
           <div>
-            <div style="font-size:1.05rem;font-weight:800;letter-spacing:0.06em;">ESTRUTURA SOCIETÁRIA</div>
+            <div style="font-size:1.05rem;font-weight:800;letter-spacing:0.06em;">ORGANOGRAMA SOCIETÁRIO</div>
             <div style="font-size:0.75rem;opacity:0.85;">Arraste as caixas · trace ligações pelos pontinhos · clique no % para editar</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
