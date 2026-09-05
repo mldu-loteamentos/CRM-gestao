@@ -629,7 +629,10 @@ function anexosBuildMapaHtml() {
     return '<div class="anexos-mapa-empty">Busque o empreendimento para carregar o espelho de lotes.</div>';
   }
   if (AnexosState.mapaLoading) {
-    return '<div class="anexos-mapa-empty">Cruzando contratos ativos e envios…</div>';
+    return '<div class="anexos-mapa-empty anexos-mapa-loading">'
+      + '<div class="loading-spinner anexos-mapa-spinner" aria-hidden="true"></div>'
+      + '<span>Cruzando contratos ativos e envios…</span>'
+      + '</div>';
   }
   const groups = {};
   units.forEach((u) => {
@@ -691,7 +694,10 @@ function anexosBuildMapaHtml() {
 function anexosBuildPeriodoMapaHtml() {
   const groups = AnexosState.periodoMapa || [];
   if (AnexosState.mapaLoading) {
-    return '<div class="anexos-mapa-empty">Buscando vendas do período…</div>';
+    return '<div class="anexos-mapa-empty anexos-mapa-loading">'
+      + '<div class="loading-spinner anexos-mapa-spinner" aria-hidden="true"></div>'
+      + '<span>Buscando vendas do período…</span>'
+      + '</div>';
   }
   if (!groups.length) {
     return '<div class="anexos-mapa-empty">Nenhuma venda pendente de anexo no período.</div>';

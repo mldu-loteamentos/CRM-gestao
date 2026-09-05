@@ -147,7 +147,7 @@ body {
 .brand-logo-container {
   width: 48px;
   height: 48px;
-  background: radial-gradient(circle at bottom right, var(--color-secondary) 30%, transparent 70%), var(--color-primary-light);
+  background: #ffffff;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -155,6 +155,7 @@ body {
   position: relative;
   overflow: hidden;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
 }
 
 .brand-logo-tree {
@@ -181,10 +182,11 @@ body {
 }
 
 .brand-text span {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   color: var(--color-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
 
 .nav-links {
@@ -1825,6 +1827,21 @@ circle.donut-segment {
   background: #f8fafc;
   border: 1px dashed #cbd5e1;
   border-radius: 8px;
+}
+.anexos-mapa-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 96px;
+  padding: 28px 16px;
+}
+.anexos-mapa-spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+  flex-shrink: 0;
 }
 .anexos-mapa-foot {
   margin-top: 10px;
