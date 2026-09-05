@@ -35,6 +35,7 @@ function _vcDaysSince(dateValue) {
 
 function _vcTimestampToDateStr(val) {
     if (!val) return '';
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
     let d = null;
     if (typeof val.toDate === 'function') {
         d = val.toDate();
@@ -51,6 +52,85 @@ function _vcTimestampToDateStr(val) {
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
 }
+
+function _vcPendingRequestDate(docObj) {
+    if (!docObj) return '';
+    return _vcTimestampToDateStr(docObj.createdAt)
+        || _vcTimestampToDateStr(docObj.requestedAt)
+        || _vcTimestampToDateStr(docObj.updatedAt);
+}
+
+function _vcLatestDateAmong(keys, dateByKey) {
+    return (keys || [])
+        .map(k => dateByKey[String(k)])
+        .filter(Boolean)
+        .map(_vcTimestampToDateStr)
+        .filter(Boolean)
+        .sort()
+        .pop() || null;
+}
+
+function _vcIsPendingSuperseded(pendingDoc, latestCheckDate) {
+    if (!latestCheckDate) return false;
+    const checkDate = _vcTimestampToDateStr(latestCheckDate);
+    if (!checkDate) return false;
+    const pendingDate = _vcPendingRequestDate(pendingDoc);
+    if (!pendingDate) return true;
+    return checkDate >= pendingDate;
+}
+
+function _vcClientLookupKeys(c) {
+    if (!c) return [];
+    const contractId = c.saleId || c.contractId || c.id;
+    let fallbackTitle = contractId;
+    if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
+    const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
+    const unit = String(c.unitName || c.unit || c.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase();
+    const cc = _vcExtractCostCenterId(c);
+    const keys = [
+        contractId, tituloKey, c.contractNumber, c.realSaleId, c.customerId, c.saleCode, c.saleId
+    ];
+    if (Array.isArray(c.billIds)) keys.push(...c.billIds);
+    if (cc && unit) keys.push(`unit:${cc}:${unit}`);
+    return [...new Set(keys.map(k => String(k == null ? '' : k).trim()).filter(k => k && k !== 'undefined' && k !== 'null'))];
+}
+
+function _vcResolvePendingVistoria(keys, checksByContract, latestCheckDateByContract) {
+    const pending = (keys || []).map(k => checksByContract[String(k)]).find(Boolean) || null;
+    if (!pending) return null;
+    const latestCheck = _vcLatestDateAmong(keys, latestCheckDateByContract);
+    if (_vcIsPendingSuperseded(pending, latestCheck)) return null;
+    return pending;
+}
+
+window.closePendingLinkVistorias = async function(contractKeys, reason) {
+    const keys = [...new Set((contractKeys || []).map(String).filter(k => k && k !== 'undefined' && k !== 'null' && k.trim() !== ''))];
+    if (!keys.length || !window.firebaseDb || !window.firebaseCollections) return 0;
+    const { collection, getDocs, query, where, doc, updateDoc } = window.firebaseCollections;
+    const pendingStatuses = new Set(['aguardando_fotos', 'aguardando_validacao']);
+    const keySet = new Set(keys);
+    let closed = 0;
+    try {
+        const snap = await getDocs(query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida')));
+        const updates = [];
+        snap.forEach(d => {
+            const data = d.data();
+            if (data.isTest || !pendingStatuses.has(data.status)) return;
+            const docKeys = [data.contractId, data.tituloKey, data.titulo, data.customerId, ...(data.contractKeys || [])].map(String);
+            if (!docKeys.some(k => keySet.has(k))) return;
+            updates.push(updateDoc(doc(window.firebaseDb, 'vistorias', d.id), {
+                status: 'concluida',
+                closedBy: reason || 'vistoria_interna',
+                closedAt: new Date().toISOString()
+            }));
+        });
+        await Promise.all(updates);
+        closed = updates.length;
+    } catch (err) {
+        console.warn('[Vistoria] Falha ao encerrar links pendentes:', err);
+    }
+    return closed;
+};
 
 window.openVistoriaRecurrenceModal = function() {
     const modal = document.getElementById('vistoria-recurrence-modal');
@@ -429,11 +509,23 @@ window.VerificarConstrucaoApp = {
                         const docObj = { id: doc.id, ...data };
                         const register = (key) => {
                             if (key === undefined || key === null || String(key).trim() === '') return;
-                            checksByContract[String(key)] = docObj;
+                            const k = String(key);
+                            const prev = checksByContract[k];
+                            if (!prev) {
+                                checksByContract[k] = docObj;
+                                return;
+                            }
+                            const prevDate = _vcPendingRequestDate(prev);
+                            const nextDate = _vcPendingRequestDate(docObj);
+                            if (!prevDate || (nextDate && nextDate >= prevDate)) checksByContract[k] = docObj;
                         };
                         register(data.contractId);
                         register(data.tituloKey);
                         register(data.titulo);
+                        register(data.customerId);
+                        if (data.costCenterId && data.unidade) {
+                            register(`unit:${data.costCenterId}:${String(data.unidade).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
+                        }
                         if (data.contractKeys && Array.isArray(data.contractKeys)) {
                             data.contractKeys.forEach(register);
                         }
@@ -443,14 +535,19 @@ window.VerificarConstrucaoApp = {
                     snapChecks.forEach(doc => {
                         const data = doc.data();
                         if (data.stage && data.stage.trim() !== '') {
-                            const cDate = data.date || data.createdAt || '1970-01-01';
+                            const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
                             
                             const keysToSet = data.contractKeys ? [...data.contractKeys] : [String(data.contractId)];
                             if (data.realSaleId) keysToSet.push(String(data.realSaleId));
                             if (data.tituloKey) keysToSet.push(String(data.tituloKey));
+                            if (data.customerId) keysToSet.push(String(data.customerId));
+                            if (data.costCenterId && data.unidade) {
+                                keysToSet.push(`unit:${data.costCenterId}:${String(data.unidade).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
+                            }
                             
                             keysToSet.forEach(key => {
-                                if (!latestCheckDateByContract[key] || cDate >= latestCheckDateByContract[key]) {
+                                const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
+                                if (!prevDate || cDate >= prevDate) {
                                     latestCheckDateByContract[key] = cDate;
                                     
                                     const stageUpper = data.stage.trim().toUpperCase();
@@ -463,12 +560,29 @@ window.VerificarConstrucaoApp = {
                             });
                         }
                     });
+                    const staleKeys = [];
+                    const seenPending = new Set();
+                    Object.values(checksByContract).forEach(pending => {
+                        if (!pending || !pending.id || seenPending.has(pending.id)) return;
+                        seenPending.add(pending.id);
+                        const keys = [pending.contractId, pending.tituloKey, pending.titulo, ...(pending.contractKeys || [])].filter(Boolean);
+                        const latestCheck = _vcLatestDateAmong(keys, latestCheckDateByContract);
+                        if (_vcIsPendingSuperseded(pending, latestCheck)) {
+                            staleKeys.push(...keys);
+                        }
+                    });
+                    if (staleKeys.length) {
+                        window.closePendingLinkVistorias(staleKeys, 'vistoria_interna').catch(err => {
+                            console.warn('[Vistoria] Falha ao encerrar links antigos após vistoria interna:', err);
+                        });
+                    }
                 } catch (err) {
                     console.warn('[Vistoria] Erro ao buscar histórico:', err);
                 }
             }
 
             const includeSubjudice = document.getElementById('vc-include-subjudice') ? document.getElementById('vc-include-subjudice').checked : false;
+            const supersededLinkKeys = [];
 
             const elegiveis = clients.filter(c => {
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
@@ -476,29 +590,32 @@ window.VerificarConstrucaoApp = {
                 
                 if (!includeSubjudice && (c.subjudice === 'S' || c.subjudice === true)) return false;
 
-                const contractId = c.saleId || c.contractId || c.id;
-                let fallbackTitle = contractId;
-                if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
-                const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
-                const realSaleIdStr = String(c.realSaleId || '');
-                const contractNumberStr = String(c.contractNumber || '');
-                
-                const hasActive = !!(
-                    checksByContract[String(contractId)] || 
-                    checksByContract[String(tituloKey)] || 
-                    (contractNumberStr && checksByContract[contractNumberStr]) ||
-                    (realSaleIdStr && checksByContract[realSaleIdStr])
-                );
-                
-                const latestCheckDate = [String(contractId), String(tituloKey), contractNumberStr, realSaleIdStr]
-                    .map(key => latestCheckDateByContract[key])
-                    .filter(Boolean)
-                    .sort()
-                    .pop();
+                const contractLookupKeys = _vcClientLookupKeys(c);
+                const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
+                const pendingRaw = contractLookupKeys.map(k => checksByContract[String(k)]).find(Boolean) || null;
                 const daysSinceCheck = _vcDaysSince(latestCheckDate);
-
-                return !latestCheckDate || daysSinceCheck >= recurrenceDays || hasActive;
+                const linkAfterCheck = !!(pendingRaw && !_vcIsPendingSuperseded(pendingRaw, latestCheckDate));
+                if (pendingRaw && latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !linkAfterCheck) {
+                    supersededLinkKeys.push(
+                        ...contractLookupKeys,
+                        pendingRaw.contractId,
+                        pendingRaw.tituloKey,
+                        pendingRaw.titulo,
+                        pendingRaw.customerId,
+                        ...(pendingRaw.contractKeys || [])
+                    );
+                }
+                if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) {
+                    return linkAfterCheck;
+                }
+                return true;
             });
+
+            if (supersededLinkKeys.length && typeof window.closePendingLinkVistorias === 'function') {
+                window.closePendingLinkVistorias(supersededLinkKeys, 'vistoria_interna').catch(err => {
+                    console.warn('[Vistoria] Falha ao encerrar link antigo do lote vistoriado:', err);
+                });
+            }
 
             const rows = [];
             elegiveis.forEach(c => {
@@ -508,13 +625,9 @@ window.VerificarConstrucaoApp = {
                 const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
                 const realSaleIdStr = String(c.realSaleId || '');
                 const contractNumberStr = String(c.contractNumber || '');
+                const contractLookupKeys = _vcClientLookupKeys(c);
                 
-                const hasConstruction = !!(
-                    completedChecksByContract[String(contractId)] || 
-                    completedChecksByContract[String(tituloKey)] || 
-                    (contractNumberStr && completedChecksByContract[contractNumberStr]) ||
-                    (realSaleIdStr && completedChecksByContract[realSaleIdStr])
-                );
+                const hasConstruction = contractLookupKeys.some(k => completedChecksByContract[k]);
                 if (hasConstruction) return; // Dispensa de vistoria - remove da lista
 
                 const costCenterId = _vcExtractCostCenterId(c);
@@ -523,7 +636,14 @@ window.VerificarConstrucaoApp = {
                 const empLabel = _vcGetEmpLabel(costCenterId);
 
                 const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
-                const vistoriaAtiva = checksByContract[String(contractId)] || checksByContract[String(tituloKey)] || (contractNumberStr && checksByContract[contractNumberStr]) || (realSaleIdStr && checksByContract[realSaleIdStr]);
+                const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
+                const vistoriaAtiva = _vcResolvePendingVistoria(
+                    contractLookupKeys,
+                    checksByContract,
+                    latestCheckDateByContract
+                );
+                const daysSinceRecentCheck = _vcDaysSince(latestCheckDate);
+                if (daysSinceRecentCheck !== null && daysSinceRecentCheck < recurrenceDays && !vistoriaAtiva) return;
 
                 // Dados financeiros do cliente
                 const clienteName = c.customerName || c.name || c.nome || '-';
@@ -561,8 +681,8 @@ window.VerificarConstrucaoApp = {
                 if (contractNumberStr) contractKeys.push(String(contractNumberStr));
                 if (realSaleIdStr) contractKeys.push(String(realSaleIdStr));
                 
-                let maxDate = null;
-                contractKeys.forEach(k => {
+                let maxDate = latestCheckDate && latestCheckDate !== '1970-01-01' ? latestCheckDate : null;
+                contractLookupKeys.forEach(k => {
                     const d = latestCheckDateByContract[k];
                     if (d && d !== '1970-01-01') {
                         if (!maxDate || d > maxDate) maxDate = d;
@@ -580,9 +700,6 @@ window.VerificarConstrucaoApp = {
                     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
                     lastCheckDays = diffDays >= 0 ? `${diffDays} dia(s)` : 'Hoje';
                 }
-
-                const daysSinceCheck = maxDate ? _vcDaysSince(maxDate) : null;
-                if (daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !vistoriaAtiva) return;
 
                 rows.push({
                     customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',

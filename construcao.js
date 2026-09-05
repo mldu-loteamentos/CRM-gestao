@@ -1176,6 +1176,10 @@ window.saveNovaVistoria = async function() {
             checkData.createdAt = new Date().toISOString();
             await addDoc(collection(window.firebaseDb, "construction_checks"), checkData);
         }
+
+        if (typeof window.closePendingLinkVistorias === 'function') {
+            await window.closePendingLinkVistorias(Array.from(allKeys), 'vistoria_interna');
+        }
         
         document.getElementById('modal-nova-vistoria').remove();
         window.loadConstrucoes();

@@ -164,9 +164,11 @@ const HomeDashboard = {
     const thresholdJuridico = juridicoNode ? Number(juridicoNode.dias) : 151;
     const group = typeof window.getFilaQueueGroup === 'function'
       ? window.getFilaQueueGroup(c, thresholdJuridico)
-      : 5;
-    // 0 = 0% pago, 5 = fila de cobrança. 1–4 são Sub Judice / acordo / recente / enviar jurídico
-    if (group !== 0 && group !== 5) return false;
+      : 6;
+    const G = window.FILA_QUEUE_GROUPS || {};
+    const zeroPago = G.ZERO_PAGO != null ? G.ZERO_PAGO : 1;
+    const semCategoria = G.SEM_CATEGORIA != null ? G.SEM_CATEGORIA : 6;
+    if (group !== zeroPago && group !== semCategoria) return false;
     const rule = String(c.appliedRule || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (/JURIDICO|ADVOGADO|APOIO_JURIDICO/.test(rule)) return false;
     const info = typeof window.getClientJudicialPhaseInfo === 'function'

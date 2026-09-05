@@ -532,6 +532,15 @@ body {
   justify-content: flex-end;
 }
 
+.fila-cache-status {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;

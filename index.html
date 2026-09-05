@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=700">
+  <link rel="stylesheet" href="style.css?v=701">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -732,7 +732,7 @@
         flex: 1 1 33.333%;
         width: 33.333%;
         max-width: 33.333%;
-        background: #07140f;
+        background: #ffffff;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -752,15 +752,10 @@
         pointer-events: none;
         z-index: 0;
       }
-      .login-cables-video {
-        mix-blend-mode: screen;
-        opacity: 0.42;
-        z-index: 1;
-      }
       .cable-line {
         fill: none;
-        stroke: #3dff8a;
-        stroke-width: 1.4;
+        stroke: #1b8253;
+        stroke-width: 1.2;
         stroke-linecap: round;
         filter: url(#cable-glow);
         stroke-dasharray: 10 18;
@@ -793,12 +788,12 @@
         padding: 36px 28px 8px;
       }
       .login-tree-badge {
-        width: 200px;
-        max-width: 72%;
-        background: #ffffff;
-        border-radius: 28px;
-        padding: 10px 12px 4px;
-        box-shadow: 0 0 36px rgba(61, 255, 138, 0.22), 0 12px 28px rgba(0, 0, 0, 0.28);
+        width: 280px;
+        max-width: 88%;
+        background: transparent;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
       }
       .login-tree-badge img {
         width: 100%;
@@ -807,7 +802,7 @@
       }
       .login-integra-name {
         margin: 18px 0 0;
-        color: #ffffff;
+        color: #0c291d;
         font-family: 'Outfit', 'Metropolis', sans-serif;
         font-size: 2rem;
         font-weight: 800;
@@ -944,7 +939,7 @@
           margin-top: 24px;
         }
         .login-integra-name { font-size: 1.65rem; }
-        .login-tree-badge { width: 160px; }
+        .login-tree-badge { width: 220px; }
         .login-pane-video {
           min-height: 48vh;
         }
@@ -962,36 +957,23 @@
             </feMerge>
           </filter>
         </defs>
-        <path class="cable-line" d="M 30 890 C 70 760, 40 620, 90 500 S 60 280, 120 40"/>
-        <path class="cable-line slow reverse" d="M 80 900 C 110 740, 160 610, 130 470 S 200 250, 170 20"/>
-        <path class="cable-line fast" d="M 200 900 C 180 750, 240 600, 210 430 S 280 220, 250 10"/>
-        <path class="cable-line reverse" d="M 320 890 C 300 730, 350 590, 310 440 S 360 210, 340 30"/>
-        <path class="cable-line slow" d="M 370 900 C 390 720, 340 560, 380 390 S 350 180, 395 0"/>
-        <path class="cable-line orange reverse" d="M 140 900 C 190 770, 120 580, 200 410 S 150 190, 220 50"/>
-        <path class="cable-line fast reverse" d="M 260 890 C 230 700, 300 540, 270 360 S 330 160, 300 20"/>
-        <circle class="cable-node" cx="90" cy="500" r="2.6"/>
-        <circle class="cable-node orange" cx="200" cy="410" r="2.6"/>
-        <circle class="cable-node" cx="310" cy="440" r="2.6"/>
-        <circle class="cable-node" cx="170" cy="20" r="2.6"/>
-        <circle class="cable-node orange" cx="250" cy="10" r="2.6"/>
-        <circle class="cable-node" cx="130" cy="470" r="2.6"/>
-        <circle r="3.2" fill="#3dff8a" filter="url(#cable-glow)">
-          <animateMotion dur="4.8s" repeatCount="indefinite" path="M 30 890 C 70 760, 40 620, 90 500 S 60 280, 120 40"/>
+        <path class="cable-line slow" d="M 70 900 C 90 720, 50 520, 110 360 S 80 160, 140 20"/>
+        <path class="cable-line reverse" d="M 330 900 C 310 740, 360 540, 300 360 S 340 160, 280 20"/>
+        <path class="cable-line orange reverse" d="M 200 900 C 170 700, 230 480, 190 280 S 220 120, 200 10"/>
+        <circle class="cable-node" cx="110" cy="360" r="2.6"/>
+        <circle class="cable-node orange" cx="190" cy="280" r="2.6"/>
+        <circle class="cable-node" cx="300" cy="360" r="2.6"/>
+        <circle r="3" fill="#2cb17a" filter="url(#cable-glow)">
+          <animateMotion dur="6s" repeatCount="indefinite" path="M 70 900 C 90 720, 50 520, 110 360 S 80 160, 140 20"/>
         </circle>
-        <circle r="2.8" fill="#f37021" filter="url(#cable-glow)">
-          <animateMotion dur="5.6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="M 140 900 C 190 770, 120 580, 200 410 S 150 190, 220 50"/>
-        </circle>
-        <circle r="3" fill="#7dffb2" filter="url(#cable-glow)">
-          <animateMotion dur="3.9s" repeatCount="indefinite" path="M 200 900 C 180 750, 240 600, 210 430 S 280 220, 250 10"/>
-        </circle>
-        <circle r="2.6" fill="#3dff8a" filter="url(#cable-glow)">
-          <animateMotion dur="6.2s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="M 320 890 C 300 730, 350 590, 310 440 S 360 210, 340 30"/>
+        <circle r="2.6" fill="#f37021" filter="url(#cable-glow)">
+          <animateMotion dur="7s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="M 200 900 C 170 700, 230 480, 190 280 S 220 120, 200 10"/>
         </circle>
       </svg>
 
       <div class="login-integra-hero">
         <div class="login-tree-badge">
-          <img src="i.ntegr.a/arvore.png" alt="Logo I.ntegr.A">
+          <img src="i.ntegr.a/arvore.png?v=701" alt="Logo I.ntegr.A">
         </div>
         <div class="login-integra-name">I.ntegr.A</div>
         <div class="login-integra-sub">Moura Leite</div>
@@ -999,8 +981,8 @@
 
       <div class="login-center-card">
         <div class="ml-logo-container">
-          <img class="login-30-logo" src="Banner/logo branca.png" alt="Moura Leite 30 anos" style="mix-blend-mode: screen;" onerror="this.onerror=null; this.src='Banner/logo preta comemorativa.png'; this.style.mixBlendMode='normal'; this.style.filter='invert(1)';">
-          <p style="font-family: 'Metropolis', sans-serif; font-weight: 300; font-size: 0.9rem; text-align: center; color: #cbd5e1; margin: 4px 0 0 0; line-height: 1.4;">
+          <img class="login-30-logo" src="Banner/logo preta comemorativa.png" alt="Moura Leite 30 anos" onerror="this.onerror=null; this.src='Banner/logo comemorativa.png';">
+          <p style="font-family: 'Metropolis', sans-serif; font-weight: 300; font-size: 0.9rem; text-align: center; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
             Transformar lugares para as pessoas transformarem suas vidas
           </p>
         </div>
@@ -1018,31 +1000,6 @@
       <video id="login-bg-video" autoplay muted loop playsinline preload="auto">
         <source src="Banner/Banner_.mp4" type="video/mp4">
       </video>
-      <svg class="login-cables login-cables-video" viewBox="0 0 800 900" preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <filter id="cable-glow-video" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="2.2" result="blur"/>
-            <feMerge>
-              <feMergeNode in="blur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        <path class="cable-line slow" d="M 0 820 C 120 760, 80 640, 180 560 S 140 400, 260 320 S 220 140, 340 40"/>
-        <path class="cable-line fast reverse" d="M 0 680 C 160 640, 90 520, 240 450 S 180 280, 360 200 S 300 80, 480 20"/>
-        <path class="cable-line orange" d="M 0 540 C 140 500, 60 390, 220 330 S 160 190, 320 120 S 280 40, 420 0"/>
-        <path class="cable-line reverse" d="M 0 400 C 180 370, 70 250, 260 190 S 200 80, 380 30"/>
-        <circle class="cable-node" cx="180" cy="560" r="2.8"/>
-        <circle class="cable-node orange" cx="240" cy="450" r="2.8"/>
-        <circle class="cable-node" cx="320" cy="120" r="2.8"/>
-        <circle class="cable-node" cx="260" cy="320" r="2.8"/>
-        <circle r="3.2" fill="#3dff8a" filter="url(#cable-glow-video)">
-          <animateMotion dur="5.2s" repeatCount="indefinite" path="M 0 820 C 120 760, 80 640, 180 560 S 140 400, 260 320 S 220 140, 340 40"/>
-        </circle>
-        <circle r="2.8" fill="#f37021" filter="url(#cable-glow-video)">
-          <animateMotion dur="4.4s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="M 0 680 C 160 640, 90 520, 240 450 S 180 280, 360 200 S 300 80, 480 20"/>
-        </circle>
-      </svg>
     </div>
     
   </div>
@@ -1415,7 +1372,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.700 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.701 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -3113,28 +3070,24 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                   placeholder="Pesquise pelo título ou nome do cliente..." data-original-placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;">
                 <i data-lucide="search" class="search-icon"></i>
               </div>
+              <button id="btn-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600;">
+                <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
+                <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
+              </button>
+              <div class="fila-align-side">
+                <button id="btn-export-excel" class="btn btn-secondary fila-align-btn" onclick="exportFilteredToExcel()" style="white-space: nowrap; background-color: #f8fafc; border: 1px solid #cbd5e1; color: #334155; font-weight: 600; padding: 0 16px; height: 36px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
+                    <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
+                </button>
+              </div>
+
+              <div id="operator-tabs-container" class="operator-tabs" style="min-width: 0; width: 100%;">
+              </div>
               <button id="btn-refresh-dashboard" class="btn btn-primary fila-align-btn"
                 style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;">
                 <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
               </button>
               <div class="fila-align-side">
-                <span id="cache-status-indicator" style="font-size: 0.8rem; font-weight: 500; color: #64748b; display: none; text-align: right; white-space: nowrap; line-height: 1.25;"></span>
-              </div>
-
-              <div id="operator-tabs-container" class="operator-tabs" style="min-width: 0; width: 100%;">
-              </div>
-              <button type="button" id="btn-toggle-hide-webro-fila" class="webro-hide-toggle" onclick="window.toggleHideWebroPending('fila')" aria-pressed="false" title="Ocultar da lista e da contagem quem já pagou e aguarda repasse Webro">
-                <i data-lucide="banknote" style="width:14px;height:14px;flex-shrink:0;"></i> Ocultar Webro
-              </button>
-              <button id="btn-adv-filters" class="adv-filter-trigger fila-align-btn" onclick="if(typeof window.openAdvFiltersModal === 'function') window.openAdvFiltersModal('fila')" disabled style="opacity: 0.5; cursor: not-allowed; background-color: #f97316; color: white; border: none; padding: 0 16px; border-radius: 4px; font-weight: 600;">
-                <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
-                <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
-              </button>
-              <div class="fila-align-side" style="gap: 8px;">
-                <div style="border-left: 2px solid #cbd5e1; height: 28px; flex-shrink: 0;"></div>
-                <button id="btn-export-excel" class="btn btn-secondary" onclick="exportFilteredToExcel()" style="white-space: nowrap; background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; height: 36px; border-radius: 4px; cursor: pointer; flex: 1; justify-content: center;" title="Exportar tabela atual para Excel">
-                    <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
-                </button>
+                <span id="cache-status-indicator" class="fila-cache-status" style="display: none;"></span>
               </div>
             </div>
           </div>
@@ -4076,7 +4029,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 </h3>
                 <p style="font-size: 0.85rem; color: #64748b; margin-top: 0; margin-bottom: 12px;">Atribua e gerencie os operadores responsáveis por cada cidade da sua carteira.</p>
                 <div style="margin-bottom: 15px; padding: 12px 14px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; font-size: 0.82rem; color: #3730a3; line-height: 1.45;">
-                  <strong>Apoio Jurídico (Interno):</strong> clientes com parcelas de acordo em atraso (SA, A1, A2, A3…) ou que saíram do sub judice há até 90 dias e voltaram a atrasar vão para o operador com esse tipo. Depois dos 90 dias, sem parcela de acordo vencida, o título volta para a carteira da cidade. O aviso <em>Recente Jurídico</em> permanece como hoje.
+                  <strong>Apoio Jurídico (Interno):</strong> parcelas de acordo (SA, A1, A2, A3…) só vão para o operador de apoio jurídico (hoje Lucelia) se o cliente saiu do sub judice nos últimos <strong>180 dias</strong>. Acordo interno vencido sem passagem pelo jurídico nesse período volta para o operador da cidade, com a tag <em>Acordo quebrado</em>, no grupo <em>Acordo Interno Quebrado</em> no topo da fila. Sem parcela de acordo, o retorno pós-jurídico de 180 dias continua com o apoio jurídico.
                 </div>
               <div class="table-container" style="max-height: 450px; overflow-y: auto;">
                 <table class="custom-table" style="font-size: 0.85rem; border: none; border-bottom: 0;">
@@ -6863,43 +6816,43 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=700"></script>
-  <script defer src="sienge-api.js?v=700"></script>
-  <script defer src="azure-auth.js?v=700"></script>
-  <script defer src="app.js?v=700"></script>
-  <script defer src="home-dashboard.js?v=700"></script>
-  <script defer src="anexos.js?v=700"></script>
-  <script defer src="contas-pagar.js?v=700"></script>
-  <script defer src="config-tags.js?v=700"></script>
-  <script defer src="config-users.js?v=700"></script>
-  <script defer src="suporte.js?v=700"></script>
-  <script defer src="construcao.js?v=700"></script>
-  <script defer src="empresas.js?v=700"></script>
-  <script defer src="relacionamento.js?v=700"></script>
-  <script defer src="compromissario.js?v=700"></script>
+  <script defer src="data.js?v=701"></script>
+  <script defer src="sienge-api.js?v=701"></script>
+  <script defer src="azure-auth.js?v=701"></script>
+  <script defer src="app.js?v=701"></script>
+  <script defer src="home-dashboard.js?v=701"></script>
+  <script defer src="anexos.js?v=701"></script>
+  <script defer src="contas-pagar.js?v=701"></script>
+  <script defer src="config-tags.js?v=701"></script>
+  <script defer src="config-users.js?v=701"></script>
+  <script defer src="suporte.js?v=701"></script>
+  <script defer src="construcao.js?v=701"></script>
+  <script defer src="empresas.js?v=701"></script>
+  <script defer src="relacionamento.js?v=701"></script>
+  <script defer src="compromissario.js?v=701"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=700"></script>
-  <script defer src="centros-custo.js?v=700"></script>
-  <script defer src="marketing.js?v=700"></script>
-  <script defer src="plano-financeiro.js?v=700"></script>
-  <script defer src="prestacao-contas.js?v=700"></script>
+  <script defer src="estoque-comercial.js?v=701"></script>
+  <script defer src="centros-custo.js?v=701"></script>
+  <script defer src="marketing.js?v=701"></script>
+  <script defer src="plano-financeiro.js?v=701"></script>
+  <script defer src="prestacao-contas.js?v=701"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=700"></script>
-  <script defer src="fluxo-caixa.js?v=700"></script>
-  <script defer src="caixa-diario.js?v=700"></script>
-  <script defer src="investimento.js?v=700"></script>
-  <script defer src="parametrizacao-parceiro.js?v=700"></script>
-  <script defer src="societario.js?v=700"></script>
-  <script defer src="participacoes.js?v=700"></script>
-  <script defer src="fiscal.js?v=700"></script>
-  <script defer src="indexadores.js?v=700"></script>
-  <script defer src="verificar-construcao.js?v=700"></script>
-  <script src="repactuacoes.js?v=700"></script>
-  <script defer src="repactuacao-lote.js?v=700"></script>
+  <script defer src="empresa-filter.js?v=701"></script>
+  <script defer src="fluxo-caixa.js?v=701"></script>
+  <script defer src="caixa-diario.js?v=701"></script>
+  <script defer src="investimento.js?v=701"></script>
+  <script defer src="parametrizacao-parceiro.js?v=701"></script>
+  <script defer src="societario.js?v=701"></script>
+  <script defer src="participacoes.js?v=701"></script>
+  <script defer src="fiscal.js?v=701"></script>
+  <script defer src="indexadores.js?v=701"></script>
+  <script defer src="verificar-construcao.js?v=701"></script>
+  <script src="repactuacoes.js?v=701"></script>
+  <script defer src="repactuacao-lote.js?v=701"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=700"></script>
+  <script defer src="dashboard-inadimplencia.js?v=701"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
