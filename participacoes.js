@@ -337,7 +337,7 @@ const ParticipacoesApp = {
       <div style="padding:16px 18px 28px;">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
           <div>
-            <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">Participações — Prestação de contas (Ellenco)</div>
+            <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">Prestação Contas Ellenceo</div>
             <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">A abertura da tela lê a pasta <strong>PRESTAÇÃO DE CONTAS</strong> (subpasta <strong>ID - NOME</strong> e o PDF mais recente). Análise das despesas pagas para achar cobrança a mais e desvios.</div>
           </div>
           <label class="btn btn-secondary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">

@@ -1784,8 +1784,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "investimento": "Aplicações e Investimentos",
     "repactuacao-lote": "Repactuação",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
-    "estrutura-societaria": "Estrutura Societária",
-    "participacoes": "Participações",
+    "estrutura-societaria": "Organograma Societário",
+    "participacoes": "Prestação Contas Ellenceo",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",
@@ -2311,6 +2311,17 @@ window.applyPermissions = function(profileName) {
     const suporteMenu = document.querySelector('li[data-module="mod_suporte"]');
     if (suporteMenu) suporteMenu.style.display = '';
   }
+
+  const navGroups = Array.from(document.querySelectorAll(".nav-group"));
+  for (let i = navGroups.length - 1; i >= 0; i--) {
+    const group = navGroups[i];
+    const submenu = group.querySelector(":scope > .nav-submenu");
+    if (!submenu) continue;
+    const kids = Array.from(submenu.children).filter(el => el.tagName === "LI");
+    if (!kids.length) continue;
+    const anyVisible = kids.some(li => li.style.display !== "none");
+    if (!anyVisible) group.style.display = "none";
+  }
 }
 
 window.isCrmSuperAdmin = function() {
@@ -2337,10 +2348,28 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms["sub_fin_cr_" + id + "_editar"] === true
     );
   }
-  if (modKey === "mod_participacoes" || modKey === "sub_part_geral_participacoes_acessar") {
-    return perms.mod_societario === true
+  if (modKey === "mod_gerencial") {
+    return perms.mod_participacoes === true
+      || perms.mod_societario === true
+      || perms.sub_part_geral === true
+      || perms.sub_soc_geral === true
+      || perms.sub_part_geral_participacoes_acessar === true
+      || perms.sub_part_geral_participacoes_visualizar === true
       || perms.sub_soc_geral_estrutura_societaria_acessar === true
-      || perms.sub_soc_geral_estrutura_societaria_visualizar === true;
+      || perms.sub_soc_geral_estrutura_societaria_visualizar === true
+      || perms.sub_soc_geral_estrutura_societaria_editar === true;
+  }
+  if (modKey === "mod_participacoes" || modKey === "sub_part_geral_participacoes_acessar") {
+    return perms.mod_participacoes === true
+      || perms.sub_part_geral === true
+      || perms.sub_part_geral_participacoes_acessar === true
+      || perms.sub_part_geral_participacoes_visualizar === true;
+  }
+  if (modKey === "sub_soc_geral_estrutura_societaria_acessar") {
+    return perms.mod_societario === true
+      || perms.sub_soc_geral === true
+      || perms.sub_soc_geral_estrutura_societaria_visualizar === true
+      || perms.sub_soc_geral_estrutura_societaria_editar === true;
   }
   if (modKey === "sub_rel_geral_buscar_cliente_acessar") {
     return perms.mod_rel === true

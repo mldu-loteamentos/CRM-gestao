@@ -122,10 +122,20 @@ const ComercialApp = {
         const firstDay = `${m.year}-${String(m.month).padStart(2, '0')}-01`;
         const lastDayObj = new Date(m.year, m.month, 0);
         const lastDay = `${m.year}-${String(m.month).padStart(2, '0')}-${String(lastDayObj.getDate()).padStart(2, '0')}`;
-        const [vendas, distratos] = await Promise.all([
+        const [vAtivas, vCanceladas, vQuitadas, distratos] = await Promise.all([
           fetchAllPages(`/sales-contracts?situation=2&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
+          fetchAllPages(`/sales-contracts?situation=3&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
+          fetchAllPages(`/sales-contracts?situation=4&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
           fetchAllPages(`/sales-contracts?situation=3&initialCancelDate=${firstDay}&finalCancelDate=${lastDay}`)
         ]);
+        const seen = new Set();
+        const vendas = [];
+        vAtivas.concat(vCanceladas).concat(vQuitadas).forEach((c) => {
+          const id = String(c && c.id != null ? c.id : '');
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          vendas.push(c);
+        });
         return { year: m.year, month: m.month, vendas, distratos };
       }));
 
@@ -142,6 +152,11 @@ const ComercialApp = {
     }
   },
 
+  contractQty(contract) {
+    const units = (contract && (contract.salesContractUnits || contract.units)) || [];
+    return units.length > 0 ? units.length : 1;
+  },
+
   contractArea(contract) {
     const units = contract.salesContractUnits || contract.units || [];
     let sum = 0;
@@ -153,15 +168,21 @@ const ComercialApp = {
   },
 
   resolveEnterprise(contract) {
-    const unitId = String(contract.unitId || '');
-    const enterpriseId = unitId.includes('-') ? unitId.split('-')[0] : (contract.enterpriseId || contract.costCenterId || '');
-    let name = String(enterpriseId || 'N/D');
+    const units = (contract && (contract.salesContractUnits || contract.units)) || [];
+    const firstUnit = units[0] || {};
+    const unitId = String(contract.unitId || firstUnit.id || firstUnit.unitId || '');
+    const enterpriseId = String(
+      contract.enterpriseId || contract.costCenterId || firstUnit.enterpriseId || firstUnit.costCenterId
+      || (unitId.includes('-') ? unitId.split('-')[0] : '')
+    );
+    let name = enterpriseId || 'N/D';
     if (window.AppState && window.AppState.cachedCostCenters) {
       const cc = window.AppState.cachedCostCenters.find((c) =>
-        String(c.id) === String(enterpriseId) || String(c.id) === String(contract.costCenterId)
+        String(c.id) === enterpriseId || String(c.id) === String(contract.costCenterId)
       );
       if (cc && cc.name) name = cc.name;
     }
+    if (firstUnit.enterpriseName) name = firstUnit.enterpriseName;
     if (contract.enterpriseName) name = contract.enterpriseName;
     return { enterpriseId: String(enterpriseId || name), name: String(name).toUpperCase() };
   },
@@ -193,36 +214,38 @@ const ComercialApp = {
       let dMes = 0;
 
       res.vendas.forEach((v) => {
+        const qty = this.contractQty(v);
         const area = this.contractArea(v);
         const { name } = this.resolveEnterprise(v);
-        if (inChart) vMes += 1;
+        if (inChart) vMes += qty;
         if (inYear) {
-          vendasAno += 1;
+          vendasAno += qty;
           m2Venda += area;
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
-          produtos[name].vendas += 1;
+          produtos[name].vendas += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
-          cidades[city].vendas += 1;
+          cidades[city].vendas += qty;
         } else if (inPrev) {
-          vendasAnoAnt += 1;
+          vendasAnoAnt += qty;
         }
       });
 
       res.distratos.forEach((d) => {
+        const qty = this.contractQty(d);
         const area = this.contractArea(d);
         const { name } = this.resolveEnterprise(d);
-        if (inChart) dMes += 1;
+        if (inChart) dMes += qty;
         if (inYear) {
-          distratosAno += 1;
+          distratosAno += qty;
           m2Dist += area;
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
-          produtos[name].distratos += 1;
+          produtos[name].distratos += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
-          cidades[city].distratos += 1;
+          cidades[city].distratos += qty;
         } else if (inPrev) {
-          distratosAnoAnt += 1;
+          distratosAnoAnt += qty;
         }
       });
 

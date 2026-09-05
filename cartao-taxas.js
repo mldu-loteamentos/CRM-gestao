@@ -2,7 +2,6 @@
   const STORAGE_KEY = "crm_moura_cartao_taxas";
 
   const PRODUCTS = [
-    { id: "debito", label: "Débito", icon: "banknote", hint: "Débito à vista" },
     { id: "credito_vista", label: "Crédito à vista", icon: "credit-card", hint: "1x no crédito" },
     { id: "credito_2_6", label: "Crédito parcelado de 2 a 6x", icon: "layers", hint: "2 a 6 parcelas" },
     { id: "credito_7_12", label: "Crédito parcelado de 7 a 12x", icon: "calendar-range", hint: "7 a 12 parcelas" }
@@ -23,7 +22,7 @@
         eloAmex: DEFAULT_RATES[p.id].eloAmex
       };
     });
-    return { rates: rates, updatedAt: null };
+    return { rates: rates, passFee: true, updatedAt: null };
   }
 
   function formatPct(value) {
@@ -84,7 +83,11 @@
         if (Number.isFinite(mv)) rates[p.id].masterVisa = mv;
         if (Number.isFinite(ea)) rates[p.id].eloAmex = ea;
       });
-      return { rates: rates, updatedAt: parsed.updatedAt || null };
+      return {
+        rates: rates,
+        passFee: parsed.passFee !== false,
+        updatedAt: parsed.updatedAt || null
+      };
     } catch (e) {
       return fallback;
     }
@@ -94,11 +97,11 @@
     const cfg = window.loadCardFeesConfig();
     let productId = String(productOrInstallments || "");
     if (PRODUCTS.every(function (p) { return p.id !== productId; })) {
-      if (productId === "debito") productId = "debito";
-      else productId = productForInstallments(productOrInstallments);
+      productId = productForInstallments(productOrInstallments);
     }
+    if (cfg.passFee === false) return 0;
     const group = normalizeBrand(brand);
-    const row = cfg.rates[productId] || cfg.rates.credito_vista;
+    const row = cfg.rates[productId] || cfg.rates.credito_vista || {};
     return Number(row[group]) || 0;
   };
 
@@ -106,7 +109,7 @@
     const rate = window.getCardFeeRate(productOrInstallments, brand);
     const base = Number(amount) || 0;
     const fee = base * (rate / 100);
-    return { rate: rate, fee: fee, net: base - fee };
+    return { rate: rate, fee: fee, net: base - fee, passFee: window.loadCardFeesConfig().passFee !== false };
   };
 
   function collectRatesFromInputs() {
@@ -145,31 +148,25 @@
     });
   }
 
-  window.updateCardFeesSimulator = function () {
-    const grid = document.getElementById("cartao-taxas-sim-grid");
-    const amountEl = document.getElementById("cartao-taxas-sim-amount");
-    if (!grid) return;
-    const amount = parseMoney(amountEl && amountEl.value);
-    const collected = collectRatesFromInputs();
-    const rates = collected.rates;
-    grid.innerHTML = PRODUCTS.map(function (p) {
-      const mv = rates[p.id].masterVisa;
-      const ea = rates[p.id].eloAmex;
-      const feeMv = amount * (mv / 100);
-      const feeEa = amount * (ea / 100);
-      return (
-        '<article class="cartao-sim-card">' +
-          '<header><i data-lucide="' + p.icon + '"></i><span>' + p.label + '</span></header>' +
-          '<div class="cartao-sim-cols">' +
-            '<div><small>Master e Visa · ' + formatPct(mv) + '%</small><strong>' + formatMoney(amount - feeMv) + '</strong><em>taxa ' + formatMoney(feeMv) + '</em></div>' +
-            '<div><small>Elo e Amex · ' + formatPct(ea) + '%</small><strong>' + formatMoney(amount - feeEa) + '</strong><em>taxa ' + formatMoney(feeEa) + '</em></div>' +
-          '</div>' +
-        '</article>'
-      );
-    }).join("");
-    if (window.lucide && typeof window.lucide.createIcons === "function") {
-      window.lucide.createIcons();
+  function paintPolicyToggle(passFee) {
+    const btn = document.getElementById("cartao-taxas-policy-toggle");
+    const hint = document.getElementById("cartao-taxas-policy-hint");
+    const on = passFee !== false;
+    if (btn) {
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
     }
+    if (hint) {
+      hint.textContent = on
+        ? "A taxa é cobrada do cliente no valor da venda."
+        : "A taxa é isenta para o cliente — a empresa absorve o custo.";
+    }
+  }
+
+  window.toggleCardFeePolicy = function () {
+    const btn = document.getElementById("cartao-taxas-policy-toggle");
+    const next = !(btn && btn.classList.contains("is-on"));
+    paintPolicyToggle(next);
   };
 
   window.renderCardFeesTab = function (cfg) {
@@ -189,13 +186,13 @@
           '</td>' +
           '<td>' +
             '<label class="cartao-rate-field">' +
-              '<input type="text" inputmode="decimal" id="cartao-taxa-' + p.id + '-mv" value="' + formatPct(row.masterVisa) + '" oninput="if (window.updateCardFeesSimulator) window.updateCardFeesSimulator()">' +
+              '<input type="text" inputmode="decimal" id="cartao-taxa-' + p.id + '-mv" value="' + formatPct(row.masterVisa) + '">' +
               '<span>%</span>' +
             '</label>' +
           '</td>' +
           '<td>' +
             '<label class="cartao-rate-field">' +
-              '<input type="text" inputmode="decimal" id="cartao-taxa-' + p.id + '-ea" value="' + formatPct(row.eloAmex) + '" oninput="if (window.updateCardFeesSimulator) window.updateCardFeesSimulator()">' +
+              '<input type="text" inputmode="decimal" id="cartao-taxa-' + p.id + '-ea" value="' + formatPct(row.eloAmex) + '">' +
               '<span>%</span>' +
             '</label>' +
           '</td>' +
@@ -203,7 +200,7 @@
       );
     }).join("");
     paintUpdated(data.updatedAt);
-    window.updateCardFeesSimulator();
+    paintPolicyToggle(data.passFee !== false);
     if (window.lucide && typeof window.lucide.createIcons === "function") {
       window.lucide.createIcons();
     }
@@ -219,7 +216,9 @@
       alert("Informe taxas válidas entre 0 e 100, no formato 1,30.");
       return;
     }
-    const payload = { rates: collected.rates, updatedAt: Date.now() };
+    const toggle = document.getElementById("cartao-taxas-policy-toggle");
+    const passFee = !(toggle && !toggle.classList.contains("is-on"));
+    const payload = { rates: collected.rates, passFee: passFee, updatedAt: Date.now() };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     paintUpdated(payload.updatedAt);
     try {
@@ -232,7 +231,7 @@
 
   window.resetCardFeesToDefault = async function () {
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela (Débito 1,30% / 2,10% e demais faixas)? As alterações não salvas serão perdidas.")
+      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela e o repasse da taxa? As alterações não salvas serão perdidas.")
       : window.confirm("Restaurar as taxas padrão?");
     if (!ok) return;
     window.renderCardFeesTab(cloneDefaults());

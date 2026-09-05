@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=708">
+  <link rel="stylesheet" href="style.css?v=709">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=708" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=709" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1069,23 +1069,19 @@
             </li>
           </ul>
         </li>
-        <!-- PARTICIPAÇÕES -->
-        <li class="nav-item" data-tab="participacoes" data-module="mod_participacoes">
-          <a onclick="switchTab('participacoes', 'Participações')" title="Participações">
-            <i data-lucide="pie-chart"></i>
-            <span>Participações</span>
-          </a>
-        </li>
-        <!-- SOCIETÁRIO -->
-        <li class="nav-item nav-group" data-module="mod_societario">
-          <a onclick="toggleNavMenu(event, 'submenu-societario')" title="Societário">
-            <i data-lucide="git-fork"></i>
-            <span>Societário</span>
+        <!-- GERENCIAL -->
+        <li class="nav-item nav-group" data-module="mod_gerencial">
+          <a onclick="toggleNavMenu(event, 'submenu-gerencial')" title="Gerencial">
+            <i data-lucide="briefcase"></i>
+            <span>Gerencial</span>
             <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
-          <ul class="nav-submenu" id="submenu-societario" style="display: none;">
+          <ul class="nav-submenu" id="submenu-gerencial" style="display: none;">
+            <li data-tab="participacoes" data-module="sub_part_geral_participacoes_acessar">
+              <a onclick="switchTab('participacoes', 'Prestação Contas Ellenceo')">Prestação Contas Ellenceo</a>
+            </li>
             <li data-tab="estrutura-societaria" data-module="sub_soc_geral_estrutura_societaria_acessar">
-              <a onclick="switchTab('estrutura-societaria', 'Estrutura Societária')">Estrutura Societária</a>
+              <a onclick="switchTab('estrutura-societaria', 'Organograma Societário')">Organograma Societário</a>
             </li>
           </ul>
         </li>
@@ -1266,7 +1262,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.708 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.709 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -4335,18 +4331,16 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                   </table>
                 </div>
 
-                <div class="cartao-taxas-sim">
-                  <div class="cartao-taxas-sim-head">
-                    <div>
-                      <h4><i data-lucide="calculator"></i> Simular recebimento</h4>
-                      <p>Veja a taxa e o valor líquido para cada produto.</p>
-                    </div>
-                    <label class="cartao-taxas-sim-value">
-                      Valor da venda
-                      <input type="text" id="cartao-taxas-sim-amount" inputmode="decimal" value="10.000,00" oninput="if (window.updateCardFeesSimulator) window.updateCardFeesSimulator()">
-                    </label>
+                <div class="cartao-taxas-policy">
+                  <div>
+                    <strong>Repasse da taxa</strong>
+                    <p id="cartao-taxas-policy-hint">A taxa é cobrada do cliente no valor da venda.</p>
                   </div>
-                  <div id="cartao-taxas-sim-grid" class="cartao-taxas-sim-grid"></div>
+                  <button type="button" id="cartao-taxas-policy-toggle" class="cartao-taxas-switch is-on" onclick="window.toggleCardFeePolicy()" aria-pressed="true">
+                    <span class="cartao-taxas-switch-off">Isentar</span>
+                    <span class="cartao-taxas-switch-track" aria-hidden="true"><span class="cartao-taxas-switch-knob"></span></span>
+                    <span class="cartao-taxas-switch-on">Repassar</span>
+                  </button>
                 </div>
 
                 <div class="cartao-taxas-actions">
@@ -6791,44 +6785,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=708"></script>
-  <script defer src="sienge-api.js?v=708"></script>
-  <script defer src="azure-auth.js?v=708"></script>
-  <script defer src="app.js?v=708"></script>
-  <script defer src="cartao-taxas.js?v=708"></script>
-  <script defer src="home-dashboard.js?v=708"></script>
-  <script defer src="anexos.js?v=708"></script>
-  <script defer src="contas-pagar.js?v=708"></script>
-  <script defer src="config-tags.js?v=708"></script>
-  <script defer src="config-users.js?v=708"></script>
-  <script defer src="suporte.js?v=708"></script>
-  <script defer src="construcao.js?v=708"></script>
-  <script defer src="empresas.js?v=708"></script>
-  <script defer src="relacionamento.js?v=708"></script>
-  <script defer src="compromissario.js?v=708"></script>
-  <script defer src="comercial.js?v=708"></script>
-  <script defer src="estoque-comercial.js?v=708"></script>
-  <script defer src="centros-custo.js?v=708"></script>
-  <script defer src="marketing.js?v=708"></script>
-  <script defer src="plano-financeiro.js?v=708"></script>
-  <script defer src="prestacao-contas.js?v=708"></script>
+  <script defer src="data.js?v=709"></script>
+  <script defer src="sienge-api.js?v=709"></script>
+  <script defer src="azure-auth.js?v=709"></script>
+  <script defer src="app.js?v=709"></script>
+  <script defer src="cartao-taxas.js?v=709"></script>
+  <script defer src="home-dashboard.js?v=709"></script>
+  <script defer src="anexos.js?v=709"></script>
+  <script defer src="contas-pagar.js?v=709"></script>
+  <script defer src="config-tags.js?v=709"></script>
+  <script defer src="config-users.js?v=709"></script>
+  <script defer src="suporte.js?v=709"></script>
+  <script defer src="construcao.js?v=709"></script>
+  <script defer src="empresas.js?v=709"></script>
+  <script defer src="relacionamento.js?v=709"></script>
+  <script defer src="compromissario.js?v=709"></script>
+  <script defer src="comercial.js?v=709"></script>
+  <script defer src="estoque-comercial.js?v=709"></script>
+  <script defer src="centros-custo.js?v=709"></script>
+  <script defer src="marketing.js?v=709"></script>
+  <script defer src="plano-financeiro.js?v=709"></script>
+  <script defer src="prestacao-contas.js?v=709"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=708"></script>
-  <script defer src="fluxo-caixa.js?v=708"></script>
-  <script defer src="caixa-diario.js?v=708"></script>
-  <script defer src="investimento.js?v=708"></script>
-  <script defer src="parametrizacao-parceiro.js?v=708"></script>
-  <script defer src="societario.js?v=708"></script>
-  <script defer src="participacoes.js?v=708"></script>
-  <script defer src="fiscal.js?v=708"></script>
-  <script defer src="indexadores.js?v=708"></script>
-  <script defer src="verificar-construcao.js?v=708"></script>
-  <script src="repactuacoes.js?v=708"></script>
-  <script defer src="repactuacao-lote.js?v=708"></script>
+  <script defer src="empresa-filter.js?v=709"></script>
+  <script defer src="fluxo-caixa.js?v=709"></script>
+  <script defer src="caixa-diario.js?v=709"></script>
+  <script defer src="investimento.js?v=709"></script>
+  <script defer src="parametrizacao-parceiro.js?v=709"></script>
+  <script defer src="societario.js?v=709"></script>
+  <script defer src="participacoes.js?v=709"></script>
+  <script defer src="fiscal.js?v=709"></script>
+  <script defer src="indexadores.js?v=709"></script>
+  <script defer src="verificar-construcao.js?v=709"></script>
+  <script src="repactuacoes.js?v=709"></script>
+  <script defer src="repactuacao-lote.js?v=709"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=708"></script>
+  <script defer src="dashboard-inadimplencia.js?v=709"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

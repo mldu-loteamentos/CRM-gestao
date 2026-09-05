@@ -66,6 +66,16 @@ const ConfigUsersApp = {
       savedPerms.sub_fiscal_geral_csll_visualizar = !!savedPerms.sub_fiscal_geral_fiscal_visualizar;
       savedPerms.sub_fiscal_geral_csll_editar = !!savedPerms.sub_fiscal_geral_fiscal_editar;
     }
+    if (!savedPerms.mod_gerencial && (
+      savedPerms.mod_participacoes
+      || savedPerms.mod_societario
+      || savedPerms.sub_part_geral
+      || savedPerms.sub_soc_geral
+      || savedPerms.sub_part_geral_participacoes_acessar
+      || savedPerms.sub_soc_geral_estrutura_societaria_acessar
+    )) {
+      savedPerms.mod_gerencial = true;
+    }
     return savedPerms;
   },
 
@@ -142,12 +152,11 @@ const ConfigUsersApp = {
       ]
     },
     {
-      name: "Participações", icon: "pie-chart", key: "mod_participacoes",
-      submodules: [{ name: "Prestação de contas (Ellenco)", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Participações" }] }]
-    },
-    {
-      name: "Societário", icon: "git-fork", key: "mod_societario",
-      submodules: [{ name: "Estrutura Societária", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Estrutura Societária" }] }]
+      name: "Gerencial", icon: "briefcase", key: "mod_gerencial",
+      submodules: [
+        { name: "Prestação Contas Ellenceo", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Prestação Contas Ellenceo" }] },
+        { name: "Organograma Societário", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Organograma Societário" }] }
+      ]
     },
     {
       name: "Comercial", icon: "store", key: "mod_comercial",

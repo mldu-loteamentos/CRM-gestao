@@ -76,9 +76,9 @@
       { id: "pis_cofins", label: "PIS/COFINS" },
       { id: "csll_irpj", label: "CSLL/IRPJ" }
     ]},
-    { id: "participacoes", label: "Participações" },
-    { id: "societario", label: "Societário", subs: [
-      { id: "estrutura", label: "Estrutura Societária" }
+    { id: "gerencial", label: "Gerencial", subs: [
+      { id: "participacoes", label: "Prestação Contas Ellenceo" },
+      { id: "estrutura", label: "Organograma Societário" }
     ]},
     { id: "comercial", label: "Comercial", subs: [
       { id: "dash_com", label: "Dashboard" },
@@ -140,8 +140,8 @@
     "repactuacao-lote": { modulo: "financeiro", subitem: "repactuacao" },
     "construcao-fiscal": { modulo: "fiscal", subitem: "pis_cofins" },
     "construcao-fiscal-csll": { modulo: "fiscal", subitem: "csll_irpj" },
-    participacoes: { modulo: "participacoes" },
-    "estrutura-societaria": { modulo: "societario", subitem: "estrutura" },
+    participacoes: { modulo: "gerencial", subitem: "part_ellenceo" },
+    "estrutura-societaria": { modulo: "gerencial", subitem: "organograma" },
     "dashboard-comercial": { modulo: "comercial", subitem: "dash_com" },
     "estoque-comercial": { modulo: "comercial", subitem: "estoque" },
     anexos: { modulo: "comercial", subitem: "anexos" },
