@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=708">
+  <link rel="stylesheet" href="style.css?v=707">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=708" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=707" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1266,7 +1266,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.708 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.707 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2215,84 +2215,95 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
       <!-- TAB: DASHBOARD COMERCIAL -->
       <section id="tab-dashboard-comercial" class="tab-pane" style="display: none;">
-        <div class="search-filter-panel" style="margin-bottom: 20px;">
-          <h2 style="display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="bar-chart-2" style="width: 24px; color: var(--color-primary);"></i> 
-            Dashboard Comercial (Vendas e Distratos)
-          </h2>
-          <p style="font-size: 0.9rem; color: var(--color-text-muted);">
-            Selecione o período para buscar os dados de Vendas e Distratos e visualizar os indicadores comerciais. O carregamento de períodos longos pode demorar.
-          </p>
-          <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; margin-top: 15px;">
-            <div style="width: 200px;">
-              <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Mês Referência (Fim)</label>
-              <input type="month" id="comercial-month-end" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none;">
-            </div>
+        <div class="com-dash">
+          <div class="com-dash-head">
             <div>
-              <button onclick="ComercialApp.fetchData()" style="padding: 8px 15px; background: #105436; color: #fff; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 160px; gap: 6px; font-weight: 600; transition: background 0.2s;" id="comercial-btn-search">
-                <i data-lucide="search" style="width: 16px;"></i> <span>Carregar Dados</span>
+              <h2><i data-lucide="bar-chart-2" style="width: 22px; color: var(--color-primary);"></i> Vendas e Distratos</h2>
+              <p>Indicadores do ano em curso. Os filtros só recortam a visão — os dados já abrem sozinhos.</p>
+            </div>
+            <div class="com-dash-filters">
+              <label>Ano
+                <select id="comercial-year" onchange="ComercialApp.onFilterChange()"></select>
+              </label>
+              <label>Mês
+                <select id="comercial-month" onchange="ComercialApp.onFilterChange()"></select>
+              </label>
+              <button type="button" class="btn btn-primary" id="comercial-btn-search" onclick="ComercialApp.fetchData(true)">
+                <i data-lucide="refresh-cw" style="width: 15px;"></i> Atualizar
               </button>
-            </div>
-          </div>
-        </div>
-        
-        <div id="comercial-dashboard-content" style="display: none;">
-          <!-- KPIs Mês -->
-          <h3 style="font-size: 1rem; color: #475569; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 15px;">Resultados do Mês Selecionado</h3>
-          <div style="display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #1e3a8a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Vendas</h4>
-              <div id="kpi-vendas-mes" style="font-size: 2.5rem; font-weight: 800; color: #1e3a8a; line-height: 1;">0</div>
-              <div id="kpi-vendas-mes-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
-            </div>
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #ef4444; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Distratos</h4>
-              <div id="kpi-distratos-mes" style="font-size: 2.5rem; font-weight: 800; color: #ef4444; line-height: 1;">0</div>
-              <div id="kpi-distratos-mes-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
-            </div>
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #16a34a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Variação (Saldo)</h4>
-              <div id="kpi-saldo-mes" style="font-size: 2.5rem; font-weight: 800; color: #16a34a; line-height: 1;">0</div>
-              <div id="kpi-saldo-mes-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
-            </div>
-          </div>
-          
-          <!-- KPIs Ano -->
-          <h3 style="font-size: 1rem; color: #475569; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 15px;">Acumulado do Ano (Até o mês selecionado)</h3>
-          <div style="display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #1e3a8a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Vendas</h4>
-              <div id="kpi-vendas-ano" style="font-size: 2.5rem; font-weight: 800; color: #1e3a8a; line-height: 1;">0</div>
-              <div id="kpi-vendas-ano-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
-            </div>
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #ef4444; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Distratos</h4>
-              <div id="kpi-distratos-ano" style="font-size: 2.5rem; font-weight: 800; color: #ef4444; line-height: 1;">0</div>
-              <div id="kpi-distratos-ano-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
-            </div>
-            <div style="flex: 1; min-width: 200px; background: #fff; padding: 15px 20px; border-top: 4px solid #16a34a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px;">
-              <h4 style="margin: 0 0 5px 0; font-size: 0.9rem; color: #475569; font-weight: 600;">Variação (Saldo)</h4>
-              <div id="kpi-saldo-ano" style="font-size: 2.5rem; font-weight: 800; color: #16a34a; line-height: 1;">0</div>
-              <div id="kpi-saldo-ano-comp" style="font-size: 0.8rem; color: #64748b; margin-top: 8px;">-</div>
+              <span id="comercial-updated" class="com-dash-updated"></span>
             </div>
           </div>
 
-          <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-            <table class="custom-table" style="font-size: 0.85rem;">
-              <thead style="position: sticky; top: 0; background: #fff; z-index: 10;">
-                <tr>
-                  <th>Produto / Empreendimento</th>
-                  <th style="text-align: center;">Vendas (Mês)</th>
-                  <th style="text-align: center;">Distratos (Mês)</th>
-                  <th style="text-align: center;">Saldo (Mês)</th>
-                  <th style="text-align: center;">Vendas (Ano)</th>
-                  <th style="text-align: center;">Distratos (Ano)</th>
-                  <th style="text-align: center;">Saldo (Ano)</th>
-                </tr>
-              </thead>
-              <tbody id="comercial-table-body">
-              </tbody>
-            </table>
+          <div id="comercial-loading" class="com-dash-loading" style="display: none;">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <span>Buscando vendas e distratos no Sienge…</span>
+          </div>
+
+          <div id="comercial-dashboard-content" style="display: none;">
+            <div class="com-dash-kpis">
+              <article class="com-kpi com-kpi--venda">
+                <h4>Vendas</h4>
+                <div id="kpi-vendas" class="com-kpi-val">0</div>
+                <div id="kpi-vendas-comp" class="com-kpi-comp">-</div>
+                <div id="kpi-vendas-avg" class="com-kpi-avg"></div>
+              </article>
+              <article class="com-kpi com-kpi--distrato">
+                <h4>Distratos</h4>
+                <div id="kpi-distratos" class="com-kpi-val">0</div>
+                <div id="kpi-distratos-comp" class="com-kpi-comp">-</div>
+                <div id="kpi-distratos-avg" class="com-kpi-avg"></div>
+              </article>
+              <article class="com-kpi com-kpi--var">
+                <h4>Variação</h4>
+                <div id="kpi-variacao" class="com-kpi-val">0</div>
+                <div id="kpi-variacao-comp" class="com-kpi-comp">-</div>
+              </article>
+              <article class="com-kpi com-kpi--rel">
+                <h4>Relação vendas / distrato</h4>
+                <div id="kpi-relacao" class="com-kpi-val">0</div>
+                <div id="kpi-relacao-comp" class="com-kpi-comp">-</div>
+              </article>
+            </div>
+
+            <div class="com-dash-charts">
+              <div class="com-dash-card">
+                <h3>Vendas × Distratos</h3>
+                <canvas id="comercial-chart-vd"></canvas>
+              </div>
+              <div class="com-dash-card">
+                <h3>Variação</h3>
+                <canvas id="comercial-chart-var"></canvas>
+              </div>
+            </div>
+
+            <div class="com-dash-bottom">
+              <div class="com-dash-card com-dash-table-wrap">
+                <h3>Produto</h3>
+                <div class="table-container" style="max-height: 420px; overflow: auto;">
+                  <table class="custom-table" style="font-size: 0.85rem;">
+                    <thead>
+                      <tr>
+                        <th>Empreendimento</th>
+                        <th style="text-align: center;">Venda</th>
+                        <th style="text-align: center;">Distrato</th>
+                        <th style="text-align: center;">Variação</th>
+                      </tr>
+                    </thead>
+                    <tbody id="comercial-table-body"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="com-dash-m2">
+                <div class="com-m2 com-m2--venda"><div id="kpi-m2-vendido">—</div><span>M² vendido</span></div>
+                <div class="com-m2 com-m2--dist"><div id="kpi-m2-devolvido">—</div><span>M² devolvido</span></div>
+                <div class="com-m2 com-m2--saldo"><div id="kpi-m2-saldo">—</div><span>M² saldo</span></div>
+              </div>
+              <div class="com-dash-card">
+                <h3>Cidade</h3>
+                <canvas id="comercial-chart-city"></canvas>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -6780,44 +6791,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=708"></script>
-  <script defer src="sienge-api.js?v=708"></script>
-  <script defer src="azure-auth.js?v=708"></script>
-  <script defer src="app.js?v=708"></script>
-  <script defer src="cartao-taxas.js?v=708"></script>
-  <script defer src="home-dashboard.js?v=708"></script>
-  <script defer src="anexos.js?v=708"></script>
-  <script defer src="contas-pagar.js?v=708"></script>
-  <script defer src="config-tags.js?v=708"></script>
-  <script defer src="config-users.js?v=708"></script>
-  <script defer src="suporte.js?v=708"></script>
-  <script defer src="construcao.js?v=708"></script>
-  <script defer src="empresas.js?v=708"></script>
-  <script defer src="relacionamento.js?v=708"></script>
-  <script defer src="compromissario.js?v=708"></script>
-  <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=708"></script>
-  <script defer src="centros-custo.js?v=708"></script>
-  <script defer src="marketing.js?v=708"></script>
-  <script defer src="plano-financeiro.js?v=708"></script>
-  <script defer src="prestacao-contas.js?v=708"></script>
+  <script defer src="data.js?v=707"></script>
+  <script defer src="sienge-api.js?v=707"></script>
+  <script defer src="azure-auth.js?v=707"></script>
+  <script defer src="app.js?v=707"></script>
+  <script defer src="cartao-taxas.js?v=707"></script>
+  <script defer src="home-dashboard.js?v=707"></script>
+  <script defer src="anexos.js?v=707"></script>
+  <script defer src="contas-pagar.js?v=707"></script>
+  <script defer src="config-tags.js?v=707"></script>
+  <script defer src="config-users.js?v=707"></script>
+  <script defer src="suporte.js?v=707"></script>
+  <script defer src="construcao.js?v=707"></script>
+  <script defer src="empresas.js?v=707"></script>
+  <script defer src="relacionamento.js?v=707"></script>
+  <script defer src="compromissario.js?v=707"></script>
+  <script defer src="comercial.js?v=707"></script>
+  <script defer src="estoque-comercial.js?v=707"></script>
+  <script defer src="centros-custo.js?v=707"></script>
+  <script defer src="marketing.js?v=707"></script>
+  <script defer src="plano-financeiro.js?v=707"></script>
+  <script defer src="prestacao-contas.js?v=707"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=708"></script>
-  <script defer src="fluxo-caixa.js?v=708"></script>
-  <script defer src="caixa-diario.js?v=708"></script>
-  <script defer src="investimento.js?v=708"></script>
-  <script defer src="parametrizacao-parceiro.js?v=708"></script>
-  <script defer src="societario.js?v=708"></script>
-  <script defer src="participacoes.js?v=708"></script>
-  <script defer src="fiscal.js?v=708"></script>
-  <script defer src="indexadores.js?v=708"></script>
-  <script defer src="verificar-construcao.js?v=708"></script>
-  <script src="repactuacoes.js?v=708"></script>
-  <script defer src="repactuacao-lote.js?v=708"></script>
+  <script defer src="empresa-filter.js?v=707"></script>
+  <script defer src="fluxo-caixa.js?v=707"></script>
+  <script defer src="caixa-diario.js?v=707"></script>
+  <script defer src="investimento.js?v=707"></script>
+  <script defer src="parametrizacao-parceiro.js?v=707"></script>
+  <script defer src="societario.js?v=707"></script>
+  <script defer src="participacoes.js?v=707"></script>
+  <script defer src="fiscal.js?v=707"></script>
+  <script defer src="indexadores.js?v=707"></script>
+  <script defer src="verificar-construcao.js?v=707"></script>
+  <script src="repactuacoes.js?v=707"></script>
+  <script defer src="repactuacao-lote.js?v=707"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=708"></script>
+  <script defer src="dashboard-inadimplencia.js?v=707"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
