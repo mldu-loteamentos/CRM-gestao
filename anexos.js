@@ -631,6 +631,26 @@ function anexosFileNeedsTagConfirm(f) {
   return !!(f && f.autoTagged && f.tagFeedback === 'pending' && f.tags && f.tags[0] && String(f.tags[0]) === String(f.autoTag));
 }
 
+function anexosTituloNumber(bill, fallback) {
+  if (!bill && fallback) return String(fallback);
+  if (!bill) return '';
+  const raw = bill.billReceivableId || bill.receivableBillId || bill.id
+    || bill.number || bill.documentNumber || fallback;
+  return raw != null && String(raw).trim() && String(raw) !== '—' ? String(raw).trim() : '';
+}
+
+function anexosTituloSlotHtml() {
+  const t = AnexosState.tituloReceber;
+  const n = t && t.number && t.number !== '—' ? String(t.number) : '';
+  if (n) {
+    return `<span title="Título a receber"><i data-lucide="receipt" style="width:15px;height:15px;color:var(--color-primary);"></i> Título ${anexosEsc(n)}</span>`;
+  }
+  if (AnexosState.activeContract) {
+    return `<span id="anexos-titulo-slot"><span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Título…</span>`;
+  }
+  return '';
+}
+
 function anexosFmtMoney(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return '—';
@@ -652,6 +672,23 @@ function anexosSetLoadPhase(phase) {
   AnexosState.periodoLoadPhase = phase;
   const el = document.getElementById('anexos-mapa-load-text');
   if (el) el.textContent = anexosLoadPhaseLabel();
+}
+
+function anexosSetCcLoading(on) {
+  const btn = document.getElementById('anexos-btn-buscar-cc');
+  if (btn) {
+    btn.classList.toggle('is-loading', !!on);
+    btn.disabled = !!(on || AnexosState.periodoOpen);
+  }
+  const unit = document.getElementById('anexos-unidade');
+  if (unit) unit.disabled = !!(on || AnexosState.periodoOpen || !(AnexosState.unidades || []).length);
+}
+
+function anexosPatchCcDisplay(id, name) {
+  const input = document.getElementById('anexos-cc');
+  if (input && id) input.value = name ? `${id} - ${name}` : String(id);
+  const pin = document.getElementById('anexos-contract-cc-name');
+  if (pin) pin.textContent = name || id || '';
 }
 
 function anexosBuscarBtnHtml(loading, idleText) {
@@ -937,8 +974,7 @@ function renderAnexosModule() {
           Mapa de unidades (espelho)
         </label>` : ''}
 
-        ${(AnexosState.activeContract || AnexosState.ccName) ? `
-        <div class="anexos-contract-info">
+        <div class="anexos-contract-info" id="anexos-contract-info">
           <div class="anexos-contract-meta">
             <span class="anexos-contract-label">Informações do contrato</span>
             <div class="anexos-contract-line">
@@ -946,12 +982,12 @@ function renderAnexosModule() {
                 <span><i data-lucide="user" style="width:15px;height:15px;color:var(--color-primary);"></i>
                   ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : 'Cliente'}
                 </span>` : ''}
-              ${AnexosState.ccName ? `<span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.ccName}</span>` : ''}
+              <span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i>
+                <span id="anexos-contract-cc-name">${anexosEsc(AnexosState.ccName || (AnexosState.cc ? AnexosState.cc : 'Busque o empreendimento'))}</span>
+              </span>
               ${AnexosState.activeContract ? `<span><i data-lucide="file-text" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractNumber}</span>` : ''}
               ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `<span><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractDate}</span>` : ''}
-              ${AnexosState.tituloReceber && AnexosState.tituloReceber.number && AnexosState.tituloReceber.number !== '—'
-                ? `<span><i data-lucide="receipt" style="width:15px;height:15px;color:var(--color-primary);"></i> ${anexosEsc(AnexosState.tituloReceber.number)}</span>`
-                : (AnexosState.activeContract ? `<span><span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Título…</span>` : '')}
+              ${AnexosState.activeContract ? anexosTituloSlotHtml() : ''}
             </div>
           </div>
           <div class="anexos-contract-side">
@@ -963,7 +999,7 @@ function renderAnexosModule() {
                 : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`
             ) : ''}
           </div>
-        </div>` : ''}
+        </div>
 
         ${(AnexosState.mapaUnidades || AnexosState.periodoMode || AnexosState.periodoOpen) && AnexosState.contexto !== 'Cliente' ? `
         <div class="anexos-mapa-panel" id="anexos-mapa-panel">
@@ -1452,56 +1488,89 @@ const AnexosApp = {
   },
 
   async loadTituloReceber(contract) {
-    AnexosState.tituloReceber = null;
-    if (!contract || !contract.customerId) {
+    const knownId = contract && (contract.receivableBillId || contract.billReceivableId);
+    if (knownId) {
+      AnexosState.tituloReceber = { id: knownId, number: String(knownId), balance: null, statusLabel: 'Ativo' };
+      const slot = document.getElementById('anexos-titulo-slot');
+      if (slot) slot.outerHTML = anexosTituloSlotHtml();
+      else renderAnexosModule();
+    } else {
+      AnexosState.tituloReceber = null;
+    }
+    if (!contract) {
       renderAnexosModule();
       return;
     }
     try {
       let bills = [];
-      if (window.SiengeApiService && typeof SiengeApiService.getReceivableBills === 'function') {
-        const res = await SiengeApiService.getReceivableBills(contract.customerId);
-        bills = (res && res.results) || res || [];
-      } else {
-        const res = await fetch(anexosApiUrl(`/sienge-proxy/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(contract.customerId)}&limit=100&offset=0`), {
-          headers: { Authorization: getBasicAuthHeader() }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          bills = data.results || [];
+      if (knownId && window.SiengeApiService && typeof SiengeApiService.getReceivableBill === 'function') {
+        try {
+          const one = await SiengeApiService.getReceivableBill(knownId);
+          if (one) bills = [one];
+        } catch (e) {}
+      }
+      if (!bills.length && contract.customerId) {
+        if (window.SiengeApiService && typeof SiengeApiService.getReceivableBills === 'function') {
+          const res = await SiengeApiService.getReceivableBills(contract.customerId);
+          bills = (res && res.results) || res || [];
+        } else {
+          const res = await fetch(anexosApiUrl(`/sienge-proxy/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(contract.customerId)}&limit=100&offset=0`), {
+            headers: { Authorization: getBasicAuthHeader() }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            bills = data.results || [];
+          }
         }
       }
       if (!Array.isArray(bills)) bills = [];
       const unitId = String(contract.unitId || '');
       const unitName = String(contract.unitName || '').toUpperCase().replace(/\s+/g, '');
       const contractId = String(contract.id || '');
-      let bill = bills.find((b) => String(b.salesContractId || b.contractId || '') === contractId)
+      const known = String(knownId || '');
+      const billNum = (b) => String(b.billReceivableId || b.receivableBillId || b.id || '');
+      const contractNumber = String(contract.contractNumber || '').toUpperCase();
+      let bill = (known && bills.find((b) => billNum(b) === known))
+        || bills.find((b) => String(b.salesContractId || b.contractId || '') === contractId)
         || bills.find((b) => {
           const u = b.units || b.salesContractUnits || [];
           return u.some((x) => String(x.id || x.unitId) === unitId);
         })
         || bills.find((b) => {
+          const doc = String(b.documentNumber || b.number || '').toUpperCase();
+          return contractNumber && doc && doc === contractNumber;
+        })
+        || bills.find((b) => {
           const blob = `${b.unitName || ''} ${b.notes || ''} ${b.documentNumber || ''}`.toUpperCase().replace(/\s+/g, '');
           return unitName && blob.includes(unitName);
         })
-        || bills[0];
-      if (!bill) {
+        || (known ? { billReceivableId: known } : bills[0]);
+      const number = anexosTituloNumber(bill, known);
+      if (!number) {
         AnexosState.tituloReceber = { id: '', number: '—', balance: null, statusLabel: 'Sem título' };
       } else {
-        const bal = bill.balanceAmount ?? bill.outstandingBalance ?? bill.totalBalance ?? bill.value ?? bill.originalAmount;
-        const sit = String(bill.situation || bill.status || bill.billStatus || '').toUpperCase();
+        const bal = bill && (bill.balanceAmount ?? bill.outstandingBalance ?? bill.totalBalance ?? bill.value ?? bill.originalAmount);
+        const sit = String((bill && (bill.situation || bill.status || bill.billStatus)) || '').toUpperCase();
         AnexosState.tituloReceber = {
-          id: bill.id,
-          number: bill.documentNumber || bill.number || bill.id,
+          id: billNum(bill) || number,
+          number,
           balance: bal,
           statusLabel: sit || 'Ativo'
         };
       }
     } catch (e) {
       console.warn('[Anexos] título a receber', e);
-      AnexosState.tituloReceber = { id: '', number: '—', balance: null, statusLabel: 'Indisponível' };
+      if (!AnexosState.tituloReceber || !AnexosState.tituloReceber.number || AnexosState.tituloReceber.number === '—') {
+        AnexosState.tituloReceber = { id: knownId || '', number: knownId ? String(knownId) : '—', balance: null, statusLabel: 'Indisponível' };
+      }
     }
-    renderAnexosModule();
+    const slot = document.getElementById('anexos-titulo-slot');
+    if (slot && AnexosState.tituloReceber && AnexosState.tituloReceber.number && AnexosState.tituloReceber.number !== '—') {
+      slot.outerHTML = anexosTituloSlotHtml();
+      if (window.lucide) lucide.createIcons();
+    } else {
+      renderAnexosModule();
+    }
   },
 
   filterEnterprisesForAnexos(list) {
@@ -1901,6 +1970,21 @@ const AnexosApp = {
         else fmtDate = rawD;
       }
 
+      let billId = mainC.receivableBillId || mainC.billReceivableId
+        || (matchUnit && (matchUnit.receivableBillId || matchUnit.currentReceivableBillId))
+        || null;
+      if (!billId && unitId) {
+        try {
+          const uRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${encodeURIComponent(unitId)}`), {
+            headers: { Authorization: getBasicAuthHeader() }
+          });
+          if (uRes.ok) {
+            const uData = await uRes.json();
+            billId = uData.receivableBillId || uData.currentReceivableBillId || uData.billReceivableId || null;
+          }
+        } catch (e) {}
+      }
+
       AnexosState.activeContract = {
         id: mainC.id,
         contractNumber: mainC.contractNumber || mainC.number || mainC.id,
@@ -1911,7 +1995,7 @@ const AnexosApp = {
         unitId: unitId,
         enterpriseId: enterpriseId,
         unitName: nomeUnidade,
-        receivableBillId: mainC.receivableBillId || mainC.billReceivableId || null
+        receivableBillId: billId
       };
       AnexosState.tituloReceber = null;
       await anexosHydrateContractPeople();
@@ -2296,21 +2380,17 @@ const AnexosApp = {
     AnexosState.unidadesLoading = true;
     const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
     if (suggestionsDiv) suggestionsDiv.style.display = 'none';
-    renderAnexosModule();
+    anexosSetCcLoading(true);
     
     try {
       if (window.SiengeApiService) {
         const ccData = await window.SiengeApiService.getCostCenter(cc);
         if (ccData && ccData.name) {
           AnexosState.ccName = ccData.name;
-          if (ccInput) ccInput.value = `${cc} - ${ccData.name}`;
-          renderAnexosModule();
+          anexosPatchCcDisplay(cc, ccData.name);
         }
       }
     } catch(e) {}
-
-    const loader = document.getElementById('anexos-unidade-loading');
-    if (loader) loader.style.display = 'block';
     
     let allUnits = [];
     let offset = 0;

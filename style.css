@@ -1617,6 +1617,10 @@ circle.donut-segment {
   display: grid;
   gap: 12px 14px;
   align-items: end;
+  min-height: 68px;
+}
+.anexos-field {
+  min-width: 0;
 }
 .anexos-filters-grid.is-unidade {
   grid-template-columns: minmax(280px, 1.4fr) minmax(180px, 0.9fr) minmax(240px, 1fr);
@@ -1709,12 +1713,15 @@ circle.donut-segment {
   align-items: center;
   justify-content: center;
   min-width: 168px;
-  height: 36px;
+  width: 168px;
+  height: 40px !important;
   padding: 0 14px;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 .anexos-buscar-btn-cc {
-  min-width: 132px;
+  min-width: 118px;
+  width: 118px;
 }
 .anexos-buscar-slot {
   display: grid;
@@ -1757,6 +1764,7 @@ circle.donut-segment {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid #f1f5f9;
+  min-height: 62px;
 }
 .anexos-contract-side {
   display: flex;
