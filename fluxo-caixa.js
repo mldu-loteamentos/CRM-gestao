@@ -148,6 +148,7 @@ const FluxoCaixaApp = {
         categoryId,
         categoryName: fc.financialCategoryName || this.catName(fc.financialCategoryId) || "Sem nome",
         reducer: fc.financialCategoryReducer,
+        categoryType: fc.financialCategoryType,
         month: this.movMonth(mov)
       };
     }).filter(Boolean);
@@ -207,7 +208,8 @@ const FluxoCaixaApp = {
 
   /**
    * Conta redutora: reduz o total do nó pai (desconto, cancelamento, retenção, etc.).
-   * Também cobre contas 2.x alocadas sob RECEITAS (ex.: Desconto de Juros em 01.01).
+   * Em grupo de saída, a redutora entra positiva (como no Excel: 05.09 Retenções).
+   * Em RECEITAS, a redutora entra negativa (01.04 Cancelamentos).
    */
   isReducingAccount(categoryId, categoryName, node) {
     if (node && node.redutora) return true;
@@ -215,21 +217,38 @@ const FluxoCaixaApp = {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toUpperCase();
-    if (/DESCONTO|CANCELAMENTO|RETENCAO|DEDUCAO|ESTORNO DE (VENDA|RECEITA)|REDUTOR|\(\-\)|^\-\s/.test(n)) return true;
+    if (/DESCONT|CANCELAMENT|RETENC|DEDUC|ESTORNO DE (VENDA|RECEITA)|REDUTOR|\(\-\)|^\-\s/.test(n)) return true;
     if (node && this.isRevenueGroup(node.id) && this.isExpenseAccount(categoryId)) return true;
     return false;
   },
 
+  isExpenseType(categoryType) {
+    const t = String(categoryType || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toUpperCase();
+    return /^(D|2|DESPESA|SAIDA)$/.test(t) || t.includes("DESPESA") || t.includes("SAIDA");
+  },
+
   /**
-   * Sinal no DFC: a API de caixa já manda crédito/débito com sinal.
-   * Só inverte positivo quando for redutora (nó, nome, flag Sienge ou 2.x sob RECEITAS).
+   * Sinal no DFC (mesmo critério do demonstrativo Excel):
+   * — grupo de saída (02/04/05/07/09.02/09.05) ou conta 2.x / tipo despesa → negativo
+   * — redutora nesses grupos (retenção, desconto obtido, flag Sienge) → positivo
+   * — redutora em RECEITAS (cancelamento) → negativo
+   * Usa módulo do valor para não depender do sinal cru da API.
    */
-  signedAmount(node, categoryId, categoryName, amount, reducerFlag) {
-    let amt = Number(amount) || 0;
+  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType) {
+    const abs = Math.abs(Number(amount) || 0);
+    if (!abs) return 0;
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
-    if (reduce && amt > 0) amt = -amt;
-    return amt;
+    if (this.isRevenueGroup(node && node.id)) return reduce ? -abs : abs;
+    const outflow = this.isCashOutflowGroup(node && node.id)
+      || this.isExpenseAccount(categoryId)
+      || this.isExpenseType(categoryType);
+    if (outflow) return reduce ? abs : -abs;
+    return reduce ? -abs : abs;
   },
 
   formatAccountCode(id) {
@@ -309,7 +328,7 @@ const FluxoCaixaApp = {
         return;
       }
       const node = byId[nid];
-      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer);
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType);
       this.addInto(node, a.month, amount);
       const idxKey = nk || rawId;
       if (!accIndex[idxKey]) {
