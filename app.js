@@ -28653,14 +28653,14 @@ document.addEventListener('tabChanged', async (e) => {
             try { customFields = JSON.parse(localCustom); } catch(err) {}
          }
          
-         ccs = ccs.filter(c => {
-            const custom = customFields[c.id] || {};
-            const tipo = custom.tipo_cc || '';
-            return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'Incorporação';
-         });
-
-         if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterCostCentersForEmp === "function") {
-            ccs = EstoqueComercialApp.filterCostCentersForEmp(ccs);
+         if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+            ccs = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(ccs);
+         } else {
+            ccs = ccs.filter(c => {
+               const custom = customFields[c.id] || {};
+               const tipo = custom.tipo_cc || '';
+               return tipo === 'Loteamento Aberto' || tipo === 'Loteamento Fechado' || tipo === 'Incorporação';
+            });
          }
          
          // Sort by ID ascending
@@ -31139,7 +31139,8 @@ window.SYNC_KEYS = [
     "crm_plano_visoes_v2",
     "crm_moura_preambles_list",
     "crm_moura_cartorios_list",
-    "crm_moura_cartao_taxas"
+    "crm_moura_cartao_taxas",
+    "crm_compromissario_configs"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -31637,6 +31638,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_compromissario_configs" && typeof window.mergeCompromissarioConfigs === "function") {
+                    const merged = window.mergeCompromissarioConfigs(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -31736,6 +31748,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
           }
           if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
             payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+          }
+          if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
+            if (typeof window.mergeCompromissarioConfigs === "function") {
+              payload.crm_compromissario_configs = window.mergeCompromissarioConfigs(
+                payload.crm_compromissario_configs || "{}",
+                cloud.crm_compromissario_configs || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_compromissario_configs", payload.crm_compromissario_configs); } catch (e) {}
+            } else if (!payload.crm_compromissario_configs && cloud.crm_compromissario_configs) {
+              payload.crm_compromissario_configs = cloud.crm_compromissario_configs;
+            }
           }
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
             payload.crm_moura_cartorios_list = window.mergeCartoriosList(payload.crm_moura_cartorios_list || "[]", cloud.crm_moura_cartorios_list || "[]");
@@ -31906,6 +31929,16 @@ localStorage.setItem = function(key, value) {
                       }
                       if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
                         payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+                      }
+                      if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
+                        if (typeof window.mergeCompromissarioConfigs === "function") {
+                          payload.crm_compromissario_configs = window.mergeCompromissarioConfigs(
+                            payload.crm_compromissario_configs || "{}",
+                            cloud.crm_compromissario_configs || "{}"
+                          );
+                        } else if (!payload.crm_compromissario_configs && cloud.crm_compromissario_configs) {
+                          payload.crm_compromissario_configs = cloud.crm_compromissario_configs;
+                        }
                       }
                     } catch (mergeErr) {}
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });

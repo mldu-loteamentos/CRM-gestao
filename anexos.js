@@ -27,6 +27,7 @@ const AnexosState = {
   periodoMapa: [], // [{ enterpriseId, enterpriseName, units: [{id,name,...}] }]
   periodoSkippedIncorp: 0,
   unidadesLoading: false,
+  periodoLoadPhase: '',
   tagMemory: [] // fingerprints aprendidos
 };
 
@@ -605,6 +606,9 @@ function anexosMatchTagMemory(fp) {
       const hit = b.filter((w) => a.has(w)).length;
       score += hit * 2;
     }
+    if (m.rejected) score -= 6;
+    if (m.confirmed) score += 3;
+    if (Number(m.hits) > 0) score += Math.min(3, Number(m.hits));
     if (fp.aspect && m.aspect && Math.abs(Number(fp.aspect) - Number(m.aspect)) < 0.15) score += 2;
     if (fp.colors && m.colors && fp.colors[0] && m.colors[0] && fp.colors[0] === m.colors[0]) score += 3;
     if (score > bestScore) {
@@ -616,25 +620,59 @@ function anexosMatchTagMemory(fp) {
   return '';
 }
 
+function anexosMarkAutoTagged(fileObj, tag) {
+  if (!fileObj || !tag) return;
+  fileObj.autoTagged = true;
+  fileObj.autoTag = tag;
+  fileObj.tagFeedback = 'pending';
+}
+
+function anexosFileNeedsTagConfirm(f) {
+  return !!(f && f.autoTagged && f.tagFeedback === 'pending' && f.tags && f.tags[0] && String(f.tags[0]) === String(f.autoTag));
+}
+
 function anexosFmtMoney(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return '—';
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function anexosMapaLoadingHtml(label) {
+  return '<div class="anexos-mapa-empty anexos-mapa-loading">'
+    + '<div class="loading-spinner anexos-mapa-spinner" aria-hidden="true"></div>'
+    + '<span id="anexos-mapa-load-text">' + anexosEsc(label) + '</span>'
+    + '</div>';
+}
+
+function anexosLoadPhaseLabel() {
+  return AnexosState.periodoLoadPhase === 'anexos' ? 'Analisando anexos' : 'Buscando vendas';
+}
+
+function anexosSetLoadPhase(phase) {
+  AnexosState.periodoLoadPhase = phase;
+  const el = document.getElementById('anexos-mapa-load-text');
+  if (el) el.textContent = anexosLoadPhaseLabel();
+}
+
+function anexosBuscarBtnHtml(loading, idleText) {
+  return '<span class="anexos-buscar-slot">'
+    + '<span class="anexos-buscar-idle"><i data-lucide="search" style="width:16px;height:16px;"></i> ' + idleText + '</span>'
+    + '<span class="anexos-buscar-busy">Buscando<span class="anexos-dots"></span></span>'
+    + '</span>';
+}
+
 function anexosBuildMapaHtml() {
-  if (AnexosState.periodoMode && AnexosState.periodoMapa && AnexosState.periodoMapa.length) {
-    return anexosBuildPeriodoMapaHtml();
+  if (AnexosState.periodoMode || AnexosState.periodoOpen) {
+    if (AnexosState.mapaLoading) return anexosMapaLoadingHtml(anexosLoadPhaseLabel());
+    if (AnexosState.periodoMode) return anexosBuildPeriodoMapaHtml();
+    return '<div class="anexos-mapa-empty">Informe o período e clique em Buscar vendas.</div>';
   }
   const units = AnexosState.unidades || [];
+  if (AnexosState.mapaLoading || AnexosState.unidadesLoading) {
+    return anexosMapaLoadingHtml(AnexosState.unidadesLoading ? 'Buscando vendas' : 'Analisando anexos');
+  }
   if (!units.length) {
     return '<div class="anexos-mapa-empty">Busque o empreendimento para carregar o espelho de lotes.</div>';
-  }
-  if (AnexosState.mapaLoading) {
-    return '<div class="anexos-mapa-empty anexos-mapa-loading">'
-      + '<div class="loading-spinner anexos-mapa-spinner" aria-hidden="true"></div>'
-      + '<span>Cruzando contratos ativos e envios…</span>'
-      + '</div>';
   }
   const groups = {};
   units.forEach((u) => {
@@ -695,12 +733,6 @@ function anexosBuildMapaHtml() {
 
 function anexosBuildPeriodoMapaHtml() {
   const groups = AnexosState.periodoMapa || [];
-  if (AnexosState.mapaLoading) {
-    return '<div class="anexos-mapa-empty anexos-mapa-loading">'
-      + '<div class="loading-spinner anexos-mapa-spinner" aria-hidden="true"></div>'
-      + '<span>Buscando vendas do período…</span>'
-      + '</div>';
-  }
   if (!groups.length) {
     const skippedEmpty = Number(AnexosState.periodoSkippedIncorp) || 0;
     return `<div class="anexos-mapa-empty">Nenhuma venda pendente de anexo no período.${skippedEmpty ? ` ${skippedEmpty} lote(s) de incorporação foram ocultados (só lotes próprios entram).` : ''}</div>`;
@@ -847,10 +879,8 @@ function renderAnexosModule() {
         <div class="anexos-periodo-bar">
           <label>Início <input type="date" id="anexos-periodo-ini" value="${AnexosState.periodoStart || ''}" onchange="AnexosState.periodoStart=this.value"></label>
           <label>Fim <input type="date" id="anexos-periodo-fim" value="${AnexosState.periodoEnd || ''}" onchange="AnexosState.periodoEnd=this.value"></label>
-          <button type="button" class="btn btn-primary anexos-ctrl" onclick="AnexosApp.buscarVendasPeriodo()" ${AnexosState.mapaLoading ? 'disabled' : ''} style="display:inline-flex;align-items:center;gap:6px;">
-            ${AnexosState.mapaLoading
-              ? '<span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Buscando'
-              : '<i data-lucide="search" style="width:16px;"></i> Buscar vendas'}
+          <button type="button" class="btn btn-primary anexos-ctrl anexos-buscar-btn ${AnexosState.mapaLoading ? 'is-loading' : ''}" onclick="AnexosApp.buscarVendasPeriodo()" ${AnexosState.mapaLoading ? 'disabled' : ''}>
+            ${anexosBuscarBtnHtml(AnexosState.mapaLoading, 'Buscar vendas')}
           </button>
           <button type="button" class="btn btn-outline anexos-ctrl" onclick="AnexosApp.fecharPeriodoMode()">Fechar período</button>
           <span class="anexos-periodo-hint">Não precisa escolher empreendimento/unidade — o espelho lista o que falta enviar. Incorporação fica de fora, exceto lotes próprios.</span>
@@ -871,10 +901,8 @@ function renderAnexosModule() {
                 <button type="button" class="btn btn-outline anexos-ctrl anexos-cc-chevron" title="Abrir lista" onclick="AnexosApp.toggleCostCenterList()" ${AnexosState.periodoOpen ? 'disabled' : ''}>
                   <i data-lucide="chevron-down" style="width:16px;height:16px;"></i>
                 </button>
-                <button type="button" class="btn btn-primary anexos-ctrl" id="anexos-btn-buscar-cc" onclick="AnexosApp.buscarUnidades()" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:0 14px;" ${AnexosState.periodoOpen || AnexosState.unidadesLoading ? 'disabled' : ''}>
-                  ${AnexosState.unidadesLoading
-                    ? '<span class="loading-spinner anexos-btn-spinner" aria-hidden="true"></span> Buscando'
-                    : '<i data-lucide="search" style="width:16px"></i> Buscar'}
+                <button type="button" class="btn btn-primary anexos-ctrl anexos-buscar-btn anexos-buscar-btn-cc ${AnexosState.unidadesLoading ? 'is-loading' : ''}" id="anexos-btn-buscar-cc" onclick="AnexosApp.buscarUnidades()" ${AnexosState.periodoOpen || AnexosState.unidadesLoading ? 'disabled' : ''}>
+                  ${anexosBuscarBtnHtml(AnexosState.unidadesLoading, 'Buscar')}
                 </button>
                 <div id="anexos-cc-suggestions" class="anexos-cc-suggestions" style="display:none;"></div>
               </div>
@@ -937,11 +965,11 @@ function renderAnexosModule() {
           </div>
         </div>` : ''}
 
-        ${(AnexosState.mapaUnidades || AnexosState.periodoMode) && AnexosState.contexto !== 'Cliente' ? `
+        ${(AnexosState.mapaUnidades || AnexosState.periodoMode || AnexosState.periodoOpen) && AnexosState.contexto !== 'Cliente' ? `
         <div class="anexos-mapa-panel" id="anexos-mapa-panel">
           <div class="anexos-mapa-head">
-            <strong>${AnexosState.periodoMode ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
-            <span>${AnexosState.periodoMode
+            <strong>${AnexosState.periodoMode || AnexosState.periodoOpen ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
+            <span>${AnexosState.periodoMode || AnexosState.periodoOpen
               ? 'Empreendimentos e unidades com venda no período que precisam envio de anexos. Incorporação não entra, exceto lotes próprios.'
               : 'Só lotes com contrato ativo. Após distrato + nova venda, o lote volta a ficar disponível para novo envio.'}</span>
           </div>
@@ -1115,6 +1143,7 @@ const AnexosApp = {
     AnexosState.periodoMapa = [];
     AnexosState.periodoSkippedIncorp = 0;
     AnexosState.unidadesLoading = false;
+    AnexosState.periodoLoadPhase = '';
     renderAnexosModule();
   },
 
@@ -1135,6 +1164,7 @@ const AnexosApp = {
     AnexosState.periodoOpen = false;
     AnexosState.periodoMapa = [];
     AnexosState.periodoSkippedIncorp = 0;
+    AnexosState.periodoLoadPhase = '';
     renderAnexosModule();
   },
 
@@ -1150,6 +1180,7 @@ const AnexosApp = {
     AnexosState.periodoMode = true;
     AnexosState.mapaUnidades = false;
     AnexosState.mapaLoading = true;
+    AnexosState.periodoLoadPhase = 'vendas';
     AnexosState.periodoMapa = [];
     AnexosState.periodoSkippedIncorp = 0;
     renderAnexosModule();
@@ -1187,6 +1218,7 @@ const AnexosApp = {
               _seen: new Set()
             };
           }
+          if (AnexosState.periodoLoadPhase !== 'anexos') anexosSetLoadPhase('anexos');
           const envios = AnexosState._periodoEnviosCache && AnexosState._periodoEnviosCache[enterpriseId]
             ? AnexosState._periodoEnviosCache[enterpriseId]
             : await anexosLoadMapaEnvios(enterpriseId);
@@ -1227,6 +1259,7 @@ const AnexosApp = {
       alert('Falha ao buscar vendas do período: ' + (e.message || e));
     } finally {
       AnexosState.mapaLoading = false;
+      AnexosState.periodoLoadPhase = '';
       renderAnexosModule();
     }
   },
@@ -1471,13 +1504,23 @@ const AnexosApp = {
     renderAnexosModule();
   },
 
+  filterEnterprisesForAnexos(list) {
+    if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+      return EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(list);
+    }
+    return list || [];
+  },
+
   async loadEnterprisesInBackground() {
     if (AnexosState.enterprisesLoaded) return;
     try {
-      if (window.SiengeApiService && window.SiengeApiService.getEnterprises) {
-        AnexosState.enterprises = await window.SiengeApiService.getEnterprises();
-        AnexosState.enterprisesLoaded = true;
-      }
+      const svc = window.SiengeApiService;
+      if (!svc) return;
+      const raw = typeof svc.getCostCenters === "function"
+        ? await svc.getCostCenters()
+        : (typeof svc.getEnterprises === "function" ? await svc.getEnterprises() : []);
+      AnexosState.enterprises = AnexosApp.filterEnterprisesForAnexos(raw);
+      AnexosState.enterprisesLoaded = true;
     } catch(e) {
       console.error("Erro ao carregar empreendimentos:", e);
     }
@@ -1511,7 +1554,7 @@ const AnexosApp = {
     if (!AnexosState.enterprises) AnexosState.enterprises = [];
 
     const term = String(val || '').toLowerCase().trim();
-    let filtered = AnexosState.enterprises.slice();
+    let filtered = AnexosApp.filterEnterprisesForAnexos(AnexosState.enterprises).slice();
     if (!showAll) {
       if (!term || term.length < 1) {
         suggestionsDiv.style.display = 'none';
@@ -1790,7 +1833,7 @@ const AnexosApp = {
     AnexosState.activeContract = null;
     AnexosState.contractAttachments = [];
     // Troca de lote: limpa arquivos preparados (o nome na tela usa o lote atual e mascarava conteúdo antigo)
-    if (prevUnit && String(prevUnit) !== String(unitId || '') && AnexosState.files.length) {
+    if (String(prevUnit || '') !== String(unitId || '')) {
       AnexosState.files = [];
       AnexosState.importedContracts.clear();
       AnexosState.downloadedFilesIds.clear();
@@ -1963,6 +2006,9 @@ const AnexosApp = {
 
       AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
       renderAnexosModule();
+      if (AnexosState.contractAttachments.length) {
+        this.importarAnexosDoContrato({ auto: true });
+      }
     } catch (e) {
       console.error('Erro ao buscar contrato vigente:', e);
     }
@@ -2067,6 +2113,7 @@ const AnexosApp = {
     if (knownActive) {
       fileObj.tags = [fromName];
       fileObj.status = 'Pronto';
+      anexosMarkAutoTagged(fileObj, fromName);
       anexosAssignClientTarget(fileObj, { autoDefault: true });
       return fromName;
     }
@@ -2076,6 +2123,7 @@ const AnexosApp = {
       if (ocrTag) {
         fileObj.tags = [ocrTag];
         fileObj.status = 'Pronto';
+        anexosMarkAutoTagged(fileObj, ocrTag);
         anexosAssignClientTarget(fileObj, { autoDefault: true });
         return ocrTag;
       }
@@ -2092,14 +2140,15 @@ const AnexosApp = {
     return '';
   },
 
-  importarAnexosDoContrato() {
+  importarAnexosDoContrato(opts) {
     if (!AnexosState.activeContract || AnexosState.contractAttachments.length === 0) return;
+    const auto = !!(opts && opts.auto);
     
     const isModal = window.anexosTargetId === 'anexos-cliente-root';
 
     // Se não for modal, mantemos o bloqueio original
     if (!isModal && AnexosState.importedContracts.has(AnexosState.activeContract.id)) {
-      alert("Os anexos deste contrato já foram importados nesta sessão.");
+      if (!auto) alert("Os anexos deste contrato já foram importados nesta sessão.");
       return;
     }
 
@@ -2109,7 +2158,7 @@ const AnexosApp = {
     });
 
     if (attachmentsToImport.length === 0) {
-        if (isModal) alert("Todos os anexos deste contrato já estão na lista.");
+        if (isModal && !auto) alert("Todos os anexos deste contrato já estão na lista.");
         return;
     }
 
@@ -2300,6 +2349,12 @@ const AnexosApp = {
 
       AnexosState.unidades = allUnits;
       AnexosState.mapaMeta = {};
+      if (window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
+        EstoqueComercialApp.markCcUnits(cc, allUnits.length > 0);
+      }
+      if (!allUnits.length) {
+        AnexosState.enterprises = (AnexosState.enterprises || []).filter((e) => String(e.id) !== String(cc));
+      }
       if (AnexosState.mapaUnidades) {
         await this.enrichMapaMeta();
         return;
@@ -2455,10 +2510,10 @@ const AnexosApp = {
         .join('');
 
       return `
-        <div style="display: flex; gap: 20px; padding-bottom: 20px; margin-bottom: 5px; align-items: center; border-bottom: 1px dashed #ccc; flex-wrap: wrap;">
+        <div class="anexos-file-row">
           ${previewHtml}
           
-          <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 250px;">
+          <div class="anexos-file-row-main">
             <div>
               <strong style="font-size: 1.05rem; color: var(--color-text); word-break: break-all;">${nomeFinal}</strong>
               <div style="font-size: 0.85rem; color: var(--color-text-muted); margin-top: 2px;">
@@ -2483,6 +2538,20 @@ const AnexosApp = {
                   `}
                 ` : ''}
               </div>
+              ${anexosFileNeedsTagConfirm(f) ? `
+              <div class="anexos-tag-quiz">
+                <span class="anexos-auto-tag-badge"><i data-lucide="sparkles" style="width:13px;height:13px;"></i> Tagueado automaticamente</span>
+                <span class="anexos-tag-quiz-q">Acertei a tag?</span>
+                <div class="anexos-tag-quiz-actions">
+                  <button type="button" class="btn btn-primary anexos-tag-quiz-yes" onclick="AnexosApp.confirmAutoTag('${f.id}', true)">Sim</button>
+                  <button type="button" class="btn btn-secondary anexos-tag-quiz-no" onclick="AnexosApp.confirmAutoTag('${f.id}', false)">Não</button>
+                </div>
+              </div>
+              ` : (f.autoTagged && f.tagFeedback === 'yes' ? `
+              <div class="anexos-tag-quiz anexos-tag-quiz--ok">
+                <span class="anexos-auto-tag-badge anexos-auto-tag-badge--ok"><i data-lucide="check-circle" style="width:13px;height:13px;"></i> Tagueado automaticamente</span>
+              </div>
+              ` : '')}
               ${(() => {
                 let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
                 let isClienteDest = mainTag && mainTag.destino === 'Cliente';
@@ -2526,11 +2595,11 @@ const AnexosApp = {
             </div>
           </div>
           
-          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 15px; min-width: 150px;">
+          <div class="anexos-file-row-side">
             <span class="badge ${badgeClass}" style="white-space: nowrap; display: inline-block;">${f.status}</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
               ${isModal ? '' : `
-              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:220px;">
+              <div class="anexos-file-date">
                 <label style="font-size: 0.8rem; color: var(--color-text-muted); margin: 0; white-space: nowrap; align-self:flex-start;">Data Documento</label>
                 ${anexosDateFieldHtml({
                   textId: `anexo-file-date-${f.id}`,
@@ -2555,6 +2624,41 @@ const AnexosApp = {
     this.checkCanSend();
   },
 
+  confirmAutoTag(fileId, ok) {
+    const file = AnexosState.files.find(f => f.id === fileId);
+    if (!file || file.tagFeedback !== 'pending') return;
+
+    const fp = file._fingerprint || file._pendingMemory || {};
+    if (ok) {
+      file.tagFeedback = 'yes';
+      anexosSaveTagMemory({
+        ...fp,
+        tag: file.autoTag || (file.tags && file.tags[0]) || '',
+        pending: false,
+        confirmed: true,
+        rejected: false,
+        hits: Number(fp.hits || 0) + 1,
+        originalName: file.originalName || '',
+        learnedAt: new Date().toISOString()
+      });
+    } else {
+      file.tagFeedback = 'no';
+      file.autoTagged = false;
+      file.tags = [];
+      this.evalFileStatus(file);
+      anexosSaveTagMemory({
+        ...fp,
+        tag: file.autoTag || '',
+        pending: false,
+        confirmed: false,
+        rejected: true,
+        originalName: file.originalName || '',
+        learnedAt: new Date().toISOString()
+      });
+    }
+    this.renderFilesList();
+  },
+
   addTag(fileId, tag) {
     if (!tag) return;
     const resolved = anexosResolveActiveTag(tag) || tag;
@@ -2567,6 +2671,9 @@ const AnexosApp = {
 
     if (!file.tags.includes(resolved)) {
       file.tags = [resolved];
+      if (file.autoTagged && file.tagFeedback === 'pending' && String(resolved) !== String(file.autoTag || '')) {
+        file.tagFeedback = 'changed';
+      }
       anexosAssignClientTarget(file, { autoDefault: true });
       this.evalFileStatus(file);
       this.renderFilesList();
@@ -2589,6 +2696,7 @@ const AnexosApp = {
     if (!file) return;
 
     file.tags = file.tags.filter(t => t !== tag);
+    if (file.tagFeedback === 'pending') file.tagFeedback = 'changed';
     this.evalFileStatus(file);
     this.renderFilesList();
   },
@@ -2757,9 +2865,12 @@ const AnexosApp = {
       }
     });
 
+    const needsTagConfirm = !isModal && AnexosState.files.some(anexosFileNeedsTagConfirm);
+
     const canSend = AnexosState.files.length > 0 && 
                     !hasDuplicates && 
                     !hasMissingTarget &&
+                    !needsTagConfirm &&
                     AnexosState.files.every(f => {
                       if (isModal) return true; // Permite salvar localmente em qualquer estado
                       const hasDate = f.dateOverride || AnexosState.dataDocumento;
@@ -2784,6 +2895,8 @@ const AnexosApp = {
           hint.innerText = 'Selecione ao menos um cliente alvo para os documentos de Pessoa/Cliente';
         } else if (hasDuplicates) {
           hint.innerText = 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.';
+        } else if (needsTagConfirm) {
+          hint.innerText = 'Confirme se a tag automática está correta (Acertei a tag?)';
         } else if (!isModal) {
           hint.innerText = 'Altere as tags de "DOC" para habilitar o envio';
         }
@@ -2799,6 +2912,10 @@ const AnexosApp = {
     const isModal = window.anexosTargetId === 'anexos-cliente-root';
     const filesToSend = isModal ? AnexosState.files : [...AnexosState.files.filter(f => f.status === 'Pronto' && !f.sentOk)];
     if (filesToSend.length === 0) return;
+    if (!isModal && AnexosState.files.some(anexosFileNeedsTagConfirm)) {
+      alert('Confirme se a tag automática está correta antes de enviar para o Sienge.');
+      return;
+    }
 
     if (isModal) {
       AnexosDB.save(AnexosState.idCliente, filesToSend).then(() => {

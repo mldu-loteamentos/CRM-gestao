@@ -154,6 +154,23 @@ const EstoqueComercialApp = {
     });
   },
 
+  /** Mesma regra do Buscar Cliente: só loteamento/incorporação com unidade ou venda. */
+  filterEmpreendimentosLikeRelacionamento(ccs) {
+    let customFields = {};
+    try {
+      customFields = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
+    } catch (e) {
+      customFields = {};
+    }
+    const typed = (ccs || []).filter((c) => {
+      if (!c) return false;
+      const custom = customFields[c.id] || customFields[String(c.id)] || {};
+      const tipo = custom.tipo_cc || "";
+      return tipo === "Loteamento Aberto" || tipo === "Loteamento Fechado" || tipo === "Incorporação";
+    });
+    return this.filterCostCentersForEmp(typed);
+  },
+
   enterprisesForFilter() {
     const empty = this.readIdSet(this.CC_EMPTY_KEY);
     const fromUnits = new Set((this.state.units || []).map(u => String(u.enterpriseId || "")).filter(Boolean));

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=706">
+  <link rel="stylesheet" href="style.css?v=707">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=706" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=707" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1266,7 +1266,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.706 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.707 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -3334,12 +3334,14 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                 <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary fila-align-btn" onclick="gerarMapaZeropaidPDF()" style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;" title="Gerar Mapa de Clientes 0% Pago">
                   <i data-lucide="map" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Gerar Mapa 0% Pago
                 </button>
-                <button id="btn-refresh-zeropaid" class="btn btn-primary fila-align-btn"
-                  style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;"
-                  onclick="(async function(){ AppState.defaultersBills=[]; AppState.defaultersLoaded=false; AppState.dashboardRendered=false; await loadDashboardData(true); if(typeof loadZeroPaidTab==='function') loadZeroPaidTab(); })()">
-                  <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
-                </button>
-                <span id="zeropaid-cache-status-indicator" class="fila-cache-status" style="display: none;"></span>
+                <div class="fila-refresh-stack">
+                  <button id="btn-refresh-zeropaid" class="btn btn-primary fila-align-btn"
+                    style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;"
+                    onclick="(async function(){ AppState.defaultersBills=[]; AppState.defaultersLoaded=false; AppState.dashboardRendered=false; await loadDashboardData(true); if(typeof loadZeroPaidTab==='function') loadZeroPaidTab(); })()">
+                    <i data-lucide="refresh-cw" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Atualizar Fila
+                  </button>
+                  <span id="zeropaid-cache-status-indicator" class="fila-cache-status" style="display: none;"></span>
+                </div>
               </div>
               <div id="zeropaid-operator-tabs-container" class="operator-tabs"></div>
             </div>
@@ -6778,44 +6780,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=706"></script>
-  <script defer src="sienge-api.js?v=706"></script>
-  <script defer src="azure-auth.js?v=706"></script>
-  <script defer src="app.js?v=706"></script>
-  <script defer src="cartao-taxas.js?v=706"></script>
-  <script defer src="home-dashboard.js?v=706"></script>
-  <script defer src="anexos.js?v=706"></script>
-  <script defer src="contas-pagar.js?v=706"></script>
-  <script defer src="config-tags.js?v=706"></script>
-  <script defer src="config-users.js?v=706"></script>
-  <script defer src="suporte.js?v=706"></script>
-  <script defer src="construcao.js?v=706"></script>
-  <script defer src="empresas.js?v=706"></script>
-  <script defer src="relacionamento.js?v=706"></script>
-  <script defer src="compromissario.js?v=706"></script>
+  <script defer src="data.js?v=707"></script>
+  <script defer src="sienge-api.js?v=707"></script>
+  <script defer src="azure-auth.js?v=707"></script>
+  <script defer src="app.js?v=707"></script>
+  <script defer src="cartao-taxas.js?v=707"></script>
+  <script defer src="home-dashboard.js?v=707"></script>
+  <script defer src="anexos.js?v=707"></script>
+  <script defer src="contas-pagar.js?v=707"></script>
+  <script defer src="config-tags.js?v=707"></script>
+  <script defer src="config-users.js?v=707"></script>
+  <script defer src="suporte.js?v=707"></script>
+  <script defer src="construcao.js?v=707"></script>
+  <script defer src="empresas.js?v=707"></script>
+  <script defer src="relacionamento.js?v=707"></script>
+  <script defer src="compromissario.js?v=707"></script>
   <script defer src="comercial.js"></script>
-  <script defer src="estoque-comercial.js?v=706"></script>
-  <script defer src="centros-custo.js?v=706"></script>
-  <script defer src="marketing.js?v=706"></script>
-  <script defer src="plano-financeiro.js?v=706"></script>
-  <script defer src="prestacao-contas.js?v=706"></script>
+  <script defer src="estoque-comercial.js?v=707"></script>
+  <script defer src="centros-custo.js?v=707"></script>
+  <script defer src="marketing.js?v=707"></script>
+  <script defer src="plano-financeiro.js?v=707"></script>
+  <script defer src="prestacao-contas.js?v=707"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=706"></script>
-  <script defer src="fluxo-caixa.js?v=706"></script>
-  <script defer src="caixa-diario.js?v=706"></script>
-  <script defer src="investimento.js?v=706"></script>
-  <script defer src="parametrizacao-parceiro.js?v=706"></script>
-  <script defer src="societario.js?v=706"></script>
-  <script defer src="participacoes.js?v=706"></script>
-  <script defer src="fiscal.js?v=706"></script>
-  <script defer src="indexadores.js?v=706"></script>
-  <script defer src="verificar-construcao.js?v=706"></script>
-  <script src="repactuacoes.js?v=706"></script>
-  <script defer src="repactuacao-lote.js?v=706"></script>
+  <script defer src="empresa-filter.js?v=707"></script>
+  <script defer src="fluxo-caixa.js?v=707"></script>
+  <script defer src="caixa-diario.js?v=707"></script>
+  <script defer src="investimento.js?v=707"></script>
+  <script defer src="parametrizacao-parceiro.js?v=707"></script>
+  <script defer src="societario.js?v=707"></script>
+  <script defer src="participacoes.js?v=707"></script>
+  <script defer src="fiscal.js?v=707"></script>
+  <script defer src="indexadores.js?v=707"></script>
+  <script defer src="verificar-construcao.js?v=707"></script>
+  <script src="repactuacoes.js?v=707"></script>
+  <script defer src="repactuacao-lote.js?v=707"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=706"></script>
+  <script defer src="dashboard-inadimplencia.js?v=707"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

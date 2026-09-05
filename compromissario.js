@@ -1,5 +1,57 @@
 // MÓDULO: COMPROMISSÁRIO (PREFEITURAS E ASSOCIAÇÕES)
 
+function normalizePrefCityKey(city) {
+  if (city === null || city === undefined) return "";
+  return String(city).trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function cityConfigWeight(cfg) {
+  if (!cfg || typeof cfg !== "object") return 0;
+  let score = 0;
+  if (cfg.email) score += 3;
+  if (cfg.hasPortal) score += 2;
+  if (cfg.portalUrl) score += 2;
+  if (cfg.portalLogin) score += 1;
+  if (cfg.portalSenha) score += 1;
+  if (cfg.template) score += 2;
+  if (cfg.reqEspecial) score += 1;
+  if (cfg.agrupar) score += 1;
+  return score;
+}
+
+function pickPrefCityConfig(localCfg, cloudCfg) {
+  if (!localCfg) return cloudCfg;
+  if (!cloudCfg) return localCfg;
+  const localTs = Number(localCfg.updatedAt) || 0;
+  const cloudTs = Number(cloudCfg.updatedAt) || 0;
+  if (localTs && cloudTs) return localTs >= cloudTs ? localCfg : cloudCfg;
+  if (localTs && !cloudTs) return cityConfigWeight(localCfg) >= cityConfigWeight(cloudCfg) ? localCfg : cloudCfg;
+  if (cloudTs && !localTs) return cityConfigWeight(cloudCfg) >= cityConfigWeight(localCfg) ? cloudCfg : localCfg;
+  return cityConfigWeight(localCfg) >= cityConfigWeight(cloudCfg) ? localCfg : cloudCfg;
+}
+
+window.mergeCompromissarioConfigs = function(localStr, cloudStr) {
+  const parse = (raw) => {
+    try { return JSON.parse(raw || "{}") || {}; } catch (e) { return {}; }
+  };
+  const normalizeMap = (obj) => {
+    const out = {};
+    Object.entries(obj || {}).forEach(([key, val]) => {
+      const cityKey = normalizePrefCityKey(key);
+      if (!cityKey) return;
+      out[cityKey] = out[cityKey] ? pickPrefCityConfig(val, out[cityKey]) : val;
+    });
+    return out;
+  };
+  const local = normalizeMap(parse(localStr));
+  const cloud = normalizeMap(parse(cloudStr));
+  const merged = {};
+  new Set([...Object.keys(local), ...Object.keys(cloud)]).forEach((key) => {
+    merged[key] = pickPrefCityConfig(local[key], cloud[key]);
+  });
+  return JSON.stringify(merged);
+};
+
 const CompromissarioApp = {
   state: {
     prefeituras: [],
@@ -11,10 +63,27 @@ const CompromissarioApp = {
   },
 
   normalizeCityKey(city) {
-    if (city === null || city === undefined) return '';
-    const s = String(city).trim().toUpperCase();
-    // Remove acentos para evitar "TATUI" != "TATUÍ"
-    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return normalizePrefCityKey(city);
+  },
+
+  persistConfigs(configs, upload) {
+    localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs || {}));
+    if (upload !== false && window.forceUploadLocalConfig) {
+      return window.forceUploadLocalConfig(true);
+    }
+    return Promise.resolve();
+  },
+
+  configHasSubstance(cfg) {
+    return cityConfigWeight(cfg) > 0;
+  },
+
+  pushLocalConfigsToCloudIfNeeded() {
+    const configs = this.loadConfigs();
+    const hasSubstance = Object.values(configs || {}).some((cfg) => this.configHasSubstance(cfg));
+    if (hasSubstance && window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig(true).catch(() => {});
+    }
   },
 
   loadConfigs() {
@@ -45,6 +114,7 @@ const CompromissarioApp = {
     this.state.notifiedContracts = JSON.parse(localStorage.getItem('crm_compromissario_notified') || '{}');
     this.loadPrefeituras();
     this.renderPrefeituraShell();
+    this.pushLocalConfigsToCloudIfNeeded();
     // A renderização de Associações fica em placeholder no HTML por enquanto
   },
 
@@ -600,7 +670,7 @@ const CompromissarioApp = {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
   },
 
-  saveConfigModal() {
+  async saveConfigModal() {
     let configs = this.loadConfigs();
 
     const citiesToSave = this.getCitiesWithAssignedOperator();
@@ -625,14 +695,21 @@ const CompromissarioApp = {
           hasPortal: portalEl ? portalEl.checked : false,
           portalUrl: urlEl ? urlEl.value : '',
           portalLogin: loginEl ? loginEl.value : '',
-          portalSenha: senhaEl ? senhaEl.value : ''
+          portalSenha: senhaEl ? senhaEl.value : '',
+          updatedAt: Date.now()
         };
       }
     });
 
-    localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs));
-    document.getElementById('comp-config-modal').remove();
-    alert("Configurações salvas com sucesso!");
+    const modal = document.getElementById('comp-config-modal');
+    try {
+      await this.persistConfigs(configs, true);
+      if (modal) modal.remove();
+      alert("Configurações salvas e enviadas para a nuvem. Os demais operadores passam a ver ao atualizar a página.");
+    } catch (err) {
+      if (modal) modal.remove();
+      alert("Configurações ficaram neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
+    }
   },
 
   toggleAccordion(id) {
@@ -1009,17 +1086,22 @@ Botucatu, [DATA]`;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
   },
 
-  saveTemplate(city) {
+  async saveTemplate(city) {
     const text = document.getElementById('comp-tpl-text').value;
 
     let configs = this.loadConfigs();
     const cityKey = this.normalizeCityKey(city);
     if (!configs[cityKey]) configs[cityKey] = { ativo: true };
     configs[cityKey].template = text;
-    localStorage.setItem('crm_compromissario_configs', JSON.stringify(configs));
-
-    document.getElementById('comp-tpl-modal').remove();
-    alert("Padrão salvo com sucesso! Clique em Gerar Requerimento na tabela para testar.");
+    configs[cityKey].updatedAt = Date.now();
+    try {
+      await this.persistConfigs(configs, true);
+      document.getElementById('comp-tpl-modal').remove();
+      alert("Padrão salvo e enviado para a nuvem. Clique em Gerar Requerimento na tabela para testar.");
+    } catch (err) {
+      document.getElementById('comp-tpl-modal').remove();
+      alert("Padrão ficou neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
+    }
   }
 };
 
