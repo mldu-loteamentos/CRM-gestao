@@ -8,36 +8,146 @@ const ComercialApp = {
     loaded: false,
     rawMonths: [],
     year: 0,
-    month: 0,
+    months: [],
+    monthOpen: false,
     updatedAt: null,
     charts: {}
   },
 
-  currentPeriod() {
+  todayParts() {
     const today = new Date();
+    return { yNow: today.getFullYear(), mNow: today.getMonth() + 1 };
+  },
+
+  availableMonths(year) {
+    const { yNow, mNow } = this.todayParts();
+    const last = year === yNow ? mNow : 12;
+    const out = [];
+    for (let m = 1; m <= last; m++) out.push(m);
+    return out;
+  },
+
+  normalizeMonths(year, months) {
+    const allowed = this.availableMonths(year);
+    const allow = new Set(allowed);
+    const next = (months || []).map((n) => parseInt(n, 10)).filter((m) => allow.has(m));
+    const unique = [...new Set(next)].sort((a, b) => a - b);
+    if (unique.length) return unique;
+    const { yNow, mNow } = this.todayParts();
+    return [year === yNow ? mNow : allowed[allowed.length - 1]];
+  },
+
+  currentPeriod() {
+    const { yNow, mNow } = this.todayParts();
     const yEl = document.getElementById('comercial-year');
-    const mEl = document.getElementById('comercial-month');
-    const year = yEl && yEl.value ? parseInt(yEl.value, 10) : today.getFullYear();
-    const month = mEl && mEl.value ? parseInt(mEl.value, 10) : (today.getMonth() + 1);
-    return { year, month: month || (today.getMonth() + 1) };
+    const year = yEl && yEl.value ? parseInt(yEl.value, 10) : (this.state.year || yNow);
+    const months = this.normalizeMonths(year, this.state.months.length ? this.state.months : [mNow]);
+    return { year, months, maxMonth: months[months.length - 1] };
+  },
+
+  periodLabel(months) {
+    const list = (months || []).slice().sort((a, b) => a - b);
+    if (!list.length) return 'Período';
+    if (list.length === 1) return COM_MESES[list[0] - 1];
+    if (list.length <= 3) return list.map((m) => COM_MESES[m - 1]).join(', ');
+    return `${list.length} meses`;
+  },
+
+  ytdLabel(maxMonth) {
+    return maxMonth === 1 ? 'jan' : `jan–${COM_MESES[maxMonth - 1]}`;
   },
 
   fillFilters() {
-    const today = new Date();
-    const yNow = today.getFullYear();
-    const mNow = today.getMonth() + 1;
+    const { yNow, mNow } = this.todayParts();
     const yEl = document.getElementById('comercial-year');
-    const mEl = document.getElementById('comercial-month');
     if (yEl && !yEl.options.length) {
       for (let y = yNow; y >= yNow - 3; y--) {
         yEl.appendChild(new Option(String(y), String(y)));
       }
       yEl.value = String(yNow);
     }
-    if (mEl && !mEl.options.length) {
-      COM_MESES.forEach((nome, i) => mEl.appendChild(new Option(nome, String(i + 1))));
-      mEl.value = String(mNow);
+    if (!this.state.months.length) this.state.months = [mNow];
+    const year = yEl && yEl.value ? parseInt(yEl.value, 10) : yNow;
+    this.state.year = year;
+    this.state.months = this.normalizeMonths(year, this.state.months);
+    this.renderMonthFilter();
+  },
+
+  renderMonthFilter() {
+    const { year, months } = this.currentPeriod();
+    const list = document.getElementById('comercial-month-list');
+    const label = document.getElementById('comercial-month-label');
+    if (label) label.textContent = this.periodLabel(months);
+    if (list) {
+      const selected = new Set(months);
+      list.innerHTML = this.availableMonths(year).map((m) => `
+        <label class="com-month-filter-item">
+          <input type="checkbox" value="${m}" ${selected.has(m) ? 'checked' : ''} onchange="ComercialApp.toggleMonth(${m}, this.checked)">
+          ${COM_MESES[m - 1]}
+        </label>`).join('');
     }
+    const wrap = document.getElementById('comercial-month-filter');
+    const panel = document.getElementById('comercial-month-panel');
+    if (wrap) wrap.classList.toggle('is-open', !!this.state.monthOpen);
+    if (panel) panel.hidden = !this.state.monthOpen;
+    this.bindMonthOutside();
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  bindMonthOutside() {
+    if (this._monthOutside) return;
+    this._monthOutside = true;
+    document.addEventListener('mousedown', (e) => {
+      if (!this.state.monthOpen) return;
+      const wrap = document.getElementById('comercial-month-filter');
+      if (wrap && !wrap.contains(e.target)) this.closeMonthFilter();
+    });
+  },
+
+  toggleMonthFilter(ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    this.state.monthOpen = !this.state.monthOpen;
+    this.renderMonthFilter();
+  },
+
+  closeMonthFilter() {
+    if (!this.state.monthOpen) return;
+    this.state.monthOpen = false;
+    this.renderMonthFilter();
+  },
+
+  applyMonths(months, keepOpen) {
+    const { year } = this.currentPeriod();
+    this.state.months = this.normalizeMonths(year, months);
+    this.state.monthOpen = !!keepOpen;
+    this.renderMonthFilter();
+    this.onFilterChange();
+  },
+
+  toggleMonth(month, on) {
+    const { months } = this.currentPeriod();
+    const next = on ? [...months, month] : months.filter((m) => m !== month);
+    this.applyMonths(next, true);
+  },
+
+  selectAllMonths() {
+    const { year } = this.currentPeriod();
+    this.applyMonths(this.availableMonths(year), true);
+  },
+
+  selectNoneMonths() {
+    const { yNow, mNow } = this.todayParts();
+    const { year } = this.currentPeriod();
+    this.applyMonths([year === yNow ? mNow : 1], true);
+  },
+
+  onYearChange() {
+    const yEl = document.getElementById('comercial-year');
+    const year = yEl && yEl.value ? parseInt(yEl.value, 10) : this.todayParts().yNow;
+    this.state.year = year;
+    this.state.months = this.normalizeMonths(year, this.state.months);
+    this.renderMonthFilter();
+    this.onFilterChange();
   },
 
   init() {
@@ -58,10 +168,10 @@ const ComercialApp = {
   },
 
   hasCachedPeriod() {
-    const { year, month } = this.currentPeriod();
+    const { year, maxMonth } = this.currentPeriod();
     const need = [];
     for (let y = year - 1; y <= year; y++) {
-      const last = y === year ? month : 12;
+      const last = y === year ? maxMonth : 12;
       for (let m = 1; m <= last; m++) need.push(`${y}-${m}`);
     }
     const have = new Set((this.state.rawMonths || []).map((r) => `${r.year}-${r.month}`));
@@ -86,7 +196,7 @@ const ComercialApp = {
   async fetchData(force) {
     if (this.state.loading) return;
     this.fillFilters();
-    const { year, month } = this.currentPeriod();
+    const { year, maxMonth } = this.currentPeriod();
     if (!force && this.state.loaded && this.hasCachedPeriod()) {
       this.updateDashboardUI();
       return;
@@ -96,11 +206,13 @@ const ComercialApp = {
     this.setLoading(true);
 
     try {
-      const monthsToFetch = [];
+      const monthsNeeded = [];
       for (let y = year - 1; y <= year; y++) {
-        const last = y === year ? month : 12;
-        for (let m = 1; m <= last; m++) monthsToFetch.push({ year: y, month: m });
+        const last = y === year ? maxMonth : 12;
+        for (let m = 1; m <= last; m++) monthsNeeded.push({ year: y, month: m });
       }
+      const have = new Set((this.state.rawMonths || []).map((r) => `${r.year}-${r.month}`));
+      const monthsToFetch = force ? monthsNeeded : monthsNeeded.filter((m) => !have.has(`${m.year}-${m.month}`));
 
       const fetchAllPages = async (baseUrl) => {
         let allResults = [];
@@ -139,7 +251,9 @@ const ComercialApp = {
         return { year: m.year, month: m.month, vendas, distratos };
       }));
 
-      this.state.rawMonths = results;
+      const byKey = new Map((force ? [] : (this.state.rawMonths || [])).map((r) => [`${r.year}-${r.month}`, r]));
+      results.forEach((r) => byKey.set(`${r.year}-${r.month}`, r));
+      this.state.rawMonths = [...byKey.values()].sort((a, b) => a.year - b.year || a.month - b.month);
       this.state.loaded = true;
       this.state.updatedAt = new Date();
       this.updateDashboardUI();
@@ -194,10 +308,15 @@ const ComercialApp = {
   },
 
   aggregate() {
-    const { year, month } = this.currentPeriod();
+    const { year, months, maxMonth } = this.currentPeriod();
+    const selected = new Set(months);
     const produtos = {};
     const cidades = {};
     const serie = [];
+    let vendasPeriodo = 0;
+    let distratosPeriodo = 0;
+    let vendasPeriodoAnt = 0;
+    let distratosPeriodoAnt = 0;
     let vendasAno = 0;
     let distratosAno = 0;
     let vendasAnoAnt = 0;
@@ -206,9 +325,11 @@ const ComercialApp = {
     let m2Dist = 0;
 
     (this.state.rawMonths || []).forEach((res) => {
-      const inYear = res.year === year && res.month <= month;
-      const inPrev = res.year === year - 1 && res.month <= month;
-      const inChart = (res.year === year - 1 && res.month >= 1) || (res.year === year && res.month <= month);
+      const inPeriod = res.year === year && selected.has(res.month);
+      const inPeriodPrev = res.year === year - 1 && selected.has(res.month);
+      const inYear = res.year === year && res.month <= maxMonth;
+      const inPrev = res.year === year - 1 && res.month <= maxMonth;
+      const inChart = (res.year === year - 1 && res.month >= 1) || (res.year === year && res.month <= maxMonth);
 
       let vMes = 0;
       let dMes = 0;
@@ -218,17 +339,18 @@ const ComercialApp = {
         const area = this.contractArea(v);
         const { name } = this.resolveEnterprise(v);
         if (inChart) vMes += qty;
-        if (inYear) {
-          vendasAno += qty;
+        if (inPeriod) {
+          vendasPeriodo += qty;
           m2Venda += area;
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
           produtos[name].vendas += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
           cidades[city].vendas += qty;
-        } else if (inPrev) {
-          vendasAnoAnt += qty;
         }
+        if (inYear) vendasAno += qty;
+        if (inPeriodPrev) vendasPeriodoAnt += qty;
+        if (inPrev) vendasAnoAnt += qty;
       });
 
       res.distratos.forEach((d) => {
@@ -236,17 +358,18 @@ const ComercialApp = {
         const area = this.contractArea(d);
         const { name } = this.resolveEnterprise(d);
         if (inChart) dMes += qty;
-        if (inYear) {
-          distratosAno += qty;
+        if (inPeriod) {
+          distratosPeriodo += qty;
           m2Dist += area;
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
           produtos[name].distratos += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
           cidades[city].distratos += qty;
-        } else if (inPrev) {
-          distratosAnoAnt += qty;
         }
+        if (inYear) distratosAno += qty;
+        if (inPeriodPrev) distratosPeriodoAnt += qty;
+        if (inPrev) distratosAnoAnt += qty;
       });
 
       if (inChart) {
@@ -262,7 +385,8 @@ const ComercialApp = {
     });
 
     return {
-      year, month, produtos, cidades, serie,
+      year, months, maxMonth, produtos, cidades, serie,
+      vendasPeriodo, distratosPeriodo, vendasPeriodoAnt, distratosPeriodoAnt,
       vendasAno, distratosAno, vendasAnoAnt, distratosAnoAnt,
       m2Venda, m2Dist
     };
@@ -352,29 +476,49 @@ const ComercialApp = {
     }
   },
 
+  fmtRel(vendas, distratos) {
+    const rel = distratos > 0 ? (vendas / distratos) : vendas;
+    return rel.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  },
+
   updateDashboardUI() {
     const agg = this.aggregate();
-    const monthsCount = Math.max(1, agg.month);
-    const saldo = agg.vendasAno - agg.distratosAno;
-    const saldoAnt = agg.vendasAnoAnt - agg.distratosAnoAnt;
-    const rel = agg.distratosAno > 0 ? (agg.vendasAno / agg.distratosAno) : agg.vendasAno;
-    const relAnt = agg.distratosAnoAnt > 0 ? (agg.vendasAnoAnt / agg.distratosAnoAnt) : agg.vendasAnoAnt;
+    const monthsCount = Math.max(1, agg.maxMonth);
+    const saldo = agg.vendasPeriodo - agg.distratosPeriodo;
+    const saldoAnt = agg.vendasPeriodoAnt - agg.distratosPeriodoAnt;
+    const saldoYtd = agg.vendasAno - agg.distratosAno;
+    const saldoYtdAnt = agg.vendasAnoAnt - agg.distratosAnoAnt;
+    const periodLbl = this.periodLabel(agg.months);
+    const ytdLbl = this.ytdLabel(agg.maxMonth);
 
     const set = (id, html) => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = html;
     };
 
-    set('kpi-vendas', String(agg.vendasAno));
-    set('kpi-vendas-comp', this.fmtPct(agg.vendasAno, agg.vendasAnoAnt, false));
+    ['kpi-vendas-period-lbl', 'kpi-distratos-period-lbl', 'kpi-variacao-period-lbl', 'kpi-relacao-period-lbl']
+      .forEach((id) => set(id, periodLbl));
+    ['kpi-vendas-ytd-lbl', 'kpi-distratos-ytd-lbl', 'kpi-variacao-ytd-lbl', 'kpi-relacao-ytd-lbl']
+      .forEach((id) => set(id, `Acum. ${ytdLbl}`));
+
+    set('kpi-vendas', String(agg.vendasPeriodo));
+    set('kpi-vendas-comp', this.fmtPct(agg.vendasPeriodo, agg.vendasPeriodoAnt, false));
+    set('kpi-vendas-ytd', String(agg.vendasAno));
+    set('kpi-vendas-ytd-comp', this.fmtPct(agg.vendasAno, agg.vendasAnoAnt, false));
     set('kpi-vendas-avg', `média mensal ${agg.year}: ${Math.round(agg.vendasAno / monthsCount)}`);
-    set('kpi-distratos', String(agg.distratosAno));
-    set('kpi-distratos-comp', this.fmtPct(agg.distratosAno, agg.distratosAnoAnt, true));
+    set('kpi-distratos', String(agg.distratosPeriodo));
+    set('kpi-distratos-comp', this.fmtPct(agg.distratosPeriodo, agg.distratosPeriodoAnt, true));
+    set('kpi-distratos-ytd', String(agg.distratosAno));
+    set('kpi-distratos-ytd-comp', this.fmtPct(agg.distratosAno, agg.distratosAnoAnt, true));
     set('kpi-distratos-avg', `média mensal ${agg.year}: ${Math.round(agg.distratosAno / monthsCount)}`);
     set('kpi-variacao', String(saldo));
     set('kpi-variacao-comp', this.fmtPct(saldo, saldoAnt, false));
-    set('kpi-relacao', rel.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
-    set('kpi-relacao-comp', `ano ant. ${relAnt.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`);
+    set('kpi-variacao-ytd', String(saldoYtd));
+    set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
+    set('kpi-relacao', this.fmtRel(agg.vendasPeriodo, agg.distratosPeriodo));
+    set('kpi-relacao-comp', `ano ant. ${this.fmtRel(agg.vendasPeriodoAnt, agg.distratosPeriodoAnt)}`);
+    set('kpi-relacao-ytd', this.fmtRel(agg.vendasAno, agg.distratosAno));
+    set('kpi-relacao-ytd-comp', `ano ant. ${this.fmtRel(agg.vendasAnoAnt, agg.distratosAnoAnt)}`);
     set('kpi-m2-vendido', this.fmtM2(agg.m2Venda));
     set('kpi-m2-devolvido', this.fmtM2(agg.m2Dist));
     set('kpi-m2-saldo', this.fmtM2(agg.m2Venda - agg.m2Dist));
@@ -421,6 +565,8 @@ const ComercialApp = {
     if (window.lucide) window.lucide.createIcons();
   }
 };
+
+window.ComercialApp = ComercialApp;
 
 document.addEventListener('tabChanged', function (e) {
   if (e.detail === 'dashboard-comercial') ComercialApp.init();

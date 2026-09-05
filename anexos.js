@@ -3,6 +3,7 @@
 const AnexosState = {
   contexto: 'Ambos', // 'Unidade', 'Cliente', 'Ambos'
   cc: '',
+  ccConfirmado: '',
   unidades: [],
   selectedUnidade: null,
   idCliente: '',
@@ -968,12 +969,14 @@ function renderAnexosModule() {
           `}
         </div>
 
-        ${AnexosState.contexto !== 'Cliente' && !AnexosState.periodoOpen ? `
-        <label class="anexos-mapa-flag">
+        ${AnexosState.contexto !== 'Cliente' && !AnexosState.periodoOpen && AnexosState.ccConfirmado ? `
+        <label class="moura-switch anexos-mapa-flag">
           <input type="checkbox" ${AnexosState.mapaUnidades ? 'checked' : ''} onchange="AnexosApp.setMapaUnidades(this.checked)">
-          Mapa de unidades (espelho)
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Mapa de unidades (espelho)</span>
         </label>` : ''}
 
+        ${AnexosState.activeContract || AnexosState.idCliente ? `
         <div class="anexos-contract-info" id="anexos-contract-info">
           <div class="anexos-contract-meta">
             <span class="anexos-contract-label">Informações do contrato</span>
@@ -982,9 +985,10 @@ function renderAnexosModule() {
                 <span><i data-lucide="user" style="width:15px;height:15px;color:var(--color-primary);"></i>
                   ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : 'Cliente'}
                 </span>` : ''}
+              ${AnexosState.ccName || AnexosState.cc ? `
               <span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i>
-                <span id="anexos-contract-cc-name">${anexosEsc(AnexosState.ccName || (AnexosState.cc ? AnexosState.cc : 'Busque o empreendimento'))}</span>
-              </span>
+                <span id="anexos-contract-cc-name">${anexosEsc(AnexosState.ccName || AnexosState.cc)}</span>
+              </span>` : ''}
               ${AnexosState.activeContract ? `<span><i data-lucide="file-text" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractNumber}</span>` : ''}
               ${AnexosState.activeContract && AnexosState.activeContract.contractDate ? `<span><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${AnexosState.activeContract.contractDate}</span>` : ''}
               ${AnexosState.activeContract ? anexosTituloSlotHtml() : ''}
@@ -999,15 +1003,15 @@ function renderAnexosModule() {
                 : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`
             ) : ''}
           </div>
-        </div>
+        </div>` : ''}
 
         ${(AnexosState.mapaUnidades || AnexosState.periodoMode || AnexosState.periodoOpen) && AnexosState.contexto !== 'Cliente' ? `
         <div class="anexos-mapa-panel" id="anexos-mapa-panel">
           <div class="anexos-mapa-head">
             <strong>${AnexosState.periodoMode || AnexosState.periodoOpen ? 'Vendas do período — espelho' : 'Mapa de unidades'}</strong>
-            <span>${AnexosState.periodoMode || AnexosState.periodoOpen
-              ? 'Empreendimentos e unidades com venda no período que precisam envio de anexos. Incorporação não entra, exceto lotes próprios.'
-              : 'Só lotes com contrato ativo. Após distrato + nova venda, o lote volta a ficar disponível para novo envio.'}</span>
+            ${AnexosState.periodoMode || AnexosState.periodoOpen
+              ? '<span>Empreendimentos e unidades com venda no período que precisam envio de anexos. Incorporação não entra, exceto lotes próprios.</span>'
+              : ''}
           </div>
           ${anexosBuildMapaHtml()}
         </div>` : ''}
@@ -1157,6 +1161,7 @@ const AnexosApp = {
   resetAndRender() {
     AnexosState.contexto = 'Ambos';
     AnexosState.cc = '';
+    AnexosState.ccConfirmado = '';
     AnexosState.ccNome = '';
     AnexosState.ccName = '';
     AnexosState.activeContract = null;
@@ -1302,6 +1307,7 @@ const AnexosApp = {
 
   async selecionarUnidadePeriodo(enterpriseId, unitId) {
     AnexosState.cc = String(enterpriseId || '').trim();
+    AnexosState.ccConfirmado = AnexosState.cc;
     const emp = (AnexosState.periodoMapa || []).find((e) => String(e.enterpriseId) === String(enterpriseId));
     AnexosState.ccName = emp ? emp.enterpriseName : AnexosState.ccName;
     // Garante unidade na lista local
@@ -1597,6 +1603,16 @@ const AnexosApp = {
 
   handleCostCenterAutocomplete(val) {
     AnexosState.cc = String(val || '').split(' - ')[0].trim();
+    if (!AnexosState.cc) {
+      AnexosState.ccConfirmado = '';
+      if (AnexosState.mapaUnidades) {
+        AnexosState.mapaUnidades = false;
+        renderAnexosModule();
+        return;
+      }
+      const flag = document.querySelector('.anexos-mapa-flag');
+      if (flag) flag.remove();
+    }
     AnexosApp.renderCostCenterSuggestions(val, false);
   },
 
@@ -2377,6 +2393,7 @@ const AnexosApp = {
       return;
     }
     AnexosState.cc = cc;
+    AnexosState.ccConfirmado = cc;
     AnexosState.unidadesLoading = true;
     const suggestionsDiv = document.getElementById('anexos-cc-suggestions');
     if (suggestionsDiv) suggestionsDiv.style.display = 'none';

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=714">
+  <link rel="stylesheet" href="style.css?v=717">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -874,7 +874,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=714" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=717" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1262,7 +1262,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.714 &nbsp;&middot;&nbsp; 05/09/2026
+            v1.0.717 &nbsp;&middot;&nbsp; 05/09/2026
           </span>
         </div>
       </div>
@@ -2215,15 +2215,26 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
           <div class="com-dash-head">
             <div>
               <h2><i data-lucide="bar-chart-2" style="width: 22px; color: var(--color-primary);"></i> Vendas e Distratos</h2>
-              <p>Indicadores do ano em curso. Os filtros só recortam a visão — os dados já abrem sozinhos.</p>
+              <p>Cada card mostra o período selecionado e o acumulado do ano. Os filtros só recortam a visão — os dados já abrem sozinhos.</p>
             </div>
             <div class="com-dash-filters">
               <label>Ano
-                <select id="comercial-year" onchange="ComercialApp.onFilterChange()"></select>
+                <select id="comercial-year" onchange="ComercialApp.onYearChange()"></select>
               </label>
-              <label>Mês
-                <select id="comercial-month" onchange="ComercialApp.onFilterChange()"></select>
-              </label>
+              <div class="com-month-filter" id="comercial-month-filter">
+                <span class="com-month-filter-label">Mês</span>
+                <button type="button" class="com-month-filter-btn" id="comercial-month-btn" onclick="ComercialApp.toggleMonthFilter(event)">
+                  <span id="comercial-month-label">fev</span>
+                  <i data-lucide="chevron-down" style="width:14px;height:14px;"></i>
+                </button>
+                <div class="com-month-filter-panel" id="comercial-month-panel" hidden>
+                  <div class="ml-emp-filter-actions">
+                    <button type="button" class="ml-emp-filter-all" onclick="ComercialApp.selectAllMonths()">Marcar Todos</button>
+                    <button type="button" class="ml-emp-filter-none" onclick="ComercialApp.selectNoneMonths()">Desmarcar Todos</button>
+                  </div>
+                  <div class="com-month-filter-list" id="comercial-month-list"></div>
+                </div>
+              </div>
               <button type="button" class="btn btn-primary" id="comercial-btn-search" onclick="ComercialApp.fetchData(true)">
                 <i data-lucide="refresh-cw" style="width: 15px;"></i> Atualizar
               </button>
@@ -2240,25 +2251,65 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
             <div class="com-dash-kpis">
               <article class="com-kpi com-kpi--venda">
                 <h4>Vendas</h4>
-                <div id="kpi-vendas" class="com-kpi-val">0</div>
-                <div id="kpi-vendas-comp" class="com-kpi-comp">-</div>
+                <div class="com-kpi-split">
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-vendas-period-lbl">Período</span>
+                    <div id="kpi-vendas" class="com-kpi-val">0</div>
+                    <div id="kpi-vendas-comp" class="com-kpi-comp">-</div>
+                  </div>
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-vendas-ytd-lbl">Acumulado</span>
+                    <div id="kpi-vendas-ytd" class="com-kpi-val">0</div>
+                    <div id="kpi-vendas-ytd-comp" class="com-kpi-comp">-</div>
+                  </div>
+                </div>
                 <div id="kpi-vendas-avg" class="com-kpi-avg"></div>
               </article>
               <article class="com-kpi com-kpi--distrato">
                 <h4>Distratos</h4>
-                <div id="kpi-distratos" class="com-kpi-val">0</div>
-                <div id="kpi-distratos-comp" class="com-kpi-comp">-</div>
+                <div class="com-kpi-split">
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-distratos-period-lbl">Período</span>
+                    <div id="kpi-distratos" class="com-kpi-val">0</div>
+                    <div id="kpi-distratos-comp" class="com-kpi-comp">-</div>
+                  </div>
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-distratos-ytd-lbl">Acumulado</span>
+                    <div id="kpi-distratos-ytd" class="com-kpi-val">0</div>
+                    <div id="kpi-distratos-ytd-comp" class="com-kpi-comp">-</div>
+                  </div>
+                </div>
                 <div id="kpi-distratos-avg" class="com-kpi-avg"></div>
               </article>
               <article class="com-kpi com-kpi--var">
                 <h4>Variação</h4>
-                <div id="kpi-variacao" class="com-kpi-val">0</div>
-                <div id="kpi-variacao-comp" class="com-kpi-comp">-</div>
+                <div class="com-kpi-split">
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-variacao-period-lbl">Período</span>
+                    <div id="kpi-variacao" class="com-kpi-val">0</div>
+                    <div id="kpi-variacao-comp" class="com-kpi-comp">-</div>
+                  </div>
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-variacao-ytd-lbl">Acumulado</span>
+                    <div id="kpi-variacao-ytd" class="com-kpi-val">0</div>
+                    <div id="kpi-variacao-ytd-comp" class="com-kpi-comp">-</div>
+                  </div>
+                </div>
               </article>
               <article class="com-kpi com-kpi--rel">
                 <h4>Relação vendas / distrato</h4>
-                <div id="kpi-relacao" class="com-kpi-val">0</div>
-                <div id="kpi-relacao-comp" class="com-kpi-comp">-</div>
+                <div class="com-kpi-split">
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-relacao-period-lbl">Período</span>
+                    <div id="kpi-relacao" class="com-kpi-val">0</div>
+                    <div id="kpi-relacao-comp" class="com-kpi-comp">-</div>
+                  </div>
+                  <div>
+                    <span class="com-kpi-split-lbl" id="kpi-relacao-ytd-lbl">Acumulado</span>
+                    <div id="kpi-relacao-ytd" class="com-kpi-val">0</div>
+                    <div id="kpi-relacao-ytd-comp" class="com-kpi-comp">-</div>
+                  </div>
+                </div>
               </article>
             </div>
 
@@ -3482,11 +3533,9 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                     <div>
                       <label>Mostrar Nex sem nº objeto</label>
                       <div style="height:38px; display:flex; align-items:center;">
-                        <label style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin:0;">
-                          <span class="custom-switch">
-                            <input type="checkbox" id="wesend-filter-objeto-vazio" onchange="var el=document.getElementById('wesend-filter-objeto'); if(el) el.disabled=this.checked; if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();">
-                            <span class="custom-switch-slider"></span>
-                          </span>
+                        <label class="moura-switch">
+                          <input type="checkbox" id="wesend-filter-objeto-vazio" onchange="var el=document.getElementById('wesend-filter-objeto'); if(el) el.disabled=this.checked; if(typeof window.renderNexFollowup==='function') window.renderNexFollowup();">
+                          <span class="moura-switch-track" aria-hidden="true"></span>
                         </label>
                       </div>
                     </div>
@@ -3509,12 +3558,10 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
               Se o cliente pagou depois do envio, a NEX sai desta lista e perde validade jurídica.
             </p>
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-              <label style="display:inline-flex;align-items:center;gap:10px;font-size:0.85rem;font-weight:600;color:#334155;cursor:pointer;user-select:none;">
-                <span class="custom-switch">
-                  <input type="checkbox" id="nex-followup-zero-only" onchange="window.setNexFollowupZeroOnly(this.checked)">
-                  <span class="custom-switch-slider"></span>
-                </span>
-                NEX apenas de 0% pago
+              <label class="moura-switch">
+                <input type="checkbox" id="nex-followup-zero-only" onchange="window.setNexFollowupZeroOnly(this.checked)">
+                <span class="moura-switch-track" aria-hidden="true"></span>
+                <span class="moura-switch-text">NEX apenas de 0% pago</span>
               </label>
               <button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexFollowupSelected()" style="border-color:#fecaca;color:#b91c1c;">
                 <i data-lucide="trash-2" style="width:14px;"></i> Excluir selecionados
@@ -4794,14 +4841,9 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                         </span>
                         <span id="quitacao-juros-hint" style="font-size:0.75rem; color:var(--color-text-muted);">a.m. · Tabela Price (P)</span>
                       </div>
-                      <div style="font-size:0.78rem; color:var(--color-text-muted); margin-top:4px;">VP do contrato atual via saldo devedor presente · opcional abater com outro CT do cliente</div>
+                      <div style="font-size:0.78rem; color:var(--color-text-muted); margin-top:4px;">VP do contrato atual via saldo devedor presente · juros Price 0,80% a.m.</div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                      <label id="quitacao-abate-label" for="quitacao-abate-toggle" title="Abater com outro contrato"
-                        style="display:inline-flex;align-items:center;gap:8px;margin:0;cursor:pointer;background:#fff;color:#9a3412;border:2px solid #fdba74;border-radius:999px;padding:5px 12px;font-size:0.75rem;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;line-height:1;">
-                        <input type="checkbox" id="quitacao-abate-toggle" onchange="toggleQuitacaoAbatimento()" style="width:16px;height:16px;accent-color:#ea580c;flex-shrink:0;">
-                        Abatimento
-                      </label>
                       <button type="button" class="btn btn-secondary" onclick="exportQuitacaoSaldoDevedorExcel()"
                         style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;height:36px;border-radius:4px;cursor:pointer;"
                         title="Exportar relatório Saldo Devedor Presente">
@@ -4817,6 +4859,16 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
                   <div
                     style="display: flex; gap: 1rem; align-items: stretch; justify-content: space-between; flex-wrap: wrap;">
+
+                    <div class="kpi-card"
+                      style="flex: 1; min-width: 150px; border-left: 4px solid #166534; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fff; text-align: center;">
+                      <span
+                        style="font-size: 0.75rem; color: var(--color-text-muted); font-weight: 700; text-transform: uppercase;">Recebidas</span>
+                      <h4 id="quitacao-left-pagas-count"
+                        style="margin: 4px 0; font-size: 1rem; color: var(--color-text-dark);">0 parcelas</h4>
+                      <h3 id="quitacao-left-pagas-val"
+                        style="margin: 0; font-size: 1.15rem; color: #166534;">R$ 0,00</h3>
+                    </div>
 
                     <!-- KPI Vencidas -->
                     <div class="kpi-card"
@@ -4863,9 +4915,6 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                       <h3 id="quitacao-right-val-quitacao"
                         style="margin: 0; font-size: 1.25rem; color: var(--color-primary); font-weight: 800;">R$ 0,00
                       </h3>
-                      <div id="quitacao-vp-liquido-wrap" style="display:none; margin-top:6px; font-size:0.72rem; color:#9a3412; font-weight:700;">
-                        Líquido após abate: <span id="quitacao-vp-liquido-val">R$ 0,00</span>
-                      </div>
                     </div>
 
                     <!-- KPI Desconto Total -->
@@ -4881,29 +4930,6 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
                         OFF</h4>
                     </div>
 
-                  </div>
-
-                  <!-- Abatimento com 2º contrato (padrão permuta) -->
-                  <div id="quitacao-abate-panel" style="display:none; margin-top:1.25rem; padding:14px; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;">
-                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
-                      <div style="flex:1; min-width:260px;">
-                        <label for="quitacao-abate-contract" style="font-size:0.8rem; font-weight:600; color:#334155; display:block; margin-bottom:4px;">Contrato para abatimento</label>
-                        <select id="quitacao-abate-contract" class="form-control" onchange="onQuitacaoAbateContractChange()" style="min-width:260px; font-weight:600; border-color:#fdba74;">
-                          <option value="">Selecione o contrato do cliente...</option>
-                        </select>
-                      </div>
-                      <div style="font-size:0.78rem; color:#9a3412; max-width:420px; line-height:1.35;">
-                        Escolha outro CT ativo do mesmo cliente e marque parcelas a VP para abater do valor de quitação.
-                      </div>
-                    </div>
-                    <div id="quitacao-abate-parcelas-body" style="margin-top:12px; max-height:280px; overflow:auto; background:#fff; border:1px solid #fed7aa; border-radius:6px;">
-                      <div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Ative o abatimento e selecione um contrato.</div>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:10px; font-size:0.85rem; font-weight:700;">
-                      <span>Saldo presente do título: <span id="quitacao-abate-sd-presente">R$ 0,00</span></span>
-                      <span>Selecionado VP: <span id="quitacao-abate-selecionado">R$ 0,00</span></span>
-                      <span id="quitacao-abate-liquido" style="color:#166534;">Quitação líquida: R$ 0,00</span>
-                    </div>
                   </div>
 
                   <!-- Relatório detalhado -->
@@ -6788,44 +6814,44 @@ O não pagamento de qualquer das parcelas no vencimento pactuado importará no v
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=714"></script>
-  <script defer src="sienge-api.js?v=714"></script>
-  <script defer src="azure-auth.js?v=714"></script>
-  <script defer src="app.js?v=714"></script>
-  <script defer src="cartao-taxas.js?v=714"></script>
-  <script defer src="home-dashboard.js?v=714"></script>
-  <script defer src="anexos.js?v=714"></script>
-  <script defer src="contas-pagar.js?v=714"></script>
-  <script defer src="config-tags.js?v=714"></script>
-  <script defer src="config-users.js?v=714"></script>
-  <script defer src="suporte.js?v=714"></script>
-  <script defer src="construcao.js?v=714"></script>
-  <script defer src="empresas.js?v=714"></script>
-  <script defer src="relacionamento.js?v=714"></script>
-  <script defer src="compromissario.js?v=714"></script>
-  <script defer src="comercial.js?v=714"></script>
-  <script defer src="estoque-comercial.js?v=714"></script>
-  <script defer src="centros-custo.js?v=714"></script>
-  <script defer src="marketing.js?v=714"></script>
-  <script defer src="plano-financeiro.js?v=714"></script>
-  <script defer src="prestacao-contas.js?v=714"></script>
+  <script defer src="data.js?v=717"></script>
+  <script defer src="sienge-api.js?v=717"></script>
+  <script defer src="azure-auth.js?v=717"></script>
+  <script defer src="app.js?v=717"></script>
+  <script defer src="cartao-taxas.js?v=717"></script>
+  <script defer src="home-dashboard.js?v=717"></script>
+  <script defer src="anexos.js?v=717"></script>
+  <script defer src="contas-pagar.js?v=717"></script>
+  <script defer src="config-tags.js?v=717"></script>
+  <script defer src="config-users.js?v=717"></script>
+  <script defer src="suporte.js?v=717"></script>
+  <script defer src="construcao.js?v=717"></script>
+  <script defer src="empresas.js?v=717"></script>
+  <script defer src="relacionamento.js?v=717"></script>
+  <script defer src="compromissario.js?v=717"></script>
+  <script defer src="comercial.js?v=717"></script>
+  <script defer src="estoque-comercial.js?v=717"></script>
+  <script defer src="centros-custo.js?v=717"></script>
+  <script defer src="marketing.js?v=717"></script>
+  <script defer src="plano-financeiro.js?v=717"></script>
+  <script defer src="prestacao-contas.js?v=717"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="empresa-filter.js?v=714"></script>
-  <script defer src="fluxo-caixa.js?v=714"></script>
-  <script defer src="caixa-diario.js?v=714"></script>
-  <script defer src="investimento.js?v=714"></script>
-  <script defer src="parametrizacao-parceiro.js?v=714"></script>
-  <script defer src="societario.js?v=714"></script>
-  <script defer src="participacoes.js?v=714"></script>
-  <script defer src="fiscal.js?v=714"></script>
-  <script defer src="indexadores.js?v=714"></script>
-  <script defer src="verificar-construcao.js?v=714"></script>
-  <script src="repactuacoes.js?v=714"></script>
-  <script defer src="repactuacao-lote.js?v=714"></script>
+  <script defer src="empresa-filter.js?v=717"></script>
+  <script defer src="fluxo-caixa.js?v=717"></script>
+  <script defer src="caixa-diario.js?v=717"></script>
+  <script defer src="investimento.js?v=717"></script>
+  <script defer src="parametrizacao-parceiro.js?v=717"></script>
+  <script defer src="societario.js?v=717"></script>
+  <script defer src="participacoes.js?v=717"></script>
+  <script defer src="fiscal.js?v=717"></script>
+  <script defer src="indexadores.js?v=717"></script>
+  <script defer src="verificar-construcao.js?v=717"></script>
+  <script src="repactuacoes.js?v=717"></script>
+  <script defer src="repactuacao-lote.js?v=717"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=714"></script>
+  <script defer src="dashboard-inadimplencia.js?v=717"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

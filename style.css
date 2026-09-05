@@ -1644,21 +1644,7 @@ circle.donut-segment {
   margin-bottom: 6px;
 }
 .anexos-mapa-flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   margin-top: 12px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #334155;
-  cursor: pointer;
-  user-select: none;
-}
-.anexos-mapa-flag input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--color-primary, #105436);
 }
 .anexos-ctrl {
   height: 40px !important;
@@ -2208,13 +2194,78 @@ circle.donut-segment {
 }
 
 
-/* Custom Toggle Switch */
-.custom-switch { position: relative; display: inline-block; width: 34px; height: 20px; }
-.custom-switch input { opacity: 0; width: 0; height: 0; }
-.custom-switch-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
-.custom-switch-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-.custom-switch input:checked + .custom-switch-slider { background-color: #16a34a; }
-.custom-switch input:checked + .custom-switch-slider:before { transform: translateX(14px); }
+/* Interruptor ligar/desligar — verde Moura (#105436) */
+.moura-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.moura-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.moura-switch-track,
+.custom-switch-slider {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  flex-shrink: 0;
+  transition: background 0.2s ease;
+}
+.moura-switch-track::after,
+.custom-switch-slider:before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+  transition: transform 0.2s ease;
+}
+.moura-switch input:checked + .moura-switch-track,
+.custom-switch input:checked + .custom-switch-slider,
+.moura-switch input:checked + .custom-switch-slider {
+  background: var(--color-primary);
+}
+.moura-switch input:checked + .moura-switch-track::after,
+.custom-switch input:checked + .custom-switch-slider:before,
+.moura-switch input:checked + .custom-switch-slider:before {
+  transform: translateX(20px);
+}
+.moura-switch input:focus-visible + .moura-switch-track,
+.custom-switch input:focus-visible + .custom-switch-slider {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.moura-switch-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+}
+.custom-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+.custom-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
 
 /* Tabelas longas: cabeçalho fixo ao rolar */
 .crm-scroll-table {
@@ -2995,8 +3046,8 @@ circle.donut-segment {
 .cartao-taxas-switch-off { text-align: right; }
 .cartao-taxas-switch-on { text-align: left; }
 .cartao-taxas-switch-track {
-  width: 52px;
-  height: 28px;
+  width: 44px;
+  height: 24px;
   border-radius: 999px;
   background: #cbd5e1;
   position: relative;
@@ -3007,18 +3058,18 @@ circle.donut-segment {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
   transition: transform 0.2s ease;
 }
 .cartao-taxas-switch.is-on .cartao-taxas-switch-track {
   background: var(--color-primary);
 }
 .cartao-taxas-switch.is-on .cartao-taxas-switch-knob {
-  transform: translateX(24px);
+  transform: translateX(20px);
 }
 .cartao-taxas-switch.is-on .cartao-taxas-switch-on { color: var(--color-primary); }
 .cartao-taxas-switch:not(.is-on) .cartao-taxas-switch-off { color: #475569; }
@@ -3151,6 +3202,78 @@ circle.donut-segment {
   font-weight: 600;
 }
 .com-dash-filters .btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
+.com-month-filter { position: relative; min-width: 168px; z-index: 80; }
+.com-month-filter.is-open { z-index: 220; }
+.com-month-filter-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.com-month-filter-btn {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #0f172a;
+  gap: 8px;
+}
+.com-month-filter-btn span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.com-month-filter-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+  z-index: 230;
+}
+.com-month-filter-panel[hidden] { display: none; }
+.com-month-filter-list { max-height: 260px; overflow: auto; }
+.com-month-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #334155;
+  font-weight: 600;
+  margin: 0;
+}
+.com-month-filter-item:last-child { border-bottom: none; }
+.com-month-filter-item input { width: 16px; height: 16px; margin: 0; accent-color: #105436; flex-shrink: 0; }
+.com-kpi-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+.com-kpi-split-lbl {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.com-kpi-split .com-kpi-val { font-size: 1.7rem; }
+.com-kpi-split .com-kpi-comp { margin-top: 6px; font-size: 0.72rem; line-height: 1.35; }
 .com-dash-updated { font-size: 0.75rem; color: #94a3b8; padding-bottom: 8px; }
 .com-dash-loading {
   display: flex;

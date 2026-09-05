@@ -8866,6 +8866,11 @@ function formatCpfCnpj(val) {
 
           return {
             installmentId: inst.installmentId || inst.installmentNumber,
+            installmentNumber: inst.installmentNumber || inst.installmentId,
+            interestPercentage: inst.interestPercentage,
+            interestRate: inst.interestRate,
+            conditionType: inst.conditionType || inst.paymentConditionType || inst.installmentType,
+            receipts: receipts,
             installmentSituation: situationCode,
             value: orig,
             currentBalance: inst.currentBalance || orig,
@@ -13024,17 +13029,58 @@ function quitacaoDaysBetween(isoA, isoB) {
   return Math.round((db - da) / 86400000);
 }
 
-/** Taxa mensal decimal do parcelamento (ex.: 0.008 = 0,80% a.m. Price). */
-function quitacaoGetMonthlyInterestRate(sale) {
-  if (!sale) return null;
-  if (sale.interestPercentage != null && sale.interestPercentage !== "") {
-    const raw = Number(sale.interestPercentage);
-    if (Number.isFinite(raw)) return raw / 100;
-  }
-  if (sale.interestRate != null && Number.isFinite(Number(sale.interestRate))) {
-    return Number(sale.interestRate);
-  }
+/** Converte valor do Sienge para taxa mensal decimal. 0,80 → 0.008; 0.008 fica 0.008; 8 → 0.008. */
+function quitacaoNormalizeMonthlyRate(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n <= 0.05) return n;
+  if (n <= 5) return n / 100;
+  if (n <= 15) return n / 1000;
   return null;
+}
+
+function quitacaoRateMode(rates) {
+  if (!rates || !rates.length) return null;
+  const bag = {};
+  rates.forEach((r) => {
+    const k = r.toFixed(5);
+    bag[k] = (bag[k] || 0) + 1;
+  });
+  let best = rates[0];
+  let n = 0;
+  Object.keys(bag).forEach((k) => {
+    if (bag[k] > n) {
+      n = bag[k];
+      best = Number(k);
+    }
+  });
+  return best;
+}
+
+/** Taxa mensal decimal do parcelamento Price (0.008 = 0,80% a.m.). */
+function quitacaoGetMonthlyInterestRate(sale) {
+  const candidates = [];
+  const push = (v) => {
+    const r = quitacaoNormalizeMonthlyRate(v);
+    if (r != null) candidates.push(r);
+  };
+  if (sale) {
+    push(sale.interestPercentage);
+    if (sale.interestRate != null) {
+      const ir = Number(sale.interestRate);
+      if (ir > 0 && ir <= 0.05) candidates.push(ir);
+      else push(ir);
+    }
+  }
+  ((window.AppState && AppState.currentContractInstallments) || []).forEach((inst) => {
+    push(inst.interestPercentage);
+    push(inst.interestRate);
+  });
+  const priceLike = candidates.filter((r) => r >= 0.005 && r <= 0.0095);
+  if (priceLike.length) return quitacaoRateMode(priceLike);
+  const notMora = candidates.filter((r) => Math.abs(r - 0.01) > 0.0004);
+  if (notMora.length) return quitacaoRateMode(notMora);
+  return 0.008;
 }
 
 /** Ex.: 0,80%P — P = Tabela Price */
@@ -13146,6 +13192,42 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
   };
 }
 
+function quitacaoInstIsPaid(inst) {
+  if (!inst) return false;
+  if (inst.installmentSituation === 2 || inst.isValidReceipt) return true;
+  const sit = String(inst.situation || inst.status || inst.installmentSituation || "").toLowerCase();
+  if (sit.includes("quit") || sit.includes("pago") || sit.includes("paid")) return true;
+  const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+  if (recs.some((r) => Number(r.receiptValue || r.value || r.netReceiptValue || 0) > 0.009)) return true;
+  return Number(inst.receiptValue) > 0.009;
+}
+
+function quitacaoMapPaidRow(inst) {
+  const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+  const original = Number(inst.originalValue != null ? inst.originalValue : (inst.value || inst.installmentValue)) || 0;
+  let valorBaixa = 0;
+  let liquido = 0;
+  let payDate = inst.receiptDate || inst.payOffDate || "";
+  recs.forEach((r) => {
+    valorBaixa += Number(r.receiptValue || r.value || r.settlementValue || 0);
+    liquido += Number(r.netReceiptValue || r.netValue || r.receiptValue || r.value || 0);
+    if (!payDate) payDate = r.receiptDate || r.paymentDate || r.date || "";
+  });
+  if (!(valorBaixa > 0.009)) valorBaixa = Number(inst.receiptValue) || original;
+  if (!(liquido > 0.009)) liquido = Number(inst.receiptValue) || valorBaixa;
+  return {
+    due: String(inst.dueDate || inst.due || "").slice(0, 10),
+    number: inst.installmentNumber || inst.installmentId || inst.id || "—",
+    tipo: inst.conditionType || inst.paymentConditionType || inst.typeName || "Parcelas",
+    original,
+    payDate: String(payDate || "").slice(0, 10),
+    valorBaixa,
+    liquido,
+    juros: Number(inst.extra || inst.interest || 0) || 0,
+    desconto: Number(inst.discount || 0) || 0
+  };
+}
+
 window.loadQuitacaoDebtReport = async function(force) {
   const statusEl = document.getElementById("quitacao-report-status");
   const bodyEl = document.getElementById("quitacao-report-body");
@@ -13177,6 +13259,19 @@ window.loadQuitacaoDebtReport = async function(force) {
   }
   window._quitacaoState = window._quitacaoState || {};
   if (!force && window._quitacaoState.billId === billId && Array.isArray(window._quitacaoState.rows) && window._quitacaoState.rows.length) {
+    if (!window._quitacaoState.paidRows || !window._quitacaoState.paidRows.length) {
+      const paidRows = ((AppState.currentContractInstallments || []).filter(quitacaoInstIsPaid))
+        .map(quitacaoMapPaidRow)
+        .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+      window._quitacaoState.paidRows = paidRows;
+      window._quitacaoState.pagoLiquido = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
+    }
+    window.updateQuitacaoJurosDisplay(sale);
+    const paidCountEl = document.getElementById("quitacao-left-pagas-count");
+    const paidValEl = document.getElementById("quitacao-left-pagas-val");
+    const cachedPaid = window._quitacaoState.paidRows || [];
+    if (paidCountEl) paidCountEl.textContent = cachedPaid.length === 1 ? "1 parcela" : `${cachedPaid.length} parcelas`;
+    if (paidValEl) paidValEl.textContent = quitacaoFmtMoney(window._quitacaoState.pagoLiquido || 0);
     window.renderQuitacaoDebtReport();
     return;
   }
@@ -13193,6 +13288,11 @@ window.loadQuitacaoDebtReport = async function(force) {
       .sort((a, b) => String(a.due).localeCompare(String(b.due)));
     const vencidas = rows.filter((r) => r.overdue);
     const aVencer = rows.filter((r) => !r.overdue);
+    const paidRows = ((AppState.currentContractInstallments || []).filter(quitacaoInstIsPaid))
+      .map(quitacaoMapPaidRow)
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const sumPago = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
+    const sumBaixa = paidRows.reduce((s, r) => s + (Number(r.valorBaixa) || 0), 0);
     const sumVencVp = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
     const sumFutVp = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
     const sumFutCorr = aVencer.reduce((s, r) => s + (Number(r.corrected) || 0), 0);
@@ -13206,6 +13306,9 @@ window.loadQuitacaoDebtReport = async function(force) {
     window._quitacaoState.vencidasAtualizado = sumVencVp;
     window._quitacaoState.aVencerVp = sumFutVp;
     window._quitacaoState.valorFuturo = sumVencCorr + sumFutCorr;
+    window._quitacaoState.paidRows = paidRows;
+    window._quitacaoState.pagoLiquido = sumPago;
+    window._quitacaoState.pagoBaixa = sumBaixa;
     // Atualiza KPIs a partir do relatório detalhado (mais fiel ao Saldo Devedor Presente)
     const leftVencidasCount = document.getElementById("quitacao-left-vencidas-count");
     const leftVencidasVal = document.getElementById("quitacao-left-vencidas-val");
@@ -13220,6 +13323,10 @@ window.loadQuitacaoDebtReport = async function(force) {
     if (leftAvencerVal) leftAvencerVal.textContent = quitacaoFmtMoney(sumFutCorr > 0.009 ? sumFutCorr : sumFutVp);
     if (leftTotalCount) leftTotalCount.textContent = n === 1 ? "1 parcela" : `${n} parcelas`;
     if (leftTotalVal) leftTotalVal.textContent = quitacaoFmtMoney(sumVencCorr + sumFutCorr);
+    const paidCountEl = document.getElementById("quitacao-left-pagas-count");
+    const paidValEl = document.getElementById("quitacao-left-pagas-val");
+    if (paidCountEl) paidCountEl.textContent = paidRows.length === 1 ? "1 parcela" : `${paidRows.length} parcelas`;
+    if (paidValEl) paidValEl.textContent = quitacaoFmtMoney(sumPago);
     const qVpRightCountEl = document.getElementById("quitacao-right-count-quitacao");
     if (qVpRightCountEl) qVpRightCountEl.textContent = n === 1 ? "1 parcela" : `${n} parcelas`;
     // Se a API total ainda não preencheu VP, usa soma do detalhe
@@ -13253,9 +13360,10 @@ window.renderQuitacaoDebtReport = function() {
   const st = window._quitacaoState || {};
   const vencidas = st.vencidas || [];
   const aVencer = st.aVencer || [];
+  const paidRows = st.paidRows || [];
   const jurosLabel = st.jurosLabel || "—";
-  if (!vencidas.length && !aVencer.length) {
-    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
+  if (!vencidas.length && !aVencer.length && !paidRows.length) {
+    bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela encontrada neste contrato.</div>`;
     return;
   }
   const rowVenc = (r, i) => `
@@ -13286,7 +13394,45 @@ window.renderQuitacaoDebtReport = function() {
   const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
   const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
   const sumFutCorr = aVencer.reduce((s, r) => s + (Number(r.corrected) || 0), 0);
+  const sumPago = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
+  const sumBaixa = paidRows.reduce((s, r) => s + (Number(r.valorBaixa) || 0), 0);
+  const rowPago = (r, i) => `
+    <tr style="border-bottom:1px solid #e2e8f0;background:${i % 2 ? "#f0fdf4" : "#fff"};">
+      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.due)}</td>
+      <td style="padding:6px 8px;font-weight:700;text-align:center;">${r.number}</td>
+      <td style="padding:6px 8px;">${r.tipo}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.original)}</td>
+      <td style="padding:6px 8px;white-space:nowrap;">${quitacaoFmtDate(r.payDate)}</td>
+      <td style="padding:6px 8px;text-align:right;">${quitacaoFmtMoney(r.valorBaixa)}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:800;color:#166534;">${quitacaoFmtMoney(r.liquido)}</td>
+      <td style="padding:6px 8px;text-align:center;"><span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Pago</span></td>
+    </tr>`;
   bodyEl.innerHTML = `
+    ${paidRows.length ? `
+    <div style="padding:10px 12px;background:#166534;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;">Valores pagos (parcelas recebidas)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+      <thead>
+        <tr style="background:#64748b;color:#fff;">
+          <th style="padding:8px;text-align:left;">Dt. Venc</th>
+          <th style="padding:8px;text-align:center;">Par</th>
+          <th style="padding:8px;text-align:left;">Tipo</th>
+          <th style="padding:8px;text-align:right;">Valor original</th>
+          <th style="padding:8px;text-align:left;">Data baixa</th>
+          <th style="padding:8px;text-align:right;">Valor baixa</th>
+          <th style="padding:8px;text-align:right;">Receb. líquido</th>
+          <th style="padding:8px;text-align:center;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${paidRows.map(rowPago).join("")}
+        <tr style="background:#14532d;color:#fff;">
+          <td colspan="5" style="padding:8px;text-align:right;font-weight:800;">Totais recebidos</td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumBaixa)}</td>
+          <td style="padding:8px;text-align:right;font-weight:800;">${quitacaoFmtMoney(sumPago)}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>` : ""}
     ${vencidas.length ? `
     <div style="padding:10px 12px;background:#450a0a;color:#fff;font-size:0.78rem;font-weight:800;text-transform:uppercase;">Valores a pagar (vencidas)</div>
     <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
@@ -13622,15 +13768,18 @@ window.exportQuitacaoSaldoDevedorExcel = function() {
     }
     aoa.push([]);
   };
+  if ((st.paidRows || []).length) {
+    aoa.push(["VALORES PAGOS (PARCELAS RECEBIDAS)"]);
+    aoa.push(["Dt. Venc", "Par", "Tipo", "Valor original", "Data baixa", "Valor baixa", "Receb. líquido"]);
+    st.paidRows.forEach((r) => aoa.push([
+      quitacaoFmtDate(r.due), r.number, r.tipo, r.original, quitacaoFmtDate(r.payDate), r.valorBaixa, r.liquido
+    ]));
+    aoa.push(["", "", "", "", "Totais recebidos", st.pagoBaixa || 0, st.pagoLiquido || 0]);
+    aoa.push([]);
+  }
   pushSection("VALORES A PAGAR (VENCIDAS)", st.vencidas || [], "vencidas");
   pushSection("VALORES A PAGAR (A VENCER)", st.aVencer || [], "avencer");
   aoa.push(["Total saldo devedor presente", st.saldoPresente || 0]);
-  const abate = Number((window._quitacaoAbateState && window._quitacaoAbateState.selectedVp)) || 0;
-  if (abate > 0.009) {
-    aoa.push(["Abatimento (2º contrato VP)", abate]);
-    aoa.push(["Quitação líquida", Math.max(0, (Number(window.funnelCurrentVP) || st.saldoPresente || 0) - abate)]);
-    aoa.push(["Título abatimento", (window._quitacaoAbateState && window._quitacaoAbateState.billId) || ""]);
-  }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Saldo Devedor Presente");
