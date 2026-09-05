@@ -22,7 +22,34 @@
         eloAmex: DEFAULT_RATES[p.id].eloAmex
       };
     });
-    return { rates: rates, passFee: true, updatedAt: null };
+    return { rates: rates, passFeeByProduct: defaultPassFees(), passFee: true, updatedAt: null };
+  }
+
+  function defaultPassFees() {
+    const map = {};
+    PRODUCTS.forEach(function (p) { map[p.id] = true; });
+    return map;
+  }
+
+  function normalizePassFees(parsed) {
+    const map = defaultPassFees();
+    const src = parsed && parsed.passFeeByProduct;
+    if (src && typeof src === "object") {
+      PRODUCTS.forEach(function (p) {
+        if (Object.prototype.hasOwnProperty.call(src, p.id)) map[p.id] = src[p.id] !== false;
+      });
+      return map;
+    }
+    if (parsed && parsed.passFee === false) {
+      PRODUCTS.forEach(function (p) { map[p.id] = false; });
+    }
+    return map;
+  }
+
+  function productPassesFee(cfg, productId) {
+    const map = (cfg && cfg.passFeeByProduct) || {};
+    if (Object.prototype.hasOwnProperty.call(map, productId)) return map[productId] !== false;
+    return !cfg || cfg.passFee !== false;
   }
 
   function formatPct(value) {
@@ -83,9 +110,11 @@
         if (Number.isFinite(mv)) rates[p.id].masterVisa = mv;
         if (Number.isFinite(ea)) rates[p.id].eloAmex = ea;
       });
+      const passFeeByProduct = normalizePassFees(parsed);
       return {
         rates: rates,
-        passFee: parsed.passFee !== false,
+        passFeeByProduct: passFeeByProduct,
+        passFee: PRODUCTS.every(function (p) { return passFeeByProduct[p.id] !== false; }),
         updatedAt: parsed.updatedAt || null
       };
     } catch (e) {
@@ -99,17 +128,22 @@
     if (PRODUCTS.every(function (p) { return p.id !== productId; })) {
       productId = productForInstallments(productOrInstallments);
     }
-    if (cfg.passFee === false) return 0;
+    if (!productPassesFee(cfg, productId)) return 0;
     const group = normalizeBrand(brand);
     const row = cfg.rates[productId] || cfg.rates.credito_vista || {};
     return Number(row[group]) || 0;
   };
 
   window.calcCardFee = function (amount, productOrInstallments, brand) {
-    const rate = window.getCardFeeRate(productOrInstallments, brand);
+    const cfg = window.loadCardFeesConfig();
+    let productId = String(productOrInstallments || "");
+    if (PRODUCTS.every(function (p) { return p.id !== productId; })) {
+      productId = productForInstallments(productOrInstallments);
+    }
+    const rate = window.getCardFeeRate(productId, brand);
     const base = Number(amount) || 0;
     const fee = base * (rate / 100);
-    return { rate: rate, fee: fee, net: base - fee, passFee: window.loadCardFeesConfig().passFee !== false };
+    return { rate: rate, fee: fee, net: base - fee, passFee: productPassesFee(cfg, productId), productId: productId };
   };
 
   function collectRatesFromInputs() {
@@ -148,31 +182,40 @@
     });
   }
 
-  function paintPolicyToggle(passFee) {
-    const btn = document.getElementById("cartao-taxas-policy-toggle");
-    const hint = document.getElementById("cartao-taxas-policy-hint");
+  function passSwitchHtml(productId, passFee) {
     const on = passFee !== false;
-    if (btn) {
-      btn.classList.toggle("is-on", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    }
-    if (hint) {
-      hint.textContent = on
-        ? "A taxa é cobrada do cliente no valor da venda."
-        : "A taxa é isenta para o cliente — a empresa absorve o custo.";
-    }
+    return (
+      '<button type="button" id="cartao-taxas-pass-' + productId + '" class="cartao-taxas-switch cartao-taxas-switch--row' + (on ? ' is-on' : '') + '" onclick="window.toggleCardFeePolicy(\'' + productId + '\')" aria-pressed="' + (on ? 'true' : 'false') + '" title="' + (on ? 'Repassar a taxa ao cliente' : 'Isentar a taxa nesta faixa') + '">' +
+        '<span class="cartao-taxas-switch-off">Isentar</span>' +
+        '<span class="cartao-taxas-switch-track" aria-hidden="true"><span class="cartao-taxas-switch-knob"></span></span>' +
+        '<span class="cartao-taxas-switch-on">Repassar</span>' +
+      '</button>'
+    );
   }
 
-  window.toggleCardFeePolicy = function () {
-    const btn = document.getElementById("cartao-taxas-policy-toggle");
-    const next = !(btn && btn.classList.contains("is-on"));
-    paintPolicyToggle(next);
+  window.toggleCardFeePolicy = function (productId) {
+    const btn = document.getElementById("cartao-taxas-pass-" + productId);
+    if (!btn) return;
+    const next = !btn.classList.contains("is-on");
+    btn.classList.toggle("is-on", next);
+    btn.setAttribute("aria-pressed", next ? "true" : "false");
+    btn.title = next ? "Repassar a taxa ao cliente" : "Isentar a taxa nesta faixa";
   };
+
+  function collectPassFeesFromToggles() {
+    const map = defaultPassFees();
+    PRODUCTS.forEach(function (p) {
+      const btn = document.getElementById("cartao-taxas-pass-" + p.id);
+      if (btn) map[p.id] = btn.classList.contains("is-on");
+    });
+    return map;
+  }
 
   window.renderCardFeesTab = function (cfg) {
     const body = document.getElementById("cartao-taxas-table-body");
     if (!body) return;
     const data = cfg || window.loadCardFeesConfig();
+    const passMap = data.passFeeByProduct || normalizePassFees(data);
     body.innerHTML = PRODUCTS.map(function (p, idx) {
       const row = data.rates[p.id] || DEFAULT_RATES[p.id];
       const zebra = idx % 2 === 0 ? " is-alt" : "";
@@ -196,11 +239,11 @@
               '<span>%</span>' +
             '</label>' +
           '</td>' +
+          '<td>' + passSwitchHtml(p.id, passMap[p.id] !== false) + '</td>' +
         '</tr>'
       );
     }).join("");
     paintUpdated(data.updatedAt);
-    paintPolicyToggle(data.passFee !== false);
     if (window.lucide && typeof window.lucide.createIcons === "function") {
       window.lucide.createIcons();
     }
@@ -216,9 +259,13 @@
       alert("Informe taxas válidas entre 0 e 100, no formato 1,30.");
       return;
     }
-    const toggle = document.getElementById("cartao-taxas-policy-toggle");
-    const passFee = !(toggle && !toggle.classList.contains("is-on"));
-    const payload = { rates: collected.rates, passFee: passFee, updatedAt: Date.now() };
+    const passFeeByProduct = collectPassFeesFromToggles();
+    const payload = {
+      rates: collected.rates,
+      passFeeByProduct: passFeeByProduct,
+      passFee: PRODUCTS.every(function (p) { return passFeeByProduct[p.id] !== false; }),
+      updatedAt: Date.now()
+    };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     paintUpdated(payload.updatedAt);
     try {
@@ -231,7 +278,7 @@
 
   window.resetCardFeesToDefault = async function () {
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela e o repasse da taxa? As alterações não salvas serão perdidas.")
+      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela e o repasse de cada faixa? As alterações não salvas serão perdidas.")
       : window.confirm("Restaurar as taxas padrão?");
     if (!ok) return;
     window.renderCardFeesTab(cloneDefaults());

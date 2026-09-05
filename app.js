@@ -2011,18 +2011,69 @@ function auditEsc(s) {
     .replace(/"/g, "&quot;");
 }
 
+function auditNorm(s) {
+  return String(s == null ? "" : s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+function auditRowContext(row) {
+  const d = (row && row.details) || {};
+  const enterpriseId = String(row.enterpriseId || d.enterpriseId || d.costCenterId || "").trim();
+  const enterpriseName = String(row.enterpriseName || d.enterpriseName || d.costCenterName || "").trim();
+  const unitId = String(row.unitId || d.unitId || "").trim();
+  const unitName = String(row.unitName || d.unitName || "").trim();
+  const titleId = String(row.titleId || d.receivableBillId || d.titleId || "").trim();
+  const customerId = String(row.customerId || d.customerId || "").trim();
+  const customerLabel = String(row.customerLabel || "").trim();
+  return { enterpriseId, enterpriseName, unitId, unitName, titleId, customerId, customerLabel };
+}
+
+function auditIntegraUsers() {
+  let users = [];
+  try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
+  if (window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users) && ConfigUsersApp.users.length) {
+    users = ConfigUsersApp.users;
+  }
+  const seen = new Set();
+  return users.filter(function(u) {
+    if (!u) return false;
+    const email = String(u.email || "").toLowerCase().trim();
+    const key = email || String(u.id || u.name || "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return !!(u.name || email);
+  }).sort(function(a, b) {
+    return String(a.name || a.email || "").localeCompare(String(b.name || b.email || ""), "pt-BR");
+  });
+}
+
+function populateAuditUserFilter() {
+  const sel = document.getElementById("audit-filter-user");
+  if (!sel) return;
+  const current = sel.value || "";
+  const users = auditIntegraUsers();
+  const opts = ['<option value="">Todos</option>'].concat(users.map(function(u) {
+    const email = String(u.email || "").toLowerCase();
+    const name = String(u.name || email || "Usuário");
+    const label = email ? (name + " — " + email) : name;
+    return '<option value="' + auditEsc(email || name) + '">' + auditEsc(label) + "</option>";
+  }));
+  sel.innerHTML = opts.join("");
+  if (current && [...sel.options].some(function(o) { return o.value === current; })) sel.value = current;
+}
+
 window.renderAuditLogs = async function(forceReload) {
   const tbody = document.getElementById("audit-table-body");
   if (!tbody) return;
+  populateAuditUserFilter();
 
   const force = forceReload === true;
   const now = Date.now();
   if (force || !window._auditCache.rows.length || (now - window._auditCache.at) > 20000) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:24px;">Carregando logs...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:24px;">Carregando logs...</td></tr>`;
     const local = (window.AuditService && AuditService.getLogs()) || [];
     let remote = [];
     if (window.AuditService && typeof AuditService.loadRemote === "function") {
-      try { remote = await AuditService.loadRemote(400); } catch (e) { remote = []; }
+      try { remote = await AuditService.loadRemote(800); } catch (e) { remote = []; }
     }
     const byId = {};
     [].concat(remote, local).forEach(function(row) {
@@ -2037,44 +2088,79 @@ window.renderAuditLogs = async function(forceReload) {
 
   const actionFilter = (document.getElementById("audit-filter-action") || {}).value || "principais";
   const userQ = String((document.getElementById("audit-filter-user") || {}).value || "").trim().toLowerCase();
-  const textQ = String((document.getElementById("audit-filter-text") || {}).value || "").trim().toLowerCase();
+  const ccQ = auditNorm((document.getElementById("audit-filter-cc") || {}).value);
+  const unitQ = auditNorm((document.getElementById("audit-filter-unit") || {}).value);
+  const tituloQ = auditNorm((document.getElementById("audit-filter-titulo") || {}).value);
+  const clienteQ = auditNorm((document.getElementById("audit-filter-cliente") || {}).value);
+  const fromVal = String((document.getElementById("audit-filter-from") || {}).value || "").trim();
+  const toVal = String((document.getElementById("audit-filter-to") || {}).value || "").trim();
+  const fromTs = fromVal ? new Date(fromVal + "T00:00:00").getTime() : 0;
+  const toTs = toVal ? new Date(toVal + "T23:59:59").getTime() : 0;
 
   const rows = window._auditCache.rows.filter(function(row) {
     const meta = auditActionMeta(row.action);
     if (actionFilter === "principais" && meta.group === "outros") return false;
     if (actionFilter === "boleto" && meta.group !== "boleto") return false;
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
-    const userBlob = ((row.user || "") + " " + (row.userEmail || "")).toLowerCase();
-    if (userQ && userBlob.indexOf(userQ) === -1) return false;
-    if (textQ) {
-      const hay = [
-        row.summary, row.customerLabel, row.customerId, row.endpoint,
-        JSON.stringify(row.details || {})
-      ].join(" ").toLowerCase();
-      if (hay.indexOf(textQ) === -1) return false;
+    if (userQ) {
+      const email = String(row.userEmail || "").toLowerCase();
+      const name = auditNorm(row.user);
+      if (email !== userQ && name !== auditNorm(userQ) && email.indexOf(userQ) === -1) return false;
+    }
+    if (fromTs && !isNaN(fromTs)) {
+      const t = new Date(row.timestamp || 0).getTime();
+      if (!t || t < fromTs) return false;
+    }
+    if (toTs && !isNaN(toTs)) {
+      const t = new Date(row.timestamp || 0).getTime();
+      if (!t || t > toTs) return false;
+    }
+    const ctx = auditRowContext(row);
+    if (ccQ) {
+      const hay = auditNorm([ctx.enterpriseId, ctx.enterpriseName].join(" "));
+      if (hay.indexOf(ccQ) === -1) return false;
+    }
+    if (unitQ) {
+      const hay = auditNorm([ctx.unitId, ctx.unitName].join(" "));
+      if (hay.indexOf(unitQ) === -1) return false;
+    }
+    if (tituloQ) {
+      const hay = auditNorm([ctx.titleId, row.summary, (row.details && row.details.contractNumber) || ""].join(" "));
+      if (hay.indexOf(tituloQ) === -1) return false;
+    }
+    if (clienteQ) {
+      const hay = auditNorm([ctx.customerId, ctx.customerLabel, row.summary].join(" "));
+      if (hay.indexOf(clienteQ) === -1) return false;
     }
     return true;
   });
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:28px;">Nenhum log encontrado para este filtro.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:28px;">Nenhum log encontrado para este filtro.</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(function(row) {
     const meta = auditActionMeta(row.action);
+    const ctx = auditRowContext(row);
     const ok = String(row.status || "ok") !== "erro";
     const statusHtml = ok
       ? `<span style="color:#15803d;font-weight:700;">OK</span>`
       : `<span style="color:#b91c1c;font-weight:700;">Erro</span>`;
     const who = row.userEmail ? (auditEsc(row.user) + "<br><span style=\"color:#64748b;font-size:0.75rem;\">" + auditEsc(row.userEmail) + "</span>") : auditEsc(row.user || "—");
-    const alvo = row.customerLabel || (row.details && row.details.receivableBillId ? ("Título " + row.details.receivableBillId) : "—");
+    const emp = [ctx.enterpriseId, ctx.enterpriseName].filter(Boolean).join(" — ") || "—";
+    const uni = [ctx.unitId, ctx.unitName].filter(Boolean).join(" — ");
+    const local = uni && uni !== emp ? (emp + "<br><span style=\"color:#64748b;font-size:0.75rem;\">" + auditEsc(uni) + "</span>") : auditEsc(emp);
+    const cliente = ctx.customerLabel || (ctx.customerId ? ("Cliente " + ctx.customerId) : "—");
+    const titulo = ctx.titleId || "—";
     return `<tr>
       <td style="white-space:nowrap;">${auditEsc(auditFormatWhen(row.timestamp))}</td>
       <td>${who}</td>
       <td>${auditEsc(meta.label)}</td>
-      <td>${auditEsc(alvo)}</td>
-      <td style="max-width:420px;">${auditEsc(row.summary || "")}</td>
+      <td>${auditEsc(cliente)}</td>
+      <td>${auditEsc(titulo)}</td>
+      <td>${local}</td>
+      <td style="max-width:360px;">${auditEsc(row.summary || "")}</td>
       <td>${statusHtml}</td>
     </tr>`;
   }).join("");

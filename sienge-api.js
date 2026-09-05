@@ -241,9 +241,26 @@ const AuditService = {
     }
   },
 
+  resolveEnterpriseName: function(id) {
+    const sid = id == null ? "" : String(id).trim();
+    if (!sid) return "";
+    try {
+      const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+      const cc = list.find(function(c) {
+        return String(c.id) === sid || String(c.code) === sid;
+      });
+      if (cc && cc.name) return String(cc.name);
+    } catch (e) {}
+    return "";
+  },
+
   logEvent: function(entry) {
     try {
       const user = this.currentUser();
+      const d = (entry && entry.details) || {};
+      const enterpriseId = String((entry && entry.enterpriseId) || d.enterpriseId || d.costCenterId || "").trim();
+      const unitId = String((entry && entry.unitId) || d.unitId || "").trim();
+      const titleId = String((entry && entry.titleId) || d.receivableBillId || d.titleId || "").trim();
       const rec = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2, 9),
         timestamp: new Date().toISOString(),
@@ -255,6 +272,11 @@ const AuditService = {
         summary: (entry && entry.summary) || "",
         customerId: entry && entry.customerId != null ? String(entry.customerId) : "",
         customerLabel: (entry && entry.customerLabel) || this.customerLabel(entry && entry.customerId),
+        enterpriseId: enterpriseId,
+        enterpriseName: (entry && entry.enterpriseName) || d.enterpriseName || d.costCenterName || this.resolveEnterpriseName(enterpriseId),
+        unitId: unitId,
+        unitName: (entry && entry.unitName) || d.unitName || "",
+        titleId: titleId,
         details: this.slim((entry && entry.details) || {}),
         endpoint: (entry && entry.endpoint) || "",
         method: (entry && entry.method) || ""

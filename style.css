@@ -2955,6 +2955,7 @@ circle.donut-segment {
   text-align: center;
 }
 .cartao-taxas-table th:first-child { text-align: left; }
+.cartao-taxas-table th:last-child { min-width: 210px; }
 .cartao-taxas-table td {
   padding: 12px 16px;
   border-top: 1px solid #edf2f0;
@@ -2962,6 +2963,7 @@ circle.donut-segment {
   vertical-align: middle;
 }
 .cartao-taxas-table td:first-child { text-align: left; }
+.cartao-taxas-table td:last-child { text-align: center; }
 .cartao-taxas-table tr.is-alt td { background: #faf6f1; }
 .cartao-prod {
   display: flex;
@@ -3004,6 +3006,19 @@ circle.donut-segment {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--color-primary);
+}
+.cartao-taxas-row-hint {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+.cartao-taxas-switch--row {
+  gap: 8px;
+  font-size: 0.72rem;
+}
+.cartao-taxas-switch--row .cartao-taxas-switch-off,
+.cartao-taxas-switch--row .cartao-taxas-switch-on {
+  min-width: 52px;
 }
 .cartao-taxas-policy {
   display: flex;
@@ -3361,5 +3376,24 @@ circle.donut-segment {
   .com-dash-kpis,
   .com-dash-charts,
   .com-dash-bottom { grid-template-columns: 1fr; }
+}
+
+.audit-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.audit-filters .form-group {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+}
+.audit-filters-actions {
+  flex: 0 0 auto;
+  min-width: auto;
+  display: flex;
+  align-items: flex-end;
 }
 
