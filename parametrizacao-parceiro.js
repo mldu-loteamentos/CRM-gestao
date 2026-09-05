@@ -150,12 +150,71 @@ const ParametrizacaoParceiroApp = {
     if (this.isSociedade(part)) return 0;
     const obra = this.currentObra(part);
     if (!obra) return 0;
-    if (this.isNA(part, key)) return 0;
+    return this.partnerPctForObra(part, obra, key);
+  },
+
+  /** Localiza a obra da parametrização pelo centro de custo. */
+  obraForCostCenter(part, costCenterId) {
+    const p = this.normalizeItem(part);
+    if (!p) return null;
+    const cid = String(costCenterId || "");
+    return (p.obras || []).find(o => (o.costCenters || []).some(c => String(c.id) === cid)) || null;
+  },
+
+  /** % do parceiro numa obra específica (sem depender da obra selecionada na UI). */
+  partnerPctForObra(part, obra, key) {
+    if (this.isSociedade(part) || !obra) return 0;
+    if (this.isNAForObra(part, obra, key)) return 0;
     if (obra.accountShares && Object.prototype.hasOwnProperty.call(obra.accountShares, key)) {
       const n = Number(obra.accountShares[key]);
       return Number.isFinite(n) ? n : Number(obra.defaultPartnerShare) || 0;
     }
     return Number(obra.defaultPartnerShare) || 0;
+  },
+
+  isAccountNAForObra(part, obra, accId) {
+    if (!obra) return false;
+    const sid = String(accId || "");
+    const parent = this.accountParentId(sid) || this.accountParentIdLoose(sid);
+    const ancs = parent ? [parent].concat(this.nodeAncestors(parent)) : [];
+    const ancestorNA = ancs.some(a => obra.naNodes && obra.naNodes[a]);
+    if (ancestorNA) return !(obra.inAccounts && (obra.inAccounts[sid] || obra.inAccounts[this.normKey(sid)]));
+    return !!(obra.naAccounts && (obra.naAccounts[sid] || obra.naAccounts[this.normKey(sid)]));
+  },
+
+  isNAForObra(part, obra, key, ancestors) {
+    if (!obra) return false;
+    const groups = this.dfcGroups();
+    const nk = this.normKey(key);
+    const isAcc = groups.some(g => (g.accounts || []).some(a => String(a) === String(key) || this.normKey(a) === nk));
+    if (isAcc) return this.isAccountNAForObra(part, obra, key);
+    if (obra.naNodes && obra.naNodes[key]) return true;
+    if ((ancestors || []).some(a => obra.naNodes && obra.naNodes[a])) return true;
+    return this.nodeAncestors(key).some(a => obra.naNodes && obra.naNodes[a]);
+  },
+
+  accountParentIdLoose(accId) {
+    const nk = this.normKey(accId);
+    const g = this.dfcGroups().find(g => (g.accounts || []).some(a => String(a) === String(accId) || this.normKey(a) === nk));
+    return g ? g.id : null;
+  },
+
+  normKey(id) {
+    return String(id || "").replace(/\D/g, "");
+  },
+
+  /** Conta entra na prestação com o parceiro? */
+  accountEntersPartnership(part, obra, accId) {
+    if (!part || !obra) return true;
+    return !this.isAccountNAForObra(part, obra, accId);
+  },
+
+  /** Fator a aplicar no valor (1 = 100%). Sociedade = conta integral; parceria = % do parceiro. */
+  partnershipAmountFactor(part, obra, accId) {
+    if (!part || !obra) return 1;
+    if (!this.accountEntersPartnership(part, obra, accId)) return 0;
+    if (this.isSociedade(part)) return 1;
+    return (Number(this.partnerPctForObra(part, obra, accId)) || 0) / 100;
   },
 
   dfcDefaultGroups() {
@@ -166,14 +225,25 @@ const ParametrizacaoParceiroApp = {
   },
 
   dfcVisao() {
+    if (typeof PlanoFinanceiroApp !== "undefined") {
+      if (!Array.isArray(PlanoFinanceiroApp.visoes) || !PlanoFinanceiroApp.visoes.length) {
+        try {
+          PlanoFinanceiroApp.visoes = JSON.parse(localStorage.getItem(PlanoFinanceiroApp.STORAGE_KEY || "crm_plano_visoes_v2") || "[]") || [];
+        } catch (e) {
+          PlanoFinanceiroApp.visoes = [];
+        }
+      }
+      if (typeof PlanoFinanceiroApp.ensureDfcDefault === "function") PlanoFinanceiroApp.ensureDfcDefault();
+      const dfc = (PlanoFinanceiroApp.visoes || []).find(v => v.id === "dfc_default");
+      if (dfc && Array.isArray(dfc.groups) && dfc.groups.length) {
+        return { name: dfc.name || "DFC Padrão", groups: dfc.groups, ignoredAccounts: dfc.ignoredAccounts || [] };
+      }
+    }
     let visoes = [];
     try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
-    if (typeof PlanoFinanceiroApp !== "undefined" && Array.isArray(PlanoFinanceiroApp.visoes) && PlanoFinanceiroApp.visoes.length) {
-      visoes = PlanoFinanceiroApp.visoes;
-    }
     const visao = visoes.find(v => v.id === "dfc_default") || visoes.find(v => /dfc/i.test(v.name || "")) || visoes[0];
     const groups = visao && Array.isArray(visao.groups) && visao.groups.length ? visao.groups : this.dfcDefaultGroups();
-    return { name: (visao && visao.name) || "DFC Padrão", groups };
+    return { name: (visao && visao.name) || "DFC Padrão", groups, ignoredAccounts: (visao && visao.ignoredAccounts) || [] };
   },
 
   catName(id) {

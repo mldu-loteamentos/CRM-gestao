@@ -174,19 +174,21 @@ const RepactuacaoLoteApp = {
   bindUpload() {
     const dz = document.getElementById("repac-dropzone");
     const input = document.getElementById("repac-input-excel");
-    if (!dz || !input) return;
-    dz.onclick = () => input.click();
+    if (!input) return;
+    if (dz) {
+      dz.onclick = () => input.click();
+      ["dragenter", "dragover", "dragleave", "drop"].forEach((evt) => {
+        dz.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
+      });
+      dz.addEventListener("drop", (e) => {
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f && /\.xlsx?$/i.test(f.name)) this.loadFile(f);
+      });
+    }
     input.onchange = (e) => {
       const f = e.target.files && e.target.files[0];
       if (f) this.loadFile(f);
     };
-    ["dragenter", "dragover", "dragleave", "drop"].forEach((evt) => {
-      dz.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
-    });
-    dz.addEventListener("drop", (e) => {
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f && /\.xlsx?$/i.test(f.name)) this.loadFile(f);
-    });
   },
 
   async loadFile(file) {
@@ -213,40 +215,44 @@ const RepactuacaoLoteApp = {
     }
   },
 
+  normHeader(c) {
+    return String(c || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  },
+
   findColMap(matrix) {
-    const want = {
-      cliente: ["cliente"],
-      documento: ["documento"],
-      titulo: ["título", "titulo"],
-      parcela: ["parcela"],
-      vencimento: ["data"],
-      indexerId: ["id"],
-      baseDate: ["data"],
-      valor: ["valor"],
-      emAberto: ["em aberto"],
-      ultimo: ["último", "ultimo"]
-    };
     for (let r = 0; r < Math.min(matrix.length, 40); r++) {
-      const row = (matrix[r] || []).map((c) => String(c || "").trim().toLowerCase());
-      if (!row.some((c) => c === "cliente" || c === "parcela" || c === "título" || c === "titulo")) continue;
+      const row = (matrix[r] || []).map((c) => this.normHeader(c));
+      if (!row.some((c) => c === "cliente" || c === "parcela" || c === "titulo")) continue;
       const map = { headerRow: r };
       row.forEach((c, i) => {
-        if (want.cliente.includes(c) && map.cliente == null) map.cliente = i;
-        if (want.documento.includes(c) && map.documento == null) map.documento = i;
-        if (want.titulo.includes(c) && map.titulo == null) map.titulo = i;
-        if (want.parcela.includes(c) && map.parcela == null) map.parcela = i;
-        if (want.emAberto.includes(c) && map.emAberto == null) map.emAberto = i;
-        if (want.ultimo.includes(c) && map.ultimo == null) map.ultimo = i;
+        if ((c === "cliente" || c.startsWith("cliente")) && map.cliente == null) map.cliente = i;
+        if (c === "documento" && map.documento == null) map.documento = i;
+        if ((c === "titulo" || c === "titulo a receber" || c === "nr titulo") && map.titulo == null) map.titulo = i;
+        if (c === "parcela" && map.parcela == null) map.parcela = i;
+        if ((c === "em aberto" || c.includes("em aberto")) && map.emAberto == null) map.emAberto = i;
+        if ((c === "ultimo" || c.includes("ultimo")) && map.ultimo == null) map.ultimo = i;
+        if ((c === "vencimento" || c === "dt vencimento" || c === "data vencimento") && map.vencimento == null) map.vencimento = i;
+        if ((c.includes("data base") || c === "dt base" || c === "base") && map.baseDate == null) map.baseDate = i;
+        if ((c === "indexador" || c === "id indexador" || c === "id do indexador") && map.indexerId == null) map.indexerId = i;
+        if ((c === "centro" || c.includes("centro de custo")) && map.cc == null) map.cc = i;
       });
       const dataCols = [];
       row.forEach((c, i) => { if (c === "data") dataCols.push(i); });
-      if (dataCols[0] != null && map.parcela != null && dataCols[0] > map.parcela) map.vencimento = dataCols[0];
-      else if (dataCols[0] != null) map.refDate = dataCols[0];
-      if (dataCols[1] != null) map.vencimento = map.vencimento != null ? map.vencimento : dataCols[1];
-      const idIdx = row.findIndex((c, i) => c === "id" && (map.parcela == null || i > map.parcela));
-      if (idIdx >= 0) map.indexerId = idIdx;
-      if (idIdx >= 0) {
-        const afterId = dataCols.find((i) => i > idIdx);
+      if (map.vencimento == null) {
+        if (dataCols[0] != null && map.parcela != null && dataCols[0] > map.parcela) map.vencimento = dataCols[0];
+        else if (dataCols[0] != null) map.refDate = dataCols[0];
+        if (dataCols[1] != null) map.vencimento = map.vencimento != null ? map.vencimento : dataCols[1];
+      }
+      if (map.indexerId == null) {
+        const idIdx = row.findIndex((c, i) => c === "id" && (map.parcela == null || i > map.parcela));
+        if (idIdx >= 0) map.indexerId = idIdx;
+      }
+      if (map.baseDate == null && map.indexerId != null) {
+        const afterId = dataCols.find((i) => i > map.indexerId);
         if (afterId != null) map.baseDate = afterId;
       }
       const valorIdx = row.lastIndexOf("valor");
@@ -303,8 +309,11 @@ const RepactuacaoLoteApp = {
       const isInstallment = parcela != null && parcela > 0 && Number.isInteger(parcela) && valor != null && indexerId;
       if (!isInstallment) return;
 
+      const rowCc = col.cc != null ? String(row[col.cc] || "").trim() : "";
       rows.push({
-        empresa, cc, cliente, documento, titulo,
+        empresa,
+        cc: rowCc || cc,
+        cliente, documento, titulo,
         parcela: Math.round(parcela),
         vencimento: this.parseDate(row[col.vencimento]),
         indexerId,
@@ -403,6 +412,54 @@ const RepactuacaoLoteApp = {
     });
   },
 
+  pickSiengeInstallmentValue(inst) {
+    if (!inst) return null;
+    const candidates = [
+      inst.currentBalance,
+      inst.currentValue,
+      inst.balanceDue,
+      inst.installmentValue,
+      inst.originalValue,
+      inst.principalValue,
+      inst.value,
+      inst.correctedValue
+    ];
+    for (const c of candidates) {
+      if (c == null || c === "") continue;
+      const n = Number(c);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  },
+
+  findInstallmentForParcela(insts, parcela) {
+    const want = Number(parcela);
+    if (!Number.isFinite(want)) return null;
+    const list = Array.isArray(insts) ? insts : [];
+    return list.find((x) => Number(x.installmentNumber ?? x.number) === want)
+      || list.find((x) => Number(x.installmentId) === want && (x.installmentNumber == null && x.number == null))
+      || null;
+  },
+
+  applyTitleInstallments(titulo, insts) {
+    this.state.rows = this.state.rows.map((row) => {
+      if (String(row.titulo) !== String(titulo)) return row;
+      const hit = this.findInstallmentForParcela(insts, row.parcela);
+      const cur = this.pickSiengeInstallmentValue(hit);
+      const projetado = cur != null && Number.isFinite(cur) && row.factor ? cur * row.factor : null;
+      const valorOk = projetado != null && row.excelValor != null
+        ? Math.abs(projetado - row.excelValor) <= Math.max(0.05, Math.abs(row.excelValor) * 0.002)
+        : null;
+      return {
+        ...row,
+        siengeValor: cur,
+        crmProjetado: projetado,
+        valorOk,
+        vencimento: row.vencimento || (hit && hit.dueDate ? String(hit.dueDate).slice(0, 10) : row.vencimento)
+      };
+    });
+  },
+
   async conferirSienge() {
     const uniqueIdx = [...new Set(this.state.rows.map((r) => r.indexerId).filter(Boolean))];
     for (const id of uniqueIdx) {
@@ -421,42 +478,87 @@ const RepactuacaoLoteApp = {
     const titles = [...new Set(this.state.rows.map((r) => r.titulo).filter(Boolean))];
     this.state.loading = true;
     this.render();
-    for (let i = 0; i < titles.length; i++) {
+
+    const concurrency = 6;
+    let done = 0;
+    for (let i = 0; i < titles.length; i += concurrency) {
       if (this.state.stop) break;
-      const titulo = titles[i];
-      const el = document.getElementById("repac-progress");
-      if (el) el.textContent = `Conferindo valores no Sienge ${i + 1}/${titles.length} (título ${titulo})…`;
-      try {
-        const insts = await this.fetchInstallments(titulo);
-        this.state.rows = this.state.rows.map((row) => {
-          if (String(row.titulo) !== String(titulo)) return row;
-          const hit = (insts || []).find((x) => Number(x.installmentNumber || x.number) === Number(row.parcela));
-          const raw = hit
-            ? (hit.value != null ? hit.value
-              : (hit.installmentValue != null ? hit.installmentValue
-                : (hit.currentValue != null ? hit.currentValue : hit.originalValue)))
-            : null;
-          const cur = raw == null || raw === "" ? null : Number(raw);
-          const projetado = cur != null && Number.isFinite(cur) && row.factor ? cur * row.factor : null;
-          const valorOk = projetado != null && row.excelValor != null
-            ? Math.abs(projetado - row.excelValor) <= Math.max(0.05, Math.abs(row.excelValor) * 0.002)
-            : null;
-          return { ...row, siengeValor: cur, crmProjetado: projetado, valorOk };
-        });
-      } catch (e) {
-        console.warn("[Repactuação] título", titulo, e);
-      }
-      if ((i + 1) % 8 === 0) this.renderTableOnly();
+      const chunk = titles.slice(i, i + concurrency);
+      await Promise.all(chunk.map(async (titulo) => {
+        if (this.state.stop) return;
+        try {
+          const insts = await this.fetchInstallments(titulo);
+          this.applyTitleInstallments(titulo, insts);
+        } catch (e) {
+          console.warn("[Repactuação] título", titulo, e);
+        } finally {
+          done += 1;
+          const el = document.getElementById("repac-progress");
+          if (el) el.textContent = `Conferindo valores no Sienge ${done}/${titles.length}…`;
+        }
+      }));
+      this.renderTableOnly();
+      this.renderKpisOnly();
     }
     this.state.loading = false;
     this.render();
   },
 
   async fetchInstallments(titulo) {
-    const id = String(titulo || "").replace(/^B-/, "");
-    if (!id || typeof window.siengeFetchWithRetry !== "function") return [];
-    const res = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments`);
-    return (res && (res.results || res.data)) || [];
+    const id = String(titulo || "").replace(/^B-/i, "").trim();
+    if (!id) return [];
+
+    let list = [];
+    try {
+      if (window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
+        list = await SiengeApiService.getBillInstallments(id) || [];
+      } else if (typeof window.siengeFetchWithRetry === "function") {
+        const res = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments`);
+        list = (res && (res.results || res.data || res.installments)) || (Array.isArray(res) ? res : []);
+      }
+    } catch (e) {
+      console.warn("[Repactuação] installments", id, e);
+      list = [];
+    }
+    if (!Array.isArray(list)) list = [];
+
+    // Fallback: extrato do cliente (mesma fonte da aba Repactuações)
+    const hasBalance = list.some((inst) => this.pickSiengeInstallmentValue(inst) != null);
+    if ((!list.length || !hasBalance) && typeof window.siengeFetchWithRetry === "function") {
+      try {
+        const end = this.state.adjustDate || (typeof window.localDateStr === "function" ? window.localDateStr() : new Date().toISOString().slice(0, 10));
+        const start = "2000-01-01";
+        const q = `/bulk-data/v1/customer-extract-history?startDueDate=${start}&endDueDate=${end}&billReceivableId=${encodeURIComponent(id)}&documentsId=CT&includeRemadeInstallments=true&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
+        const json = await siengeFetchWithRetry(q);
+        const items = (json && (json.data || json.results || json.items)) || (Array.isArray(json) ? json : []);
+        const fromExtract = [];
+        (items || []).forEach((item) => {
+          (item.installments || []).forEach((inst) => {
+            fromExtract.push(inst);
+          });
+        });
+        if (fromExtract.length) list = fromExtract;
+      } catch (e2) {
+        console.warn("[Repactuação] extract-history", id, e2);
+      }
+    }
+    return list;
+  },
+
+  clearFile() {
+    if (this.state.loading) {
+      this.state.stop = true;
+    }
+    this.state.fileName = "";
+    this.state.rows = [];
+    this.state.loading = false;
+    this.state.stop = false;
+    this.state.filter = "all";
+    this.state.period = null;
+    this.state.adjustDate = null;
+    this.state.firstBusinessDay = null;
+    this.state.empresa = "";
+    this.render();
   },
 
   setFilter(f) {
@@ -466,6 +568,23 @@ const RepactuacaoLoteApp = {
 
   parar() {
     this.state.stop = true;
+  },
+
+  renderKpisOnly() {
+    const box = document.getElementById("repac-kpis");
+    if (!box || !this.state.rows.length) return;
+    const n = this.state.rows.length;
+    const baseFail = this.state.rows.filter((r) => r.baseOk === false).length;
+    const valFail = this.state.rows.filter((r) => r.valorOk === false).length;
+    const ok = this.state.rows.filter((r) => r.baseOk === true && r.valorOk === true).length;
+    const missingSienge = this.state.rows.filter((r) => r.siengeValor == null).length;
+    box.innerHTML = `
+      <div class="est-fin-card"><label>Parcelas</label><strong>${n}</strong></div>
+      <div class="est-fin-card is-ok"><label>Bateram</label><strong>${ok}</strong></div>
+      <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${baseFail}</strong></div>
+      <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${valFail}</strong></div>
+      <div class="est-fin-card${missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${missingSienge}</strong></div>
+    `;
   },
 
   filteredRows() {
@@ -481,6 +600,35 @@ const RepactuacaoLoteApp = {
     if (wrap) wrap.innerHTML = this.tableHtml();
   },
 
+  uploadZoneHtml() {
+    const hasFile = !!this.state.fileName;
+    if (hasFile) {
+      return `
+        <div class="repac-file-chip" style="display:inline-flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;max-width:100%;">
+          <i data-lucide="paperclip" style="width:18px;height:18px;color:var(--color-primary);flex-shrink:0;"></i>
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:0.72rem;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:0.02em;">Anexo</div>
+            <div style="font-size:0.85rem;color:#14532d;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this.esc(this.state.fileName)}">${this.esc(this.state.fileName)}</div>
+          </div>
+          <button type="button" class="btn btn-cancel" style="padding:6px 10px;font-size:0.78rem;flex-shrink:0;" onclick="event.stopPropagation(); RepactuacaoLoteApp.clearFile()" title="Remover planilha">
+            <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Remover
+          </button>
+          <input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">
+        </div>
+      `;
+    }
+    return `
+      <div id="repac-dropzone" class="dropzone" style="border:2px dashed #94a3b8;padding:14px 16px;text-align:left;border-radius:8px;cursor:pointer;background:#f8fafc;display:flex;align-items:center;gap:12px;max-width:420px;">
+        <i data-lucide="file-spreadsheet" style="width:28px;height:28px;color:var(--color-primary);flex-shrink:0;"></i>
+        <div>
+          <p style="margin:0;color:#334155;font-size:0.9rem;font-weight:600;">Clique ou arraste o Excel (.xlsx)</p>
+          <p style="margin:2px 0 0;font-size:0.75rem;color:#64748b;">Planilha Títulos para Repactuação</p>
+        </div>
+        <input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">
+      </div>
+    `;
+  },
+
   tableHtml() {
     const rows = this.filteredRows();
     if (!this.state.rows.length) {
@@ -489,27 +637,32 @@ const RepactuacaoLoteApp = {
     const body = rows.slice(0, 800).map((r) => {
       const baseClass = r.baseOk === false ? "color:#b91c1c;font-weight:700;" : (r.baseOk ? "color:#15803d;" : "");
       const valClass = r.valorOk === false ? "color:#b91c1c;font-weight:700;" : (r.valorOk ? "color:#15803d;" : "");
-      const st = r.baseOk === false || r.valorOk === false
-        ? `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`
-        : (r.valorOk && r.baseOk
-          ? `<span class="est-fin-chip est-fin-Adimplente">Bateu</span>`
-          : `<span class="est-fin-chip est-fin-apurar">Conferindo</span>`);
+      let st;
+      if (r.baseOk === false || r.valorOk === false) {
+        st = `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`;
+      } else if (r.valorOk && r.baseOk) {
+        st = `<span class="est-fin-chip est-fin-Adimplente">Bateu</span>`;
+      } else if (r.siengeValor == null && !this.state.loading) {
+        st = `<span class="est-fin-chip est-fin-Inadimplente">Sem Sienge</span>`;
+      } else {
+        st = `<span class="est-fin-chip est-fin-apurar">${this.state.loading ? "Conferindo" : "Pendente"}</span>`;
+      }
       return `<tr>
-        <td>${this.esc(r.titulo)}</td>
-        <td>${this.esc(r.cliente)}</td>
-        <td>${this.esc(r.documento)}</td>
-        <td>${this.esc(r.cc)}</td>
-        <td>${this.esc(r.parcela)}</td>
-        <td>${this.esc(this.fmtDate(r.vencimento))}</td>
-        <td>${this.esc(r.indexerId)} — ${this.esc(r.indexerName)}</td>
-        <td>${r.retro == null ? "—" : this.esc(r.retro)}</td>
-        <td style="${baseClass}">${this.esc(this.fmtDate(r.excelBase))}</td>
-        <td style="${baseClass}">${this.esc(this.fmtDate(r.expectedBase))}</td>
-        <td>${this.esc(this.pct(r.accPct))}</td>
-        <td style="text-align:right;">${this.esc(this.money(r.siengeValor))}</td>
-        <td style="text-align:right;${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
-        <td style="text-align:right;${valClass}">${this.esc(this.money(r.excelValor))}</td>
-        <td>${st}</td>
+        <td style="text-align:center;">${this.esc(r.titulo)}</td>
+        <td style="text-align:center;">${this.esc(r.cliente)}</td>
+        <td style="text-align:center;">${this.esc(r.documento)}</td>
+        <td style="text-align:center;">${this.esc(r.cc || "—")}</td>
+        <td style="text-align:center;">${this.esc(r.parcela)}</td>
+        <td style="text-align:center;">${this.esc(this.fmtDate(r.vencimento))}</td>
+        <td style="text-align:center;">${this.esc(r.indexerId)} — ${this.esc(r.indexerName)}</td>
+        <td style="text-align:center;">${r.retro == null ? "—" : this.esc(r.retro)}</td>
+        <td style="text-align:center;${baseClass}">${this.esc(this.fmtDate(r.excelBase))}</td>
+        <td style="text-align:center;${baseClass}">${this.esc(this.fmtDate(r.expectedBase))}</td>
+        <td style="text-align:center;">${this.esc(this.pct(r.accPct))}</td>
+        <td style="text-align:center;">${this.esc(this.money(r.siengeValor))}</td>
+        <td style="text-align:center;${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
+        <td style="text-align:center;${valClass}">${this.esc(this.money(r.excelValor))}</td>
+        <td style="text-align:center;">${st}</td>
       </tr>`;
     }).join("");
     return `
@@ -517,10 +670,21 @@ const RepactuacaoLoteApp = {
         <table class="custom-table">
           <thead>
             <tr>
-              <th>Título</th><th>Cliente</th><th>Documento</th><th>Centro</th>
-              <th>Parcela</th><th>Vencimento</th><th>Indexador</th><th>Retro</th>
-              <th>Data base (Excel)</th><th>Data base (CRM)</th><th>Acum. 12m</th>
-              <th>Valor atual Sienge</th><th>Projetado CRM</th><th>Valor Excel</th><th>Status</th>
+              <th style="text-align:center;">Título</th>
+              <th style="text-align:center;">Cliente</th>
+              <th style="text-align:center;">Documento</th>
+              <th style="text-align:center;">Centro</th>
+              <th style="text-align:center;">Parcela</th>
+              <th style="text-align:center;">Vencimento</th>
+              <th style="text-align:center;">Indexador</th>
+              <th style="text-align:center;">Retro</th>
+              <th style="text-align:center;">Data base (Excel)</th>
+              <th style="text-align:center;">Data base (CRM)</th>
+              <th style="text-align:center;">Acum. 12m</th>
+              <th style="text-align:center;">Valor atual Sienge</th>
+              <th style="text-align:center;">Projetado CRM</th>
+              <th style="text-align:center;">Valor Excel</th>
+              <th style="text-align:center;">Status</th>
             </tr>
           </thead>
           <tbody>${body || `<tr><td colspan="15" style="text-align:center;padding:20px;color:#64748b;">Nenhuma linha neste filtro.</td></tr>`}</tbody>
@@ -538,6 +702,7 @@ const RepactuacaoLoteApp = {
     const baseFail = this.state.rows.filter((r) => r.baseOk === false).length;
     const valFail = this.state.rows.filter((r) => r.valorOk === false).length;
     const ok = this.state.rows.filter((r) => r.baseOk === true && r.valorOk === true).length;
+    const missingSienge = this.state.rows.filter((r) => r.siengeValor == null).length;
     root.innerHTML = `
       <div class="est-stock-page">
         <div class="search-filter-panel" style="margin-bottom:16px;">
@@ -545,28 +710,24 @@ const RepactuacaoLoteApp = {
             <i data-lucide="refresh-cw" style="width:24px;color:var(--color-primary);"></i>
             Repactuação
           </h2>
-          <p style="font-size:0.9rem;color:var(--color-text-muted);margin:0 0 16px;">
+          <p style="font-size:0.9rem;color:var(--color-text-muted);margin:0 0 12px;">
             Upload da planilha <strong>Títulos para Repactuação</strong>. O reajuste é no
             <strong>1º dia útil do mês</strong>
             ${this.state.firstBusinessDay ? `(${this.fmtDate(this.state.firstBusinessDay)})` : ""}.
             A data base do indexador segue o cadastro do Sienge (<strong>-1</strong> ou <strong>-2</strong> meses),
             igual à aba Repactuações da ficha: acumulado de 12 meses até essa data base.
           </p>
-          <div id="repac-dropzone" class="dropzone" style="border:2px dashed var(--color-primary);padding:28px;text-align:center;border-radius:8px;cursor:pointer;background:#f8fafc;">
-            <i data-lucide="file-spreadsheet" style="width:40px;height:40px;color:var(--color-primary);margin-bottom:8px;"></i>
-            <p style="margin:0;color:#334155;">Clique ou arraste o Excel (.xlsx)</p>
-            ${this.state.fileName ? `<p style="margin:8px 0 0;font-size:0.85rem;color:#15803d;">${this.esc(this.state.fileName)}</p>` : ""}
-            <input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">
-          </div>
+          ${this.uploadZoneHtml()}
           <p id="repac-progress" style="font-size:0.82rem;color:#64748b;margin:10px 0 0;">${this.state.loading ? "Processando…" : (n ? `${n} parcelas · ${titles} títulos` : "")}</p>
           ${this.state.loading ? `<button type="button" class="btn btn-cancel" style="margin-top:8px;" onclick="RepactuacaoLoteApp.parar()">Parar</button>` : ""}
         </div>
         ${n ? `
-        <div class="est-stock-kpis" style="margin-bottom:12px;">
+        <div id="repac-kpis" class="est-stock-kpis" style="margin-bottom:12px;">
           <div class="est-fin-card"><label>Parcelas</label><strong>${n}</strong></div>
           <div class="est-fin-card is-ok"><label>Bateram</label><strong>${ok}</strong></div>
           <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${baseFail}</strong></div>
           <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${valFail}</strong></div>
+          <div class="est-fin-card${missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${missingSienge}</strong></div>
         </div>
         <div class="est-stock-pills" style="margin-bottom:12px;">
           <button type="button" class="est-pill${this.state.filter === "all" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('all')">Todas</button>

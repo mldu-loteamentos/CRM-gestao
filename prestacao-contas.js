@@ -1,4 +1,4 @@
-// Prestação de Contas — DFC a partir do caixa/banco Sienge (bulk-data bank-movement)
+// Prestação de Contas — DFC Padrão (cadastro de visões) × caixa/banco Sienge × parametrização de parceiro
 
 const PrestacaoContasApp = {
   year: new Date().getFullYear(),
@@ -12,35 +12,14 @@ const PrestacaoContasApp = {
   error: "",
   movements: [],
   lines: [],
-  totals: { receitas: 0, custos: 0, despesas: 0, gco: 0 },
-  expanded: new Set(["01", "01.01", "04", "04.01", "05", "05.03", "outros"]),
+  totals: { receitas: 0, custos: 0, despesas: 0, custosDespesas: 0, gco: 0 },
+  expanded: new Set(),
+  _expandInited: false,
   selectedAccount: null,
   accountMovements: [],
-
-  DEFAULT_DFC: [
-    { id: "01", code: "01", name: "RECEITAS", kind: "total", parentId: null },
-    { id: "01.01", code: "01.01", name: "VENDA DE IMOVEIS", kind: "group", parentId: "01" },
-    { id: "04", code: "04", name: "CUSTOS", kind: "total", parentId: null },
-    { id: "04.01", code: "04.01", name: "REPASSES TERRENISTAS", kind: "group", parentId: "04" },
-    { id: "05", code: "05", name: "DESPESAS", kind: "total", parentId: null },
-    { id: "05.03", code: "05.03", name: "ADMINISTRATIVAS", kind: "group", parentId: "05" }
-  ],
-
-  ACCOUNT_MAP: {
-    "1.01.01.01": "01.01",
-    "1.03.01.02": "01.01",
-    "2.05.01.03": "01.01",
-    "2.02.04.01": "04.01",
-    "2.05.01.05": "05.03"
-  },
-
-  NAME_MAP: [
-    { test: /venda de lote/i, group: "01.01" },
-    { test: /juros ativos/i, group: "01.01" },
-    { test: /desconto de juros/i, group: "01.01" },
-    { test: /repasse/i, group: "04.01" },
-    { test: /despesas banc/i, group: "05.03" }
-  ],
+  accountIndex: {},
+  unmatchedInfo: { total: 0, samples: [] },
+  categories: [],
 
   init() {
     if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
@@ -48,10 +27,90 @@ const PrestacaoContasApp = {
     if (companies.length && !companies.some(c => String(c.id) === String(this.companyId))) {
       this.companyId = String(companies[0].id);
     }
+    this.ensureDfcReady();
+    this.ensureCategories();
     if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
       ParametrizacaoParceiroApp.loadItems().then(() => this.render()).catch(() => {});
     }
     this.render();
+  },
+
+  ensureDfcReady() {
+    if (typeof PlanoFinanceiroApp === "undefined") return;
+    if (!Array.isArray(PlanoFinanceiroApp.visoes) || !PlanoFinanceiroApp.visoes.length) {
+      try {
+        PlanoFinanceiroApp.visoes = JSON.parse(localStorage.getItem(PlanoFinanceiroApp.STORAGE_KEY || "crm_plano_visoes_v2") || "[]") || [];
+      } catch (e) {
+        PlanoFinanceiroApp.visoes = [];
+      }
+    }
+    if (typeof PlanoFinanceiroApp.ensureDfcDefault === "function") PlanoFinanceiroApp.ensureDfcDefault();
+  },
+
+  async ensureCategories() {
+    if (this.categories.length) return;
+    try {
+      if (typeof PlanoFinanceiroApp !== "undefined" && PlanoFinanceiroApp.categories && PlanoFinanceiroApp.categories.length) {
+        this.categories = PlanoFinanceiroApp.categories;
+        return;
+      }
+      if (window.SiengeApiService) {
+        const cats = await SiengeApiService.getPaymentCategories();
+        this.categories = (cats || []).map(c => ({ ...c, name: c.name || c.description || "" }));
+      }
+    } catch (e) {
+      console.warn("[Prestação de Contas] Plano financeiro:", e);
+    }
+  },
+
+  /** Mesma visão DFC Padrão do Fluxo de Caixa / cadastro de visões. */
+  visao() {
+    if (typeof FluxoCaixaApp !== "undefined" && typeof FluxoCaixaApp.visao === "function") {
+      return FluxoCaixaApp.visao();
+    }
+    this.ensureDfcReady();
+    if (typeof PlanoFinanceiroApp !== "undefined") {
+      const dfc = (PlanoFinanceiroApp.visoes || []).find(v => v.id === "dfc_default");
+      if (dfc) return dfc;
+    }
+    let visoes = [];
+    try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
+    return visoes.find(v => v.id === "dfc_default") || visoes[0] || { groups: [] };
+  },
+
+  fc() {
+    return typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+  },
+
+  normAccountKey(id) {
+    const fc = this.fc();
+    if (fc && fc.normAccountKey) return fc.normAccountKey(id);
+    return String(id || "").replace(/\D/g, "");
+  },
+
+  formatAccountCode(id) {
+    const fc = this.fc();
+    if (fc && fc.formatAccountCode) {
+      const prev = fc.categories;
+      fc.categories = this.categories;
+      const out = fc.formatAccountCode(id);
+      fc.categories = prev;
+      return out;
+    }
+    const raw = String(id || "").trim();
+    if (raw.includes(".")) return raw;
+    return raw;
+  },
+
+  catName(id) {
+    const c = this.categories.find(x => String(x.id) === String(id));
+    return (c && (c.name || c.description)) || "";
+  },
+
+  activePartnership() {
+    if (!this.partnershipId || typeof ParametrizacaoParceiroApp === "undefined") return null;
+    const p = (ParametrizacaoParceiroApp.items || []).find(x => x.id === this.partnershipId);
+    return p ? ParametrizacaoParceiroApp.normalizeItem(p) : null;
   },
 
   applyPartnership(id) {
@@ -62,8 +121,9 @@ const PrestacaoContasApp = {
     }
     const p = (ParametrizacaoParceiroApp.items || []).find(x => x.id === id);
     if (!p) { this.render(); return; }
-    this.companyId = String(p.companyId);
-    const obras = Array.isArray(p.obras) && p.obras.length ? p.obras : [{ costCenters: p.costCenters || [] }];
+    const part = ParametrizacaoParceiroApp.normalizeItem(p);
+    this.companyId = String(part.companyId);
+    const obras = Array.isArray(part.obras) && part.obras.length ? part.obras : [];
     this.costCenterIds = [...new Set(obras.flatMap(o => (o.costCenters || []).filter(c => c.inAccount).map(c => String(c.id))))];
     this.render();
   },
@@ -124,118 +184,224 @@ const PrestacaoContasApp = {
     this.render();
   },
 
-  signedAmount(categoryId, amount) {
-    const digits = String(categoryId || "").replace(/\D/g, "");
+  ignoredAccountKeys() {
+    const set = new Set();
+    const v = this.visao();
+    (v.ignoredAccounts || []).forEach(id => {
+      const sid = String(id || "").trim();
+      if (!sid) return;
+      set.add(sid);
+      const nk = this.normAccountKey(sid);
+      if (nk) set.add(nk);
+    });
+    return set;
+  },
+
+  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType) {
+    const fc = this.fc();
+    if (fc && typeof fc.signedAmount === "function") {
+      return fc.signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType);
+    }
     const abs = Math.abs(Number(amount) || 0);
-    if (digits.startsWith("2")) return -abs;
-    return abs;
+    const digits = String(categoryId || "").replace(/\D/g, "");
+    return digits.charAt(0) === "2" ? -abs : abs;
+  },
+
+  isReducingAccount(categoryId, categoryName, node) {
+    const fc = this.fc();
+    if (fc && typeof fc.isReducingAccount === "function") {
+      return fc.isReducingAccount(categoryId, categoryName, node);
+    }
+    return !!(node && node.redutora);
   },
 
   allocate(mov) {
     const amount = Number(mov.bankMovementAmount) || 0;
     const wanted = this.costCenterIds.map(String);
     let cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+    // Sem plano financeiro = transferência / aplicação — fora do DFC
+    if (!cats.length) return [];
     if (wanted.length) {
       cats = cats.filter(fc => wanted.includes(String(fc.costCenterId)));
     }
-    if (!cats.length) {
-      if (wanted.length) return [];
-      return [{
-        amount: this.signedAmount("SEM_CONTA", amount),
-        categoryId: "SEM_CONTA",
-        categoryName: "Sem plano financeiro",
-        costCenterId: mov.costCenterId || "",
-        mov
-      }];
-    }
+    if (!cats.length) return [];
+
+    const ignored = this.ignoredAccountKeys();
+    const part = this.activePartnership();
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+
     return cats.map(fc => {
+      const categoryId = String(fc.financialCategoryId || "").trim();
+      if (!categoryId) return null;
+      const nk = this.normAccountKey(categoryId);
+      if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
+
       const rate = Number(fc.financialCategoryRate);
       let share = 1;
       if (rate > 1) share = rate / 100;
       else if (rate > 0) share = rate;
       else share = 1 / cats.length;
-      const categoryId = String(fc.financialCategoryId || "SEM_CONTA");
+
+      let factor = 1;
+      if (part && PP) {
+        const obra = PP.obraForCostCenter(part, fc.costCenterId)
+          || (part.obras && part.obras[0])
+          || null;
+        if (obra) {
+          if (!PP.accountEntersPartnership(part, obra, categoryId)) return null;
+          factor = PP.partnershipAmountFactor(part, obra, categoryId);
+          if (!factor) return null;
+        }
+      }
+
       return {
-        amount: this.signedAmount(categoryId, amount * share),
+        amount: amount * share * factor,
         categoryId,
-        categoryName: fc.financialCategoryName || "Sem nome",
+        categoryName: fc.financialCategoryName || this.catName(fc.financialCategoryId) || "Sem nome",
         costCenterId: fc.costCenterId,
         costCenterName: fc.costCenterName,
+        reducer: fc.financialCategoryReducer,
+        categoryType: fc.financialCategoryType,
         mov
       };
-    });
-  },
-
-  resolveGroup(categoryId, categoryName) {
-    if (this.ACCOUNT_MAP[categoryId]) return this.ACCOUNT_MAP[categoryId];
-    for (const rule of this.NAME_MAP) {
-      if (rule.test.test(categoryName || "") || rule.test.test(categoryId || "")) return rule.group;
-    }
-    const visaoGroup = this.groupFromVisao(categoryId);
-    if (visaoGroup) return visaoGroup;
-    return "outros";
-  },
-
-  groupFromVisao(categoryId) {
-    try {
-      const visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]");
-      const visao = visoes.find(v => v.type === "custom" && Array.isArray(v.groups)) || visoes[0];
-      if (!visao || !visao.groups) return null;
-      const hit = visao.groups.find(g => Array.isArray(g.accounts) && g.accounts.some(a => String(a) === String(categoryId)));
-      return hit ? hit.id : null;
-    } catch (e) {
-      return null;
-    }
+    }).filter(Boolean);
   },
 
   buildTree(allocs) {
-    const byAccount = {};
+    this.ensureDfcReady();
+    const visao = this.visao();
+    const groups = (visao.groups || []).map(g => ({
+      ...g,
+      amount: 0,
+      accountRows: []
+    }));
+    const byId = Object.fromEntries(groups.map(g => [g.id, g]));
+    const part = this.activePartnership();
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+
+    const accToNode = {};
+    groups.forEach(g => {
+      (g.accounts || []).forEach(id => {
+        const sid = String(id).trim();
+        if (!sid) return;
+        accToNode[sid] = g.id;
+        const nk = this.normAccountKey(sid);
+        if (nk) accToNode[nk] = g.id;
+        const dotted = this.formatAccountCode(sid);
+        if (dotted) {
+          accToNode[dotted] = g.id;
+          const nk2 = this.normAccountKey(dotted);
+          if (nk2) accToNode[nk2] = g.id;
+        }
+      });
+    });
+
+    const unmatched = { total: 0, samples: [] };
+    const accIndex = {};
+
     allocs.forEach(a => {
-      const key = a.categoryId;
-      if (!byAccount[key]) byAccount[key] = { id: key, name: a.categoryName, amount: 0, items: [] };
-      byAccount[key].amount += a.amount;
-      byAccount[key].name = a.categoryName || byAccount[key].name;
-      byAccount[key].items.push(a);
+      const rawId = String(a.categoryId || "").trim();
+      if (!rawId) return;
+      const nk = this.normAccountKey(rawId);
+      const dotted = this.formatAccountCode(rawId);
+      const nid = accToNode[rawId] || (nk && accToNode[nk]) || (dotted && accToNode[dotted]) || null;
+      if (!nid || !byId[nid]) {
+        unmatched.total += Number(a.amount) || 0;
+        if (unmatched.samples.length < 12) {
+          unmatched.samples.push({ id: rawId, name: a.categoryName, amount: a.amount });
+        }
+        return;
+      }
+      const node = byId[nid];
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType);
+      node.amount += amount;
+
+      const idxKey = nk || rawId;
+      if (!accIndex[idxKey]) {
+        accIndex[idxKey] = {
+          id: rawId,
+          displayId: this.formatAccountCode(rawId),
+          name: a.categoryName,
+          amount: 0,
+          items: [],
+          parentId: node.id,
+          redutora: !!(node.redutora || this.isReducingAccount(a.categoryId, a.categoryName, node)
+            || /^(S|SIM|TRUE|1|Y|R)$/i.test(String(a.reducer || "").trim()))
+        };
+      }
+      accIndex[idxKey].amount += amount;
+      accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
+      accIndex[idxKey].items.push({ ...a, amount });
+    });
+    this.unmatchedInfo = unmatched;
+    this.accountIndex = accIndex;
+
+    Object.values(accIndex).forEach(acc => {
+      const node = byId[acc.parentId];
+      if (node) node.accountRows.push(acc);
     });
 
-    const nodes = this.DEFAULT_DFC.map(n => ({ ...n, amount: 0, accounts: [] }));
-    nodes.push({ id: "outros", code: "", name: "CONTAS NÃO CLASSIFICADAS", kind: "group", parentId: null, amount: 0, accounts: [] });
-
-    Object.values(byAccount).forEach(acc => {
-      const gid = this.resolveGroup(acc.id, acc.name);
-      let node = nodes.find(n => n.id === gid);
-      if (!node) node = nodes.find(n => n.id === "outros");
-      node.accounts.push(acc);
-      node.amount += acc.amount;
+    groups.forEach(g => {
+      g.accountRows.sort((a, b) => String(a.displayId || a.id).localeCompare(String(b.displayId || b.id), "pt-BR", { numeric: true }));
     });
 
-    const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
-    nodes.forEach(n => {
-      if (n.parentId && byId[n.parentId]) byId[n.parentId].amount += n.amount;
+    // Rollup bottom-up
+    const depthOf = (g) => {
+      let d = 0, cur = g;
+      while (cur && cur.parentId && byId[cur.parentId]) { d++; cur = byId[cur.parentId]; }
+      return d;
+    };
+    [...groups].filter(g => g.type !== "formula").sort((a, b) => depthOf(b) - depthOf(a)).forEach(g => {
+      const children = groups.filter(c => c.parentId === g.id && c.type !== "formula");
+      children.forEach(ch => { g.amount += ch.amount; });
     });
 
-    const receitas = (byId["01"] && byId["01"].amount) || 0;
-    const custos = (byId["04"] && byId["04"].amount) || 0;
-    const despesas = (byId["05"] && byId["05"].amount) || 0;
-    const outros = (byId["outros"] && byId["outros"].amount) || 0;
-    const custosDespesas = custos + despesas;
-    const gco = receitas + custosDespesas + outros;
+    const sumNodes = (ids) => ids.reduce((s, id) => s + ((byId[id] && byId[id].amount) || 0), 0);
+    const applySum = (id, parts) => {
+      if (!byId[id]) return;
+      byId[id].amount = sumNodes(parts);
+    };
+    applySum("g_03", ["g_04", "g_05"]);
+    applySum("g_06", ["g_01", "g_02", "g_03"]);
+    applySum("g_08", ["g_06", "g_07"]);
+    applySum("g_10", ["g_08", "g_09"]);
+    applySum("g_12", ["g_10", "g_11"]);
 
-    this.totals = { receitas, custos, despesas, custosDespesas, outros, gco };
-    this.accountIndex = byAccount;
+    const hideNode = (node) => {
+      if (!part || !PP || !node) return false;
+      return PP.isDfcHiddenForParceria(part, node);
+    };
+
+    if (!this._expandInited) {
+      groups.filter(g => !g.parentId && g.type !== "formula").forEach(g => this.expanded.add(g.id));
+      this._expandInited = true;
+    }
 
     const rows = [];
     const pushNode = (node, level) => {
-      const children = nodes.filter(n => n.parentId === node.id);
-      const hasKids = children.length > 0 || (node.accounts && node.accounts.length > 0);
-      rows.push({ ...node, level, hasKids, isAccount: false });
+      if (hideNode(node)) return;
+      const children = groups.filter(g => g.parentId === node.id && !hideNode(g));
+      const hasKids = children.length > 0 || (node.accountRows && node.accountRows.length > 0);
+      rows.push({
+        id: node.id,
+        code: node.code || "",
+        name: node.name || "",
+        amount: node.amount,
+        level,
+        hasKids,
+        isAccount: false,
+        isFormula: node.type === "formula",
+        type: node.type
+      });
       if (!this.expanded.has(node.id)) return;
       children.forEach(ch => pushNode(ch, level + 1));
-      (node.accounts || []).sort((a, b) => String(a.id).localeCompare(String(b.id))).forEach(acc => {
+      (node.accountRows || []).forEach(acc => {
+        const code = acc.displayId || this.formatAccountCode(acc.id);
+        const redFlag = acc.redutora ? " (−)" : "";
         rows.push({
           id: acc.id,
-          code: acc.id,
-          name: acc.name,
+          code,
+          name: `${acc.name || ""}${redFlag}`.trim(),
           amount: acc.amount,
           level: level + 1,
           isAccount: true,
@@ -244,15 +410,21 @@ const PrestacaoContasApp = {
         });
       });
     };
-    nodes.filter(n => !n.parentId && (n.amount !== 0 || n.id !== "outros")).forEach(n => pushNode(n, 0));
+    groups.filter(g => !g.parentId).forEach(g => pushNode(g, 0));
 
-    rows.push({ id: "t_cd", code: "", name: "CUSTOS E DESPESAS", amount: custosDespesas, level: 0, isFormula: true });
-    rows.push({ id: "06", code: "06", name: "GCO - GERAÇÃO DE CAIXA OPERACIONAL", amount: gco, level: 0, isFormula: true });
-    rows.push({ id: "08", code: "08", name: "FCF - FLUXO DE CAIXA LIVRE", amount: gco, level: 0, isFormula: true });
-    rows.push({ id: "10", code: "10", name: "GCO - LÍQUIDO DO RESULTADO", amount: gco, level: 0, isFormula: true });
-    rows.push({ id: "12", code: "12", name: "VARIAÇÃO DE CAIXA", amount: gco, level: 0, isFormula: true });
-
+    const receitas = (byId.g_01 && byId.g_01.amount) || 0;
+    const custos = (byId.g_04 && byId.g_04.amount) || 0;
+    const despesas = (byId.g_05 && byId.g_05.amount) || 0;
+    const gco = (byId.g_06 && byId.g_06.amount) || (receitas + custos + despesas);
+    const custosDespesas = custos + despesas;
+    this.totals = { receitas, custos, despesas, custosDespesas, gco };
     this.lines = rows;
+  },
+
+  rebuildFromMovements() {
+    const allocs = [];
+    (this.movements || []).forEach(mov => this.allocate(mov).forEach(a => allocs.push(a)));
+    this.buildTree(allocs);
   },
 
   async load() {
@@ -267,6 +439,8 @@ const PrestacaoContasApp = {
     this.render();
     const { start, end } = this.periodBounds();
     try {
+      await this.ensureCategories();
+      this.ensureDfcReady();
       if (!window.SiengeApiService || typeof SiengeApiService.getBankMovements !== "function") {
         throw new Error("API de caixa e banco indisponível.");
       }
@@ -275,11 +449,11 @@ const PrestacaoContasApp = {
         companyId: this.companyId,
         costCentersId: this.costCenterIds
       });
-      const allocs = [];
-      (this.movements || []).forEach(mov => this.allocate(mov).forEach(a => allocs.push(a)));
-      this.buildTree(allocs);
+      this.rebuildFromMovements();
       if (!this.movements.length) {
         this.error = "Nenhum movimento de caixa/banco no período para os filtros selecionados.";
+      } else if (this.unmatchedInfo && Math.abs(this.unmatchedInfo.total) > 0.005) {
+        this.error = "";
       }
     } catch (err) {
       console.error("[Prestação de Contas]", err);
@@ -295,15 +469,14 @@ const PrestacaoContasApp = {
   toggle(id) {
     if (this.expanded.has(id)) this.expanded.delete(id);
     else this.expanded.add(id);
-    const allocs = [];
-    (this.movements || []).forEach(mov => this.allocate(mov).forEach(a => allocs.push(a)));
-    this.buildTree(allocs);
+    this.rebuildFromMovements();
     this.render();
   },
 
   openAccount(id) {
     this.selectedAccount = id;
-    const acc = this.accountIndex && this.accountIndex[id];
+    const nk = this.normAccountKey(id);
+    const acc = (this.accountIndex && (this.accountIndex[id] || this.accountIndex[nk])) || null;
     this.accountMovements = acc ? acc.items : [];
     this.render();
   },
@@ -314,13 +487,16 @@ const PrestacaoContasApp = {
     const { start, end, label } = this.periodBounds();
     const companies = (window.AppState && AppState.companies) || [];
     const ccs = this.costCenters();
-    const q = (this.ccSearch || "").toLowerCase().trim();
     const partnerships = (typeof ParametrizacaoParceiroApp !== "undefined" && ParametrizacaoParceiroApp.items) || [];
     const monthLabel = label.charAt(0).toUpperCase() + label.slice(1);
     const ccNames = this.costCenterIds.map(id => {
       const cc = ccs.find(c => String(c.id) === String(id));
       return cc ? `${id} - ${cc.name}` : id;
     });
+    const visao = this.visao();
+    const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
+    const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
+    const part = this.activePartnership();
 
     root.innerHTML = `
       <div class="crm-card" style="padding: 1.2rem 1.4rem;">
@@ -330,15 +506,22 @@ const PrestacaoContasApp = {
               <i data-lucide="receipt" style="width:20px;"></i> Prestação de Contas
             </h2>
             <p style="margin:6px 0 0;color:#64748b;font-size:0.82rem;">
-              Visão DFC · Realizado · valores em REAL · seleção pela data de movimento (caixa/banco Sienge)
+              Visão <strong>${visao.name || "DFC Padrão"}</strong> (cadastro de visões) · Realizado · caixa/banco Sienge
+              ${part ? ` · parceiro <strong>${part.partnerName || ""}</strong> (entra / não entra + %)` : ""}
             </p>
           </div>
-          <button class="btn btn-primary" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}
-            style="display:inline-flex;align-items:center;gap:8px;height:38px;">
-            ${this.loading
-              ? '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></span> Consultando Sienge...'
-              : '<i data-lucide="refresh-cw" style="width:14px;"></i> Carregar DFC'}
-          </button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')"
+              style="height:38px;display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;">
+              <i data-lucide="settings-2" style="width:14px;"></i> Visões DFC
+            </button>
+            <button class="btn btn-primary" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}
+              style="display:inline-flex;align-items:center;gap:8px;height:38px;">
+              ${this.loading
+                ? '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></span> Consultando Sienge...'
+                : '<i data-lucide="refresh-cw" style="width:14px;"></i> Carregar DFC'}
+            </button>
+          </div>
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px;">
@@ -389,53 +572,57 @@ const PrestacaoContasApp = {
                 <button onclick="PrestacaoContasApp.removeCostCenter('${id}')" style="border:none;background:transparent;cursor:pointer;color:#065f46;font-size:1rem;line-height:1;">×</button>
               </span>`).join("") || '<span style="color:#94a3b8;font-size:0.8rem;">Nenhum centro selecionado</span>'}
           </div>
-          <input type="text" id="pc-cc-search" value="${this.ccSearch || ""}" placeholder="Buscar e adicionar centro (ex. 13600)..."
+          <input type="text" placeholder="Buscar e adicionar centro de custo..." value="${this.ccSearch || ""}"
             oninput="PrestacaoContasApp.onCcSearch(this.value)"
-            style="width:100%;max-width:480px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;width:100%;max-width:480px;font-size:0.85rem;">
           <div id="pc-cc-sugg">${this.ccSuggestionsHtml()}</div>
         </div>
-      </div>
 
-      ${this.error ? `<div class="crm-card" style="margin-top:12px;padding:12px 16px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;">${this.error}</div>` : ""}
+        ${this.error ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.82rem;border:1px solid #fecaca;">${this.error}</div>` : ""}
+        ${hasUnmatched ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fffbeb;color:#92400e;font-size:0.82rem;border:1px solid #fde68a;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <span><strong>${this.fmt(unmatched.total)}</strong> em contas ainda não alocadas na visão DFC Padrão.</span>
+          <button type="button" class="btn btn-outline" style="height:32px;font-size:0.75rem;" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no Apoio</button>
+        </div>` : ""}
 
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;">
-        ${this.kpi("Receitas", this.totals.receitas, "#16a34a")}
-        ${this.kpi("Custos e despesas", this.totals.custosDespesas, "#dc2626")}
-        ${this.kpi("GCO / Variação de caixa", this.totals.gco, "#0f172a")}
-        ${this.kpi("Movimentos", this.movements.length, "#0369a1", true)}
-      </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;">
+          ${this.kpi("Receitas", this.totals.receitas, "#16a34a")}
+          ${this.kpi("Custos e despesas", this.totals.custosDespesas, "#dc2626")}
+          ${this.kpi("GCO / Variação de caixa", this.totals.gco, "#0f172a")}
+          ${this.kpi("Movimentos", this.movements.length, "#0369a1", true)}
+        </div>
 
-      <div class="crm-card" style="margin-top:12px;padding:0;overflow:hidden;">
-        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-          <div>
-            <div style="font-weight:800;color:#0f172a;">Demonstrativo de Resultado</div>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
-              Agrupado por obra · ${ccNames.join(" | ") || "—"} · ${start.split("-").reverse().join("/")} a ${end.split("-").reverse().join("/")}
+        <div class="crm-card" style="margin-top:12px;padding:0;overflow:hidden;">
+          <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:800;color:#0f172a;">Demonstrativo — ${visao.name || "DFC Padrão"}</div>
+              <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
+                Agrupado por obra · ${ccNames.join(" | ") || "—"} · ${start.split("-").reverse().join("/")} a ${end.split("-").reverse().join("/")}
+              </div>
             </div>
+            <div style="font-size:0.75rem;color:#64748b;text-transform:capitalize;">${monthLabel}</div>
           </div>
-          <div style="font-size:0.75rem;color:#64748b;text-transform:capitalize;">${monthLabel}</div>
+          <div class="table-container" style="max-height:calc(100vh - 280px);overflow:auto;box-shadow:none;">
+            <table class="custom-table" style="font-size:0.82rem;">
+              <thead>
+                <tr>
+                  <th style="width:140px;">Código</th>
+                  <th>Conta</th>
+                  <th style="text-align:right;">${monthLabel}</th>
+                  <th style="text-align:right;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${this.lines.length ? this.lines.map(row => this.renderRow(row)).join("") : `
+                  <tr><td colspan="4" style="text-align:center;padding:28px;color:#94a3b8;">
+                    ${this.loading ? "Carregando movimentos de caixa..." : "Clique em Carregar DFC para consultar o Sienge."}
+                  </td></tr>`}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div class="table-container" style="max-height:calc(100vh - 280px);overflow:auto;box-shadow:none;">
-          <table class="custom-table" style="font-size:0.82rem;">
-            <thead>
-              <tr>
-                <th style="width:140px;">Código</th>
-                <th>Conta</th>
-                <th style="text-align:right;">${monthLabel}</th>
-                <th style="text-align:right;">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${this.lines.length ? this.lines.map(row => this.renderRow(row)).join("") : `
-                <tr><td colspan="4" style="text-align:center;padding:28px;color:#94a3b8;">
-                  ${this.loading ? "Carregando movimentos de caixa..." : "Clique em Carregar DFC para consultar o Sienge."}
-                </td></tr>`}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      ${this.selectedAccount ? this.renderAccountDetail() : ""}
+        ${this.selectedAccount ? this.renderAccountDetail() : ""}
+      </div>
     `;
     if (window.lucide) lucide.createIcons();
   },
@@ -457,7 +644,7 @@ const PrestacaoContasApp = {
            <i data-lucide="${this.expanded.has(row.id) ? "chevron-down" : "chevron-right"}" style="width:14px;"></i>
          </button>`
       : "";
-    const click = row.isAccount ? `onclick="PrestacaoContasApp.openAccount('${row.id}')" style="cursor:pointer;"` : "";
+    const click = row.isAccount ? `onclick="PrestacaoContasApp.openAccount('${String(row.id).replace(/'/g, "\\'")}')" style="cursor:pointer;"` : "";
     return `<tr style="background:${bg};" ${click}>
       <td style="font-weight:${isBold ? 800 : 500};color:#64748b;white-space:nowrap;">${row.code || ""}</td>
       <td style="padding-left:${pad}px;font-weight:${isBold ? 800 : 500};">
@@ -469,24 +656,25 @@ const PrestacaoContasApp = {
   },
 
   renderAccountDetail() {
-    const acc = this.accountIndex && this.accountIndex[this.selectedAccount];
+    const nk = this.normAccountKey(this.selectedAccount);
+    const acc = this.accountIndex && (this.accountIndex[this.selectedAccount] || this.accountIndex[nk]);
     if (!acc) return "";
     return `
       <div class="crm-card" style="margin-top:12px;padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">${acc.id} — ${acc.name}</h3>
-          <button class="btn btn-secondary" onclick="PrestacaoContasApp.selectedAccount=null;PrestacaoContasApp.render()">Fechar</button>
+          <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">${acc.displayId || acc.id} — ${acc.name}</h3>
+          <button class="btn btn-cancel" onclick="PrestacaoContasApp.selectedAccount=null;PrestacaoContasApp.render()">Fechar</button>
         </div>
         <div class="table-container" style="box-shadow:none;max-height:280px;overflow:auto;">
           <table class="custom-table" style="font-size:0.8rem;">
             <thead><tr><th>Data</th><th>Histórico</th><th>Cliente / Credor</th><th>C.C.</th><th style="text-align:right;">Valor</th></tr></thead>
             <tbody>
-              ${acc.items.map(it => {
-                const d = String(it.mov.bankMovementDate || "").slice(0, 10).split("-").reverse().join("/");
+              ${(acc.items || []).map(it => {
+                const d = String((it.mov && (it.mov.bankMovementDate || it.mov.paymentDate)) || "").slice(0, 10).split("-").reverse().join("/");
                 return `<tr>
                   <td>${d || "—"}</td>
-                  <td>${it.mov.bankMovementHistoricName || it.mov.documentIdentificationName || "—"}</td>
-                  <td>${it.mov.clientName || it.mov.creditorName || "—"}</td>
+                  <td>${(it.mov && (it.mov.bankMovementHistoricName || it.mov.documentIdentificationName)) || "—"}</td>
+                  <td>${(it.mov && (it.mov.clientName || it.mov.creditorName)) || "—"}</td>
                   <td>${it.costCenterId || "—"}</td>
                   <td style="text-align:right;font-weight:700;color:${it.amount < 0 ? "#b91c1c" : "#16a34a"};">${this.fmt(it.amount)}</td>
                 </tr>`;

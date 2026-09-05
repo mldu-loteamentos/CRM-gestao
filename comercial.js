@@ -496,9 +496,9 @@ const ComercialApp = {
       if (el) el.innerHTML = html;
     };
 
-    ['kpi-vendas-period-lbl', 'kpi-distratos-period-lbl', 'kpi-variacao-period-lbl', 'kpi-relacao-period-lbl']
+    ['kpi-vendas-period-lbl', 'kpi-distratos-period-lbl', 'kpi-variacao-period-lbl']
       .forEach((id) => set(id, periodLbl));
-    ['kpi-vendas-ytd-lbl', 'kpi-distratos-ytd-lbl', 'kpi-variacao-ytd-lbl', 'kpi-relacao-ytd-lbl']
+    ['kpi-vendas-ytd-lbl', 'kpi-distratos-ytd-lbl', 'kpi-variacao-ytd-lbl']
       .forEach((id) => set(id, `Acum. ${ytdLbl}`));
 
     set('kpi-vendas', String(agg.vendasPeriodo));
@@ -515,13 +515,6 @@ const ComercialApp = {
     set('kpi-variacao-comp', this.fmtPct(saldo, saldoAnt, false));
     set('kpi-variacao-ytd', String(saldoYtd));
     set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
-    set('kpi-relacao', this.fmtRel(agg.vendasPeriodo, agg.distratosPeriodo));
-    set('kpi-relacao-comp', `ano ant. ${this.fmtRel(agg.vendasPeriodoAnt, agg.distratosPeriodoAnt)}`);
-    set('kpi-relacao-ytd', this.fmtRel(agg.vendasAno, agg.distratosAno));
-    set('kpi-relacao-ytd-comp', `ano ant. ${this.fmtRel(agg.vendasAnoAnt, agg.distratosAnoAnt)}`);
-    set('kpi-m2-vendido', this.fmtM2(agg.m2Venda));
-    set('kpi-m2-devolvido', this.fmtM2(agg.m2Dist));
-    set('kpi-m2-saldo', this.fmtM2(agg.m2Venda - agg.m2Dist));
 
     const tbody = document.getElementById('comercial-table-body');
     if (tbody) {

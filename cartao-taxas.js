@@ -1,5 +1,7 @@
 (function () {
   const STORAGE_KEY = "crm_moura_cartao_taxas";
+  let saveTimer = null;
+  let saving = false;
 
   const PRODUCTS = [
     { id: "credito_vista", label: "Crédito à vista", icon: "credit-card", hint: "1x no crédito" },
@@ -58,31 +60,15 @@
     return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function formatMoney(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "R$ 0,00";
-    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  }
-
   function parsePct(raw) {
     const s = String(raw || "").trim().replace("%", "").replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
     if (!s) return NaN;
     return parseFloat(s);
   }
 
-  function parseMoney(raw) {
-    const s = String(raw || "").trim().replace(/[R$\s]/g, "");
-    if (!s) return 0;
-    const normalized = s.indexOf(",") !== -1
-      ? s.replace(/\./g, "").replace(",", ".")
-      : s;
-    const n = parseFloat(normalized);
-    return Number.isFinite(n) ? n : 0;
-  }
-
   function normalizeBrand(brand) {
     const b = String(brand || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (b.indexOf("elo") !== -1 || b.indexOf("amex") !== -1 || b.indexOf("american") !== -1) return "eloAmex";
+    if (b.indexOf("elo") !== -1 || b.indexOf("amex") !== -1 || b.indexOf("american") !== -1 || b === "eloamex") return "eloAmex";
     return "masterVisa";
   }
 
@@ -94,7 +80,15 @@
     return "credito_7_12";
   }
 
+  function brandLabel(brand) {
+    return normalizeBrand(brand) === "eloAmex" ? "Elo / Amex" : "Master / Visa";
+  }
+
   window.getDefaultCardFees = cloneDefaults;
+  window.cardProductForInstallments = productForInstallments;
+  window.cardBrandLabel = brandLabel;
+  window.normalizeCardBrand = normalizeBrand;
+  window.CARD_FEE_PRODUCTS = PRODUCTS;
 
   window.loadCardFeesConfig = function () {
     const fallback = cloneDefaults();
@@ -122,28 +116,52 @@
     }
   };
 
-  window.getCardFeeRate = function (productOrInstallments, brand) {
+  window.getCardFeeRateInfo = function (productOrInstallments, brand) {
     const cfg = window.loadCardFeesConfig();
     let productId = String(productOrInstallments || "");
     if (PRODUCTS.every(function (p) { return p.id !== productId; })) {
       productId = productForInstallments(productOrInstallments);
     }
-    if (!productPassesFee(cfg, productId)) return 0;
     const group = normalizeBrand(brand);
     const row = cfg.rates[productId] || cfg.rates.credito_vista || {};
-    return Number(row[group]) || 0;
+    const rate = Number(row[group]) || 0;
+    const passFee = productPassesFee(cfg, productId);
+    return {
+      productId: productId,
+      brand: group,
+      brandLabel: brandLabel(group),
+      rate: rate,
+      passFee: passFee,
+      appliedRate: passFee ? rate : 0
+    };
+  };
+
+  window.getCardFeeRate = function (productOrInstallments, brand) {
+    return window.getCardFeeRateInfo(productOrInstallments, brand).appliedRate;
   };
 
   window.calcCardFee = function (amount, productOrInstallments, brand) {
-    const cfg = window.loadCardFeesConfig();
-    let productId = String(productOrInstallments || "");
-    if (PRODUCTS.every(function (p) { return p.id !== productId; })) {
-      productId = productForInstallments(productOrInstallments);
-    }
-    const rate = window.getCardFeeRate(productId, brand);
+    const info = window.getCardFeeRateInfo(productOrInstallments, brand);
     const base = Number(amount) || 0;
-    const fee = base * (rate / 100);
-    return { rate: rate, fee: fee, net: base - fee, passFee: productPassesFee(cfg, productId), productId: productId };
+    const rate = info.appliedRate;
+    let charged = base;
+    let fee = 0;
+    if (rate > 0 && rate < 100) {
+      charged = base / (1 - rate / 100);
+      fee = charged - base;
+    }
+    return {
+      rate: info.rate,
+      appliedRate: rate,
+      fee: fee,
+      base: base,
+      charged: charged,
+      net: base,
+      passFee: info.passFee,
+      productId: info.productId,
+      brand: info.brand,
+      brandLabel: info.brandLabel
+    };
   };
 
   function collectRatesFromInputs() {
@@ -165,9 +183,17 @@
     return { rates: rates, valid: valid };
   }
 
-  function paintUpdated(updatedAt) {
+  function paintUpdated(updatedAt, status) {
     const el = document.getElementById("cartao-taxas-updated");
     if (!el) return;
+    if (status === "saving") {
+      el.textContent = "salvando…";
+      return;
+    }
+    if (status === "error") {
+      el.textContent = "salvo localmente · falha na nuvem";
+      return;
+    }
     if (!updatedAt) {
       el.textContent = "";
       return;
@@ -177,7 +203,7 @@
       el.textContent = "";
       return;
     }
-    el.textContent = "última atualização · " + d.toLocaleString("pt-BR", {
+    el.textContent = "salva automaticamente · " + d.toLocaleString("pt-BR", {
       day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
     });
   }
@@ -200,6 +226,77 @@
       if (input) map[p.id] = !!input.checked;
     });
     return map;
+  }
+
+  function canEditFees() {
+    if (typeof window.hasFinCrAction !== "function") return true;
+    return window.hasFinCrAction("regras_cobranca", "editar");
+  }
+
+  window.persistCardFeesConfig = async function (opts) {
+    opts = opts || {};
+    if (!canEditFees()) {
+      if (!opts.silent) alert("Sem permissão para editar as taxas de cartão.");
+      return false;
+    }
+    const collected = collectRatesFromInputs();
+    if (!collected.valid) {
+      if (!opts.silent) alert("Informe taxas válidas entre 0 e 100, no formato 1,30.");
+      paintUpdated(null, "error");
+      return false;
+    }
+    const passFeeByProduct = collectPassFeesFromToggles();
+    const payload = {
+      rates: collected.rates,
+      passFeeByProduct: passFeeByProduct,
+      passFee: PRODUCTS.every(function (p) { return passFeeByProduct[p.id] !== false; }),
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    paintUpdated(payload.updatedAt, "saving");
+    try {
+      if (window.forceUploadLocalConfig) await window.forceUploadLocalConfig(true);
+      paintUpdated(payload.updatedAt);
+      return true;
+    } catch (err) {
+      paintUpdated(payload.updatedAt, "error");
+      if (!opts.silent) {
+        alert("Taxas salvas neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
+      }
+      return false;
+    }
+  };
+
+  function scheduleAutoSave() {
+    if (!canEditFees()) return;
+    paintUpdated(Date.now(), "saving");
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async function () {
+      if (saving) {
+        scheduleAutoSave();
+        return;
+      }
+      saving = true;
+      try {
+        await window.persistCardFeesConfig({ silent: true });
+      } finally {
+        saving = false;
+      }
+    }, 450);
+  }
+
+  function bindAutoSave() {
+    const body = document.getElementById("cartao-taxas-table-body");
+    if (!body || body.dataset.autoSaveBound === "1") return;
+    body.dataset.autoSaveBound = "1";
+    body.addEventListener("input", function (ev) {
+      if (ev.target && ev.target.matches("input[type='text']")) scheduleAutoSave();
+    });
+    body.addEventListener("change", function (ev) {
+      if (ev.target && (ev.target.matches("input[type='checkbox']") || ev.target.matches("input[type='text']"))) {
+        scheduleAutoSave();
+      }
+    });
   }
 
   window.renderCardFeesTab = function (cfg) {
@@ -234,44 +331,28 @@
         '</tr>'
       );
     }).join("");
+    body.dataset.autoSaveBound = "";
+    bindAutoSave();
     paintUpdated(data.updatedAt);
     if (window.lucide && typeof window.lucide.createIcons === "function") {
       window.lucide.createIcons();
     }
   };
 
-  window.saveCardFeesConfig = async function () {
-    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
-      alert("Sem permissão para editar as taxas de cartão.");
-      return;
-    }
-    const collected = collectRatesFromInputs();
-    if (!collected.valid) {
-      alert("Informe taxas válidas entre 0 e 100, no formato 1,30.");
-      return;
-    }
-    const passFeeByProduct = collectPassFeesFromToggles();
-    const payload = {
-      rates: collected.rates,
-      passFeeByProduct: passFeeByProduct,
-      passFee: PRODUCTS.every(function (p) { return passFeeByProduct[p.id] !== false; }),
-      updatedAt: Date.now()
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    paintUpdated(payload.updatedAt);
-    try {
-      if (window.forceUploadLocalConfig) await window.forceUploadLocalConfig(true);
-      alert("Taxas de cartão salvas com sucesso.");
-    } catch (err) {
-      alert("Taxas salvas neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
-    }
+  // Compat: botão antigo, se ainda existir em algum cache
+  window.saveCardFeesConfig = function () {
+    return window.persistCardFeesConfig({ silent: false });
   };
 
   window.resetCardFeesToDefault = async function () {
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela e o repasse de cada faixa? As alterações não salvas serão perdidas.")
+      ? await window.mouraConfirm("Restaurar as taxas padrão da tabela e o repasse de cada faixa?")
       : window.confirm("Restaurar as taxas padrão?");
     if (!ok) return;
-    window.renderCardFeesTab(cloneDefaults());
+    const payload = cloneDefaults();
+    payload.updatedAt = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    window.renderCardFeesTab(payload);
+    scheduleAutoSave();
   };
 })();

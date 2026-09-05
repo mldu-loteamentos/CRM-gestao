@@ -1989,13 +1989,21 @@ function switchTab(tabId, titleOverride, showLoader = false) {
 window._auditCache = { at: 0, rows: [] };
 window._auditFilteredRows = [];
 
-function auditActionMeta(action, summary) {
+function auditActionMeta(action, summary, module) {
   const key = String(action || "HTTP");
-  const blob = (key + " " + String(summary || "")).toLowerCase();
+  const mod = String(module || "");
+  const blob = (key + " " + String(summary || "") + " " + mod).toLowerCase();
   if (key === "BOLETO_GERADO" || /boleto gerado/.test(blob)) return { group: "boleto", label: "Geração de Boleto" };
   if (key === "BOLETO_ERRO" || /falha ao gerar boleto/.test(blob)) return { group: "boleto", label: "Falha ao gerar boleto" };
-  if (key === "ANEXO_ENVIADO" || /anexo/.test(key.toLowerCase()) && /envi/.test(blob)) return { group: "anexo", label: "Envio de Anexo" };
+  if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
+  if (
+    /attachment/.test(blob)
+    || ((/anexo/.test(blob) || /ged/.test(blob)) && /envi|upload|post|erro/.test(blob))
+  ) {
+    if (/erro|fail|falha/.test(blob)) return { group: "anexo", label: "Falha no envio de anexo" };
+    return { group: "anexo", label: "Envio de Anexo" };
+  }
   return { group: "outros", label: key === "HTTP" ? "Requisição" : key };
 }
 
@@ -2177,6 +2185,58 @@ async function auditCollectNoteRows(fromCloud) {
   }
 }
 
+async function auditRowsFromAnexosMapa() {
+  if (!window.firebaseDb || !window.firebaseCollections) return [];
+  try {
+    const { collection, getDocs } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "anexos_mapa"));
+    const rows = [];
+    snap.forEach(function(docu) {
+      const data = docu.data() || {};
+      const byKey = data.byKey && typeof data.byKey === "object" ? data.byKey : {};
+      const enterpriseId = String(data.enterpriseId || docu.id || "");
+      Object.keys(byKey).forEach(function(k) {
+        const rec = byKey[k];
+        if (!rec) return;
+        const sentBy = String(rec.sentBy || "").trim();
+        const tag = String(rec.tag || "").trim();
+        const fileName = String(rec.fileName || "").trim();
+        const dest = String(rec.destination || "Unidade").trim();
+        rows.push({
+          id: "mapa-" + String(rec.key || k),
+          timestamp: rec.sentAt || data.updatedAt || "",
+          user: sentBy || "—",
+          userEmail: sentBy.indexOf("@") >= 0 ? sentBy.toLowerCase() : "",
+          action: "ANEXO_ENVIADO",
+          module: "GED / Anexos",
+          status: "ok",
+          summary: [tag, fileName, dest ? ("→ " + dest) : ""].filter(Boolean).join(" · "),
+          customerId: "",
+          customerLabel: "",
+          titleId: String(rec.contractNumber || rec.contractId || "").trim(),
+          enterpriseId: String(rec.enterpriseId || enterpriseId),
+          enterpriseName: String(rec.enterpriseName || ""),
+          unitId: String(rec.unitId || ""),
+          unitName: String(rec.unitName || ""),
+          details: {
+            source: "anexos_mapa",
+            tag: tag,
+            fileName: fileName,
+            destino: dest,
+            contractId: rec.contractId || "",
+            contractNumber: rec.contractNumber || "",
+            costCenterId: rec.enterpriseId || enterpriseId
+          }
+        });
+      });
+    });
+    return rows;
+  } catch (e) {
+    console.warn("[Auditoria] anexos_mapa", e);
+    return [];
+  }
+}
+
 function auditLooseKey(row) {
   const t = auditParseTs(row && row.timestamp);
   const bucket = t ? new Date(t).toISOString().slice(0, 16) : "";
@@ -2284,11 +2344,12 @@ window.renderAuditLogs = async function(forceReload) {
     }
     const localNotes = auditRowsFromNotes();
     const fromNotes = await auditCollectNoteRows(force || !localNotes.length);
+    const fromMapa = await auditRowsFromAnexosMapa();
     const byId = {};
-    [].concat(remote, local, fromNotes).forEach(function(row) {
+    [].concat(remote, local, fromNotes, fromMapa).forEach(function(row) {
       if (!row) return;
       const id = String(row.id || "");
-      const key = (id && id.indexOf("note-") !== 0) ? ("id:" + id) : auditLooseKey(row);
+      const key = (id && id.indexOf("note-") !== 0 && id.indexOf("mapa-") !== 0) ? ("id:" + id) : auditLooseKey(row);
       if (!byId[key]) byId[key] = row;
     });
     window._auditCache.rows = Object.keys(byId).map(function(k) { return byId[k]; })
@@ -2308,7 +2369,7 @@ window.renderAuditLogs = async function(forceReload) {
   const toTs = toVal ? new Date(toVal + "T23:59:59").getTime() : 0;
 
   const rows = window._auditCache.rows.filter(function(row) {
-    const meta = auditActionMeta(row.action, row.summary);
+    const meta = auditActionMeta(row.action, row.summary, row.module);
     if (actionFilter === "principais" && meta.group === "outros") return false;
     if (actionFilter === "boleto" && meta.group !== "boleto") return false;
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
@@ -2343,10 +2404,16 @@ window.renderAuditLogs = async function(forceReload) {
 
   const countEl = document.getElementById("audit-result-count");
   if (countEl) {
+    const nAnexo = window._auditCache.rows.filter(function(r) {
+      return auditActionMeta(r.action, r.summary, r.module).group === "anexo";
+    }).length;
+    const nBoleto = window._auditCache.rows.filter(function(r) {
+      return auditActionMeta(r.action, r.summary, r.module).group === "boleto";
+    }).length;
     countEl.textContent = rows.length
       ? (rows.length + " registro(s)")
       : (window._auditCache.rows.length
-        ? ("Nenhum no filtro · " + window._auditCache.rows.length + " no total")
+        ? ("Nenhum no filtro · " + window._auditCache.rows.length + " no total (" + nBoleto + " boleto · " + nAnexo + " anexo)")
         : "Nenhum registro");
   }
 
@@ -2354,16 +2421,19 @@ window.renderAuditLogs = async function(forceReload) {
 
   if (!rows.length) {
     const total = window._auditCache.rows.length;
+    const tipAnexo = actionFilter === "anexo"
+      ? " Nenhum envio de anexo encontrado no log nem no mapa de anexos. Envie um anexo e clique em Atualizar."
+      : "";
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#5b7264;padding:36px;">${
       total
-        ? "Nenhum log neste filtro. Há " + total + " registro(s) no total — limpe o usuário, o tipo ou o período."
+        ? ("Nenhum log neste filtro. Há " + total + " registro(s) no total — limpe o usuário, o tipo ou o período." + tipAnexo)
         : "Nenhum log encontrado. Gere um boleto ou envie um anexo e clique em Atualizar."
     }</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(function(row) {
-    const meta = auditActionMeta(row.action, row.summary);
+    const meta = auditActionMeta(row.action, row.summary, row.module);
     const ctx = auditRowContext(row);
     const ok = String(row.status || "ok") !== "erro";
     const statusHtml = ok
@@ -2425,7 +2495,7 @@ window.exportAuditExcel = function() {
   }
   const aoa = [["Data/Hora", "Usuário", "E-mail", "Ação", "Cliente", "Título", "Empreendimento", "Unidade", "Detalhe", "Status"]];
   rows.forEach(function(row) {
-    const meta = auditActionMeta(row.action, row.summary);
+    const meta = auditActionMeta(row.action, row.summary, row.module);
     const ctx = auditRowContext(row);
     aoa.push([
       auditFormatWhen(row.timestamp),
@@ -2924,7 +2994,7 @@ window.hasFinCrAction = function(actionId, flag) {
 window.setRulesSectionMode = function(root, canView, canEdit) {
   if (!root) return;
   root.querySelectorAll("input, select, textarea, button").forEach(el => {
-    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-cartao-taxas" || el.id === "btn-save-alcada-desconto") return;
+    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-alcada-desconto") return;
     if (el.closest && el.closest("#regras-tabs-menu")) return;
     el.disabled = !canEdit;
     el.style.pointerEvents = canEdit ? "" : "none";
@@ -2966,8 +3036,6 @@ window.applyRulesModulePermissions = function() {
   if (btnSaveNeg) btnSaveNeg.disabled = !canEditNeg;
   const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
   if (btnFila) btnFila.disabled = !canEditCob;
-  const btnSaveCard = document.getElementById("btn-save-cartao-taxas");
-  if (btnSaveCard) btnSaveCard.disabled = !canEditCob;
   const btnSaveAlcada = document.getElementById("btn-save-alcada-desconto");
   if (btnSaveAlcada) btnSaveAlcada.disabled = !canEditCob;
 
@@ -9289,7 +9357,10 @@ function formatCpfCnpj(val) {
             fine: inst.fine !== undefined ? inst.fine : (inst.fineAmount !== undefined ? inst.fineAmount : undefined),
             interest: inst.interest !== undefined ? inst.interest : (inst.interestAmount !== undefined ? inst.interestAmount : undefined),
             monetaryCorrection: inst.monetaryCorrection !== undefined ? inst.monetaryCorrection : (inst.correctionAmount !== undefined ? inst.correctionAmount : undefined),
-            overdueCharges: inst.overdueCharges
+            overdueCharges: inst.overdueCharges,
+            indexerId: inst.indexerId != null ? inst.indexerId : (inst.indexerCode != null ? inst.indexerCode : (inst.idIndexer != null ? inst.idIndexer : null)),
+            indexerCode: inst.indexerCode != null ? inst.indexerCode : inst.indexerId,
+            indexerName: inst.indexerName || inst.indexerDescription || (typeof inst.indexer === "string" ? inst.indexer : "")
           };
         });
       };
@@ -12170,7 +12241,12 @@ function calculateRenegotiation() {
   // Atualizar dropdown de parcelas restrito ao MaxParcelas da regra
   const selectedCount = selectedBills.length;
   const maxInstallmentsCalc = Math.floor(selectedCount + (selectedCount * (sinalPct / 100)));
-  const maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas);
+  const paymentMethod = (document.getElementById("reneg-payment-method")?.value === "cartao") ? "cartao" : "interno";
+  const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
+  const cardBrandWrap = document.getElementById("reneg-card-brand-wrap");
+  if (cardBrandWrap) cardBrandWrap.style.display = paymentMethod === "cartao" ? "" : "none";
+  // Cartão: no máximo 12x (faixas da tabela de taxas)
+  const maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, paymentMethod === "cartao" ? 12 : 9999);
   
   const qtySelect = document.getElementById("reneg-installments-qty");
   const currentSelectedQty = Number(qtySelect.value) || 1;
@@ -12178,7 +12254,7 @@ function calculateRenegotiation() {
   for (let i = 1; i <= Math.max(1, maxInstallments); i++) {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `${i}Ã—${i === 1 ? ' (À vista)' : ''}`;
+    opt.textContent = `${i}\u00D7${i === 1 ? ' (À vista)' : ''}`;
     if (i === currentSelectedQty || (i === maxInstallments && currentSelectedQty > maxInstallments)) {
       opt.selected = true;
     }
@@ -12199,16 +12275,43 @@ function calculateRenegotiation() {
   // Sinal
   const sinalValue = grossDebt * (sinalPct / 100);
   const remainingAfterSinal = grossDebt - sinalValue;
+
+  // Taxa de cartão (repasse embutido na divisão, se configurado)
+  let cardFee = {
+    rate: 0,
+    appliedRate: 0,
+    fee: 0,
+    passFee: false,
+    brandLabel: "",
+    productId: null,
+    chargedBase: remainingAfterSinal
+  };
+  let amountToFinance = remainingAfterSinal;
+  if (paymentMethod === "cartao" && typeof window.calcCardFee === "function") {
+    const cf = window.calcCardFee(remainingAfterSinal, instQty, cardBrand);
+    cardFee = {
+      rate: cf.rate || 0,
+      appliedRate: cf.appliedRate || 0,
+      fee: cf.fee || 0,
+      passFee: !!cf.passFee,
+      brandLabel: cf.brandLabel || (typeof window.cardBrandLabel === "function" ? window.cardBrandLabel(cardBrand) : cardBrand),
+      productId: cf.productId || null,
+      chargedBase: cf.charged != null ? cf.charged : remainingAfterSinal
+    };
+    if (cardFee.passFee && cardFee.appliedRate > 0) {
+      amountToFinance = cardFee.chargedBase;
+    }
+  }
   
-  // Cálculo das parcelas (Price)
-  let installmentValue = remainingAfterSinal / instQty;
+  // Cálculo das parcelas (Price) — sobre base já com taxa de cartão embutida, se houver
+  let installmentValue = amountToFinance / instQty;
   if (interestRate > 0 && instQty > 1) {
-    installmentValue = remainingAfterSinal * (interestRate * Math.pow(1 + interestRate, instQty)) / (Math.pow(1 + interestRate, instQty) - 1);
+    installmentValue = amountToFinance * (interestRate * Math.pow(1 + interestRate, instQty)) / (Math.pow(1 + interestRate, instQty) - 1);
   }
 
   // Preencher resumo
   if (chargesEl) chargesEl.textContent = fmt(charges);
-  if (calcValEl) calcValEl.textContent = instQty > 0 ? `${instQty}Ã— de ${fmt(installmentValue)}` : 'â€“';
+  if (calcValEl) calcValEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)}` : '–';
   
   const interestLabelEl = document.getElementById("reneg-interest-label");
   if (interestLabelEl) {
@@ -12226,19 +12329,61 @@ function calculateRenegotiation() {
   const mathCustoOperacaoEl = document.getElementById("reneg-math-custo-operacao");
   const headerParcelasEl = document.getElementById("reneg-header-parcelas");
   const headerSinalPctEl = document.getElementById("reneg-header-sinal-pct");
+  const cardFeeRowEl = document.getElementById("reneg-math-card-fee-row");
+  const cardFeeLabelEl = document.getElementById("reneg-math-card-fee-label");
+  const cardFeeValEl = document.getElementById("reneg-math-card-fee-val");
 
   if (mathSinalValEl) mathSinalValEl.textContent = fmt(sinalValue);
   if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = `${(interestRate * 100).toFixed(1)}%`;
   
-  // Total das parcelas do acordo = N Ã— valor_parcela com juros
+  // Total das parcelas do acordo = N × valor_parcela com juros
   const totalAcordo = instQty * installmentValue;
-  const financingCost = totalAcordo - remainingAfterSinal;
+  const financingCost = totalAcordo - amountToFinance;
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
   if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
   if (headerParcelasEl) {
-    headerParcelasEl.textContent = instQty > 0 ? `${instQty}Ã— de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
+    headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
   }
+
+  if (cardFeeRowEl) {
+    if (paymentMethod === "cartao") {
+      cardFeeRowEl.style.display = "flex";
+      const pctStr = Number(cardFee.rate || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+      const passStr = cardFee.passFee
+        ? "repasse ao cliente"
+        : "empresa absorve";
+      if (cardFeeLabelEl) {
+        cardFeeLabelEl.textContent = `${cardFee.brandLabel || "Cartão"} ${pctStr} · ${passStr}`;
+      }
+      if (cardFeeValEl) cardFeeValEl.textContent = fmt(cardFee.passFee ? cardFee.fee : 0);
+    } else {
+      cardFeeRowEl.style.display = "none";
+    }
+  }
+
+  // Botão: acordo interno → documento; cartão → link de pagamento
+  const genLabel = document.getElementById("reneg-generate-label");
+  const genIcon = document.getElementById("reneg-generate-icon");
+  const genBtn = document.getElementById("reneg-generate-btn");
+  if (paymentMethod === "cartao") {
+    if (genLabel) genLabel.textContent = "Gerar Link de Pagamento";
+    if (genIcon) genIcon.setAttribute("data-lucide", "link");
+    if (genBtn) {
+      genBtn.style.background = "linear-gradient(135deg, #105436, #1a7a4c)";
+      genBtn.style.color = "#fff";
+      genBtn.style.boxShadow = "0 2px 8px rgba(16,84,54,0.35)";
+    }
+  } else {
+    if (genLabel) genLabel.textContent = "Gerar Documento de Acordo";
+    if (genIcon) genIcon.setAttribute("data-lucide", "file-text");
+    if (genBtn) {
+      genBtn.style.background = "linear-gradient(135deg, #fbc02d, #f57f17)";
+      genBtn.style.color = "#000";
+      genBtn.style.boxShadow = "0 2px 8px rgba(251,192,45,0.4)";
+    }
+  }
+  if (typeof lucide !== "undefined" && lucide.createIcons) lucide.createIcons();
 
   if (mathNoInterestEl && mathWithInterestEl) {
     if (instQty > 0 && selectedCount > 0) {
@@ -12341,8 +12486,8 @@ function calculateRenegotiation() {
       scheduleBody.appendChild(tr);
     }
     
-    // 2. Parcelas do Acordo (NÃ—)
-    if (instQty > 0 && remainingAfterSinal > 0) {
+    // 2. Parcelas do Acordo (N×)
+    if (instQty > 0 && amountToFinance > 0) {
       let firstDate = firstDueDateStr ? new Date(firstDueDateStr + 'T12:00:00') : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         for (let i = 0; i < instQty; i++) {
           rowNum++;
@@ -12449,14 +12594,165 @@ function calculateRenegotiation() {
     installmentValue,
     discountPct,
     discountValue,
-    firstDueDate: firstDueDateStr
+    firstDueDate: firstDueDateStr,
+    paymentMethod,
+    cardBrand: paymentMethod === "cartao" ? cardBrand : null,
+    cardFee,
+    totalAcordo,
+    amountToFinance,
+    financingCost
   };
 }
 
 
+function onRenegPaymentMethodChange() {
+  const method = document.getElementById("reneg-payment-method")?.value || "interno";
+  const brandWrap = document.getElementById("reneg-card-brand-wrap");
+  if (brandWrap) brandWrap.style.display = method === "cartao" ? "" : "none";
+  calculateRenegotiation();
+}
+
+function handleRenegGenerateAction() {
+  const method = document.getElementById("reneg-payment-method")?.value || "interno";
+  if (method === "cartao") {
+    generateCardPaymentLink();
+  } else {
+    generateAgreementPDF();
+  }
+}
+
+function closeRenegPayLinkModal() {
+  const el = document.getElementById("reneg-paylink-overlay");
+  if (el) el.classList.remove("active");
+}
+
+function buildRenegPayLinkPayload() {
+  const results = AppState.currentRenegResult;
+  if (!results || results.paymentMethod !== "cartao") return null;
+  const customer = g_renegCustomer || {};
+  const sale = g_renegSale || {};
+  const ref = "ML-CARD-" + String(sale.id || AppState.selectedSaleId || "0") + "-" + Date.now().toString(36).toUpperCase();
+  const totalCard = Number(results.totalAcordo) || (Number(results.instQty) * Number(results.installmentValue)) || 0;
+  const payload = {
+    ref: ref,
+    customerId: customer.id || AppState.selectedCustomerId || null,
+    customerName: customer.name || "",
+    saleId: sale.id || AppState.selectedSaleId || null,
+    brand: results.cardBrand,
+    brandLabel: (results.cardFee && results.cardFee.brandLabel) || "",
+    installments: results.instQty,
+    installmentValue: results.installmentValue,
+    total: totalCard,
+    sinal: results.sinalValue || 0,
+    fee: (results.cardFee && results.cardFee.passFee) ? (results.cardFee.fee || 0) : 0,
+    feeRate: (results.cardFee && results.cardFee.rate) || 0,
+    passFee: !!(results.cardFee && results.cardFee.passFee),
+    createdAt: new Date().toISOString()
+  };
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify({
+    r: payload.ref,
+    t: Math.round(payload.total * 100) / 100,
+    n: payload.installments,
+    b: payload.brand
+  }))));
+  payload.link = `${window.location.origin}${window.location.pathname}?pagar=${encodeURIComponent(encoded)}#cartao`;
+  const feeLine = payload.passFee
+    ? `Taxa cartão embutida: ${Number(payload.feeRate).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% (${payload.brandLabel})`
+    : `Taxa cartão absorvida pela empresa (${payload.brandLabel})`;
+  payload.message =
+    `Olá${payload.customerName ? ", " + payload.customerName.split(" ")[0] : ""}! Segue o link para pagamento no cartão (${payload.brandLabel}):\n` +
+    `${payload.link}\n\n` +
+    `Valor no cartão: ${payload.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} em ${payload.installments}x de ${payload.installmentValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.\n` +
+    (payload.sinal > 0
+      ? `Sinal (à parte): ${payload.sinal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.\n`
+      : "") +
+    `${feeLine}\n` +
+    `Ref: ${payload.ref}`;
+  return payload;
+}
+
+function generateCardPaymentLink() {
+  const results = AppState.currentRenegResult;
+  if (!results) {
+    alert("Configure o quadro de renegociação antes de gerar o link.");
+    return;
+  }
+  if (results.paymentMethod !== "cartao") {
+    generateAgreementPDF();
+    return;
+  }
+  const payload = buildRenegPayLinkPayload();
+  if (!payload) return;
+  window._renegPayLinkPayload = payload;
+  try {
+    const histKey = "crm_moura_card_pay_links";
+    const hist = JSON.parse(localStorage.getItem(histKey) || "[]");
+    hist.unshift({
+      ref: payload.ref,
+      saleId: payload.saleId,
+      customerId: payload.customerId,
+      total: payload.total,
+      installments: payload.installments,
+      brand: payload.brand,
+      createdAt: payload.createdAt
+    });
+    localStorage.setItem(histKey, JSON.stringify(hist.slice(0, 50)));
+  } catch (e) { /* ignore */ }
+
+  const fmt = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const body = document.getElementById("reneg-paylink-body");
+  if (body) {
+    body.innerHTML = `
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+        <div style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;margin-bottom:4px;">Pagamento no cartão</div>
+        <div style="font-size:1.15rem;font-weight:800;color:#105436;">${fmt(payload.total)} · ${payload.installments}x de ${fmt(payload.installmentValue)}</div>
+        <div style="margin-top:6px;font-size:0.82rem;color:#475569;">Bandeira: <strong>${payload.brandLabel}</strong>
+          · ${payload.passFee ? "taxa repassada ao cliente (" + Number(payload.feeRate).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%)" : "taxa absorvida pela empresa"}</div>
+        <div style="margin-top:4px;font-size:0.78rem;color:#64748b;">Ref. ${payload.ref}</div>
+      </div>
+      <label style="font-size:0.75rem;font-weight:700;color:#64748b;display:block;margin-bottom:4px;">Link de pagamento</label>
+      <input type="text" readonly id="reneg-paylink-url" class="form-control" value="${payload.link.replace(/"/g, "&quot;")}"
+        style="font-size:0.8rem;background:#f8fafc;">
+      <p style="margin:10px 0 0;font-size:0.78rem;color:#64748b;line-height:1.4;">
+        Acordo em cartão <strong>não gera termo</strong> — envie o link ao cliente. Acordo interno continua gerando o documento de acordo.
+      </p>
+    `;
+  }
+  const overlay = document.getElementById("reneg-paylink-overlay");
+  if (overlay) overlay.classList.add("active");
+  if (typeof lucide !== "undefined" && lucide.createIcons) lucide.createIcons();
+}
+
+async function copyRenegPayLink() {
+  const payload = window._renegPayLinkPayload || buildRenegPayLinkPayload();
+  if (!payload) return;
+  try {
+    await navigator.clipboard.writeText(payload.link);
+    alert("Link copiado.");
+  } catch (e) {
+    const input = document.getElementById("reneg-paylink-url");
+    if (input) { input.select(); document.execCommand("copy"); alert("Link copiado."); }
+  }
+}
+
+async function copyRenegPayLinkMessage() {
+  const payload = window._renegPayLinkPayload || buildRenegPayLinkPayload();
+  if (!payload) return;
+  try {
+    await navigator.clipboard.writeText(payload.message);
+    alert("Mensagem copiada.");
+  } catch (e) {
+    alert(payload.message);
+  }
+}
+
 function generateAgreementPDF() {
   const results = AppState.currentRenegResult;
   if (!results) return;
+  if (results.paymentMethod === "cartao") {
+    generateCardPaymentLink();
+    return;
+  }
   return (async function() {
   if (typeof window.enrichCustomerForLegalDocs === "function" && g_renegCustomer) {
     g_renegCustomer = await window.enrichCustomerForLegalDocs(g_renegCustomer);
@@ -13809,7 +14105,7 @@ window.renderQuitacaoDebtReport = function() {
       <td>${r.tipo}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
       <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
-      <td class="quitacao-center">${r.daysOverdue || "—"}</td>
+      <td>${r.daysOverdue || "—"}</td>
       <td class="quitacao-val quitacao-val--late">${quitacaoFmtMoney(r.additions)}</td>
       <td class="quitacao-val quitacao-val--late quitacao-val--strong">${quitacaoFmtMoney(r.vp)}</td>
     </tr>`;
@@ -13820,7 +14116,7 @@ window.renderQuitacaoDebtReport = function() {
       <td>${r.tipo}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
       <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
-      <td class="quitacao-center">${r.daysForDiscount || "—"}</td>
+      <td>${r.daysForDiscount || "—"}</td>
       <td class="quitacao-val">${r.jurosVpPct != null ? quitacaoFmtPct(r.jurosVpPct) : "—"}</td>
       <td class="quitacao-val quitacao-val--vp">${quitacaoFmtMoney(r.vp)}</td>
       <td class="quitacao-val quitacao-val--disc">${quitacaoFmtMoney(r.desconto)}</td>
@@ -13845,80 +14141,86 @@ window.renderQuitacaoDebtReport = function() {
     </tr>`;
   bodyEl.innerHTML = `
     ${paidRows.length ? `
-    <div class="quitacao-sec-head">Valores pagos</div>
-    <table class="quitacao-table">
-      <thead>
-        <tr>
-          <th>Dt. Venc</th>
-          <th class="quitacao-center">Par</th>
-          <th>Tipo</th>
-          <th class="quitacao-val">Valor original</th>
-          <th>Data baixa</th>
-          <th class="quitacao-val">Valor baixa</th>
-          <th class="quitacao-val">Receb. líquido</th>
-          <th class="quitacao-val">Desconto</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${paidRows.map(rowPago).join("")}
-        <tr class="quitacao-subtotal">
-          <td colspan="5">Totais recebidos</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumBaixa)}</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumPago)}</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumPagoDisc)}</td>
-        </tr>
-      </tbody>
-    </table>` : ""}
+    <section class="quitacao-block">
+      <div class="quitacao-sec-head">Valores pagos</div>
+      <table class="quitacao-table">
+        <thead>
+          <tr>
+            <th>Dt. Venc</th>
+            <th>Par</th>
+            <th>Tipo</th>
+            <th>Valor original</th>
+            <th>Data baixa</th>
+            <th>Valor baixa</th>
+            <th>Receb. líquido</th>
+            <th>Desconto</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${paidRows.map(rowPago).join("")}
+          <tr class="quitacao-subtotal">
+            <td colspan="5">Totais recebidos</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumBaixa)}</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumPago)}</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumPagoDisc)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>` : ""}
     ${vencidas.length ? `
-    <div class="quitacao-sec-head quitacao-sec-head--late">Valores a pagar · vencidas</div>
-    <table class="quitacao-table">
-      <thead>
-        <tr>
-          <th>Dt. Venc</th>
-          <th class="quitacao-center">Par</th>
-          <th>Tipo</th>
-          <th class="quitacao-val">Valor original</th>
-          <th class="quitacao-center">Juros</th>
-          <th class="quitacao-center">Dias atraso</th>
-          <th class="quitacao-val">Acréscimo</th>
-          <th class="quitacao-val">Valor atualizado</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${vencidas.map(rowVenc).join("")}
-        <tr class="quitacao-subtotal quitacao-subtotal--late">
-          <td colspan="7">Total vencidas</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumVenc)}</td>
-        </tr>
-      </tbody>
-    </table>` : ""}
+    <section class="quitacao-block">
+      <div class="quitacao-sec-head quitacao-sec-head--late">Parcelas vencidas</div>
+      <table class="quitacao-table">
+        <thead>
+          <tr>
+            <th>Dt. Venc</th>
+            <th>Par</th>
+            <th>Tipo</th>
+            <th>Valor original</th>
+            <th>Juros</th>
+            <th>Dias atraso</th>
+            <th>Acréscimo</th>
+            <th>Valor atualizado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${vencidas.map(rowVenc).join("")}
+          <tr class="quitacao-subtotal quitacao-subtotal--late">
+            <td colspan="7">Total vencidas</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumVenc)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>` : ""}
     ${aVencer.length ? `
-    <div class="quitacao-sec-head">Valores a pagar · a vencer (valor presente)</div>
-    <table class="quitacao-table">
-      <thead>
-        <tr>
-          <th>Dt. Venc</th>
-          <th class="quitacao-center">Par</th>
-          <th>Tipo</th>
-          <th class="quitacao-val">Valor original</th>
-          <th class="quitacao-center">Juros</th>
-          <th class="quitacao-center">Dias p/ VP</th>
-          <th class="quitacao-val">Juros VP</th>
-          <th class="quitacao-val">VP</th>
-          <th class="quitacao-val">Desconto</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${aVencer.map(rowFut).join("")}
-        <tr class="quitacao-subtotal">
-          <td colspan="3">Totais a vencer</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumFutOrig)}</td>
-          <td colspan="3"></td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumFut)}</td>
-          <td class="quitacao-val">${quitacaoFmtMoney(sumFutDisc)}</td>
-        </tr>
-      </tbody>
-    </table>` : ""}
+    <section class="quitacao-block">
+      <div class="quitacao-sec-head">Parcelas a vencer</div>
+      <table class="quitacao-table">
+        <thead>
+          <tr>
+            <th>Dt. Venc</th>
+            <th>Par</th>
+            <th>Tipo</th>
+            <th>Valor original</th>
+            <th>Juros</th>
+            <th>Dias p/ VP</th>
+            <th>Juros VP</th>
+            <th>VP</th>
+            <th>Desconto</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${aVencer.map(rowFut).join("")}
+          <tr class="quitacao-subtotal">
+            <td colspan="3">Totais a vencer</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumFutOrig)}</td>
+            <td colspan="3"></td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumFut)}</td>
+            <td class="quitacao-val">${quitacaoFmtMoney(sumFutDisc)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>` : ""}
     <div class="quitacao-grand">
       <span>Saldo devedor presente</span>
       <span>${quitacaoFmtMoney(st.saldoPresente || (sumVenc + sumFut))}</span>
@@ -15867,6 +16169,88 @@ window.isBusinessDayIso = function(iso) {
   return !holidays[key];
 };
 
+/** Segunda a domingo da semana que contém iso; só dias úteis (sem FDS e sem feriados nacionais). */
+window.getWeekBusinessDaysIso = function(iso) {
+  const key = String(iso || "").slice(0, 10);
+  if (!key || typeof window.addDaysIso !== "function") return [];
+  const d = new Date(key + "T12:00:00");
+  if (isNaN(d.getTime())) return [];
+  const dow = d.getDay();
+  const toMonday = dow === 0 ? -6 : 1 - dow;
+  const monday = window.addDaysIso(key, toMonday);
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const day = window.addDaysIso(monday, i);
+    if (window.isBusinessDayIso(day)) days.push(day);
+  }
+  return days;
+};
+
+window.getOperatorFilaConfig = function(operatorName) {
+  const defaultConfig = {
+    capacity: 25,
+    capacityMode: "linear",
+    r1: 50, r2: 20, r3: 10, r4: 10, r5: 10, r6: 0, r7: 0,
+    paymentDays: 15
+  };
+  const configs = (window.AppState && AppState.rules && AppState.rules.filaConfig) || {};
+  const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === "function"
+    ? window.occurrenceAuthorMatchesOperator(a, b)
+    : String(a) === String(b);
+  let opConfig = configs[operatorName] || configs["Todos"] || null;
+  if (!opConfig) {
+    const matchKey = Object.keys(configs).find(k => k !== "Todos" && opMatch(k, operatorName));
+    if (matchKey) opConfig = configs[matchKey];
+  }
+  return Object.assign({}, defaultConfig, opConfig || {});
+};
+
+/**
+ * Títulos atribuídos diretamente ao operador (já na régua interna).
+ * Em cidades com terceirizada (ex.: Letícia + Thaiane), só entram os que ainda estão com ela.
+ */
+window.countOperatorDirectPortfolio = function(operatorName) {
+  if (!operatorName || operatorName === "Todos") return { titles: 0, customers: 0 };
+  const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === "function"
+    ? window.occurrenceAuthorMatchesOperator(a, b)
+    : String(a) === String(b);
+  const sourceList = (window.rawClientList && window.rawClientList.length)
+    ? window.rawClientList
+    : (window.clientList || []);
+  const pool = sourceList.filter(item => opMatch(item.assignedOperator, operatorName));
+  const customers = new Set(pool.map(p => String(p.customerId)));
+  return { titles: pool.length, customers: customers.size };
+};
+
+window.resolveDynamicFilaCapacity = function(operatorName, dateStr) {
+  const portfolio = window.countOperatorDirectPortfolio(operatorName);
+  const weekDays = window.getWeekBusinessDaysIso(dateStr);
+  const businessDays = Math.max(1, weekDays.length || 5);
+  const baseCount = portfolio.titles > 0 ? portfolio.titles : portfolio.customers;
+  const capacity = Math.max(1, Math.ceil(baseCount / businessDays));
+  return {
+    capacity,
+    titles: portfolio.titles,
+    customers: portfolio.customers,
+    businessDays,
+    weekDays
+  };
+};
+
+window.resolveOperatorDailyCapacity = function(operatorName, dateStr, opConfig) {
+  const cfg = opConfig || window.getOperatorFilaConfig(operatorName);
+  const mode = (cfg.capacityMode === "dynamic") ? "dynamic" : "linear";
+  if (mode === "dynamic") {
+    const dyn = window.resolveDynamicFilaCapacity(operatorName, dateStr);
+    return { capacity: dyn.capacity, mode: "dynamic", meta: dyn };
+  }
+  return {
+    capacity: Math.max(1, Number(cfg.capacity) || 25),
+    mode: "linear",
+    meta: null
+  };
+};
+
 window.addBusinessDaysIso = function(iso, days) {
   const n = Number(days) || 0;
   if (!iso || n <= 0) return String(iso || "").slice(0, 10);
@@ -16911,8 +17295,8 @@ window.getActiveQueueDate = function() {
     return window.localDateStr(current);
 };
 
-// v4: invalida filas do dia após remanejamento de cidades/operadores (2026-09-04)
-window.CRM_DAILY_QUEUE_CACHE_KEY = "crm_daily_queue_cache_v4";
+// v5: capacidade linear ou agenda dinâmica (carteira ÷ dias úteis da semana)
+window.CRM_DAILY_QUEUE_CACHE_KEY = "crm_daily_queue_cache_v5";
 
 window.getCityAssignmentCacheSig = function() {
   const rules = (window.AppState && AppState.rules) || {};
@@ -16931,7 +17315,8 @@ window.invalidateDailyQueueCache = function(reason) {
   try {
     window._dailyQueueCache = {};
     window.agendaItemsCache = {};
-    localStorage.removeItem(window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v4");
+    localStorage.removeItem(window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v5");
+    localStorage.removeItem("crm_daily_queue_cache_v4");
     localStorage.removeItem("crm_daily_queue_cache_v3");
     localStorage.removeItem("crm_daily_queue_cache_v2");
     console.log("[Fila] Cache diário invalidado" + (reason ? (": " + reason) : ""));
@@ -16944,7 +17329,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === 'function'
       ? window.occurrenceAuthorMatchesOperator(a, b)
       : String(a) === String(b);
-  const cacheStorageKey = window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v4";
+  const cacheStorageKey = window.CRM_DAILY_QUEUE_CACHE_KEY || "crm_daily_queue_cache_v5";
   
   if (!window._dailyQueueCache) {
       try {
@@ -16987,7 +17372,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   if (selectedOperator === "Todos") return []; 
 
   const defaultFilaConfig = {
-    capacity: 25, r1: 50, r2: 20, r3: 10, r4: 10, r5: 10, r6: 0, r7: 0, paymentDays: 15
+    capacity: 25, capacityMode: "linear", r1: 50, r2: 20, r3: 10, r4: 10, r5: 10, r6: 0, r7: 0, paymentDays: 15
   };
   const configs = (AppState.rules && AppState.rules.filaConfig) ? AppState.rules.filaConfig : {};
   let opConfig = configs[selectedOperator] || configs["Todos"] || null;
@@ -16997,7 +17382,11 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   }
   if (!opConfig) opConfig = defaultFilaConfig;
   
-  const capacity = Number(opConfig.capacity) || 25;
+  const resolvedCap = typeof window.resolveOperatorDailyCapacity === "function"
+    ? window.resolveOperatorDailyCapacity(selectedOperator, dateKey, opConfig)
+    : { capacity: Number(opConfig.capacity) || 25, mode: "linear", meta: null };
+  const capacity = Math.max(1, Number(resolvedCap.capacity) || 25);
+  const capacityMode = resolvedCap.mode || "linear";
   const r1_pct = (opConfig.r1 || 50) / 100;
   const r2_pct = (opConfig.r2 || 20) / 100;
   const r3_pct = (opConfig.r3 || 10) / 100;
@@ -17007,7 +17396,12 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const r7_pct = (opConfig.r7 || 0) / 100;
   const paymentDays = opConfig.paymentDays !== undefined ? opConfig.paymentDays : 15;
   const citySig = typeof window.getCityAssignmentCacheSig === "function" ? window.getCityAssignmentCacheSig() : "";
-  const configSig = [capacity, opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0, paymentDays, citySig].join('|');
+  const configSig = [
+    capacityMode, capacity,
+    opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0,
+    paymentDays, citySig,
+    resolvedCap.meta ? (resolvedCap.meta.titles + "/" + resolvedCap.meta.businessDays) : ""
+  ].join('|');
 
   const cachedEntry = window._dailyQueueCache[cacheKey];
   const cachedItems = unwrapQueueCache(cachedEntry);
@@ -17061,6 +17455,20 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
              leftoverSaleIds.add(String(item.saleId));
          }
       });
+  }
+
+  const weekBusinessDays = (typeof window.getWeekBusinessDaysIso === "function")
+    ? window.getWeekBusinessDaysIso(dateKey)
+    : [];
+  const weekSeenCustomerIds = new Set();
+  if (capacityMode === "dynamic" && weekBusinessDays.length) {
+    weekBusinessDays.forEach(dayIso => {
+      if (dayIso >= dateKey) return;
+      const dayKey = `${selectedOperator}_${dayIso}`;
+      unwrapQueueCache(window._dailyQueueCache[dayKey]).forEach(item => {
+        if (item && item.customerId != null) weekSeenCustomerIds.add(String(item.customerId));
+      });
+    });
   }
 
   let sourceList = (window.rawClientList && window.rawClientList.length) ? window.rawClientList : (window.clientList || []);
@@ -17170,11 +17578,21 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
                      (scoreParcelas * r5_pct) +
                      (scorePulada * r6_pct) +
                      (scoreJuridico * r7_pct);
+
+    // Agenda dinâmica: prioriza quem ainda não passou na fila nesta semana (cobertura total)
+    let weekCoverageBoost = 0;
+    if (capacityMode === "dynamic") {
+      const alreadyThisWeek = weekSeenCustomerIds.has(String(item.customerId));
+      if (!alreadyThisWeek && !isLeftover) weekCoverageBoost = 50000;
+      else if (!alreadyThisWeek && isLeftover) weekCoverageBoost = 25000;
+    }
                      
     // Generate a summary reason
     let reasons = [];
     if (isLeftover) {
         reasons.push("Fila Anterior");
+    } else if (capacityMode === "dynamic" && weekCoverageBoost > 0) {
+        reasons.push("Cobertura Semanal");
     } else {
         if (scoreValor * r1_pct > 15) reasons.push("Valor Alto");
         if (scoreDias * r2_pct > 15) reasons.push("Atraso Antigo");
@@ -17189,7 +17607,9 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
     return {
       ...item,
       filaScore: Math.round(finalScore),
-      sortScore: isLeftover ? (100000 + Math.round(finalScore)) : Math.round(finalScore),
+      sortScore: isLeftover
+        ? (100000 + weekCoverageBoost + Math.round(finalScore))
+        : (weekCoverageBoost + Math.round(finalScore)),
       filaReason: reasons.slice(0, 2).join(" + ")
     };
   });
@@ -23906,6 +24326,7 @@ window.loadFilaConfigForOperator = function() {
   
   const defaultConfig = {
     capacity: 25,
+    capacityMode: "linear",
     r1: 50, // Maiores valores
     r2: 20, // Mais tempo atraso
     r3: 10, // >1 contrato
@@ -23916,7 +24337,11 @@ window.loadFilaConfigForOperator = function() {
   
   // Se não existir, tenta carregar o 'Todos', senão usa default
   const config = AppState.rules.filaConfig[op] || AppState.rules.filaConfig["Todos"] || defaultConfig;
+  const isDynamic = config.capacityMode === "dynamic";
   
+  const dynToggle = document.getElementById("fila-capacity-dynamic");
+  if (dynToggle) dynToggle.checked = isDynamic;
+
   document.getElementById("fila-capacity").value = config.capacity || 25;
   document.getElementById("fila-rule-1").value = config.r1 || 0;
   document.getElementById("fila-rule-2").value = config.r2 || 0;
@@ -23927,11 +24352,63 @@ window.loadFilaConfigForOperator = function() {
   document.getElementById("fila-rule-7").value = config.r7 || 0;
   if(document.getElementById("fila-rule-payment-days")) document.getElementById("fila-rule-payment-days").value = config.paymentDays !== undefined ? config.paymentDays : 15;
   
-  if (window.updateCapacityVisual) window.updateCapacityVisual(config.capacity || 25);
+  if (window.applyFilaCapacityModeUi) window.applyFilaCapacityModeUi();
+  else {
+    if (window.updateCapacityVisual) window.updateCapacityVisual(config.capacity || 25);
+  }
   if (window.updateCalendarVisual) window.updateCalendarVisual(config.paymentDays !== undefined ? config.paymentDays : 15);
   
   window.updateFilaTotalPercentage();
   if (window.sortFilaCircles) window.sortFilaCircles();
+};
+
+window.toggleFilaCapacityMode = function() {
+  if (window.applyFilaCapacityModeUi) window.applyFilaCapacityModeUi();
+};
+
+window.applyFilaCapacityModeUi = function() {
+  const dynToggle = document.getElementById("fila-capacity-dynamic");
+  const capacityInput = document.getElementById("fila-capacity");
+  const hint = document.getElementById("fila-capacity-dynamic-hint");
+  const op = document.getElementById("fila-config-operator")?.value || "Todos";
+  const isDynamic = !!(dynToggle && dynToggle.checked);
+
+  if (capacityInput) {
+    capacityInput.readOnly = isDynamic;
+    capacityInput.style.opacity = isDynamic ? "0.75" : "1";
+    capacityInput.style.background = isDynamic ? "#f1f5f9" : "";
+    capacityInput.title = isDynamic
+      ? "Calculado automaticamente: títulos do operador ÷ dias úteis da semana"
+      : "";
+  }
+
+  if (hint) {
+    hint.style.display = isDynamic ? "block" : "none";
+  }
+
+  let displayCap = parseInt(capacityInput?.value, 10) || 25;
+
+  if (isDynamic) {
+    const todayStr = typeof window.localDateStr === "function"
+      ? window.localDateStr()
+      : new Date().toISOString().slice(0, 10);
+    if (op === "Todos") {
+      if (hint) {
+        hint.innerHTML = "Selecione um operador para calcular a capacidade pela carteira direta (régua interna). Feriados nacionais são excluídos.";
+      }
+    } else if (typeof window.resolveDynamicFilaCapacity === "function") {
+      const dyn = window.resolveDynamicFilaCapacity(op, todayStr);
+      displayCap = dyn.capacity;
+      if (capacityInput) capacityInput.value = displayCap;
+      if (hint) {
+        hint.innerHTML = `<strong>${dyn.titles}</strong> título(s) diretos ÷ <strong>${dyn.businessDays}</strong> dia(s) útil(eis) desta semana = <strong>${dyn.capacity}</strong>/dia. Inclui só quem está com o operador (antes da terceirizada).`;
+      }
+    }
+  } else if (hint) {
+    hint.innerHTML = "";
+  }
+
+  if (window.updateCapacityVisual) window.updateCapacityVisual(displayCap);
 };
 
 window.updateCapacityVisual = function(val) {
@@ -24088,12 +24565,14 @@ window.saveFilaConfig = function() {
   }
   
   const capacity = parseInt(document.getElementById("fila-capacity")?.value || 25);
+  const capacityMode = document.getElementById("fila-capacity-dynamic")?.checked ? "dynamic" : "linear";
   
   if (!AppState.rules) AppState.rules = {};
   if (!AppState.rules.filaConfig) AppState.rules.filaConfig = {};
   
   AppState.rules.filaConfig[op] = {
     capacity: capacity,
+    capacityMode: capacityMode,
     r1: r1,
     r2: r2,
     r3: r3,
@@ -24110,12 +24589,14 @@ window.saveFilaConfig = function() {
       window.invalidateDailyQueueCache("configuração da fila alterada");
     } else {
       window._dailyQueueCache = {};
+      localStorage.removeItem('crm_daily_queue_cache_v5');
       localStorage.removeItem('crm_daily_queue_cache_v4');
       localStorage.removeItem('crm_daily_queue_cache_v3');
       window.agendaItemsCache = {};
     }
   } catch (e) {}
-  alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso!`);
+  const modeLabel = capacityMode === "dynamic" ? "agenda dinâmica" : "capacidade linear";
+  alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso! (${modeLabel})`);
 };
 
 window.DEFAULT_RENEG_BLOCK_MONTHS = 24;

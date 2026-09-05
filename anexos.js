@@ -1224,12 +1224,41 @@ function anexosContractHasUnit(c, unitId, nomeUnidade) {
   });
 }
 
-async function anexosFetchJson(path) {
-  const res = await fetch(anexosApiUrl(path), {
-    headers: { Authorization: getBasicAuthHeader(), Accept: 'application/json' }
-  });
-  if (!res.ok) return null;
-  try { return await res.json(); } catch (e) { return null; }
+async function anexosFetchJson(path, timeoutMs) {
+  const ms = timeoutMs == null ? 18000 : Number(timeoutMs);
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () {
+    try { ctrl.abort(); } catch (e) {}
+  }, Number.isFinite(ms) && ms > 0 ? ms : 18000);
+  try {
+    const res = await fetch(anexosApiUrl(path), {
+      headers: { Authorization: getBasicAuthHeader(), Accept: 'application/json' },
+      signal: ctrl.signal
+    });
+    if (!res.ok) return null;
+    try { return await res.json(); } catch (e) { return null; }
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function anexosFetchJsonUrl(url, timeoutMs) {
+  const ms = timeoutMs == null ? 8000 : Number(timeoutMs);
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () {
+    try { ctrl.abort(); } catch (e) {}
+  }, Number.isFinite(ms) && ms > 0 ? ms : 8000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    try { return await res.json(); } catch (e) { return null; }
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function anexosResolveSalesContract(enterpriseId, unitId, nomeUnidade, meta) {
@@ -2145,49 +2174,21 @@ const AnexosApp = {
 
       renderAnexosModule();
 
+      const mainCustId = mainCust.customerId || mainCust.id;
+      const [attData, uAttData, cAttData] = await Promise.all([
+        anexosFetchJson(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`),
+        anexosFetchJson(`/sienge-proxy/units/${encodeURIComponent(unitId)}/attachments`),
+        mainCustId ? anexosFetchJson(`/sienge-proxy/customers/${mainCustId}/attachments`) : Promise.resolve(null)
+      ]);
+      if (!stillThis()) return;
+
       let allAttachments = [];
-      const attData = await anexosFetchJson(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`);
       if (attData) {
         allAttachments = allAttachments.concat((attData.results || []).map(a => ({
           ...a,
           _sourceContractId: mainC.id
         })));
       }
-      if (!stillThis()) return;
-
-      let historicCustomers = [];
-      try {
-        const numContrato = mainC.contractNumber || mainC.number || mainC.id;
-        if (enterpriseId && nomeUnidade && numContrato) {
-          const histRes = await fetch(anexosApiUrl(`/api/sienge/historico-cessao?unidade=${encodeURIComponent(nomeUnidade)}&empreendimento=${encodeURIComponent(enterpriseId)}&contrato=${encodeURIComponent(numContrato)}`));
-          if (histRes.ok) historicCustomers = await histRes.json();
-        }
-      } catch (err) {
-        console.error("Erro ao buscar histórico de cessões via puppeteer:", err);
-      }
-      if (!stillThis()) return;
-
-      const customersToFetch = new Set();
-      if (mainCust.customerId || mainCust.id) customersToFetch.add(mainCust.customerId || mainCust.id);
-      historicCustomers.forEach(hc => { if (hc && hc.customerId) customersToFetch.add(hc.customerId); });
-
-      for (const custId of customersToFetch) {
-        const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${custId}/attachments`);
-        if (!stillThis()) return;
-        if (!cAttData) continue;
-        const custResults = (cAttData.results || [])
-          .filter(a => anexosAttachmentBelongsToUnit(a, { enterpriseId, unitName: nomeUnidade, unitId }))
-          .map(a => ({
-            ...a,
-            isCustomerAttachment: true,
-            customerId: custId,
-            description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
-          }));
-        allAttachments = allAttachments.concat(custResults);
-      }
-
-      const uAttData = await anexosFetchJson(`/sienge-proxy/units/${encodeURIComponent(unitId)}/attachments`);
-      if (!stillThis()) return;
       if (uAttData) {
         allAttachments = allAttachments.concat((uAttData.results || []).map(a => ({
           ...a,
@@ -2196,6 +2197,16 @@ const AnexosApp = {
           description: a.description ? `(Unidade) ${a.description}` : `(Unidade) Arquivo`
         })));
       }
+      if (cAttData) {
+        allAttachments = allAttachments.concat((cAttData.results || [])
+          .filter(a => anexosAttachmentBelongsToUnit(a, { enterpriseId, unitName: nomeUnidade, unitId }))
+          .map(a => ({
+            ...a,
+            isCustomerAttachment: true,
+            customerId: mainCustId,
+            description: a.description ? `(Cliente ${mainCustId}) ${a.description}` : `(Cliente ${mainCustId}) Arquivo`
+          })));
+      }
 
       AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
       AnexosState.loadingUnidadeAnexos = false;
@@ -2203,12 +2214,66 @@ const AnexosApp = {
       if (AnexosState.contractAttachments.length) {
         this.importarAnexosDoContrato({ auto: true, force: true });
       }
+
+      this._enrichAttachmentsFromHistorico({
+        gen: gen,
+        unitId: unitId,
+        mainC: mainC,
+        mainCustId: mainCustId,
+        enterpriseId: enterpriseId,
+        nomeUnidade: nomeUnidade
+      });
     } catch (e) {
       console.error('Erro ao buscar contrato vigente:', e);
       if (stillThis()) {
         AnexosState.loadingUnidadeAnexos = false;
         renderAnexosModule();
       }
+    } finally {
+      if (stillThis()) AnexosState.loadingUnidadeAnexos = false;
+    }
+  },
+
+  async _enrichAttachmentsFromHistorico(ctx) {
+    const stillThis = () => ctx.gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(ctx.unitId || '');
+    try {
+      const numContrato = ctx.mainC.contractNumber || ctx.mainC.number || ctx.mainC.id;
+      if (!ctx.enterpriseId || !ctx.nomeUnidade || !numContrato) return;
+      const historicCustomers = await anexosFetchJsonUrl(anexosApiUrl(
+        `/api/sienge/historico-cessao?unidade=${encodeURIComponent(ctx.nomeUnidade)}&empreendimento=${encodeURIComponent(ctx.enterpriseId)}&contrato=${encodeURIComponent(numContrato)}`
+      ), 8000);
+      if (!stillThis() || !Array.isArray(historicCustomers) || !historicCustomers.length) return;
+
+      const extra = [];
+      for (const hc of historicCustomers) {
+        const custId = hc && hc.customerId;
+        if (!custId || String(custId) === String(ctx.mainCustId)) continue;
+        const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${custId}/attachments`);
+        if (!stillThis()) return;
+        if (!cAttData) continue;
+        extra.push.apply(extra, (cAttData.results || [])
+          .filter(a => anexosAttachmentBelongsToUnit(a, {
+            enterpriseId: ctx.enterpriseId,
+            unitName: ctx.nomeUnidade,
+            unitId: ctx.unitId
+          }))
+          .map(a => ({
+            ...a,
+            isCustomerAttachment: true,
+            customerId: custId,
+            description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
+          })));
+      }
+      if (!extra.length || !stillThis()) return;
+      const before = AnexosState.contractAttachments.length;
+      AnexosState.contractAttachments = anexosDedupeAttachments(
+        (AnexosState.contractAttachments || []).concat(extra)
+      );
+      if (AnexosState.contractAttachments.length === before) return;
+      renderAnexosModule();
+      this.importarAnexosDoContrato({ auto: true, force: true });
+    } catch (err) {
+      console.warn('[Anexos] histórico de cessão ignorado:', err);
     }
   },
 

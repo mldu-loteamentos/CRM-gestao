@@ -2288,7 +2288,10 @@ const SiengeApiService = {
       console.log("[Sienge] Preparando snapshot diário de inadimplência...");
       
       const today = new Date();
-      const dateStr = today.toISOString().split('T')[0];
+      // Data local (BRT): toISOString() muda o dia após 21h e gravava snapshot no dia errado
+      const dateStr = (typeof window.localDateStr === "function")
+        ? window.localDateStr(today)
+        : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
       
       // Regras de negócio
       // O 2º dia útil pode ser calculado com feriados fixos. Para simplificar no MVP, 
@@ -2320,10 +2323,11 @@ const SiengeApiService = {
       const operatorMap = {};
       
       bills.forEach(b => {
-        totalValue += b.value;
+        const billVal = Number(b.value != null ? b.value : b.overdueValue) || 0;
+        totalValue += billVal;
         if (b.subjudice === 'S') {
           subjudiceCount++;
-          subjudiceValue += b.value;
+          subjudiceValue += billVal;
         }
         
         // Empresa
@@ -2345,7 +2349,7 @@ const SiengeApiService = {
         
         const comp = companyMap[b.companyId];
         comp.count++;
-        comp.value += b.value;
+        comp.value += billVal;
         
         // CC
         const cc = String(b.costCenterId || 'N/D');
@@ -2353,7 +2357,7 @@ const SiengeApiService = {
           comp.cost_centers[cc] = { id: cc, count: 0, value: 0 };
         }
         comp.cost_centers[cc].count++;
-        comp.cost_centers[cc].value += b.value;
+        comp.cost_centers[cc].value += billVal;
         
         // Aging
         const delay = Number(b.daysDelay != null ? b.daysDelay : b.maxDaysDelay) || 0;
@@ -2366,10 +2370,9 @@ const SiengeApiService = {
         else agingKey = 'd365p';
         
         comp.aging[agingKey].count++;
-        comp.aging[agingKey].value += b.value;
+        comp.aging[agingKey].value += billVal;
 
         const opName = String(b.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
-        const billVal = Number(b.value != null ? b.value : b.overdueValue) || 0;
         const nTit = (Array.isArray(b.titles) && b.titles.length)
           ? b.titles.length
           : (Number(b.billCount) || 1);
@@ -2391,6 +2394,7 @@ const SiengeApiService = {
         if (b.subjudice !== 'S') return;
         const cid = String(b.customerId || '');
         if (!cid) return;
+        const billVal = Number(b.value != null ? b.value : b.overdueValue) || 0;
         if (!sjClients[cid]) {
           sjClients[cid] = {
             id: cid,
@@ -2400,11 +2404,11 @@ const SiengeApiService = {
             cc: String(b.costCenterId || (b.costCentersId && (Array.isArray(b.costCentersId) ? b.costCentersId[0] : b.costCentersId)) || 'N/D')
           };
         }
-        sjClients[cid].value += b.value || 0;
+        sjClients[cid].value += billVal;
         sjClients[cid].titles += 1;
         const cc = sjClients[cid].cc;
         if (!sjCenters[cc]) sjCenters[cc] = { id: cc, value: 0, titles: 0, clients: 0 };
-        sjCenters[cc].value += b.value || 0;
+        sjCenters[cc].value += billVal;
         sjCenters[cc].titles += 1;
       });
       Object.values(sjClients).forEach(c => {
@@ -2419,7 +2423,7 @@ const SiengeApiService = {
         total_count: bills.length,
         total_customers: uniqueCustomers.size,
         total_value: totalValue,
-        avg_ticket: totalValue / bills.length,
+        avg_ticket: bills.length ? totalValue / bills.length : 0,
         subjudice_count: subjudiceCount,
         subjudice_customers: Object.keys(sjClients).length,
         subjudice_value: subjudiceValue,
@@ -2435,12 +2439,33 @@ const SiengeApiService = {
             cost_centers: Object.values(c.cost_centers)
           })),
           operators: Object.values(operatorMap)
-        }
+        },
+        saved_at: new Date().toISOString(),
+        source_count: bills.length
       };
 
       if (window.firebaseCollections && window.firebaseDb) {
         try {
           const docRef = window.firebaseCollections.doc(window.firebaseDb, 'inadimplencia_snapshots', dateStr);
+          // Não sobrescrever um snapshot cheio com carga parcial (causa o “buraco” no gráfico)
+          try {
+            const existingSnap = await window.firebaseCollections.getDoc(docRef);
+            if (existingSnap && existingSnap.exists()) {
+              const prev = existingSnap.data() || {};
+              const prevVal = Number(prev.total_value) || 0;
+              const prevCnt = Number(prev.total_count) || 0;
+              const thinnerValue = prevVal > 0 && totalValue < prevVal * 0.85;
+              const thinnerCount = prevCnt > 0 && bills.length < prevCnt * 0.85;
+              if (thinnerValue || thinnerCount) {
+                console.warn(
+                  `[Firebase] Snapshot ${dateStr} NÃO sobrescrito: existente ${prevCnt} tít / R$ ${prevVal.toFixed(0)} vs novo ${bills.length} tít / R$ ${totalValue.toFixed(0)} (parece parcial).`
+                );
+                return;
+              }
+            }
+          } catch (readPrevErr) {
+            console.warn("[Firebase] Não foi possível comparar snapshot anterior:", readPrevErr);
+          }
           await window.firebaseCollections.setDoc(docRef, payload);
           console.log(`[Firebase] Snapshot de dashboard (${dateStr}) salvo no Firestore com sucesso.`);
         } catch (fbErr) {

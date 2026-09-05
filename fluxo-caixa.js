@@ -29,6 +29,8 @@ const FluxoCaixaApp = {
       const last = new Date(y, now.getMonth() + 1, 0).getDate();
       this.endDate = `${y}-${m}-${String(last).padStart(2, "0")}`;
     }
+    // Sempre a visão DFC Padrão do cadastro de visões (Apoio / Integra)
+    this.visao();
     const cons = this.consolidacaoCompanies();
     if (!this.selectedCompanyIds.length) this.selectedCompanyIds = cons.map(c => String(c.id));
     this.render();
@@ -650,7 +652,7 @@ const FluxoCaixaApp = {
             <div class="fc-head-icon"><i data-lucide="git-branch"></i></div>
             <div>
               <h2>Fluxo de caixa (DFC)</h2>
-              <p>Mesma estrutura do cadastro de visões · API caixa e banco · % MLDU</p>
+              <p>Estrutura <strong>DFC Padrão</strong> do cadastro de visões · API caixa e banco · % MLDU</p>
             </div>
           </div>
           <button type="button" class="btn btn-outline fc-link-visoes" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">

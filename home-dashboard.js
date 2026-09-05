@@ -441,7 +441,16 @@ const HomeDashboard = {
         }).length;
       });
     } catch (e) {}
-    const capacity = 25;
+    let capacity = 25;
+    try {
+      const user = this.getViewUser();
+      const opName = user?.sienge_user || user?.name || '';
+      if (opName && typeof window.resolveOperatorDailyCapacity === 'function') {
+        capacity = window.resolveOperatorDailyCapacity(opName, today).capacity || 25;
+      } else if (opName && typeof window.getOperatorFilaConfig === 'function') {
+        capacity = Number(window.getOperatorFilaConfig(opName).capacity) || 25;
+      }
+    } catch (e) {}
     return { ...counts, filaTotal: filaTotal || capacity, filaDone, capacity };
   },
 
@@ -452,8 +461,9 @@ const HomeDashboard = {
     const day = this.getTodayWorkStats();
     const week = this.countNotesBetween(monday, today);
     const month = this.countNotesBetween(monthStart, today);
-    week.capacity = 25 * this.weekdaysInRange(monday, today);
-    month.capacity = 25 * this.weekdaysInRange(monthStart, today);
+    const dayCap = day.capacity || 25;
+    week.capacity = dayCap * this.weekdaysInRange(monday, today);
+    month.capacity = dayCap * this.weekdaysInRange(monthStart, today);
     week.filaDone = week.total;
     month.filaDone = month.total;
     return { day, week, month };

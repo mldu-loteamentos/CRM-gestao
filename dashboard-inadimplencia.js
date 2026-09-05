@@ -1,6 +1,30 @@
 const DashboardInadimplencia = (function() {
   let snapshots = [];
-  
+  let chartInstance = null;
+
+  const filterDraft = {
+    companies: [],
+    centers: [],
+    cities: [],
+    operators: []
+  };
+  const filterApplied = {
+    companies: [],
+    centers: [],
+    cities: [],
+    operators: []
+  };
+  const filterUi = {
+    openEmp: false,
+    openCc: false,
+    openCid: false,
+    openOp: false,
+    qEmp: "",
+    qCc: "",
+    qCid: "",
+    qOp: ""
+  };
+
   async function carregarDados() {
     try {
       if (window.firebaseCollections && window.firebaseDb) {
@@ -10,7 +34,7 @@ const DashboardInadimplencia = (function() {
         snapshots = [];
         fbDocs.forEach(d => {
           const data = d.data();
-          if (data.total_value > 1000) { // filter out anomalous/empty days
+          if (data.total_value > 1000) {
             snapshots.push(data);
           }
         });
@@ -21,7 +45,7 @@ const DashboardInadimplencia = (function() {
       console.error('Falha na requisição dos snapshots do Firebase', e);
     }
   }
-  
+
   function formatMoney(value) {
     if (value === undefined || value === null) return "R$ 0,00";
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -30,19 +54,18 @@ const DashboardInadimplencia = (function() {
   function getSnapshotAtual() {
     return snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
   }
-  
+
   function getSnapshotAnterior() {
     return snapshots.length > 1 ? snapshots[snapshots.length - 2] : null;
   }
-  
+
   function getSnapshotFechamentoMes() {
-    // Busca o snapshot do último fechamento de mês
     for (let i = snapshots.length - 1; i >= 0; i--) {
       if (snapshots[i].is_month_close) return snapshots[i];
     }
     return null;
   }
-  
+
   function calcularVariacao(atual, anterior) {
     if (!anterior || anterior === 0) return { val: 0, text: '-', class: '' };
     const pct = ((atual - anterior) / anterior) * 100;
@@ -50,82 +73,601 @@ const DashboardInadimplencia = (function() {
     const colorClass = pct > 0 ? 'text-red-600' : (pct < 0 ? 'text-green-600' : 'text-gray-500');
     return { val: pct, text: `${sign}${pct.toFixed(1)}%`, class: colorClass };
   }
-  
-  function renderCards() {
+
+  function hasAnyFilter(f) {
+    return !!(f.companies.length || f.centers.length || f.cities.length || f.operators.length);
+  }
+
+  function getLiveClients() {
+    const list = window.rawClientList || window.clientList || [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  function clientValue(c) {
+    return Number(c.overdueValue != null ? c.overdueValue : c.value) || 0;
+  }
+
+  function clientTitles(c) {
+    if (Array.isArray(c.titles) && c.titles.length) return c.titles.length;
+    return Number(c.billCount) || 1;
+  }
+
+  function clientDelay(c) {
+    return Number(c.maxDaysDelay != null ? c.maxDaysDelay : c.daysDelay) || 0;
+  }
+
+  function clientCity(c) {
+    if (typeof window.resolveCityRuleId !== 'function') return { city: '', ruleId: '' };
+    return window.resolveCityRuleId(c.costCenterId) || { city: '', ruleId: '' };
+  }
+
+  function clientOperator(c) {
+    return String(c.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
+  }
+
+  function clientMatches(c, f) {
+    if (f.companies.length && !f.companies.includes(String(c.companyId))) return false;
+    if (f.centers.length && !f.centers.includes(String(c.costCenterId))) return false;
+    if (f.operators.length && !f.operators.includes(clientOperator(c))) return false;
+    if (f.cities.length) {
+      const r = clientCity(c);
+      if (!f.cities.includes(String(r.city || '')) && !f.cities.includes(String(r.ruleId || ''))) return false;
+    }
+    return true;
+  }
+
+  function emptyAging() {
+    return {
+      d0_30: { count: 0, value: 0 },
+      d31_60: { count: 0, value: 0 },
+      d61_90: { count: 0, value: 0 },
+      d91_180: { count: 0, value: 0 },
+      d181_365: { count: 0, value: 0 },
+      d365p: { count: 0, value: 0 }
+    };
+  }
+
+  function agingKeyFromDelay(delay) {
+    if (delay <= 30) return 'd0_30';
+    if (delay <= 60) return 'd31_60';
+    if (delay <= 90) return 'd61_90';
+    if (delay <= 180) return 'd91_180';
+    if (delay <= 365) return 'd181_365';
+    return 'd365p';
+  }
+
+  function costCenterName(id) {
+    let nome = String(id);
+    if (window.MouraAuth && window.MouraAuth.costCenters) {
+      const found = window.MouraAuth.costCenters.find(x => String(x.id) === String(id));
+      if (found) return `${id} - ${String(found.name).toUpperCase()}`;
+    }
+    if (window.AppState && window.AppState.cachedCostCenters) {
+      const found = window.AppState.cachedCostCenters.find(x => String(x.id) === String(id));
+      if (found) return `${id} - ${String(found.name).toUpperCase()}`;
+    }
+    if (typeof window.getCostCenterName === 'function') {
+      const n = window.getCostCenterName(id);
+      if (n) {
+        const clean = String(n).replace(new RegExp(`^${id}\\s*-\\s*`, 'i'), '').trim();
+        return `${id} - ${clean.toUpperCase()}`;
+      }
+    }
+    return nome;
+  }
+
+  function companyName(id) {
+    if (typeof window.getCompanyName === 'function') {
+      const n = window.getCompanyName(id);
+      if (n) return `${id} - ${String(n).toUpperCase()}`;
+    }
+    if (window.AppState && window.AppState.companies) {
+      const c = window.AppState.companies.find(x => String(x.id) === String(id));
+      if (c) return `${id} - ${String(c.tradeName || c.name || '').toUpperCase()}`;
+    }
+    return String(id);
+  }
+
+  function buildFilterOptions() {
+    const companies = new Map();
+    const centers = new Map();
+    const cities = new Map();
+    const operators = new Map();
+
+    function addFromClient(c) {
+      if (c.companyId != null && c.companyId !== '') {
+        companies.set(String(c.companyId), companyName(c.companyId));
+      }
+      if (c.costCenterId != null && c.costCenterId !== '') {
+        centers.set(String(c.costCenterId), costCenterName(c.costCenterId));
+        const r = clientCity(c);
+        if (r.city) cities.set(String(r.city), String(r.city));
+      }
+      const op = clientOperator(c);
+      operators.set(op, op);
+    }
+
+    getLiveClients().forEach(addFromClient);
+
     const atual = getSnapshotAtual();
-    const anterior = getSnapshotFechamentoMes() || getSnapshotAnterior();
-    
-    if (!atual) return '';
-    
-    const varValor = calcularVariacao(atual.total_value, anterior ? anterior.total_value : 0);
-    const varQtd = calcularVariacao(atual.total_count, anterior ? anterior.total_count : 0);
-    const varTicket = calcularVariacao(atual.avg_ticket, anterior ? anterior.avg_ticket : 0);
-    
+    if (atual && atual.data_json) {
+      (atual.data_json.companies || []).forEach(comp => {
+        const cid = String(comp.company_id != null ? comp.company_id : comp.id || '');
+        if (cid) companies.set(cid, companyName(cid));
+        (comp.cost_centers || []).forEach(cc => {
+          const id = String(cc.id);
+          centers.set(id, costCenterName(id));
+          if (typeof window.resolveCityRuleId === 'function') {
+            const r = window.resolveCityRuleId(id) || {};
+            if (r.city) cities.set(String(r.city), String(r.city));
+          }
+        });
+      });
+      (atual.data_json.operators || []).forEach(op => {
+        const name = String(op.name || '').toUpperCase().trim();
+        if (name) operators.set(name, name);
+      });
+    }
+
+    const toItems = (map) => Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+    return {
+      companies: toItems(companies),
+      centers: toItems(centers),
+      cities: toItems(cities),
+      operators: toItems(operators)
+    };
+  }
+
+  function aggregateFromLive(clients, f) {
+    const filtered = clients.filter(c => clientMatches(c, f) && clientValue(c) >= 0.01);
+    const aging = emptyAging();
+    const centerMap = {};
+    const opMap = {};
+    let total_value = 0;
+    let total_count = 0;
+    let subjudice_count = 0;
+    let subjudice_value = 0;
+    const customers = new Set();
+
+    filtered.forEach(c => {
+      const val = clientValue(c);
+      const nTit = clientTitles(c);
+      const delay = clientDelay(c);
+      total_value += val;
+      total_count += nTit;
+      if (c.customerId != null) customers.add(String(c.customerId));
+      if (c.subjudice === 'S') {
+        subjudice_count += nTit;
+        subjudice_value += val;
+      }
+      const ak = agingKeyFromDelay(delay);
+      aging[ak].count += nTit;
+      aging[ak].value += val;
+
+      const ccId = String(c.costCenterId || 'N/D');
+      if (!centerMap[ccId]) centerMap[ccId] = { id: ccId, count: 0, value: 0 };
+      centerMap[ccId].count += nTit;
+      centerMap[ccId].value += val;
+
+      const opName = clientOperator(c);
+      if (!opMap[opName]) opMap[opName] = { name: opName, total_count: 0, total_value: 0, above31_count: 0, above31_value: 0 };
+      opMap[opName].total_count += nTit;
+      opMap[opName].total_value += val;
+      if (delay >= 31) {
+        opMap[opName].above31_count += nTit;
+        opMap[opName].above31_value += val;
+      }
+    });
+
+    return {
+      total_value,
+      total_count,
+      total_customers: customers.size,
+      avg_ticket: total_count > 0 ? total_value / total_count : 0,
+      subjudice_count,
+      subjudice_value,
+      aging,
+      centers: Object.values(centerMap),
+      operators: Object.values(opMap),
+      source: 'live'
+    };
+  }
+
+  function ccPassesFilters(ccId, companyId, f) {
+    if (f.companies.length && !f.companies.includes(String(companyId))) return false;
+    if (f.centers.length && !f.centers.includes(String(ccId))) return false;
+    if (f.cities.length) {
+      if (typeof window.resolveCityRuleId !== 'function') return false;
+      const r = window.resolveCityRuleId(ccId) || {};
+      if (!f.cities.includes(String(r.city || '')) && !f.cities.includes(String(r.ruleId || ''))) return false;
+    }
+    return true;
+  }
+
+  function aggregateFromSnapshot(snap, f) {
+    if (!snap) {
+      return {
+        total_value: 0, total_count: 0, avg_ticket: 0,
+        subjudice_count: 0, subjudice_value: 0,
+        aging: emptyAging(), centers: [], operators: [], source: 'snapshot'
+      };
+    }
+
+    if (!hasAnyFilter(f)) {
+      const aging = emptyAging();
+      const centers = [];
+      (snap.data_json && snap.data_json.companies || []).forEach(comp => {
+        if (comp.aging) {
+          Object.keys(aging).forEach(k => {
+            if (comp.aging[k]) {
+              aging[k].count += comp.aging[k].count || 0;
+              aging[k].value += comp.aging[k].value || 0;
+            }
+          });
+        }
+        (comp.cost_centers || []).forEach(cc => {
+          centers.push({ id: cc.id, count: cc.count, value: cc.value });
+        });
+      });
+      return {
+        total_value: snap.total_value || 0,
+        total_count: snap.total_count || 0,
+        avg_ticket: snap.avg_ticket || 0,
+        subjudice_count: snap.subjudice_count || 0,
+        subjudice_value: snap.subjudice_value || 0,
+        aging,
+        centers,
+        operators: (snap.data_json && snap.data_json.operators) ? snap.data_json.operators.slice() : [],
+        source: 'snapshot'
+      };
+    }
+
+    const onlyOps = f.operators.length && !f.companies.length && !f.centers.length && !f.cities.length;
+    if (onlyOps) {
+      const ops = ((snap.data_json && snap.data_json.operators) || []).filter(o =>
+        f.operators.includes(String(o.name || '').toUpperCase().trim())
+      );
+      let total_value = 0, total_count = 0;
+      ops.forEach(o => {
+        total_value += Number(o.total_value) || 0;
+        total_count += Number(o.total_count) || 0;
+      });
+      return {
+        total_value,
+        total_count,
+        avg_ticket: total_count > 0 ? total_value / total_count : 0,
+        subjudice_count: 0,
+        subjudice_value: 0,
+        aging: emptyAging(),
+        centers: [],
+        operators: ops,
+        source: 'snapshot'
+      };
+    }
+
+    const aging = emptyAging();
+    const centers = [];
+    let total_value = 0;
+    let total_count = 0;
+    let subjudice_count = 0;
+    let subjudice_value = 0;
+    const companies = (snap.data_json && snap.data_json.companies) || [];
+
+    companies.forEach(comp => {
+      const companyId = String(comp.company_id != null ? comp.company_id : comp.id || '');
+      if (f.companies.length && !f.companies.includes(companyId)) return;
+
+      const ccs = comp.cost_centers || [];
+      const matchingCcs = ccs.filter(cc => ccPassesFilters(cc.id, companyId, f));
+      if (!matchingCcs.length && (f.centers.length || f.cities.length)) return;
+
+      if (f.centers.length || f.cities.length) {
+        matchingCcs.forEach(cc => {
+          total_value += Number(cc.value) || 0;
+          total_count += Number(cc.count) || 0;
+          centers.push({ id: cc.id, count: cc.count, value: cc.value });
+        });
+        // aging só existe por empresa — proporção aproximada pelo valor dos CCs
+        const compVal = Number(comp.value) || 0;
+        const matchedVal = matchingCcs.reduce((s, cc) => s + (Number(cc.value) || 0), 0);
+        const ratio = compVal > 0 ? matchedVal / compVal : 0;
+        if (comp.aging && ratio > 0) {
+          Object.keys(aging).forEach(k => {
+            if (comp.aging[k]) {
+              aging[k].count += Math.round((comp.aging[k].count || 0) * ratio);
+              aging[k].value += (comp.aging[k].value || 0) * ratio;
+            }
+          });
+        }
+      } else {
+        total_value += Number(comp.value) || 0;
+        total_count += Number(comp.count) || 0;
+        ccs.forEach(cc => centers.push({ id: cc.id, count: cc.count, value: cc.value }));
+        if (comp.aging) {
+          Object.keys(aging).forEach(k => {
+            if (comp.aging[k]) {
+              aging[k].count += comp.aging[k].count || 0;
+              aging[k].value += comp.aging[k].value || 0;
+            }
+          });
+        }
+      }
+    });
+
+    let operators = (snap.data_json && snap.data_json.operators) ? snap.data_json.operators.slice() : [];
+    if (f.operators.length) {
+      operators = operators.filter(o => f.operators.includes(String(o.name || '').toUpperCase().trim()));
+      if (!f.companies.length && !f.centers.length && !f.cities.length) {
+        // already handled above
+      } else {
+        // combina filtros: mantém ops filtrados, totais já vêm de empresas/CCs
+      }
+    }
+
+    // Se filtro de operador + empresa/cc: sem cruzamento no snapshot, escala ops pelo ratio do valor
+    if (f.operators.length && (f.companies.length || f.centers.length || f.cities.length)) {
+      const opVal = operators.reduce((s, o) => s + (Number(o.total_value) || 0), 0);
+      if (opVal > 0 && total_value > 0) {
+        // mantém o menor entre os dois como aproximação não disponível — usa valor de CC/empresa
+      }
+    }
+
+    return {
+      total_value,
+      total_count,
+      avg_ticket: total_count > 0 ? total_value / total_count : 0,
+      subjudice_count,
+      subjudice_value,
+      aging,
+      centers,
+      operators,
+      source: 'snapshot'
+    };
+  }
+
+  function filteredSnapshotValue(snap, f) {
+    if (!snap) return 0;
+    if (!hasAnyFilter(f)) return Number(snap.total_value) || 0;
+    return aggregateFromSnapshot(snap, f).total_value;
+  }
+
+  function getCurrentMetrics() {
+    const f = filterApplied;
+    const live = getLiveClients();
+    if (live.length > 0) {
+      return aggregateFromLive(live, f);
+    }
+    return aggregateFromSnapshot(getSnapshotAtual(), f);
+  }
+
+  function getCompareMetrics(snap) {
+    return aggregateFromSnapshot(snap, filterApplied);
+  }
+
+  function bindFilters(options) {
+    if (!window.MlEmpresaFilter) return;
+
+    const bindOne = (id, key, openKey, qKey, items) => {
+      MlEmpresaFilter.bind(id, {
+        toggleOpen() {
+          filterUi[openKey] = !filterUi[openKey];
+          paint({ keepScroll: true });
+        },
+        setQuery(q) {
+          filterUi[qKey] = q || "";
+          const box = document.getElementById(id + "-list");
+          if (box && window.MlEmpresaFilter) {
+            box.innerHTML = MlEmpresaFilter.listHtml({
+              id,
+              items,
+              selectedIds: filterDraft[key],
+              query: filterUi[qKey]
+            });
+          }
+        },
+        toggleId(itemId, on) {
+          const sid = String(itemId);
+          const cur = filterDraft[key].slice();
+          filterDraft[key] = on
+            ? (cur.includes(sid) ? cur : cur.concat(sid))
+            : cur.filter(x => x !== sid);
+          filterApplied[key] = filterDraft[key].slice();
+          filterUi[openKey] = true;
+          paint({ keepScroll: true });
+        },
+        selectAll() {
+          filterDraft[key] = items.map(x => String(x.id));
+          filterApplied[key] = filterDraft[key].slice();
+          filterUi[openKey] = true;
+          paint({ keepScroll: true });
+        },
+        selectNone() {
+          filterDraft[key] = [];
+          filterApplied[key] = [];
+          filterUi[openKey] = true;
+          paint({ keepScroll: true });
+        }
+      });
+    };
+
+    bindOne("dash-inad-emp", "companies", "openEmp", "qEmp", options.companies);
+    bindOne("dash-inad-cc", "centers", "openCc", "qCc", options.centers);
+    bindOne("dash-inad-cid", "cities", "openCid", "qCid", options.cities);
+    bindOne("dash-inad-op", "operators", "openOp", "qOp", options.operators);
+  }
+
+  function filterDropHtml(id, label, items, selectedIds, open, query) {
+    if (!window.MlEmpresaFilter) {
+      return `<div style="flex:1;min-width:200px;"><div class="ml-emp-filter-label">${label}</div><span style="color:#94a3b8;font-size:0.8rem;">Filtro indisponível</span></div>`;
+    }
+    return MlEmpresaFilter.html({
+      id,
+      label,
+      items,
+      selectedIds: selectedIds.map(String),
+      open: !!open,
+      query: query || "",
+      emptyMeansAll: true
+    });
+  }
+
+  function renderFilterBar(options) {
+    bindFilters(options);
+    return `
+      <div style="background:white;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);padding:18px 20px;margin-bottom:22px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+          <h3 style="margin:0;font-size:1rem;color:#1e293b;display:flex;align-items:center;gap:8px;">
+            <i data-lucide="filter" style="width:18px;color:#105436;"></i> Filtros
+          </h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary" onclick="window.DashboardInadimplencia.aplicarFiltros()">
+              <i data-lucide="check" style="width:16px;"></i> Aplicar
+            </button>
+            <button type="button" class="btn btn-cancel" onclick="window.DashboardInadimplencia.limparFiltros()">
+              <i data-lucide="eraser" style="width:16px;"></i> Limpar filtros
+            </button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
+          ${filterDropHtml("dash-inad-emp", "EMPRESAS", options.companies, filterDraft.companies, filterUi.openEmp, filterUi.qEmp)}
+          ${filterDropHtml("dash-inad-cc", "EMPREENDIMENTOS", options.centers, filterDraft.centers, filterUi.openCc, filterUi.qCc)}
+          ${filterDropHtml("dash-inad-cid", "CIDADES", options.cities, filterDraft.cities, filterUi.openCid, filterUi.qCid)}
+          ${filterDropHtml("dash-inad-op", "OPERADORES", options.operators, filterDraft.operators, filterUi.openOp, filterUi.qOp)}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCards(metrics, compareMetrics) {
+    if (!metrics) return '';
+    const varValor = calcularVariacao(metrics.total_value, compareMetrics ? compareMetrics.total_value : 0);
+    const varQtd = calcularVariacao(metrics.total_count, compareMetrics ? compareMetrics.total_count : 0);
+    const varTicket = calcularVariacao(metrics.avg_ticket, compareMetrics ? compareMetrics.avg_ticket : 0);
+
     return `
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 25px;">
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f59e0b; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Valor Total (R$)</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(atual.total_value)}</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(metrics.total_value)}</div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varValor.class}">
             ${varValor.text} vs Fechamento Mês
           </div>
         </div>
-        
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+
+        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #105436; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Qtd. de Títulos</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${atual.total_count}</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${metrics.total_count}</div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varQtd.class}">
             ${varQtd.text} vs Fechamento Mês
           </div>
         </div>
-        
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #10b981; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+
+        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #105436; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Ticket Médio</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(atual.avg_ticket)}</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(metrics.avg_ticket)}</div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varTicket.class}">
             ${varTicket.text} vs Fechamento Mês
           </div>
         </div>
-        
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #8b5cf6; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+
+        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Sub Júdice</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${atual.subjudice_count} <span style="font-size: 1rem; color: #64748b; font-weight: 500;">títulos</span></div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${metrics.subjudice_count} <span style="font-size: 1rem; color: #64748b; font-weight: 500;">títulos</span></div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500; color: #64748b;">
-            Total: ${formatMoney(atual.subjudice_value)}
+            Total: ${formatMoney(metrics.subjudice_value)}
           </div>
         </div>
       </div>
     `;
   }
-  
+
+  function detectSnapshotOutliers(snaps, values) {
+    const flags = values.map(() => false);
+    for (let i = 1; i < values.length - 1; i++) {
+      const prev = Number(values[i - 1]) || 0;
+      const cur = Number(values[i]) || 0;
+      const next = Number(values[i + 1]) || 0;
+      if (prev <= 0 || next <= 0 || cur <= 0) continue;
+      const neighborAvg = (prev + next) / 2;
+      // Queda em V: dia bem abaixo dos vizinhos (ex.: 04/09)
+      if (cur < neighborAvg * 0.8 && cur < prev * 0.85 && cur < next * 0.85) {
+        flags[i] = true;
+      }
+    }
+    return flags;
+  }
+
   function initChart() {
     const ctx = document.getElementById('inadimplencia-chart');
     if (!ctx) return;
-    
-    // Preparar dados (últimos 30 dias se houver)
+
+    if (chartInstance) {
+      try { chartInstance.destroy(); } catch (e) { /* ignore */ }
+      chartInstance = null;
+    }
+
+    const f = filterApplied;
     const recentSnaps = snapshots.slice(-30);
     const labels = recentSnaps.map(s => {
-      const parts = s.date.split('-');
-      return `${parts[2]}/${parts[1]}`;
+      const parts = String(s.date || '').split('-');
+      return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
     });
-    
-    const values = recentSnaps.map(s => s.total_value);
-    
-    new Chart(ctx, {
+    const rawValues = recentSnaps.map(s => filteredSnapshotValue(s, f));
+    const outlierFlags = detectSnapshotOutliers(recentSnaps, rawValues);
+    const displayValues = rawValues.map((v, i) => {
+      if (!outlierFlags[i]) return v;
+      const prev = rawValues[i - 1];
+      const next = rawValues[i + 1];
+      if (prev > 0 && next > 0) return (prev + next) / 2;
+      return v;
+    });
+
+    const noteEl = document.getElementById('inadimplencia-chart-note');
+    if (noteEl) {
+      const bad = [];
+      outlierFlags.forEach((flag, i) => {
+        if (!flag) return;
+        bad.push(`${labels[i]} (gravado ${formatMoney(rawValues[i])}; tendência ~${formatMoney(displayValues[i])})`);
+      });
+      if (bad.length) {
+        noteEl.style.display = 'flex';
+        noteEl.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0;"></i> <span>Possível snapshot parcial: <strong>${bad.join('; ')}</strong>. Linha tracejada usa a média dos dias vizinhos; o ponto vermelho é o valor gravado.</span>`;
+        if (window.lucide) window.lucide.createIcons({ root: noteEl });
+      } else {
+        noteEl.style.display = 'none';
+        noteEl.innerHTML = '';
+      }
+    }
+
+    chartInstance = new Chart(ctx, {
       type: 'line',
       data: {
         labels: labels,
-        datasets: [{
-          label: 'Valor Total de Inadimplência (R$)',
-          data: values,
-          borderColor: '#f59e0b',
-          backgroundColor: 'rgba(245, 158, 11, 0.1)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.1,
-          pointBackgroundColor: recentSnaps.map(s => s.is_month_close ? '#ef4444' : '#f59e0b'),
-          pointRadius: recentSnaps.map(s => s.is_month_close ? 5 : 3),
-        }]
+        datasets: [
+          {
+            label: 'Tendência (corrige buracos)',
+            data: displayValues,
+            borderColor: '#f37021',
+            backgroundColor: 'rgba(243, 112, 33, 0.12)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.1,
+            pointRadius: 0,
+            borderDash: outlierFlags.some(Boolean) ? [6, 4] : [],
+            order: 2
+          },
+          {
+            label: 'Valor gravado',
+            data: rawValues,
+            borderColor: 'transparent',
+            backgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
+            pointBackgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
+            pointRadius: rawValues.map((_, i) => outlierFlags[i] ? 6 : (recentSnaps[i].is_month_close ? 5 : 3)),
+            pointHoverRadius: 7,
+            showLine: false,
+            order: 1
+          }
+        ]
       },
       options: {
         responsive: true,
@@ -135,13 +677,13 @@ const DashboardInadimplencia = (function() {
           tooltip: {
             callbacks: {
               label: function(context) {
-                let label = context.dataset.label || '';
-                if (label) { label += ': '; }
-                if (context.parsed.y !== null) {
-                  label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.parsed.y);
-                }
-                const snap = recentSnaps[context.dataIndex];
+                const i = context.dataIndex;
+                const snap = recentSnaps[i];
+                const raw = rawValues[i];
+                let label = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(raw);
+                if (outlierFlags[i]) label += ' (possível carga parcial)';
                 if (snap && snap.is_month_close) label += ' (Fechamento)';
+                if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
                 return label;
               }
             }
@@ -160,13 +702,10 @@ const DashboardInadimplencia = (function() {
       }
     });
   }
-  
-  function renderTabelaComparativa() {
-    const snapHoje = getSnapshotAtual();
-    const snapFech = getSnapshotFechamentoMes();
-    
-    if (!snapHoje) return '';
-    
+
+  function renderTabelaComparativa(hojeMetrics, fechMetrics) {
+    if (!hojeMetrics) return '';
+
     return `
       <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
         <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
@@ -185,18 +724,18 @@ const DashboardInadimplencia = (function() {
               </tr>
             </thead>
             <tbody>
-              ${snapFech ? `
+              ${fechMetrics ? `
               <tr style="border-bottom: 1px solid #e2e8f0;">
                 <td style="padding: 12px 20px; font-weight: 600; color: #334155;">Fechamento do Mês</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${snapFech.total_count}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(snapFech.total_value)}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${snapFech.subjudice_count}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${fechMetrics.total_count}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(fechMetrics.total_value)}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${fechMetrics.subjudice_count}</td>
               </tr>` : ''}
               <tr style="border-bottom: 1px solid #e2e8f0;">
                 <td style="padding: 12px 20px; font-weight: 600; color: #334155;">Hoje</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${snapHoje.total_count}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(snapHoje.total_value)}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${snapHoje.subjudice_count}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${hojeMetrics.total_count}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(hojeMetrics.total_value)}</td>
+                <td style="padding: 12px 20px; text-align: right; color: #334155;">${hojeMetrics.subjudice_count}</td>
               </tr>
             </tbody>
           </table>
@@ -204,32 +743,10 @@ const DashboardInadimplencia = (function() {
       </div>
     `;
   }
-  
-  function renderAging() {
-    const atual = getSnapshotAtual();
-    if (!atual || !atual.data_json || !atual.data_json.companies) return '';
-    
-    // Agrega o aging de todas as empresas
-    const agings = {
-      d0_30: { count: 0, value: 0 },
-      d31_60: { count: 0, value: 0 },
-      d61_90: { count: 0, value: 0 },
-      d91_180: { count: 0, value: 0 },
-      d181_365: { count: 0, value: 0 },
-      d365p: { count: 0, value: 0 }
-    };
-    
-    atual.data_json.companies.forEach(c => {
-      if(c.aging) {
-        Object.keys(agings).forEach(k => {
-          if (c.aging[k]) {
-            agings[k].count += c.aging[k].count;
-            agings[k].value += c.aging[k].value;
-          }
-        });
-      }
-    });
-    
+
+  function renderAging(metrics) {
+    if (!metrics || !metrics.aging) return '';
+    const agings = metrics.aging;
     const labels = {
       d0_30: '0 a 30 dias',
       d31_60: '31 a 60 dias',
@@ -238,9 +755,9 @@ const DashboardInadimplencia = (function() {
       d181_365: '181 a 365 dias',
       d365p: 'Acima de 365 dias'
     };
-    
+
     let html = `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
+      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
         <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
           <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
             <i data-lucide="bar-chart-3" style="width: 18px; color: #64748b;"></i> Faixa de Atraso (Aging)
@@ -248,10 +765,10 @@ const DashboardInadimplencia = (function() {
         </div>
         <div style="padding: 20px;">
     `;
-    
+
     Object.keys(agings).forEach(k => {
       const val = agings[k].value;
-      const pct = atual.total_value > 0 ? (val / atual.total_value) * 100 : 0;
+      const pct = metrics.total_value > 0 ? (val / metrics.total_value) * 100 : 0;
       html += `
         <div style="margin-bottom: 12px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.85rem; color: #334155;">
@@ -259,45 +776,28 @@ const DashboardInadimplencia = (function() {
             <span style="font-weight: 600;">${formatMoney(val)} (${pct.toFixed(1)}%)</span>
           </div>
           <div style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
-            <div style="width: ${pct}%; height: 100%; background: #f59e0b; border-radius: 4px;"></div>
+            <div style="width: ${pct}%; height: 100%; background: #f37021; border-radius: 4px;"></div>
           </div>
         </div>
       `;
     });
-    
+
     html += `</div></div>`;
     return html;
   }
-  
-  function renderCentrosDeCusto() {
-    const atual = getSnapshotAtual();
-    if (!atual || !atual.data_json || !atual.data_json.companies) return '';
-    
-    const ccs = [];
-    atual.data_json.companies.forEach(c => {
-      if (c.cost_centers) {
-        c.cost_centers.forEach(cc => {
-          ccs.push({
-            id: cc.id,
-            count: cc.count,
-            value: cc.value
-          });
-        });
-      }
-    });
-    
-    // Ordena do maior valor para o menor e pega top 15
-    ccs.sort((a, b) => b.value - a.value);
-    const topCcs = ccs.slice(0, 15);
-    
+
+  function renderCentrosDeCusto(metrics) {
+    if (!metrics) return '';
+    const ccs = (metrics.centers || []).slice().sort((a, b) => b.value - a.value).slice(0, 15);
+
     let html = `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
+      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
         <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
           <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
             <i data-lucide="building-2" style="width: 18px; color: #64748b;"></i> Maiores Empreendimentos em Inadimplência
           </h3>
         </div>
-        <div style="overflow-x: auto;">
+        <div style="overflow-x: auto; max-height: 420px;">
           <table class="custom-table" style="width: 100%; border-collapse: collapse;">
             <thead>
               <tr style="background: #f1f5f9; text-align: left;">
@@ -308,109 +808,187 @@ const DashboardInadimplencia = (function() {
             </thead>
             <tbody>
     `;
-    
-    topCcs.forEach(cc => {
-      // Tentar pegar nome do cache
-      let nome = cc.id;
-      if (window.MouraAuth && window.MouraAuth.costCenters) {
-         const found = window.MouraAuth.costCenters.find(x => String(x.id) === String(cc.id));
-         if (found) nome = `${cc.id} - ${found.name.toUpperCase()}`;
-      } else if (window.AppState && window.AppState.cachedCostCenters) {
-         const found = window.AppState.cachedCostCenters.find(x => String(x.id) === String(cc.id));
-         if (found) nome = `${cc.id} - ${found.name.toUpperCase()}`;
-      }
-      html += `
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 12px 20px; color: #334155; font-size: 0.85rem;">${nome}</td>
-          <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem;">${cc.count}</td>
-          <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem; font-weight: 500;">${formatMoney(cc.value)}</td>
-        </tr>
-      `;
-    });
-    
+
+    if (!ccs.length) {
+      html += `<tr><td colspan="3" style="padding:20px;color:#94a3b8;text-align:center;">Nenhum empreendimento no filtro</td></tr>`;
+    } else {
+      ccs.forEach(cc => {
+        const nome = costCenterName(cc.id);
+        html += `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 12px 20px; color: #334155; font-size: 0.85rem;">${nome}</td>
+            <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem;">${cc.count}</td>
+            <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem; font-weight: 500;">${formatMoney(cc.value)}</td>
+          </tr>
+        `;
+      });
+    }
+
     html += `</tbody></table></div></div>`;
     return html;
   }
-  
-  async function render() {
+
+  function renderOperadores(metrics) {
+    if (!metrics) return '';
+    const ops = (metrics.operators || []).slice().sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
+
+    let html = `
+      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
+        <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+          <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="users" style="width: 18px; color: #64748b;"></i> Resumo por Operador
+          </h3>
+        </div>
+        <div style="overflow-x: auto; max-height: 420px;">
+          <table class="custom-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f1f5f9; text-align: left;">
+                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem;">Operador</th>
+                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">Títulos</th>
+                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">Valor</th>
+                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">≥ 31 dias</th>
+              </tr>
+            </thead>
+            <tbody>
+    `;
+
+    if (!ops.length) {
+      html += `<tr><td colspan="4" style="padding:20px;color:#94a3b8;text-align:center;">Nenhum operador no filtro</td></tr>`;
+    } else {
+      ops.forEach(op => {
+        html += `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 12px 16px; color: #334155; font-size: 0.85rem; font-weight: 600;">${op.name || 'N/D'}</td>
+            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem;">${op.total_count || 0}</td>
+            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem; font-weight: 500;">${formatMoney(op.total_value || 0)}</td>
+            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem;">${formatMoney(op.above31_value || 0)}</td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `</tbody></table></div></div>`;
+    return html;
+  }
+
+  function aplicarFiltros() {
+    filterApplied.companies = filterDraft.companies.slice();
+    filterApplied.centers = filterDraft.centers.slice();
+    filterApplied.cities = filterDraft.cities.slice();
+    filterApplied.operators = filterDraft.operators.slice();
+    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = false;
+    paint();
+  }
+
+  function limparFiltros() {
+    filterDraft.companies = [];
+    filterDraft.centers = [];
+    filterDraft.cities = [];
+    filterDraft.operators = [];
+    filterApplied.companies = [];
+    filterApplied.centers = [];
+    filterApplied.cities = [];
+    filterApplied.operators = [];
+    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = false;
+    filterUi.qEmp = filterUi.qCc = filterUi.qCid = filterUi.qOp = "";
+    paint();
+  }
+
+  function paint(opts) {
     try {
       const container = document.getElementById('inadimplencia-dashboard-root');
       if (!container) return;
-      
-      container.innerHTML = `
-        <div style="display: flex; justify-content: center; padding: 40px;">
-          <div class="loader" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-        </div>
-      `;
-      
-      await carregarDados();
-      
-      if (snapshots.length === 0) {
+
+      const scrollY = opts && opts.keepScroll ? window.scrollY : null;
+
+      if (snapshots.length === 0 && getLiveClients().length === 0) {
         container.innerHTML = `
-          <div style="background: #fff; padding: 40px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
-            <i data-lucide="inbox" style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 15px;"></i>
-            <h3 style="margin: 0 0 10px 0; color: #1e293b;">Nenhum histórico disponível</h3>
-            <p style="color: #64748b; margin: 0;">O dashboard passará a ter dados após a primeira atualização da Fila de Cobrança.</p>
+          <div style="padding: 16px 24px 32px;">
+            <div style="background: #fff; padding: 40px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+              <i data-lucide="inbox" style="width: 48px; height: 48px; color: #94a3b8; margin-bottom: 15px;"></i>
+              <h3 style="margin: 0 0 10px 0; color: #1e293b;">Nenhum histórico disponível</h3>
+              <p style="color: #64748b; margin: 0;">O dashboard passará a ter dados após a primeira atualização da Fila de Cobrança.</p>
+            </div>
           </div>
         `;
-        if (window.lucide) window.lucide.createIcons();
+        if (window.lucide) window.lucide.createIcons({ root: container });
         return;
       }
-      
-      let html = `
-        <div style="max-width: 1200px; margin: 0 auto;">
-          
+
+      const options = buildFilterOptions();
+      const metrics = getCurrentMetrics();
+      const fechSnap = getSnapshotFechamentoMes() || getSnapshotAnterior();
+      const fechMetrics = fechSnap ? getCompareMetrics(fechSnap) : null;
+
+      const html = `
+        <div style="width: 100%; padding: 16px 24px 32px; box-sizing: border-box;">
+          ${renderFilterBar(options)}
+
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
             <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
               <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
             </button>
           </div>
 
-          ${renderCards()}
-          
+          ${renderCards(metrics, fechMetrics)}
+
           <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
             <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
               <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
                 <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
               </h3>
             </div>
+            <div id="inadimplencia-chart-note" style="display:none;padding:10px 16px;background:#fff7ed;color:#9a3412;font-size:0.82rem;border-bottom:1px solid #ffedd5;align-items:center;gap:6px;"></div>
             <div style="padding: 20px; height: 350px;">
               <canvas id="inadimplencia-chart"></canvas>
             </div>
           </div>
-          
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px;">
-            <div>
-              ${renderTabelaComparativa()}
-              ${renderAging()}
-            </div>
-            <div>
-              ${renderCentrosDeCusto()}
-            </div>
+
+          ${renderTabelaComparativa(metrics, fechMetrics)}
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; align-items: stretch;">
+            ${renderAging(metrics)}
+            ${renderCentrosDeCusto(metrics)}
+            ${renderOperadores(metrics)}
           </div>
         </div>
       `;
-      
+
       container.innerHTML = html;
-      
-      // Atualiza ícones lucide
+
       if (window.lucide) {
-        window.lucide.createIcons({
-          root: container
-        });
+        window.lucide.createIcons({ root: container });
       }
-      
-      // Inicializa o Chart.js
+
       setTimeout(() => {
         initChart();
+        if (scrollY != null) window.scrollTo(0, scrollY);
       }, 100);
-    } catch(err) {
+    } catch (err) {
+      console.error("Erro ao pintar dashboard de inadimplência:", err);
+      alert("ERRO NO DASHBOARD DE INADIMPLÊNCIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
+    }
+  }
+
+  async function render() {
+    try {
+      const container = document.getElementById('inadimplencia-dashboard-root');
+      if (!container) return;
+
+      container.innerHTML = `
+        <div style="display: flex; justify-content: center; padding: 40px;">
+          <div class="loader" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--color-primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        </div>
+      `;
+
+      await carregarDados();
+      paint();
+    } catch (err) {
       console.error("Erro ao renderizar dashboard de inadimplência:", err);
       alert("ERRO NO DASHBOARD DE INADIMPLÊNCIA:\n\n" + err.message + "\n\nStack:\n" + err.stack);
     }
   }
-  
-  // Intercepta a ativação da aba
+
   const originalSwitchTab = window.switchTab;
   if (originalSwitchTab) {
     window.switchTab = function(tabId, title, fromSidebar) {
@@ -420,15 +998,14 @@ const DashboardInadimplencia = (function() {
       }
     };
   } else {
-    // Se ainda não existir, cria um observer para quando existir
     setTimeout(() => {
-        if (window.switchTab) {
-            const os = window.switchTab;
-            window.switchTab = function(tabId, title, fromSidebar) {
-                os(tabId, title, fromSidebar);
-                if (tabId === 'inadimplencia_dashboard') render();
-            };
-        }
+      if (window.switchTab) {
+        const os = window.switchTab;
+        window.switchTab = function(tabId, title, fromSidebar) {
+          os(tabId, title, fromSidebar);
+          if (tabId === 'inadimplencia_dashboard') render();
+        };
+      }
     }, 1000);
   }
 
@@ -441,8 +1018,8 @@ const DashboardInadimplencia = (function() {
       try {
         await window.SiengeAPI.saveDefaultersSnapshot(window.AppState.inadimplentes);
         alert("Posição salva com sucesso!");
-        await carregarDados(); // Recarrega para exibir no gráfico
-        render();
+        await carregarDados();
+        paint();
       } catch (e) {
         alert("Erro ao salvar posição: " + e.message);
       }
@@ -1052,7 +1629,10 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   return {
     render,
     salvarPosicaoHoje,
-    gerarRelatorioDiarioPdf
+    gerarRelatorioDiarioPdf,
+    paint,
+    aplicarFiltros,
+    limparFiltros
   };
 })();
 window.DashboardInadimplencia = DashboardInadimplencia;

@@ -1,5 +1,6 @@
 // Lógica para a aba de Repactuações
-// Indexador 0 / REAL em parcela = acordo (não repactua). O contrato pode ter outro indexador (ex.: 8).
+// Indexador 0 / REAL em parcela = acordo (não repactua). O contrato pode ter outro indexador (ex.: 7, 8, 9).
+try { window.lastRepactuacaoBillId = null; } catch (e) {}
 
 function isRealIndexer(id, name) {
     const sid = id == null || id === "" ? "" : String(id).trim();
@@ -8,24 +9,68 @@ function isRealIndexer(id, name) {
         .replace(/[\u0300-\u036f]/g, "")
         .toUpperCase()
         .trim();
-    return sid === "0" || n === "REAL" || n === "0" || n === "0 - REAL" || n.endsWith(" - REAL");
+    if (sid === "0" || n === "0") return true;
+    if (n === "REAL" || n === "0 - REAL" || n.endsWith(" - REAL")) return true;
+    if (/^0\s*[-–]\s*REAL$/.test(n)) return true;
+    return false;
 }
 
 function readIndexerRef(obj) {
     if (!obj) return { id: null, name: "" };
     const nested = obj.indexer && typeof obj.indexer === "object" ? obj.indexer : null;
-    const id = obj.indexerId != null && obj.indexerId !== ""
-        ? obj.indexerId
-        : (nested && (nested.id != null && nested.id !== "" ? nested.id : nested.indexerId));
-    const name = obj.indexerName || obj.indexerDescription || (nested && (nested.description || nested.name)) || "";
+    const condition = obj.condition && typeof obj.condition === "object" ? obj.condition : null;
+    let id = null;
+    const tryId = (v) => {
+        if (v == null || v === "") return;
+        if (id != null && id !== "") return;
+        id = v;
+    };
+    tryId(obj.indexerId);
+    tryId(obj.idIndexer);
+    tryId(obj.indexadorId);
+    tryId(obj.correctionIndexerId);
+    tryId(obj.monetaryCorrectionIndexerId);
+    tryId(obj.mainIndexerId);
+    tryId(obj.indexerCode);
+    tryId(nested && nested.id);
+    tryId(nested && nested.indexerId);
+    tryId(condition && condition.indexerId);
+    tryId(condition && condition.idIndexer);
+    if (obj.indexer != null && typeof obj.indexer !== "object") tryId(obj.indexer);
+
+    // Extrato impresso: coluna "Id" = indexador (0–99). Só usa se não houver installmentId longo.
+    if ((id == null || id === "") && obj.installmentNumber != null && obj.id != null && obj.id !== "" && obj.installmentId == null) {
+        const n = Number(obj.id);
+        if (Number.isFinite(n) && n >= 0 && n <= 99 && String(obj.id).trim() === String(n)) id = obj.id;
+    }
+
+    let name = obj.indexerName || obj.indexerDescription || obj.correctionIndexerName
+        || (typeof obj.indexer === "string" ? obj.indexer : "")
+        || (nested && (nested.description || nested.name))
+        || (condition && (condition.indexerName || condition.indexerDescription))
+        || "";
+    if (typeof name === "object") name = name.name || name.description || "";
+
+    // "7 - IGPM" / "7-IGP-M"
+    if ((id == null || id === "") && name) {
+        const m = String(name).match(/^\s*(\d{1,2})\s*[-–]/);
+        if (m) id = m[1];
+    }
+
     return { id: id == null || id === "" ? null : id, name: name || "" };
+}
+
+function collectIndexerRefs(target, obj) {
+    const ref = readIndexerRef(obj);
+    if (ref.id != null || ref.name) target.push(ref);
 }
 
 function pickContractIndexer(refs) {
     const buckets = new Map();
     (refs || []).forEach(ref => {
         if (!ref || (ref.id == null && !ref.name)) return;
-        const key = String(ref.id != null ? ref.id : ref.name);
+        const key = String(ref.id != null ? ref.id : ref.name).trim();
+        if (!key) return;
         const prev = buckets.get(key) || { id: ref.id, name: ref.name || "", n: 0 };
         prev.n += 1;
         if (!prev.name && ref.name) prev.name = ref.name;
@@ -39,7 +84,11 @@ function pickContractIndexer(refs) {
     const adjusting = all.filter(x => !isRealIndexer(x.id, x.name));
     if (adjusting.length) {
         adjusting.sort((a, b) => b.n - a.n);
-        return { chosen: adjusting[0], realCount: all.filter(x => isRealIndexer(x.id, x.name)).reduce((s, x) => s + x.n, 0), adjustCount: adjusting.reduce((s, x) => s + x.n, 0) };
+        return {
+            chosen: adjusting[0],
+            realCount: all.filter(x => isRealIndexer(x.id, x.name)).reduce((s, x) => s + x.n, 0),
+            adjustCount: adjusting.reduce((s, x) => s + x.n, 0)
+        };
     }
     const real = all.find(x => isRealIndexer(x.id, x.name));
     return { chosen: real || { id: 0, name: "REAL" }, realCount: all.reduce((s, x) => s + x.n, 0), adjustCount: 0 };
@@ -53,7 +102,10 @@ async function loadRepactuacoes(isBackground = false) {
     
     try {
         let billId = window.AppState?.selectedSaleId;
-        let companyId = 13; // Default
+        let companyId = (window.AppState && AppState.currentCompanyId)
+            || (window.sale && (window.sale.companyId || (window.sale.company && window.sale.company.id)))
+            || (window.dbContract && window.dbContract.companyId)
+            || null;
         
         // Se for undefined ou vazio, vamos tentar buscar do DOM que o usuário está vendo
         if (!billId || billId === 'undefined' || billId === 'null') {
@@ -104,13 +156,14 @@ async function loadRepactuacoes(isBackground = false) {
         }
         
         const cleanBillId = String(billId).replace(/^B-/, '');
+        const cacheKey = cleanBillId + "|idx-v2";
         
         // CACHE LOGIC
-        if (window.lastRepactuacaoBillId === cleanBillId && resultsEl.innerHTML.trim() !== "") {
+        if (window.lastRepactuacaoBillId === cacheKey && resultsEl.innerHTML.trim() !== "") {
             // Se já carregou ou está carregando para esse billId, não faz nada
             return;
         }
-        window.lastRepactuacaoBillId = cleanBillId;
+        window.lastRepactuacaoBillId = cacheKey;
         
         loadingEl.style.display = "block";
         resultsEl.style.display = "none";
@@ -145,27 +198,29 @@ async function loadRepactuacoes(isBackground = false) {
         
         if (extractedCc) {
              // Mapear Centro de Custo para companyId (caminho inverso)
-             if (typeof MOCK_COST_CENTERS !== 'undefined') {
-                 const ccObj = MOCK_COST_CENTERS.find(c => String(c.id) === String(extractedCc));
-                 if (ccObj && ccObj.companyId) companyId = ccObj.companyId;
-             }
-             // Fallback manual caso MOCK_COST_CENTERS não esteja acessível
-             if (companyId === 13) {
+             const ccPools = [];
+             if (typeof MOCK_COST_CENTERS !== "undefined") ccPools.push(MOCK_COST_CENTERS);
+             if (window.AppState && AppState.costCenters) ccPools.push(AppState.costCenters);
+             if (window.AppState && AppState.enterprises) ccPools.push(AppState.enterprises);
+             ccPools.forEach(function(list) {
+                 if (companyId) return;
+                 const ccObj = (list || []).find(c => String(c.id) === String(extractedCc) || String(c.costCenterId) === String(extractedCc));
+                 if (ccObj) companyId = ccObj.companyId || (ccObj.company && ccObj.company.id) || companyId;
+             });
+             if (!companyId) {
                  if (['10100', '10200', '10300', '20100', '20200'].includes(extractedCc)) companyId = 2;
-                 else if (['10400', '10500', '10600', '10700', '10800', '10900', '13700', '13800', '13900', '14000'].includes(extractedCc)) companyId = 1;
+                 else if (['10400', '10500', '10600', '10700', '10800', '10900', '13700', '13800', '13900', '14000', '14100', '14200', '14300'].includes(extractedCc)) companyId = 1;
                  else if (extractedCc === '60100') companyId = 6;
+                 else if (/^14\d{3}$/.test(extractedCc)) companyId = 1;
              }
              console.log(`[Repactuações] Centro de custo: ${extractedCc} -> Resolvido para Empresa ID: ${companyId}`);
-        } else {
-             // Tentar obter o companyId via variáveis globais se ainda for 13
-             if (companyId === 13) {
-                 if (typeof window.dbContract !== 'undefined' && window.dbContract && window.dbContract.companyId) {
-                     companyId = window.dbContract.companyId;
-                 } else if (typeof window.sale !== 'undefined' && window.sale && window.sale.companyId) {
-                     companyId = window.sale.companyId;
-                 } else if (typeof window.sale !== 'undefined' && window.sale && window.sale.company) {
-                      companyId = window.sale.company.id || 13;
-                 }
+        } else if (!companyId) {
+             if (typeof window.dbContract !== 'undefined' && window.dbContract && window.dbContract.companyId) {
+                 companyId = window.dbContract.companyId;
+             } else if (typeof window.sale !== 'undefined' && window.sale && window.sale.companyId) {
+                 companyId = window.sale.companyId;
+             } else if (typeof window.sale !== 'undefined' && window.sale && window.sale.company) {
+                  companyId = window.sale.company.id || companyId;
              }
         }
 
@@ -185,23 +240,49 @@ async function loadRepactuacoes(isBackground = false) {
             const startDueDate = "2010-01-01";
             const endDueDate = "2050-01-01";
             
-            const endpoint = `/bulk-data/v1/customer-extract-history?startDueDate=${startDueDate}&endDueDate=${endDueDate}&billReceivableId=${cleanBillId}&companyId=${companyId}&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
-            
-            console.log("[Repactuações] Iniciando fetch para:", endpoint);
+            const extractQs = (cid, includeRemade) => {
+                const remade = includeRemade ? "true" : "false";
+                let q = `/bulk-data/v1/customer-extract-history?startDueDate=${startDueDate}&endDueDate=${endDueDate}&billReceivableId=${cleanBillId}&documentsId=CT&includeRemadeInstallments=${remade}&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
+                if (cid) q += `&companyId=${cid}`;
+                return q;
+            };
+            const runExtract = async (endpoint) => {
+                console.log("[Repactuações] Iniciando fetch para:", endpoint);
+                if (typeof siengeFetchWithRetry === 'function') return siengeFetchWithRetry(endpoint);
+                let baseUrl = (typeof SIENGE_CONFIG !== "undefined") ? SIENGE_CONFIG.baseUrl : `${window.location.origin}/sienge-proxy`;
+                const authHeader = (typeof getBasicAuthHeader === 'function') ? getBasicAuthHeader() : '';
+                const response = await fetch(`${baseUrl}${endpoint}`, {
+                    headers: authHeader ? { 'Authorization': authHeader } : {}
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            };
+            const extractItems = (payload) => {
+                if (!payload) return [];
+                if (payload.data) return payload.data;
+                if (payload.results) return payload.results;
+                return Array.isArray(payload) ? payload : [];
+            };
             let json;
+            let jsonOriginal = null;
             try {
                 const startTime = performance.now();
-                if (typeof siengeFetchWithRetry === 'function') {
-                    json = await siengeFetchWithRetry(endpoint);
-                } else {
-                    // Fallback: chama diretamente via fetch com proxy
-                    let baseUrl = (typeof SIENGE_CONFIG !== "undefined") ? SIENGE_CONFIG.baseUrl : `${window.location.origin}/sienge-proxy`;
-                    const authHeader = (typeof getBasicAuthHeader === 'function') ? getBasicAuthHeader() : '';
-                    const response = await fetch(`${baseUrl}${endpoint}`, {
-                        headers: authHeader ? { 'Authorization': authHeader } : {}
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    json = await response.json();
+                // Remadeadas (acordos) + originais: remade=true sozinho esconde o indexador do CT (ex.: 7)
+                const [jsonRemade, jsonOrig] = await Promise.all([
+                    runExtract(extractQs(companyId, true)),
+                    runExtract(extractQs(companyId, false)).catch(() => null)
+                ]);
+                json = jsonRemade;
+                jsonOriginal = jsonOrig;
+                let preview = extractItems(json);
+                if (!preview.length && companyId) {
+                    json = await runExtract(extractQs(null, true));
+                    preview = extractItems(json);
+                    try { jsonOriginal = await runExtract(extractQs(null, false)); } catch (e) { /* ignore */ }
+                }
+                if (!preview.length && String(companyId) !== "1") {
+                    json = await runExtract(extractQs(1, true));
+                    try { jsonOriginal = await runExtract(extractQs(1, false)); } catch (e) { /* ignore */ }
                 }
                 console.log(`[Repactuações] Fetch concluído em ${Math.round(performance.now() - startTime)}ms`);
             } catch(fetchErr) {
@@ -209,65 +290,141 @@ async function loadRepactuacoes(isBackground = false) {
                 throw new Error(`Falha ao buscar dados da API Sienge: ${fetchErr.message}`);
             }
             
-            // A API retorna { data: [...] } ou { results: [...] }
-            const items = (json && json.data) ? json.data 
-                        : (json && json.results) ? json.results
-                        : (Array.isArray(json) ? json : []);
-            console.log(`[Repactuações] Recebeu ${items.length} itens do extract-history`);
+            let items = extractItems(json);
+            const itemsOriginal = extractItems(jsonOriginal);
+            console.log(`[Repactuações] Recebeu ${items.length} itens (remade) + ${itemsOriginal.length} itens (originais)`);
             // Novo código seguindo a regra de negócio exata (BCB e Retroatividade)
             let emissionDate = null;
             let indexerId = null;
             let indexerNameBackup = "Índice Contratual";
             let allInstallments = [];
-            const indexerRefs = [];
+            let indexerRefs = [];
             let acordoParcelCount = 0;
-            
-            // 1. Extrair data da venda e indexador por parcela (0/REAL = acordo, não define o contrato)
-            items.forEach(item => {
-                let em = item.emissionDate || item.issueDate || item.contractDate || item.saleDate;
-                if (!emissionDate && em) emissionDate = String(em).split('T')[0];
-                
-                const itemIdx = readIndexerRef(item);
-                if (itemIdx.id != null || itemIdx.name) indexerRefs.push(itemIdx);
-                
-                const installments = item.installments || [];
-                for (const inst of installments) {
-                    const instIdx = readIndexerRef(inst);
-                    const resolvedId = instIdx.id != null ? instIdx.id : itemIdx.id;
-                    const resolvedName = instIdx.name || itemIdx.name;
-                    if (resolvedId != null || resolvedName) indexerRefs.push({ id: resolvedId, name: resolvedName });
-                    if (inst.dueDate && inst.installmentNumber) {
-                        const val = parseFloat(inst.currentValue || inst.installmentValue || inst.originalValue || inst.principalValue || inst.value || 0);
-                        const isAcordo = isRealIndexer(resolvedId, resolvedName);
-                        if (isAcordo) acordoParcelCount += 1;
-                        allInstallments.push({
-                            id: inst.id || inst.document || inst.installmentNumber,
-                            number: inst.installmentNumber,
-                            dueDate: inst.dueDate,
-                            value: val,
-                            annualCorrection: inst.annualCorrection,
-                            indexerName: resolvedName,
-                            indexerId: resolvedId,
-                            acordoSemRepactuacao: isAcordo
-                        });
+
+            const ingestExtractItems = (list) => {
+                (list || []).forEach(item => {
+                    let em = item.emissionDate || item.issueDate || item.contractDate || item.saleDate;
+                    if (!emissionDate && em) emissionDate = String(em).split('T')[0];
+
+                    const itemIdx = readIndexerRef(item);
+                    collectIndexerRefs(indexerRefs, item);
+
+                    const installments = item.installments || [];
+                    for (const inst of installments) {
+                        const instIdx = readIndexerRef(inst);
+                        const resolvedId = instIdx.id != null ? instIdx.id : itemIdx.id;
+                        const resolvedName = instIdx.name || itemIdx.name;
+                        if (resolvedId != null || resolvedName) indexerRefs.push({ id: resolvedId, name: resolvedName });
+                        if (inst.dueDate && inst.installmentNumber) {
+                            const val = parseFloat(inst.currentValue || inst.installmentValue || inst.originalValue || inst.principalValue || inst.value || inst.currentBalance || 0);
+                            const isAcordo = isRealIndexer(resolvedId, resolvedName);
+                            if (isAcordo) acordoParcelCount += 1;
+                            allInstallments.push({
+                                id: inst.id || inst.document || inst.installmentNumber,
+                                number: inst.installmentNumber,
+                                dueDate: inst.dueDate,
+                                value: val,
+                                annualCorrection: inst.annualCorrection,
+                                indexerName: resolvedName,
+                                indexerId: resolvedId,
+                                acordoSemRepactuacao: isAcordo
+                            });
+                        }
                     }
-                }
-            });
-            const picked = pickContractIndexer(indexerRefs);
+                });
+            };
+
+            ingestExtractItems(items);
+            // Originais sem remade: costumam trazer o indexador contratual (7, 8, 9…)
+            if (itemsOriginal && itemsOriginal.length) ingestExtractItems(itemsOriginal);
+
+            // Sempre enriquecer com parcelas do título + remade API (não só quando adjustCount=0)
+            let picked = pickContractIndexer(indexerRefs);
+            try {
+                const enrichTasks = [];
+                enrichTasks.push((async () => {
+                    let billInsts = [];
+                    if (window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
+                        billInsts = await SiengeApiService.getBillInstallments(cleanBillId) || [];
+                    } else if (typeof siengeFetchWithRetry === "function") {
+                        const bj = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${cleanBillId}/installments`);
+                        billInsts = (bj && (bj.results || bj.data)) || (Array.isArray(bj) ? bj : []);
+                    }
+                    (Array.isArray(billInsts) ? billInsts : []).forEach(inst => {
+                        collectIndexerRefs(indexerRefs, inst);
+                        const ref = readIndexerRef(inst);
+                        if (ref.id != null || ref.name) indexerRefs.push(ref);
+                    });
+                    console.log(`[Repactuações] Parcelas do título: ${billInsts.length}`);
+                })());
+                enrichTasks.push((async () => {
+                    if (!window.SiengeApiService || typeof SiengeApiService.getRemadeInstallments !== "function") return;
+                    const remade = await SiengeApiService.getRemadeInstallments(cleanBillId) || [];
+                    (Array.isArray(remade) ? remade : []).forEach(row => {
+                        collectIndexerRefs(indexerRefs, row);
+                        const nest = row.installments || row.remadeInstallments || [];
+                        nest.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+                    });
+                    console.log(`[Repactuações] Remade API: ${Array.isArray(remade) ? remade.length : 0}`);
+                })());
+                enrichTasks.push((async () => {
+                    if (typeof siengeFetchWithRetry !== "function") return;
+                    try {
+                        const bill = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${cleanBillId}`);
+                        if (bill) {
+                            collectIndexerRefs(indexerRefs, bill);
+                            if (bill.sale) collectIndexerRefs(indexerRefs, bill.sale);
+                            if (bill.contract) collectIndexerRefs(indexerRefs, bill.contract);
+                        }
+                    } catch (e) { /* ignore */ }
+                })());
+                await Promise.all(enrichTasks);
+                picked = pickContractIndexer(indexerRefs);
+            } catch (billErr) {
+                console.warn("[Repactuações] Enrichment de indexador falhou:", billErr);
+                picked = pickContractIndexer(indexerRefs);
+            }
+
+            // Fallback: parcelas já carregadas na ficha (extrato / dbContract)
+            if (window.AppState && Array.isArray(AppState.currentContractInstallments)) {
+                AppState.currentContractInstallments.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+            }
+            if (window.dbContract && Array.isArray(dbContract.installments)) {
+                dbContract.installments.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+            }
+            if (window.dbContract) collectIndexerRefs(indexerRefs, dbContract);
+            if (window.sale) collectIndexerRefs(indexerRefs, window.sale);
+            picked = pickContractIndexer(indexerRefs);
+
+            console.log(`[Repactuações] Indexador escolhido:`, picked);
+
             if (picked.chosen) {
                 indexerId = picked.chosen.id;
                 indexerNameBackup = picked.chosen.name || indexerNameBackup;
             }
 
             if (!emissionDate && typeof window.sale !== 'undefined' && window.sale) {
-                 const saleDateRaw = window.sale.saleDate || window.sale.contractDate || window.sale.issueDate;
+                 const saleDateRaw = window.sale.saleDate || window.sale.contractDate || window.sale.issueDate
+                    || window.sale.accountingDate || window.sale.emissionDate;
                  if (saleDateRaw) emissionDate = String(saleDateRaw).split('T')[0];
+            }
+            if (!emissionDate && window.dbContract) {
+                const raw = dbContract.saleDate || dbContract.contractDate || dbContract.issueDate || dbContract.emissionDate;
+                if (raw) emissionDate = String(raw).split('T')[0];
             }
 
             allInstallments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
-            // Se ainda não achou emissionDate, usa 01/01/2020 como fallback pra não quebrar a tela inteira
-            if (!emissionDate) emissionDate = "2020-01-01";
+            // Sem data de venda: usa a parcela contratual mais antiga (não acordo)
+            if (!emissionDate && allInstallments.length) {
+                const base = allInstallments.find(i => !i.acordoSemRepactuacao) || allInstallments[0];
+                if (base && base.dueDate) emissionDate = String(base.dueDate).split('T')[0];
+            }
+            // Último recurso — evita quebrar a tela (marca no log)
+            if (!emissionDate) {
+                console.warn("[Repactuações] Sem data de venda — usando 2020-01-01");
+                emissionDate = "2020-01-01";
+            }
             
             // Só assume contrato sem reajuste se nenhuma parcela tiver indexador de correção
             if (picked.adjustCount === 0 && (indexerId == null || indexerId === "" || isRealIndexer(indexerId, indexerNameBackup))) {
