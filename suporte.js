@@ -149,6 +149,7 @@
     "marketing-budget": { modulo: "marketing", subitem: "budget" },
     relacionamento_gestao: { modulo: "relacionamento", subitem: "buscar" },
     relacionamento_autorizacao: { modulo: "relacionamento", subitem: "autorizacao" },
+    relacionamento_cessao: { modulo: "relacionamento", subitem: "cessao" },
     compromissario_prefeitura: { modulo: "compromissario", subitem: "prefeitura" },
     compromissario_associacoes: { modulo: "compromissario", subitem: "associacoes" },
     auditoria: { modulo: "seguranca", subitem: "auditoria" },

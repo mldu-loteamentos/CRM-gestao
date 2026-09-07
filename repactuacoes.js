@@ -135,8 +135,9 @@ function parseInstDueDate(dueDate) {
 }
 
 /**
- * Parcela imediatamente anterior à data de reajuste e a posterior cujo %
- * aplicado mais se aproxima do % oficial do BCB (evita casar com remade/legado).
+ * Parcela do mês imediatamente anterior ao aniversário (ex.: dezembro)
+ * e a do mês do reajuste (ex.: janeiro). Se houver várias no mês,
+ * escolhe o par cujo % mais se aproxima do BCB.
  */
 function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     const MS_DAY = 86400000;
@@ -152,7 +153,7 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     // Deduplica por número de parcela: preferir não-acordo e valor de face maior
     const byNum = new Map();
     sorted.forEach((i) => {
-        const key = String(i.number != null ? i.number : i.id);
+        const key = String(i.number != null ? i.number : (i.id + '@' + i._due.toISOString().slice(0, 10)));
         const prev = byNum.get(key);
         if (!prev) {
             byNum.set(key, i);
@@ -166,7 +167,56 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
         if (Number(i.value) > Number(prev.value)) byNum.set(key, i);
     });
     const uniq = [...byNum.values()].sort((a, b) => a._due.getTime() - b._due.getTime());
+    if (!uniq.length) return { beforeInst: null, afterInst: null };
 
+    const adjustY = adjustDateStart.getUTCFullYear();
+    const adjustM = adjustDateStart.getUTCMonth(); // 0=jan
+    const beforeY = adjustM === 0 ? adjustY - 1 : adjustY;
+    const beforeM = adjustM === 0 ? 11 : adjustM - 1;
+
+    const inMonth = (inst, y, m) => inst._due.getUTCFullYear() === y && inst._due.getUTCMonth() === m;
+
+    const scorePair = (before, after) => {
+        if (!before || !after || !(before.value > 0)) return Infinity;
+        const applied = (after.value / before.value - 1) * 100;
+        const diff = Math.abs(applied - Number(expectedPct || 0));
+        const gapDays = Math.abs(after._due.getTime() - before._due.getTime()) / MS_DAY;
+        // Preferir % perto do BCB e intervalo ~1 mês (25–40 dias)
+        const monthPenalty = (gapDays >= 25 && gapDays <= 40) ? 0 : Math.abs(gapDays - 30);
+        return diff * 1000 + monthPenalty;
+    };
+
+    const pickCalendarPair = (preferNonAcordo) => {
+        const beforeMonthList = uniq.filter((i) => {
+            if (!inMonth(i, beforeY, beforeM)) return false;
+            if (preferNonAcordo && i.acordoSemRepactuacao) return false;
+            return true;
+        });
+        const afterMonthList = uniq.filter((i) => {
+            if (!inMonth(i, adjustY, adjustM)) return false;
+            if (preferNonAcordo && i.acordoSemRepactuacao) return false;
+            return true;
+        });
+        if (!beforeMonthList.length || !afterMonthList.length) return null;
+
+        let best = { beforeInst: null, afterInst: null, score: Infinity };
+        beforeMonthList.forEach((b) => {
+            afterMonthList.forEach((a) => {
+                const sameCond = !b.conditionType || !a.conditionType
+                    || String(b.conditionType).toUpperCase() === String(a.conditionType).toUpperCase();
+                const acordoPenalty = (b.acordoSemRepactuacao || a.acordoSemRepactuacao) ? 25 : 0;
+                const s = scorePair(b, a) + (sameCond ? 0 : 50) + acordoPenalty;
+                if (s < best.score) best = { beforeInst: b, afterInst: a, score: s };
+            });
+        });
+        return (best.beforeInst && best.afterInst) ? best : null;
+    };
+
+    // 1) Preferência: mês anterior (ex. dezembro) × mês do aniversário (ex. janeiro)
+    const calendarPair = pickCalendarPair(true) || pickCalendarPair(false);
+    if (calendarPair) return calendarPair;
+
+    // 2) Fallback: última parcela antes do aniversário + melhor candidata nos 60 dias seguintes
     const adjustTs = adjustDateStart.getTime();
     const beforeList = uniq.filter((i) => i._due.getTime() < adjustTs);
     const beforeInst = beforeList.length ? beforeList[beforeList.length - 1] : null;
@@ -175,7 +225,7 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     }
 
     const beforeKey = String(beforeInst.number != null ? beforeInst.number : beforeInst.id);
-    const windowEnd = adjustTs + 120 * MS_DAY;
+    const windowEnd = adjustTs + 60 * MS_DAY;
     let afterCandidates = uniq.filter((i) => {
         const t = i._due.getTime();
         if (t < adjustTs || t > windowEnd) return false;
@@ -192,10 +242,7 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     let afterInst = null;
     let bestScore = Infinity;
     afterCandidates.forEach((cand) => {
-        const applied = (cand.value / beforeInst.value - 1) * 100;
-        const diff = Math.abs(applied - Number(expectedPct));
-        // % próximo do BCB pesa mais; desempate pela parcela mais cedo após o reajuste
-        const score = diff * 1000 + (cand._due.getTime() - adjustTs) / MS_DAY;
+        const score = scorePair(beforeInst, cand);
         if (score < bestScore) {
             bestScore = score;
             afterInst = cand;
@@ -203,6 +250,59 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     });
 
     return { beforeInst, afterInst };
+}
+
+/** Valor de face da parcela (não usar saldo — parcelas pagas vêm com balance 0). */
+function readInstallmentFaceValue(inst) {
+    if (!inst) return 0;
+    const candidates = [
+        inst.originalValue,
+        inst.installmentValue,
+        inst.principalValue,
+        inst.value,
+        inst.currentValue,
+        inst.correctedValueWithoutAdditions,
+        // Só fallback de saldo se ainda houver valor aberto
+        (Number(inst.currentBalance) > 0.009 ? inst.currentBalance : null),
+        (Number(inst.currentBalanceWithAddition) > 0.009 ? inst.currentBalanceWithAddition : null)
+    ];
+    for (const c of candidates) {
+        const n = parseFloat(c);
+        if (Number.isFinite(n) && n > 0.009) return n;
+    }
+    // Último recurso: recebimento quitado
+    if (Array.isArray(inst.receipts) && inst.receipts.length) {
+        const r0 = inst.receipts[0];
+        const rv = parseFloat(r0.originalValue || r0.value || r0.receiptValue || 0);
+        if (rv > 0.009) return rv;
+    }
+    const rv = parseFloat(inst.receiptValue || 0);
+    return rv > 0.009 ? rv : 0;
+}
+
+function pushInstallmentRow(allInstallments, inst, itemIdx) {
+    if (!inst || !inst.dueDate) return;
+    const numRaw = inst.installmentNumber != null ? inst.installmentNumber
+        : (inst.number != null ? inst.number : inst.installmentId);
+    const num = numRaw != null && numRaw !== "" ? Number(numRaw) : null;
+    if ((num == null || Number.isNaN(num)) && inst.id == null && !inst.document) return;
+    const instIdx = readIndexerRef(inst);
+    const resolvedId = instIdx.id != null ? instIdx.id : (itemIdx && itemIdx.id);
+    const resolvedName = instIdx.name || (itemIdx && itemIdx.name) || "";
+    const val = readInstallmentFaceValue(inst);
+    if (!(val > 0.009)) return;
+    const isAcordo = isRealIndexer(resolvedId, resolvedName);
+    allInstallments.push({
+        id: (num != null && !Number.isNaN(num)) ? num : (inst.id || inst.document || inst.installmentId),
+        number: (num != null && !Number.isNaN(num)) ? num : null,
+        dueDate: inst.dueDate,
+        value: val,
+        annualCorrection: inst.annualCorrection,
+        indexerName: resolvedName,
+        indexerId: resolvedId,
+        conditionType: inst.conditionType || inst.paymentConditionType || inst.installmentType || "",
+        acordoSemRepactuacao: isAcordo
+    });
 }
 
 async function loadRepactuacoes(isBackground = false) {
@@ -431,24 +531,11 @@ async function loadRepactuacoes(isBackground = false) {
 
                     const installments = item.installments || [];
                     for (const inst of installments) {
-                        const instIdx = readIndexerRef(inst);
-                        const resolvedId = instIdx.id != null ? instIdx.id : itemIdx.id;
-                        const resolvedName = instIdx.name || itemIdx.name;
-                        if (resolvedId != null || resolvedName) indexerRefs.push({ id: resolvedId, name: resolvedName });
-                        if (inst.dueDate && inst.installmentNumber) {
-                            const val = parseFloat(inst.currentValue || inst.installmentValue || inst.originalValue || inst.principalValue || inst.value || inst.currentBalance || 0);
-                            const isAcordo = isRealIndexer(resolvedId, resolvedName);
-                            if (isAcordo) acordoParcelCount += 1;
-                            allInstallments.push({
-                                id: inst.installmentNumber != null ? inst.installmentNumber : (inst.id || inst.document),
-                                number: inst.installmentNumber != null ? Number(inst.installmentNumber) : null,
-                                dueDate: inst.dueDate,
-                                value: val,
-                                annualCorrection: inst.annualCorrection,
-                                indexerName: resolvedName,
-                                indexerId: resolvedId,
-                                acordoSemRepactuacao: isAcordo
-                            });
+                        collectIndexerRefs(indexerRefs, inst);
+                        const beforeLen = allInstallments.length;
+                        pushInstallmentRow(allInstallments, inst, itemIdx);
+                        if (allInstallments.length > beforeLen && allInstallments[allInstallments.length - 1].acordoSemRepactuacao) {
+                            acordoParcelCount += 1;
                         }
                     }
                 });
@@ -474,8 +561,9 @@ async function loadRepactuacoes(isBackground = false) {
                     }
                     (Array.isArray(billInsts) ? billInsts : []).forEach(inst => {
                         collectIndexerRefs(indexerRefs, inst);
+                        pushInstallmentRow(allInstallments, inst, null);
                     });
-                    console.log(`[Repactuações] Parcelas do título: ${billInsts.length}`);
+                    console.log(`[Repactuações] Parcelas do título: ${billInsts.length} (pool=${allInstallments.length})`);
                 })());
                 enrichTasks.push((async () => {
                     if (!window.SiengeApiService || typeof SiengeApiService.getRemadeInstallments !== "function") return;
@@ -484,8 +572,18 @@ async function loadRepactuacoes(isBackground = false) {
                         // Importante: não usar só row.installments (geradas = REAL).
                         // remadeInstallments / originalInstallments guardam o indexador do CT (ex.: 8).
                         collectIndexerRefsDeep(indexerRefs, row, 0);
+                        const nestedLists = [
+                            row.originalInstallments,
+                            row.remadeInstallments,
+                            row.oldInstallments,
+                            row.installments
+                        ];
+                        nestedLists.forEach((list) => {
+                            if (!Array.isArray(list)) return;
+                            list.forEach((inst) => pushInstallmentRow(allInstallments, inst, null));
+                        });
                     });
-                    console.log(`[Repactuações] Remade API: ${Array.isArray(remade) ? remade.length : 0}`);
+                    console.log(`[Repactuações] Remade API: ${Array.isArray(remade) ? remade.length : 0} (pool=${allInstallments.length})`);
                 })());
                 enrichTasks.push((async () => {
                     if (typeof siengeFetchWithRetry !== "function") return;
@@ -505,16 +603,23 @@ async function loadRepactuacoes(isBackground = false) {
                 picked = pickContractIndexer(indexerRefs);
             }
 
-            // Fallback: parcelas já carregadas na ficha (extrato / dbContract)
+            // Fallback: parcelas já carregadas na ficha (extrato / dbContract) — valores + indexador
             if (window.AppState && Array.isArray(AppState.currentContractInstallments)) {
-                AppState.currentContractInstallments.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+                AppState.currentContractInstallments.forEach(inst => {
+                    collectIndexerRefs(indexerRefs, inst);
+                    pushInstallmentRow(allInstallments, inst, null);
+                });
             }
             if (window.dbContract && Array.isArray(dbContract.installments)) {
-                dbContract.installments.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+                dbContract.installments.forEach(inst => {
+                    collectIndexerRefs(indexerRefs, inst);
+                    pushInstallmentRow(allInstallments, inst, null);
+                });
             }
             if (window.dbContract) collectIndexerRefs(indexerRefs, dbContract);
             if (window.sale) collectIndexerRefs(indexerRefs, window.sale);
             picked = pickContractIndexer(indexerRefs);
+            console.log(`[Repactuações] Pool de parcelas p/ Antes-Depois: ${allInstallments.length}`);
 
             console.log(`[Repactuações] Indexador escolhido:`, picked);
 
@@ -758,15 +863,20 @@ async function loadRepactuacoes(isBackground = false) {
                     let beforeInst = null;
                     let afterInst = null;
 
-                    // Parcelas de acordo (indexador 0/REAL) não entram na repactuação
-                    const adjustableInst = allInstallments.filter(i => !i.acordoSemRepactuacao && !isRealIndexer(i.indexerId, i.indexerName));
-                    const pool = adjustableInst.length ? adjustableInst : allInstallments.filter(i => !i.acordoSemRepactuacao);
-                    // annualCorrection é sinal fraco no extrato (muitas vezes só em parcelas antigas).
-                    // Usar o pool completo e escolher o par pelo % mais próximo do BCB.
-                    const validInstallments = pool;
+                    // Antes/Depois: usar todas as parcelas com valor de face.
+                    // Parcelas de acordo (REAL) não definem o indexador do CT, mas ainda
+                    // entram no comparativo calendário (ex.: dez → jan no aniversário).
+                    const nonAcordo = allInstallments.filter(i => !i.acordoSemRepactuacao);
+                    const adjustableInst = nonAcordo.filter(i => !isRealIndexer(i.indexerId, i.indexerName));
+                    let validInstallments = adjustableInst.length ? adjustableInst : nonAcordo;
+                    if (!validInstallments.length) validInstallments = allInstallments;
 
                     const adjustDateStart = new Date(Date.UTC(y, emMonth, 1));
-                    const pair = pickBeforeAfterForAdjust(validInstallments, adjustDateStart, pct);
+                    let pair = pickBeforeAfterForAdjust(validInstallments, adjustDateStart, pct);
+                    // Se o pool "limpo" não achou dez/jan, tenta o histórico completo do título
+                    if ((!pair.beforeInst || !pair.afterInst) && validInstallments !== allInstallments) {
+                        pair = pickBeforeAfterForAdjust(allInstallments, adjustDateStart, pct);
+                    }
                     beforeInst = pair.beforeInst;
                     afterInst = pair.afterInst;
 

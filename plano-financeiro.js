@@ -45,6 +45,8 @@ const PlanoFinanceiroApp = {
 
   DFC_TEMPLATE_VER: 4,
   ACCOUNTS_MAP_VER: 2,
+  RECEITA_SWAP_FIX_VER: 1,
+  _cloudSaveTimer: null,
 
   dfcTemplateGroups() {
     const n = (id, name, type, parentId, extra = {}) => ({
@@ -160,7 +162,14 @@ const PlanoFinanceiroApp = {
     let visao = (this.visoes || []).find(v => v.id === 'dfc_default');
     if (!visao) {
       this.visoes = this.visoes || [];
-      this.visoes.unshift({ id: 'dfc_default', name: 'DFC Padrão', type: 'custom', templateVer: this.DFC_TEMPLATE_VER, groups: template });
+      this.visoes.unshift({
+        id: 'dfc_default',
+        name: 'DFC Padrão',
+        type: 'custom',
+        templateVer: this.DFC_TEMPLATE_VER,
+        receitaSwapFixVer: this.RECEITA_SWAP_FIX_VER,
+        groups: template
+      });
       this.saveToStorage({ silent: true });
       return;
     }
@@ -168,13 +177,17 @@ const PlanoFinanceiroApp = {
       this.applyDfcTemplate(visao);
       this.saveToStorage({ silent: true });
     }
-    if (this.correctSwappedReceitaNodes(visao)) {
+    // Correção 01.02↔01.03 era reaplicada em todo refresh e desfazia arrastes manuais.
+    // Só marca a migração; não move contas de quem já organizou a visão.
+    if (Number(visao.receitaSwapFixVer || 0) < this.RECEITA_SWAP_FIX_VER) {
+      visao.receitaSwapFixVer = this.RECEITA_SWAP_FIX_VER;
       this.saveToStorage({ silent: true });
     }
   },
 
   // 1.02.01 (administração/serviços) → 01.02; 1.04.01 (venda/reembolso) → 01.03.
   // O remap antigo invertia g_01_02 ↔ g_01_03 e o Caixa lia essa alocação trocada.
+  // NÃO chamar em todo load — só na migração one-shot de ensureDfcDefault.
   correctSwappedReceitaNodes(visao) {
     if (!visao || !Array.isArray(visao.groups)) return false;
     const serv = visao.groups.find(g => g.id === 'g_01_02');
@@ -580,11 +593,6 @@ const PlanoFinanceiroApp = {
       });
       this.buildAccountTreeMeta();
       this.sortAccountsTree();
-      const dfc = (this.visoes || []).find(v => v.id === 'dfc_default');
-      if (dfc && this.correctSwappedReceitaNodes(dfc)) {
-        this.saveToStorage({ silent: true });
-        if (this.selectedVisaoId === 'dfc_default') this.renderBoard();
-      }
 
       const allCount = document.getElementById('pf-all-count');
       if (allCount) allCount.textContent = this.categories.length;
@@ -1104,11 +1112,29 @@ const PlanoFinanceiroApp = {
   
   getVisao() { return this.visoes.find(vis => vis.id === this.selectedVisaoId); },
   saveToStorage(opts) {
-    if (!opts || !opts.silent) {
+    const silent = !!(opts && opts.silent);
+    if (!silent) {
       const now = Date.now();
       (this.visoes || []).forEach(v => { v.updatedAt = now; });
     }
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.visoes));
+    if (!silent) this.scheduleCloudSave();
+  },
+
+  scheduleCloudSave() {
+    clearTimeout(this._cloudSaveTimer);
+    this._cloudSaveTimer = setTimeout(() => {
+      this.pushVisoesToCloud().catch((e) => console.warn('[Plano Financeiro] push cloud', e));
+    }, 600);
+  },
+
+  async pushVisoesToCloud() {
+    if (!window.firebaseDb || !window.firebaseCollections) return;
+    const { doc, setDoc } = window.firebaseCollections;
+    const docRef = doc(window.firebaseDb, "config", "global");
+    const local = localStorage.getItem(this.STORAGE_KEY) || "[]";
+    // Após arraste/edição do operador, o local é a fonte da verdade.
+    await setDoc(docRef, { crm_plano_visoes_v2: local }, { merge: true });
   },
 
   async syncVisoesWithCloud() {
@@ -1128,7 +1154,7 @@ const PlanoFinanceiroApp = {
       this.ensureDfcDefault();
       const next = JSON.stringify(this.visoes || []);
       if (next !== local) {
-        this.saveToStorage({ silent: true });
+        localStorage.setItem(this.STORAGE_KEY, next);
         this.renderVisoesList();
         if (this.selectedVisaoId) this.renderBoard();
         else this.renderTable();

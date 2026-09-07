@@ -177,7 +177,10 @@ const ConfigUsersApp = {
       name: "Relacionamento", icon: "users", key: "mod_rel",
       submodules: [
         { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] },
-        { name: "Gerar documentos", key: "sub_rel_docs", actions: [{ id: "autorizacao_escritura", label: "Autorização de escritura", permBase: "sub_rel_docs_autorizacao_escritura" }] }
+        { name: "Gerar documentos", key: "sub_rel_docs", actions: [
+          { id: "autorizacao_escritura", label: "Autorização de escritura", permBase: "sub_rel_docs_autorizacao_escritura" },
+          { id: "cessao_direitos", label: "Cessão de Direitos", permBase: "sub_rel_docs_cessao_direitos" }
+        ] }
       ]
     },
     {

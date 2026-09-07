@@ -36,7 +36,9 @@ const AnexosState = {
   enterprisesLoadStarted: false,
   tagsLoadStarted: false,
   _renderBusy: false,
-  _mapaEnrichGen: 0
+  _mapaEnrichGen: 0,
+  /** Aborta sync em massa de anexos do espelho (não misturar com clique em um lote). */
+  _mapaSyncGen: 0
 };
 
 function anexosTodayIso() {
@@ -1617,7 +1619,8 @@ const AnexosApp = {
       AnexosState.mapaEnvios = await anexosLoadMapaEnvios(cc);
       this.applyMapaMetaFromEnvios();
 
-      // Libera o mapa já; sync Sienge / seed rodam em background (não travar a UI)
+      // Libera o mapa já; seed (17701) em background. NÃO varrer anexos de
+      // dezenas de unidades aqui — isso competia com o clique em um lote.
       AnexosState.mapaLoading = false;
       await new Promise((r) => setTimeout(r, 0));
       if (enrichGen !== AnexosState._mapaEnrichGen) return;
@@ -1630,22 +1633,19 @@ const AnexosApp = {
             await this.seedEnviadoEmpreendimento(cc, 'CONTRATO');
             if (bgGen !== AnexosState._mapaEnrichGen) return;
             this.applyMapaMetaFromEnvios();
-          }
-          await this.syncEnviadoFromSiengeAttachments(cc);
-          if (bgGen !== AnexosState._mapaEnrichGen) return;
-          this.applyMapaMetaFromEnvios();
-          const mapaPanel = document.getElementById('anexos-mapa-panel');
-          if (mapaPanel && AnexosState.mapaUnidades) {
-            const head = mapaPanel.querySelector('.anexos-mapa-head');
-            const tmp = document.createElement('div');
-            tmp.innerHTML = anexosBuildMapaHtml();
-            mapaPanel.innerHTML = '';
-            if (head) mapaPanel.appendChild(head);
-            while (tmp.firstChild) mapaPanel.appendChild(tmp.firstChild);
-            anexosPatchMapaSelection(AnexosState.selectedUnidade);
+            const mapaPanel = document.getElementById('anexos-mapa-panel');
+            if (mapaPanel && AnexosState.mapaUnidades) {
+              const head = mapaPanel.querySelector('.anexos-mapa-head');
+              const tmp = document.createElement('div');
+              tmp.innerHTML = anexosBuildMapaHtml();
+              mapaPanel.innerHTML = '';
+              if (head) mapaPanel.appendChild(head);
+              while (tmp.firstChild) mapaPanel.appendChild(tmp.firstChild);
+              anexosPatchMapaSelection(AnexosState.selectedUnidade);
+            }
           }
         } catch (e) {
-          console.warn('[Anexos] sync mapa em background', e);
+          console.warn('[Anexos] seed mapa em background', e);
         }
       })();
       return;
@@ -1658,7 +1658,12 @@ const AnexosApp = {
     }
   },
 
+  /**
+   * Opcional / manual: varre anexos de unidades ativas para marcar ENVIADO.
+   * Não deve rodar no clique de um lote — trava a rede e busca “os demais”.
+   */
   async syncEnviadoFromSiengeAttachments(enterpriseId) {
+    const syncGen = ++AnexosState._mapaSyncGen;
     const auth = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
     const activeIds = Object.keys(AnexosState.mapaMeta || {}).filter((uid) => {
       const m = AnexosState.mapaMeta[uid];
@@ -1671,6 +1676,7 @@ const AnexosApp = {
     let i = 0;
     const run = async () => {
       while (i < queue.length) {
+        if (syncGen !== AnexosState._mapaSyncGen) return;
         const idx = i++;
         const uid = queue[idx];
         const meta = AnexosState.mapaMeta[uid];
@@ -2175,6 +2181,8 @@ const AnexosApp = {
 
   async selecionarUnidade(unitId) {
     const gen = ++AnexosState.selectGen;
+    // Cancela qualquer sync em massa do espelho — o clique só cuida DESTE contrato
+    AnexosState._mapaSyncGen += 1;
     const stillThis = () => gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(unitId || '');
     const softRender = () => renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
 
@@ -2327,15 +2335,17 @@ const AnexosApp = {
         this.importarAnexosDoContrato({ auto: true, force: true });
       }
 
-      // Anexos do cliente / histórico em background (JSON grande congelava a aba)
-      this._enrichAttachmentsFromClienteAndHistorico({
-        gen: gen,
-        unitId: unitId,
-        mainC: mainC,
-        mainCustId: mainCustId,
-        enterpriseId: enterpriseId,
-        nomeUnidade: nomeUnidade
-      });
+      // Só o cliente do contrato atual (filtrado pela unidade). Sem varrer
+      // histórico de cessão / outros clientes — isso puxava anexos “dos demais”.
+      if (mainCustId && AnexosState.contexto !== 'Unidade') {
+        this._enrichAttachmentsFromClienteOnly({
+          gen: gen,
+          unitId: unitId,
+          mainCustId: mainCustId,
+          enterpriseId: enterpriseId,
+          nomeUnidade: nomeUnidade
+        });
+      }
     } catch (e) {
       console.error('Erro ao buscar contrato vigente:', e);
       if (stillThis()) {
@@ -2350,39 +2360,41 @@ const AnexosApp = {
     }
   },
 
-  async _enrichAttachmentsFromClienteAndHistorico(ctx) {
+  /** Anexos do cliente titular deste contrato (filtrados pela unidade). */
+  async _enrichAttachmentsFromClienteOnly(ctx) {
     const stillThis = () => ctx.gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(ctx.unitId || '');
     try {
-      if (ctx.mainCustId && AnexosState.contexto !== 'Unidade') {
-        const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${ctx.mainCustId}/attachments`);
-        if (!stillThis()) return;
-        if (cAttData && Array.isArray(cAttData.results) && cAttData.results.length) {
-          const extra = cAttData.results
-            .filter(a => anexosAttachmentBelongsToUnit(a, {
-              enterpriseId: ctx.enterpriseId,
-              unitName: ctx.nomeUnidade,
-              unitId: ctx.unitId
-            }))
-            .map(a => ({
-              ...a,
-              isCustomerAttachment: true,
-              customerId: ctx.mainCustId,
-              description: a.description ? `(Cliente ${ctx.mainCustId}) ${a.description}` : `(Cliente ${ctx.mainCustId}) Arquivo`
-            }));
-          if (extra.length) {
-            AnexosState.contractAttachments = anexosDedupeAttachments(
-              (AnexosState.contractAttachments || []).concat(extra)
-            );
-            renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
-            anexosPatchMapaSelection(ctx.unitId);
-            this.importarAnexosDoContrato({ auto: true, force: true });
-          }
-        }
-      }
+      if (!ctx.mainCustId || AnexosState.contexto === 'Unidade') return;
+      const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${ctx.mainCustId}/attachments`);
+      if (!stillThis()) return;
+      if (!cAttData || !Array.isArray(cAttData.results) || !cAttData.results.length) return;
+      const extra = cAttData.results
+        .filter(a => anexosAttachmentBelongsToUnit(a, {
+          enterpriseId: ctx.enterpriseId,
+          unitName: ctx.nomeUnidade,
+          unitId: ctx.unitId
+        }))
+        .map(a => ({
+          ...a,
+          isCustomerAttachment: true,
+          customerId: ctx.mainCustId,
+          description: a.description ? `(Cliente ${ctx.mainCustId}) ${a.description}` : `(Cliente ${ctx.mainCustId}) Arquivo`
+        }));
+      if (!extra.length) return;
+      AnexosState.contractAttachments = anexosDedupeAttachments(
+        (AnexosState.contractAttachments || []).concat(extra)
+      );
+      renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
+      anexosPatchMapaSelection(ctx.unitId);
+      this.importarAnexosDoContrato({ auto: true, force: true });
     } catch (e) {
       console.warn('[Anexos] anexos cliente', e);
     }
-    if (!stillThis()) return;
+  },
+
+  async _enrichAttachmentsFromClienteAndHistorico(ctx) {
+    await this._enrichAttachmentsFromClienteOnly(ctx);
+    if (!(ctx.gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(ctx.unitId || ''))) return;
     await this._enrichAttachmentsFromHistorico(ctx);
   },
 

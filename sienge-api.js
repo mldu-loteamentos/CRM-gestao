@@ -2517,9 +2517,8 @@ const SiengeApiService = {
         comp.aging[agingKey].value += billVal;
 
         const opName = String(b.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
-        const nTit = (Array.isArray(b.titles) && b.titles.length)
-          ? b.titles.length
-          : (Number(b.billCount) || 1);
+        // 1 título por linha da carteira (não usar billCount = parcelas)
+        const nTit = 1;
         if (!operatorMap[opName]) {
           operatorMap[opName] = { name: opName, total_count: 0, total_value: 0, above31_count: 0, above31_value: 0 };
         }

@@ -47,8 +47,9 @@ const DashboardInadimplencia = (function() {
   }
 
   function formatMoney(value) {
-    if (value === undefined || value === null) return "R$ 0,00";
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0,00";
+    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function getSnapshotAtual() {
@@ -87,9 +88,14 @@ const DashboardInadimplencia = (function() {
     return Number(c.overdueValue != null ? c.overdueValue : c.value) || 0;
   }
 
+  /** Cada linha da fila = 1 título (contrato/bill). billCount/titles costumam ser parcelas. */
   function clientTitles(c) {
-    if (Array.isArray(c.titles) && c.titles.length) return c.titles.length;
-    return Number(c.billCount) || 1;
+    if (!c) return 1;
+    if (Array.isArray(c.billIds) && c.billIds.length) {
+      const uniq = new Set(c.billIds.map((id) => String(id || '').replace(/^B-/, '').split('-')[0]).filter(Boolean));
+      if (uniq.size) return uniq.size;
+    }
+    return 1;
   }
 
   function clientDelay(c) {
@@ -688,9 +694,9 @@ const DashboardInadimplencia = (function() {
 
   function filterDropHtml(id, label, items, selectedIds, open, query) {
     if (!window.MlEmpresaFilter) {
-      return `<div style="flex:1;min-width:200px;"><div class="ml-emp-filter-label">${label}</div><span style="color:#94a3b8;font-size:0.8rem;">Filtro indisponível</span></div>`;
+      return `<div class="dash-inad-filter-slot"><div class="ml-emp-filter-label">${label}</div><span style="color:#94a3b8;font-size:0.8rem;">Filtro indisponível</span></div>`;
     }
-    return MlEmpresaFilter.html({
+    return `<div class="dash-inad-filter-slot">${MlEmpresaFilter.html({
       id,
       label,
       items,
@@ -698,13 +704,13 @@ const DashboardInadimplencia = (function() {
       open: !!open,
       query: query || "",
       emptyMeansAll: true
-    });
+    })}</div>`;
   }
 
   function renderFilterBar(options) {
     bindFilters(options);
     return `
-      <div style="background:white;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);padding:18px 20px;margin-bottom:22px;">
+      <div class="dash-inad-filters" style="background:white;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);padding:18px 20px;margin-bottom:22px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
           <h3 style="margin:0;font-size:1rem;color:#1e293b;display:flex;align-items:center;gap:8px;">
             <i data-lucide="filter" style="width:18px;color:#105436;"></i> Filtros
@@ -718,7 +724,7 @@ const DashboardInadimplencia = (function() {
             </button>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
+        <div class="dash-inad-filters-grid">
           ${filterDropHtml("dash-inad-emp", "EMPRESAS", options.companies, filterDraft.companies, filterUi.openEmp, filterUi.qEmp)}
           ${filterDropHtml("dash-inad-cc", "EMPREENDIMENTOS", options.centers, filterDraft.centers, filterUi.openCc, filterUi.qCc)}
           ${filterDropHtml("dash-inad-cid", "CIDADES", options.cities, filterDraft.cities, filterUi.openCid, filterUi.qCid)}
@@ -737,7 +743,7 @@ const DashboardInadimplencia = (function() {
     return `
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 25px;">
         <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Valor Total (R$)</h4>
+          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Valor Total</h4>
           <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(metrics.total_value)}</div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varValor.class}">
             ${varValor.text} vs Fechamento Mês
@@ -746,7 +752,7 @@ const DashboardInadimplencia = (function() {
 
         <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #105436; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Qtd. de Títulos</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${metrics.total_count}</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${Number(metrics.total_count || 0).toLocaleString('pt-BR')}</div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varQtd.class}">
             ${varQtd.text} vs Fechamento Mês
           </div>
@@ -762,7 +768,7 @@ const DashboardInadimplencia = (function() {
 
         <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Sub Júdice</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${metrics.subjudice_count} <span style="font-size: 1rem; color: #64748b; font-weight: 500;">títulos</span></div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${Number(metrics.subjudice_count || 0).toLocaleString('pt-BR')} <span style="font-size: 1rem; color: #64748b; font-weight: 500;">títulos</span></div>
           <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500; color: #64748b;">
             Total: ${formatMoney(metrics.subjudice_value)}
           </div>
@@ -870,7 +876,7 @@ const DashboardInadimplencia = (function() {
                 const i = context.dataIndex;
                 const snap = recentSnaps[i];
                 const raw = rawValues[i];
-                let label = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(raw);
+                let label = formatMoney(raw);
                 if (outlierFlags[i]) label += ' (possível carga parcial)';
                 if (snap && snap.is_month_close) label += ' (Fechamento)';
                 if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
@@ -884,7 +890,7 @@ const DashboardInadimplencia = (function() {
             beginAtZero: false,
             ticks: {
               callback: function(value) {
-                return 'R$ ' + (value / 1000000).toFixed(1) + 'M';
+                return (value / 1000000).toFixed(1) + 'M';
               }
             }
           }
@@ -1240,7 +1246,7 @@ const DashboardInadimplencia = (function() {
       if ((Number(b.overdueValue) || 0) < 0.01) return;
       totalOverdue += b.overdueValue || 0;
       uniqueClients.add(b.customerId);
-      totalBills += (b.titles && b.titles.length > 0) ? b.titles.length : 1;
+      totalBills += clientTitles(b);
       sumMaxDaysDelay += (b.maxDaysDelay || 0);
 
       const delay = b.maxDaysDelay || 0;
@@ -1263,7 +1269,8 @@ const DashboardInadimplencia = (function() {
          companyData[compId] = { id: compId, name: compName.toUpperCase(), totalBills: 0, totalValue: 0, d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0 };
       }
       const comp = companyData[compId];
-      comp.totalBills += (b.titles && b.titles.length > 0) ? b.titles.length : 1;
+      const nTitulos = clientTitles(b);
+      comp.totalBills += nTitulos;
       comp.totalValue += (b.overdueValue || 0);
       if (b.subjudice === 'S') comp.subjudice_v += (b.overdueValue || 0);
       else comp[delayBucket + '_v'] += (b.overdueValue || 0);
@@ -1274,7 +1281,7 @@ const DashboardInadimplencia = (function() {
           operatorData[opName] = { name: opName, d30_c:0,d30_v:0, d60_c:0,d60_v:0, d90_c:0,d90_v:0, d120_c:0,d120_v:0, d120p_c:0,d120p_v:0, total_c:0,total_v:0, customers:[] };
       }
         const op = operatorData[opName];
-        const numTitulos = (b.titles && b.titles.length > 0) ? b.titles.length : 1;
+        const numTitulos = nTitulos;
         const bTitle = b.saleId || (b.billIds && b.billIds.length ? b.billIds[0] : '-');
         op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
         op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
@@ -1324,9 +1331,9 @@ const DashboardInadimplencia = (function() {
     const fechSnap = fechSnapReal;
     const hojeSnap = snapshots[snapshots.length-1];
 
-    function fmtK(v) { if(!v) return 'R$ 0'; if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$ '+(v/1000).toFixed(0)+'K'; return formatMoney(v); }
-    function fmtMoneyNoRs(v) { return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
-    function fmtMoney(v) { return 'R$ ' + fmtMoneyNoRs(v); }
+    function fmtK(v) { if(!v) return '0'; if(v>=1000000) return (v/1000000).toFixed(1)+'M'; if(v>=1000) return (v/1000).toFixed(0)+'K'; return formatMoney(v); }
+    function fmtMoneyNoRs(v) { return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+    function fmtMoney(v) { return fmtMoneyNoRs(v); }
     function fmtInteiro(v) { return Math.floor(v).toLocaleString('pt-BR'); }
     function cellOp(c, v) { if(c===0) return '<span style="color:#cbd5e1;">—</span>'; return `<span style="font-weight:700;">${fmtMoneyNoRs(v)}</span><br><span style="font-size:7.5px;color:#64748b;">${c} tít.</span>`; }
     function cellOpTot(c, v, totC, totalValue, totalTitles) {
@@ -1610,7 +1617,7 @@ const DashboardInadimplencia = (function() {
     if (ontemSnap) {
         const diffVal = totalOverdue - (ontemSnap.total_value || 0);
         if (Math.abs(diffVal) > 1) {
-            const diffValFmt = Math.abs(diffVal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            const diffValFmt = formatMoney(Math.abs(diffVal));
             diffValueStr = ` (${diffVal > 0 ? '+' : '-'} ${diffValFmt} do que o último dia útil)`;
         }
         

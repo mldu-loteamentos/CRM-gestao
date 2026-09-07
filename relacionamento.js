@@ -6,7 +6,6 @@ const RelacionamentoState = {
 
 const RelacionamentoApp = {
   init() {
-    this.renderCessao();
     this.renderAditamento();
     this.renderPermuta();
     this.renderTermos();

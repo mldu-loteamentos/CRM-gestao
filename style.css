@@ -2325,6 +2325,30 @@ circle.donut-segment {
 .ml-emp-filter-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 0.82rem; color: #334155; font-weight: 600; }
 .ml-emp-filter-item:last-child { border-bottom: none; }
 .ml-emp-filter-item span { min-width: 0; white-space: normal; line-height: 1.35; }
+
+/* Dashboard inadimplência — filtros sem encavalar (override do width fixo do MlEmpresaFilter) */
+.dash-inad-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.dash-inad-filter-slot {
+  min-width: 0;
+  width: 100%;
+}
+.dash-inad-filters .ml-emp-filter {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .dash-inad-filters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .dash-inad-filters-grid { grid-template-columns: 1fr; }
+}
 .ml-emp-filter-item input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: #105436; }
 .ml-emp-filter-empty { padding: 12px; color: #94a3b8; font-size: 0.8rem; }
 
@@ -3992,5 +4016,141 @@ circle.donut-segment {
 }
 @media (max-width: 720px) {
   .quitacao-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ——— Cessão de Direitos ——— */
+.cessao-lbl {
+  display: block;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  margin-bottom: 4px;
+}
+.cessao-val {
+  display: block;
+  font-size: 0.9rem;
+  color: #1e293b;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.cessao-sugestoes {
+  margin-top: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  max-height: 240px;
+  overflow: auto;
+  z-index: 20;
+}
+.cessao-sugestao-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.cessao-sugestao-item:hover { background: #f0fdf4; }
+.cessao-sugestao-item strong { color: #0f172a; font-size: 0.88rem; }
+.cessao-sugestao-item span { color: #64748b; font-size: 0.78rem; }
+.cessao-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.cessao-tab-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cessao-tab-btn.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.cessao-tab-panel { overflow: hidden; }
+.cessao-cedent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.cessao-badge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #166534;
+  vertical-align: middle;
+}
+.cessao-cond-head {
+  background: #475569;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+}
+.cessao-cond-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cessao-cond-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  color: #334155;
+  padding: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.cessao-cond-table td {
+  padding: 6px 8px;
+  border-bottom: 1px dashed #e2e8f0;
+  background: #fffbeb;
+  vertical-align: middle;
+}
+.cessao-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.cessao-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+.cessao-kpi span {
+  display: block;
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.cessao-kpi strong {
+  font-size: 1.05rem;
+  color: var(--color-primary);
+}
+@media (max-width: 900px) {
+  .cessao-kpi-row { grid-template-columns: 1fr; }
 }
 

@@ -1799,6 +1799,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "Compromissário (Associações)",
     "relacionamento_gestao": "Buscar Cliente",
     "relacionamento_autorizacao": "Autorização de escritura",
+    "relacionamento_cessao": "Cessão de Direitos",
     "condicoes-pagamento": "Condições de Pagamento",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
@@ -1841,6 +1842,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "users-round",
     "relacionamento_gestao": "users",
     "relacionamento_autorizacao": "scroll-text",
+    "relacionamento_cessao": "handshake",
     "condicoes-pagamento": "file-text",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
@@ -2775,12 +2777,15 @@ window.applyPermissions = function(profileName) {
           || perms.sub_rel_geral_relacionamento_acessar === true;
         const relAlias = (
           (modKey === "sub_rel_geral_buscar_cliente_acessar" && relLegacy)
-          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar") && (
+          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar") && (
             relLegacy
             || perms.sub_rel_docs === true
             || perms.sub_rel_docs_autorizacao_escritura_acessar === true
             || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
             || perms.sub_rel_docs_autorizacao_escritura_editar === true
+            || perms.sub_rel_docs_cessao_direitos_acessar === true
+            || perms.sub_rel_docs_cessao_direitos_visualizar === true
+            || perms.sub_rel_docs_cessao_direitos_editar === true
           ))
         );
         const suporteAlias = (modKey === "mod_suporte" || modKey === "sub_suporte_geral_chamados_acessar") && (
@@ -2941,7 +2946,7 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
   }
-  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar") {
+  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar") {
     return perms.mod_rel === true
       || perms.sub_rel_geral === true
       || perms.sub_rel_geral_relacionamento_acessar === true
@@ -2950,7 +2955,10 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_docs === true
       || perms.sub_rel_docs_autorizacao_escritura_acessar === true
       || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
-      || perms.sub_rel_docs_autorizacao_escritura_editar === true;
+      || perms.sub_rel_docs_autorizacao_escritura_editar === true
+      || perms.sub_rel_docs_cessao_direitos_acessar === true
+      || perms.sub_rel_docs_cessao_direitos_visualizar === true
+      || perms.sub_rel_docs_cessao_direitos_editar === true;
   }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
@@ -10427,18 +10435,43 @@ function formatCpfCnpj(val) {
   // Use dbContract.installments directly — it contains all installments with currentBalance.
   let clientUnpaid = [];
   if (dbContract && dbContract.installments && Array.isArray(dbContract.installments)) {
+    const enrichFromState = Array.isArray(AppState.currentContractInstallments)
+      ? AppState.currentContractInstallments
+      : [];
+    const byId = new Map();
+    const byDue = new Map();
+    enrichFromState.forEach((inst) => {
+      if (!inst) return;
+      const id = inst.installmentId != null ? inst.installmentId : inst.installmentNumber;
+      if (id != null) byId.set(String(id), inst);
+      const due = String(inst.dueDate || "").slice(0, 10);
+      if (due && !byDue.has(due)) byDue.set(due, inst);
+    });
     clientUnpaid = dbContract.installments
       .filter(inst => (inst.currentBalance || 0) > 0) // apenas parcelas com saldo em aberto
-      .map(inst => ({
-        installmentId: inst.installmentId || inst.installmentNumber,
-        installmentNum: inst.installmentNumber,
-        installmentSituation: 1, // open
-        value: inst.originalValue || inst.currentBalance || 0,
-        currentBalance: inst.currentBalance || 0,
-        currentBalanceWithAddition: (inst.currentBalance || 0) + (inst.additionalValue || 0),
-        dueDate: inst.dueDate,
-        generatedBoleto: inst.generatedBoleto || false,
-      }));
+      .map(inst => {
+        const idKey = String(inst.installmentId != null ? inst.installmentId : (inst.installmentNumber != null ? inst.installmentNumber : ""));
+        const dueKey = String(inst.dueDate || "").slice(0, 10);
+        const fromState = (idKey && byId.get(idKey)) || (dueKey && byDue.get(dueKey)) || null;
+        const src = fromState || inst;
+        return {
+          installmentId: inst.installmentId || inst.installmentNumber,
+          installmentNum: inst.installmentNumber != null ? inst.installmentNumber
+            : (src.installmentNumber != null ? src.installmentNumber : inst.installmentId),
+          installmentSituation: 1, // open
+          value: inst.originalValue || inst.currentBalance || 0,
+          currentBalance: inst.currentBalance || 0,
+          currentBalanceWithAddition: (inst.currentBalance || 0) + (inst.additionalValue || 0),
+          dueDate: inst.dueDate,
+          generatedBoleto: inst.generatedBoleto || false,
+          conditionType: src.conditionType || inst.conditionType || inst.paymentConditionType || "",
+          indexerId: src.indexerId != null ? src.indexerId
+            : (src.indexerCode != null ? src.indexerCode
+              : (inst.indexerId != null ? inst.indexerId : inst.indexerCode)),
+          indexerName: src.indexerName || src.indexerDescription || inst.indexerName || inst.indexerDescription || "",
+          indexerCode: src.indexerCode != null ? src.indexerCode : (inst.indexerCode != null ? inst.indexerCode : src.indexerId)
+        };
+      });
     // Sort by dueDate ascending
     clientUnpaid.sort((a, b) => {
       if (!a.dueDate) return 1;
@@ -12105,7 +12138,12 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
 
   const renderRow = (bill) => {
     const row = document.createElement("tr");
-    const instId = bill.installmentId || bill.installmentNum || '';
+    const instId = bill.installmentId || bill.installmentNum || bill.installmentNumber || '';
+    const parcNum = bill.installmentNum != null && bill.installmentNum !== ''
+      ? bill.installmentNum
+      : (bill.installmentNumber != null && bill.installmentNumber !== ''
+        ? bill.installmentNumber
+        : (instId || '—'));
     let selectable = false;
     if (bill.isOverdue) {
       selectable = true;
@@ -12124,25 +12162,33 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
     }
 
     // Indexador cruzado com AppState
-    const indexerId = bill.indexerId || '';
-    let indexerName = bill.indexerName || bill.indexer || '';
-    if (indexerId && AppState.indexers) {
+    const indexerId = bill.indexerId != null && bill.indexerId !== ''
+      ? bill.indexerId
+      : (bill.indexerCode != null ? bill.indexerCode : '');
+    let indexerName = bill.indexerName || bill.indexerDescription || bill.indexer || '';
+    if (indexerId !== '' && Array.isArray(AppState.indexers)) {
       const idxObj = AppState.indexers.find(x => String(x.id) === String(indexerId));
-      if (idxObj) indexerName = idxObj.name;
+      if (idxObj) indexerName = idxObj.name || indexerName;
     }
-    const indexerCode = indexerId ? String(indexerId) : '';
-    const indexerDisplay = indexerCode ? `<span style="font-weight:700;color:#5d4037;">${indexerCode}</span>` : '-';
-    const indexerNameDisplay = indexerName || '-';
+    const indexerCode = indexerId !== '' && indexerId != null ? String(indexerId) : '';
+    const indexerDisplay = indexerCode ? `<span style="font-weight:700;color:#5d4037;">${indexerCode}</span>` : '—';
+    const indexerNameDisplay = indexerName || '—';
 
     const disabledAttr = selectable ? '' : 'disabled';
     const checkedAttr = selectable ? 'checked' : '';
+    const dueLabel = bill.dueDate
+      ? new Date(bill.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
+      : 'N/D';
+    const overdueBadge = bill.isOverdue
+      ? ' <span style="color:#bf360c;font-size:0.68rem;font-weight:700;">● Vencida</span>'
+      : '';
 
     row.innerHTML = `
       <td style="text-align: center; padding: 6px;">
         <input type="checkbox" class="reneg-bill-check" value="${instId}" ${checkedAttr} ${disabledAttr} onclick="return false;" style="width: 15px; height: 15px; margin: 0; cursor: not-allowed;">
       </td>
-      <td style="padding:6px;"><strong>${instId}</strong></td>
-      <td style="padding:6px;">${bill.dueDate ? new Date(bill.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : "N/D"} ${bill.isOverdue ? '<span style="color:#bf360c;font-size:0.68rem;font-weight:700;">â° Vencida</span>' : ''}</td>
+      <td style="padding:6px;"><strong>${parcNum}</strong></td>
+      <td style="padding:6px;">${dueLabel}${overdueBadge}</td>
       <td style="padding:6px; font-size:0.75rem;">${indexerDisplay}</td>
       <td style="padding:6px; font-size:0.75rem; color:var(--color-text-muted);">${indexerNameDisplay}</td>
       <td style="padding:6px; text-align:right;">${(bill.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
@@ -12215,8 +12261,8 @@ function calculateRenegotiation() {
     chargesEl.textContent = 'R$ 0,00';
     discountEl.textContent = '- R$ 0,00';
     totalEl.textContent = 'R$ 0,00';
-    calcValEl.textContent = 'â€“';
-    if (sinalSummaryEl) sinalSummaryEl.textContent = 'â€“';
+    calcValEl.textContent = '–';
+    if (sinalSummaryEl) sinalSummaryEl.textContent = '–';
     if (scheduleBody) scheduleBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--color-text-muted); padding:12px; font-size:0.78rem;">Selecione ao menos uma parcela.</td></tr>';
     return;
   }
@@ -12530,7 +12576,7 @@ function calculateRenegotiation() {
     // 1. Sinal (Ato)
     if (sinalPct > 0 && sinalValue > 0) {
       rowNum++;
-      const sinalDateDisplay = sinalDueStr ? new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR') : 'â€“';
+      const sinalDateDisplay = sinalDueStr ? new Date(sinalDueStr + 'T12:00:00').toLocaleDateString('pt-BR') : '–';
       greenTotalParcelas++;
       greenTotalPagar += sinalValue;
       greenLastDate = sinalDateDisplay;
@@ -12596,7 +12642,7 @@ function calculateRenegotiation() {
           rowNum++;
           const instId = bill.installmentId || bill.installmentNum || '';
           
-          let dueDateStr = 'â€“';
+          let dueDateStr = '–';
           if (lastAcordoDate) {
             const newDate = new Date(lastAcordoDate);
             newDate.setMonth(newDate.getMonth() + monthOffset);
@@ -13877,7 +13923,117 @@ window.getQuitacaoCurrentBillId = function() {
   return raw || "";
 };
 
-function quitacaoMapDebtRow(inst, monthlyRate) {
+/** Número da parcela para exibição (evita NaN do debt-balance sem installmentNumber). */
+function quitacaoResolveInstallmentNumber(inst, lookupById, lookupByDue) {
+  const tryNum = (v) => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    // Evita tratar UUID/código longo como "número da parcela"
+    const s = String(v).trim();
+    if (s !== String(n) && s !== String(Math.trunc(n))) return null;
+    if (n > 99999) return null;
+    return Math.trunc(n);
+  };
+  let n = tryNum(inst && (inst.installmentNumber != null ? inst.installmentNumber : inst.number));
+  if (n != null) return n;
+  const id = inst && (inst.installmentId != null ? inst.installmentId : inst.id);
+  n = tryNum(id);
+  if (n != null) return n;
+  if (lookupById && id != null && lookupById.has(String(id))) {
+    n = tryNum(lookupById.get(String(id)));
+    if (n != null) return n;
+  }
+  const due = String((inst && (inst.dueDate || inst.due)) || "").slice(0, 10);
+  if (lookupByDue && due && lookupByDue.has(due)) {
+    n = tryNum(lookupByDue.get(due));
+    if (n != null) return n;
+  }
+  return "—";
+}
+
+function quitacaoBuildInstallmentLookups(list) {
+  const byId = new Map();
+  const byDue = new Map();
+  (list || []).forEach((inst) => {
+    if (!inst) return;
+    const num = inst.installmentNumber != null ? inst.installmentNumber : inst.number;
+    const id = inst.installmentId != null ? inst.installmentId : inst.id;
+    if (id != null && num != null && num !== "") byId.set(String(id), num);
+    const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+    if (due && num != null && num !== "" && !byDue.has(due)) byDue.set(due, num);
+  });
+  return { byId, byDue };
+}
+
+/**
+ * Parcela vencida no mesmo critério da Simulação de Vencidas:
+ * extrato do contrato + multa 2% + juros 1% a.m. pro-rata.
+ */
+function quitacaoMapOverdueFromSimulador(inst, monthlyRate, lookups) {
+  const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+  const today = quitacaoTodayIso();
+  const daysOverdue = Math.max(0, quitacaoDaysBetween(due, today) || 0);
+  const original = Number(
+    inst.originalValue != null ? inst.originalValue
+      : (inst.value != null ? inst.value : inst.installmentValue)
+  ) || 0;
+  const cb = Number(
+    inst.currentBalance != null ? inst.currentBalance
+      : (inst.balanceDue != null ? inst.balanceDue
+        : (inst.correctedValue != null ? inst.correctedValue : original))
+  ) || 0;
+  const face = original > 0.009 ? original : cb;
+  let multa = 0;
+  let juros = 0;
+  if (daysOverdue >= 1 && cb > 0.009) {
+    multa = cb * 0.02;
+    juros = cb * 0.01 * (daysOverdue / 30);
+  }
+  const apiUpdated = Number(
+    inst.correctedValueWithAdditions != null ? inst.correctedValueWithAdditions
+      : (inst.currentBalanceWithAddition != null ? inst.currentBalanceWithAddition : NaN)
+  );
+  const localUpdated = cb + multa + juros;
+  const vpNum = (Number.isFinite(apiUpdated) && apiUpdated > 0.009) ? apiUpdated : localUpdated;
+  const additions = Math.max(0, vpNum - (cb > 0.009 ? cb : face));
+  const billId = String(
+    inst.billReceivableId || inst.billId || inst.receivableBillId
+    || (typeof window.getQuitacaoCurrentBillId === "function" && window.getQuitacaoCurrentBillId())
+    || ""
+  ).replace(/^B-/, "").split("-")[0];
+  const installmentId = inst.installmentId != null ? inst.installmentId
+    : (inst.id != null ? inst.id : inst.installmentNumber);
+  const number = quitacaoResolveInstallmentNumber(inst, lookups && lookups.byId, lookups && lookups.byDue);
+  const jurosParcelamento = monthlyRate != null
+    ? ((monthlyRate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P")
+    : (window._quitacaoState && window._quitacaoState.jurosLabel) || "—";
+  return {
+    raw: inst,
+    key: billId + ":" + String(installmentId),
+    billId,
+    installmentId,
+    due,
+    number,
+    tipo: inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || "Parcelas",
+    original: face,
+    corrected: cb > 0.009 ? cb : face,
+    additions,
+    vp: vpNum,
+    overdue: true,
+    daysOverdue,
+    daysForDiscount: 0,
+    jurosVpPct: null,
+    desconto: 0,
+    valorComDesconto: vpNum,
+    jurosParcelamento,
+    finePct: 2,
+    interestLatePct: 1,
+    source: "simulador-vencidas"
+  };
+}
+
+function quitacaoMapDebtRow(inst, monthlyRate, lookups) {
   const due = String(inst.dueDate || inst.due || "").slice(0, 10);
   const today = quitacaoTodayIso();
   const overdue = typeof distPermutaIsOverdue === "function" ? distPermutaIsOverdue(inst) : (due && due < today);
@@ -13927,8 +14083,7 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
   ).replace(/^B-/, "").split("-")[0];
   const installmentId = inst.installmentId != null ? inst.installmentId
     : (inst.id != null ? inst.id : inst.installmentNumber);
-  const number = inst.installmentNumber != null ? Number(inst.installmentNumber)
-    : (Number.isFinite(Number(installmentId)) ? Number(installmentId) : installmentId);
+  const number = quitacaoResolveInstallmentNumber(inst, lookups && lookups.byId, lookups && lookups.byDue);
   const key = billId + ":" + String(installmentId);
   return {
     raw: inst,
@@ -13950,7 +14105,8 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
     valorComDesconto: vpNum,
     jurosParcelamento,
     finePct: Number.isFinite(finePct) ? finePct : 2,
-    interestLatePct: Number.isFinite(interestLatePct) ? interestLatePct : 1
+    interestLatePct: Number.isFinite(interestLatePct) ? interestLatePct : 1,
+    source: overdue ? "debt-balance" : "antecipacao-vp"
   };
 }
 
@@ -14042,21 +14198,58 @@ window.loadQuitacaoDebtReport = async function(force) {
     window.renderQuitacaoDebtReport();
     return;
   }
-  if (statusEl) statusEl.textContent = "Buscando saldo devedor presente no Sienge...";
-  if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#64748b;font-size:0.85rem;">Carregando parcelas a valor presente...</div>`;
+  if (statusEl) statusEl.textContent = "Carregando vencidas (simulador) e a vencer (antecipação/VP)...";
+  if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:#64748b;font-size:0.85rem;">Carregando parcelas...</div>`;
   try {
     const companyId = (sale && sale.companyId) || AppState.currentCompanyId || "";
-    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
     const monthlyRate = quitacaoGetMonthlyInterestRate(sale);
-    const rows = flattenCustomerDebtBalance(res)
-      .filter((inst) => typeof distPermutaInstOpen === "function" ? distPermutaInstOpen(inst) : true)
-      .map((inst) => quitacaoMapDebtRow(inst, monthlyRate))
-      .filter((r) => (r.vp > 0.009) || (r.corrected > 0.009) || (r.original > 0.009))
+    const contractInsts = Array.isArray(AppState.currentContractInstallments)
+      ? AppState.currentContractInstallments
+      : [];
+    const lookups = quitacaoBuildInstallmentLookups(contractInsts);
+    const today = quitacaoTodayIso();
+
+    // 1) Vencidas — mesma base da aba Simulação de Vencidas (extrato + multa/juros)
+    const vencidasFromSim = contractInsts
+      .filter((inst) => {
+        if (!inst || !inst.dueDate) return false;
+        if (quitacaoInstIsPaid(inst)) return false;
+        const due = String(inst.dueDate).slice(0, 10);
+        if (!(due < today)) return false;
+        const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue);
+        if (Number.isFinite(cb) && cb <= 0.009) return false;
+        const sit = inst.installmentSituation;
+        if (sit != null && sit !== 1 && sit !== "1") return false;
+        return true;
+      })
+      .map((inst) => quitacaoMapOverdueFromSimulador(inst, monthlyRate, lookups))
+      .filter((r) => (r.vp > 0.009) || (r.original > 0.009))
       .sort((a, b) => String(a.due).localeCompare(String(b.due)));
-    const vencidas = rows.filter((r) => r.overdue);
-    const aVencer = rows.filter((r) => !r.overdue);
-    const paidRows = ((AppState.currentContractInstallments || []).filter(quitacaoInstIsPaid))
-      .map(quitacaoMapPaidRow)
+
+    // 2) A vencer — API de saldo/antecipação (customer-debt-balance com VP)
+    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
+    const debtRows = flattenCustomerDebtBalance(res)
+      .filter((inst) => typeof distPermutaInstOpen === "function" ? distPermutaInstOpen(inst) : true)
+      .map((inst) => quitacaoMapDebtRow(inst, monthlyRate, lookups))
+      .filter((r) => (r.vp > 0.009) || (r.corrected > 0.009) || (r.original > 0.009));
+
+    let vencidas = vencidasFromSim;
+    // Fallback: se o extrato não trouxe vencidas, usa debt-balance só para as atrasadas
+    if (!vencidas.length) {
+      vencidas = debtRows.filter((r) => r.overdue).sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    }
+    const overdueKeys = new Set(vencidas.map((r) => r.key));
+    const aVencer = debtRows
+      .filter((r) => !r.overdue && !overdueKeys.has(r.key))
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const rows = [].concat(vencidas, aVencer);
+    const paidRows = contractInsts
+      .filter(quitacaoInstIsPaid)
+      .map((inst) => {
+        const row = quitacaoMapPaidRow(inst);
+        row.number = quitacaoResolveInstallmentNumber(inst, lookups.byId, lookups.byDue);
+        return row;
+      })
       .sort((a, b) => String(a.due).localeCompare(String(b.due)));
     const sumPago = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
     const sumBaixa = paidRows.reduce((s, r) => s + (Number(r.valorBaixa) || 0), 0);
@@ -14246,6 +14439,64 @@ window.quitacaoSelectAllOpen = function() {
   const st = window.quitacaoEnsureSelectionState();
   const rows = window.quitacaoSelectableRows();
   st.selectedKeys = new Set(rows.map((r) => r.key));
+  st.simResult = null;
+  window.renderQuitacaoDebtReport();
+};
+
+/** Marca todas as vencidas, ou todas as a vencer (exige vencidas já marcadas). */
+window.quitacaoSelectSection = function(section) {
+  const st = window.quitacaoEnsureSelectionState();
+  const next = new Set(st.selectedKeys);
+  const vencidas = st.vencidas || [];
+  const aVencer = st.aVencer || [];
+  if (section === "vencidas") {
+    vencidas.forEach((r) => next.add(r.key));
+  } else if (section === "avencer") {
+    const allOverdueOn = !vencidas.length || vencidas.every((r) => next.has(r.key));
+    if (!allOverdueOn) {
+      alert("Há parcelas vencidas em aberto. Marque todas as vencidas antes de marcar as a vencer.");
+      window.renderQuitacaoDebtReport();
+      return;
+    }
+    aVencer.forEach((r) => next.add(r.key));
+  } else if (section === "all") {
+    vencidas.forEach((r) => next.add(r.key));
+    aVencer.forEach((r) => next.add(r.key));
+  }
+  if (!window.quitacaoSelectionIsValid(next)) {
+    alert("Seleção inválida: as parcelas precisam ser sequenciais a partir do início e/ou do fim (sem pular).");
+    window.renderQuitacaoDebtReport();
+    return;
+  }
+  st.selectedKeys = next;
+  st.simResult = null;
+  window.renderQuitacaoDebtReport();
+};
+
+window.quitacaoToggleSection = function(section, wantOn) {
+  const st = window.quitacaoEnsureSelectionState();
+  const next = new Set(st.selectedKeys);
+  const list = section === "vencidas" ? (st.vencidas || []) : (st.aVencer || []);
+  if (wantOn) {
+    if (section === "avencer") {
+      const vencidas = st.vencidas || [];
+      const allOverdueOn = !vencidas.length || vencidas.every((r) => next.has(r.key));
+      if (!allOverdueOn) {
+        alert("Há parcelas vencidas em aberto. Marque todas as vencidas antes de marcar as a vencer.");
+        window.renderQuitacaoDebtReport();
+        return;
+      }
+    }
+    list.forEach((r) => next.add(r.key));
+  } else {
+    list.forEach((r) => next.delete(r.key));
+  }
+  if (wantOn && !window.quitacaoSelectionIsValid(next)) {
+    alert("Seleção inválida: as parcelas precisam ser sequenciais a partir do início e/ou do fim (sem pular).");
+    window.renderQuitacaoDebtReport();
+    return;
+  }
+  st.selectedKeys = next;
   st.simResult = null;
   window.renderQuitacaoDebtReport();
 };
@@ -14479,12 +14730,16 @@ window.renderQuitacaoDebtReport = function() {
         onchange="window.quitacaoToggleInstallment(this.dataset.key, this.checked)">
     </td>`;
   };
+  const fmtPar = (n) => {
+    if (n == null || n === "" || (typeof n === "number" && !Number.isFinite(n))) return "—";
+    return n;
+  };
 
   const rowVenc = (r) => `
     <tr class="${selected.has(r.key) ? "quitacao-row--sel" : ""}">
       ${chk(r, false, "Marcar para antecipação / quitação")}
       <td>${quitacaoFmtDate(r.due)}</td>
-      <td class="quitacao-num">${r.number}</td>
+      <td class="quitacao-num">${fmtPar(r.number)}</td>
       <td>${r.tipo}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
       <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
@@ -14501,7 +14756,7 @@ window.renderQuitacaoDebtReport = function() {
     <tr class="${selected.has(r.key) ? "quitacao-row--sel" : ""} ${blockUpcoming ? "quitacao-row--blocked" : ""}">
       ${chk(r, blockUpcoming, title)}
       <td>${quitacaoFmtDate(r.due)}</td>
-      <td class="quitacao-num">${r.number}</td>
+      <td class="quitacao-num">${fmtPar(r.number)}</td>
       <td>${r.tipo}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
       <td class="quitacao-juros" title="Juros do parcelamento · Tabela Price">${r.jurosParcelamento || jurosLabel}</td>
@@ -14521,7 +14776,7 @@ window.renderQuitacaoDebtReport = function() {
   const rowPago = (r) => `
     <tr>
       <td>${quitacaoFmtDate(r.due)}</td>
-      <td class="quitacao-num">${r.number}</td>
+      <td class="quitacao-num">${fmtPar(r.number)}</td>
       <td>${r.tipo}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.original)}</td>
       <td>${quitacaoFmtDate(r.payDate)}</td>
@@ -14533,6 +14788,10 @@ window.renderQuitacaoDebtReport = function() {
   const alcadaHint = st.alcada
     ? ((st.alcada.roleLabel ? st.alcada.roleLabel + " · " : "") + (st.alcada.label || ("até " + maxPct + "%")))
     : ("até " + maxPct + "%");
+
+  const allVencSelected = vencidas.length > 0 && vencidas.every((r) => selected.has(r.key));
+  const allFutSelected = aVencer.length > 0 && aVencer.every((r) => selected.has(r.key));
+  const futSelectDisabled = hasOverdue && !allOverdueSelected;
 
   const toolbar = (vencidas.length || aVencer.length) ? `
     <section class="quitacao-prepay-bar">
@@ -14563,7 +14822,9 @@ window.renderQuitacaoDebtReport = function() {
         </label>
       </div>
       <div class="quitacao-prepay-actions">
-        <button type="button" class="btn btn-secondary" onclick="window.quitacaoSelectAllOpen()">Marcar todas</button>
+        <button type="button" class="btn btn-primary" onclick="window.quitacaoSelectSection('all')">Marcar todos</button>
+        ${vencidas.length ? `<button type="button" class="btn btn-secondary" onclick="window.quitacaoSelectSection('vencidas')">Marcar vencidas</button>` : ""}
+        ${aVencer.length ? `<button type="button" class="btn btn-secondary" onclick="window.quitacaoSelectSection('avencer')" ${futSelectDisabled ? "disabled title=\"Marque todas as vencidas primeiro\"" : ""}>Marcar a vencer</button>` : ""}
         <button type="button" class="btn btn-cancel" onclick="window.quitacaoClearSelection()">Limpar</button>
         <button type="button" class="btn btn-secondary" onclick="window.quitacaoSimulateSelected()" ${selCount ? "" : "disabled"}>
           Simular desconto
@@ -14611,11 +14872,19 @@ window.renderQuitacaoDebtReport = function() {
     </section>` : ""}
     ${vencidas.length ? `
     <section class="quitacao-block">
-      <div class="quitacao-sec-head quitacao-sec-head--late">Parcelas vencidas</div>
+      <div class="quitacao-sec-head quitacao-sec-head--late" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <span>Parcelas vencidas</span>
+        <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:0.72rem;"
+          onclick="window.quitacaoSelectSection('vencidas')">Marcar todos</button>
+      </div>
       <table class="quitacao-table">
         <thead>
           <tr>
-            <th class="quitacao-center" style="width:36px;"></th>
+            <th class="quitacao-center" style="width:36px;">
+              <input type="checkbox" class="quitacao-inst-chk" title="Marcar todas as vencidas"
+                ${allVencSelected ? "checked" : ""}
+                onchange="window.quitacaoToggleSection('vencidas', this.checked)">
+            </th>
             <th>Dt. Venc</th>
             <th>Par</th>
             <th>Tipo</th>
@@ -14637,11 +14906,19 @@ window.renderQuitacaoDebtReport = function() {
     </section>` : ""}
     ${aVencer.length ? `
     <section class="quitacao-block">
-      <div class="quitacao-sec-head">Parcelas a vencer</div>
+      <div class="quitacao-sec-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <span>Parcelas a vencer</span>
+        <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:0.72rem;"
+          onclick="window.quitacaoSelectSection('avencer')" ${futSelectDisabled ? "disabled" : ""}>Marcar todos</button>
+      </div>
       <table class="quitacao-table">
         <thead>
           <tr>
-            <th class="quitacao-center" style="width:36px;"></th>
+            <th class="quitacao-center" style="width:36px;">
+              <input type="checkbox" class="quitacao-inst-chk" title="Marcar todas a vencer"
+                ${allFutSelected ? "checked" : ""} ${futSelectDisabled ? "disabled" : ""}
+                onchange="window.quitacaoToggleSection('avencer', this.checked)">
+            </th>
             <th>Dt. Venc</th>
             <th>Par</th>
             <th>Tipo</th>
