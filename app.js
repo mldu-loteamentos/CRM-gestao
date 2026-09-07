@@ -3107,6 +3107,9 @@ async function initializeApplication() {
   if (window.syncGlobalConfigFromFirebase) {
       await window.syncGlobalConfigFromFirebase();
   }
+  if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
+      EmpresasApp.ensureDefaultCobrancaFlags();
+  }
   if (window.EmpresasApp && typeof EmpresasApp.syncCompaniesDaily === "function") {
       EmpresasApp.syncCompaniesDaily(false).catch(() => {});
   }
@@ -4690,7 +4693,23 @@ window.updateFilaCacheStatusIndicator = function() {
 async function loadDashboardData(forceRefresh = false) {
     if (window._isDefaultersLoading) return;
     window._isDefaultersLoading = true;
-    try { await _loadDashboardData_Impl(forceRefresh); }
+    try {
+      if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
+        EmpresasApp.ensureDefaultCobrancaFlags();
+      }
+      let force = !!forceRefresh;
+      if (!force && typeof window.shouldForceFilaRefreshOnNonBusinessAccess === "function") {
+        force = window.shouldForceFilaRefreshOnNonBusinessAccess();
+      } else if (!force) {
+        try {
+          const today = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : null;
+          if (today && typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today)) {
+            force = localStorage.getItem(`crm_fila_full_refresh_${today}`) !== "done";
+          }
+        } catch (e) {}
+      }
+      await _loadDashboardData_Impl(force);
+    }
     finally { window._isDefaultersLoading = false; }
 }
 const defaultAdvFilterState = {
@@ -6778,11 +6797,21 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // === BACKGROUND FETCH PARA FILA DE COBRANï¿½A ===
+  // === BACKGROUND FETCH PARA FILA DE COBRANÇA ===
   setTimeout(async () => {
     if (!AppState.defaultersLoaded && getSiengeApiMode() === 'real') {
        try {
-         const bills = await SiengeApiService.getDefaulters();
+         if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
+           EmpresasApp.ensureDefaultCobrancaFlags();
+         }
+         let force = false;
+         try {
+           const today = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : null;
+           if (today && typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today)) {
+             force = localStorage.getItem(`crm_fila_full_refresh_${today}`) !== "done";
+           }
+         } catch (e) {}
+         const bills = await SiengeApiService.getDefaulters(null, null, force);
          AppState.defaultersBills = bills;
          AppState.defaultersLoaded = true;
          if (document.getElementById('tab-dashboard') && document.getElementById('tab-dashboard').style.display !== 'none') {
@@ -12241,20 +12270,37 @@ function calculateRenegotiation() {
   }
 
   const discountPct = Number(document.getElementById("reneg-discount-pct").value) || 0;
-  const interestRate = (ruleTaxa) / 100;
-  const sinalPct = Number(document.getElementById("reneg-sinal-pct")?.value) || ruleSinalMin;
+  const paymentMethod = (document.getElementById("reneg-payment-method")?.value === "cartao") ? "cartao" : "interno";
+  const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
+  const isCartao = paymentMethod === "cartao";
+
+  // Cartão: sem sinal / datas de sinal e 1º vencimento
+  const sinalPctWrap = document.getElementById("reneg-sinal-pct-wrap");
+  const sinalDueWrap = document.getElementById("reneg-sinal-due-wrap");
+  const firstDueWrap = document.getElementById("reneg-first-due-wrap");
+  const cardBrandWrap = document.getElementById("reneg-card-brand-wrap");
+  const mathSinalRow = document.getElementById("reneg-math-sinal-row");
+  if (cardBrandWrap) cardBrandWrap.style.display = isCartao ? "" : "none";
+  if (sinalPctWrap) sinalPctWrap.style.display = isCartao ? "none" : "";
+  if (sinalDueWrap) sinalDueWrap.style.display = isCartao ? "none" : "";
+  if (firstDueWrap) firstDueWrap.style.display = isCartao ? "none" : "";
+  if (mathSinalRow) mathSinalRow.style.display = isCartao ? "none" : "flex";
+
+  // Acordo interno usa taxa da regra; cartão usa só a taxa da bandeira × N (tabela de taxas)
+  const interestRate = isCartao ? 0 : ((ruleTaxa) / 100);
+  let sinalPct = isCartao ? 0 : (Number(document.getElementById("reneg-sinal-pct")?.value) || ruleSinalMin);
+  if (isCartao) {
+    const sinalInput = document.getElementById("reneg-sinal-pct");
+    if (sinalInput) sinalInput.value = "0";
+  }
   const sinalDueStr = document.getElementById("reneg-sinal-due")?.value || '';
-  const firstDueDateStr = document.getElementById("reneg-first-due-date").value;
+  const firstDueDateStr = document.getElementById("reneg-first-due-date")?.value || '';
   
   // Atualizar dropdown de parcelas restrito ao MaxParcelas da regra
   const selectedCount = selectedBills.length;
   const maxInstallmentsCalc = Math.floor(selectedCount + (selectedCount * (sinalPct / 100)));
-  const paymentMethod = (document.getElementById("reneg-payment-method")?.value === "cartao") ? "cartao" : "interno";
-  const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
-  const cardBrandWrap = document.getElementById("reneg-card-brand-wrap");
-  if (cardBrandWrap) cardBrandWrap.style.display = paymentMethod === "cartao" ? "" : "none";
   // Cartão: no máximo 12x (faixas da tabela de taxas)
-  const maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, paymentMethod === "cartao" ? 12 : 9999);
+  const maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
   
   const qtySelect = document.getElementById("reneg-installments-qty");
   const currentSelectedQty = Number(qtySelect.value) || 1;
@@ -12295,7 +12341,7 @@ function calculateRenegotiation() {
     chargedBase: remainingAfterSinal
   };
   let amountToFinance = remainingAfterSinal;
-  if (paymentMethod === "cartao" && typeof window.calcCardFee === "function") {
+  if (isCartao && typeof window.calcCardFee === "function") {
     const cf = window.calcCardFee(remainingAfterSinal, instQty, cardBrand);
     cardFee = {
       rate: cf.rate || 0,
@@ -12342,11 +12388,25 @@ function calculateRenegotiation() {
   const cardFeeValEl = document.getElementById("reneg-math-card-fee-val");
 
   if (mathSinalValEl) mathSinalValEl.textContent = fmt(sinalValue);
-  if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = `${(interestRate * 100).toFixed(1)}%`;
+  const mathTaxaSuffixEl = document.getElementById("reneg-math-taxa-suffix");
   
-  // Total das parcelas do acordo = N × valor_parcela com juros
+  // Total das parcelas do acordo = N × valor_parcela com juros (interno) ou com taxa cartão embutida
   const totalAcordo = instQty * installmentValue;
-  const financingCost = totalAcordo - amountToFinance;
+  const financingCost = isCartao
+    ? (cardFee.passFee ? (cardFee.fee || 0) : 0)
+    : (totalAcordo - amountToFinance);
+
+  if (isCartao) {
+    const pctStr = Number(cardFee.rate || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    const passHint = cardFee.passFee ? " · repasse" : " · empresa absorve";
+    if (mathTaxaLabelEl) {
+      mathTaxaLabelEl.textContent = `${cardFee.brandLabel || "Cartão"} ${pctStr}${passHint}`;
+    }
+    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = "";
+  } else {
+    if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = `${(interestRate * 100).toFixed(1)}%`;
+    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = " a.m.";
+  }
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
   if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
@@ -12354,27 +12414,18 @@ function calculateRenegotiation() {
     headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
   }
 
+  // Linha extra de taxa cartão fica oculta: no cartão a taxa já aparece em "Taxa da operação"
   if (cardFeeRowEl) {
-    if (paymentMethod === "cartao") {
-      cardFeeRowEl.style.display = "flex";
-      const pctStr = Number(cardFee.rate || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
-      const passStr = cardFee.passFee
-        ? "repasse ao cliente"
-        : "empresa absorve";
-      if (cardFeeLabelEl) {
-        cardFeeLabelEl.textContent = `${cardFee.brandLabel || "Cartão"} ${pctStr} · ${passStr}`;
-      }
-      if (cardFeeValEl) cardFeeValEl.textContent = fmt(cardFee.passFee ? cardFee.fee : 0);
-    } else {
-      cardFeeRowEl.style.display = "none";
-    }
+    cardFeeRowEl.style.display = "none";
+    if (cardFeeLabelEl) cardFeeLabelEl.textContent = "—";
+    if (cardFeeValEl) cardFeeValEl.textContent = fmt(0);
   }
 
   // Botão: acordo interno → documento; cartão → link de pagamento
   const genLabel = document.getElementById("reneg-generate-label");
   const genIcon = document.getElementById("reneg-generate-icon");
   const genBtn = document.getElementById("reneg-generate-btn");
-  if (paymentMethod === "cartao") {
+  if (isCartao) {
     if (genLabel) genLabel.textContent = "Gerar Link de Pagamento";
     if (genIcon) genIcon.setAttribute("data-lucide", "link");
     if (genBtn) {
@@ -12496,7 +12547,10 @@ function calculateRenegotiation() {
     
     // 2. Parcelas do Acordo (N×)
     if (instQty > 0 && amountToFinance > 0) {
-      let firstDate = firstDueDateStr ? new Date(firstDueDateStr + 'T12:00:00') : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const scheduleFirstStr = (!isCartao && firstDueDateStr)
+        ? firstDueDateStr
+        : (typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10));
+      let firstDate = scheduleFirstStr ? new Date(scheduleFirstStr + 'T12:00:00') : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         for (let i = 0; i < instQty; i++) {
           rowNum++;
           const dueDate = new Date(firstDate);
@@ -12508,7 +12562,7 @@ function calculateRenegotiation() {
           const tr = document.createElement('tr');
           tr.innerHTML = `
             <td style="padding:5px 8px;">${rowNum}</td>
-            <td style="padding:5px 8px;"><span style="background:rgba(239,68,68,0.1);color:var(--color-danger);border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">ACORDO</span></td>
+            <td style="padding:5px 8px;"><span style="background:rgba(239,68,68,0.1);color:var(--color-danger);border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">${isCartao ? "CARTÃO" : "ACORDO"}</span></td>
             <td style="padding:5px 8px;">${dateStr}</td>
             <td style="padding:5px 8px; text-align:right; font-weight:600;">${fmt(installmentValue)}</td>
           `;
@@ -12520,8 +12574,11 @@ function calculateRenegotiation() {
     if (unselectedBills.length > 0) {
       // Calcular a data da última parcela do ACORDO
       let lastAcordoDate = null;
-      if (instQty > 0 && firstDueDateStr) {
-        const firstAcordoDate = new Date(firstDueDateStr + 'T12:00:00');
+      const scheduleFirstStr2 = (!isCartao && firstDueDateStr)
+        ? firstDueDateStr
+        : (typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10));
+      if (instQty > 0 && scheduleFirstStr2) {
+        const firstAcordoDate = new Date(scheduleFirstStr2 + 'T12:00:00');
         lastAcordoDate = new Date(firstAcordoDate);
         lastAcordoDate.setMonth(lastAcordoDate.getMonth() + (instQty - 1));
       }
@@ -12615,8 +12672,21 @@ function calculateRenegotiation() {
 
 function onRenegPaymentMethodChange() {
   const method = document.getElementById("reneg-payment-method")?.value || "interno";
+  const isCartao = method === "cartao";
   const brandWrap = document.getElementById("reneg-card-brand-wrap");
-  if (brandWrap) brandWrap.style.display = method === "cartao" ? "" : "none";
+  const sinalPctWrap = document.getElementById("reneg-sinal-pct-wrap");
+  const sinalDueWrap = document.getElementById("reneg-sinal-due-wrap");
+  const firstDueWrap = document.getElementById("reneg-first-due-wrap");
+  const mathSinalRow = document.getElementById("reneg-math-sinal-row");
+  if (brandWrap) brandWrap.style.display = isCartao ? "" : "none";
+  if (sinalPctWrap) sinalPctWrap.style.display = isCartao ? "none" : "";
+  if (sinalDueWrap) sinalDueWrap.style.display = isCartao ? "none" : "";
+  if (firstDueWrap) firstDueWrap.style.display = isCartao ? "none" : "";
+  if (mathSinalRow) mathSinalRow.style.display = isCartao ? "none" : "flex";
+  if (isCartao) {
+    const sinalInput = document.getElementById("reneg-sinal-pct");
+    if (sinalInput) sinalInput.value = "0";
+  }
   calculateRenegotiation();
 }
 
@@ -13850,10 +13920,23 @@ function quitacaoMapDebtRow(inst, monthlyRate) {
   const vpNum = Number(vp) || 0;
   const face = original > 0.009 ? original : corrected;
   const desconto = (!overdue && face > vpNum) ? (face - vpNum) : 0;
+  const billId = String(
+    inst.billReceivableId || inst.billId || inst.receivableBillId
+    || (typeof window.getQuitacaoCurrentBillId === "function" && window.getQuitacaoCurrentBillId())
+    || ""
+  ).replace(/^B-/, "").split("-")[0];
+  const installmentId = inst.installmentId != null ? inst.installmentId
+    : (inst.id != null ? inst.id : inst.installmentNumber);
+  const number = inst.installmentNumber != null ? Number(inst.installmentNumber)
+    : (Number.isFinite(Number(installmentId)) ? Number(installmentId) : installmentId);
+  const key = billId + ":" + String(installmentId);
   return {
     raw: inst,
+    key,
+    billId,
+    installmentId,
     due,
-    number: inst.installmentNumber || inst.installmentId || inst.id || "—",
+    number,
     tipo,
     original,
     corrected,
@@ -13986,6 +14069,9 @@ window.loadQuitacaoDebtReport = async function(force) {
     window._quitacaoState.rows = rows;
     window._quitacaoState.vencidas = vencidas;
     window._quitacaoState.aVencer = aVencer;
+    window._quitacaoState.selectedKeys = new Set();
+    window._quitacaoState.simResult = null;
+    window._quitacaoState.prepayAccountsCache = null;
     window._quitacaoState.saldoPresente = sumVencVp + sumFutVp;
     window._quitacaoState.vencidasAtualizado = sumVencVp;
     window._quitacaoState.aVencerVp = sumFutVp;
@@ -14075,10 +14161,294 @@ window.loadQuitacaoDebtReport = async function(force) {
   }
 };
 
+window.quitacaoSelectableRows = function() {
+  const st = window._quitacaoState || {};
+  const rows = []
+    .concat(st.vencidas || [])
+    .concat(st.aVencer || [])
+    .filter((r) => r && r.key);
+  return rows.slice().sort((a, b) => {
+    const na = Number(a.number);
+    const nb = Number(b.number);
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+    return String(a.due || "").localeCompare(String(b.due || ""));
+  });
+};
+
+window.quitacaoEnsureSelectionState = function() {
+  const st = window._quitacaoState || (window._quitacaoState = {});
+  if (!(st.selectedKeys instanceof Set)) {
+    st.selectedKeys = new Set(Array.isArray(st.selectedKeys) ? st.selectedKeys : []);
+  }
+  if (st.simPct == null) st.simPct = 0;
+  if (!st.simResult) st.simResult = null;
+  return st;
+};
+
+/** Seleção válida = prefixo (início) e/ou sufixo (fim), sem buracos. */
+window.quitacaoSelectionIsValid = function(selectedKeys, sortedRows) {
+  const rows = sortedRows || window.quitacaoSelectableRows();
+  const set = selectedKeys instanceof Set ? selectedKeys : new Set(selectedKeys || []);
+  if (!set.size) return true;
+  const flags = rows.map((r) => set.has(r.key));
+  const blocks = [];
+  for (let i = 0; i < flags.length; i++) {
+    if (!flags[i]) continue;
+    let j = i;
+    while (j < flags.length && flags[j]) j++;
+    blocks.push([i, j - 1]);
+    i = j - 1;
+  }
+  if (!blocks.length) return true;
+  if (blocks.length === 1) {
+    const [a, b] = blocks[0];
+    return a === 0 || b === flags.length - 1;
+  }
+  if (blocks.length === 2) {
+    return blocks[0][0] === 0 && blocks[1][1] === flags.length - 1;
+  }
+  return false;
+};
+
+window.quitacaoSelectionViolatesOverdue = function(selectedKeys, sortedRows) {
+  const rows = sortedRows || window.quitacaoSelectableRows();
+  const set = selectedKeys instanceof Set ? selectedKeys : new Set(selectedKeys || []);
+  const overdue = rows.filter((r) => r.overdue);
+  if (!overdue.length) return false;
+  const hasUpcoming = rows.some((r) => !r.overdue && set.has(r.key));
+  if (!hasUpcoming) return false;
+  return overdue.some((r) => !set.has(r.key));
+};
+
+window.quitacaoToggleInstallment = function(key, wantOn) {
+  const st = window.quitacaoEnsureSelectionState();
+  const rows = window.quitacaoSelectableRows();
+  const next = new Set(st.selectedKeys);
+  if (wantOn) next.add(key);
+  else next.delete(key);
+
+  if (!window.quitacaoSelectionIsValid(next, rows)) {
+    alert("Seleção inválida: as parcelas precisam ser sequenciais a partir do início e/ou do fim (sem pular).");
+    window.renderQuitacaoDebtReport();
+    return;
+  }
+  if (window.quitacaoSelectionViolatesOverdue(next, rows)) {
+    alert("Há parcelas vencidas em aberto. Inclua todas as vencidas antes de marcar parcelas a vencer, ou limpe a seleção.");
+    window.renderQuitacaoDebtReport();
+    return;
+  }
+  st.selectedKeys = next;
+  st.simResult = null;
+  window.renderQuitacaoDebtReport();
+};
+
+window.quitacaoSelectAllOpen = function() {
+  const st = window.quitacaoEnsureSelectionState();
+  const rows = window.quitacaoSelectableRows();
+  st.selectedKeys = new Set(rows.map((r) => r.key));
+  st.simResult = null;
+  window.renderQuitacaoDebtReport();
+};
+
+window.quitacaoClearSelection = function() {
+  const st = window.quitacaoEnsureSelectionState();
+  st.selectedKeys = new Set();
+  st.simResult = null;
+  window.renderQuitacaoDebtReport();
+};
+
+window.quitacaoAlcadaMaxPct = function() {
+  const st = window._quitacaoState || {};
+  if (st.alcada && Number.isFinite(Number(st.alcada.maxPct))) return Number(st.alcada.maxPct);
+  if (typeof window.resolveQuitacaoAlcada === "function") {
+    const discPct = Number(st.descontoPct) || 0;
+    const allZero = typeof window.quitacaoUpcomingAllZeroRate === "function"
+      ? window.quitacaoUpcomingAllZeroRate((window.AppState && AppState.currentContractInstallments) || [])
+      : false;
+    const alcada = window.resolveQuitacaoAlcada(discPct, allZero, {
+      companyId: st.companyId || (AppState && AppState.currentCompanyId),
+      costCenterId: AppState && AppState.currentCostCenterId
+    });
+    st.alcada = alcada;
+    return Number(alcada.maxPct) || 0;
+  }
+  return 0;
+};
+
+window.quitacaoSetSimPct = function(pct) {
+  const st = window.quitacaoEnsureSelectionState();
+  const max = window.quitacaoAlcadaMaxPct();
+  let n = Number(String(pct).replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  if (n > max + 0.009) {
+    alert("Desconto máximo da sua alçada: " + max.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%.");
+    n = max;
+  }
+  st.simPct = Math.round(n * 100) / 100;
+  const input = document.getElementById("quitacao-sim-pct");
+  if (input) input.value = String(st.simPct).replace(".", ",");
+};
+
+window.quitacaoBuildPrepaymentPayload = function() {
+  const st = window.quitacaoEnsureSelectionState();
+  const rows = window.quitacaoSelectableRows().filter((r) => st.selectedKeys.has(r.key));
+  if (!rows.length) throw new Error("Selecione ao menos uma parcela.");
+  if (window.quitacaoSelectionViolatesOverdue(st.selectedKeys)) {
+    throw new Error("Inclua todas as parcelas vencidas antes de antecipar a vencer.");
+  }
+  const account = String((document.getElementById("quitacao-prepay-account") || {}).value || "").trim();
+  const newDueDate = String((document.getElementById("quitacao-prepay-duedate") || {}).value || "").slice(0, 10);
+  if (!account) throw new Error("Selecione a conta corrente para o boleto.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDueDate)) throw new Error("Informe a nova data de vencimento.");
+  const pct = Number(st.simPct) || 0;
+  const max = window.quitacaoAlcadaMaxPct();
+  if (pct > max + 0.009) throw new Error("Desconto acima da alçada (" + max + "%).");
+  const companyId = String(st.companyId || AppState.currentCompanyId || "").trim();
+  if (!companyId) throw new Error("Empresa do contrato não identificada.");
+  return {
+    companyId,
+    installments: rows.map((r) => ({
+      billId: String(r.billId),
+      installmentId: Number(r.installmentId)
+    })),
+    accountNumber: account,
+    newDueDate,
+    groupBy: "CUSTOMER",
+    matchDueDate: "ALL",
+    percentPresentValue: pct,
+    calculatePresentValue: true,
+    correctAnnualInstallment: true
+  };
+};
+
+window.quitacaoFormatSimResult = function(res, pct) {
+  if (!res || typeof res !== "object") return "Sem retorno da simulação.";
+  const money = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const orig = res.originalValue != null ? res.originalValue
+    : (res.totalOriginalValue != null ? res.totalOriginalValue
+      : (res.grossValue != null ? res.grossValue : res.totalValue));
+  const fin = res.finalValue != null ? res.finalValue
+    : (res.presentValue != null ? res.presentValue
+      : (res.netValue != null ? res.netValue : res.totalPresentValue));
+  const disc = res.discountApplied != null ? res.discountApplied
+    : (res.discountValue != null ? res.discountValue
+      : ((Number(orig) || 0) - (Number(fin) || 0)));
+  const due = res.dueDateSimulated || res.newDueDate || res.dueDate || "";
+  return [
+    "Desconto simulado: " + (Number(pct) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%",
+    Number.isFinite(Number(orig)) ? ("Valor original: " + money(orig)) : null,
+    Number.isFinite(Number(disc)) ? ("Desconto: " + money(disc)) : null,
+    Number.isFinite(Number(fin)) ? ("Valor final (VP): " + money(fin)) : null,
+    due ? ("Vencimento: " + String(due).slice(0, 10).split("-").reverse().join("/")) : null
+  ].filter(Boolean).join(" · ");
+};
+
+window.quitacaoSimulateSelected = async function() {
+  const st = window.quitacaoEnsureSelectionState();
+  const pctInput = document.getElementById("quitacao-sim-pct");
+  if (pctInput) window.quitacaoSetSimPct(pctInput.value);
+  const statusEl = document.getElementById("quitacao-prepay-status");
+  try {
+    const payload = window.quitacaoBuildPrepaymentPayload();
+    if (statusEl) statusEl.textContent = "Simulando antecipação no Sienge...";
+    const res = await SiengeApiService.simulatePrepaymentSlip(payload);
+    st.simResult = res;
+    if (statusEl) statusEl.textContent = window.quitacaoFormatSimResult(res, payload.percentPresentValue);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.textContent = e.message || "Falha na simulação.";
+    alert(e.message || "Falha na simulação.");
+  }
+};
+
+window.quitacaoRegisterSelected = async function() {
+  const st = window.quitacaoEnsureSelectionState();
+  const pctInput = document.getElementById("quitacao-sim-pct");
+  if (pctInput) window.quitacaoSetSimPct(pctInput.value);
+  const statusEl = document.getElementById("quitacao-prepay-status");
+  try {
+    const payload = window.quitacaoBuildPrepaymentPayload();
+    const n = payload.installments.length;
+    const totalOpen = window.quitacaoSelectableRows().length;
+    const isFull = n >= totalOpen;
+    const ok = confirm(
+      (isFull ? "Gerar quitação integral" : "Gerar boleto de antecipação")
+      + " de " + n + " parcela(s) com desconto de "
+      + (payload.percentPresentValue || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })
+      + "%?"
+    );
+    if (!ok) return;
+    if (statusEl) statusEl.textContent = "Registrando boleto de antecipação...";
+    const res = await SiengeApiService.registerPrepaymentSlip(payload);
+    st.simResult = res;
+    const msg = (res && (res.message || res.status || res.id))
+      ? ("Registrado: " + (res.message || res.status || ("id " + res.id)))
+      : "Boleto de antecipação registrado no Sienge.";
+    if (statusEl) statusEl.textContent = msg;
+    alert(msg);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.textContent = e.message || "Falha ao registrar antecipação.";
+    alert(e.message || "Falha ao registrar antecipação.");
+  }
+};
+
+window.quitacaoLoadPrepayAccounts = async function() {
+  const select = document.getElementById("quitacao-prepay-account");
+  if (!select) return;
+  const st = window.quitacaoEnsureSelectionState();
+  const fill = (usable) => {
+    if (!usable.length) {
+      select.innerHTML = '<option value="">Nenhuma conta disponível</option>';
+      select.disabled = true;
+      return;
+    }
+    select.innerHTML = usable.map((acc) => {
+      const num = String(acc.accountNumber || acc.number || acc.checkingAccountId || acc.id || "").trim();
+      const name = acc.accountName || acc.name || "Conta corrente";
+      return `<option value="${num}">${num} — ${name}</option>`;
+    }).join("");
+    const prev = st.prepayAccount;
+    if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
+    st.prepayAccount = select.value;
+    select.onchange = function() { st.prepayAccount = this.value; };
+    select.disabled = usable.length === 1;
+  };
+  if (Array.isArray(st.prepayAccountsCache) && st.prepayAccountsCache.length) {
+    fill(st.prepayAccountsCache);
+    return;
+  }
+  select.innerHTML = '<option value="">Carregando contas...</option>';
+  select.disabled = true;
+  try {
+    const sale = (typeof window.getQuitacaoCurrentSale === "function" && window.getQuitacaoCurrentSale()) || window.sale || null;
+    const companyId = st.companyId || (sale && sale.companyId) || AppState.currentCompanyId;
+    const unit = (sale && sale.unitId && AppState.units && AppState.units[sale.unitId]) || {};
+    const ccId = AppState.currentCostCenterId || (unit && unit.costCenterId) || (sale && (sale.costCenterId || sale.enterpriseId));
+    let accounts = [];
+    if (ccId && SiengeApiService.getCostCenterAvailableAccounts) {
+      try {
+        const data = await SiengeApiService.getCostCenterAvailableAccounts(ccId);
+        accounts = (data && (data.availables || data.results)) || [];
+      } catch (e) { /* ignore */ }
+    }
+    if ((!accounts || !accounts.length) && companyId && SiengeApiService.getCheckingAccounts) {
+      const ca = await SiengeApiService.getCheckingAccounts(companyId);
+      accounts = (ca && ca.results) || [];
+    }
+    const usable = (accounts || []).filter((acc) => acc.accountNumber || acc.checkingAccountId || acc.id || acc.number);
+    st.prepayAccountsCache = usable;
+    fill(usable);
+  } catch (e) {
+    console.error(e);
+    select.innerHTML = '<option value="">Erro ao carregar contas</option>';
+  }
+};
+
 window.renderQuitacaoDebtReport = function() {
   const bodyEl = document.getElementById("quitacao-report-body");
   if (!bodyEl) return;
-  const st = window._quitacaoState || {};
+  const st = window.quitacaoEnsureSelectionState();
   const vencidas = st.vencidas || [];
   const aVencer = st.aVencer || [];
   const paidRows = st.paidRows || [];
@@ -14087,8 +14457,32 @@ window.renderQuitacaoDebtReport = function() {
     bodyEl.innerHTML = `<div class="quitacao-empty">Nenhuma parcela encontrada neste contrato.</div>`;
     return;
   }
+  const selected = st.selectedKeys;
+  const sortedOpen = window.quitacaoSelectableRows();
+  const hasOverdue = vencidas.length > 0;
+  const allOverdueSelected = !hasOverdue || vencidas.every((r) => selected.has(r.key));
+  const maxPct = window.quitacaoAlcadaMaxPct();
+  const simPct = Number(st.simPct) || 0;
+  const todayIso = (typeof quitacaoTodayIso === "function")
+    ? quitacaoTodayIso()
+    : (typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10));
+  const dueVal = st.prepayDueDate || todayIso;
+  const selCount = selected.size;
+  const selVp = sortedOpen.filter((r) => selected.has(r.key)).reduce((s, r) => s + (Number(r.vp) || 0), 0);
+
+  const chk = (r, disabled, title) => {
+    const on = selected.has(r.key);
+    return `<td class="quitacao-center">
+      <input type="checkbox" class="quitacao-inst-chk" data-key="${r.key}"
+        ${on ? "checked" : ""} ${disabled ? "disabled" : ""}
+        title="${title || ""}"
+        onchange="window.quitacaoToggleInstallment(this.dataset.key, this.checked)">
+    </td>`;
+  };
+
   const rowVenc = (r) => `
-    <tr>
+    <tr class="${selected.has(r.key) ? "quitacao-row--sel" : ""}">
+      ${chk(r, false, "Marcar para antecipação / quitação")}
       <td>${quitacaoFmtDate(r.due)}</td>
       <td class="quitacao-num">${r.number}</td>
       <td>${r.tipo}</td>
@@ -14098,8 +14492,14 @@ window.renderQuitacaoDebtReport = function() {
       <td class="quitacao-val quitacao-val--late">${quitacaoFmtMoney(r.additions)}</td>
       <td class="quitacao-val quitacao-val--late quitacao-val--strong">${quitacaoFmtMoney(r.vp)}</td>
     </tr>`;
-  const rowFut = (r) => `
-    <tr>
+  const rowFut = (r) => {
+    const blockUpcoming = hasOverdue && !allOverdueSelected && !selected.has(r.key);
+    const title = blockUpcoming
+      ? "Há vencidas em aberto — selecione todas as vencidas antes de marcar a vencer"
+      : "Marcar para antecipação / quitação";
+    return `
+    <tr class="${selected.has(r.key) ? "quitacao-row--sel" : ""} ${blockUpcoming ? "quitacao-row--blocked" : ""}">
+      ${chk(r, blockUpcoming, title)}
       <td>${quitacaoFmtDate(r.due)}</td>
       <td class="quitacao-num">${r.number}</td>
       <td>${r.tipo}</td>
@@ -14110,6 +14510,7 @@ window.renderQuitacaoDebtReport = function() {
       <td class="quitacao-val quitacao-val--vp">${quitacaoFmtMoney(r.vp)}</td>
       <td class="quitacao-val quitacao-val--disc">${quitacaoFmtMoney(r.desconto)}</td>
     </tr>`;
+  };
   const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
   const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
   const sumFutOrig = aVencer.reduce((s, r) => s + (Number(r.original) || 0), 0);
@@ -14128,7 +14529,59 @@ window.renderQuitacaoDebtReport = function() {
       <td class="quitacao-val quitacao-val--vp">${quitacaoFmtMoney(r.liquido)}</td>
       <td class="quitacao-val">${quitacaoFmtMoney(r.desconto)}</td>
     </tr>`;
+
+  const alcadaHint = st.alcada
+    ? ((st.alcada.roleLabel ? st.alcada.roleLabel + " · " : "") + (st.alcada.label || ("até " + maxPct + "%")))
+    : ("até " + maxPct + "%");
+
+  const toolbar = (vencidas.length || aVencer.length) ? `
+    <section class="quitacao-prepay-bar">
+      <div class="quitacao-prepay-title">
+        <strong>Antecipação / quitação</strong>
+        <span>Selecione sequencialmente do início e/ou do fim · ${selCount} marcada(s) · VP ${quitacaoFmtMoney(selVp)}</span>
+      </div>
+      <div class="quitacao-prepay-grid">
+        <label class="quitacao-prepay-field">
+          <span>Conta corrente</span>
+          <select id="quitacao-prepay-account"><option value="">Carregar...</option></select>
+        </label>
+        <label class="quitacao-prepay-field">
+          <span>Novo vencimento</span>
+          <input type="date" id="quitacao-prepay-duedate" value="${dueVal}"
+            onchange="window._quitacaoState.prepayDueDate=this.value">
+        </label>
+        <label class="quitacao-prepay-field">
+          <span>Desconto alçada (${alcadaHint})</span>
+          <div class="quitacao-sim-pct-row">
+            <input type="text" inputmode="decimal" id="quitacao-sim-pct" value="${String(simPct).replace(".", ",")}"
+              onchange="window.quitacaoSetSimPct(this.value)" title="Máximo ${maxPct}%">
+            <span>%</span>
+            <button type="button" class="btn btn-secondary quitacao-prepay-mini" onclick="window.quitacaoSetSimPct(0)">0%</button>
+            <button type="button" class="btn btn-secondary quitacao-prepay-mini" onclick="window.quitacaoSetSimPct(${(maxPct / 2).toFixed(2)})">½</button>
+            <button type="button" class="btn btn-secondary quitacao-prepay-mini" onclick="window.quitacaoSetSimPct(${maxPct})">Teto</button>
+          </div>
+        </label>
+      </div>
+      <div class="quitacao-prepay-actions">
+        <button type="button" class="btn btn-secondary" onclick="window.quitacaoSelectAllOpen()">Marcar todas</button>
+        <button type="button" class="btn btn-cancel" onclick="window.quitacaoClearSelection()">Limpar</button>
+        <button type="button" class="btn btn-secondary" onclick="window.quitacaoSimulateSelected()" ${selCount ? "" : "disabled"}>
+          Simular desconto
+        </button>
+        <button type="button" class="btn btn-primary" onclick="window.quitacaoRegisterSelected()" ${selCount ? "" : "disabled"}>
+          Gerar boleto antecipação
+        </button>
+      </div>
+      <div id="quitacao-prepay-status" class="quitacao-prepay-status">${
+        st.simResult ? window.quitacaoFormatSimResult(st.simResult, simPct)
+          : (hasOverdue
+            ? "Há parcelas vencidas: marque-as (ou todas) antes de antecipar a vencer."
+            : "Marque do início (próximas) e/ou do fim (últimas), sem pular parcelas.")
+      }</div>
+    </section>` : "";
+
   bodyEl.innerHTML = `
+    ${toolbar}
     ${paidRows.length ? `
     <section class="quitacao-block">
       <div class="quitacao-sec-head">Valores pagos</div>
@@ -14162,6 +14615,7 @@ window.renderQuitacaoDebtReport = function() {
       <table class="quitacao-table">
         <thead>
           <tr>
+            <th class="quitacao-center" style="width:36px;"></th>
             <th>Dt. Venc</th>
             <th>Par</th>
             <th>Tipo</th>
@@ -14175,7 +14629,7 @@ window.renderQuitacaoDebtReport = function() {
         <tbody>
           ${vencidas.map(rowVenc).join("")}
           <tr class="quitacao-subtotal quitacao-subtotal--late">
-            <td colspan="7">Total vencidas</td>
+            <td colspan="8">Total vencidas</td>
             <td class="quitacao-val">${quitacaoFmtMoney(sumVenc)}</td>
           </tr>
         </tbody>
@@ -14187,6 +14641,7 @@ window.renderQuitacaoDebtReport = function() {
       <table class="quitacao-table">
         <thead>
           <tr>
+            <th class="quitacao-center" style="width:36px;"></th>
             <th>Dt. Venc</th>
             <th>Par</th>
             <th>Tipo</th>
@@ -14201,7 +14656,7 @@ window.renderQuitacaoDebtReport = function() {
         <tbody>
           ${aVencer.map(rowFut).join("")}
           <tr class="quitacao-subtotal">
-            <td colspan="3">Totais a vencer</td>
+            <td colspan="4">Totais a vencer</td>
             <td class="quitacao-val">${quitacaoFmtMoney(sumFutOrig)}</td>
             <td colspan="3"></td>
             <td class="quitacao-val">${quitacaoFmtMoney(sumFut)}</td>
@@ -14215,6 +14670,7 @@ window.renderQuitacaoDebtReport = function() {
       <span>${quitacaoFmtMoney(st.saldoPresente || (sumVenc + sumFut))}</span>
     </div>`;
   if (window.lucide) lucide.createIcons();
+  window.quitacaoLoadPrepayAccounts();
 };
 
 window.syncQuitacaoAbateUi = function() {

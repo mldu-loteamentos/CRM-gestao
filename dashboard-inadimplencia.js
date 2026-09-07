@@ -101,14 +101,40 @@ const DashboardInadimplencia = (function() {
     return window.resolveCityRuleId(c.costCenterId) || { city: '', ruleId: '' };
   }
 
+  function normOp(s) {
+    if (typeof window.normalizeOperatorName === 'function') return window.normalizeOperatorName(s);
+    return String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\./g, ' ')
+      .replace(/\s+/g, ' ')
+      .toUpperCase()
+      .trim();
+  }
+
   function clientOperator(c) {
-    return String(c.assignedOperator || 'NÃO ATRIBUÍDO').toUpperCase().trim();
+    const raw = c && (c.assignedOperator || c.operator || c.operador);
+    const s = String(raw || '').trim();
+    return s ? s.toUpperCase().trim() : 'NÃO ATRIBUÍDO';
+  }
+
+  /** Mesma regra da fila/home: "THAIANE CORDEIRO" casa com "THAIANE" / "THAIANE.CORDEIRO". */
+  function operatorMatchesSelection(opName, selectedList) {
+    if (!selectedList || !selectedList.length) return true;
+    const name = opName || 'NÃO ATRIBUÍDO';
+    return selectedList.some(sel => {
+      if (typeof window.occurrenceAuthorMatchesOperator === 'function') {
+        if (window.occurrenceAuthorMatchesOperator(name, sel)) return true;
+        if (window.occurrenceAuthorMatchesOperator(sel, name)) return true;
+      }
+      return normOp(name) === normOp(sel);
+    });
   }
 
   function clientMatches(c, f) {
     if (f.companies.length && !f.companies.includes(String(c.companyId))) return false;
     if (f.centers.length && !f.centers.includes(String(c.costCenterId))) return false;
-    if (f.operators.length && !f.operators.includes(clientOperator(c))) return false;
+    if (f.operators.length && !operatorMatchesSelection(clientOperator(c), f.operators)) return false;
     if (f.cities.length) {
       const r = clientCity(c);
       if (!f.cities.includes(String(r.city || '')) && !f.cities.includes(String(r.ruleId || ''))) return false;
@@ -168,54 +194,206 @@ const DashboardInadimplencia = (function() {
     return String(id);
   }
 
-  function buildFilterOptions() {
-    const companies = new Map();
-    const centers = new Map();
-    const cities = new Map();
-    const operators = new Map();
+  function buildRelationRows() {
+    const rows = [];
+    const seen = new Set();
 
-    function addFromClient(c) {
-      if (c.companyId != null && c.companyId !== '') {
-        companies.set(String(c.companyId), companyName(c.companyId));
+    function push(companyId, centerId, city, operator) {
+      const c = companyId != null && companyId !== '' ? String(companyId) : '';
+      const cc = centerId != null && centerId !== '' ? String(centerId) : '';
+      let cityU = city != null && city !== '' ? String(city) : '';
+      if (cityU) {
+        cityU = cityU.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
       }
-      if (c.costCenterId != null && c.costCenterId !== '') {
-        centers.set(String(c.costCenterId), costCenterName(c.costCenterId));
-        const r = clientCity(c);
-        if (r.city) cities.set(String(r.city), String(r.city));
-      }
-      const op = clientOperator(c);
-      operators.set(op, op);
+      const op = operator != null && operator !== '' ? String(operator).toUpperCase().trim() : '';
+      if (!c && !cc && !cityU) return;
+      const key = c + '|' + cc + '|' + cityU + '|' + op;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ companyId: c, centerId: cc, city: cityU, operator: op });
     }
 
-    getLiveClients().forEach(addFromClient);
+    getLiveClients().forEach(cli => {
+      const r = clientCity(cli);
+      push(cli.companyId, cli.costCenterId, r.city, clientOperator(cli));
+    });
 
     const atual = getSnapshotAtual();
     if (atual && atual.data_json) {
       (atual.data_json.companies || []).forEach(comp => {
         const cid = String(comp.company_id != null ? comp.company_id : comp.id || '');
-        if (cid) companies.set(cid, companyName(cid));
         (comp.cost_centers || []).forEach(cc => {
           const id = String(cc.id);
-          centers.set(id, costCenterName(id));
+          let city = '';
           if (typeof window.resolveCityRuleId === 'function') {
-            const r = window.resolveCityRuleId(id) || {};
-            if (r.city) cities.set(String(r.city), String(r.city));
+            city = (window.resolveCityRuleId(id) || {}).city || '';
           }
+          push(cid, id, city, '');
         });
       });
       (atual.data_json.operators || []).forEach(op => {
         const name = String(op.name || '').toUpperCase().trim();
-        if (name) operators.set(name, name);
+        if (name) push('', '', '', name);
       });
     }
 
-    const toItems = (map) => Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+    const ccList = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters))
+      || (window.MouraAuth && MouraAuth.costCenters)
+      || [];
+    (ccList || []).forEach(cc => {
+      if (!cc || cc.id == null) return;
+      let city = '';
+      if (typeof window.resolveCityRuleId === 'function') {
+        city = (window.resolveCityRuleId(cc.id, cc.name) || {}).city || '';
+      }
+      push(cc.companyId, cc.id, city, '');
+    });
+
+    return rows;
+  }
+
+  function buildFilterOptions() {
+    const companies = new Map();
+    const centers = new Map();
+    const cities = new Map();
+    const operators = new Map();
+    const relations = buildRelationRows();
+
+    relations.forEach(r => {
+      if (r.companyId) companies.set(r.companyId, companyName(r.companyId));
+      if (r.centerId) centers.set(r.centerId, costCenterName(r.centerId));
+      if (r.city) cities.set(r.city, r.city);
+      if (r.operator) operators.set(normOp(r.operator) || r.operator, String(r.operator).toUpperCase().trim());
+    });
+
+    // Nomes de cadastro de usuários (THAIANE CORDEIRO) + aliases da fila
+    if (typeof window.getDynamicOperators === 'function') {
+      (window.getDynamicOperators() || []).forEach(op => {
+        const label = String(op || '')
+          .replace(/\./g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toUpperCase();
+        if (!label) return;
+        const key = normOp(label);
+        if (!key || key === 'NAO ATRIBUIDO') return;
+        if (!operators.has(key)) operators.set(key, label);
+      });
+    }
+    getLiveClients().forEach(c => {
+      const op = clientOperator(c);
+      const key = normOp(op);
+      if (!key) return;
+      if (!operators.has(key)) operators.set(key, op);
+    });
+
+    const toItems = (map) => Array.from(map.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => {
+        const na = Number(a.id);
+        const nb = Number(b.id);
+        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+        return String(a.label).localeCompare(String(b.label), 'pt-BR');
+      });
+
+    // Deduplica operadores por chave normalizada (evita "THAIANE" vs "THAIANE CORDEIRO" sem match)
+    const opItems = [];
+    const opSeen = new Set();
+    Array.from(operators.entries())
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR'))
+      .forEach(([, label]) => {
+        const k = normOp(label);
+        if (!k || opSeen.has(k)) return;
+        opSeen.add(k);
+        opItems.push({ id: label, label });
+      });
+
     return {
       companies: toItems(companies),
       centers: toItems(centers),
       cities: toItems(cities),
-      operators: toItems(operators)
+      operators: opItems,
+      relations
     };
+  }
+
+  /** Empresa / CC / Cidade se restringem mutuamente. Operadores só acompanham esses três. */
+  function rowsForCascade(relations, draft, ignoreKey) {
+    const f = draft || filterDraft;
+    return (relations || []).filter(r => {
+      if (ignoreKey !== 'companies' && f.companies.length && r.companyId && !f.companies.includes(r.companyId)) return false;
+      if (ignoreKey !== 'companies' && f.companies.length && !r.companyId) return false;
+      if (ignoreKey !== 'centers' && f.centers.length && r.centerId && !f.centers.includes(r.centerId)) return false;
+      if (ignoreKey !== 'centers' && f.centers.length && !r.centerId) return false;
+      if (ignoreKey !== 'cities' && f.cities.length && r.city && !f.cities.includes(r.city)) return false;
+      if (ignoreKey !== 'cities' && f.cities.length && !r.city) return false;
+      return true;
+    });
+  }
+
+  function itemsFromRows(allItems, rows, field) {
+    const allowed = new Set();
+    rows.forEach(r => {
+      const v = r[field];
+      if (v) allowed.add(String(v));
+    });
+    if (!allowed.size && !(filterDraft.companies.length || filterDraft.centers.length || filterDraft.cities.length)) {
+      return allItems.slice();
+    }
+    return (allItems || []).filter(it => allowed.has(String(it.id)));
+  }
+
+  function cascadeFilterOptions(all) {
+    const rel = all.relations || [];
+    const companies = itemsFromRows(all.companies, rowsForCascade(rel, filterDraft, 'companies'), 'companyId');
+    const centers = itemsFromRows(all.centers, rowsForCascade(rel, filterDraft, 'centers'), 'centerId');
+    const cities = itemsFromRows(all.cities, rowsForCascade(rel, filterDraft, 'cities'), 'city');
+
+    // Operadores: não usar linhas só de CC (operator vazio). Cruza pela carteira ao vivo + match flexível.
+    let operators = (all.operators || []).slice();
+    if (filterDraft.companies.length || filterDraft.centers.length || filterDraft.cities.length) {
+      const geoF = {
+        companies: filterDraft.companies,
+        centers: filterDraft.centers,
+        cities: filterDraft.cities,
+        operators: []
+      };
+      const liveOps = [];
+      getLiveClients().forEach(c => {
+        if (!clientMatches(c, geoF)) return;
+        liveOps.push(clientOperator(c));
+      });
+      if (liveOps.length) {
+        operators = (all.operators || []).filter(it =>
+          liveOps.some(op => operatorMatchesSelection(op, [it.id]))
+        );
+      }
+    }
+
+    return { companies, centers, cities, operators, relations: rel };
+  }
+
+  function pruneDraftToVisible(visible) {
+    let changed = false;
+    const prune = (key, items) => {
+      const before = filterDraft[key].slice();
+      if (key === 'operators') {
+        // Mantém seleção se ainda casa com algum item visível (nome curto vs completo)
+        filterDraft[key] = before.filter(sel =>
+          (items || []).some(it => operatorMatchesSelection(it.id, [sel]))
+        );
+      } else {
+        const allow = new Set((items || []).map(x => String(x.id)));
+        filterDraft[key] = before.filter(id => allow.has(String(id)));
+      }
+      if (filterDraft[key].length !== before.length) changed = true;
+      filterApplied[key] = filterDraft[key].slice();
+    };
+    prune('companies', visible.companies);
+    prune('centers', visible.centers);
+    prune('cities', visible.cities);
+    prune('operators', visible.operators);
+    return changed;
   }
 
   function aggregateFromLive(clients, f) {
@@ -324,9 +502,15 @@ const DashboardInadimplencia = (function() {
 
     const onlyOps = f.operators.length && !f.companies.length && !f.centers.length && !f.cities.length;
     if (onlyOps) {
-      const ops = ((snap.data_json && snap.data_json.operators) || []).filter(o =>
-        f.operators.includes(String(o.name || '').toUpperCase().trim())
-      );
+      const allOps = (snap.data_json && snap.data_json.operators) || [];
+      const ops = [];
+      f.operators.forEach(sel => {
+        const candidates = allOps.filter(o => operatorMatchesSelection(o.name, [sel]));
+        if (!candidates.length) return;
+        const exact = candidates.find(o => normOp(o.name) === normOp(sel));
+        const best = exact || candidates.slice().sort((a, b) => (Number(b.total_value) || 0) - (Number(a.total_value) || 0))[0];
+        if (best && !ops.some(x => normOp(x.name) === normOp(best.name))) ops.push(best);
+      });
       let total_value = 0, total_count = 0;
       ops.forEach(o => {
         total_value += Number(o.total_value) || 0;
@@ -396,7 +580,7 @@ const DashboardInadimplencia = (function() {
 
     let operators = (snap.data_json && snap.data_json.operators) ? snap.data_json.operators.slice() : [];
     if (f.operators.length) {
-      operators = operators.filter(o => f.operators.includes(String(o.name || '').toUpperCase().trim()));
+      operators = operators.filter(o => operatorMatchesSelection(o.name, f.operators));
       if (!f.companies.length && !f.centers.length && !f.cities.length) {
         // already handled above
       } else {
@@ -435,7 +619,13 @@ const DashboardInadimplencia = (function() {
     const f = filterApplied;
     const live = getLiveClients();
     if (live.length > 0) {
-      return aggregateFromLive(live, f);
+      const liveMetrics = aggregateFromLive(live, f);
+      // Carteira ao vivo sem operador preenchido → usa snapshot (onde o operador foi gravado)
+      if (f.operators.length && liveMetrics.total_value < 0.01) {
+        const snapMetrics = aggregateFromSnapshot(getSnapshotAtual(), f);
+        if (snapMetrics.total_value > 0.01) return snapMetrics;
+      }
+      return liveMetrics;
     }
     return aggregateFromSnapshot(getSnapshotAtual(), f);
   }
@@ -915,7 +1105,11 @@ const DashboardInadimplencia = (function() {
         return;
       }
 
-      const options = buildFilterOptions();
+      const optionsAll = buildFilterOptions();
+      let options = cascadeFilterOptions(optionsAll);
+      pruneDraftToVisible(options);
+      options = cascadeFilterOptions(optionsAll);
+
       const metrics = getCurrentMetrics();
       const fechSnap = getSnapshotFechamentoMes() || getSnapshotAnterior();
       const fechMetrics = fechSnap ? getCompareMetrics(fechSnap) : null;

@@ -449,6 +449,49 @@ const EmpresasApp = {
     localStorage.setItem("crm_empresas_custom", JSON.stringify(toStore));
   },
 
+  /** Garante flags padrão de cobrança interna antes da fila (evita fallback só 1+2). */
+  ensureDefaultCobrancaFlags() {
+    const defaultCustom = {
+      "1": { company_id: 1, nome_usual: "MLDU", percentual_mldu: 100, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "2": { company_id: 2, nome_usual: "EMPREENDIMENTOS", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "3": { company_id: 3, nome_usual: "TERRA DO ARAÇARI", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "4": { company_id: 4, nome_usual: "TERRAS DE ITU", percentual_mldu: 0, consolidacao_padrao: 0, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+      "5": { company_id: 5, nome_usual: "MLES", percentual_mldu: 66, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+      "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "12": { company_id: 12, nome_usual: "ELLENCO & MLDU BOI", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+      "13": { company_id: 13, nome_usual: "VERCELLINO", percentual_mldu: 27.75, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "14": { company_id: 14, nome_usual: "PIRAPITINGUI", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
+      "28": { company_id: 28, nome_usual: "RAMOS I", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "32": { company_id: 32, nome_usual: "ITATINGA", percentual_mldu: 100, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 }
+    };
+    let customData = {};
+    try {
+      customData = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+    } catch (e) {
+      customData = {};
+    }
+    let changed = false;
+    Object.keys(defaultCustom).forEach((k) => {
+      if (!customData[k] || typeof customData[k] !== "object") {
+        customData[k] = { ...defaultCustom[k] };
+        changed = true;
+      } else {
+        const cur = customData[k];
+        const def = defaultCustom[k];
+        if (!cur.nome_usual && def.nome_usual) {
+          cur.nome_usual = def.nome_usual;
+          changed = true;
+        }
+        if (!this.isCobrancaInternaSet(cur) && this.isCobrancaInternaSet(def)) {
+          cur.cobranca_interna = def.cobranca_interna;
+          changed = true;
+        }
+      }
+    });
+    this.hydrateCustomFields(customData, true);
+    if (changed) this.persistCustomMap();
+  },
+
   afterCompaniesFetched(comps, fromNetwork) {
     const list = Array.isArray(comps) ? comps : [];
     EmpresasState.companies = list.slice().sort((a, b) => Number(a.id) - Number(b.id));
@@ -590,3 +633,4 @@ document.addEventListener('tabChanged', (e) => {
 });
 
 window.EmpresasApp = EmpresasApp;
+window.EmpresasState = EmpresasState;

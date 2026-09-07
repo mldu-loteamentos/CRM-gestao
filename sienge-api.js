@@ -23,36 +23,111 @@ const SIENGE_CONFIG = {
   })()
 };
 
-// Empresas permitidas por padrão. Quando estiver parametrizado em "Cobrança Interna",
-// a lista passa a seguir o que estiver no crm_empresas_custom; a empresa 1 não pode continuar
-// sendo bloqueada por um fallback rígido de [2].
-const ALLOWED_COMPANY_IDS = [1, 2];
+// Fallback alinhado ao default de Cobrança Interna (empresas.js).
+// Nunca usar só [1, 2] — isso gravava cache incompleto no 1º acesso de FDS/feriado.
+const ALLOWED_COMPANY_IDS = [1, 2, 3, 6, 13, 28, 32];
+
+function isCompanyCobrancaInterna(company) {
+  if (!company || typeof company !== 'object') return false;
+  const value = company.cobranca_interna;
+  return value === 1 || value === true || value === '1' || value === 'true';
+}
+
+function filaLocalTodayStr() {
+  if (typeof window.localDateStr === 'function') return window.localDateStr(new Date());
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+}
+
+function isFilaNonBusinessDay(dayStr) {
+  const key = String(dayStr || filaLocalTodayStr()).slice(0, 10);
+  if (typeof window.isBusinessDayIso === 'function') return !window.isBusinessDayIso(key);
+  const d = new Date(key + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return false;
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return true;
+  if (typeof window.isHoliday === 'function') return !!window.isHoliday(d);
+  return false;
+}
+
+function filaFullRefreshFlagKey(dayStr) {
+  return `crm_fila_full_refresh_${String(dayStr || filaLocalTodayStr()).slice(0, 10)}`;
+}
+
+function shouldForceFilaFullRefreshOnAccess(forceRefresh) {
+  if (forceRefresh) return true;
+  const today = filaLocalTodayStr();
+  if (!isFilaNonBusinessDay(today)) return false;
+  try {
+    return localStorage.getItem(filaFullRefreshFlagKey(today)) !== 'done';
+  } catch (e) {
+    return true;
+  }
+}
+
+function markFilaFullRefreshDone(dayStr) {
+  try {
+    localStorage.setItem(filaFullRefreshFlagKey(dayStr || filaLocalTodayStr()), 'done');
+  } catch (e) {}
+}
+
+window.shouldForceFilaRefreshOnNonBusinessAccess = function() {
+  return shouldForceFilaFullRefreshOnAccess(false);
+};
+
+function collectInternalIdsFromCustomMap(customData) {
+  if (!customData || typeof customData !== 'object') return [];
+  return Object.entries(customData)
+    .filter(([id, c]) => id !== '_v2' && isCompanyCobrancaInterna(c))
+    .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
+    .filter(Number.isFinite);
+}
 
 function getConfiguredInternalCompanyIds() {
   try {
+    if (window.EmpresasApp && typeof window.EmpresasApp.ensureDefaultCobrancaFlags === 'function') {
+      window.EmpresasApp.ensureDefaultCobrancaFlags();
+    }
+
+    if (window.EmpresasState && window.EmpresasState.customFields) {
+      const fromState = collectInternalIdsFromCustomMap(window.EmpresasState.customFields);
+      if (fromState.length > 0) return [...new Set(fromState)];
+    }
+
     const localCustom = localStorage.getItem('crm_empresas_custom');
-    if (!localCustom) return [...ALLOWED_COMPANY_IDS];
-
-    const customData = JSON.parse(localCustom);
-    const isCompanyInternal = (company) => {
-      if (!company || typeof company !== 'object') return false;
-      const value = company.cobranca_interna;
-      return value === 1 || value === true || value === '1' || value === 'true';
-    };
-
-    const internalIds = Object.entries(customData)
-      .filter(([id, c]) => isCompanyInternal(c))
-      .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
-      .filter(Number.isFinite);
-
-    if (internalIds.length > 0) {
-      return [...new Set(internalIds)];
+    if (localCustom) {
+      const customData = JSON.parse(localCustom);
+      const internalIds = collectInternalIdsFromCustomMap(customData);
+      if (internalIds.length > 0) return [...new Set(internalIds)];
     }
   } catch (e) {
     console.warn('[Sienge] Erro ao ler crm_empresas_custom para empresas internas:', e);
   }
 
   return [...ALLOWED_COMPANY_IDS];
+}
+
+/** Cache do dia só vale se cobriu as empresas internas esperadas (evita base só 1+2). */
+function defaultersCacheLooksIncomplete(data, meta, expectedIds) {
+  const expected = [...new Set((expectedIds || getConfiguredInternalCompanyIds()).map(Number).filter(Number.isFinite))];
+  if (expected.length <= 2) return false;
+
+  const metaIds = meta && Array.isArray(meta.companyIds)
+    ? meta.companyIds.map(Number).filter(Number.isFinite)
+    : null;
+  if (metaIds && metaIds.length) {
+    const have = new Set(metaIds);
+    return expected.some((id) => !have.has(id));
+  }
+
+  const found = new Set();
+  (Array.isArray(data) ? data : []).forEach((b) => {
+    if (b && b.companyId != null) found.add(Number(b.companyId));
+  });
+  const beyond12 = expected.filter((id) => id !== 1 && id !== 2);
+  if (!beyond12.length) return false;
+  const only12 = [...found].every((id) => id === 1 || id === 2);
+  return only12;
 }
 
 function installmentDueIso(inst) {
@@ -918,21 +993,34 @@ const SiengeApiService = {
           onProgress(...this._lastProgressState);
         }
       }
-      if (this._defaultersPromise && !forceRefresh) {
+
+      // Sáb/dom/feriado: 1º acesso do dia força base completa (warmup não roda nesses dias)
+      const effectiveForce = shouldForceFilaFullRefreshOnAccess(forceRefresh);
+      if (effectiveForce && !forceRefresh) {
+        console.log('%c[Sienge] 📅 FDS/feriado — primeiro acesso: atualizando base completa da fila.', 'color:#f59e0b;font-weight:bold;');
+      }
+
+      if (this._defaultersPromise && !effectiveForce) {
         return this._defaultersPromise;
       }
       this._lastProgressState = null;
+      this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
+      const fetchGen = this._defaultersFetchGen;
       this._defaultersPromise = (async () => {
         const t0 = performance.now();
+        const todayStr = filaLocalTodayStr();
+        const expectedCompanyIds = getConfiguredInternalCompanyIds();
 
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (INDEXEDDB E FIRESTORE)
-        if (!forceRefresh) {
-           const todayStr = new Date().toISOString().split('T')[0];
+        if (!effectiveForce) {
            
            // A) Tentar ler do IndexedDB (Cache Local, rápido e sem limite de quota)
            try {
                const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
                if (localCache && localCache.data) {
+                   if (defaultersCacheLooksIncomplete(localCache.data, localCache, expectedCompanyIds)) {
+                       console.warn('%c[Sienge] ⚠️ Cache IndexedDB incompleto (faltam empresas internas) — ignorando.', 'color:#f59e0b;font-weight:bold;');
+                   } else {
                    console.log(`%c[Sienge] ✅ Base carregada do IndexedDB local — ${localCache.data.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
                    if (localCache.paidMap) {
                        window.advFilters = window.advFilters || {};
@@ -950,6 +1038,7 @@ const SiengeApiService = {
                    };
                    if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
                    return localCache.data;
+                   }
                }
            } catch (e) {
                console.log('%c[Sienge] ℹ️ Erro ao ler cache do IndexedDB:', e);
@@ -978,6 +1067,10 @@ const SiengeApiService = {
                        result.push(...JSON.parse(snap.data().data));
                      }
                    });
+
+                   if (defaultersCacheLooksIncomplete(result, meta, expectedCompanyIds)) {
+                     console.warn('%c[Sienge] ⚠️ Cache Firestore incompleto (faltam empresas internas) — buscando base completa.', 'color:#f59e0b;font-weight:bold;');
+                   } else {
                    
                    if (meta.paidMap) {
                      window.advFilters = window.advFilters || {};
@@ -1003,10 +1096,12 @@ const SiengeApiService = {
                        data: result,
                        paidMap: meta.paidMap,
                        timestampStr: meta.timestampStr,
-                       atFull: meta.atFull || null
+                       atFull: meta.atFull || null,
+                       companyIds: meta.companyIds || expectedCompanyIds
                    }).catch(() => {});
 
                    return result;
+                   }
                  } else {
                    console.log('%c[Sienge] ℹ️ Cache do Firestore desatualizado ou inexistente.', 'color:#f59e0b;');
                  }
@@ -1025,6 +1120,10 @@ const SiengeApiService = {
              }
           };
           const result = await this._getDefaultersInternal(null, broadcastProgress);
+          if (fetchGen !== this._defaultersFetchGen) {
+            console.warn('%c[Sienge] ℹ️ Busca obsoleta descartada (nova atualização em andamento).', 'color:#f59e0b;');
+            return result;
+          }
           const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
           console.log(
             `%c[Sienge] ✅ Busca concluída em ${elapsed}s — ${result.length} títulos inadimplentes`,
@@ -1035,13 +1134,22 @@ const SiengeApiService = {
           const atFull = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
           window._siengeLastFetchTime = { elapsed, count: result.length, at: timestampStr, atFull, cached: false };
           if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
+
+          const fetchedCompanyIds = (result && result._fetchedCompanyIds)
+            ? result._fetchedCompanyIds
+            : expectedCompanyIds;
+          if (result && result._fetchedCompanyIds) delete result._fetchedCompanyIds;
+
+          if (isFilaNonBusinessDay(todayStr) && !defaultersCacheLooksIncomplete(result, { companyIds: fetchedCompanyIds }, expectedCompanyIds)) {
+            markFilaFullRefreshDone(todayStr);
+          }
           
           if (window.firebaseDb && window.firebaseCollections) {
-              const todayStr = new Date().toISOString().split('T')[0];
               const CHUNK_SIZE = 100;
               const numChunks = Math.ceil(result.length / CHUNK_SIZE);
               
               (async () => {
+                if (fetchGen !== this._defaultersFetchGen) return;
                 try {
                   console.log(`%c[Firebase] Salvando cache diário no Firestore em ${numChunks} blocos...`, 'color:#3b82f6;');
                   const promises = [];
@@ -1064,6 +1172,7 @@ const SiengeApiService = {
                       timestampStr: timestampStr,
                       atFull: atFull,
                       paidMap: paidMapStr,
+                      companyIds: fetchedCompanyIds,
                       createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
                   });
                   console.log(`%c[Firebase] Cache diário (${todayStr}) salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
@@ -1074,6 +1183,7 @@ const SiengeApiService = {
               
               // SALVA NO INDEXEDDB LOCALMENTE TAMBÉM
               (async () => {
+                if (fetchGen !== this._defaultersFetchGen) return;
                 try {
                    let paidMapStr = null;
                    if (window.advFilters && window.advFilters.paidMap) {
@@ -1083,7 +1193,8 @@ const SiengeApiService = {
                        data: result,
                        paidMap: paidMapStr,
                        timestampStr: timestampStr,
-                       atFull: atFull
+                       atFull: atFull,
+                       companyIds: fetchedCompanyIds
                    });
                    console.log(`%c[IndexedDB] Cache diário salvo localmente com sucesso!`, 'color:#3b82f6;font-weight:bold;');
                 } catch(e) {
@@ -1101,9 +1212,11 @@ const SiengeApiService = {
 
           return result;
         } finally {
-          this._defaultersPromise = null;
-          this._progressListeners = [];
-          this._lastProgressState = null;
+          if (fetchGen === this._defaultersFetchGen) {
+            this._defaultersPromise = null;
+            this._progressListeners = [];
+            this._lastProgressState = null;
+          }
         }
       })();
       return this._defaultersPromise;
@@ -1114,7 +1227,7 @@ const SiengeApiService = {
   async updateCachePaidMap(paidMapStr) {
     if (s_apiMode === "simulado" || !window.firebaseDb || !window.firebaseCollections) return;
     try {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = filaLocalTodayStr();
         const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
         // Only update if it exists
         const metaSnap = await window.firebaseCollections.getDoc(metaRef);
@@ -1129,12 +1242,6 @@ const SiengeApiService = {
 
 
   async _getDefaultersInternal(companyId, onProgress) {
-    const isCompanyInternal = (company) => {
-      if (!company || typeof company !== 'object') return false;
-      const value = company.cobranca_interna;
-      return value === 1 || value === true || value === "1" || value === "true";
-    };
-
     let targetCompanies = getConfiguredInternalCompanyIds();
     let customData = null;
     if (companyId) {
@@ -1144,10 +1251,7 @@ const SiengeApiService = {
         const localCustom = localStorage.getItem('crm_empresas_custom');
         if (localCustom) {
           customData = JSON.parse(localCustom);
-          const internalIds = Object.entries(customData)
-            .filter(([id, c]) => isCompanyInternal(c))
-            .map(([id, c]) => Number(c.company_id ?? c.id ?? id))
-            .filter(Number.isFinite);
+          const internalIds = collectInternalIdsFromCustomMap(customData);
           if (internalIds.length > 0) {
             targetCompanies = [...new Set(internalIds)];
           }
@@ -1165,7 +1269,7 @@ const SiengeApiService = {
     }
     if (onProgress) onProgress(null, null, 0, targetCompanies.length, firstCompanyName);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = filaLocalTodayStr();
     const allNormalized = [];
 
     // Carregar os centros de custo para aplicar o filtro por enterpriseId
@@ -1326,6 +1430,7 @@ const SiengeApiService = {
       currentWeightAccum += thisWeight;
     }
 
+    allNormalized._fetchedCompanyIds = [...targetCompanies];
     return allNormalized;
   },
 
@@ -1572,11 +1677,50 @@ const SiengeApiService = {
     return [];
   },
 
-  // 10. Simulação de antecipação
+  // 10. Antecipação / quitação (Sienge prepayment-slip-register)
+  async simulatePrepaymentSlip(payload) {
+    if (s_apiMode === "simulado") {
+      const insts = (payload && payload.installments) || [];
+      const pct = Number(payload && payload.percentPresentValue) || 0;
+      const base = insts.length * 1000;
+      const disc = base * (pct / 100);
+      return {
+        originalValue: base,
+        discountApplied: disc,
+        finalValue: base - disc,
+        presentValue: base - disc,
+        percentPresentValue: pct,
+        dueDateSimulated: (payload && payload.newDueDate) || new Date().toISOString().slice(0, 10)
+      };
+    }
+    return await siengePost("/prepayment-slip-register/simulate", payload || {}, 4);
+  },
+
+  async registerPrepaymentSlip(payload) {
+    if (s_apiMode === "simulado") {
+      return { ok: true, simulated: true, message: "Boleto de antecipação simulado gerado." };
+    }
+    return await siengePost("/prepayment-slip-register/", payload || {}, 4);
+  },
+
   async simulatePrepayment(saleId, installmentsToPay) {
     if (s_apiMode === "simulado") return runLocalPrepaymentSimulation(saleId, installmentsToPay);
     try {
-      return await siengeFetchWithRetry(`/prepayment-slip-register/simulate?saleId=${saleId}&installments=${JSON.stringify(installmentsToPay)}`);
+      const insts = (installmentsToPay || []).map((b) => ({
+        billId: String(b.billId || b.id || b.receivableBillId || saleId),
+        installmentId: Number(b.installmentId != null ? b.installmentId : (b.installmentNumber != null ? b.installmentNumber : 0))
+      }));
+      return await this.simulatePrepaymentSlip({
+        companyId: String((installmentsToPay && installmentsToPay[0] && installmentsToPay[0].companyId) || (window.AppState && AppState.currentCompanyId) || "1"),
+        installments: insts,
+        accountNumber: "6538-2",
+        newDueDate: new Date().toISOString().slice(0, 10),
+        groupBy: "CUSTOMER",
+        matchDueDate: "ALL",
+        percentPresentValue: 0,
+        calculatePresentValue: true,
+        correctAnnualInstallment: true
+      });
     } catch (e) {
       return runLocalPrepaymentSimulation(saleId, installmentsToPay);
     }

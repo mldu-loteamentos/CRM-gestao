@@ -31,7 +31,12 @@ const AnexosState = {
   periodoLoadPhase: '',
   tagMemory: [], // fingerprints aprendidos
   selectGen: 0,
-  loadingUnidadeAnexos: false
+  loadingUnidadeAnexos: false,
+  enterprisesLoaded: false,
+  enterprisesLoadStarted: false,
+  tagsLoadStarted: false,
+  _renderBusy: false,
+  _mapaEnrichGen: 0
 };
 
 function anexosTodayIso() {
@@ -926,16 +931,52 @@ window.anexosLoadMapaEnvios = anexosLoadMapaEnvios;
 
 // --- RENDERIZAÇÃO DA INTERFACE ---
 
-function renderAnexosModule() {
+function anexosPatchMapaSelection(unitId) {
+  const panel = document.getElementById('anexos-mapa-panel');
+  if (!panel) return;
+  panel.querySelectorAll('.anexos-mapa-tile.is-sel').forEach((el) => el.classList.remove('is-sel'));
+  if (!unitId) return;
+  const id = String(unitId);
+  const btn = panel.querySelector(`.anexos-mapa-tile[data-unit-id="${id.replace(/"/g, '')}"]`);
+  if (btn) btn.classList.add('is-sel');
+}
+
+function renderAnexosModule(opts) {
+  if (AnexosState._renderBusy) {
+    AnexosState._renderQueued = true;
+    // Sem opts = render completo; preserveMapa só se ninguém pediu full rebuild
+    if (!opts) AnexosState._renderQueuedOpts = null;
+    else if (!AnexosState._renderQueuedOpts) AnexosState._renderQueuedOpts = opts;
+    return;
+  }
+  AnexosState._renderBusy = true;
+  AnexosState._renderQueued = false;
+  if (opts == null) opts = AnexosState._renderQueuedOpts || null;
+  AnexosState._renderQueuedOpts = null;
+  try {
   const targetId = window.anexosTargetId || 'anexos-root';
   const root = document.getElementById(targetId);
   if (!root) return;
 
   const isModal = targetId === 'anexos-cliente-root';
+  const preserveMapa = !!(opts && opts.preserveMapa) && AnexosState.mapaUnidades && !AnexosState.periodoMode && !AnexosState.periodoOpen;
+  let savedMapa = null;
+  if (preserveMapa) {
+    const existing = document.getElementById('anexos-mapa-panel');
+    if (existing && existing.querySelector('.anexos-mapa-wrap, .anexos-mapa-empty, .anexos-mapa-loading')) {
+      savedMapa = existing;
+    }
+  }
 
   const ccDisplay = AnexosState.cc
     ? (AnexosState.ccName ? `${AnexosState.cc} - ${AnexosState.ccName}` : AnexosState.cc)
     : '';
+
+  const mapaBodyHtml = savedMapa
+    ? ''
+    : ((AnexosState.mapaUnidades || AnexosState.periodoMode || AnexosState.periodoOpen) && AnexosState.contexto !== 'Cliente'
+      ? anexosBuildMapaHtml()
+      : '');
 
   root.innerHTML = `
     <div class="anexos-container">
@@ -1046,11 +1087,13 @@ function renderAnexosModule() {
           </div>
           <div class="anexos-contract-side">
             ${AnexosState.activeContract ? (
-              AnexosState.contractAttachments.length > 0
+              AnexosState.loadingUnidadeAnexos
+                ? `<span style="color:var(--color-primary);font-size:0.9rem;font-weight:600;">Verificando anexos…</span>`
+                : (AnexosState.contractAttachments.length > 0
                 ? (AnexosState.importedContracts.has(AnexosState.activeContract.id)
                   ? `<span class="anexos-imported-badge"><i data-lucide="check-circle" style="width:16px;"></i> ${AnexosState.contractAttachments.length} Anexos Importados</span>`
                   : `<button type="button" class="btn btn-outline anexos-ctrl" style="padding:0 14px;font-weight:600;border-color:var(--color-primary);color:var(--color-primary);display:inline-flex;align-items:center;gap:6px;" onclick="AnexosApp.importarAnexosDoContrato()"><i data-lucide="download" style="width:16px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
-                : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`
+                : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`)
             ) : ''}
           </div>
         </div>` : ''}
@@ -1061,7 +1104,7 @@ function renderAnexosModule() {
           <div class="anexos-mapa-head">
             <strong>Mapa de unidades</strong>
           </div>`}
-          ${anexosBuildMapaHtml()}
+          ${mapaBodyHtml}
         </div>` : ''}
       </div>
       `}
@@ -1157,12 +1200,38 @@ function renderAnexosModule() {
     </div>
   `;
 
+  if (savedMapa) {
+    const slot = document.getElementById('anexos-mapa-panel');
+    if (slot && slot.parentNode) {
+      slot.parentNode.replaceChild(savedMapa, slot);
+      anexosPatchMapaSelection(AnexosState.selectedUnidade);
+    }
+  }
+
   AnexosApp.bindEvents();
-  lucide.createIcons();
-  AnexosApp.loadTagsAtivas();
-  AnexosApp.loadEnterprisesInBackground();
-  anexosLoadTagMemory();
+  if (window.lucide) lucide.createIcons();
+  if (!AnexosState.tagsLoadStarted) {
+    AnexosState.tagsLoadStarted = true;
+    AnexosApp.loadTagsAtivas();
+  }
+  if (!AnexosState.enterprisesLoadStarted) {
+    AnexosState.enterprisesLoadStarted = true;
+    AnexosApp.loadEnterprisesInBackground();
+  }
+  if (!(AnexosState.tagMemory && AnexosState.tagMemory.length) && !AnexosState._tagMemoryLoading) {
+    AnexosState._tagMemoryLoading = true;
+    Promise.resolve(anexosLoadTagMemory()).finally(() => { AnexosState._tagMemoryLoading = false; });
+  }
   if (AnexosState.files.length) AnexosApp.renderFilesList();
+  } finally {
+    AnexosState._renderBusy = false;
+    if (AnexosState._renderQueued) {
+      AnexosState._renderQueued = false;
+      const nextOpts = AnexosState._renderQueuedOpts;
+      AnexosState._renderQueuedOpts = null;
+      setTimeout(() => renderAnexosModule(nextOpts), 0);
+    }
+  }
 }
 
 // --- LOGICA DE NEGOCIO ---
@@ -1289,6 +1358,7 @@ async function anexosResolveSalesContract(enterpriseId, unitId, nomeUnidade, met
     });
     if (results.length < 200) break;
     offset += results.length;
+    await new Promise((r) => setTimeout(r, 0));
   }
   if (!found.length) return null;
   found.sort(function(a, b) {
@@ -1493,6 +1563,7 @@ const AnexosApp = {
   async enrichMapaMeta() {
     const cc = String(AnexosState.cc || '').trim();
     if (!cc || !AnexosState.unidades.length) return;
+    const enrichGen = ++AnexosState._mapaEnrichGen;
     AnexosState.mapaLoading = true;
     renderAnexosModule();
     try {
@@ -1500,6 +1571,7 @@ const AnexosApp = {
       let offset = 0;
       let hasMore = true;
       while (hasMore) {
+        if (enrichGen !== AnexosState._mapaEnrichGen) return;
         const url = anexosApiUrl(`/sienge-proxy/sales-contracts?limit=200&offset=${offset}&enterpriseId=${encodeURIComponent(cc)}`);
         const res = await fetch(url, { headers: { Authorization: getBasicAuthHeader() } });
         if (!res.ok) break;
@@ -1524,39 +1596,65 @@ const AnexosApp = {
               byUnit[uid] = info;
               return;
             }
-            // Preferir contrato ativo; entre ativos, o mais recente
             if (active && !prev.active) byUnit[uid] = info;
             else if (active === prev.active && dateKey > prev.dateKey) byUnit[uid] = info;
           });
         });
         if (results.length < 200) hasMore = false;
         else offset += results.length;
+        await new Promise((r) => setTimeout(r, 0));
       }
+      if (enrichGen !== AnexosState._mapaEnrichGen) return;
 
       const meta = {};
       AnexosState.unidades.forEach((u) => {
         const hit = byUnit[String(u.id)];
         meta[String(u.id)] = hit
-          ? { active: !!hit.active, contractId: hit.contractId, contractNumber: hit.contractNumber, sentTags: [] }
-          : { active: false, contractId: null, contractNumber: null, sentTags: [] };
+          ? { active: !!hit.active, contractId: hit.contractId, contractNumber: hit.contractNumber, sentTags: [], unitName: hit.unitName || u.name || '' }
+          : { active: false, contractId: null, contractNumber: null, sentTags: [], unitName: u.name || '' };
       });
       AnexosState.mapaMeta = meta;
       AnexosState.mapaEnvios = await anexosLoadMapaEnvios(cc);
       this.applyMapaMetaFromEnvios();
 
-      // Detecta CONTRATO já na unidade (Sienge) e grava no ledger — marca Enviado
-      await this.syncEnviadoFromSiengeAttachments(cc);
+      // Libera o mapa já; sync Sienge / seed rodam em background (não travar a UI)
+      AnexosState.mapaLoading = false;
+      await new Promise((r) => setTimeout(r, 0));
+      if (enrichGen !== AnexosState._mapaEnrichGen) return;
+      if (enrichGen === AnexosState._mapaEnrichGen) renderAnexosModule();
 
-      // Implantação do espelho: 17701 já teve documentos enviados → seed Enviado
-      if (String(cc) === '17701') {
-        await this.seedEnviadoEmpreendimento(cc, 'CONTRATO');
-      }
-      this.applyMapaMetaFromEnvios();
+      const bgGen = enrichGen;
+      (async () => {
+        try {
+          if (String(cc) === '17701') {
+            await this.seedEnviadoEmpreendimento(cc, 'CONTRATO');
+            if (bgGen !== AnexosState._mapaEnrichGen) return;
+            this.applyMapaMetaFromEnvios();
+          }
+          await this.syncEnviadoFromSiengeAttachments(cc);
+          if (bgGen !== AnexosState._mapaEnrichGen) return;
+          this.applyMapaMetaFromEnvios();
+          const mapaPanel = document.getElementById('anexos-mapa-panel');
+          if (mapaPanel && AnexosState.mapaUnidades) {
+            const head = mapaPanel.querySelector('.anexos-mapa-head');
+            const tmp = document.createElement('div');
+            tmp.innerHTML = anexosBuildMapaHtml();
+            mapaPanel.innerHTML = '';
+            if (head) mapaPanel.appendChild(head);
+            while (tmp.firstChild) mapaPanel.appendChild(tmp.firstChild);
+            anexosPatchMapaSelection(AnexosState.selectedUnidade);
+          }
+        } catch (e) {
+          console.warn('[Anexos] sync mapa em background', e);
+        }
+      })();
+      return;
     } catch (e) {
       console.error('[Anexos] enrichMapaMeta', e);
     } finally {
-      AnexosState.mapaLoading = false;
-      renderAnexosModule();
+      if (enrichGen === AnexosState._mapaEnrichGen) {
+        AnexosState.mapaLoading = false;
+      }
     }
   },
 
@@ -1566,12 +1664,15 @@ const AnexosApp = {
       const m = AnexosState.mapaMeta[uid];
       return m && m.active && m.contractId && !(m.sentTags && m.sentTags.includes('CONTRATO'));
     });
-    const concurrency = 4;
+    // Limite: evita centenas de requests que congelam a aba
+    const maxScan = 40;
+    const queue = activeIds.slice(0, maxScan);
+    const concurrency = 3;
     let i = 0;
     const run = async () => {
-      while (i < activeIds.length) {
+      while (i < queue.length) {
         const idx = i++;
-        const uid = activeIds[idx];
+        const uid = queue[idx];
         const meta = AnexosState.mapaMeta[uid];
         if (!meta) continue;
         try {
@@ -1600,6 +1701,7 @@ const AnexosApp = {
             source: 'sienge_sync'
           });
         } catch (e) { /* ignore unit */ }
+        await new Promise((r) => setTimeout(r, 0));
       }
     };
     await Promise.all(Array.from({ length: concurrency }, () => run()));
@@ -1609,18 +1711,19 @@ const AnexosApp = {
     const t = String(tag || 'CONTRATO').toUpperCase();
     const seededKey = `anexos_seed_enviado_${enterpriseId}_${t}`;
     try {
-      if (localStorage.getItem(seededKey) === '1') {
-        // ainda reaplica meta a partir do ledger
-        return;
-      }
+      if (localStorage.getItem(seededKey) === '1') return;
     } catch (e) {}
+    if (!window.firebaseCollections || !window.firebaseDb) return;
     const entries = Object.keys(AnexosState.mapaMeta || {});
-    for (const uid of entries) {
+    const byKey = { ...(AnexosState.mapaEnvios || {}) };
+    let changed = false;
+    const now = new Date().toISOString();
+    entries.forEach((uid) => {
       const meta = AnexosState.mapaMeta[uid];
-      if (!meta || !meta.active || !meta.contractId) continue;
+      if (!meta || !meta.active || !meta.contractId) return;
       const key = anexosEnvioKey(meta.contractId, t);
-      if (AnexosState.mapaEnvios[key]) continue;
-      await anexosSaveMapaEnvio({
+      if (byKey[key]) return;
+      byKey[key] = {
         enterpriseId,
         unitId: uid,
         unitName: meta.unitName || '',
@@ -1630,27 +1733,44 @@ const AnexosApp = {
         destination: 'Unidade',
         description: 'seed-implantacao-espelho',
         fileName: '',
-        sentAt: new Date().toISOString(),
-        source: 'seed_17701'
-      });
+        sentAt: now,
+        source: 'seed_17701',
+        key
+      };
+      changed = true;
+    });
+    if (changed) {
+      try {
+        const { doc, setDoc } = window.firebaseCollections;
+        await setDoc(doc(window.firebaseDb, 'anexos_mapa', String(enterpriseId)), {
+          enterpriseId: String(enterpriseId),
+          byKey,
+          updatedAt: now
+        }, { merge: true });
+        AnexosState.mapaEnvios = byKey;
+      } catch (e) {
+        console.warn('[Anexos] seed mapa batch', e);
+      }
     }
     try { localStorage.setItem(seededKey, '1'); } catch (e) {}
   },
 
   async loadTituloReceber(contract) {
     const knownId = contract && (contract.receivableBillId || contract.billReceivableId);
+    const patchTituloSlot = () => {
+      const slot = document.getElementById('anexos-titulo-slot');
+      if (!slot) return false;
+      slot.outerHTML = anexosTituloSlotHtml();
+      if (window.lucide) lucide.createIcons();
+      return true;
+    };
     if (knownId) {
       AnexosState.tituloReceber = { id: knownId, number: String(knownId), balance: null, statusLabel: 'Ativo' };
-      const slot = document.getElementById('anexos-titulo-slot');
-      if (slot) slot.outerHTML = anexosTituloSlotHtml();
-      else renderAnexosModule();
+      patchTituloSlot();
     } else {
       AnexosState.tituloReceber = null;
     }
-    if (!contract) {
-      renderAnexosModule();
-      return;
-    }
+    if (!contract) return;
     try {
       let bills = [];
       if (knownId && window.SiengeApiService && typeof SiengeApiService.getReceivableBill === 'function') {
@@ -1714,11 +1834,8 @@ const AnexosApp = {
         AnexosState.tituloReceber = { id: knownId || '', number: knownId ? String(knownId) : '—', balance: null, statusLabel: 'Indisponível' };
       }
     }
-    const slot = document.getElementById('anexos-titulo-slot');
-    if (slot && AnexosState.tituloReceber && AnexosState.tituloReceber.number && AnexosState.tituloReceber.number !== '—') {
-      slot.outerHTML = anexosTituloSlotHtml();
-      if (window.lucide) lucide.createIcons();
-    } else {
+    // Nunca re-renderizar o módulo inteiro daqui (travava o mapa). Só atualiza o slot.
+    if (!patchTituloSlot() && !AnexosState.loadingUnidadeAnexos) {
       renderAnexosModule();
     }
   },
@@ -2059,6 +2176,7 @@ const AnexosApp = {
   async selecionarUnidade(unitId) {
     const gen = ++AnexosState.selectGen;
     const stillThis = () => gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(unitId || '');
+    const softRender = () => renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
 
     AnexosState.selectedUnidade = unitId || '';
     AnexosState.activeContract = null;
@@ -2066,15 +2184,17 @@ const AnexosApp = {
     AnexosState.files = [];
     AnexosState.importedContracts.clear();
     AnexosState.downloadedFilesIds.clear();
+    AnexosState.tituloReceber = null;
     AnexosState.loadingUnidadeAnexos = !!unitId;
 
     if (!unitId) {
-      AnexosState.tituloReceber = null;
       AnexosState.loadingUnidadeAnexos = false;
-      renderAnexosModule();
+      softRender();
       return;
     }
-    renderAnexosModule();
+    // Com mapa ligado: não reconstrói centenas de quadrinhos (isso congelava a aba).
+    softRender();
+    anexosPatchMapaSelection(unitId);
 
     try {
       const ccInput = document.getElementById('anexos-cc');
@@ -2086,7 +2206,7 @@ const AnexosApp = {
 
       if (!enterpriseId && !meta.contractId) {
         AnexosState.loadingUnidadeAnexos = false;
-        renderAnexosModule();
+        softRender();
         return;
       }
 
@@ -2094,7 +2214,6 @@ const AnexosApp = {
       if (!stillThis()) return;
 
       if (!mainC) {
-        // Sem contrato na lista: ainda tenta anexos gravados na própria unidade
         const uAtt = await anexosFetchJson(`/sienge-proxy/units/${encodeURIComponent(unitId)}/attachments`);
         if (!stillThis()) return;
         const unitResults = ((uAtt && uAtt.results) || []).map(a => ({
@@ -2105,7 +2224,7 @@ const AnexosApp = {
         }));
         AnexosState.contractAttachments = anexosDedupeAttachments(unitResults);
         AnexosState.loadingUnidadeAnexos = false;
-        renderAnexosModule();
+        softRender();
         if (AnexosState.contractAttachments.length) {
           AnexosState.activeContract = {
             id: meta.contractId || ('unit-' + unitId),
@@ -2115,6 +2234,7 @@ const AnexosApp = {
             enterpriseId,
             unitName: nomeUnidade
           };
+          softRender();
           this.importarAnexosDoContrato({ auto: true, force: true });
         }
         return;
@@ -2151,10 +2271,6 @@ const AnexosApp = {
         unitName: nomeUnidade,
         receivableBillId: billId
       };
-      AnexosState.tituloReceber = null;
-      await anexosHydrateContractPeople();
-      if (!stillThis()) return;
-      this.loadTituloReceber(AnexosState.activeContract);
 
       if (AnexosState.contexto === 'Ambos' && !AnexosState.idCliente) {
         let doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj;
@@ -2172,14 +2288,19 @@ const AnexosApp = {
         }
       }
 
-      renderAnexosModule();
+      // Atualiza faixa do contrato mantendo o mapa; título e anexos em paralelo
+      softRender();
+      anexosPatchMapaSelection(unitId);
 
       const mainCustId = mainCust.customerId || mainCust.id;
-      const [attData, uAttData, cAttData] = await Promise.all([
+      const hydrateP = anexosHydrateContractPeople();
+      const tituloP = this.loadTituloReceber(AnexosState.activeContract);
+      const [attData, uAttData] = await Promise.all([
         anexosFetchJson(`/sienge-proxy/sales-contracts/${mainC.id}/attachments`),
-        anexosFetchJson(`/sienge-proxy/units/${encodeURIComponent(unitId)}/attachments`),
-        mainCustId ? anexosFetchJson(`/sienge-proxy/customers/${mainCustId}/attachments`) : Promise.resolve(null)
+        anexosFetchJson(`/sienge-proxy/units/${encodeURIComponent(unitId)}/attachments`)
       ]);
+      if (!stillThis()) return;
+      await Promise.all([hydrateP, tituloP]);
       if (!stillThis()) return;
 
       let allAttachments = [];
@@ -2197,25 +2318,17 @@ const AnexosApp = {
           description: a.description ? `(Unidade) ${a.description}` : `(Unidade) Arquivo`
         })));
       }
-      if (cAttData) {
-        allAttachments = allAttachments.concat((cAttData.results || [])
-          .filter(a => anexosAttachmentBelongsToUnit(a, { enterpriseId, unitName: nomeUnidade, unitId }))
-          .map(a => ({
-            ...a,
-            isCustomerAttachment: true,
-            customerId: mainCustId,
-            description: a.description ? `(Cliente ${mainCustId}) ${a.description}` : `(Cliente ${mainCustId}) Arquivo`
-          })));
-      }
 
       AnexosState.contractAttachments = anexosDedupeAttachments(allAttachments);
       AnexosState.loadingUnidadeAnexos = false;
-      renderAnexosModule();
+      softRender();
+      anexosPatchMapaSelection(unitId);
       if (AnexosState.contractAttachments.length) {
         this.importarAnexosDoContrato({ auto: true, force: true });
       }
 
-      this._enrichAttachmentsFromHistorico({
+      // Anexos do cliente / histórico em background (JSON grande congelava a aba)
+      this._enrichAttachmentsFromClienteAndHistorico({
         gen: gen,
         unitId: unitId,
         mainC: mainC,
@@ -2227,11 +2340,50 @@ const AnexosApp = {
       console.error('Erro ao buscar contrato vigente:', e);
       if (stillThis()) {
         AnexosState.loadingUnidadeAnexos = false;
-        renderAnexosModule();
+        softRender();
       }
     } finally {
-      if (stillThis()) AnexosState.loadingUnidadeAnexos = false;
+      if (stillThis() && AnexosState.loadingUnidadeAnexos) {
+        AnexosState.loadingUnidadeAnexos = false;
+        softRender();
+      }
     }
+  },
+
+  async _enrichAttachmentsFromClienteAndHistorico(ctx) {
+    const stillThis = () => ctx.gen === AnexosState.selectGen && String(AnexosState.selectedUnidade) === String(ctx.unitId || '');
+    try {
+      if (ctx.mainCustId && AnexosState.contexto !== 'Unidade') {
+        const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${ctx.mainCustId}/attachments`);
+        if (!stillThis()) return;
+        if (cAttData && Array.isArray(cAttData.results) && cAttData.results.length) {
+          const extra = cAttData.results
+            .filter(a => anexosAttachmentBelongsToUnit(a, {
+              enterpriseId: ctx.enterpriseId,
+              unitName: ctx.nomeUnidade,
+              unitId: ctx.unitId
+            }))
+            .map(a => ({
+              ...a,
+              isCustomerAttachment: true,
+              customerId: ctx.mainCustId,
+              description: a.description ? `(Cliente ${ctx.mainCustId}) ${a.description}` : `(Cliente ${ctx.mainCustId}) Arquivo`
+            }));
+          if (extra.length) {
+            AnexosState.contractAttachments = anexosDedupeAttachments(
+              (AnexosState.contractAttachments || []).concat(extra)
+            );
+            renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
+            anexosPatchMapaSelection(ctx.unitId);
+            this.importarAnexosDoContrato({ auto: true, force: true });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Anexos] anexos cliente', e);
+    }
+    if (!stillThis()) return;
+    await this._enrichAttachmentsFromHistorico(ctx);
   },
 
   async _enrichAttachmentsFromHistorico(ctx) {
@@ -2250,30 +2402,32 @@ const AnexosApp = {
         if (!custId || String(custId) === String(ctx.mainCustId)) continue;
         const cAttData = await anexosFetchJson(`/sienge-proxy/customers/${custId}/attachments`);
         if (!stillThis()) return;
-        if (!cAttData) continue;
-        extra.push.apply(extra, (cAttData.results || [])
+        if (!cAttData || !Array.isArray(cAttData.results)) continue;
+        cAttData.results
           .filter(a => anexosAttachmentBelongsToUnit(a, {
             enterpriseId: ctx.enterpriseId,
             unitName: ctx.nomeUnidade,
             unitId: ctx.unitId
           }))
-          .map(a => ({
-            ...a,
-            isCustomerAttachment: true,
-            customerId: custId,
-            description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
-          })));
+          .forEach(a => {
+            extra.push({
+              ...a,
+              isCustomerAttachment: true,
+              customerId: custId,
+              description: a.description ? `(Cliente ${custId}) ${a.description}` : `(Cliente ${custId}) Arquivo`
+            });
+          });
+        await new Promise((r) => setTimeout(r, 0));
       }
       if (!extra.length || !stillThis()) return;
-      const before = AnexosState.contractAttachments.length;
       AnexosState.contractAttachments = anexosDedupeAttachments(
         (AnexosState.contractAttachments || []).concat(extra)
       );
-      if (AnexosState.contractAttachments.length === before) return;
-      renderAnexosModule();
+      renderAnexosModule(AnexosState.mapaUnidades ? { preserveMapa: true } : undefined);
+      anexosPatchMapaSelection(ctx.unitId);
       this.importarAnexosDoContrato({ auto: true, force: true });
-    } catch (err) {
-      console.warn('[Anexos] histórico de cessão ignorado:', err);
+    } catch (e) {
+      console.warn('[Anexos] histórico cessão', e);
     }
   },
 
@@ -2609,6 +2763,7 @@ const AnexosApp = {
         } else {
           offset += limit;
         }
+        await new Promise((r) => setTimeout(r, 0));
       }
 
       // Filtrar unidades com status T = Transferido apenas se não estiver na Ficha do Cliente

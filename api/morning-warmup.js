@@ -82,7 +82,7 @@ async function fetchAllPages(path, pageSize = 200) {
 }
 
 function internalCompanyIds(customRaw) {
-  const allowed = [1, 2];
+  const allowed = [1, 2, 3, 6, 13, 28, 32];
   try {
     const custom = typeof customRaw === "string" ? JSON.parse(customRaw || "{}") : (customRaw || {});
     const ids = Object.entries(custom)
