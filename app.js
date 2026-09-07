@@ -14613,35 +14613,11 @@ window.quitacaoSimulateSelected = async function() {
 };
 
 window.quitacaoRegisterSelected = async function() {
-  const st = window.quitacaoEnsureSelectionState();
-  const pctInput = document.getElementById("quitacao-sim-pct");
-  if (pctInput) window.quitacaoSetSimPct(pctInput.value);
   const statusEl = document.getElementById("quitacao-prepay-status");
-  try {
-    const payload = window.quitacaoBuildPrepaymentPayload();
-    const n = payload.installments.length;
-    const totalOpen = window.quitacaoSelectableRows().length;
-    const isFull = n >= totalOpen;
-    const ok = confirm(
-      (isFull ? "Gerar quitação integral" : "Gerar boleto de antecipação")
-      + " de " + n + " parcela(s) com desconto de "
-      + (payload.percentPresentValue || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })
-      + "%?"
-    );
-    if (!ok) return;
-    if (statusEl) statusEl.textContent = "Registrando boleto de antecipação...";
-    const res = await SiengeApiService.registerPrepaymentSlip(payload);
-    st.simResult = res;
-    const msg = (res && (res.message || res.status || res.id))
-      ? ("Registrado: " + (res.message || res.status || ("id " + res.id)))
-      : "Boleto de antecipação registrado no Sienge.";
-    if (statusEl) statusEl.textContent = msg;
-    alert(msg);
-  } catch (e) {
-    console.error(e);
-    if (statusEl) statusEl.textContent = e.message || "Falha ao registrar antecipação.";
-    alert(e.message || "Falha ao registrar antecipação.");
-  }
+  const msg = "Geração de boleto de antecipação temporariamente desabilitada até validarmos as funções desta tela.";
+  if (statusEl) statusEl.textContent = msg;
+  alert(msg);
+  return;
 };
 
 window.quitacaoLoadPrepayAccounts = async function() {
@@ -14829,7 +14805,9 @@ window.renderQuitacaoDebtReport = function() {
         <button type="button" class="btn btn-secondary" onclick="window.quitacaoSimulateSelected()" ${selCount ? "" : "disabled"}>
           Simular desconto
         </button>
-        <button type="button" class="btn btn-primary" onclick="window.quitacaoRegisterSelected()" ${selCount ? "" : "disabled"}>
+        <button type="button" class="btn btn-primary" disabled
+          title="Disponível após validação das funções desta tela"
+          onclick="window.quitacaoRegisterSelected()">
           Gerar boleto antecipação
         </button>
       </div>

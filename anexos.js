@@ -376,7 +376,9 @@ function anexosResolveActiveTag(suggested) {
 }
 
 function anexosAttId(att) {
-  return String((att && (att.attachmentid || att.attachmentId || att.id)) || '').trim();
+  if (!att) return '';
+  const raw = att.attachmentid ?? att.attachmentId ?? att.attachmentID ?? att.id ?? att.fileId ?? att.documentId;
+  return String(raw == null ? '' : raw).trim();
 }
 
 /**
@@ -1146,9 +1148,9 @@ function renderAnexosModule(opts) {
               AnexosState.loadingUnidadeAnexos
                 ? `<span style="color:var(--color-primary);font-size:0.9rem;font-weight:600;">Verificando anexos…</span>`
                 : (AnexosState.contractAttachments.length > 0
-                ? (AnexosState.importedContracts.has(AnexosState.activeContract.id)
-                  ? `<span class="anexos-imported-badge"><i data-lucide="check-circle" style="width:16px;"></i> ${AnexosState.contractAttachments.length} Anexos Importados</span>`
-                  : `<button type="button" class="btn btn-outline anexos-ctrl" style="padding:0 14px;font-weight:600;border-color:var(--color-primary);color:var(--color-primary);display:inline-flex;align-items:center;gap:6px;" onclick="AnexosApp.importarAnexosDoContrato()"><i data-lucide="download" style="width:16px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
+                ? (AnexosState.importedContracts.has(AnexosState.activeContract.id) && AnexosState.files.length
+                  ? `<span class="anexos-imported-badge"><i data-lucide="check-circle" style="width:16px;"></i> ${AnexosState.files.length} na lista · <button type="button" class="btn btn-outline anexos-ctrl" style="padding:2px 8px;font-size:0.75rem;margin-left:6px;" onclick="AnexosApp.importarAnexosDoContrato({ force: true, skipOcr: true })">Baixar de novo</button></span>`
+                  : `<button type="button" class="btn btn-outline anexos-ctrl" style="padding:0 14px;font-weight:600;border-color:var(--color-primary);color:var(--color-primary);display:inline-flex;align-items:center;gap:6px;" onclick="AnexosApp.importarAnexosDoContrato({ force: true, skipOcr: true })"><i data-lucide="download" style="width:16px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
                 : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`)
             ) : ''}
           </div>
@@ -2289,7 +2291,9 @@ const AnexosApp = {
         }
         anexosSoftRender();
         anexosPatchMapaSelection(unitId);
-        // Só lista metadados — download/OCR sob demanda (botão Baixar) para não travar
+        if (AnexosState.contractAttachments.length) {
+          this.importarAnexosDoContrato({ auto: true, force: true, skipOcr: true });
+        }
         return;
       }
 
@@ -2376,7 +2380,10 @@ const AnexosApp = {
       AnexosState.loadingUnidadeAnexos = false;
       anexosSoftRender();
       anexosPatchMapaSelection(unitId);
-      // Sem auto-download/OCR no clique — usuário usa "Baixar N Anexos" (evita freeze)
+      // Auto-baixa leve (sem OCR em massa) — não reconstrói o mapa
+      if (AnexosState.contractAttachments.length) {
+        this.importarAnexosDoContrato({ auto: true, force: true, skipOcr: true });
+      }
 
       // Só o cliente do contrato atual (filtrado pela unidade). Sem varrer
       // histórico de cessão / outros clientes — isso puxava anexos “dos demais”.
@@ -2429,7 +2436,8 @@ const AnexosApp = {
       );
       anexosSoftRender();
       anexosPatchMapaSelection(ctx.unitId);
-      // Sem auto-import — só atualiza a contagem no botão Baixar
+      // Baixa só o que ainda não está na lista (sem OCR)
+      AnexosApp.importarAnexosDoContrato({ auto: true, skipOcr: true });
     } catch (e) {
       console.warn('[Anexos] anexos cliente', e);
     }
@@ -2592,7 +2600,8 @@ const AnexosApp = {
     return resolved;
   },
 
-  async applyTagFromOcrOrName(fileObj, nameHint) {
+  async applyTagFromOcrOrName(fileObj, nameHint, opts) {
+    const skipOcr = !!(opts && opts.skipOcr);
     const fromName = anexosResolveActiveTag(nameHint || anexosGuessTagFromDescription(fileObj.originalName || ''));
     const knownActive = fromName && (AnexosState.tagsAtivas || []).some(t => String(t.name).toUpperCase() === fromName.toUpperCase());
 
@@ -2603,6 +2612,12 @@ const AnexosApp = {
       anexosMarkAutoTagged(fileObj, fromName);
       anexosAssignClientTarget(fileObj, { autoDefault: true });
       return fromName;
+    }
+
+    if (skipOcr) {
+      fileObj.tags = [];
+      fileObj.status = 'Revisar';
+      return '';
     }
 
     try {
@@ -2628,32 +2643,46 @@ const AnexosApp = {
   },
 
   importarAnexosDoContrato(opts) {
-    if (!AnexosState.activeContract || AnexosState.contractAttachments.length === 0) return;
+    if (!AnexosState.activeContract) {
+      if (!(opts && opts.auto)) alert('Selecione uma unidade/contrato primeiro.');
+      return;
+    }
+    if (!AnexosState.contractAttachments.length) {
+      if (!(opts && opts.auto)) alert('Nenhum anexo encontrado neste contrato.');
+      return;
+    }
     const auto = !!(opts && opts.auto);
     const force = !!(opts && opts.force);
+    // OCR em massa congela a aba — só roda se pedir explicitamente { ocr: true }
+    const skipOcr = !(opts && opts.ocr);
     
     const isModal = window.anexosTargetId === 'anexos-cliente-root';
 
-    if (!force && !isModal && AnexosState.importedContracts.has(AnexosState.activeContract.id)) {
+    if (!force && !isModal && AnexosState.importedContracts.has(AnexosState.activeContract.id) && AnexosState.files.length) {
       if (!auto) alert("Os anexos deste contrato já foram importados nesta sessão.");
       return;
     }
 
     const attachmentsToImport = AnexosState.contractAttachments.filter(att => {
         const attId = anexosAttId(att);
-        return attId && !AnexosState.files.some(f => String(f.downloadedId) === attId);
+        if (!attId) return true; // tenta mesmo sem id (usa fallback de nome)
+        return !AnexosState.files.some(f => String(f.downloadedId) === attId);
     });
 
     if (attachmentsToImport.length === 0) {
-        if (isModal && !auto) alert("Todos os anexos deste contrato já estão na lista.");
+        if (!auto) {
+          if (AnexosState.files.length) alert("Todos os anexos deste contrato já estão na lista.");
+          else alert("Não foi possível identificar os IDs dos anexos no Sienge. Tente novamente ou recarregue a unidade.");
+        }
         return;
     }
 
-    const novos = attachmentsToImport.map(att => {
+    const novos = attachmentsToImport.map((att, i) => {
       const fName = att.fileName || att.description || 'Anexo Sienge.pdf';
       const extMatch = fName.match(/\.([a-zA-Z0-9]+)$/);
       const ext = extMatch ? extMatch[1].toLowerCase() : 'pdf';
       const guessedTag = anexosResolveActiveTag(anexosGuessTagFromDescription(att.description || fName));
+      const attId = anexosAttId(att) || (`tmp_${i}_${String(fName).slice(0, 40)}`);
       
       const fileObj = {
         id: 'imported_' + Math.random().toString(36).substr(2, 9),
@@ -2668,60 +2697,89 @@ const AnexosApp = {
         uploadProgress: 0,
         previewUrl: null,
         dateOverride: '',
-        downloadedId: anexosAttId(att),
+        downloadedId: attId,
         _importAtt: att
       };
       return fileObj;
     });
 
-    AnexosState.files = [...AnexosState.files, ...novos];
+    AnexosState.files = force
+      ? [...AnexosState.files.filter((f) => !novos.some((n) => String(n.downloadedId) === String(f.downloadedId))), ...novos]
+      : [...AnexosState.files, ...novos];
     AnexosState.importedContracts.add(AnexosState.activeContract.id);
+    // Só atualiza lista de arquivos — não reconstrói o mapa
+    this.renderFilesList();
+    this.checkCanSend();
     anexosSoftRender();
+    anexosPatchMapaSelection(AnexosState.selectedUnidade);
 
-    // Download/OCR com concorrência baixa — evita travar a aba
+    // Download com 1 arquivo por vez; OCR só se pedido (auto = sem OCR para não travar)
     const queue = novos.slice();
-    const concurrency = 2;
+    const concurrency = 1;
     const runOne = async (fileObj) => {
       const att = fileObj._importAtt;
       delete fileObj._importAtt;
       try {
         fileObj.status = 'Baixando arquivo...';
         AnexosApp.renderFilesList();
-        const attId = anexosAttId(att);
+        const attId = anexosAttId(att) || fileObj.downloadedId;
         const contractId = att._sourceContractId || (AnexosState.activeContract && AnexosState.activeContract.id);
-        let url = anexosApiUrl(`/sienge-proxy/sales-contracts/${contractId}/attachments/${attId}`);
+        const bases = [];
         if (att.isCustomerAttachment) {
-          url = anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`);
+          bases.push(anexosApiUrl(`/sienge-proxy/customers/${att.customerId}/attachments/${attId}`));
         } else if (att.isUnitAttachment) {
-          url = anexosApiUrl(`/sienge-proxy/units/${att.unitId || AnexosState.selectedUnidade}/attachments/${attId}`);
+          bases.push(anexosApiUrl(`/sienge-proxy/units/${att.unitId || AnexosState.selectedUnidade}/attachments/${attId}`));
+        } else {
+          bases.push(anexosApiUrl(`/sienge-proxy/sales-contracts/${contractId}/attachments/${attId}`));
         }
         fileObj._downloadUnitId = AnexosState.selectedUnidade;
         fileObj._downloadContractId = contractId;
-        const res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
+        let res = null;
+        let lastErr = '';
+        for (const base of bases) {
+          for (const url of [base + '/file', base]) {
+            try {
+              res = await fetch(url, { headers: { 'Authorization': getBasicAuthHeader() } });
+              if (res.ok) break;
+              lastErr = `${res.status}`;
+              res = null;
+            } catch (e) {
+              lastErr = e.message || 'fetch';
+              res = null;
+            }
+          }
+          if (res && res.ok) break;
+        }
         if (String(fileObj._downloadUnitId) !== String(AnexosState.selectedUnidade)) {
           AnexosState.files = AnexosState.files.filter(f => f.id !== fileObj.id);
           AnexosApp.renderFilesList();
           return;
         }
-        if (res.ok) {
+        if (res && res.ok) {
           const blob = await res.blob();
+          // Evita gravar JSON de erro como PDF
+          const ctype = String(res.headers.get('content-type') || blob.type || '');
+          if (/json|text\/html/i.test(ctype) && blob.size < 5000) {
+            fileObj.status = 'Erro: resposta inválida do Sienge';
+            AnexosApp.renderFilesList();
+            return;
+          }
           fileObj.size = blob.size;
           fileObj.file = new File([blob], fileObj.originalName, { type: blob.type || (fileObj.ext === 'pdf' ? 'application/pdf' : 'image/jpeg') });
           if (['jpg', 'jpeg', 'png', 'pdf'].includes(fileObj.ext)) {
             fileObj.previewUrl = URL.createObjectURL(blob);
           }
-          fileObj.status = 'Identificando TAG...';
+          fileObj.status = skipOcr ? 'Identificando TAG…' : 'Identificando TAG (OCR)...';
           AnexosApp.renderFilesList();
-          await AnexosApp.applyTagFromOcrOrName(fileObj, fileObj.tagOriginal || fileObj.originalName);
+          await AnexosApp.applyTagFromOcrOrName(fileObj, fileObj.tagOriginal || fileObj.originalName, { skipOcr });
           AnexosApp.renderFilesList();
           AnexosApp.checkCanSend();
         } else {
-          const errText = await res.text();
-          fileObj.status = `Erro: ${res.status} ${errText.substring(0, 30)}`;
+          fileObj.status = `Erro: ${lastErr || 'download'}`;
           AnexosApp.renderFilesList();
         }
       } catch (e) {
-        fileObj.status = `Exceção: ${(e.message || '').substring(0, 30)}`;
+        fileObj.status = `Exceção: ${(e.message || '').substring(0, 40)}`;
         AnexosApp.renderFilesList();
       }
       await new Promise((r) => setTimeout(r, 0));
@@ -2729,6 +2787,10 @@ const AnexosApp = {
     let qi = 0;
     const workers = Array.from({ length: concurrency }, async () => {
       while (qi < queue.length) {
+        if (String(AnexosState.selectedUnidade) !== String(queue[0] && queue[0]._downloadUnitId || AnexosState.selectedUnidade)
+            && AnexosState.selectGen) {
+          // se o usuário mudou de lote, os itens já se limpam no selecionarUnidade
+        }
         const idx = qi++;
         await runOne(queue[idx]);
       }

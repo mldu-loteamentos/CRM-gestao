@@ -17,12 +17,16 @@ const RepactuacaoLoteApp = {
     stop: false,
     period: null,
     adjustDate: null,
+    adjustMonth: "", // YYYY-MM escolhido pelo operador
     firstBusinessDay: null,
     empresa: "",
     rows: [],
     indexers: [],
     ratesByIndexer: {},
-    filter: "all"
+    filter: "all",
+    previewLoading: false,
+    previewRows: [],
+    previewError: ""
   },
 
   esc(v) {
@@ -163,12 +167,208 @@ const RepactuacaoLoteApp = {
   init() {
     try {
       this.state.inited = true;
+      if (!this.state.adjustMonth) {
+        const d = new Date();
+        // Próximo mês civil como default (ciclo típico de repactuação)
+        const nm = this.addMonths(d.getFullYear(), d.getMonth(), 1);
+        this.state.adjustMonth = `${nm.year}-${String(nm.month + 1).padStart(2, "0")}`;
+        this.applyAdjustMonthToState(this.state.adjustMonth);
+      }
       this.render();
+      this.loadIndexerPreview();
     } catch (e) {
       console.error("[Repactuação lote] init", e);
       const root = document.getElementById("repactuacao-lote-root");
       if (root) root.innerHTML = `<p style="padding:24px;color:#b91c1c;">Não foi possível montar a tela de Repactuação. Recarregue a página.</p>`;
     }
+  },
+
+  applyAdjustMonthToState(ym) {
+    const m = String(ym || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(m)) return;
+    const [yy, mm] = m.split("-").map(Number);
+    this.state.adjustMonth = m;
+    this.state.adjustDate = `${m}-01`;
+    this.state.firstBusinessDay = this.firstBusinessDay(yy, mm);
+    this.state.period = {
+      start: this.state.adjustDate,
+      end: this.state.firstBusinessDay,
+      label: `${String(mm).padStart(2, "0")}/${yy}`
+    };
+  },
+
+  setAdjustMonth(ym) {
+    this.applyAdjustMonthToState(ym);
+    if (this.state.rows.length) {
+      this.applyIndexerLogic();
+      this.conferirSienge();
+    }
+    this.render();
+    this.loadIndexerPreview();
+  },
+
+  monthLabel(ym) {
+    if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return "—";
+    const [y, m] = ym.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, 1));
+    const name = dt.toLocaleDateString("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" });
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  },
+
+  isPreviewIndexer(idx) {
+    if (!idx || !idx.name) return false;
+    const n = String(idx.name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    if (n === "REAL" || n === "0" || n.startsWith("0 -") || /NAO UTILIZAR|NÃO UTILIZAR/.test(n)) return false;
+    return !!this.bcbCodeForName(idx.name);
+  },
+
+  async loadIndexerPreview() {
+    const ym = this.state.adjustMonth;
+    if (!ym) return;
+    const gen = (this.state._previewGen = (this.state._previewGen || 0) + 1);
+    this.state.previewLoading = true;
+    this.state.previewError = "";
+    this.renderPreviewOnly();
+    try {
+      await this.ensureIndexers();
+      if (gen !== this.state._previewGen) return;
+      const adjustIso = `${ym}-01`;
+      const list = (this.state.indexers || []).filter((i) => this.isPreviewIndexer(i));
+      // Preferir ativos do cadastro de Indexadores, se houver
+      let activeNames = null;
+      try {
+        const saved = localStorage.getItem("crm_indexadores_ativos");
+        if (saved) activeNames = new Set(JSON.parse(saved).map((x) => String(x)));
+      } catch (e) {}
+      const pool = activeNames && activeNames.size
+        ? list.filter((i) => activeNames.has(i.name))
+        : list;
+      const use = (pool.length ? pool : list).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+
+      const rows = [];
+      for (const idx of use) {
+        if (gen !== this.state._previewGen) return;
+        const retro = idx.revenueRetroactivity != null ? Number(idx.revenueRetroactivity) : 0;
+        const expectedBase = this.expectedBaseIso(adjustIso, retro);
+        const rates = await this.ratesForIndexer(idx);
+        const acc = this.accumulated12(rates, expectedBase);
+        const lastAvail = Object.keys(rates).sort().reverse()[0] || null;
+        rows.push({
+          id: idx.id,
+          name: idx.name,
+          retro,
+          expectedBase,
+          accPct: acc.missing.length === 12 ? null : acc.pct,
+          missing: acc.missing,
+          complete: acc.missing.length === 0,
+          partial: acc.missing.length > 0 && acc.missing.length < 12,
+          lastAvail,
+          months: acc.months
+        });
+      }
+      if (gen !== this.state._previewGen) return;
+      this.state.previewRows = rows;
+      this.state.previewLoading = false;
+      this.renderPreviewOnly();
+    } catch (e) {
+      console.error("[Repactuação] prévia indexadores", e);
+      if (gen !== this.state._previewGen) return;
+      this.state.previewLoading = false;
+      this.state.previewError = e.message || String(e);
+      this.renderPreviewOnly();
+    }
+  },
+
+  renderPreviewOnly() {
+    const el = document.getElementById("repac-indexer-preview");
+    if (!el) {
+      // Painel ainda não montado — próximo render() cobre
+      return;
+    }
+    el.outerHTML = this.previewHtml();
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  previewHtml() {
+    const ym = this.state.adjustMonth;
+    const fbd = this.state.firstBusinessDay;
+    const loading = this.state.previewLoading;
+    const err = this.state.previewError;
+    const rows = this.state.previewRows || [];
+    let body = "";
+    if (loading) {
+      body = `<p style="margin:0;color:#64748b;font-size:0.85rem;">Consultando BCB e cadastro Sienge dos indexadores…</p>`;
+    } else if (err) {
+      body = `<p style="margin:0;color:#b91c1c;font-size:0.85rem;">Falha na prévia: ${this.esc(err)}</p>`;
+    } else if (!rows.length) {
+      body = `<p style="margin:0;color:#64748b;font-size:0.85rem;">Nenhum indexador de correção encontrado no Sienge.</p>`;
+    } else {
+      body = `
+        <div style="overflow-x:auto;">
+          <table class="custom-table" style="font-size:0.82rem;">
+            <thead>
+              <tr>
+                <th style="text-align:left;">Indexador (Sienge)</th>
+                <th style="text-align:center;">ID</th>
+                <th style="text-align:center;">Retro</th>
+                <th style="text-align:center;">Mês base BCB</th>
+                <th style="text-align:center;">% acum. 12 meses</th>
+                <th style="text-align:center;">Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r) => {
+                const situ = r.complete
+                  ? `<span style="color:#15803d;font-weight:700;">Completo</span>`
+                  : (r.partial
+                    ? `<span style="color:#c2410c;font-weight:700;">Parcial · faltam ${r.missing.length}</span>`
+                    : `<span style="color:#94a3b8;">Sem dados</span>`);
+                const pctStyle = r.complete ? "color:#15803d;font-weight:800;" : (r.partial ? "color:#c2410c;font-weight:700;" : "");
+                return `<tr>
+                  <td style="text-align:left;font-weight:600;">${this.esc(r.name)}</td>
+                  <td style="text-align:center;">${this.esc(r.id)}</td>
+                  <td style="text-align:center;">${r.retro}</td>
+                  <td style="text-align:center;">${this.esc(this.fmtDate(r.expectedBase).replace(/^01\//, ""))}</td>
+                  <td style="text-align:center;${pctStyle}">${r.accPct == null ? "—" : this.esc(this.pct(r.accPct))}</td>
+                  <td style="text-align:center;">${situ}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+        <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">
+          Mesma regra da ficha (aba Repactuações): data base = mês da repactuação + retroatividade do indexador no Sienge (−1 / −2).
+          O percentual é o acumulado de 12 meses do BCB até essa data base.
+        </p>
+      `;
+    }
+    return `
+      <div id="repac-indexer-preview" class="search-filter-panel" style="margin-bottom:16px;border:1px solid #d1fae5;background:linear-gradient(180deg,#f0fdf4 0%,#fff 48%);">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:14px;">
+          <div class="form-group" style="margin:0;min-width:200px;">
+            <label for="repac-adjust-month" style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.03em;">Mês da repactuação</label>
+            <input type="month" id="repac-adjust-month" class="form-control" value="${this.esc(ym || "")}"
+              onchange="RepactuacaoLoteApp.setAdjustMonth(this.value)"
+              style="max-width:200px;font-weight:600;">
+          </div>
+          <div style="flex:1;min-width:180px;">
+            <div style="font-size:0.9rem;font-weight:700;color:#14532d;">${this.esc(this.monthLabel(ym))}</div>
+            <div style="font-size:0.78rem;color:#64748b;">
+              1º dia útil: <strong>${this.esc(this.fmtDate(fbd))}</strong>
+              · reajuste contratual nessa competência
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary" style="padding:8px 12px;"
+            onclick="RepactuacaoLoteApp.loadIndexerPreview()" ${loading ? "disabled" : ""}>
+            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar prévia
+          </button>
+        </div>
+        <h3 style="margin:0 0 8px;font-size:0.85rem;color:#166534;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;">
+          Prévia dos indexadores
+        </h3>
+        ${body}
+      </div>
+    `;
   },
 
   bindUpload() {
@@ -324,11 +524,20 @@ const RepactuacaoLoteApp = {
     });
 
     this.state.empresa = empresa;
-    this.state.period = period;
-    const start = period && period.start ? period.start : null;
-    const [yy, mm] = start ? start.split("-").map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1];
-    this.state.adjustDate = start || `${yy}-${String(mm).padStart(2, "0")}-01`;
-    this.state.firstBusinessDay = this.firstBusinessDay(yy, mm);
+    // Preferir mês escolhido pelo operador; planilha só sugere se ainda não houver escolha
+    if (this.state.adjustMonth && /^\d{4}-\d{2}$/.test(this.state.adjustMonth)) {
+      this.applyAdjustMonthToState(this.state.adjustMonth);
+    } else if (period && period.start) {
+      const [yy, mm] = period.start.split("-").map(Number);
+      this.state.adjustMonth = `${yy}-${String(mm).padStart(2, "0")}`;
+      this.applyAdjustMonthToState(this.state.adjustMonth);
+    } else {
+      const d = new Date();
+      const nm = this.addMonths(d.getFullYear(), d.getMonth(), 1);
+      this.state.adjustMonth = `${nm.year}-${String(nm.month + 1).padStart(2, "0")}`;
+      this.applyAdjustMonthToState(this.state.adjustMonth);
+    }
+    this.state.period = this.state.period || period;
     this.state.rows = rows;
   },
 
@@ -554,10 +763,8 @@ const RepactuacaoLoteApp = {
     this.state.loading = false;
     this.state.stop = false;
     this.state.filter = "all";
-    this.state.period = null;
-    this.state.adjustDate = null;
-    this.state.firstBusinessDay = null;
     this.state.empresa = "";
+    // Mantém o mês escolhido pelo operador e a prévia dos indexadores
     this.render();
   },
 
@@ -632,7 +839,7 @@ const RepactuacaoLoteApp = {
   tableHtml() {
     const rows = this.filteredRows();
     if (!this.state.rows.length) {
-      return `<p style="color:#64748b;padding:24px;text-align:center;">Envie a planilha <strong>Títulos para Repactuação</strong> para conferir data base (-1 / -2) e o valor projetado.</p>`;
+      return `<p style="color:#64748b;padding:24px;text-align:center;">Com o mês escolhido acima, envie a planilha <strong>Títulos para Repactuação</strong> para conferir data base e valor projetado por parcela.</p>`;
     }
     const body = rows.slice(0, 800).map((r) => {
       const baseClass = r.baseOk === false ? "color:#b91c1c;font-weight:700;" : (r.baseOk ? "color:#15803d;" : "");
@@ -711,12 +918,14 @@ const RepactuacaoLoteApp = {
             Repactuação
           </h2>
           <p style="font-size:0.9rem;color:var(--color-text-muted);margin:0 0 12px;">
-            Upload da planilha <strong>Títulos para Repactuação</strong>. O reajuste é no
-            <strong>1º dia útil do mês</strong>
-            ${this.state.firstBusinessDay ? `(${this.fmtDate(this.state.firstBusinessDay)})` : ""}.
-            A data base do indexador segue o cadastro do Sienge (<strong>-1</strong> ou <strong>-2</strong> meses),
-            igual à aba Repactuações da ficha: acumulado de 12 meses até essa data base.
+            Escolha o <strong>mês da repactuação</strong> para ver a prévia dos indexadores (data base do Sienge e % acumulado BCB).
+            Depois envie a planilha <strong>Títulos para Repactuação</strong> para conferir parcela a parcela.
+            O reajuste cai no <strong>1º dia útil</strong>${this.state.firstBusinessDay ? ` (${this.fmtDate(this.state.firstBusinessDay)})` : ""}.
           </p>
+        </div>
+        ${this.previewHtml()}
+        <div class="search-filter-panel" style="margin-bottom:16px;">
+          <h3 style="margin:0 0 10px;font-size:0.9rem;color:#334155;">Planilha de títulos</h3>
           ${this.uploadZoneHtml()}
           <p id="repac-progress" style="font-size:0.82rem;color:#64748b;margin:10px 0 0;">${this.state.loading ? "Processando…" : (n ? `${n} parcelas · ${titles} títulos` : "")}</p>
           ${this.state.loading ? `<button type="button" class="btn btn-cancel" style="margin-top:8px;" onclick="RepactuacaoLoteApp.parar()">Parar</button>` : ""}
