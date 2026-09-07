@@ -2994,7 +2994,7 @@ window.hasFinCrAction = function(actionId, flag) {
 window.setRulesSectionMode = function(root, canView, canEdit) {
   if (!root) return;
   root.querySelectorAll("input, select, textarea, button").forEach(el => {
-    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config" || el.id === "btn-save-alcada-desconto") return;
+    if (el.id === "btn-save-rules-config" || el.id === "btn-save-negociacao-config") return;
     if (el.closest && el.closest("#regras-tabs-menu")) return;
     el.disabled = !canEdit;
     el.style.pointerEvents = canEdit ? "" : "none";
@@ -3036,8 +3036,6 @@ window.applyRulesModulePermissions = function() {
   if (btnSaveNeg) btnSaveNeg.disabled = !canEditNeg;
   const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
   if (btnFila) btnFila.disabled = !canEditCob;
-  const btnSaveAlcada = document.getElementById("btn-save-alcada-desconto");
-  if (btnSaveAlcada) btnSaveAlcada.disabled = !canEditCob;
 
   let hint = document.getElementById("regras-perm-hint");
   if (!hint) {
@@ -9358,7 +9356,17 @@ function formatCpfCnpj(val) {
             interest: inst.interest !== undefined ? inst.interest : (inst.interestAmount !== undefined ? inst.interestAmount : undefined),
             monetaryCorrection: inst.monetaryCorrection !== undefined ? inst.monetaryCorrection : (inst.correctionAmount !== undefined ? inst.correctionAmount : undefined),
             overdueCharges: inst.overdueCharges,
-            indexerId: inst.indexerId != null ? inst.indexerId : (inst.indexerCode != null ? inst.indexerCode : (inst.idIndexer != null ? inst.idIndexer : null)),
+            indexerId: (() => {
+              if (inst.indexerId != null && inst.indexerId !== "") return inst.indexerId;
+              if (inst.indexerCode != null && inst.indexerCode !== "") return inst.indexerCode;
+              if (inst.idIndexer != null && inst.idIndexer !== "") return inst.idIndexer;
+              // Extrato: coluna Id = indexador quando installmentId é outro valor
+              if (inst.id != null && inst.installmentId != null && String(inst.id) !== String(inst.installmentId)) {
+                const n = Number(inst.id);
+                if (Number.isFinite(n) && n >= 0 && n <= 99 && String(inst.id).trim() === String(n)) return inst.id;
+              }
+              return null;
+            })(),
             indexerCode: inst.indexerCode != null ? inst.indexerCode : inst.indexerId,
             indexerName: inst.indexerName || inst.indexerDescription || (typeof inst.indexer === "string" ? inst.indexer : "")
           };
@@ -12757,96 +12765,58 @@ function generateAgreementPDF() {
   if (typeof window.enrichCustomerForLegalDocs === "function" && g_renegCustomer) {
     g_renegCustomer = await window.enrichCustomerForLegalDocs(g_renegCustomer);
   }
-  
-  // Obter Preâmbulo dos Sócios baseado na unidade
+
   const unit = AppState.units[g_renegSale.unitId] || {};
   const preambleText = (typeof window.getPreambleForContract === "function")
     ? window.getPreambleForContract(unit, g_renegSale)
     : (AppState.preambles[unit.costCenterId] || "PREÂMBULO NÃO CADASTRADO NO SHAREPOINT.");
-  
-  // Obter Cláusulas Editadas
-  let textTemplate = document.getElementById("reneg-clauses-editor").value;
+
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("crm_docpadrao_reneg") || "{}"); } catch (e) {}
+  const titleEl = document.getElementById("doc-reneg-title");
+  const subtitleEl = document.getElementById("doc-reneg-subtitle");
+  const docTitle = (titleEl && titleEl.value) || saved["doc-reneg-title"] || "INSTRUMENTO PARTICULAR DE CONFISSÃO DE DÍVIDA";
+  const docSubtitle = (subtitleEl && subtitleEl.value) || saved["doc-reneg-subtitle"] || "Moura Leite Loteamentos";
+
+  const padraoEl = document.getElementById("doc-reneg-clauses");
+  const editorEl = document.getElementById("reneg-clauses-editor");
+  let textTemplate = "";
+  if (padraoEl && padraoEl.value && !isLegacyRenegClauses(padraoEl.value)) {
+    textTemplate = padraoEl.value;
+  } else if (saved["doc-reneg-clauses"] && !isLegacyRenegClauses(saved["doc-reneg-clauses"])) {
+    textTemplate = saved["doc-reneg-clauses"];
+  } else if (editorEl && editorEl.value && !isLegacyRenegClauses(editorEl.value)) {
+    textTemplate = editorEl.value;
+  } else if (editorEl && editorEl.value) {
+    textTemplate = editorEl.value;
+  } else if (padraoEl && padraoEl.value) {
+    textTemplate = padraoEl.value;
+  }
   if (typeof window.upgradeCredorPlaceholdersToPreamble === "function") {
     textTemplate = window.upgradeCredorPlaceholdersToPreamble(textTemplate);
   }
   textTemplate = formatDocPadraoMarkup(textTemplate);
 
-  const extraMap = {
-    PARCELAS_ACORDO: String(results.instQty),
-    DATA_PRIMEIRA_PARCELA: new Date(results.firstDueDate).toLocaleDateString('pt-BR'),
-    VALOR_DIVIDA: results.newDebtBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-    VALOR_PARCELA_ACORDO: results.installmentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  };
-  if (typeof valorPorExtensoBRL === "function") {
-    extraMap.VALOR_DIVIDA_EXTENSO = valorPorExtensoBRL(results.newDebtBalance);
-    extraMap.VALOR_PARCELA_EXTENSO = valorPorExtensoBRL(results.installmentValue);
-  }
+  const extraMap = buildRenegAgreementExtraMap(results);
   const legalMap = window.buildLegalDocVarMap
     ? window.buildLegalDocVarMap(g_renegCustomer, g_renegSale, unit, { preambleText, map: extraMap })
     : extraMap;
   textTemplate = applyDistratoTemplateVars(textTemplate, legalMap);
-  textTemplate = textTemplate
-    .replace(/{{PARCELAS_ACORDO}}/g, `<strong>${results.instQty}</strong>`)
-    .replace(/{{DATA_PRIMEIRA_PARCELA}}/g, `<strong>${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</strong>`);
   if (typeof window.centerDistratoSignatures === "function") {
     textTemplate = window.centerDistratoSignatures(textTemplate);
   }
-  
-  // Montar Documento
+
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
-      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">INSTRUMENTO PARTICULAR DE ACORDO E CONFISSÃO DE DÍVIDA</h2>
-      <h3 style="font-size: 12pt; color: #666; margin: 0;">Moura Leite Loteamentos</h3>
+      <h2 style="color: #105436; font-size: 16pt; font-weight: bold; margin-bottom: 5px;">${docTitle}</h2>
+      <h3 style="font-size: 12pt; color: #666; margin: 0;">${docSubtitle}</h3>
     </div>
-    
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      <strong>OBJETO DO ACORDO:</strong> Referente à Unidade/Lote <strong>${g_renegSale.unitId}</strong> do Empreendimento/Cidade <strong>${unit.city || unit.enterpriseName || '___'}</strong>, com área aproximada de <strong>${unit.area || '___'} mÂ²</strong>, comercializada originalmente na data de <strong>${g_renegSale.saleDate ? new Date(g_renegSale.saleDate + 'T12:00:00').toLocaleDateString('pt-BR') : '___'}</strong>.
-    </p>
-
-    <p style="text-align: justify; margin-bottom: 1.5rem;">
-      Resolvem de comum acordo lavrar o presente instrumento, confessando a dívida líquida e certa de 
-      <strong>${results.newDebtBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>, 
-      a ser liquidada sob as condições e termos a seguir expostos:
-    </p>
-
-    <div style="margin: 1.5rem 0; padding: 15px; border: 1.5px solid #105436; border-radius: 6px;">
-      <h4 style="color: #105436; margin-top: 0; font-weight: bold;">DEMONSTRATIVO DE PARCELAMENTO</h4>
-      <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10pt;">
-        <tr>
-          <td style="padding: 5px; font-weight: bold;">Número de Parcelas acordadas:</td>
-          <td style="padding: 5px; text-align: right;">${results.instQty} parcela(s)</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px; font-weight: bold;">Valor de cada Parcela:</td>
-          <td style="padding: 5px; text-align: right;">${results.installmentValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px; font-weight: bold;">Vencimento da 1ª Parcela:</td>
-          <td style="padding: 5px; text-align: right;">${new Date(results.firstDueDate).toLocaleDateString('pt-BR')}</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px; font-weight: bold;">Desconto concedido em juros/multas:</td>
-          <td style="padding: 5px; text-align: right; color: red;">R$ ${results.discountValue.toFixed(2)} (${results.discountPct}%)</td>
-        </tr>
-      </table>
-    </div>
-
-    <div style="text-align: justify; margin-bottom: 2rem;">
+    <div style="text-align: justify; margin-bottom: 2rem; font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; line-height: 1.55;">
       ${textTemplate.replace(/\n/g, "<br>")}
     </div>
-
-    <div style="text-align: center; margin-top: 1.5rem; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 4px;">
-      <p style="margin: 0; font-size: 9pt; color: #555; font-weight: bold;">
-        A presente proposta de acordo tem validade de 2 dias úteis a partir da data de sua emissão.
-      </p>
-    </div>
-
-    <p style="text-align: right; margin-top: 3rem; margin-bottom: 3rem;">
-      Avaré/SP, ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}.
-    </p>
   `;
 
-  document.getElementById("pdf-modal-title").textContent = "Termo de Acordo Jurídico - PDF";
+  document.getElementById("pdf-modal-title").textContent = "Termo de Confissão de Dívida - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   document.getElementById("pdf-view-overlay").classList.add("active");
   lucide.createIcons();
@@ -14067,13 +14037,32 @@ window.loadQuitacaoDebtReport = async function(force) {
       const allZero = typeof window.quitacaoUpcomingAllZeroRate === "function"
         ? window.quitacaoUpcomingAllZeroRate((window.AppState && AppState.currentContractInstallments) || [])
         : false;
-      const alcada = window.resolveQuitacaoAlcada(discPct, allZero);
+      const qSale = (typeof window.getQuitacaoCurrentSale === "function" && window.getQuitacaoCurrentSale())
+        || sale
+        || window.sale
+        || null;
+      const unit = (qSale && qSale.unitId && AppState.units && AppState.units[qSale.unitId]) || {};
+      const alcadaCtx = {
+        companyId: (window._quitacaoState && window._quitacaoState.companyId)
+          || (AppState && AppState.currentCompanyId)
+          || (qSale && qSale.companyId)
+          || null,
+        costCenterId: (AppState && AppState.currentCostCenterId)
+          || (unit && unit.costCenterId)
+          || (qSale && (qSale.costCenterId || qSale.enterpriseId))
+          || null
+      };
+      const alcada = window.resolveQuitacaoAlcada(discPct, allZero, alcadaCtx);
       window._quitacaoState.alcada = alcada;
       alcadaBanner.style.display = "block";
       alcadaBanner.className = "quitacao-alcada-banner " + (alcada.within ? "is-ok" : "is-warn");
-      alcadaBanner.textContent = allZero
-        ? ("Alçada taxa 0: desconto máximo " + (alcada.maxPct != null ? alcada.maxPct.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%" : "—") + (alcada.within ? "." : " — o desconto atual ultrapassa o teto."))
-        : ((alcada.roleLabel ? ("Alçada " + alcada.roleLabel + ": ") : "Alçada aplicável: ") + alcada.label + (alcada.within ? "." : " — o desconto atual ultrapassa o teto do seu perfil."));
+      if (alcada.kind === "taxa_zero_fora") {
+        alcadaBanner.textContent = "Contrato taxa 0%, mas esta SPE/empreendimento está fora da regra de alçada taxa 0 — desconto por essa alçada não se aplica.";
+      } else {
+        alcadaBanner.textContent = allZero
+          ? ("Alçada taxa 0: desconto máximo " + (alcada.maxPct != null ? alcada.maxPct.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%" : "—") + (alcada.within ? "." : " — o desconto atual ultrapassa o teto."))
+          : ((alcada.roleLabel ? ("Alçada " + alcada.roleLabel + ": ") : "Alçada aplicável: ") + alcada.label + (alcada.within ? "." : " — o desconto atual ultrapassa o teto do seu perfil."));
+      }
     }
     if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     window.renderQuitacaoDebtReport();
@@ -14954,6 +14943,129 @@ function isLegacyDistratoClauses(text) {
   if (s.length < 280 && /As partes acordam na rescisão do contrato de compra e venda/i.test(s)) return true;
   if (!/\{\{#SE_RESTITUICAO\}\}/.test(s) && (/Parágrafo Primeiro: Nos termos previstos no caput/i.test(s) || /NOVO_LOTE/i.test(s))) return true;
   return false;
+}
+
+/** Modelo antigo de confissão (sem preâmbulo/assinaturas dos responsáveis ou texto curto). */
+function isLegacyRenegClauses(text) {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  if (/\{\{CREDOR_NOME\}\}/.test(s) && !/\{\{PREAMBULO\}\}/.test(s)) return true;
+  if (/Resolvem de comum acordo lavrar o presente instrumento/i.test(s)) return true;
+  if (!/\{\{PREAMBULO\}\}/.test(s) || !/\{\{ASSINATURAS_CREDORES\}\}/.test(s)) return true;
+  if (!/\{\{INDEXADOR_NOME\}\}/.test(s) || !/\{\{QTD_PARCELAS_VENCIDAS\}\}/.test(s)) return true;
+  if (!/CL[ÁA]USULA\s*16/i.test(s)) return true;
+  return false;
+}
+window.isLegacyRenegClauses = isLegacyRenegClauses;
+
+function moneyBRL(v) {
+  return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function renegPickIndexerName(bills) {
+  const names = (bills || [])
+    .map((b) => String(b.indexerName || b.indexerDescription || b.indexer || "").trim())
+    .filter(Boolean);
+  const prefer = names.find((n) => !/^real$/i.test(n) && !/^0$/.test(n) && !/^sem\s*index/i.test(n));
+  return prefer || names[0] || "IPC-DI da Fundação Getúlio Vargas";
+}
+
+function renegFormatJurosContrato(sale, bills) {
+  let rate = null;
+  if (typeof quitacaoGetMonthlyInterestRate === "function") {
+    rate = quitacaoGetMonthlyInterestRate(sale);
+  }
+  if (!(rate > 0) && bills && bills.length) {
+    for (let i = 0; i < bills.length; i++) {
+      const b = bills[i];
+      const raw = b.interestRate != null ? b.interestRate : b.interestPercentage;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      rate = n > 0.05 ? n / 100 : n;
+      break;
+    }
+  }
+  if (!(rate > 0)) return "____";
+  return (rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + "% ao mês";
+}
+
+function buildRenegAgreementExtraMap(results) {
+  const bills = g_renegBills || [];
+  const overdue = bills.filter((b) => b.isOverdue);
+  const aVencer = bills.filter((b) => !b.isOverdue);
+  const valorVencidas = overdue.reduce((acc, b) => acc + (b.computedCorrected != null ? b.computedCorrected : (b.value || 0)), 0);
+  const valorVincendo = aVencer.reduce((acc, b) => acc + (b.value || 0), 0);
+  const qtdVinc = aVencer.length;
+  const parcelaVincenda = qtdVinc ? (valorVincendo / qtdVinc) : (aVencer[0] && aVencer[0].value) || 0;
+  const firstVinc = aVencer
+    .map((b) => b.dueDate)
+    .filter(Boolean)
+    .sort()[0];
+  const firstOverdue = overdue
+    .map((b) => b.dueDate)
+    .filter(Boolean)
+    .sort()[0];
+  let mesAnoInad = "____";
+  if (firstOverdue) {
+    const d = new Date(String(firstOverdue).slice(0, 10) + "T12:00:00");
+    if (!isNaN(d.getTime())) {
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      mesAnoInad = mm + "/" + d.getFullYear();
+    }
+  }
+  const firstDue = results && results.firstDueDate
+    ? new Date(String(results.firstDueDate).slice(0, 10) + "T12:00:00")
+    : null;
+  let diaVenc = "20";
+  if (firstDue && !isNaN(firstDue.getTime())) diaVenc = String(firstDue.getDate()).padStart(2, "0");
+  else {
+    const days = bills.map((b) => (b.dueDate ? parseInt(String(b.dueDate).split("-")[2], 10) : null)).filter((d) => d);
+    if (days.length) {
+      const bag = {};
+      days.forEach((d) => { bag[d] = (bag[d] || 0) + 1; });
+      diaVenc = String(Object.keys(bag).sort((a, b) => bag[b] - bag[a])[0]).padStart(2, "0");
+    }
+  }
+  const w1 = (typeof getDistratoWitnessBySelect === "function") ? getDistratoWitnessBySelect("dist-testemunha-1") : null;
+  const w2 = (typeof getDistratoWitnessBySelect === "function") ? getDistratoWitnessBySelect("dist-testemunha-2") : null;
+  const witnessUsers = (typeof getDistratoWitnessUsers === "function") ? getDistratoWitnessUsers() : [];
+  const tw1 = w1 || witnessUsers[0] || {};
+  const tw2 = w2 || witnessUsers[1] || {};
+  const map = {
+    PARCELAS_ACORDO: String(results.instQty),
+    DATA_PRIMEIRA_PARCELA: firstDue && !isNaN(firstDue.getTime())
+      ? firstDue.toLocaleDateString("pt-BR")
+      : String(results.firstDueDate || "____"),
+    VALOR_DIVIDA: moneyBRL(results.newDebtBalance),
+    VALOR_PARCELA_ACORDO: moneyBRL(results.installmentValue),
+    DIA_VENCIMENTO: diaVenc,
+    MES_ANO_INADIMPLENCIA: mesAnoInad,
+    QTD_PARCELAS_VENCIDAS: String(overdue.length),
+    VALOR_VENCIDAS: moneyBRL(valorVencidas),
+    VALOR_VINCENDO: moneyBRL(valorVincendo),
+    QTD_PARCELAS_VINCENDAS: String(qtdVinc),
+    VALOR_PARCELA_VINCENDA: moneyBRL(parcelaVincenda),
+    DATA_PRIMEIRA_VINCENDA: firstVinc
+      ? new Date(String(firstVinc).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR")
+      : "____",
+    INDEXADOR_NOME: renegPickIndexerName(bills),
+    JUROS_CONTRATO: renegFormatJurosContrato(g_renegSale, bills),
+    TESTEMUNHA_1_NOME: tw1.nome || tw1.name || "LETICIA PEREIRA DE OLIVIERA",
+    TESTEMUNHA_1_RG: tw1.rg || tw1.doc_rg || "50.505.231-3",
+    TESTEMUNHA_2_NOME: tw2.nome || tw2.name || "MICHELLE FRANCINE VIEIRA",
+    TESTEMUNHA_2_RG: tw2.rg || tw2.doc_rg || "463210852"
+  };
+  if (typeof valorPorExtensoBRL === "function") {
+    map.VALOR_DIVIDA_EXTENSO = valorPorExtensoBRL(results.newDebtBalance);
+    map.VALOR_PARCELA_EXTENSO = valorPorExtensoBRL(results.installmentValue);
+    map.VALOR_VENCIDAS_EXTENSO = valorPorExtensoBRL(valorVencidas);
+    map.VALOR_VINCENDO_EXTENSO = valorPorExtensoBRL(valorVincendo);
+    map.VALOR_PARCELA_VINCENDA_EXTENSO = valorPorExtensoBRL(parcelaVincenda);
+  }
+  if (typeof numeroPorExtenso === "function") {
+    map.QTD_PARCELAS_VINCENDAS_EXTENSO = numeroPorExtenso(qtdVinc);
+  }
+  return map;
 }
 
 function applyDistratoConditionals(text, flags) {
@@ -26602,7 +26714,8 @@ async function previewDocPadrao(tipo) {
     const subtitle = document.getElementById('doc-reneg-subtitle')?.value || '';
     const clauses = document.getElementById('doc-reneg-clauses')?.value || '';
     const filled = await fillLegalPreview(clauses);
-    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+    const centered = window.centerDistratoSignatures ? window.centerDistratoSignatures(filled) : filled;
+    content = `<h2 style="text-align:center;">${title}</h2><p style="text-align:center;color:#666;">${subtitle}</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${centered}</div>`;
   } else if (tipo === 'boleto') {
     const inst1 = document.getElementById('doc-boleto-inst1')?.value || '';
     const inst2 = document.getElementById('doc-boleto-inst2')?.value || '';
@@ -26647,8 +26760,13 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
     if (!el || data[id] === undefined) return;
     if (id === 'doc-distrato-clauses' && isLegacyDistratoClauses(data[id])) return;
     if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
-    if (id === 'doc-reneg-clauses' && typeof window.upgradeCredorPlaceholdersToPreamble === 'function') {
-      el.value = window.upgradeCredorPlaceholdersToPreamble(data[id]);
+    if (id === 'doc-reneg-clauses') {
+      if (typeof isLegacyRenegClauses === 'function' && isLegacyRenegClauses(data[id])) return;
+      el.value = (typeof window.upgradeCredorPlaceholdersToPreamble === 'function')
+        ? window.upgradeCredorPlaceholdersToPreamble(data[id])
+        : data[id];
+      const hidden = document.getElementById('reneg-clauses-editor');
+      if (hidden) hidden.value = el.value;
       return;
     }
     el.value = data[id];

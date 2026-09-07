@@ -1,6 +1,8 @@
 // Alçadas de desconto para Valor Quitação
 (function () {
   const STORAGE_KEY = "crm_moura_alcada_desconto";
+  let saveTimer = null;
+  let saving = false;
 
   const ALCADA_ROLES = [
     { id: "op_cobranca_interno", label: "Operador de cobrança interno", hint: "Perfil OPERADOR COBRANÇA · interno" },
@@ -10,6 +12,13 @@
     { id: "sup_tes", label: "Supervisor tesouraria", hint: "Perfil SUPERVISOR TESOURARIA" },
     { id: "ger_fpa", label: "Gerente FP&A", hint: "Perfil GERENTE FP&A" }
   ];
+
+  const ui = {
+    companyOpen: false,
+    companyQuery: "",
+    ccOpen: false,
+    ccQuery: ""
+  };
 
   function defaultRoleLevels(levels) {
     const firstId = levels && levels[0] ? Number(levels[0].id) || 1 : 1;
@@ -22,6 +31,8 @@
     const levels = [{ id: 1, minPct: 0, maxPct: 5 }];
     return {
       taxaZeroMaxPct: 5,
+      taxaZeroCompanyIds: [],
+      taxaZeroCostCenterIds: [],
       levels: levels,
       roleLevels: defaultRoleLevels(levels),
       updatedAt: null
@@ -32,6 +43,11 @@
     if (v == null || v === "") return null;
     const n = Number(String(v).replace(",", "."));
     return Number.isFinite(n) ? n : null;
+  }
+
+  function asIdList(arr) {
+    if (!Array.isArray(arr)) return [];
+    return [...new Set(arr.map(function (x) { return String(x); }).filter(Boolean))];
   }
 
   function normalizeRoleLevels(raw, levels) {
@@ -51,6 +67,8 @@
     if (!raw || typeof raw !== "object") return base;
     const taxa = parsePct(raw.taxaZeroMaxPct);
     base.taxaZeroMaxPct = taxa != null && taxa >= 0 ? taxa : base.taxaZeroMaxPct;
+    base.taxaZeroCompanyIds = asIdList(raw.taxaZeroCompanyIds || (raw.taxaZeroScope && raw.taxaZeroScope.companyIds));
+    base.taxaZeroCostCenterIds = asIdList(raw.taxaZeroCostCenterIds || (raw.taxaZeroScope && raw.taxaZeroScope.costCenterIds));
     const levels = Array.isArray(raw.levels) ? raw.levels : [];
     base.levels = (levels.length ? levels : base.levels).map(function (lv, i) {
       const min = parsePct(lv && lv.minPct);
@@ -145,7 +163,22 @@
     });
   }
 
-  function resolveAlcada(discountPct, allUpcomingZero) {
+  /**
+   * Regra "teto taxa 0" só vale se empresa/empreendimento estiverem no escopo.
+   * Listas vazias = todas (compatível com configs antigas).
+   */
+  function taxaZeroScopeApplies(cfg, ctx) {
+    const cos = asIdList(cfg && cfg.taxaZeroCompanyIds);
+    const ccs = asIdList(cfg && cfg.taxaZeroCostCenterIds);
+    if (!cos.length && !ccs.length) return true;
+    const companyId = ctx && ctx.companyId != null ? String(ctx.companyId) : "";
+    const costCenterId = ctx && ctx.costCenterId != null ? String(ctx.costCenterId) : "";
+    if (cos.length && (!companyId || cos.indexOf(companyId) === -1)) return false;
+    if (ccs.length && (!costCenterId || ccs.indexOf(costCenterId) === -1)) return false;
+    return true;
+  }
+
+  function resolveAlcada(discountPct, allUpcomingZero, ctx) {
     const cfg = loadConfig();
     const pct = Number(discountPct);
     const user = window.AppState && AppState.currentUser;
@@ -155,6 +188,19 @@
     const roleLabel = role ? role.label : (isAdmin ? "Administrador" : null);
 
     if (allUpcomingZero) {
+      if (!taxaZeroScopeApplies(cfg, ctx || {})) {
+        return {
+          kind: "taxa_zero_fora",
+          maxPct: 0,
+          minPct: 0,
+          level: null,
+          roleId: roleId,
+          roleLabel: roleLabel,
+          label: "Taxa 0 · empreendimento fora da regra (sem desconto por alçada taxa 0)",
+          within: !Number.isFinite(pct) || pct <= 0.009,
+          scopeBlocked: true
+        };
+      }
       return {
         kind: "taxa_zero",
         maxPct: cfg.taxaZeroMaxPct,
@@ -204,9 +250,17 @@
     };
   }
 
-  function paintUpdated(updatedAt) {
+  function paintUpdated(updatedAt, status) {
     const el = document.getElementById("alcada-desconto-updated");
     if (!el) return;
+    if (status === "saving") {
+      el.textContent = "salvando…";
+      return;
+    }
+    if (status === "error") {
+      el.textContent = "salvo localmente · falha na nuvem";
+      return;
+    }
     if (!updatedAt) {
       el.textContent = "";
       return;
@@ -216,7 +270,7 @@
       el.textContent = "";
       return;
     }
-    el.textContent = "última atualização · " + d.toLocaleString("pt-BR", {
+    el.textContent = "salva automaticamente · " + d.toLocaleString("pt-BR", {
       day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
     });
   }
@@ -239,7 +293,7 @@
         '</td>' +
         '<td>' +
           '<button type="button" class="alcada-del" onclick="window.removeAlcadaDescontoLevel(this)" title="Remover nível">' +
-            '<i data-lucide="trash-2"></i>' +
+            '<i data-lucide="trash-2" style="width:13px;height:13px;"></i>' +
           '</button>' +
         '</td>' +
       '</tr>'
@@ -295,15 +349,313 @@
     });
   }
 
-  function bindLevelInputs() {
-    const body = document.getElementById("alcada-levels-body");
-    if (!body || body._alcadaBound) return;
-    body._alcadaBound = true;
-    body.addEventListener("input", function (e) {
-      const t = e.target;
-      if (t && (t.classList.contains("alcada-min") || t.classList.contains("alcada-max"))) {
-        refreshRoleSelects();
+  function companiesList() {
+    return ((window.AppState && AppState.companies) || []).map(function (c) {
+      return { id: String(c.id), name: c.name || "", label: c.id + " - " + String(c.name || "").toUpperCase() };
+    });
+  }
+
+  function costCentersList(companyIds) {
+    const all = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const cos = asIdList(companyIds);
+    return all
+      .filter(function (cc) {
+        if (!cos.length) return true;
+        return cos.indexOf(String(cc.companyId)) !== -1 || cc.companyId == null;
+      })
+      .map(function (cc) {
+        return {
+          id: String(cc.id),
+          name: cc.name || "",
+          label: cc.id + " - " + String(cc.name || "").toUpperCase()
+        };
+      });
+  }
+
+  function readScopeFromUiOrCfg(cfg) {
+    const root = document.getElementById("alcada-taxa-zero-scope");
+    if (!root) {
+      return {
+        companyIds: asIdList(cfg && cfg.taxaZeroCompanyIds),
+        costCenterIds: asIdList(cfg && cfg.taxaZeroCostCenterIds)
+      };
+    }
+    return {
+      companyIds: asIdList(JSON.parse(root.getAttribute("data-companies") || "[]")),
+      costCenterIds: asIdList(JSON.parse(root.getAttribute("data-ccs") || "[]"))
+    };
+  }
+
+  function writeScopeAttrs(companyIds, costCenterIds) {
+    const root = document.getElementById("alcada-taxa-zero-scope");
+    if (!root) return;
+    root.setAttribute("data-companies", JSON.stringify(asIdList(companyIds)));
+    root.setAttribute("data-ccs", JSON.stringify(asIdList(costCenterIds)));
+  }
+
+  function renderScopeFilters(cfg) {
+    const host = document.getElementById("alcada-taxa-zero-scope");
+    if (!host || typeof window.MlEmpresaFilter === "undefined") return;
+    const companyIds = asIdList(cfg.taxaZeroCompanyIds);
+    let costCenterIds = asIdList(cfg.taxaZeroCostCenterIds);
+    const cos = companiesList();
+    const ccs = costCentersList(companyIds);
+    const ccSet = new Set(ccs.map(function (x) { return String(x.id); }));
+    costCenterIds = costCenterIds.filter(function (id) { return !companyIds.length || ccSet.has(String(id)); });
+    writeScopeAttrs(companyIds, costCenterIds);
+
+    const empHtml = MlEmpresaFilter.html({
+      id: "alcada-emp",
+      label: "EMPRESAS (SPE)",
+      items: cos,
+      selectedIds: companyIds,
+      open: ui.companyOpen,
+      query: ui.companyQuery,
+      emptyMeansAll: true,
+      countMode: true
+    });
+    const ccHtml = MlEmpresaFilter.html({
+      id: "alcada-cc",
+      label: "EMPREENDIMENTOS",
+      items: ccs,
+      selectedIds: costCenterIds,
+      open: ui.ccOpen,
+      query: ui.ccQuery,
+      emptyMeansAll: true,
+      countMode: true
+    });
+
+    host.innerHTML =
+      '<p class="alcada-scope-hint">Marque onde a regra de teto taxa 0 vale. Sem seleção = todas. SPE/empreendimento de fora fica sem desconto por essa alçada, mesmo com contrato 0%.</p>' +
+      '<div class="alcada-scope-filters">' + empHtml + ccHtml + "</div>";
+
+    MlEmpresaFilter.bind("alcada-emp", {
+      toggleOpen: function () {
+        ui.companyOpen = !ui.companyOpen;
+        ui.ccOpen = false;
+        renderScopeFilters(Object.assign({}, cfg, {
+          taxaZeroCompanyIds: readScopeFromUiOrCfg(cfg).companyIds,
+          taxaZeroCostCenterIds: readScopeFromUiOrCfg(cfg).costCenterIds
+        }));
+        if (window.lucide) lucide.createIcons();
+      },
+      setQuery: function (q) {
+        ui.companyQuery = q;
+        const list = document.getElementById("alcada-emp-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            items: cos,
+            selectedIds: readScopeFromUiOrCfg(cfg).companyIds,
+            query: q
+          });
+        }
+      },
+      toggleId: function (id, on) {
+        const scope = readScopeFromUiOrCfg(cfg);
+        const set = new Set(scope.companyIds);
+        if (on) set.add(String(id)); else set.delete(String(id));
+        const nextCos = [...set];
+        const allowedCc = new Set(costCentersList(nextCos).map(function (x) { return String(x.id); }));
+        const nextCcs = scope.costCenterIds.filter(function (cid) { return !nextCos.length || allowedCc.has(String(cid)); });
+        writeScopeAttrs(nextCos, nextCcs);
+        renderScopeFilters({
+          taxaZeroCompanyIds: nextCos,
+          taxaZeroCostCenterIds: nextCcs
+        });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
+      },
+      selectAll: function () {
+        const nextCos = cos.map(function (c) { return String(c.id); });
+        writeScopeAttrs(nextCos, readScopeFromUiOrCfg(cfg).costCenterIds);
+        renderScopeFilters({
+          taxaZeroCompanyIds: nextCos,
+          taxaZeroCostCenterIds: readScopeFromUiOrCfg(cfg).costCenterIds
+        });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
+      },
+      selectNone: function () {
+        writeScopeAttrs([], []);
+        renderScopeFilters({ taxaZeroCompanyIds: [], taxaZeroCostCenterIds: [] });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
       }
+    });
+
+    MlEmpresaFilter.bind("alcada-cc", {
+      toggleOpen: function () {
+        ui.ccOpen = !ui.ccOpen;
+        ui.companyOpen = false;
+        const scope = readScopeFromUiOrCfg(cfg);
+        renderScopeFilters({
+          taxaZeroCompanyIds: scope.companyIds,
+          taxaZeroCostCenterIds: scope.costCenterIds
+        });
+        if (window.lucide) lucide.createIcons();
+      },
+      setQuery: function (q) {
+        ui.ccQuery = q;
+        const scope = readScopeFromUiOrCfg(cfg);
+        const list = document.getElementById("alcada-cc-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            items: costCentersList(scope.companyIds),
+            selectedIds: scope.costCenterIds,
+            query: q
+          });
+        }
+      },
+      toggleId: function (id, on) {
+        const scope = readScopeFromUiOrCfg(cfg);
+        const set = new Set(scope.costCenterIds);
+        if (on) set.add(String(id)); else set.delete(String(id));
+        writeScopeAttrs(scope.companyIds, [...set]);
+        renderScopeFilters({
+          taxaZeroCompanyIds: scope.companyIds,
+          taxaZeroCostCenterIds: [...set]
+        });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
+      },
+      selectAll: function () {
+        const scope = readScopeFromUiOrCfg(cfg);
+        const next = costCentersList(scope.companyIds).map(function (c) { return String(c.id); });
+        writeScopeAttrs(scope.companyIds, next);
+        renderScopeFilters({
+          taxaZeroCompanyIds: scope.companyIds,
+          taxaZeroCostCenterIds: next
+        });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
+      },
+      selectNone: function () {
+        const scope = readScopeFromUiOrCfg(cfg);
+        writeScopeAttrs(scope.companyIds, []);
+        renderScopeFilters({
+          taxaZeroCompanyIds: scope.companyIds,
+          taxaZeroCostCenterIds: []
+        });
+        scheduleAutoSave();
+        if (window.lucide) lucide.createIcons();
+      }
+    });
+  }
+
+  function canEdit() {
+    if (typeof window.hasFinCrAction !== "function") return true;
+    return window.hasFinCrAction("regras_cobranca", "editar");
+  }
+
+  function collectFromForm() {
+    const taxa = parsePct((document.getElementById("alcada-taxa-zero-max") || {}).value);
+    if (taxa == null || taxa < 0 || taxa > 100) return { valid: false };
+    const rows = document.querySelectorAll("#alcada-levels-body .alcada-level-row");
+    const levels = [];
+    let valid = true;
+    rows.forEach(function (row, i) {
+      const min = parsePct((row.querySelector(".alcada-min") || {}).value);
+      const max = parsePct((row.querySelector(".alcada-max") || {}).value);
+      if (min == null || max == null || min < 0 || max < 0 || max < min || min > 100 || max > 100) valid = false;
+      levels.push({
+        id: Number(row.getAttribute("data-id")) || (i + 1),
+        minPct: min,
+        maxPct: max
+      });
+    });
+    const roleLevels = defaultRoleLevels(levels);
+    document.querySelectorAll(".alcada-role-row").forEach(function (row) {
+      const id = row.getAttribute("data-role");
+      const n = Number((row.querySelector(".alcada-role-level") || {}).value);
+      if (id && Number.isFinite(n) && levels.some(function (lv) { return Number(lv.id) === n; })) {
+        roleLevels[id] = n;
+      } else {
+        valid = false;
+      }
+    });
+    const scope = readScopeFromUiOrCfg({});
+    return {
+      valid: valid && levels.length > 0,
+      taxaZeroMaxPct: taxa,
+      levels: levels,
+      roleLevels: roleLevels,
+      taxaZeroCompanyIds: scope.companyIds,
+      taxaZeroCostCenterIds: scope.costCenterIds
+    };
+  }
+
+  window.persistAlcadaDescontoConfig = async function (opts) {
+    opts = opts || {};
+    if (!canEdit()) {
+      if (!opts.silent) alert("Sem permissão para editar alçadas de desconto.");
+      return false;
+    }
+    const collected = collectFromForm();
+    if (!collected.valid) {
+      if (!opts.silent) {
+        alert("Informe o nível de cada perfil e percentuais válidos (0 a 100). Em cada nível, o máximo deve ser maior ou igual ao mínimo.");
+      }
+      paintUpdated(null, "error");
+      return false;
+    }
+    const payload = {
+      taxaZeroMaxPct: collected.taxaZeroMaxPct,
+      taxaZeroCompanyIds: collected.taxaZeroCompanyIds,
+      taxaZeroCostCenterIds: collected.taxaZeroCostCenterIds,
+      levels: collected.levels,
+      roleLevels: collected.roleLevels,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    paintUpdated(payload.updatedAt, "saving");
+    try {
+      if (window.forceUploadLocalConfig) await window.forceUploadLocalConfig(true);
+      paintUpdated(payload.updatedAt);
+      return true;
+    } catch (err) {
+      paintUpdated(payload.updatedAt, "error");
+      if (!opts.silent) {
+        alert("Alçadas salvas neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
+      }
+      return false;
+    }
+  };
+
+  function scheduleAutoSave() {
+    if (!canEdit()) return;
+    paintUpdated(Date.now(), "saving");
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async function () {
+      if (saving) {
+        scheduleAutoSave();
+        return;
+      }
+      saving = true;
+      try {
+        await window.persistAlcadaDescontoConfig({ silent: true });
+      } finally {
+        saving = false;
+      }
+    }, 450);
+  }
+
+  function bindAutoSave() {
+    const root = document.getElementById("content-regra-alcada");
+    if (!root || root.dataset.alcadaAutoSave === "1") return;
+    root.dataset.alcadaAutoSave = "1";
+    root.addEventListener("input", function (ev) {
+      const t = ev.target;
+      if (!t) return;
+      if (t.id === "alcada-taxa-zero-max" || (t.classList && (t.classList.contains("alcada-min") || t.classList.contains("alcada-max")))) {
+        if (t.classList && (t.classList.contains("alcada-min") || t.classList.contains("alcada-max"))) refreshRoleSelects();
+        scheduleAutoSave();
+      }
+    });
+    root.addEventListener("change", function (ev) {
+      const t = ev.target;
+      if (!t) return;
+      if (t.classList && t.classList.contains("alcada-role-level")) scheduleAutoSave();
+      if (t.id === "alcada-taxa-zero-max") scheduleAutoSave();
     });
   }
 
@@ -332,13 +684,14 @@
       body.innerHTML = (data.levels || []).map(levelRowHtml).join("");
     }
     renderRoles(data.roleLevels || defaultRoleLevels(data.levels), data.levels || []);
-    bindLevelInputs();
+    renderScopeFilters(data);
+    bindAutoSave();
     paintUpdated(data.updatedAt);
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   };
 
   window.addAlcadaDescontoLevel = function () {
-    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    if (!canEdit()) {
       alert("Sem permissão para editar alçadas de desconto.");
       return;
     }
@@ -354,11 +707,12 @@
     }, n));
     renumberLevelLabels();
     refreshRoleSelects();
+    scheduleAutoSave();
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   };
 
   window.removeAlcadaDescontoLevel = function (btn) {
-    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    if (!canEdit()) {
       alert("Sem permissão para editar alçadas de desconto.");
       return;
     }
@@ -373,74 +727,31 @@
     if (row) row.remove();
     renumberLevelLabels();
     refreshRoleSelects();
+    scheduleAutoSave();
   };
 
-  function collectFromForm() {
-    const taxa = parsePct((document.getElementById("alcada-taxa-zero-max") || {}).value);
-    if (taxa == null || taxa < 0 || taxa > 100) return { valid: false };
-    const rows = document.querySelectorAll("#alcada-levels-body .alcada-level-row");
-    const levels = [];
-    let valid = true;
-    rows.forEach(function (row, i) {
-      const min = parsePct((row.querySelector(".alcada-min") || {}).value);
-      const max = parsePct((row.querySelector(".alcada-max") || {}).value);
-      if (min == null || max == null || min < 0 || max < 0 || max < min || min > 100 || max > 100) valid = false;
-      levels.push({
-        id: Number(row.getAttribute("data-id")) || (i + 1),
-        minPct: min,
-        maxPct: max
-      });
-    });
-    const roleLevels = defaultRoleLevels(levels);
-    document.querySelectorAll(".alcada-role-row").forEach(function (row) {
-      const id = row.getAttribute("data-role");
-      const n = Number((row.querySelector(".alcada-role-level") || {}).value);
-      if (id && Number.isFinite(n) && levels.some(function (lv) { return Number(lv.id) === n; })) {
-        roleLevels[id] = n;
-      } else {
-        valid = false;
-      }
-    });
-    return { valid: valid && levels.length > 0, taxaZeroMaxPct: taxa, levels: levels, roleLevels: roleLevels };
-  }
-
-  window.saveAlcadaDescontoConfig = async function () {
-    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
-      alert("Sem permissão para editar alçadas de desconto.");
-      return;
-    }
-    const collected = collectFromForm();
-    if (!collected.valid) {
-      alert("Informe o nível de cada perfil e percentuais válidos (0 a 100). Em cada nível, o máximo deve ser maior ou igual ao mínimo.");
-      return;
-    }
-    const payload = {
-      taxaZeroMaxPct: collected.taxaZeroMaxPct,
-      levels: collected.levels,
-      roleLevels: collected.roleLevels,
-      updatedAt: Date.now()
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    paintUpdated(payload.updatedAt);
-    try {
-      if (window.forceUploadLocalConfig) await window.forceUploadLocalConfig(true);
-      alert("Alçadas de desconto salvas com sucesso.");
-    } catch (err) {
-      alert("Alçadas salvas neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
-    }
+  window.saveAlcadaDescontoConfig = function () {
+    return window.persistAlcadaDescontoConfig({ silent: false });
   };
 
   window.resetAlcadaDescontoToDefault = async function () {
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Restaurar as alçadas padrão? As alterações não salvas serão perdidas.")
+      ? await window.mouraConfirm("Restaurar as alçadas padrão?")
       : window.confirm("Restaurar as alçadas padrão?");
     if (!ok) return;
-    window.renderAlcadaDescontoTab(defaultConfig());
+    const payload = defaultConfig();
+    payload.updatedAt = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    window.renderAlcadaDescontoTab(payload);
+    scheduleAutoSave();
   };
 
   window.loadAlcadaDescontoConfig = loadConfig;
   window.resolveQuitacaoAlcada = resolveAlcada;
   window.quitacaoUpcomingAllZeroRate = upcomingAllZeroRate;
+  window.alcadaTaxaZeroScopeApplies = function (ctx) {
+    return taxaZeroScopeApplies(loadConfig(), ctx || {});
+  };
   window.matchAlcadaDescontoRole = matchAlcadaRole;
   window.ALCADA_DESCONTO_ROLES = ALCADA_ROLES;
 })();

@@ -37,11 +37,20 @@ function readIndexerRef(obj) {
     tryId(condition && condition.indexerId);
     tryId(condition && condition.idIndexer);
     if (obj.indexer != null && typeof obj.indexer !== "object") tryId(obj.indexer);
+    if (obj.indexador != null && typeof obj.indexador !== "object") tryId(obj.indexador);
 
-    // Extrato impresso: coluna "Id" = indexador (0–99). Só usa se não houver installmentId longo.
-    if ((id == null || id === "") && obj.installmentNumber != null && obj.id != null && obj.id !== "" && obj.installmentId == null) {
+    // Extrato Sienge: coluna "Id" = indexador (0–99). installmentId é a parcela; não confundir.
+    if ((id == null || id === "") && obj.id != null && obj.id !== "") {
         const n = Number(obj.id);
-        if (Number.isFinite(n) && n >= 0 && n <= 99 && String(obj.id).trim() === String(n)) id = obj.id;
+        const idStr = String(obj.id).trim();
+        const looksIndexer = Number.isFinite(n) && n >= 0 && n <= 99 && idStr === String(n);
+        if (looksIndexer) {
+            if (obj.installmentId == null || obj.installmentId === "") {
+                if (obj.installmentNumber != null) id = obj.id;
+            } else if (String(obj.installmentId) !== idStr) {
+                id = obj.id;
+            }
+        }
     }
 
     let name = obj.indexerName || obj.indexerDescription || obj.correctionIndexerName
@@ -51,7 +60,7 @@ function readIndexerRef(obj) {
         || "";
     if (typeof name === "object") name = name.name || name.description || "";
 
-    // "7 - IGPM" / "7-IGP-M"
+    // "7 - IGPM" / "8-IPCA"
     if ((id == null || id === "") && name) {
         const m = String(name).match(/^\s*(\d{1,2})\s*[-–]/);
         if (m) id = m[1];
@@ -63,6 +72,21 @@ function readIndexerRef(obj) {
 function collectIndexerRefs(target, obj) {
     const ref = readIndexerRef(obj);
     if (ref.id != null || ref.name) target.push(ref);
+}
+
+/** Percorre arrays de parcelas do remade (originais + geradas). */
+function collectIndexerRefsDeep(target, obj, depth) {
+    if (!obj || depth > 4) return;
+    collectIndexerRefs(target, obj);
+    const keys = [
+        "remadeInstallments", "originalInstallments", "oldInstallments",
+        "generatedInstallments", "installments", "conditions", "paymentConditions"
+    ];
+    keys.forEach((k) => {
+        const arr = obj[k];
+        if (!Array.isArray(arr)) return;
+        arr.forEach((row) => collectIndexerRefsDeep(target, row, depth + 1));
+    });
 }
 
 function pickContractIndexer(refs) {
@@ -156,7 +180,7 @@ async function loadRepactuacoes(isBackground = false) {
         }
         
         const cleanBillId = String(billId).replace(/^B-/, '');
-        const cacheKey = cleanBillId + "|idx-v2";
+        const cacheKey = cleanBillId + "|idx-v3";
         
         // CACHE LOGIC
         if (window.lastRepactuacaoBillId === cacheKey && resultsEl.innerHTML.trim() !== "") {
@@ -240,9 +264,11 @@ async function loadRepactuacoes(isBackground = false) {
             const startDueDate = "2010-01-01";
             const endDueDate = "2050-01-01";
             
-            const extractQs = (cid, includeRemade) => {
+            const extractQs = (cid, includeRemade, histFlags) => {
                 const remade = includeRemade ? "true" : "false";
-                let q = `/bulk-data/v1/customer-extract-history?startDueDate=${startDueDate}&endDueDate=${endDueDate}&billReceivableId=${cleanBillId}&documentsId=CT&includeRemadeInstallments=${remade}&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
+                const canceled = histFlags && histFlags.canceled ? "true" : "false";
+                const revoked = histFlags && histFlags.revoked ? "true" : "false";
+                let q = `/bulk-data/v1/customer-extract-history?startDueDate=${startDueDate}&endDueDate=${endDueDate}&billReceivableId=${cleanBillId}&documentsId=CT&includeRemadeInstallments=${remade}&includeCanceledInstallments=${canceled}&includeRevokedInstallments=${revoked}&includeRenegotiatedDischarge=false`;
                 if (cid) q += `&companyId=${cid}`;
                 return q;
             };
@@ -265,24 +291,30 @@ async function loadRepactuacoes(isBackground = false) {
             };
             let json;
             let jsonOriginal = null;
+            let jsonHistoric = null;
             try {
                 const startTime = performance.now();
-                // Remadeadas (acordos) + originais: remade=true sozinho esconde o indexador do CT (ex.: 7)
-                const [jsonRemade, jsonOrig] = await Promise.all([
+                // Remadeadas (acordos) + originais + históricas (baixadas/canceladas após remade):
+                // remade=true sozinho esconde o indexador do CT (ex.: 7, 8, 9)
+                const [jsonRemade, jsonOrig, jsonHist] = await Promise.all([
                     runExtract(extractQs(companyId, true)),
-                    runExtract(extractQs(companyId, false)).catch(() => null)
+                    runExtract(extractQs(companyId, false)).catch(() => null),
+                    runExtract(extractQs(companyId, false, { canceled: true, revoked: true })).catch(() => null)
                 ]);
                 json = jsonRemade;
                 jsonOriginal = jsonOrig;
+                jsonHistoric = jsonHist;
                 let preview = extractItems(json);
                 if (!preview.length && companyId) {
                     json = await runExtract(extractQs(null, true));
                     preview = extractItems(json);
                     try { jsonOriginal = await runExtract(extractQs(null, false)); } catch (e) { /* ignore */ }
+                    try { jsonHistoric = await runExtract(extractQs(null, false, { canceled: true, revoked: true })); } catch (e) { /* ignore */ }
                 }
                 if (!preview.length && String(companyId) !== "1") {
                     json = await runExtract(extractQs(1, true));
                     try { jsonOriginal = await runExtract(extractQs(1, false)); } catch (e) { /* ignore */ }
+                    try { jsonHistoric = await runExtract(extractQs(1, false, { canceled: true, revoked: true })); } catch (e) { /* ignore */ }
                 }
                 console.log(`[Repactuações] Fetch concluído em ${Math.round(performance.now() - startTime)}ms`);
             } catch(fetchErr) {
@@ -292,7 +324,8 @@ async function loadRepactuacoes(isBackground = false) {
             
             let items = extractItems(json);
             const itemsOriginal = extractItems(jsonOriginal);
-            console.log(`[Repactuações] Recebeu ${items.length} itens (remade) + ${itemsOriginal.length} itens (originais)`);
+            const itemsHistoric = extractItems(jsonHistoric);
+            console.log(`[Repactuações] Recebeu ${items.length} remade + ${itemsOriginal.length} originais + ${itemsHistoric.length} históricas`);
             // Novo código seguindo a regra de negócio exata (BCB e Retroatividade)
             let emissionDate = null;
             let indexerId = null;
@@ -337,6 +370,8 @@ async function loadRepactuacoes(isBackground = false) {
             ingestExtractItems(items);
             // Originais sem remade: costumam trazer o indexador contratual (7, 8, 9…)
             if (itemsOriginal && itemsOriginal.length) ingestExtractItems(itemsOriginal);
+            // Parcelas baixadas/canceladas após acordo ainda carregam o indexador do CT
+            if (itemsHistoric && itemsHistoric.length) ingestExtractItems(itemsHistoric);
 
             // Sempre enriquecer com parcelas do título + remade API (não só quando adjustCount=0)
             let picked = pickContractIndexer(indexerRefs);
@@ -352,8 +387,6 @@ async function loadRepactuacoes(isBackground = false) {
                     }
                     (Array.isArray(billInsts) ? billInsts : []).forEach(inst => {
                         collectIndexerRefs(indexerRefs, inst);
-                        const ref = readIndexerRef(inst);
-                        if (ref.id != null || ref.name) indexerRefs.push(ref);
                     });
                     console.log(`[Repactuações] Parcelas do título: ${billInsts.length}`);
                 })());
@@ -361,9 +394,9 @@ async function loadRepactuacoes(isBackground = false) {
                     if (!window.SiengeApiService || typeof SiengeApiService.getRemadeInstallments !== "function") return;
                     const remade = await SiengeApiService.getRemadeInstallments(cleanBillId) || [];
                     (Array.isArray(remade) ? remade : []).forEach(row => {
-                        collectIndexerRefs(indexerRefs, row);
-                        const nest = row.installments || row.remadeInstallments || [];
-                        nest.forEach(inst => collectIndexerRefs(indexerRefs, inst));
+                        // Importante: não usar só row.installments (geradas = REAL).
+                        // remadeInstallments / originalInstallments guardam o indexador do CT (ex.: 8).
+                        collectIndexerRefsDeep(indexerRefs, row, 0);
                     });
                     console.log(`[Repactuações] Remade API: ${Array.isArray(remade) ? remade.length : 0}`);
                 })());
@@ -372,9 +405,9 @@ async function loadRepactuacoes(isBackground = false) {
                     try {
                         const bill = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${cleanBillId}`);
                         if (bill) {
-                            collectIndexerRefs(indexerRefs, bill);
-                            if (bill.sale) collectIndexerRefs(indexerRefs, bill.sale);
-                            if (bill.contract) collectIndexerRefs(indexerRefs, bill.contract);
+                            collectIndexerRefsDeep(indexerRefs, bill, 0);
+                            if (bill.sale) collectIndexerRefsDeep(indexerRefs, bill.sale, 0);
+                            if (bill.contract) collectIndexerRefsDeep(indexerRefs, bill.contract, 0);
                         }
                     } catch (e) { /* ignore */ }
                 })());

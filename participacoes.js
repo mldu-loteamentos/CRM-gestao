@@ -1,18 +1,20 @@
 const ParticipacoesApp = {
   companies: [],
+  folderCompanies: [],
   files: [],
-  expenses: [],
   companyId: "",
+  companyQ: "",
   fileName: "",
-  groupBy: "credor",
+  groupBy: "periodo",
   q: "",
   loading: false,
   error: "",
-  pdfUrl: "",
+  hint: "",
   parsing: false,
+  uploadProgress: "",
 
   CATEGORIES: [
-    { id: "relacionada", name: "Parte relacionada / sócio", test: /ellenco|moura leite|mutuo|mútuo|devolução de mutuo|socio|sócio/i },
+    { id: "relacionada", name: "Parte relacionada / sócio", test: /ellenco|ellenceo|moura leite|mutuo|mútuo|devolução de mutuo|socio|sócio/i },
     { id: "prefeitura", name: "Taxas e prefeitura", test: /prefeitura|certidao|certidão|fiscaliza|desmembr|itbi|alvara|alvará|taxa/i },
     { id: "bancario", name: "Bancário / IOF", test: /\biof\b|bancari|tarifa|resgate|ted|pix/i },
     { id: "ti", name: "TI / certificado", test: /certificado digital|mega online|dominio|domínio|software|licen[cç]a/i },
@@ -39,9 +41,37 @@ const ParticipacoesApp = {
     return origin + p;
   },
 
+  crmCompanies() {
+    const list = (window.AppState && AppState.companies)
+      || (window.EmpresasState && EmpresasState.companies)
+      || [];
+    return (list || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
   crmCompany(id) {
-    const list = (window.AppState && AppState.companies) || (window.EmpresasState && EmpresasState.companies) || [];
-    return list.find((c) => String(c.id) === String(id)) || null;
+    return this.crmCompanies().find((c) => String(c.id) === String(id)) || null;
+  },
+
+  companyLabel(id) {
+    const c = this.crmCompany(id);
+    if (!c) {
+      const f = this.folderCompanies.find((x) => String(x.companyId) === String(id));
+      return f ? f.label : "";
+    }
+    const usual = c.nomeUsual
+      || (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[c.id] && EmpresasState.customFields[c.id].nome_usual)
+      || "";
+    return usual || c.name || "";
+  },
+
+  filteredCompanies() {
+    const q = String(this.companyQ || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return this.crmCompanies().filter((c) => {
+      if (!q) return true;
+      const usual = (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[c.id] && EmpresasState.customFields[c.id].nome_usual) || "";
+      const blob = `${c.id} ${c.name || ""} ${usual}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return blob.includes(q);
+    });
   },
 
   categoryOf(row) {
@@ -49,9 +79,30 @@ const ParticipacoesApp = {
     return this.CATEGORIES.find((c) => c.test.test(blob)) || this.CATEGORIES[this.CATEGORIES.length - 1];
   },
 
+  periodFromFileName(name) {
+    const ym = String(name || "").match(/(\d{4})[_-](\d{2})/);
+    if (ym) return `${ym[1]}-${ym[2]}`;
+    return "";
+  },
+
+  periodLabel(closing, fallback) {
+    if (!closing) return fallback || "Sem período";
+    const [y, m] = String(closing).split("-");
+    if (!y || !m) return closing;
+    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  },
+
   init() {
+    this.refreshCompanyList();
     this.render();
-    this.loadCompanies();
+    this.loadFolderMeta();
+  },
+
+  refreshCompanyList() {
+    this.companies = this.crmCompanies().map((c) => ({
+      companyId: String(c.id),
+      label: this.companyLabel(c.id) || c.name || String(c.id)
+    }));
   },
 
   async fetchJson(path) {
@@ -61,49 +112,63 @@ const ParticipacoesApp = {
     try {
       data = text ? JSON.parse(text) : {};
     } catch (e) {
-      throw new Error("A API não devolveu JSON (a pasta de prestações não foi lida). No computador use o servidor local (node server.js). No site, publique esta versão para ativar /api/participacoes.");
+      throw new Error("API indisponível para pastas locais. Você ainda pode selecionar a empresa e enviar PDFs por aqui.");
     }
     if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
     return data;
   },
 
-  async loadCompanies() {
-    this.loading = true;
-    this.error = "";
-    this.render();
+  async loadFolderMeta() {
     try {
       const data = await this.fetchJson("/api/participacoes/companies");
-      this.companies = data.companies || [];
+      this.folderCompanies = data.companies || [];
       if (data.missingRoot) {
-        this.error = "Pasta PRESTAÇÃO DE CONTAS não encontrada. Coloque os PDFs em projeto-cobranca/PRESTAÇÃO DE CONTAS (ou PRESTACAO DE CONTAS), com subpastas no formato 1 - NOME DA EMPRESA.";
+        this.hint = "Pasta local opcional. Selecione a empresa no cadastro e envie os PDFs pela tela.";
       }
-      if (!this.companyId && this.companies.length) this.companyId = this.companies[0].companyId;
-      if (this.companyId) await this.loadFiles();
     } catch (e) {
-      this.error = e.message || String(e);
+      this.hint = e.message || String(e);
+      this.folderCompanies = [];
     }
-    this.loading = false;
     this.render();
   },
 
-  async loadFiles() {
+  async loadFilesFromServer() {
     if (!this.companyId) return;
-    this.loading = true;
-    this.render();
     try {
       const data = await this.fetchJson("/api/participacoes/files?companyId=" + encodeURIComponent(this.companyId));
-      this.files = data.files || [];
-      if (this.fileName && !this.files.some((f) => f.name === this.fileName)) this.fileName = "";
-      if (!this.fileName && this.files.length) this.fileName = this.files[0].name;
-      if (this.fileName) await this.parseCurrentFile();
+      const remote = data.files || [];
+      remote.forEach((f) => {
+        const existing = this.files.find((x) => x.name === f.name);
+        if (existing) {
+          existing.size = f.size;
+          existing.mtime = f.mtime;
+          existing.closing = f.closing || existing.closing;
+          existing.year = f.year;
+          existing.month = f.month;
+          existing.fromServer = true;
+        } else {
+          this.files.push({
+            name: f.name,
+            size: f.size,
+            mtime: f.mtime,
+            year: f.year,
+            month: f.month,
+            closing: f.closing || this.periodFromFileName(f.name),
+            expenses: null,
+            fromServer: true,
+            objectUrl: ""
+          });
+        }
+      });
+      this.files.sort((a, b) => String(b.closing || "").localeCompare(String(a.closing || "")) || b.name.localeCompare(a.name));
     } catch (e) {
-      this.error = e.message || String(e);
+      /* upload local continua válido */
     }
-    this.loading = false;
-    this.render();
   },
 
   fileLink(name) {
+    const local = this.files.find((f) => f.name === name);
+    if (local && local.objectUrl) return local.objectUrl;
     return this.apiUrl("/api/participacoes/file?companyId=" + encodeURIComponent(this.companyId) + "&file=" + encodeURIComponent(name));
   },
 
@@ -115,7 +180,7 @@ const ParticipacoesApp = {
     return Number.isFinite(v) ? v : 0;
   },
 
-  parseExpenseLines(text) {
+  parseExpenseLines(text, meta) {
     const raw = String(text || "").replace(/\r/g, "");
     let chunk = raw;
     const start = raw.search(/DESPESAS\s+PAGAS/i);
@@ -124,6 +189,8 @@ const ParticipacoesApp = {
     if (cut > 80) chunk = chunk.slice(0, cut);
     const lines = chunk.split("\n").map((l) => l.replace(/\s+$/g, ""));
     const rows = [];
+    const periodo = (meta && meta.closing) || "";
+    const sourceFile = (meta && meta.name) || "";
     lines.forEach((line) => {
       const m = line.match(/^(\d{2}\/\d{2}\/\d{4})\s+(.+)$/);
       if (!m) return;
@@ -157,7 +224,9 @@ const ParticipacoesApp = {
         detalhe,
         valor,
         categoria: cat.name,
-        categoriaId: cat.id
+        categoriaId: cat.id,
+        periodo,
+        sourceFile
       });
     });
     return rows;
@@ -182,37 +251,75 @@ const ParticipacoesApp = {
     return pages.join("\n");
   },
 
-  async parseCurrentFile() {
-    if (!this.companyId || !this.fileName) {
-      this.expenses = [];
-      this.pdfUrl = "";
-      return;
-    }
-    this.parsing = true;
-    this.pdfUrl = this.fileLink(this.fileName);
-    this.render();
-    try {
-      const text = await this.extractPdfText(this.pdfUrl);
-      this.expenses = this.parseExpenseLines(text);
-      this.persistCache();
-    } catch (e) {
-      this.error = "Não foi possível ler o PDF: " + (e.message || e);
-      this.expenses = [];
-    }
-    this.parsing = false;
-    this.render();
+  async ensureFileParsed(fileRec) {
+    if (!fileRec) return;
+    if (Array.isArray(fileRec.expenses)) return;
+    const url = this.fileLink(fileRec.name);
+    const text = await this.extractPdfText(url);
+    fileRec.expenses = this.parseExpenseLines(text, fileRec);
+    this.persistCache(fileRec);
   },
 
-  persistCache() {
+  persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v1";
+      const key = "crm_participacoes_cache_v2";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
-      all[this.companyId + "|" + this.fileName] = {
+      all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
-        expenses: this.expenses
+        closing: fileRec.closing,
+        expenses: fileRec.expenses
       };
       localStorage.setItem(key, JSON.stringify(all));
     } catch (e) {}
+  },
+
+  restoreCacheForCompany() {
+    try {
+      const key = "crm_participacoes_cache_v2";
+      const all = JSON.parse(localStorage.getItem(key) || "{}");
+      Object.keys(all).forEach((k) => {
+        if (!k.startsWith(String(this.companyId) + "|")) return;
+        const name = k.slice(String(this.companyId).length + 1);
+        const hit = all[k];
+        if (!hit || !Array.isArray(hit.expenses)) return;
+        let rec = this.files.find((f) => f.name === name);
+        if (!rec) {
+          rec = {
+            name,
+            closing: hit.closing || this.periodFromFileName(name),
+            expenses: hit.expenses,
+            fromCache: true
+          };
+          this.files.push(rec);
+        } else if (!rec.expenses) {
+          rec.expenses = hit.expenses;
+        }
+      });
+    } catch (e) {}
+  },
+
+  allExpenses() {
+    const list = [];
+    this.files.forEach((f) => {
+      (f.expenses || []).forEach((r) => {
+        list.push(Object.assign({}, r, {
+          periodo: r.periodo || f.closing || this.periodFromFileName(f.name),
+          sourceFile: r.sourceFile || f.name
+        }));
+      });
+    });
+    return list;
+  },
+
+  activeExpenses() {
+    if (this.fileName) {
+      const f = this.files.find((x) => x.name === this.fileName);
+      return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, r, {
+        periodo: r.periodo || (f && f.closing) || "",
+        sourceFile: r.sourceFile || (f && f.name) || ""
+      })) : [];
+    }
+    return this.allExpenses();
   },
 
   alerts() {
@@ -246,23 +353,14 @@ const ParticipacoesApp = {
         }
       });
     });
-    const byDetail = {};
-    rows.forEach((r) => {
-      const d = String(r.detalhe || "").toUpperCase().replace(/\s+/g, " ").trim();
-      if (d.length < 8) return;
-      byDetail[d] = (byDetail[d] || 0) + 1;
-    });
-    Object.keys(byDetail).forEach((d) => {
-      if (byDetail[d] >= 3) out.push({ level: "warn", text: `Mesmo detalhe ${byDetail[d]} vezes neste fechamento: ${d}` });
-    });
     return out;
   },
 
   filtered() {
     const q = String(this.q || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return (this.expenses || []).filter((r) => {
+    return this.activeExpenses().filter((r) => {
       if (!q) return true;
-      const blob = `${r.credor} ${r.detalhe} ${r.categoria} ${r.date}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const blob = `${r.credor} ${r.detalhe} ${r.categoria} ${r.date} ${r.periodo || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return blob.includes(q);
     });
   },
@@ -270,6 +368,7 @@ const ParticipacoesApp = {
   grouped() {
     const rows = this.filtered();
     const keyFn = {
+      periodo: (r) => this.periodLabel(r.periodo, r.sourceFile || "Sem período"),
       credor: (r) => r.credor,
       categoria: (r) => r.categoria,
       data: (r) => r.date
@@ -285,119 +384,246 @@ const ParticipacoesApp = {
   },
 
   async onCompany(id) {
-    this.companyId = id;
+    this.companyId = String(id || "");
     this.fileName = "";
-    this.expenses = [];
-    await this.loadFiles();
+    this.files.forEach((f) => {
+      if (f.objectUrl) {
+        try { URL.revokeObjectURL(f.objectUrl); } catch (e) {}
+      }
+    });
+    this.files = [];
+    this.error = "";
+    this.refreshCompanyList();
+    this.restoreCacheForCompany();
+    this.loading = true;
+    this.render();
+    await this.loadFilesFromServer();
+    this.loading = false;
+    if (this.files.length && !this.fileName) {
+      const first = this.files.find((f) => Array.isArray(f.expenses) && f.expenses.length) || this.files[0];
+      if (first) await this.onFile(first.name);
+    }
+    this.render();
   },
 
   async onFile(name) {
     this.fileName = name;
-    await this.parseCurrentFile();
+    const rec = this.files.find((f) => f.name === name);
+    if (!rec) return;
+    this.parsing = true;
+    this.render();
+    try {
+      await this.ensureFileParsed(rec);
+    } catch (e) {
+      this.error = "Não foi possível ler o PDF: " + (e.message || e);
+    }
+    this.parsing = false;
+    this.render();
+  },
+
+  async onFileAll() {
+    this.fileName = "";
+    this.parsing = true;
+    this.render();
+    try {
+      for (const f of this.files) {
+        await this.ensureFileParsed(f);
+      }
+    } catch (e) {
+      this.error = "Não foi possível ler um dos PDFs: " + (e.message || e);
+    }
+    this.parsing = false;
+    this.groupBy = "periodo";
+    this.render();
+  },
+
+  async tryServerUpload(fileList) {
+    const fd = new FormData();
+    fd.append("companyId", this.companyId);
+    fd.append("companyLabel", this.companyLabel(this.companyId) || "");
+    fileList.forEach((file) => fd.append("file", file, file.name));
+    const res = await fetch(this.apiUrl("/api/participacoes/upload"), { method: "POST", body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Falha no upload no servidor");
+    return data;
   },
 
   async onUpload(input) {
-    const file = input && input.files && input.files[0];
-    if (!file || !this.companyId) return;
-    const fd = new FormData();
-    fd.append("companyId", this.companyId);
-    fd.append("file", file, file.name);
+    const picked = Array.from((input && input.files) || []).filter((f) => /\.pdf$/i.test(f.name));
+    if (!this.companyId) {
+      this.error = "Selecione a empresa antes de enviar os PDFs.";
+      this.render();
+      if (input) input.value = "";
+      return;
+    }
+    if (!picked.length) {
+      this.error = "Selecione um ou mais arquivos PDF.";
+      this.render();
+      if (input) input.value = "";
+      return;
+    }
     this.loading = true;
+    this.parsing = true;
     this.error = "";
+    this.uploadProgress = `Enviando e lendo ${picked.length} PDF(s)...`;
     this.render();
+
+    let serverOk = false;
     try {
-      const res = await fetch(this.apiUrl("/api/participacoes/upload"), { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha no upload");
-      this.fileName = data.name || file.name;
-      await this.loadFiles();
+      await this.tryServerUpload(picked);
+      serverOk = true;
+    } catch (e) {
+      this.hint = "Upload no servidor indisponível nesta sessão — os PDFs serão lidos só neste navegador.";
+    }
+
+    try {
+      for (let i = 0; i < picked.length; i++) {
+        const file = picked[i];
+        this.uploadProgress = `Lendo ${i + 1}/${picked.length}: ${file.name}`;
+        this.render();
+        const objectUrl = URL.createObjectURL(file);
+        const closing = this.periodFromFileName(file.name);
+        const ym = closing ? closing.split("-") : [];
+        const text = await this.extractPdfText(objectUrl);
+        const expenses = this.parseExpenseLines(text, { name: file.name, closing });
+        let rec = this.files.find((f) => f.name === file.name);
+        if (rec && rec.objectUrl && rec.objectUrl !== objectUrl) {
+          try { URL.revokeObjectURL(rec.objectUrl); } catch (e) {}
+        }
+        if (!rec) {
+          rec = { name: file.name };
+          this.files.push(rec);
+        }
+        rec.size = file.size;
+        rec.closing = closing;
+        rec.year = ym[0] ? Number(ym[0]) : null;
+        rec.month = ym[1] ? Number(ym[1]) : null;
+        rec.objectUrl = objectUrl;
+        rec.expenses = expenses;
+        rec.fromUpload = true;
+        this.persistCache(rec);
+      }
+      this.files.sort((a, b) => String(b.closing || "").localeCompare(String(a.closing || "")) || b.name.localeCompare(a.name));
+      this.fileName = "";
+      this.groupBy = "periodo";
+      if (serverOk) await this.loadFilesFromServer();
     } catch (e) {
       this.error = e.message || String(e);
-      this.loading = false;
-      this.render();
     }
+
+    this.loading = false;
+    this.parsing = false;
+    this.uploadProgress = "";
     if (input) input.value = "";
+    this.render();
   },
 
   render() {
     const root = document.getElementById("participacoes-root");
     if (!root) return;
+    this.refreshCompanyList();
     const crm = this.crmCompany(this.companyId);
-    const folder = this.companies.find((c) => String(c.companyId) === String(this.companyId));
     const groups = this.grouped();
     const alerts = this.alerts();
-    const total = this.filtered().reduce((s, r) => s + (Number(r.valor) || 0), 0);
-    const monthLabel = (() => {
-      const f = this.files.find((f) => f.name === this.fileName);
-      if (!f || !f.year) return "";
-      return new Date(f.year, f.month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-    })();
+    const rows = this.filtered();
+    const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    const selectedFile = this.files.find((f) => f.name === this.fileName);
+    const periodTitle = this.fileName
+      ? this.periodLabel(selectedFile && selectedFile.closing, this.fileName)
+      : (this.files.length ? "Todos os períodos" : "—");
+    const coList = this.filteredCompanies();
+    const uploadDisabled = !this.companyId;
 
     root.innerHTML = `
       <div style="padding:16px 18px 28px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
-          <div>
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
+          <div style="max-width:720px;">
             <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">Prestação Contas Ellenceo</div>
-            <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">A abertura da tela lê a pasta <strong>PRESTAÇÃO DE CONTAS</strong> (subpasta <strong>ID - NOME</strong> e o PDF mais recente). Análise das despesas pagas para achar cobrança a mais e desvios.</div>
+            <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">
+              1) Escolha a <strong>empresa</strong> no cadastro · 2) Envie <strong>vários PDFs</strong> de uma vez · 3) Agrupe as despesas pagas por <strong>período</strong>.
+            </div>
           </div>
-          <label class="btn btn-secondary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-            <i data-lucide="upload" style="width:16px;"></i> Enviar PDF
-            <input type="file" accept="application/pdf,.pdf" style="display:none" onchange="ParticipacoesApp.onUpload(this)">
+          <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;">
+            <i data-lucide="upload" style="width:16px;"></i> Enviar PDFs
+            <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
           </label>
         </div>
         ${this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;">${this.esc(this.error)}</div>` : ""}
-        <div style="display:grid;grid-template-columns:260px 1fr;gap:14px;align-items:start;">
+        ${this.hint && !this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:0.82rem;">${this.esc(this.hint)}</div>` : ""}
+        ${this.uploadProgress ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;font-size:0.85rem;">${this.esc(this.uploadProgress)}</div>` : ""}
+
+        <div style="display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:14px;align-items:start;">
           <div class="crm-card" style="padding:12px;">
-            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:8px;">Empresas na pasta</div>
-            ${this.companies.length ? this.companies.map((c) => {
-              const info = this.crmCompany(c.companyId);
-              const usual = info && (info.nomeUsual || (window.EmpresasState && EmpresasState.customFields[c.companyId] && EmpresasState.customFields[c.companyId].nome_usual));
-              const active = String(c.companyId) === String(this.companyId);
-              return `<button onclick="ParticipacoesApp.onCompany('${c.companyId}')" style="display:block;width:100%;text-align:left;padding:8px 10px;margin-bottom:6px;border-radius:8px;border:1px solid ${active ? "#105436" : "#e2e8f0"};background:${active ? "#ecfdf5" : "#fff"};cursor:pointer;">
-                <div style="font-weight:800;color:#105436;">${c.companyId} — ${this.esc(c.label)}</div>
-                <div style="font-size:0.72rem;color:#64748b;">${this.esc((info && info.name) || usual || "ID do cadastro de empresas")}</div>
-              </button>`;
-            }).join("") : `<div style="font-size:0.82rem;color:#64748b;">Nenhuma pasta no formato <strong>ID - NOME</strong>.</div>`}
-            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin:14px 0 8px;">Fechamentos</div>
-            ${this.files.length ? this.files.map((f) => {
-              const active = f.name === this.fileName;
-              const lab = f.closing ? f.closing.replace("-", "/") : f.name;
-              return `<button onclick="ParticipacoesApp.onFile(${JSON.stringify(f.name)})" style="display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border-radius:8px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};cursor:pointer;font-size:0.8rem;">
-                <div style="font-weight:700;">${this.esc(lab)}</div>
-                <div style="font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(f.name)}</div>
-              </button>`;
-            }).join("") : `<div style="font-size:0.82rem;color:#64748b;">Nenhum PDF nesta pasta.</div>`}
+            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:8px;">1. Empresa</div>
+            <input class="form-control" placeholder="Buscar ID ou nome..." value="${this.esc(this.companyQ)}"
+              oninput="ParticipacoesApp.companyQ=this.value;ParticipacoesApp.render()"
+              style="margin-bottom:8px;font-size:0.82rem;">
+            <div style="max-height:280px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
+              ${coList.length ? coList.map((c) => {
+                const active = String(c.id) === String(this.companyId);
+                const label = this.companyLabel(c.id) || c.name || "";
+                return `<button type="button" onclick="ParticipacoesApp.onCompany('${String(c.id).replace(/'/g, "\\'")}')"
+                  style="display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-bottom:1px solid #f1f5f9;background:${active ? "#ecfdf5" : "#fff"};cursor:pointer;">
+                  <div style="font-weight:800;color:#105436;font-size:0.82rem;">${c.id} — ${this.esc(label)}</div>
+                  ${label !== c.name && c.name ? `<div style="font-size:0.7rem;color:#94a3b8;">${this.esc(c.name)}</div>` : ""}
+                </button>`;
+              }).join("") : `<div style="padding:12px;font-size:0.82rem;color:#64748b;">Nenhuma empresa no cadastro.</div>`}
+            </div>
+
+            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin:14px 0 8px;">2. Períodos (PDFs)</div>
+            ${!this.companyId ? `<div style="font-size:0.82rem;color:#64748b;">Selecione uma empresa para liberar o envio.</div>` : `
+              <button type="button" onclick="ParticipacoesApp.onFileAll()"
+                style="display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border-radius:8px;border:1px solid ${!this.fileName && this.files.length ? "#105436" : "#e2e8f0"};background:${!this.fileName && this.files.length ? "#ecfdf5" : "#fff"};cursor:pointer;font-size:0.8rem;">
+                <div style="font-weight:700;">Todos os períodos</div>
+                <div style="font-size:0.68rem;color:#94a3b8;">${this.files.length} arquivo(s)</div>
+              </button>
+              ${this.files.length ? this.files.map((f) => {
+                const active = f.name === this.fileName;
+                const lab = this.periodLabel(f.closing, f.name);
+                const n = Array.isArray(f.expenses) ? f.expenses.length : "…";
+                return `<button type="button" onclick="ParticipacoesApp.onFile(${JSON.stringify(f.name)})"
+                  style="display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border-radius:8px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};cursor:pointer;font-size:0.8rem;">
+                  <div style="font-weight:700;text-transform:capitalize;">${this.esc(lab)}</div>
+                  <div style="font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(f.name)} · ${n} desp.</div>
+                </button>`;
+              }).join("") : `<div style="font-size:0.82rem;color:#64748b;">Nenhum PDF ainda. Use <strong>Enviar PDFs</strong> e selecione vários arquivos.</div>`}
+            `}
           </div>
+
           <div>
             <div class="crm-card" style="padding:14px;margin-bottom:12px;">
               <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
                 <div>
-                  <div style="font-weight:800;color:#0f172a;">${this.esc((crm && crm.name) || (folder && folder.label) || "Selecione a empresa")}</div>
-                  <div style="font-size:0.8rem;color:#64748b;">Administrador: Ellenco · Fechamento: <strong>${this.esc(monthLabel || "—")}</strong> · ${this.filtered().length} despesa(s) · ${this.fmt(total)}</div>
+                  <div style="font-weight:800;color:#0f172a;">${this.esc((crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa")}</div>
+                  <div style="font-size:0.8rem;color:#64748b;">Administrador: Ellenceo · Visão: <strong style="text-transform:capitalize;">${this.esc(periodTitle)}</strong> · ${rows.length} despesa(s) · ${this.fmt(total)}</div>
                 </div>
-                ${this.pdfUrl ? `<a class="btn btn-outline" href="${this.pdfUrl}" target="_blank" rel="noopener">Abrir PDF</a>` : ""}
+                ${this.fileName ? `<a class="btn btn-outline" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener">Abrir PDF</a>` : ""}
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;">
                 <input class="form-control" placeholder="Filtrar credor, detalhe, categoria..." value="${this.esc(this.q)}" oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="max-width:280px;">
-                ${["credor", "categoria", "data"].map((g) => `<button class="btn ${this.groupBy === g ? "btn-primary" : "btn-outline"}" onclick="ParticipacoesApp.groupBy='${g}';ParticipacoesApp.render()">${g === "credor" ? "Por credor" : g === "categoria" ? "Por categoria" : "Por data"}</button>`).join("")}
+                ${["periodo", "credor", "categoria", "data"].map((g) => {
+                  const lab = g === "periodo" ? "Por período" : g === "credor" ? "Por credor" : g === "categoria" ? "Por categoria" : "Por data";
+                  return `<button type="button" class="btn ${this.groupBy === g ? "btn-primary" : "btn-outline"}" onclick="ParticipacoesApp.groupBy='${g}';ParticipacoesApp.render()">${lab}</button>`;
+                }).join("")}
               </div>
             </div>
-            ${this.parsing || this.loading ? `<div class="crm-card" style="padding:20px;text-align:center;color:#64748b;">Lendo PDF / pasta...</div>` : ""}
-            ${!this.parsing && alerts.length ? `
+            ${this.parsing || this.loading ? `<div class="crm-card" style="padding:20px;text-align:center;color:#64748b;">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
+            ${!this.parsing && !this.loading && alerts.length ? `
               <div class="crm-card" style="padding:12px;margin-bottom:12px;border-left:4px solid #ea580c;">
                 <div style="font-weight:800;color:#9a3412;margin-bottom:8px;">Pontos de atenção (${alerts.length})</div>
                 ${alerts.slice(0, 12).map((a) => `<div style="font-size:0.8rem;margin-bottom:6px;color:${a.level === "danger" ? "#991b1b" : "#9a3412"};">• ${this.esc(a.text)}</div>`).join("")}
               </div>` : ""}
-            ${groups.map((g) => `
+            ${!this.parsing && !this.loading ? groups.map((g) => `
               <div class="crm-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
                 <div style="display:flex;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                  <strong>${this.esc(g.key)}</strong>
+                  <strong style="text-transform:capitalize;">${this.esc(g.key)}</strong>
                   <span style="font-weight:800;color:#105436;">${this.fmt(g.total)} · ${g.rows.length}</span>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
                   <thead>
                     <tr style="background:#105436;color:#fff;">
                       <th style="text-align:left;padding:6px 10px;">Data</th>
+                      ${this.groupBy === "periodo" ? "" : `<th style="text-align:left;padding:6px 10px;">Período</th>`}
                       <th style="text-align:left;padding:6px 10px;">Credor</th>
                       <th style="text-align:left;padding:6px 10px;">Detalhe</th>
                       <th style="text-align:left;padding:6px 10px;">Categoria</th>
@@ -407,6 +633,7 @@ const ParticipacoesApp = {
                   <tbody>
                     ${g.rows.map((r) => `<tr style="border-bottom:1px solid #f1f5f9;${r.categoriaId === "relacionada" ? "background:#fff7ed;" : ""}">
                       <td style="padding:6px 10px;white-space:nowrap;">${this.esc(r.date)}</td>
+                      ${this.groupBy === "periodo" ? "" : `<td style="padding:6px 10px;text-transform:capitalize;">${this.esc(this.periodLabel(r.periodo, "—"))}</td>`}
                       <td style="padding:6px 10px;">${this.esc(r.credor)}</td>
                       <td style="padding:6px 10px;">${this.esc(r.detalhe || "—")}</td>
                       <td style="padding:6px 10px;">${this.esc(r.categoria)}</td>
@@ -415,8 +642,9 @@ const ParticipacoesApp = {
                   </tbody>
                 </table>
               </div>
-            `).join("")}
-            ${!this.parsing && this.fileName && !groups.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha de despesa paga identificada neste PDF. Confira se a página “DESPESAS PAGAS” está em texto (não só imagem).</div>` : ""}
+            `).join("") : ""}
+            ${!this.parsing && !this.loading && this.companyId && this.files.length && !groups.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha de despesa paga identificada. Confira se a página “DESPESAS PAGAS” está em texto no PDF.</div>` : ""}
+            ${!this.parsing && !this.loading && this.companyId && !this.files.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Empresa selecionada. Envie um ou mais PDFs de fechamento para agrupar as despesas por período.</div>` : ""}
           </div>
         </div>
       </div>

@@ -774,9 +774,11 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
         try {
           const mp = await part.parseMultipart(req);
           const companyId = (mp.fields && mp.fields.companyId) || '';
-          if (!mp.file || !mp.file.buffer) return sendJson(res, 400, { error: 'Arquivo PDF obrigatório' });
-          const saved = part.saveUpload(__dirname, companyId, mp.file.filename, mp.file.buffer);
-          return sendJson(res, 200, saved);
+          const companyLabel = (mp.fields && (mp.fields.companyLabel || mp.fields.companyName)) || '';
+          const list = (mp.files && mp.files.length) ? mp.files : (mp.file ? [mp.file] : []);
+          if (!list.length) return sendJson(res, 400, { error: 'Arquivo PDF obrigatório' });
+          const saved = list.map((f) => part.saveUpload(__dirname, companyId, f.filename, f.buffer, companyLabel));
+          return sendJson(res, 200, { saved, name: saved[0] && saved[0].name, company: saved[0] && saved[0].company });
         } catch (e) {
           return sendJson(res, 400, { error: e.message });
         }

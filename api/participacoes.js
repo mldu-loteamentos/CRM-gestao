@@ -76,9 +76,11 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && (route === "upload" || route === "")) {
       const mp = await part.parseMultipart(req);
       const companyId = (mp.fields && mp.fields.companyId) || q.get("companyId") || "";
-      if (!mp.file || !mp.file.buffer) return sendJson(res, 400, { error: "Arquivo PDF obrigatório" });
-      const saved = part.saveUpload(dir, companyId, mp.file.filename, mp.file.buffer);
-      return sendJson(res, 200, saved);
+      const companyLabel = (mp.fields && (mp.fields.companyLabel || mp.fields.companyName)) || "";
+      const list = (mp.files && mp.files.length) ? mp.files : (mp.file ? [mp.file] : []);
+      if (!list.length) return sendJson(res, 400, { error: "Arquivo PDF obrigatório" });
+      const saved = list.map((f) => part.saveUpload(dir, companyId, f.filename, f.buffer, companyLabel));
+      return sendJson(res, 200, { saved, name: saved[0] && saved[0].name, company: saved[0] && saved[0].company });
     }
     return sendJson(res, 404, { error: "Rota de participações não encontrada" });
   } catch (e) {

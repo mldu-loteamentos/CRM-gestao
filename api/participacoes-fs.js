@@ -108,10 +108,26 @@ function filePath(projectDir, companyId, fileName) {
   return { full, company };
 }
 
-function saveUpload(projectDir, companyId, fileName, buffer) {
-  const { root, companies } = listCompanyFolders(projectDir);
-  const company = companies.find((c) => String(c.companyId) === String(companyId));
-  if (!company) throw new Error("Pasta da empresa não encontrada. Crie a pasta no formato ID - NOME.");
+function ensureCompanyFolder(projectDir, companyId, companyLabel) {
+  const id = String(companyId || "").trim();
+  if (!id) throw new Error("companyId obrigatório");
+  const root = prestacaoRoot(projectDir);
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+  const listed = listCompanyFolders(projectDir);
+  let company = (listed.companies || []).find((c) => String(c.companyId) === id);
+  if (company) return { root: listed.root || root, company };
+  const label = String(companyLabel || "EMPRESA")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim() || "EMPRESA";
+  const folder = id + " - " + label;
+  fs.mkdirSync(path.join(root, folder), { recursive: true });
+  return { root, company: { folder, companyId: id, label } };
+}
+
+function saveUpload(projectDir, companyId, fileName, buffer, companyLabel) {
+  const { company } = ensureCompanyFolder(projectDir, companyId, companyLabel);
+  const root = prestacaoRoot(projectDir);
   const base = path.basename(String(fileName || "prestacao.pdf")).replace(/[\\/:*?"<>|]+/g, "-");
   const dest = safeJoinRoot(root, company.folder, base.endsWith(".pdf") ? base : base + ".pdf");
   fs.writeFileSync(dest, buffer);
@@ -139,7 +155,7 @@ function parseMultipart(req) {
         start = next;
       }
       const fields = {};
-      let file = null;
+      const files = [];
       parts.forEach((p) => {
         let body = p;
         if (body[0] === 13 && body[1] === 10) body = body.slice(2);
@@ -151,13 +167,13 @@ function parseMultipart(req) {
         const nameM = header.match(/name="([^"]+)"/i);
         const fileM = header.match(/filename="([^"]*)"/i);
         const name = nameM ? nameM[1] : "";
-        if (fileM) {
-          file = { field: name, filename: fileM[1] || "arquivo.pdf", buffer: content };
+        if (fileM && fileM[1]) {
+          files.push({ field: name, filename: fileM[1] || "arquivo.pdf", buffer: content });
         } else if (name) {
           fields[name] = content.toString("utf8").trim();
         }
       });
-      resolve({ fields, file });
+      resolve({ fields, file: files[0] || null, files });
     });
   });
 }
@@ -167,6 +183,7 @@ module.exports = {
   listCompanyFolders,
   listPdfFiles,
   filePath,
+  ensureCompanyFolder,
   saveUpload,
   parseMultipart
 };
