@@ -138,6 +138,10 @@ function parseInstDueDate(dueDate) {
  * Parcela do mês imediatamente anterior ao aniversário (ex.: dezembro)
  * e a do mês do reajuste (ex.: janeiro). Se houver várias no mês,
  * escolhe o par cujo % mais se aproxima do BCB.
+ *
+ * Regras anti-falso após reparcelamento:
+ * - nunca escolher "depois" com número menor que "antes" (ex.: 319→185);
+ * - preferir continuidade cronológica / número maior (ex.: 319→453).
  */
 function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     const MS_DAY = 86400000;
@@ -150,7 +154,7 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
             return Number(a.number || a.id || 0) - Number(b.number || b.id || 0);
         });
 
-    // Deduplica por número de parcela: preferir não-acordo e valor de face maior
+    // Deduplica por número de parcela: preferir não-acordo, não-histórico e valor de face maior
     const byNum = new Map();
     sorted.forEach((i) => {
         const key = String(i.number != null ? i.number : (i.id + '@' + i._due.toISOString().slice(0, 10)));
@@ -164,10 +168,15 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
             return;
         }
         if (!prev.acordoSemRepactuacao && i.acordoSemRepactuacao) return;
+        if (prev.historic && !i.historic) {
+            byNum.set(key, i);
+            return;
+        }
+        if (!prev.historic && i.historic) return;
         if (Number(i.value) > Number(prev.value)) byNum.set(key, i);
     });
     const uniq = [...byNum.values()].sort((a, b) => a._due.getTime() - b._due.getTime());
-    if (!uniq.length) return { beforeInst: null, afterInst: null };
+    if (!uniq.length) return { beforeInst: null, afterInst: null, viaReparcelamento: false };
 
     const adjustY = adjustDateStart.getUTCFullYear();
     const adjustM = adjustDateStart.getUTCMonth(); // 0=jan
@@ -175,15 +184,35 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
     const beforeM = adjustM === 0 ? 11 : adjustM - 1;
 
     const inMonth = (inst, y, m) => inst._due.getUTCFullYear() === y && inst._due.getUTCMonth() === m;
+    const numOf = (inst) => {
+        const n = Number(inst && (inst.number != null ? inst.number : inst.id));
+        return Number.isFinite(n) ? n : null;
+    };
 
     const scorePair = (before, after) => {
         if (!before || !after || !(before.value > 0)) return Infinity;
+        const bNum = numOf(before);
+        const aNum = numOf(after);
+        // Após reparcelamento o extrato sobe (319→453). Número menor é série cancelada.
+        if (bNum != null && aNum != null && aNum < bNum) return Infinity;
+
         const applied = (after.value / before.value - 1) * 100;
         const diff = Math.abs(applied - Number(expectedPct || 0));
         const gapDays = Math.abs(after._due.getTime() - before._due.getTime()) / MS_DAY;
-        // Preferir % perto do BCB e intervalo ~1 mês (25–40 dias)
         const monthPenalty = (gapDays >= 25 && gapDays <= 40) ? 0 : Math.abs(gapDays - 30);
-        return diff * 1000 + monthPenalty;
+        const historicPenalty = (before.historic || after.historic) ? 40 : 0;
+        // Leve preferência pela continuidade de número (série viva)
+        const seqBonus = (bNum != null && aNum != null && aNum > bNum && (aNum - bNum) <= 5) ? -8 : 0;
+        return diff * 1000 + monthPenalty + historicPenalty + seqBonus;
+    };
+
+    const isReparcelamentoPair = (before, after) => {
+        if (!before || !after) return false;
+        const bNum = numOf(before);
+        const aNum = numOf(after);
+        const gapDays = Math.abs(after._due.getTime() - before._due.getTime()) / MS_DAY;
+        const bigJump = bNum != null && aNum != null && (aNum - bNum) >= 30;
+        return bigJump || gapDays > 50;
     };
 
     const pickCalendarPair = (preferNonAcordo) => {
@@ -209,47 +238,78 @@ function pickBeforeAfterForAdjust(installments, adjustDateStart, expectedPct) {
                 if (s < best.score) best = { beforeInst: b, afterInst: a, score: s };
             });
         });
-        return (best.beforeInst && best.afterInst) ? best : null;
+        return (best.beforeInst && best.afterInst && Number.isFinite(best.score)) ? best : null;
     };
 
-    // 1) Preferência: mês anterior (ex. dezembro) × mês do aniversário (ex. janeiro)
+    // 1) Preferência: mês anterior × mês do aniversário
     const calendarPair = pickCalendarPair(true) || pickCalendarPair(false);
-    if (calendarPair) return calendarPair;
+    if (calendarPair) {
+        return {
+            ...calendarPair,
+            viaReparcelamento: isReparcelamentoPair(calendarPair.beforeInst, calendarPair.afterInst)
+        };
+    }
 
-    // 2) Fallback: última parcela antes do aniversário + melhor candidata nos 60 dias seguintes
+    // 2) Fallback: última parcela antes do aniversário + próxima continuidade no extrato
     const adjustTs = adjustDateStart.getTime();
     const beforeList = uniq.filter((i) => i._due.getTime() < adjustTs);
     const beforeInst = beforeList.length ? beforeList[beforeList.length - 1] : null;
     if (!beforeInst || !(beforeInst.value > 0)) {
-        return { beforeInst: null, afterInst: null };
+        return { beforeInst: null, afterInst: null, viaReparcelamento: false };
     }
 
     const beforeKey = String(beforeInst.number != null ? beforeInst.number : beforeInst.id);
-    const windowEnd = adjustTs + 60 * MS_DAY;
+    const beforeNum = numOf(beforeInst);
+    const windowEnd = adjustTs + 150 * MS_DAY; // cobre saltos após reparcelamento (até ~5 meses)
     let afterCandidates = uniq.filter((i) => {
         const t = i._due.getTime();
         if (t < adjustTs || t > windowEnd) return false;
         const key = String(i.number != null ? i.number : i.id);
-        return key !== beforeKey;
+        if (key === beforeKey) return false;
+        const aNum = numOf(i);
+        if (beforeNum != null && aNum != null && aNum < beforeNum) return false;
+        return true;
     });
     if (!afterCandidates.length) {
         afterCandidates = uniq.filter((i) => {
             if (i._due.getTime() < adjustTs) return false;
-            return String(i.number != null ? i.number : i.id) !== beforeKey;
-        }).slice(0, 8);
+            if (String(i.number != null ? i.number : i.id) === beforeKey) return false;
+            const aNum = numOf(i);
+            if (beforeNum != null && aNum != null && aNum < beforeNum) return false;
+            return true;
+        }).slice(0, 12);
     }
 
+    // Preferir a 1ª parcela viva após o "antes" (continuidade do extrato),
+    // e só entre elas escolher a que mais se aproxima do BCB.
     let afterInst = null;
-    let bestScore = Infinity;
-    afterCandidates.forEach((cand) => {
-        const score = scorePair(beforeInst, cand);
-        if (score < bestScore) {
-            bestScore = score;
-            afterInst = cand;
+    if (afterCandidates.length) {
+        const chronological = [...afterCandidates].sort((a, b) => {
+            const dt = a._due.getTime() - b._due.getTime();
+            if (dt !== 0) return dt;
+            return Number(a.number || 0) - Number(b.number || 0);
+        });
+        const firstLive = chronological.find((c) => !c.historic) || chronological[0];
+        // Se a 1ª continuidade já dista >50 dias / salto grande, é reparcelamento: use-a.
+        if (isReparcelamentoPair(beforeInst, firstLive)) {
+            afterInst = firstLive;
+        } else {
+            let bestScore = Infinity;
+            afterCandidates.forEach((cand) => {
+                const score = scorePair(beforeInst, cand);
+                if (score < bestScore) {
+                    bestScore = score;
+                    afterInst = cand;
+                }
+            });
         }
-    });
+    }
 
-    return { beforeInst, afterInst };
+    return {
+        beforeInst,
+        afterInst,
+        viaReparcelamento: isReparcelamentoPair(beforeInst, afterInst)
+    };
 }
 
 /** Valor de face da parcela (não usar saldo — parcelas pagas vêm com balance 0). */
@@ -280,8 +340,9 @@ function readInstallmentFaceValue(inst) {
     return rv > 0.009 ? rv : 0;
 }
 
-function pushInstallmentRow(allInstallments, inst, itemIdx) {
+function pushInstallmentRow(allInstallments, inst, itemIdx, opts) {
     if (!inst || !inst.dueDate) return;
+    opts = opts || {};
     const numRaw = inst.installmentNumber != null ? inst.installmentNumber
         : (inst.number != null ? inst.number : inst.installmentId);
     const num = numRaw != null && numRaw !== "" ? Number(numRaw) : null;
@@ -292,6 +353,9 @@ function pushInstallmentRow(allInstallments, inst, itemIdx) {
     const val = readInstallmentFaceValue(inst);
     if (!(val > 0.009)) return;
     const isAcordo = isRealIndexer(resolvedId, resolvedName);
+    const sit = String(inst.situation || inst.status || inst.installmentSituation || "").toLowerCase();
+    const historic = !!(opts.historic
+        || /cancel|revog|baixad|inativ|remade|renegoc/.test(sit));
     allInstallments.push({
         id: (num != null && !Number.isNaN(num)) ? num : (inst.id || inst.document || inst.installmentId),
         number: (num != null && !Number.isNaN(num)) ? num : null,
@@ -301,7 +365,8 @@ function pushInstallmentRow(allInstallments, inst, itemIdx) {
         indexerName: resolvedName,
         indexerId: resolvedId,
         conditionType: inst.conditionType || inst.paymentConditionType || inst.installmentType || "",
-        acordoSemRepactuacao: isAcordo
+        acordoSemRepactuacao: isAcordo,
+        historic: historic
     });
 }
 
@@ -521,7 +586,7 @@ async function loadRepactuacoes(isBackground = false) {
             let indexerRefs = [];
             let acordoParcelCount = 0;
 
-            const ingestExtractItems = (list) => {
+            const ingestExtractItems = (list, opts) => {
                 (list || []).forEach(item => {
                     let em = item.emissionDate || item.issueDate || item.contractDate || item.saleDate;
                     if (!emissionDate && em) emissionDate = String(em).split('T')[0];
@@ -533,7 +598,7 @@ async function loadRepactuacoes(isBackground = false) {
                     for (const inst of installments) {
                         collectIndexerRefs(indexerRefs, inst);
                         const beforeLen = allInstallments.length;
-                        pushInstallmentRow(allInstallments, inst, itemIdx);
+                        pushInstallmentRow(allInstallments, inst, itemIdx, opts);
                         if (allInstallments.length > beforeLen && allInstallments[allInstallments.length - 1].acordoSemRepactuacao) {
                             acordoParcelCount += 1;
                         }
@@ -545,7 +610,7 @@ async function loadRepactuacoes(isBackground = false) {
             // Originais sem remade: costumam trazer o indexador contratual (7, 8, 9…)
             if (itemsOriginal && itemsOriginal.length) ingestExtractItems(itemsOriginal);
             // Parcelas baixadas/canceladas após acordo ainda carregam o indexador do CT
-            if (itemsHistoric && itemsHistoric.length) ingestExtractItems(itemsHistoric);
+            if (itemsHistoric && itemsHistoric.length) ingestExtractItems(itemsHistoric, { historic: true });
 
             // Sempre enriquecer com parcelas do título + remade API (não só quando adjustCount=0)
             let picked = pickContractIndexer(indexerRefs);
@@ -879,6 +944,7 @@ async function loadRepactuacoes(isBackground = false) {
                     }
                     beforeInst = pair.beforeInst;
                     afterInst = pair.afterInst;
+                    const viaReparcelamento = !!pair.viaReparcelamento;
 
                     let appliedPct = null;
                     let isValidated = false;
@@ -886,8 +952,11 @@ async function loadRepactuacoes(isBackground = false) {
                     
                     if (beforeInst && afterInst && beforeInst.value > 0) {
                         appliedPct = (afterInst.value / beforeInst.value - 1) * 100;
-                        // Regra contratual: acumulado negativo não deflaciona — parcela mantém o valor (0%).
-                        if (pct < -0.0001 && Math.abs(appliedPct) < 0.05) {
+                        if (viaReparcelamento) {
+                            // Salto por acordo/reparcelamento: mora + juros do remade ≠ % BCB anual.
+                            isValidated = false;
+                        } else if (pct < -0.0001 && Math.abs(appliedPct) < 0.05) {
+                            // Regra contratual: acumulado negativo não deflaciona — parcela mantém o valor (0%).
                             isValidated = true;
                             noDeflation = true;
                         } else if (Math.abs(appliedPct - pct) < 0.05) {
@@ -901,6 +970,7 @@ async function loadRepactuacoes(isBackground = false) {
                         appliedPercentage: appliedPct,
                         isValidated: isValidated,
                         noDeflation: noDeflation,
+                        viaReparcelamento: viaReparcelamento,
                         valueBefore: beforeInst ? beforeInst.value : null,
                         valueAfter: afterInst ? afterInst.value : null,
                         idBefore: beforeInst ? (beforeInst.number != null ? beforeInst.number : beforeInst.id) : null,
@@ -1130,7 +1200,9 @@ function renderRepactuacoes(historico, meta) {
         
         let statusHtml = '<span style="color: #94a3b8; font-size: 0.75rem;">N/A</span>';
         if (item.appliedPercentage !== null) {
-            if (item.isValidated) {
+            if (item.viaReparcelamento) {
+                statusHtml = `<span style="background: #ffedd5; color: #9a3412; padding: 3px 6px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;" title="Parcelas baixadas por acordo/reparcelamento: mora e juros do remade não batem com o % BCB anual."><i data-lucide="git-branch" style="width: 10px; height: 10px; margin-right: 2px; vertical-align: -1px;"></i> REPARCELAMENTO</span>`;
+            } else if (item.isValidated) {
                 const label = item.noDeflation
                     ? 'VALIDADO · sem deflação'
                     : 'VALIDADO';
@@ -1171,6 +1243,7 @@ function renderRepactuacoes(historico, meta) {
         <i data-lucide="info" style="width: 12px; height: 12px; margin-right: 4px; vertical-align: middle; color: #0ea5e9;"></i>
         A margem de aceitação entre o BCB oficial e o % aplicado nas parcelas (arredondamento) é de 0,05%.
         Quando o acumulado do período é <strong>negativo</strong>, a regra do contrato é <strong>não deflacionar</strong> — parcela mantém o valor (% aplicado = 0%) e isso também é considerado validado.
+        Se houver <strong>reparcelamento/acordo</strong> no período (salto de número ou gap de vencimento), o % embute mora e juros do remade e <strong>não é comparável</strong> ao BCB anual.
     </div>
     `;
     

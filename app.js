@@ -10920,11 +10920,11 @@ function renderCustomerOccurrences() {
       if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") return true;
       const isCancelled = occ.status === 'Cancelada';
       if (isCancelled && window.currentHistoryFilters.includes('Cancelado')) return true;
-      if (!isCancelled && window.currentHistoryFilters.includes(occ.promiseStatus)) return true;
+      const isReuniao = typeof window.isReuniaoSemanalTerceirizadaCanal === "function"
+        && window.isReuniaoSemanalTerceirizadaCanal(occ.canal);
+      if (!isCancelled && !isReuniao && window.currentHistoryFilters.includes(occ.promiseStatus)) return true;
       if (!isCancelled && occ.canal === 'Nota interna' && window.currentHistoryFilters.includes('Nota interna')) return true;
-      if (!isCancelled && typeof window.isReuniaoSemanalTerceirizadaCanal === "function"
-        && window.isReuniaoSemanalTerceirizadaCanal(occ.canal)
-        && window.currentHistoryFilters.includes('Reunião Semanal')) return true;
+      if (!isCancelled && isReuniao && window.currentHistoryFilters.includes('Reunião Semanal')) return true;
       return false;
     });
   }
@@ -11040,7 +11040,7 @@ function renderCustomerOccurrences() {
 
     // Status visual da promessa (Inline)
     let promiseInlineHtml = "";
-    if (occ.promiseDate && occ.status !== "Cancelada") {
+    if (occ.promiseDate && occ.status !== "Cancelada" && !isReuniaoSemanal) {
       const pdStr = new Date(occ.promiseDate + 'T12:00:00').toLocaleDateString('pt-BR');
       
       let statusHtml = '';
@@ -11635,18 +11635,18 @@ async function saveCustomerOccurrence() {
     return;
   }
   
-  if (canal !== "Nota interna") {
+  if (canal !== "Nota interna" && !isReuniaoSemanal) {
     if (!promiseDate) {
       alert(isWebroBaixa
         ? "A data da baixa Webro é obrigatória."
         : (canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória."));
       return;
     }
-    if (!isWebroBaixa && !isReuniaoSemanal && canal !== "Retorno Agendado" && !reminder) {
+    if (!isWebroBaixa && canal !== "Retorno Agendado" && !reminder) {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
-    if (!isWebroBaixa && !isReuniaoSemanal && canal !== "Retorno Agendado" && !iniciativaEl) {
+    if (!isWebroBaixa && canal !== "Retorno Agendado" && !iniciativaEl) {
       alert("O campo Iniciativa é obrigatório.");
       return;
     }
@@ -11692,8 +11692,8 @@ async function saveCustomerOccurrence() {
     saleId: canonicalSaleId || AppState.selectedSaleId || null,
     unitId: currentSale.unitId || null,
     text: text,
-    promiseDate: (canal === "Nota interna") ? null : promiseDate,
-    promiseStatus: (canal === "Nota interna" || !promiseDate) ? null : "Pendente",
+    promiseDate: (canal === "Nota interna" || isReuniaoSemanal) ? null : promiseDate,
+    promiseStatus: (canal === "Nota interna" || isReuniaoSemanal || !promiseDate) ? null : "Pendente",
     reminder: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : reminder,
     canal: canal,
     iniciativa: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : iniciativa,
@@ -12019,7 +12019,7 @@ window.validateOccurrenceForm = function() {
     isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
   } else if (typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal)) {
     if (iniciativaGroup) iniciativaGroup.style.display = "none";
-    if (promiseRow) promiseRow.style.display = "grid";
+    if (promiseRow) promiseRow.style.display = "none";
     if (installmentsGroup) installmentsGroup.style.display = "none";
     if (pinGroup) pinGroup.style.display = "none";
     if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
@@ -12028,15 +12028,7 @@ window.validateOccurrenceForm = function() {
     if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Reunião Semanal';
     if (textEl) textEl.placeholder = "Registrar conversa com a terceirizada...";
 
-    const pDateLabel = document.getElementById('label-promise-date');
-    if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
-    if (pDateEl) {
-      pDateEl.min = new Date().toISOString().split("T")[0];
-      pDateEl.removeAttribute("max");
-    }
-
-    const pDate = pDateEl ? pDateEl.value.trim() : "";
-    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
+    isValid = text.length > 0 && canal.length > 0;
   } else {
     if (iniciativaGroup) iniciativaGroup.style.display = "block";
     if (promiseRow) promiseRow.style.display = "grid";
