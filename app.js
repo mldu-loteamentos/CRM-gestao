@@ -785,6 +785,9 @@ function switchCustomerTab(tabId) {
 
   if (tabId === 'tab-cobranca-judicial' && typeof window.updateJudFaseDropdown === 'function') {
     window.updateJudFaseDropdown();
+    if (typeof window.syncJudicialOccurrenceFormLock === 'function') {
+      window.syncJudicialOccurrenceFormLock();
+    }
   }
   
   if (tabId === 'tab-construcao' && typeof window.loadConstrucoes === 'function') {
@@ -6055,14 +6058,43 @@ document.addEventListener("click", function(e) {
     } else {
       const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
 
+      const groupTotals = {};
+      clientList.forEach(client => {
+        const g = window.getFilaQueueGroup(client, thresholdJuridico);
+        if (!groupTotals[g]) groupTotals[g] = { count: 0, value: 0 };
+        groupTotals[g].count += 1;
+        groupTotals[g].value += (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
+      });
+
       let lastQueueGroup = null;
       clientList.forEach(client => {
         const queueGroup = window.getFilaQueueGroup(client, thresholdJuridico);
         if (queueGroup !== lastQueueGroup) {
           lastQueueGroup = queueGroup;
           const meta = window.getFilaQueueGroupMeta(queueGroup);
+          const totals = groupTotals[queueGroup] || { count: 0, value: 0 };
+          const countLabel = totals.count === 1 ? "1 título" : `${totals.count} títulos`;
+          const valueLabel = totals.value.toLocaleString("pt-BR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          const cellBase = `background:${meta.bg}; color:${meta.color}; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; text-transform:uppercase; padding:8px 12px; border:none;`;
           const headerRow = document.createElement("tr");
-          headerRow.innerHTML = `<td colspan="11" style="background:${meta.bg}; color:${meta.color}; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; text-transform:uppercase; padding:8px 12px;">${meta.label}</td>`;
+          headerRow.innerHTML = `
+            <td colspan="2" style="${cellBase}">${meta.label}</td>
+            <td style="${cellBase} text-align:center; letter-spacing:0; text-transform:none; white-space:nowrap;" title="Quantidade de títulos neste grupo">
+              <span style="display:inline-flex; align-items:center; justify-content:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
+                ${countLabel}
+              </span>
+            </td>
+            <td colspan="4" style="${cellBase}"></td>
+            <td style="${cellBase} white-space:nowrap; padding-right:10px; letter-spacing:0; text-transform:none;" title="Soma do R$ atualizado em atraso neste grupo">
+              <span style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
+                R$ ${valueLabel}
+              </span>
+            </td>
+            <td colspan="3" style="${cellBase}"></td>
+          `;
           body.appendChild(headerRow);
         }
         const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -7115,17 +7147,111 @@ function isRecordSubjudice(customerId, saleId, saleObj) {
   return false;
 }
 
+/** Sub judice ativo agora (Sienge/fila/memória sem exit). Não usa só histórico de notas. */
+function isCurrentlySubjudice(customerId, saleId, saleObj) {
+  if (saleObj && isSubjudiceFlag(saleObj.subjudice)) return true;
+  const cid = String(customerId || "");
+  const sid = String(saleId || "");
+  if (!cid) return false;
+
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  const billIsSub = (b) => String(b.customerId) === cid && isSubjudiceFlag(b.subjudice);
+  if (sid) {
+    if (bills.some((b) => billIsSub(b) && (
+      String(b.saleId) === sid || String(b.receivableBillId) === sid || String(b.realSaleId) === sid
+    ))) return true;
+  }
+  if (bills.some(billIsSub)) return true;
+
+  const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+  if (sales.some((s) => String(s.customerId) === cid && isSubjudiceFlag(s.subjudice) && (
+    !sid || String(s.id) === sid || String(s.receivableBillId) === sid
+  ))) return true;
+
+  if (window._subjudiceList && window._subjudiceList.some((c) => String(c.customerId) === cid)) return true;
+
+  try {
+    const hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}");
+    const mem = hist[customerId] || hist[cid];
+    if (mem && !mem.exitDate) return true;
+  } catch (e) { /* ignore */ }
+
+  return false;
+}
+
+/** Já passou pelo jurídico (memória com entrada/saída), mesmo sem flag S atual. */
+function hasPassedJuridicoHistory(customerId) {
+  const cid = String(customerId || "");
+  if (!cid) return false;
+  try {
+    const hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}");
+    const mem = hist[customerId] || hist[cid] || hist[Number(cid)];
+    return !!(mem && (mem.entryDate || mem.exitDate || mem.lastSeen));
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Permite registrar andamento na aba Cobrança judicial somente com sub judice ativo. */
+function canInsertJudicialOccurrence(customerId, saleId, saleObj) {
+  if (typeof AppState !== "undefined" && AppState.isSubjudiceMode) return true;
+  return isCurrentlySubjudice(
+    customerId != null ? customerId : (typeof AppState !== "undefined" ? AppState.selectedCustomerId : null),
+    saleId != null ? saleId : (typeof AppState !== "undefined" ? (AppState.selectedSaleId || AppState.selectedContractId) : null),
+    saleObj
+  );
+}
+
+function syncJudicialOccurrenceFormLock(saleObj) {
+  const canInsert = canInsertJudicialOccurrence(
+    typeof AppState !== "undefined" ? AppState.selectedCustomerId : null,
+    typeof AppState !== "undefined" ? (AppState.selectedSaleId || AppState.selectedContractId) : null,
+    saleObj
+  );
+
+  const banner = document.getElementById("jud-insert-locked-banner");
+  const formBlock = document.getElementById("jud-occurrence-form-fields");
+  const btnSave = document.getElementById("btn-save-jud-occurrence");
+  const lockIds = [
+    "jud-fase", "jud-note-text", "jud-prazo-date", "jud-pin-checkbox",
+    "jud-reneg-sinal-type", "jud-reneg-sinal-value", "jud-reneg-installments", "jud-reneg-first-date"
+  ];
+
+  if (banner) banner.style.display = canInsert ? "none" : "flex";
+  if (formBlock) {
+    formBlock.style.opacity = canInsert ? "1" : "0.55";
+    formBlock.style.pointerEvents = canInsert ? "" : "none";
+  }
+  lockIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !canInsert;
+  });
+  if (btnSave) {
+    btnSave.disabled = !canInsert;
+    btnSave.style.display = canInsert ? "" : "none";
+  }
+
+  return canInsert;
+}
+
+window.isCurrentlySubjudice = isCurrentlySubjudice;
+window.canInsertJudicialOccurrence = canInsertJudicialOccurrence;
+window.syncJudicialOccurrenceFormLock = syncJudicialOccurrenceFormLock;
+
 function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
   const clientSub = isRecordSubjudice(
     AppState.selectedCustomerId,
     AppState.selectedSaleId || AppState.selectedContractId,
     saleObj
   );
-  const show = !!(originIsSubjudice || isAdvogado || clientSub);
+  const passedJuridico = hasPassedJuridicoHistory(AppState.selectedCustomerId);
+  const show = !!(originIsSubjudice || isAdvogado || clientSub || passedJuridico);
   const cobrancaJudicialBtn = document.getElementById("btn-tab-cobranca-judicial");
   if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "inline-flex" : "none";
   const anexosJuridicoBtn = document.getElementById("btn-anexos-juridico");
   if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "flex" : "none";
+  syncJudicialOccurrenceFormLock(saleObj);
 }
 
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
@@ -30420,58 +30546,45 @@ window.searchRelacionamento = async function() {
 
             const docLabel = (customerDocCache || '').replace(/\D/g, '').length > 11 ? 'CNPJ' : 'CPF';
             infoContainer.innerHTML = `
-              <div style="display: grid; grid-template-columns: 1.2fr 1fr 0.8fr 1.2fr 2fr; gap: 16px 24px; padding: 10px 15px; align-items: start;">
-                  <!-- Nome -->
-                  <div style="grid-column: 1; grid-row: 1;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">Nome</span>
-                     <span style="display: flex; font-size: 0.9rem; color: #1e293b; font-weight: 500; line-height: 1.4;">${fullCustomer.name}</span>
+              <div class="cessao-customer-grid" style="padding:16px 18px;">
+                  <div class="cessao-customer-field cessao-customer-field--wide">
+                     <span class="cessao-lbl">Nome</span>
+                     <span class="cessao-val">${fullCustomer.name}</span>
                   </div>
-                  
-                  <!-- CPF/CNPJ -->
-                  <div style="grid-column: 2; grid-row: 1;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">${docLabel}</span>
-                     <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
+                  <div class="cessao-customer-field">
+                     <span class="cessao-lbl">${docLabel}</span>
+                     <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
                          ${formatCpfCnpj(customerDocCache || '')}
-                         <button onclick="copyToClipboard('${customerDocCache}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar Documento"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>
+                         <button onclick="copyToClipboard('${customerDocCache}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; opacity: 0.7;" title="Copiar Documento"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>
                      </span>
                   </div>
-
-                  <!-- Idade -->
-                  <div style="grid-column: 3; grid-row: 1;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">Idade</span>
-                     <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
+                  <div class="cessao-customer-field">
+                     <span class="cessao-lbl">Idade</span>
+                     <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
                         <i data-lucide="calendar" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span>${age}</span>
                      </span>
                   </div>
-
-                  <!-- Profissão -->
-                  <div style="grid-column: 4; grid-row: 1;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">Profissão</span>
-                     <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
+                  <div class="cessao-customer-field">
+                     <span class="cessao-lbl">Profissão</span>
+                     <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
                         <i data-lucide="${profIcon}" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span>${prof}</span>
                      </span>
                   </div>
-
-                  <!-- Endereço -->
-                  <div style="grid-column: 5; grid-row: 1 / span 2;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">${addrTypeLabel}</span>
-                     <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
-                        <i data-lucide="${addrIcon}" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0; margin-top: 2px;"></i> <span>${addrStr}</span>
-                     </span>
-                  </div>
-
-                  <!-- Telefones -->
-                  <div style="grid-column: 1; grid-row: 2;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">Telefones</span>
+                  <div class="cessao-customer-field">
+                     <span class="cessao-lbl">Telefones</span>
                      ${phoneHTML}
                   </div>
-
-                  <!-- E-mail -->
-                  <div style="grid-column: 3 / span 2; grid-row: 2;">
-                     <span style="display: block; font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; margin-bottom: 4px;">E-mail</span>
-                     <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500; display: flex; align-items: center; gap: 8px; line-height: 1.4;">
+                  <div class="cessao-customer-field cessao-customer-field--wide">
+                     <span class="cessao-lbl">E-mail</span>
+                     <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
                        <i data-lucide="mail" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0;"></i> <span style="word-break: break-all;">${hasEmail ? fullCustomer.email : 'Não informado'}</span>
-                       ${hasEmail ? `<button onclick="copyToClipboard('${fullCustomer.email}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar E-mail"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>` : ''}
+                       ${hasEmail ? `<button onclick="copyToClipboard('${fullCustomer.email}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; opacity: 0.7;" title="Copiar E-mail"><i data-lucide="copy" style="width: 14px; height: 14px; color: var(--color-primary);"></i></button>` : ''}
+                     </span>
+                  </div>
+                  <div class="cessao-customer-field cessao-customer-field--full">
+                     <span class="cessao-lbl">${addrTypeLabel}</span>
+                     <span class="cessao-val" style="display:flex;align-items:flex-start;gap:8px;">
+                        <i data-lucide="${addrIcon}" style="width: 15px; height: 15px; color: var(--color-primary); flex-shrink: 0; margin-top: 2px;"></i> <span>${addrStr}</span>
                      </span>
                   </div>
               </div>
@@ -30892,6 +31005,9 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
+              <i data-lucide="briefcase" style="width:14px;height:14px; margin-right:4px;"></i> Gestão
+            </button>
             <button class="btn btn-secondary btn-sm" data-customer-id="${customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" data-cc="${String((r.unidade || '').split(' - ')[0] || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
               <i data-lucide="file-text" style="width:14px;height:14px; margin-right:4px;"></i> Extrato
             </button>
@@ -30960,6 +31076,116 @@ document.addEventListener('tabChanged', async (e) => {
 });
 
 let fromRelacionamento = false;
+
+/** Popup: o que gerenciar no contrato (ordem alfabética). */
+window.openGestaoDocumentoMenu = function(ctx) {
+  let overlay = document.getElementById("moura-gestao-docs-modal");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "moura-gestao-docs-modal";
+    overlay.innerHTML = `
+      <div class="moura-gestao-docs-panel" role="dialog" aria-modal="true" aria-labelledby="moura-gestao-docs-title">
+        <header>
+          <h3 id="moura-gestao-docs-title">O que deseja gerenciar?</h3>
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeGestaoDocumentoMenu()" title="Fechar" style="padding:4px 8px;">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </header>
+        <div class="moura-gestao-docs-list">
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('aditamento')">
+            <i data-lucide="file-plus"></i> Aditamento
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('autorizacao')">
+            <i data-lucide="scroll-text"></i> Autorização de Escritura
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('cessao')">
+            <i data-lucide="handshake"></i> Cessão de direitos
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('quitacao')">
+            <i data-lucide="badge-check"></i> Termo de quitação
+          </button>
+        </div>
+        <footer>
+          <button type="button" class="btn btn-cancel" onclick="closeGestaoDocumentoMenu()">Cancelar</button>
+        </footer>
+      </div>`;
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) closeGestaoDocumentoMenu();
+    });
+    document.body.appendChild(overlay);
+  }
+  overlay._ctx = ctx || {};
+  overlay.style.display = "flex";
+  if (window.lucide) window.lucide.createIcons();
+};
+
+window.closeGestaoDocumentoMenu = function() {
+  const overlay = document.getElementById("moura-gestao-docs-modal");
+  if (overlay) overlay.style.display = "none";
+};
+
+window.escolherGestaoDocumento = function(tipo) {
+  const overlay = document.getElementById("moura-gestao-docs-modal");
+  const ctx = (overlay && overlay._ctx) || {};
+  closeGestaoDocumentoMenu();
+  const customerId = ctx.customerId;
+  const contractId = ctx.contractId;
+  const titulo = ctx.titulo;
+  const contractNumber = ctx.contractNumber || contractId || "";
+  const customerName = ctx.customerName || "";
+
+  if (tipo === "aditamento") {
+    if (typeof openCustomerFromRelacionamento === "function" && customerId) {
+      openCustomerFromRelacionamento(customerId, contractId, titulo);
+    }
+    setTimeout(() => {
+      alert("Aditamento: módulo em desenvolvimento. A ficha do cliente foi aberta.");
+    }, 400);
+    return;
+  }
+
+  if (tipo === "autorizacao") {
+    if (typeof switchTab === "function") switchTab("relacionamento_autorizacao", "Autorização de escritura");
+    setTimeout(() => {
+      const tEl = document.getElementById("esc-filter-titulo");
+      const cEl = document.getElementById("esc-filter-contrato");
+      const nEl = document.getElementById("esc-filter-nome");
+      if (tEl && titulo && String(titulo) !== "—") tEl.value = String(titulo).replace(/\D/g, "") || String(titulo);
+      if (cEl && contractNumber) cEl.value = String(contractNumber);
+      if (nEl && customerName) nEl.value = customerName;
+      if (window.RelacionamentoApp && typeof RelacionamentoApp.fillCartorioSelect === "function") {
+        RelacionamentoApp.fillCartorioSelect();
+      }
+      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarEscritura === "function" && (titulo || contractNumber || customerName)) {
+        RelacionamentoApp.buscarEscritura();
+      }
+    }, 120);
+    return;
+  }
+
+  if (tipo === "cessao") {
+    if (typeof switchTab === "function") switchTab("relacionamento_cessao", "Cessão de Direitos");
+    setTimeout(() => {
+      if (window.CessaoApp && typeof CessaoApp.abrirFluxo === "function" && customerId && contractId) {
+        CessaoApp.abrirFluxo(String(customerId), String(contractId), String(titulo || ""));
+      } else if (window.CessaoApp && typeof CessaoApp.init === "function") {
+        CessaoApp.init();
+      }
+    }, 180);
+    return;
+  }
+
+  if (tipo === "quitacao") {
+    if (typeof openCustomerFromRelacionamento === "function" && customerId) {
+      openCustomerFromRelacionamento(customerId, contractId, titulo);
+      const tryQuit = () => {
+        if (typeof switchCustomerTab === "function") switchCustomerTab("tab-quitacao");
+      };
+      setTimeout(tryQuit, 600);
+      setTimeout(tryQuit, 1400);
+    }
+  }
+};
 
 window.openCustomerFromRelacionamento = function(customerId, contractId, titulo) {
   fromRelacionamento = true;
@@ -31509,6 +31735,12 @@ document.addEventListener('click', (e) => {
 });
 
 window.saveJudicialOccurrence = function() {
+  if (typeof canInsertJudicialOccurrence === "function" && !canInsertJudicialOccurrence()) {
+    alert("Cliente não está mais Sub Judice. Registre novas ocorrências na aba Ocorrências e Promessas.");
+    if (typeof syncJudicialOccurrenceFormLock === "function") syncJudicialOccurrenceFormLock();
+    return;
+  }
+
   const faseEl = document.getElementById("jud-fase");
   const noteEl = document.getElementById("jud-note-text");
   const prazoEl = document.getElementById("jud-prazo-date");
@@ -31645,6 +31877,13 @@ window.renderJudicialTimeline = function() {
   const container = document.getElementById("jud-timeline");
   if (!container) return;
 
+  if (typeof syncJudicialOccurrenceFormLock === "function") {
+    syncJudicialOccurrenceFormLock();
+  }
+  const canInsertJud = typeof canInsertJudicialOccurrence === "function"
+    ? canInsertJudicialOccurrence()
+    : true;
+
   const processInput = document.getElementById("jud-process-number");
   if (processInput && AppState.selectedCustomerId) {
       if (!AppState.judicialProcessNumbers) {
@@ -31718,7 +31957,7 @@ window.renderJudicialTimeline = function() {
     }
 
     let repetirBtnHtml = "";
-    if (occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociação') {
+    if (canInsertJud && occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociação') {
         repetirBtnHtml = `
             <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc(${index})" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
                <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Repetir
@@ -31970,6 +32209,11 @@ window.togglePinJudicialOccurrence = function(occDate) {
 };
 
 window.repeatJudicialOcc = function(index) {
+  if (typeof canInsertJudicialOccurrence === "function" && !canInsertJudicialOccurrence()) {
+    alert("Cliente não está mais Sub Judice. Registre novas ocorrências na aba Ocorrências e Promessas.");
+    return;
+  }
+
   const list = AppState.judNotes[AppState.selectedCustomerId] || [];
   const occ = list[index];
   if (!occ) return;
@@ -32128,8 +32372,10 @@ window.openAnexosClienteModal = function(customerId) {
                     AnexosState.importedContracts.add(mainC.id);
                     if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
                 } else if (AnexosState.contractAttachments.length > 0) {
-                    // Automaticamente importar anexos do Sienge (primeira vez)
-                    AnexosApp.importarAnexosDoContrato();
+                    // NÃO auto-importa: download em massa + PDF.js congelava a aba.
+                    // Usuário clica em “Baixar N Anexos” quando quiser.
+                    AnexosState.importedContracts.delete(mainC.id);
+                    renderAnexosModule();
                 }
             }
         }).catch(err => {

@@ -5,13 +5,14 @@ const ParticipacoesApp = {
   companyId: "",
   companyQ: "",
   fileName: "",
-  groupBy: "periodo",
+  groupBy: "matriz",
   q: "",
   loading: false,
   error: "",
   hint: "",
   parsing: false,
   uploadProgress: "",
+  detail: null, // { credor, periodo } | null
 
   CATEGORIES: [
     { id: "relacionada", name: "Parte relacionada / sócio", test: /ellenco|ellenceo|moura leite|mutuo|mútuo|devolução de mutuo|socio|sócio/i },
@@ -383,6 +384,162 @@ const ParticipacoesApp = {
     return Object.values(map).sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
   },
 
+  /** Matriz: linhas = credor, colunas = mês (YYYY-MM), células = soma + lançamentos. */
+  matrixData() {
+    const rows = this.filtered();
+    const monthSet = new Set();
+    const byCredor = {};
+    rows.forEach((r) => {
+      const periodo = r.periodo || this.periodFromFileName(r.sourceFile) || "sem-periodo";
+      const credor = r.credor || "(sem credor)";
+      monthSet.add(periodo);
+      if (!byCredor[credor]) byCredor[credor] = { credor, cells: {}, total: 0 };
+      if (!byCredor[credor].cells[periodo]) byCredor[credor].cells[periodo] = { total: 0, rows: [] };
+      const cell = byCredor[credor].cells[periodo];
+      cell.total += Number(r.valor) || 0;
+      cell.rows.push(r);
+      byCredor[credor].total += Number(r.valor) || 0;
+    });
+    const months = Array.from(monthSet).sort((a, b) => String(a).localeCompare(String(b)));
+    const creditors = Object.values(byCredor).sort((a, b) => b.total - a.total || a.credor.localeCompare(b.credor, "pt-BR"));
+    const colTotals = {};
+    months.forEach((m) => {
+      colTotals[m] = creditors.reduce((s, c) => s + ((c.cells[m] && c.cells[m].total) || 0), 0);
+    });
+    const grand = creditors.reduce((s, c) => s + c.total, 0);
+    return { months, creditors, colTotals, grand };
+  },
+
+  openMatrixDetail(credorEnc, periodo) {
+    let credor = credorEnc;
+    try { credor = decodeURIComponent(credorEnc); } catch (e) {}
+    this.detail = { credor: String(credor || ""), periodo: String(periodo || "") };
+    this.render();
+  },
+
+  closeMatrixDetail() {
+    this.detail = null;
+    this.render();
+  },
+
+  detailRows() {
+    if (!this.detail) return [];
+    const { credor, periodo } = this.detail;
+    return this.filtered().filter((r) => {
+      const p = r.periodo || this.periodFromFileName(r.sourceFile) || "sem-periodo";
+      return String(r.credor || "(sem credor)") === String(credor) && String(p) === String(periodo);
+    }).sort((a, b) => String(a.iso || a.date).localeCompare(String(b.iso || b.date)));
+  },
+
+  matrixHtml() {
+    const mx = this.matrixData();
+    if (!mx.creditors.length) return "";
+    const shortMonth = (ym) => {
+      const lab = this.periodLabel(ym, ym);
+      const parts = String(lab).split(" ");
+      if (parts.length >= 3) return `${parts[0].slice(0, 3)}/${parts[2]}`;
+      return lab;
+    };
+    return `
+      <div class="crm-card" style="padding:0;margin-bottom:12px;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">
+          <div>
+            <strong style="color:#14532d;">Matriz por credor × mês</strong>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique em um valor para ver o detalhamento dos lançamentos.</div>
+          </div>
+          <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
+        </div>
+        <div style="overflow:auto;max-height:min(70vh,720px);">
+          <table class="part-matrix-table">
+            <thead>
+              <tr>
+                <th class="part-matrix-sticky">Credor</th>
+                ${mx.months.map((m) => `<th title="${this.esc(this.periodLabel(m, m))}">${this.esc(shortMonth(m))}</th>`).join("")}
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${mx.creditors.map((c) => {
+                const enc = encodeURIComponent(c.credor);
+                return `<tr>
+                  <td class="part-matrix-sticky part-matrix-credor" title="${this.esc(c.credor)}">${this.esc(c.credor)}</td>
+                  ${mx.months.map((m) => {
+                    const cell = c.cells[m];
+                    if (!cell || !cell.total) {
+                      return `<td class="part-matrix-empty">—</td>`;
+                    }
+                    const n = cell.rows.length;
+                    return `<td class="part-matrix-cell">
+                      <button type="button" class="part-matrix-btn" onclick="ParticipacoesApp.openMatrixDetail('${enc}','${this.esc(m)}')" title="${n} lançamento(s) — clique para detalhar">
+                        <span class="part-matrix-val">${this.fmt(cell.total)}</span>
+                        ${n > 1 ? `<span class="part-matrix-n">${n}</span>` : ""}
+                      </button>
+                    </td>`;
+                  }).join("")}
+                  <td class="part-matrix-total">${this.fmt(c.total)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td class="part-matrix-sticky">Total</td>
+                ${mx.months.map((m) => `<td class="part-matrix-total">${mx.colTotals[m] ? this.fmt(mx.colTotals[m]) : "—"}</td>`).join("")}
+                <td class="part-matrix-total">${this.fmt(mx.grand)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  detailModalHtml() {
+    if (!this.detail) return "";
+    const rows = this.detailRows();
+    const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    const periodoLab = this.periodLabel(this.detail.periodo, this.detail.periodo);
+    return `
+      <div id="part-detail-modal" class="part-detail-overlay" onclick="if(event.target===this)ParticipacoesApp.closeMatrixDetail()">
+        <div class="part-detail-panel" role="dialog" aria-modal="true">
+          <header>
+            <div>
+              <h3>${this.esc(this.detail.credor)}</h3>
+              <div class="part-detail-sub">${this.esc(periodoLab)} · ${rows.length} lançamento(s) · <strong>${this.fmt(total)}</strong></div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="ParticipacoesApp.closeMatrixDetail()" title="Fechar" style="padding:4px 8px;">
+              <i data-lucide="x" style="width:16px;height:16px;"></i>
+            </button>
+          </header>
+          <div class="part-detail-body">
+            ${rows.length ? `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Detalhe</th>
+                    <th>Categoria</th>
+                    <th style="text-align:right;">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map((r) => `<tr style="${r.categoriaId === "relacionada" ? "background:#fff7ed;" : ""}">
+                    <td style="white-space:nowrap;">${this.esc(r.date)}</td>
+                    <td>${this.esc(r.detalhe || "—")}</td>
+                    <td>${this.esc(r.categoria)}</td>
+                    <td style="text-align:right;font-weight:700;">${r.valor ? this.fmt(r.valor) : "—"}</td>
+                  </tr>`).join("")}
+                </tbody>
+              </table>
+            ` : `<div style="padding:24px;text-align:center;color:#64748b;">Nenhum lançamento neste filtro.</div>`}
+          </div>
+          <footer>
+            <button type="button" class="btn btn-cancel" onclick="ParticipacoesApp.closeMatrixDetail()">Fechar</button>
+          </footer>
+        </div>
+      </div>
+    `;
+  },
+
   async onCompany(id) {
     this.companyId = String(id || "");
     this.fileName = "";
@@ -399,10 +556,8 @@ const ParticipacoesApp = {
     this.render();
     await this.loadFilesFromServer();
     this.loading = false;
-    if (this.files.length && !this.fileName) {
-      const first = this.files.find((f) => Array.isArray(f.expenses) && f.expenses.length) || this.files[0];
-      if (first) await this.onFile(first.name);
-    }
+    // Mantém "Todos os períodos" para a matriz credor × mês
+    this.fileName = "";
     this.render();
   },
 
@@ -433,7 +588,7 @@ const ParticipacoesApp = {
       this.error = "Não foi possível ler um dos PDFs: " + (e.message || e);
     }
     this.parsing = false;
-    this.groupBy = "periodo";
+    this.groupBy = "matriz";
     this.render();
   },
 
@@ -505,7 +660,7 @@ const ParticipacoesApp = {
       }
       this.files.sort((a, b) => String(b.closing || "").localeCompare(String(a.closing || "")) || b.name.localeCompare(a.name));
       this.fileName = "";
-      this.groupBy = "periodo";
+      this.groupBy = "matriz";
       if (serverOk) await this.loadFilesFromServer();
     } catch (e) {
       this.error = e.message || String(e);
@@ -601,9 +756,14 @@ const ParticipacoesApp = {
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;">
                 <input class="form-control" placeholder="Filtrar credor, detalhe, categoria..." value="${this.esc(this.q)}" oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="max-width:280px;">
-                ${["periodo", "credor", "categoria", "data"].map((g) => {
-                  const lab = g === "periodo" ? "Por período" : g === "credor" ? "Por credor" : g === "categoria" ? "Por categoria" : "Por data";
-                  return `<button type="button" class="btn ${this.groupBy === g ? "btn-primary" : "btn-outline"}" onclick="ParticipacoesApp.groupBy='${g}';ParticipacoesApp.render()">${lab}</button>`;
+                ${[
+                  ["matriz", "Matriz"],
+                  ["periodo", "Por período"],
+                  ["credor", "Por credor"],
+                  ["categoria", "Por categoria"],
+                  ["data", "Por data"]
+                ].map(([g, lab]) => {
+                  return `<button type="button" class="btn ${this.groupBy === g ? "btn-primary" : "btn-outline"}" onclick="ParticipacoesApp.groupBy='${g}';ParticipacoesApp.detail=null;ParticipacoesApp.render()">${lab}</button>`;
                 }).join("")}
               </div>
             </div>
@@ -613,7 +773,8 @@ const ParticipacoesApp = {
                 <div style="font-weight:800;color:#9a3412;margin-bottom:8px;">Pontos de atenção (${alerts.length})</div>
                 ${alerts.slice(0, 12).map((a) => `<div style="font-size:0.8rem;margin-bottom:6px;color:${a.level === "danger" ? "#991b1b" : "#9a3412"};">• ${this.esc(a.text)}</div>`).join("")}
               </div>` : ""}
-            ${!this.parsing && !this.loading ? groups.map((g) => `
+            ${!this.parsing && !this.loading && this.groupBy === "matriz" ? this.matrixHtml() : ""}
+            ${!this.parsing && !this.loading && this.groupBy !== "matriz" ? groups.map((g) => `
               <div class="crm-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
                 <div style="display:flex;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
                   <strong style="text-transform:capitalize;">${this.esc(g.key)}</strong>
@@ -643,10 +804,11 @@ const ParticipacoesApp = {
                 </table>
               </div>
             `).join("") : ""}
-            ${!this.parsing && !this.loading && this.companyId && this.files.length && !groups.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha de despesa paga identificada. Confira se a página “DESPESAS PAGAS” está em texto no PDF.</div>` : ""}
+            ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha de despesa paga identificada. Confira se a página “DESPESAS PAGAS” está em texto no PDF.</div>` : ""}
             ${!this.parsing && !this.loading && this.companyId && !this.files.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Empresa selecionada. Envie um ou mais PDFs de fechamento para agrupar as despesas por período.</div>` : ""}
           </div>
         </div>
+        ${this.detailModalHtml()}
       </div>
     `;
     if (window.lucide) lucide.createIcons();

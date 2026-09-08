@@ -68,45 +68,38 @@ const CessaoApp = {
   buscaHtml() {
     return `
       <div class="cessao-shell">
-        <div class="search-filter-panel" style="margin-bottom:16px;">
-          <h2 style="margin:0 0 4px;display:flex;align-items:center;gap:8px;color:var(--color-primary);font-size:1.15rem;">
-            <i data-lucide="handshake" style="width:22px;height:22px;"></i> Cessão de Direitos
-          </h2>
-          <p style="margin:0;color:#64748b;font-size:0.9rem;">Busque o cliente cedente por nome, ID/CPF/CNPJ, telefone ou e-mail e abra a cessão do contrato.</p>
-        </div>
-
-        <div class="crm-card" style="margin-bottom:20px;">
-          <div class="crm-card-content" style="padding:16px 18px;">
-            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:12px;align-items:end;">
-              <div>
-                <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Nome</label>
+        <div class="crm-card cessao-search-card" style="margin-bottom:20px;">
+          <div class="crm-card-content" style="padding:18px 20px;">
+            <div class="cessao-search-grid">
+              <div class="form-group" style="margin:0;">
+                <label for="cessao-filter-nome">Nome</label>
                 <input type="text" id="cessao-filter-nome" class="form-control" placeholder="Digite para buscar..."
                   onkeydown="if(event.key==='Enter'){event.preventDefault();CessaoApp.buscar();}"
                   oninput="CessaoApp.sugerirCliente(this.value,'nome')" autocomplete="off">
               </div>
-              <div>
-                <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">ID ou CPF/CNPJ</label>
+              <div class="form-group" style="margin:0;">
+                <label for="cessao-filter-doc">ID ou CPF/CNPJ</label>
                 <input type="text" id="cessao-filter-doc" class="form-control" placeholder="ID ou 000.000.000-00"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();CessaoApp.buscar();}"
                   oninput="if(typeof maskCpfCnpj==='function' && this.value.replace(/\\D/g,'').length>3) maskCpfCnpj(this);">
               </div>
-              <div>
-                <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Telefone</label>
+              <div class="form-group" style="margin:0;">
+                <label for="cessao-filter-telefone">Telefone</label>
                 <input type="text" id="cessao-filter-telefone" class="form-control" placeholder="Somente números"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();CessaoApp.buscar();}"
                   oninput="this.value=this.value.replace(/[^0-9]/g,'');CessaoApp.sugerirCliente(this.value,'telefone')" autocomplete="off">
               </div>
-              <div>
-                <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">E-mail</label>
+              <div class="form-group" style="margin:0;">
+                <label for="cessao-filter-email">E-mail</label>
                 <input type="text" id="cessao-filter-email" class="form-control" placeholder="Digite para buscar..."
                   onkeydown="if(event.key==='Enter'){event.preventDefault();CessaoApp.buscar();}"
                   oninput="CessaoApp.sugerirCliente(this.value,'email')" autocomplete="off">
               </div>
-              <div style="display:flex;gap:8px;">
-                <button type="button" class="btn btn-primary" onclick="CessaoApp.buscar()" style="height:38px;white-space:nowrap;">
+              <div class="cessao-search-actions">
+                <button type="button" class="btn btn-primary" onclick="CessaoApp.buscar()">
                   <i data-lucide="search" style="width:16px;height:16px;"></i> Buscar
                 </button>
-                <button type="button" class="btn btn-outline" onclick="CessaoApp.limparBusca()" title="Limpar" style="height:38px;">
+                <button type="button" class="btn btn-outline" onclick="CessaoApp.limparBusca()" title="Limpar">
                   <i data-lucide="eraser" style="width:16px;height:16px;"></i>
                 </button>
               </div>
@@ -116,20 +109,20 @@ const CessaoApp = {
         </div>
 
         <div class="crm-card" id="cessao-customer-card" style="display:none;margin-bottom:20px;">
-          <div class="crm-card-header" style="background:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
+          <div class="crm-card-header" style="background:#f8fafc;padding:12px 20px;border-bottom:1px solid #e2e8f0;border-radius:8px 8px 0 0;">
             <h3 style="margin:0;font-size:1.05rem;color:var(--color-primary);">Dados do cliente</h3>
           </div>
           <div id="cessao-customer-info" class="crm-card-content"></div>
         </div>
 
         <div class="crm-card" id="cessao-results-card" style="display:none;">
-          <div class="crm-card-header" style="background:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
+          <div class="crm-card-header" style="background:#f8fafc;padding:12px 20px;border-bottom:1px solid #e2e8f0;border-radius:8px 8px 0 0;">
             <h3 style="margin:0;font-size:1.05rem;color:var(--color-primary);">Contratos do cliente</h3>
           </div>
           <div class="crm-card-content" style="padding:0;">
             <div style="overflow:auto;max-height:480px;">
               <table class="crm-table" style="width:100%;border-collapse:separate;border-spacing:0;">
-                <thead style="position:sticky;top:0;background:#f3f4f6;z-index:2;">
+                <thead style="position:sticky;top:0;background:#f8fafc;z-index:2;">
                   <tr>
                     <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Contrato</th>
                     <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Título</th>
@@ -294,14 +287,35 @@ const CessaoApp = {
     const email = c.email || 'Não informado';
     const fmtDoc = typeof formatCpfCnpj === 'function' ? formatCpfCnpj(doc) : doc;
     return `
-      <div style="display:grid;grid-template-columns:1.3fr 1fr 0.7fr 1.1fr 1.8fr;gap:14px 20px;padding:12px 16px;">
-        <div><span class="cessao-lbl">Nome</span><span class="cessao-val">${this.esc(c.name || '—')}</span></div>
-        <div><span class="cessao-lbl">${docLabel}</span><span class="cessao-val">${this.esc(fmtDoc || '—')}</span></div>
-        <div><span class="cessao-lbl">Idade</span><span class="cessao-val">${this.esc(age)}</span></div>
-        <div><span class="cessao-lbl">Profissão</span><span class="cessao-val">${this.esc(prof)}</span></div>
-        <div style="grid-row:span 2;"><span class="cessao-lbl">Endereço</span><span class="cessao-val">${this.esc(addr)}</span></div>
-        <div><span class="cessao-lbl">Telefones</span><span class="cessao-val">${this.esc(phone)}</span></div>
-        <div style="grid-column:span 2;"><span class="cessao-lbl">E-mail</span><span class="cessao-val">${this.esc(email)}</span></div>
+      <div class="cessao-customer-grid">
+        <div class="cessao-customer-field cessao-customer-field--wide">
+          <span class="cessao-lbl">Nome</span>
+          <span class="cessao-val">${this.esc(c.name || '—')}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">${docLabel}</span>
+          <span class="cessao-val">${this.esc(fmtDoc || '—')}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Idade</span>
+          <span class="cessao-val">${this.esc(age)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Profissão</span>
+          <span class="cessao-val">${this.esc(prof)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Telefones</span>
+          <span class="cessao-val">${this.esc(phone)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">E-mail</span>
+          <span class="cessao-val">${this.esc(email)}</span>
+        </div>
+        <div class="cessao-customer-field cessao-customer-field--full">
+          <span class="cessao-lbl">Endereço</span>
+          <span class="cessao-val">${this.esc(addr)}</span>
+        </div>
       </div>`;
   },
 
@@ -386,6 +400,11 @@ const CessaoApp = {
           <td style="padding:10px;font-size:0.75rem;">${this.esc(dataVenda)}</td>
           <td style="padding:10px;text-align:center;">${statusHtml}</td>
           <td style="padding:10px;text-align:center;white-space:nowrap;">
+            <button type="button" class="btn btn-primary btn-sm"
+              onclick="openGestaoDocumentoMenu({customerId:'${String(customerId).replace(/'/g, '')}',contractId:'${String(cid).replace(/'/g, '')}',titulo:'${String(titulo).replace(/'/g, '')}',contractNumber:'${String(num).replace(/'/g, '')}',customerName:'${String(customer.name || '').replace(/'/g, "\\'")}'})"
+              style="margin-right:6px;padding:6px 12px;font-size:0.75rem;font-weight:700;">
+              <i data-lucide="briefcase" style="width:14px;height:14px;margin-right:4px;"></i> Gestão
+            </button>
             <button type="button" class="btn btn-secondary btn-sm"
               data-customer-id="${this.esc(customerId)}"
               data-title="${this.esc(titulo)}"
@@ -393,13 +412,8 @@ const CessaoApp = {
               data-unit="${this.esc(unitLabel)}"
               data-cc="${this.esc(empId)}"
               onclick="visualizarExtratoDireto(this)"
-              style="margin-right:6px;padding:6px 12px;font-size:0.75rem;font-weight:700;">
+              style="padding:6px 12px;font-size:0.75rem;font-weight:700;">
               <i data-lucide="file-text" style="width:14px;height:14px;margin-right:4px;"></i> Extrato
-            </button>
-            <button type="button" class="btn btn-sm"
-              onclick="CessaoApp.abrirFluxo('${String(customerId).replace(/'/g, '')}','${String(cid).replace(/'/g, '')}','${String(titulo).replace(/'/g, '')}')"
-              style="background:var(--color-primary);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-weight:700;font-size:0.75rem;">
-              <i data-lucide="handshake" style="width:14px;height:14px;margin-right:4px;"></i> Cessão
             </button>
           </td>
         </tr>`;

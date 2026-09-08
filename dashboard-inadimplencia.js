@@ -52,6 +52,42 @@ const DashboardInadimplencia = (function() {
     return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function formatMoneyCompact(value) {
+    const n = Number(value) || 0;
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return (n / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' Mi';
+    if (abs >= 1e3) return (n / 1e3).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' mil';
+    return formatMoney(n);
+  }
+
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function costCenterShort(id) {
+    const full = costCenterName(id);
+    const parts = String(full).split(/\s*-\s*/);
+    if (parts.length >= 2) {
+      const idPart = parts[0];
+      const place = parts[1];
+      const rest = parts.slice(2).join(' - ');
+      const shortRest = rest.length > 28 ? rest.slice(0, 26) + '…' : rest;
+      return shortRest ? `${idPart} · ${place} · ${shortRest}` : `${idPart} · ${place}`;
+    }
+    return full.length > 48 ? full.slice(0, 46) + '…' : full;
+  }
+
+  function deltaBadge(atual, anterior) {
+    if (anterior == null || !Number.isFinite(Number(anterior)) || Number(anterior) === 0) {
+      return '<span class="di-delta di-delta--flat">—</span>';
+    }
+    const pct = ((Number(atual) - Number(anterior)) / Number(anterior)) * 100;
+    const cls = pct > 0.05 ? 'di-delta--up' : (pct < -0.05 ? 'di-delta--down' : 'di-delta--flat');
+    const sign = pct > 0 ? '+' : '';
+    return `<span class="di-delta ${cls}">${sign}${pct.toFixed(1)}%</span>`;
+  }
+
   function getSnapshotAtual() {
     return snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
   }
@@ -901,170 +937,169 @@ const DashboardInadimplencia = (function() {
 
   function renderTabelaComparativa(hojeMetrics, fechMetrics) {
     if (!hojeMetrics) return '';
+    const rows = [
+      fechMetrics ? {
+        key: 'fech',
+        label: 'Fechamento do mês',
+        hint: 'Último fechamento gravado',
+        count: fechMetrics.total_count,
+        value: fechMetrics.total_value,
+        subj: fechMetrics.subjudice_count
+      } : null,
+      {
+        key: 'hoje',
+        label: 'Hoje',
+        hint: 'Posição atual filtrada',
+        count: hojeMetrics.total_count,
+        value: hojeMetrics.total_value,
+        subj: hojeMetrics.subjudice_count
+      }
+    ].filter(Boolean);
 
     return `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
-        <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-          <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="calendar-days" style="width: 18px; color: #64748b;"></i> Comparativo de Períodos
-          </h3>
+      <section class="di-block">
+        <header class="di-block-head">
+          <h3><i data-lucide="calendar-days"></i> Comparativo de períodos</h3>
+        </header>
+        <div class="di-compare-grid">
+          ${rows.map((r) => {
+            const base = r.key === 'hoje' && fechMetrics ? fechMetrics : null;
+            return `
+              <article class="di-compare-card ${r.key === 'hoje' ? 'is-today' : ''}">
+                <div class="di-compare-label">${escHtml(r.label)}</div>
+                <div class="di-compare-hint">${escHtml(r.hint)}</div>
+                <div class="di-compare-value">${formatMoneyCompact(r.value)}</div>
+                <div class="di-compare-meta">
+                  <span><strong>${Number(r.count || 0).toLocaleString('pt-BR')}</strong> títulos</span>
+                  <span><strong>${Number(r.subj || 0).toLocaleString('pt-BR')}</strong> sub júdice</span>
+                  ${base ? deltaBadge(r.value, base.total_value) : ''}
+                </div>
+              </article>`;
+          }).join('')}
         </div>
-        <div style="overflow-x: auto;">
-          <table class="custom-table" style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background: #f1f5f9; text-align: left;">
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem;">Período</th>
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem; text-align: right;">Qtd Títulos</th>
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem; text-align: right;">Valor Total</th>
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem; text-align: right;">Sub Júdice</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${fechMetrics ? `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 12px 20px; font-weight: 600; color: #334155;">Fechamento do Mês</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${fechMetrics.total_count}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(fechMetrics.total_value)}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${fechMetrics.subjudice_count}</td>
-              </tr>` : ''}
-              <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 12px 20px; font-weight: 600; color: #334155;">Hoje</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${hojeMetrics.total_count}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${formatMoney(hojeMetrics.total_value)}</td>
-                <td style="padding: 12px 20px; text-align: right; color: #334155;">${hojeMetrics.subjudice_count}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </section>
     `;
   }
 
   function renderAging(metrics) {
     if (!metrics || !metrics.aging) return '';
     const agings = metrics.aging;
+    const order = ['d0_30', 'd31_60', 'd61_90', 'd91_180', 'd181_365', 'd365p'];
     const labels = {
-      d0_30: '0 a 30 dias',
-      d31_60: '31 a 60 dias',
-      d61_90: '61 a 90 dias',
-      d91_180: '91 a 180 dias',
-      d181_365: '181 a 365 dias',
-      d365p: 'Acima de 365 dias'
+      d0_30: '0–30',
+      d31_60: '31–60',
+      d61_90: '61–90',
+      d91_180: '91–180',
+      d181_365: '181–365',
+      d365p: '+365'
     };
+    const tones = {
+      d0_30: '#fbbf24',
+      d31_60: '#f59e0b',
+      d61_90: '#f37021',
+      d91_180: '#ea580c',
+      d181_365: '#c2410c',
+      d365p: '#9a3412'
+    };
+    const maxVal = Math.max(1, ...order.map((k) => (agings[k] && agings[k].value) || 0));
 
-    let html = `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
-        <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-          <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="bar-chart-3" style="width: 18px; color: #64748b;"></i> Faixa de Atraso (Aging)
-          </h3>
+    return `
+      <section class="di-block di-block--fill">
+        <header class="di-block-head">
+          <h3><i data-lucide="bar-chart-3"></i> Faixa de atraso</h3>
+        </header>
+        <div class="di-aging-list">
+          ${order.map((k) => {
+            const row = agings[k] || { count: 0, value: 0 };
+            const pctTot = metrics.total_value > 0 ? (row.value / metrics.total_value) * 100 : 0;
+            const pctBar = (row.value / maxVal) * 100;
+            return `
+              <div class="di-aging-row">
+                <div class="di-aging-top">
+                  <span class="di-aging-label">${labels[k]} <em>${row.count} tít.</em></span>
+                  <span class="di-aging-val">${formatMoneyCompact(row.value)} <em>${pctTot.toFixed(0)}%</em></span>
+                </div>
+                <div class="di-aging-track"><div class="di-aging-fill" style="width:${pctBar}%;background:${tones[k]};"></div></div>
+              </div>`;
+          }).join('')}
         </div>
-        <div style="padding: 20px;">
+      </section>
     `;
-
-    Object.keys(agings).forEach(k => {
-      const val = agings[k].value;
-      const pct = metrics.total_value > 0 ? (val / metrics.total_value) * 100 : 0;
-      html += `
-        <div style="margin-bottom: 12px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.85rem; color: #334155;">
-            <span>${labels[k]} (${agings[k].count} tít.)</span>
-            <span style="font-weight: 600;">${formatMoney(val)} (${pct.toFixed(1)}%)</span>
-          </div>
-          <div style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
-            <div style="width: ${pct}%; height: 100%; background: #f37021; border-radius: 4px;"></div>
-          </div>
-        </div>
-      `;
-    });
-
-    html += `</div></div>`;
-    return html;
   }
 
   function renderCentrosDeCusto(metrics) {
     if (!metrics) return '';
-    const ccs = (metrics.centers || []).slice().sort((a, b) => b.value - a.value).slice(0, 15);
+    const all = (metrics.centers || []).slice().sort((a, b) => b.value - a.value);
+    const ccs = all.slice(0, 8);
+    const maxVal = Math.max(1, ...(ccs.map((c) => c.value) || [1]));
+    const rest = Math.max(0, all.length - ccs.length);
 
-    let html = `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
-        <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-          <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="building-2" style="width: 18px; color: #64748b;"></i> Maiores Empreendimentos em Inadimplência
-          </h3>
+    return `
+      <section class="di-block di-block--fill">
+        <header class="di-block-head">
+          <h3><i data-lucide="building-2"></i> Maiores empreendimentos</h3>
+        </header>
+        <div class="di-rank-list">
+          ${!ccs.length ? `<div class="di-empty">Nenhum empreendimento no filtro</div>` : ccs.map((cc, i) => {
+            const full = costCenterName(cc.id);
+            const short = costCenterShort(cc.id);
+            const pct = (cc.value / maxVal) * 100;
+            return `
+              <div class="di-rank-row" title="${escHtml(full)}">
+                <span class="di-rank-pos">${i + 1}</span>
+                <div class="di-rank-main">
+                  <div class="di-rank-name">${escHtml(short)}</div>
+                  <div class="di-rank-track"><div class="di-rank-fill" style="width:${pct}%;"></div></div>
+                </div>
+                <div class="di-rank-metrics">
+                  <strong>${formatMoneyCompact(cc.value)}</strong>
+                  <span>${cc.count} tít.</span>
+                </div>
+              </div>`;
+          }).join('')}
+          ${rest ? `<div class="di-rank-more">+ ${rest} empreendimento(s)</div>` : ''}
         </div>
-        <div style="overflow-x: auto; max-height: 420px;">
-          <table class="custom-table" style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background: #f1f5f9; text-align: left;">
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem;">Centro de Custo</th>
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem; text-align: right;">Qtd Títulos</th>
-                <th style="padding: 12px 20px; color: #475569; font-size: 0.85rem; text-align: right;">Valor Total</th>
-              </tr>
-            </thead>
-            <tbody>
+      </section>
     `;
-
-    if (!ccs.length) {
-      html += `<tr><td colspan="3" style="padding:20px;color:#94a3b8;text-align:center;">Nenhum empreendimento no filtro</td></tr>`;
-    } else {
-      ccs.forEach(cc => {
-        const nome = costCenterName(cc.id);
-        html += `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 12px 20px; color: #334155; font-size: 0.85rem;">${nome}</td>
-            <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem;">${cc.count}</td>
-            <td style="padding: 12px 20px; text-align: right; color: #334155; font-size: 0.85rem; font-weight: 500;">${formatMoney(cc.value)}</td>
-          </tr>
-        `;
-      });
-    }
-
-    html += `</tbody></table></div></div>`;
-    return html;
   }
 
   function renderOperadores(metrics) {
     if (!metrics) return '';
-    const ops = (metrics.operators || []).slice().sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
+    const all = (metrics.operators || []).slice().sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
+    const ops = all.slice(0, 8);
+    const maxVal = Math.max(1, ...(ops.map((o) => o.total_value || 0) || [1]));
+    const rest = Math.max(0, all.length - ops.length);
 
-    let html = `
-      <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); height: 100%;">
-        <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-          <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="users" style="width: 18px; color: #64748b;"></i> Resumo por Operador
-          </h3>
+    return `
+      <section class="di-block di-block--fill">
+        <header class="di-block-head">
+          <h3><i data-lucide="users"></i> Resumo por operador</h3>
+        </header>
+        <div class="di-rank-list">
+          ${!ops.length ? `<div class="di-empty">Nenhum operador no filtro</div>` : ops.map((op, i) => {
+            const name = String(op.name || 'N/D');
+            const short = name.split(/\s+/).slice(0, 2).join(' ');
+            const pct = ((op.total_value || 0) / maxVal) * 100;
+            const above = Number(op.above31_value || 0);
+            const share31 = (op.total_value > 0) ? (above / op.total_value) * 100 : 0;
+            return `
+              <div class="di-rank-row" title="${escHtml(name)}">
+                <span class="di-rank-pos">${i + 1}</span>
+                <div class="di-rank-main">
+                  <div class="di-rank-name">${escHtml(short)}</div>
+                  <div class="di-rank-track"><div class="di-rank-fill di-rank-fill--op" style="width:${pct}%;"></div></div>
+                  <div class="di-rank-sub">≥31d ${formatMoneyCompact(above)} · ${share31.toFixed(0)}%</div>
+                </div>
+                <div class="di-rank-metrics">
+                  <strong>${formatMoneyCompact(op.total_value || 0)}</strong>
+                  <span>${op.total_count || 0} tít.</span>
+                </div>
+              </div>`;
+          }).join('')}
+          ${rest ? `<div class="di-rank-more">+ ${rest} operador(es)</div>` : ''}
         </div>
-        <div style="overflow-x: auto; max-height: 420px;">
-          <table class="custom-table" style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background: #f1f5f9; text-align: left;">
-                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem;">Operador</th>
-                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">Títulos</th>
-                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">Valor</th>
-                <th style="padding: 12px 16px; color: #475569; font-size: 0.85rem; text-align: right;">≥ 31 dias</th>
-              </tr>
-            </thead>
-            <tbody>
+      </section>
     `;
-
-    if (!ops.length) {
-      html += `<tr><td colspan="4" style="padding:20px;color:#94a3b8;text-align:center;">Nenhum operador no filtro</td></tr>`;
-    } else {
-      ops.forEach(op => {
-        html += `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 12px 16px; color: #334155; font-size: 0.85rem; font-weight: 600;">${op.name || 'N/D'}</td>
-            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem;">${op.total_count || 0}</td>
-            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem; font-weight: 500;">${formatMoney(op.total_value || 0)}</td>
-            <td style="padding: 12px 16px; text-align: right; color: #334155; font-size: 0.85rem;">${formatMoney(op.above31_value || 0)}</td>
-          </tr>
-        `;
-      });
-    }
-
-    html += `</tbody></table></div></div>`;
-    return html;
   }
 
   function aplicarFiltros() {
@@ -1146,7 +1181,7 @@ const DashboardInadimplencia = (function() {
 
           ${renderTabelaComparativa(metrics, fechMetrics)}
 
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; align-items: stretch;">
+          <div class="di-panels-row">
             ${renderAging(metrics)}
             ${renderCentrosDeCusto(metrics)}
             ${renderOperadores(metrics)}

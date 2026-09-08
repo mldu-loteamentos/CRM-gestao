@@ -54,6 +54,14 @@ const RepactuacaoLoteApp = {
     return `${p[2]}/${p[1]}/${p[0]}`;
   },
 
+  /** YYYY-MM → MM/YYYY */
+  fmtYm(ym) {
+    const s = String(ym || "").slice(0, 7);
+    const p = s.split("-");
+    if (p.length !== 2) return s || "—";
+    return `${p[1]}/${p[0]}`;
+  },
+
   parseBRNumber(v) {
     if (v == null || v === "") return null;
     if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -304,47 +312,69 @@ const RepactuacaoLoteApp = {
       body = `<p style="margin:0;color:#64748b;font-size:0.85rem;">Nenhum indexador de correção encontrado no Sienge.</p>`;
     } else {
       body = `
-        <div style="overflow-x:auto;">
-          <table class="custom-table" style="font-size:0.82rem;">
-            <thead>
-              <tr>
-                <th style="text-align:left;">Indexador (Sienge)</th>
-                <th style="text-align:center;">ID</th>
-                <th style="text-align:center;">Retro</th>
-                <th style="text-align:center;">Mês base BCB</th>
-                <th style="text-align:center;">% acum. 12 meses</th>
-                <th style="text-align:center;">Situação</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r) => {
-                const situ = r.complete
-                  ? `<span style="color:#15803d;font-weight:700;">Completo</span>`
-                  : (r.partial
-                    ? `<span style="color:#c2410c;font-weight:700;">Parcial · faltam ${r.missing.length}</span>`
-                    : `<span style="color:#94a3b8;">Sem dados</span>`);
-                const pctStyle = r.complete ? "color:#15803d;font-weight:800;" : (r.partial ? "color:#c2410c;font-weight:700;" : "");
-                return `<tr>
-                  <td style="text-align:left;font-weight:600;">${this.esc(r.name)}</td>
-                  <td style="text-align:center;">${this.esc(r.id)}</td>
-                  <td style="text-align:center;">${r.retro}</td>
-                  <td style="text-align:center;">${this.esc(this.fmtDate(r.expectedBase).replace(/^01\//, ""))}</td>
-                  <td style="text-align:center;${pctStyle}">${r.accPct == null ? "—" : this.esc(this.pct(r.accPct))}</td>
-                  <td style="text-align:center;">${situ}</td>
-                </tr>`;
-              }).join("")}
-            </tbody>
-          </table>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;">
+          ${rows.map((r) => {
+            const missingLabel = (r.missing || []).map((k) => this.fmtYm(k)).join(", ");
+            const used = 12 - (r.missing || []).length;
+            let tone = "#64748b";
+            let toneBg = "#f8fafc";
+            let toneBorder = "#e2e8f0";
+            let statusTitle = "Sem dados";
+            let statusSub = "Nenhuma série BCB no período";
+            let pctHtml = `<span style="font-size:1.35rem;font-weight:800;color:#94a3b8;letter-spacing:-0.02em;">—</span>`;
+            if (r.complete) {
+              tone = "#15803d";
+              toneBg = "#f0fdf4";
+              toneBorder = "#bbf7d0";
+              statusTitle = "Completo";
+              statusSub = "12/12 meses BCB";
+              pctHtml = `<span style="font-size:1.45rem;font-weight:800;color:${tone};letter-spacing:-0.02em;">${this.esc(this.pct(r.accPct))}</span>`;
+            } else if (r.partial) {
+              tone = "#c2410c";
+              toneBg = "#fff7ed";
+              toneBorder = "#fed7aa";
+              statusTitle = `Parcial · faltam ${r.missing.length}`;
+              statusSub = missingLabel
+                ? `Valor com ${used}/12 · falta ${missingLabel}`
+                : `Valor com ${used}/12 meses`;
+              pctHtml = `
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                  <span style="font-size:1.45rem;font-weight:800;color:${tone};letter-spacing:-0.02em;">${this.esc(this.pct(r.accPct))}</span>
+                  <span style="font-size:0.72rem;font-weight:700;color:${tone};text-transform:uppercase;letter-spacing:0.04em;">parcial</span>
+                </div>`;
+            }
+            return `
+              <div style="border:1px solid ${toneBorder};background:${toneBg};border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <div>
+                    <div style="font-size:1rem;font-weight:800;color:#14532d;">${this.esc(r.name)}</div>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">ID ${this.esc(r.id)} · retro ${r.retro}</div>
+                  </div>
+                  <span style="font-size:0.7rem;font-weight:700;color:${tone};background:#fff;border:1px solid ${toneBorder};border-radius:6px;padding:3px 8px;white-space:nowrap;">
+                    ${this.esc(statusTitle)}
+                  </span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">
+                  <div>
+                    <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">% acum. 12 meses</div>
+                    ${pctHtml}
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Mês base BCB</div>
+                    <div style="font-size:0.95rem;font-weight:700;color:#334155;">${this.esc(this.fmtYm(String(r.expectedBase || "").slice(0, 7)))}</div>
+                  </div>
+                </div>
+                <div style="font-size:0.78rem;color:${tone};font-weight:600;line-height:1.35;">
+                  ${this.esc(statusSub)}
+                </div>
+              </div>`;
+          }).join("")}
         </div>
-        <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">
-          Mesma regra da ficha (aba Repactuações): data base = mês da repactuação + retroatividade do indexador no Sienge (−1 / −2).
-          O percentual é o acumulado de 12 meses do BCB até essa data base.
-        </p>
       `;
     }
     return `
-      <div id="repac-indexer-preview" class="search-filter-panel" style="margin-bottom:16px;border:1px solid #d1fae5;background:linear-gradient(180deg,#f0fdf4 0%,#fff 48%);">
-        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:14px;">
+      <div id="repac-indexer-preview" class="search-filter-panel" style="margin-bottom:16px;border:1px solid #d1fae5;background:linear-gradient(180deg,#f0fdf4 0%,#fff 42%);">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:16px;">
           <div class="form-group" style="margin:0;min-width:200px;">
             <label for="repac-adjust-month" style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.03em;">Mês da repactuação</label>
             <input type="month" id="repac-adjust-month" class="form-control" value="${this.esc(ym || "")}"
@@ -352,10 +382,9 @@ const RepactuacaoLoteApp = {
               style="max-width:200px;font-weight:600;">
           </div>
           <div style="flex:1;min-width:180px;">
-            <div style="font-size:0.9rem;font-weight:700;color:#14532d;">${this.esc(this.monthLabel(ym))}</div>
+            <div style="font-size:0.95rem;font-weight:800;color:#14532d;">${this.esc(this.monthLabel(ym))}</div>
             <div style="font-size:0.78rem;color:#64748b;">
-              1º dia útil: <strong>${this.esc(this.fmtDate(fbd))}</strong>
-              · reajuste contratual nessa competência
+              1º dia útil <strong style="color:#334155;">${this.esc(this.fmtDate(fbd))}</strong>
             </div>
           </div>
           <button type="button" class="btn btn-secondary" style="padding:8px 12px;"
@@ -363,9 +392,12 @@ const RepactuacaoLoteApp = {
             <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar prévia
           </button>
         </div>
-        <h3 style="margin:0 0 8px;font-size:0.85rem;color:#166534;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;">
-          Prévia dos indexadores
-        </h3>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <h3 style="margin:0;font-size:0.85rem;color:#166534;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;">
+            Prévia dos indexadores
+          </h3>
+          <span style="font-size:0.72rem;color:#94a3b8;">Data base = mês + retro Sienge · % BCB 12m</span>
+        </div>
         ${body}
       </div>
     `;
@@ -912,17 +944,6 @@ const RepactuacaoLoteApp = {
     const missingSienge = this.state.rows.filter((r) => r.siengeValor == null).length;
     root.innerHTML = `
       <div class="est-stock-page">
-        <div class="search-filter-panel" style="margin-bottom:16px;">
-          <h2 style="display:flex;align-items:center;gap:8px;margin:0 0 8px;">
-            <i data-lucide="refresh-cw" style="width:24px;color:var(--color-primary);"></i>
-            Repactuação
-          </h2>
-          <p style="font-size:0.9rem;color:var(--color-text-muted);margin:0 0 12px;">
-            Escolha o <strong>mês da repactuação</strong> para ver a prévia dos indexadores (data base do Sienge e % acumulado BCB).
-            Depois envie a planilha <strong>Títulos para Repactuação</strong> para conferir parcela a parcela.
-            O reajuste cai no <strong>1º dia útil</strong>${this.state.firstBusinessDay ? ` (${this.fmtDate(this.state.firstBusinessDay)})` : ""}.
-          </p>
-        </div>
         ${this.previewHtml()}
         <div class="search-filter-panel" style="margin-bottom:16px;">
           <h3 style="margin:0 0 10px;font-size:0.9rem;color:#334155;">Planilha de títulos</h3>
