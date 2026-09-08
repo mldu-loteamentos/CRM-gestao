@@ -137,22 +137,56 @@ const FluxoCaixaApp = {
     return c ? (Number(c.pct) || 0) / 100 : 0;
   },
 
+  /**
+   * Rateio das categorias do movimento.
+   * Sienge manda % (0–100). Se houver linhas duplicadas ou soma > 100,
+   * normaliza — senão o DFC infla (caso visto em 2.11.03 Adiantamento a Parceiros).
+   */
+  categoryShareEntries(cats) {
+    const list = Array.isArray(cats) ? cats : [];
+    const merged = new Map();
+    list.forEach((fc) => {
+      if (!fc) return;
+      const categoryId = String(fc.financialCategoryId || "").trim();
+      if (!categoryId) return;
+      const cc = String(fc.costCenterId || "");
+      const key = categoryId + "|" + cc;
+      const rateRaw = Number(fc.financialCategoryRate);
+      let points = 0;
+      if (Number.isFinite(rateRaw) && rateRaw > 0) {
+        points = rateRaw > 1 ? rateRaw : rateRaw * 100;
+      }
+      const prev = merged.get(key);
+      if (!prev) {
+        merged.set(key, { fc, points });
+      } else {
+        prev.points += points;
+        if (!prev.fc.financialCategoryName && fc.financialCategoryName) prev.fc = fc;
+      }
+    });
+    const entries = [...merged.values()];
+    if (!entries.length) return [];
+    const sum = entries.reduce((s, e) => s + (e.points || 0), 0);
+    if (sum <= 0) {
+      const eq = 1 / entries.length;
+      return entries.map((e) => ({ fc: e.fc, share: eq }));
+    }
+    // Soma > 100: normaliza. Senão divide por 100 (rateio parcial permanece parcial).
+    const denom = sum > 100.0001 ? sum : 100;
+    return entries.map((e) => ({ fc: e.fc, share: e.points / denom }));
+  },
+
   allocate(mov, factor) {
     const amount = (Number(mov.bankMovementAmount) || 0) * factor;
     const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
     if (!cats.length) return [];
     const ignored = this.ignoredAccountKeys();
-    return cats.map(fc => {
+    return this.categoryShareEntries(cats).map(({ fc, share }) => {
       const categoryId = String(fc.financialCategoryId || "").trim();
       if (!categoryId) return null;
       const nk = this.normAccountKey(categoryId);
       if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
-      const rate = Number(fc.financialCategoryRate);
-      let share = 1;
-      if (rate > 1) share = rate / 100;
-      else if (rate > 0) share = rate;
-      else share = 1 / cats.length;
       return {
         amount: amount * share,
         categoryId,
@@ -480,6 +514,15 @@ const FluxoCaixaApp = {
         return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
       }));
       this.movements = chunks.flat();
+      // Dedupe entre empresas (API às vezes ignora companyId e devolve o mesmo movimento N vezes)
+      if (typeof siengeDedupeBankMovements === "function") {
+        this.movements = siengeDedupeBankMovements(this.movements);
+      }
+      // Garante período pelo data de caixa (não confiar só no filtro da API)
+      this.movements = this.movements.filter((m) => {
+        const d = this.cashDate(m);
+        return d && d >= this.startDate && d <= this.endDate;
+      });
       const allocs = [];
       this.movements.forEach(mov => {
         const factor = this.factorForCompany(mov.companyId);

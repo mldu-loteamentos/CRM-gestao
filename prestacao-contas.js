@@ -229,18 +229,16 @@ const PrestacaoContasApp = {
     const ignored = this.ignoredAccountKeys();
     const part = this.activePartnership();
     const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+    const fcApp = this.fc();
+    const shareEntries = (fcApp && typeof fcApp.categoryShareEntries === "function")
+      ? fcApp.categoryShareEntries(cats)
+      : cats.map((fc) => ({ fc, share: 1 / cats.length }));
 
-    return cats.map(fc => {
+    return shareEntries.map(({ fc, share }) => {
       const categoryId = String(fc.financialCategoryId || "").trim();
       if (!categoryId) return null;
       const nk = this.normAccountKey(categoryId);
       if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
-
-      const rate = Number(fc.financialCategoryRate);
-      let share = 1;
-      if (rate > 1) share = rate / 100;
-      else if (rate > 0) share = rate;
-      else share = 1 / cats.length;
 
       let factor = 1;
       if (part && PP) {
