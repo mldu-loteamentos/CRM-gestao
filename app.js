@@ -3450,7 +3450,31 @@ async function initializeApplication() {
   window.saveNotesToFirebase = async function(customerId) {
       window._isFirebaseSyncing = true;
       try {
-        localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+        try {
+          localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+        } catch (quotaErr) {
+          const msg = String((quotaErr && quotaErr.message) || quotaErr || "");
+          const isQuota = /quota|exceeded|QuotaExceeded/i.test(msg) || (quotaErr && quotaErr.name === "QuotaExceededError");
+          if (isQuota) {
+            console.warn("[Notes] localStorage cheio (crm_moura_notes). Seguindo só com Firebase.", quotaErr);
+            try {
+              // Reduz espelho local: mantém só o cliente atual + últimos tocados
+              const slim = {};
+              const keepId = customerId != null ? window.normalizeCustomerNotesKey(customerId) : null;
+              if (keepId && AppState.notes[keepId]) slim[keepId] = AppState.notes[keepId];
+              const keys = Object.keys(AppState.notes || {});
+              for (let i = keys.length - 1; i >= 0 && Object.keys(slim).length < 40; i--) {
+                const k = keys[i];
+                if (!slim[k]) slim[k] = AppState.notes[k];
+              }
+              localStorage.setItem("crm_moura_notes", JSON.stringify(slim));
+            } catch (e2) {
+              try { localStorage.removeItem("crm_moura_notes"); } catch (e3) {}
+            }
+          } else {
+            throw quotaErr;
+          }
+        }
         if (window.firebaseDb && window.firebaseCollections) {
             if (customerId) {
                const customerKey = window.normalizeCustomerNotesKey(customerId);
@@ -3487,7 +3511,13 @@ async function initializeApplication() {
         }
       } catch(e) {
           console.error('[Firebase RT] Erro FATAL ao salvar notas no Firebase:', e);
-          alert("Erro ao salvar ocorrência na nuvem (Firebase): " + e.message + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
+          const msg = String((e && e.message) || e || "");
+          const isQuota = /quota|exceeded|QuotaExceeded/i.test(msg) || (e && e.name === "QuotaExceededError");
+          if (isQuota) {
+            alert("O cache local do navegador (ocorrências) está cheio. A gravação na nuvem pode ter falhado antes de concluir — tente gravar de novo. Se persistir, limpe dados do site neste navegador ou contate o suporte.");
+          } else {
+            alert("Erro ao salvar ocorrência na nuvem (Firebase): " + msg + ". A ocorrência pode desaparecer da tela. Contate o suporte.");
+          }
       } finally {
           setTimeout(() => { window._isFirebaseSyncing = false; }, 500);
       }
@@ -4415,6 +4445,19 @@ window.isWebroBaixaCanal = function(canal) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
   return n === "aguardando baixa webro" || (n.indexOf("baixa") !== -1 && n.indexOf("webro") !== -1);
+};
+
+/** Canal de ata/acompanhamento da reunião semanal com a cobrança terceirizada. */
+window.isReuniaoSemanalTerceirizadaCanal = function(canal) {
+  const n = String(canal || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!n) return false;
+  if (n === "reuniao semanal terceirizada") return true;
+  return n.indexOf("reuniao semanal") !== -1 && n.indexOf("terceiriz") !== -1;
 };
 
 window.countBusinessDaysElapsedIso = function(fromIso, toIso) {
@@ -10879,6 +10922,9 @@ function renderCustomerOccurrences() {
       if (isCancelled && window.currentHistoryFilters.includes('Cancelado')) return true;
       if (!isCancelled && window.currentHistoryFilters.includes(occ.promiseStatus)) return true;
       if (!isCancelled && occ.canal === 'Nota interna' && window.currentHistoryFilters.includes('Nota interna')) return true;
+      if (!isCancelled && typeof window.isReuniaoSemanalTerceirizadaCanal === "function"
+        && window.isReuniaoSemanalTerceirizadaCanal(occ.canal)
+        && window.currentHistoryFilters.includes('Reunião Semanal')) return true;
       return false;
     });
   }
@@ -10918,12 +10964,19 @@ function renderCustomerOccurrences() {
       card.style.setProperty('box-shadow', '2px 2px 6px rgba(0,0,0,0.05)', 'important');
     }
     const isWebroBaixa = !!(occ.webroBaixa || (typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(occ.canal)));
+    const isReuniaoSemanal = !!(typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(occ.canal));
     if (isNexLocked) {
       card.style.setProperty('position', 'relative', 'important');
       card.style.setProperty('background-color', '#fef2f2', 'important');
       card.style.setProperty('border', '1px solid #fecaca', 'important');
       card.style.setProperty('border-left', '4px solid #ef4444', 'important');
       card.style.cursor = 'pointer';
+    } else if (isReuniaoSemanal) {
+      card.style.setProperty('position', 'relative', 'important');
+      card.style.setProperty('background-color', '#eef2ff', 'important');
+      card.style.setProperty('border', '1px solid #c7d2fe', 'important');
+      card.style.setProperty('border-left', '4px solid #4f46e5', 'important');
+      card.style.setProperty('box-shadow', '0 0 0 1px rgba(79,70,229,0.10)', 'important');
     } else if (isWebroBaixa) {
       card.style.setProperty('position', 'relative', 'important');
       card.style.setProperty('background-color', '#ecfdf5', 'important');
@@ -10951,9 +11004,13 @@ function renderCustomerOccurrences() {
       else if (occ.canal.toLowerCase() === 'e-mail' || occ.canal.toLowerCase() === 'email') canalIcon = 'mail';
       else if (occ.canal.toLowerCase() === 'presencial') canalIcon = 'user';
       else if (isNotaInterna) canalIcon = 'sticky-note';
+      else if (isReuniaoSemanal) canalIcon = 'users';
       else if (isWebroBaixa) canalIcon = 'banknote';
       else if (isNexLocked) canalIcon = 'mail';
-      tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${isWebroBaixa ? '#166534' : 'var(--color-text-muted)'}; font-weight: ${isWebroBaixa ? '700' : '400'};"><i data-lucide="${canalIcon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.canal}</span>`;
+      const canalTagBg = isReuniaoSemanal ? '#e0e7ff' : 'rgba(0,0,0,0.05)';
+      const canalTagColor = isReuniaoSemanal ? '#3730a3' : (isWebroBaixa ? '#166534' : 'var(--color-text-muted)');
+      const canalTagWeight = (isReuniaoSemanal || isWebroBaixa) ? '700' : '400';
+      tagsHtml += `<span style="background: ${canalTagBg}; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: ${canalTagColor}; font-weight: ${canalTagWeight};"><i data-lucide="${canalIcon}" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.canal}</span>`;
     }
     if (occ.iniciativa) {
       const icon = occ.iniciativa === 'Ativo' ? 'arrow-right' : 'arrow-left';
@@ -16223,6 +16280,34 @@ function splitDistratoWitnessFields(line, label) {
   return raw.split(re).map(x => x.trim()).filter(Boolean);
 }
 
+/** Separa a última cláusula (+ fecho) para manter junto das assinaturas na mesma página. */
+function splitLastDistratoClause(beforeText) {
+  const text = String(beforeText || "").replace(/\s+$/, "");
+  if (!text) return { body: "", keep: "" };
+  let lastStart = -1;
+  // Aceita título puro ou com markup (**...** → <strong>...</strong>)
+  const clauseRe = /(^|\n)([^\n]*(?:CL[ÁA]USULA|CLAUSULA)[^\n]*)/gi;
+  let m;
+  while ((m = clauseRe.exec(text)) !== null) {
+    lastStart = m.index + m[1].length;
+  }
+  if (lastStart >= 0) {
+    return {
+      body: text.slice(0, lastStart).replace(/\s+$/, ""),
+      keep: text.slice(lastStart).replace(/^\s+/, "")
+    };
+  }
+  const closeIdx = text.search(/(^|\n)(E,\s*por\s+estarem\b)/i);
+  if (closeIdx >= 0) {
+    const start = text.charAt(closeIdx) === "\n" ? closeIdx + 1 : closeIdx;
+    return {
+      body: text.slice(0, start).replace(/\s+$/, ""),
+      keep: text.slice(start).replace(/^\s+/, "")
+    };
+  }
+  return { body: text, keep: "" };
+}
+
 window.centerDistratoSignatures = function(html) {
   const s = String(html || "");
   const lines = s.split(/\r?\n/);
@@ -16249,7 +16334,8 @@ window.centerDistratoSignatures = function(html) {
     }
     break;
   }
-  const before = beforeLines.join("\n").replace(/\s+$/, "");
+  const beforeRaw = beforeLines.join("\n").replace(/\s+$/, "");
+  const { body: before, keep: lastClause } = splitLastDistratoClause(beforeRaw);
   const rest = lines.slice(start).map(l => String(l || "").trim()).filter(l => l.length);
   const parties = [];
   let i = 0;
@@ -16293,12 +16379,12 @@ window.centerDistratoSignatures = function(html) {
     i++;
   }
   const partyHtml = parties.map((p, idx) => `
-    <div style="margin: ${idx === 0 ? 36 : 56}px auto 0; max-width: 420px; text-align: center;">
+    <div style="margin: ${idx === 0 ? 22 : 40}px auto 0; max-width: 420px; text-align: center;">
       <div style="border-top: 1px solid #111; padding-top: 10px; font-weight: 700;">${p.name}</div>
       <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${p.role}</div>
     </div>`).join("");
   const witnessesHtml = (hasWitnessTitle || w1Name || w2Name) ? `
-    <div style="margin-top: 36px; text-align: center; font-weight: 700;">Testemunhas</div>
+    <div style="margin-top: 28px; text-align: center; font-weight: 700;">Testemunhas</div>
     <table style="width: 100%; max-width: 680px; margin: 14px auto 0; border-collapse: collapse; white-space: normal;">
       <tr>
         <td style="width: 50%; text-align: center; vertical-align: top; padding: 0 12px;">
@@ -16312,13 +16398,19 @@ window.centerDistratoSignatures = function(html) {
       </tr>
     </table>` : "";
   const dateHtml = dateLine
-    ? `<div style="white-space: normal; text-align: center; margin: 28px 0 12px; font-weight: 500;">${dateLine}</div>`
+    ? `<div style="white-space: normal; text-align: center; margin: 18px 0 8px; font-weight: 500;">${dateLine}</div>`
+    : "";
+  const clauseKeepHtml = lastClause
+    ? `<div class="pdf-distrato-last-clause" style="white-space: pre-wrap; text-align: justify;">${lastClause}</div>`
     : "";
   return `${before}
+<div class="pdf-sign-keep" style="page-break-inside: avoid; break-inside: avoid; page-break-before: auto;">
+${clauseKeepHtml}
 ${dateHtml}
-<div style="white-space: normal; text-align: center; margin-top: 8px;">
+<div style="white-space: normal; text-align: center; margin-top: 4px;">
 ${partyHtml}
 ${witnessesHtml}
+</div>
 </div>`;
 };
 
@@ -17646,7 +17738,7 @@ window.submitReprocessBoleto = async function() {
       ? window.getCustomerNotesList(AppState.notes, custKey)
       : (AppState.notes[custKey] || AppState.notes[customerId] || []);
     AppState.notes[custKey] = existing.concat([occurrence]);
-    localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
     if (window.saveNotesToFirebase) {
       await window.saveNotesToFirebase(custKey);
     }
@@ -17690,7 +17782,7 @@ window.submitReprocessBoleto = async function() {
           newDueDate: dueDate,
           finePercentage: fine,
           interestPercentage: interest,
-          source: (typeof source !== "undefined" && source) || currentReprocessSource || "",
+          source: (typeof currentReprocessSource !== "undefined" && currentReprocessSource) || "",
           contractNumber: sale && (sale.contractNumber || sale.number || ""),
           saleId: AppState.selectedSaleId || "",
           enterpriseId: enterpriseId,
@@ -17704,10 +17796,11 @@ window.submitReprocessBoleto = async function() {
     if (typeof window.refreshSimuladorAfterBoleto === "function") {
       try { window.refreshSimuladorAfterBoleto(instIds); } catch (e) { console.warn(e); }
     }
+    const boletoSource = (typeof currentReprocessSource !== "undefined" && currentReprocessSource) || "avulso";
     if (typeof switchCustomerTab === "function") {
-      try { switchCustomerTab(source === "boletos" ? "tab-boletos" : "tab-simulacao"); } catch (e) {}
+      try { switchCustomerTab(boletoSource === "boletos" ? "tab-boletos" : "tab-simulacao"); } catch (e) {}
     }
-    if (source === "boletos" && typeof window.loadCustomerBoletos === "function") {
+    if (boletoSource === "boletos" && typeof window.loadCustomerBoletos === "function") {
       try { window.loadCustomerBoletos(AppState.selectedCustomerId, billId); } catch (e) {}
     }
 
@@ -31344,7 +31437,7 @@ function getCanonicalOptionList(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
   const canonical = isCanal
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Proposta de renegociação', 'Retorno Agendado', 'Aguardando Baixa Webro']
+    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Proposta de renegociação', 'Retorno Agendado', 'Aguardando Baixa Webro', 'Reunião Semanal Terceirizada']
     : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
 
   try {
@@ -31457,7 +31550,7 @@ window.openOptionsEditor = function(type) {
         return `
         <div class="option-item" style="${isDisabled ? 'opacity: 0.6;' : ''}">
           <span style="font-size: 0.95rem; color: #334155; font-weight: 500; ${isDisabled ? 'text-decoration: line-through;' : ''}">${opt} ${isDisabled ? '(Inativo)' : ''}</span>
-          ${(opt === 'Nota interna' || opt === 'Aprovação Gestor') 
+          ${(opt === 'Nota interna' || opt === 'Aprovação Gestor' || opt === 'Reunião Semanal Terceirizada') 
             ? `<button class="option-trash-btn" style="color: #94a3b8; cursor: not-allowed;" title="Fixo no sistema" disabled><i data-lucide="lock" style="width: 16px; height: 16px;"></i></button>`
             : `<button class="option-trash-btn" onclick="removeOptionFromList(${index})" title="Remover/Desativar"><i data-lucide="trash-2" style="width: 16px; height: 16px;"></i></button>`
           }
@@ -33727,7 +33820,8 @@ window.SYNC_KEYS = [
     "crm_moura_cartorios_list",
     "crm_moura_cartao_taxas",
     "crm_moura_alcada_desconto",
-    "crm_compromissario_configs"
+    "crm_compromissario_configs",
+    "crm_compromissario_cessao_v1"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -34236,6 +34330,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_compromissario_cessao_v1" && typeof window.mergeCompromissarioCessao === "function") {
+                    const merged = window.mergeCompromissarioCessao(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -34345,6 +34450,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_compromissario_configs", payload.crm_compromissario_configs); } catch (e) {}
             } else if (!payload.crm_compromissario_configs && cloud.crm_compromissario_configs) {
               payload.crm_compromissario_configs = cloud.crm_compromissario_configs;
+            }
+          }
+          if (payload.crm_compromissario_cessao_v1 || cloud.crm_compromissario_cessao_v1) {
+            if (typeof window.mergeCompromissarioCessao === "function") {
+              payload.crm_compromissario_cessao_v1 = window.mergeCompromissarioCessao(
+                payload.crm_compromissario_cessao_v1 || "{}",
+                cloud.crm_compromissario_cessao_v1 || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_compromissario_cessao_v1", payload.crm_compromissario_cessao_v1); } catch (e) {}
+            } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
+              payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
             }
           }
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
@@ -34525,6 +34641,16 @@ localStorage.setItem = function(key, value) {
                           );
                         } else if (!payload.crm_compromissario_configs && cloud.crm_compromissario_configs) {
                           payload.crm_compromissario_configs = cloud.crm_compromissario_configs;
+                        }
+                      }
+                      if (payload.crm_compromissario_cessao_v1 || cloud.crm_compromissario_cessao_v1) {
+                        if (typeof window.mergeCompromissarioCessao === "function") {
+                          payload.crm_compromissario_cessao_v1 = window.mergeCompromissarioCessao(
+                            payload.crm_compromissario_cessao_v1 || "{}",
+                            cloud.crm_compromissario_cessao_v1 || "{}"
+                          );
+                        } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
+                          payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
                         }
                       }
                     } catch (mergeErr) {}

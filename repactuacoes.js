@@ -882,10 +882,15 @@ async function loadRepactuacoes(isBackground = false) {
 
                     let appliedPct = null;
                     let isValidated = false;
+                    let noDeflation = false;
                     
                     if (beforeInst && afterInst && beforeInst.value > 0) {
                         appliedPct = (afterInst.value / beforeInst.value - 1) * 100;
-                        if (Math.abs(appliedPct - pct) < 0.05) {
+                        // Regra contratual: acumulado negativo não deflaciona — parcela mantém o valor (0%).
+                        if (pct < -0.0001 && Math.abs(appliedPct) < 0.05) {
+                            isValidated = true;
+                            noDeflation = true;
+                        } else if (Math.abs(appliedPct - pct) < 0.05) {
                             isValidated = true; // Margem de erro de arredondamento
                         }
                     }
@@ -895,6 +900,7 @@ async function loadRepactuacoes(isBackground = false) {
                         bcbPercentage: pct,
                         appliedPercentage: appliedPct,
                         isValidated: isValidated,
+                        noDeflation: noDeflation,
                         valueBefore: beforeInst ? beforeInst.value : null,
                         valueAfter: afterInst ? afterInst.value : null,
                         idBefore: beforeInst ? (beforeInst.number != null ? beforeInst.number : beforeInst.id) : null,
@@ -1125,7 +1131,10 @@ function renderRepactuacoes(historico, meta) {
         let statusHtml = '<span style="color: #94a3b8; font-size: 0.75rem;">N/A</span>';
         if (item.appliedPercentage !== null) {
             if (item.isValidated) {
-                statusHtml = `<span style="background: #dcfce7; color: #166534; padding: 3px 6px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;"><i data-lucide="check-circle" style="width: 10px; height: 10px; margin-right: 2px; vertical-align: -1px;"></i> VALIDADO</span>`;
+                const label = item.noDeflation
+                    ? 'VALIDADO · sem deflação'
+                    : 'VALIDADO';
+                statusHtml = `<span style="background: #dcfce7; color: #166534; padding: 3px 6px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;"><i data-lucide="check-circle" style="width: 10px; height: 10px; margin-right: 2px; vertical-align: -1px;"></i> ${label}</span>`;
             } else {
                 statusHtml = `<span style="background: #fee2e2; color: #991b1b; padding: 3px 6px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; white-space: nowrap;"><i data-lucide="alert-triangle" style="width: 10px; height: 10px; margin-right: 2px; vertical-align: -1px;"></i> DIVERGENTE</span>`;
             }
@@ -1160,7 +1169,8 @@ function renderRepactuacoes(historico, meta) {
     </table>
     <div style="margin-top: 15px; font-size: 0.75rem; color: #64748b; background: #f1f5f9; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
         <i data-lucide="info" style="width: 12px; height: 12px; margin-right: 4px; vertical-align: middle; color: #0ea5e9;"></i>
-        A margem de aceitação para validação entre o valor oficial do Banco Central e o percentual aplicado nas parcelas (devido a arredondamentos) é de 0,05%.
+        A margem de aceitação entre o BCB oficial e o % aplicado nas parcelas (arredondamento) é de 0,05%.
+        Quando o acumulado do período é <strong>negativo</strong>, a regra do contrato é <strong>não deflacionar</strong> — parcela mantém o valor (% aplicado = 0%) e isso também é considerado validado.
     </div>
     `;
     

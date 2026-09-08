@@ -17,8 +17,9 @@ const FluxoCaixaApp = {
   expanded: new Set(),
   categories: [],
   unmatchedInfo: { total: 0, samples: [], months: {} },
-
-  unmatchedInfo: { total: 0, samples: [] },
+  accountIndex: {},
+  nodeItems: {},
+  lastAllocs: [],
 
   init() {
     const now = new Date();
@@ -177,7 +178,8 @@ const FluxoCaixaApp = {
   },
 
   allocate(mov, factor) {
-    const amount = (Number(mov.bankMovementAmount) || 0) * factor;
+    const rawBank = Number(mov.bankMovementAmount) || 0;
+    const amount = rawBank * factor;
     const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
     if (!cats.length) return [];
@@ -187,13 +189,22 @@ const FluxoCaixaApp = {
       if (!categoryId) return null;
       const nk = this.normAccountKey(categoryId);
       if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
+      const rateRaw = Number(fc.financialCategoryRate);
       return {
         amount: amount * share,
+        rawBankAmount: rawBank,
+        factor,
+        share,
+        rateRaw: Number.isFinite(rateRaw) ? rateRaw : null,
         categoryId,
         categoryName: fc.financialCategoryName || this.catName(fc.financialCategoryId) || "Sem nome",
+        costCenterId: fc.costCenterId,
+        costCenterName: fc.costCenterName,
         reducer: fc.financialCategoryReducer,
         categoryType: fc.financialCategoryType,
-        month: this.movMonth(mov)
+        month: this.movMonth(mov),
+        companyId: mov.companyId,
+        mov
       };
     }).filter(Boolean);
   },
@@ -357,6 +368,7 @@ const FluxoCaixaApp = {
     const unmatched = { months: this.emptyMonths(this.months), total: 0, accountRows: [], samples: [] };
 
     const accIndex = {};
+    const nodeItems = {};
     allocs.forEach(a => {
       const rawId = String(a.categoryId || "").trim();
       if (!rawId) return;
@@ -383,14 +395,22 @@ const FluxoCaixaApp = {
           months: this.emptyMonths(this.months),
           total: 0,
           parentId: node.id,
+          items: [],
           redutora: !!(node.redutora || this.isReducingAccount(a.categoryId, a.categoryName, node)
             || /^(S|SIM|TRUE|1|Y|R)$/i.test(String(a.reducer || "").trim()))
         };
       }
       this.addInto(accIndex[idxKey], a.month, amount);
       accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
+      const item = { ...a, amount, signedAmount: amount };
+      accIndex[idxKey].items.push(item);
+      if (!nodeItems[nid]) nodeItems[nid] = [];
+      nodeItems[nid].push(item);
     });
     this.unmatchedInfo = unmatched;
+    this.accountIndex = accIndex;
+    this.nodeItems = nodeItems;
+    this.lastAllocs = allocs;
 
     Object.values(accIndex).forEach(acc => {
       const node = byId[acc.parentId];
@@ -410,6 +430,7 @@ const FluxoCaixaApp = {
           total: 0,
           parentId: g.id,
           zero: true,
+          items: [],
           redutora: !!(g.redutora || this.isReducingAccount(sid, this.catName(id), g))
         });
       });
@@ -751,24 +772,175 @@ const FluxoCaixaApp = {
     const pad = (r.level || 0) * 18;
     const isHead = r.type === "total_n1" || r.type === "formula";
     const chevron = r.hasKids
-      ? `<button type="button" class="fc-chevron" onclick="FluxoCaixaApp.toggle('${r.id}')"><i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i></button>`
+      ? `<button type="button" class="fc-chevron" onclick="event.stopPropagation();FluxoCaixaApp.toggle('${r.id}')"><i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i></button>`
       : `<span class="fc-chevron-spacer"></span>`;
     const monthVals = this.months.map(m => {
       const v = r.months && r.months[m];
       return `<span class="fc-val" style="${this.cellStyle(v, isHead)}">${this.fmt(v)}</span>`;
     }).join("");
+    const drillId = r.isAccount ? (r.id || "") : (r.id || "");
+    const canDrill = !!(drillId && (r.isAccount || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
+    const click = canDrill
+      ? `onclick="FluxoCaixaApp.openDrill('${String(drillId).replace(/'/g, "\\'")}', ${r.isAccount ? "true" : "false"})" title="Ver lançamentos que formam este valor" style="cursor:pointer;"`
+      : "";
+    const nameHint = r.isAccount ? ` <span style="font-size:0.65rem;color:#94a3b8;font-weight:500;">(clique p/ detalhar)</span>` : "";
     return `
-      <div class="fc-node" style="margin-left:${pad}px;background:${chrome.bg};border-left-color:${chrome.border};">
+      <div class="fc-node${canDrill ? " fc-node--drill" : ""}" style="margin-left:${pad}px;background:${chrome.bg};border-left-color:${chrome.border};" ${click}>
         <div class="fc-node-main">
           ${chevron}
           <i data-lucide="${chrome.icon}" class="fc-node-icon" style="color:${chrome.border};"></i>
-          <span class="fc-node-name" style="font-weight:${isHead ? 800 : (r.isAccount ? 500 : 700)};">${this.esc(r.name)}</span>
+          <span class="fc-node-name" style="font-weight:${isHead ? 800 : (r.isAccount ? 500 : 700)};">${this.esc(r.name)}${r.isAccount ? nameHint : ""}</span>
         </div>
         <div class="fc-node-vals">
           ${monthVals}
           <span class="fc-val fc-val-total" style="${this.cellStyle(r.total, true)}">${this.fmt(r.total)}</span>
         </div>
       </div>`;
+  },
+
+  collectNodeItems(nodeId) {
+    const visao = this.visao();
+    const groups = visao.groups || [];
+    const byId = Object.fromEntries(groups.map(g => [g.id, g]));
+    const items = [];
+    const walk = (id) => {
+      const direct = this.nodeItems[id] || [];
+      direct.forEach(it => items.push(it));
+      groups.filter(g => g.parentId === id).forEach(ch => walk(ch.id));
+    };
+    if (byId[nodeId] || this.nodeItems[nodeId]) walk(nodeId);
+    return items;
+  },
+
+  resolveDrill(id, isAccount) {
+    const sid = String(id || "");
+    const nk = this.normAccountKey(sid);
+    if (isAccount) {
+      const acc = this.accountIndex[sid] || this.accountIndex[nk] || null;
+      if (!acc) return { title: sid, subtitle: "Conta", items: [], total: 0 };
+      return {
+        title: `${acc.displayId || acc.id} ${acc.name || ""}`.trim(),
+        subtitle: "Conta do plano financeiro",
+        items: acc.items || [],
+        total: acc.total || 0
+      };
+    }
+    const row = (this.rows || []).find(r => !r.isAccount && String(r.id) === sid);
+    const items = this.collectNodeItems(sid);
+    const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    return {
+      title: (row && row.name) || sid,
+      subtitle: "Nó da visão DFC (lançamentos agregados)",
+      items,
+      total: row && row.total != null ? row.total : total
+    };
+  },
+
+  fmtDatePt(iso) {
+    const s = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || "—";
+    const [y, m, d] = s.split("-");
+    return `${d}/${m}/${y}`;
+  },
+
+  movNumber(m) {
+    if (!m) return "—";
+    return m.bankMovementId || m.id || m.movementId || m.documentNumber || m.documentIdentification || "—";
+  },
+
+  movHistoric(m) {
+    if (!m) return "—";
+    return m.historic || m.history || m.bankMovementHistoricName || m.bankMovementOperationName
+      || m.documentIdentificationName || m.originDescription || m.observations || "—";
+  },
+
+  companyLabel(id) {
+    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
+    if (c) return `${c.id} - ${c.name} (${c.pct}%)`;
+    return id != null ? String(id) : "—";
+  },
+
+  closeDrill() {
+    const el = document.getElementById("fc-drill-modal");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  openDrill(id, isAccount) {
+    const info = this.resolveDrill(id, !!isAccount);
+    const items = [...(info.items || [])].sort((a, b) => {
+      const da = this.cashDate(a.mov || {}) || String(a.month || "");
+      const db = this.cashDate(b.mov || {}) || String(b.month || "");
+      return da.localeCompare(db);
+    });
+    const sum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const body = items.length
+      ? `<div style="overflow:auto;max-height:calc(80vh - 170px);" class="crm-scroll-table">
+          <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+            <thead>
+              <tr>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Data</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Nº mov.</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Empresa</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">C.C.</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Histórico</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Bruto API</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">% rateio</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Fator MLDU</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Valor no DFC</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(it => {
+                const mov = it.mov || {};
+                const amt = Number(it.amount) || 0;
+                const raw = Number(it.rawBankAmount);
+                const sharePct = (Number(it.share) || 0) * 100;
+                const factorPct = (Number(it.factor) || 0) * 100;
+                const color = amt < 0 ? "#b91c1c" : (amt > 0 ? "#105436" : "#64748b");
+                return `<tr style="border-bottom:1px solid #e2e8f0;">
+                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
+                  <td style="padding:7px 8px;font-weight:700;color:#105436;">${this.esc(this.movNumber(mov))}</td>
+                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.companyLabel(it.companyId || mov.companyId))}</td>
+                  <td style="padding:7px 8px;">${this.esc([it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—")}</td>
+                  <td style="padding:7px 8px;max-width:280px;">${this.esc(this.movHistoric(mov))}</td>
+                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
+                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? ` <span style="color:#94a3b8;">(API ${this.esc(String(it.rateRaw))})</span>` : ""}</td>
+                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
+                  <td style="padding:7px 8px;text-align:right;font-weight:700;color:${color};font-variant-numeric:tabular-nums;">${this.fmt(amt)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="8" style="padding:8px;font-weight:800;text-align:right;">Soma dos lançamentos (${items.length})</td>
+                <td style="padding:8px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
+              </tr>
+              <tr>
+                <td colspan="8" style="padding:4px 8px 8px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
+                <td style="padding:4px 8px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>`
+      : `<div style="padding:28px;text-align:center;color:#64748b;">Nenhum lançamento agrupado nesta linha no período.</div>`;
+
+    this.closeDrill();
+    const overlay = document.createElement("div");
+    overlay.id = "fc-drill-modal";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:24px;";
+    overlay.onclick = (e) => { if (e.target === overlay) this.closeDrill(); };
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;width:min(1200px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
+        <div style="padding:14px 16px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;">
+          <div>
+            <div style="font-size:1rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
+            <div style="font-size:0.78rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
+          </div>
+          <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+        </div>
+        <div style="padding:14px 16px 18px;">${body}</div>
+      </div>`;
+    document.body.appendChild(overlay);
   },
 
   esc(s) {

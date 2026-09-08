@@ -916,14 +916,18 @@ async function anexosDrainThumbQueue() {
 }
 
 function anexosThumbHtml(fileObj) {
-  const href = fileObj.previewUrl || fileObj.thumbUrl || '#';
+  const id = anexosEsc(fileObj.id);
   const imgSrc = fileObj.thumbUrl || (['jpg', 'jpeg', 'png'].includes(String(fileObj.ext || '').toLowerCase()) ? fileObj.previewUrl : '');
+  const click = `onclick="event.preventDefault();event.stopPropagation();AnexosApp.openFilePreview('${id}')"`;
   if (imgSrc) {
-    return `<a href="${href}" target="_blank" title="Clique para ampliar" class="anexos-file-thumb" data-file-id="${anexosEsc(fileObj.id)}">
-      <img src="${imgSrc}" alt="">
-    </a>`;
+    return `<button type="button" ${click} title="Clique para visualizar" class="anexos-file-thumb" data-file-id="${id}" style="border:none;padding:0;cursor:pointer;background:transparent;">
+      <img src="${imgSrc}" alt="Pré-visualização">
+    </button>`;
   }
-  return `<div class="anexos-file-thumb anexos-file-thumb--empty" data-file-id="${anexosEsc(fileObj.id)}"><i data-lucide="file" style="width:28px;height:28px;color:#94a3b8"></i></div>`;
+  return `<button type="button" ${click} title="Clique para visualizar" class="anexos-file-thumb anexos-file-thumb--empty" data-file-id="${id}" style="cursor:pointer;">
+    <i data-lucide="file" style="width:28px;height:28px;color:#94a3b8"></i>
+    <span style="font-size:0.62rem;color:#64748b;margin-top:2px;">Abrir</span>
+  </button>`;
 }
 
 /** Usado pelo Compromissário: baixa CONTRATO/DISTRATO da unidade no Sienge. */
@@ -1602,6 +1606,74 @@ const AnexosApp = {
     AnexosState.loadingUnidadeAnexos = false;
     AnexosState.selectGen += 1;
     renderAnexosModule();
+  },
+
+  closeFilePreview() {
+    const el = document.getElementById('anexos-preview-modal');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  ensurePreviewUrl(fileObj) {
+    if (!fileObj) return '';
+    if (fileObj.previewUrl) return fileObj.previewUrl;
+    if (fileObj.file instanceof Blob && fileObj.file.size) {
+      try {
+        fileObj.previewUrl = URL.createObjectURL(fileObj.file);
+        return fileObj.previewUrl;
+      } catch (e) {}
+    }
+    if (fileObj.base64 && String(fileObj.base64).startsWith('data:')) {
+      return fileObj.base64;
+    }
+    return fileObj.thumbUrl || '';
+  },
+
+  openFilePreview(fileId) {
+    const id = String(fileId || '');
+    const fileObj = (AnexosState.files || []).find(f => String(f.id) === id);
+    if (!fileObj) {
+      alert('Arquivo não encontrado na lista.');
+      return;
+    }
+    const url = this.ensurePreviewUrl(fileObj);
+    if (!url) {
+      alert('Pré-visualização indisponível para este arquivo.');
+      return;
+    }
+    const ext = String(fileObj.ext || '').toLowerCase();
+    const name = fileObj.originalName || fileObj.file?.name || 'Anexo';
+    const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+    const isPdf = ext === 'pdf';
+    let body;
+    if (isImg) {
+      body = `<div style="overflow:auto;max-height:calc(90vh - 70px);text-align:center;background:#0f172a;padding:12px;">
+        <img src="${url}" alt="${anexosEsc(name)}" style="max-width:100%;max-height:calc(90vh - 100px);object-fit:contain;">
+      </div>`;
+    } else if (isPdf) {
+      body = `<iframe src="${url}#toolbar=1&navpanes=0" title="${anexosEsc(name)}" style="width:100%;height:calc(90vh - 70px);border:0;background:#525659;"></iframe>`;
+    } else {
+      body = `<div style="padding:40px;text-align:center;color:#64748b;">
+        <p>Pré-visualização não disponível para .${anexosEsc(ext || '?')}.</p>
+        <a href="${url}" download="${anexosEsc(name)}" class="btn btn-primary" style="display:inline-flex;margin-top:12px;">Baixar arquivo</a>
+      </div>`;
+    }
+    this.closeFilePreview();
+    const overlay = document.createElement('div');
+    overlay.id = 'anexos-preview-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.onclick = (e) => { if (e.target === overlay) this.closeFilePreview(); };
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;width:min(1100px,96vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+        <div style="padding:12px 14px;background:#105436;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <div style="min-width:0;font-weight:700;font-size:0.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${anexosEsc(name)}</div>
+          <div style="display:flex;gap:8px;flex-shrink:0;">
+            <a href="${url}" target="_blank" rel="noopener" style="border:none;background:rgba(255,255,255,0.15);color:#fff;padding:6px 10px;border-radius:8px;text-decoration:none;font-size:0.78rem;font-weight:600;">Nova aba</a>
+            <button type="button" onclick="AnexosApp.closeFilePreview()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+          </div>
+        </div>
+        ${body}
+      </div>`;
+    document.body.appendChild(overlay);
   },
 
   togglePeriodoPanel() {

@@ -1993,6 +1993,7 @@ circle.donut-segment {
 }
 .anexos-file-thumb {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   flex: 0 0 160px;
@@ -2004,6 +2005,10 @@ circle.donut-segment {
   overflow: hidden;
   box-sizing: border-box;
 }
+.anexos-file-thumb:hover {
+  border-color: #105436;
+  box-shadow: 0 0 0 2px rgba(16, 84, 54, 0.15);
+}
 .anexos-file-thumb img {
   display: block;
   max-width: 100%;
@@ -2011,9 +2016,11 @@ circle.donut-segment {
   width: auto;
   height: auto;
   object-fit: contain;
+  pointer-events: none;
 }
 .anexos-file-thumb--empty {
   color: #94a3b8;
+  gap: 4px;
 }
 .anexos-file-row {
   display: flex;
@@ -3014,6 +3021,10 @@ circle.donut-segment {
     0 0 0 2px rgba(16, 84, 54, 0.28),
     0 2px 8px rgba(15, 23, 42, 0.08);
   z-index: 1;
+}
+.fc-node--drill:hover .fc-node-name {
+  text-decoration: underline;
+  text-decoration-color: rgba(16, 84, 54, 0.35);
 }
 .fc-node-main {
   display: flex;
