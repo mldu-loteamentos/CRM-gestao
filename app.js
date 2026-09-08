@@ -6080,13 +6080,17 @@ document.addEventListener("click", function(e) {
           });
           const cellBase = `background:${meta.bg}; color:${meta.color}; font-weight:700; font-size:0.75rem; letter-spacing:0.04em; text-transform:uppercase; padding:8px 12px; border:none;`;
           const headerRow = document.createElement("tr");
+          headerRow.className = "fila-group-header";
           headerRow.innerHTML = `
-            <td colspan="2" style="${cellBase}">${meta.label}</td>
-            <td style="${cellBase} text-align:center; letter-spacing:0; text-transform:none; white-space:nowrap;" title="Quantidade de títulos neste grupo">
-              <span style="display:inline-flex; align-items:center; justify-content:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
-                ${countLabel}
-              </span>
+            <td colspan="2" style="${cellBase}">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0;">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${meta.label}</span>
+                <span title="Quantidade de títulos neste grupo" style="flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 8px; font-weight:800; font-size:0.72rem; letter-spacing:0; text-transform:none; white-space:nowrap;">
+                  ${countLabel}
+                </span>
+              </div>
             </td>
+            <td style="${cellBase} width:1%; padding-left:10px; padding-right:10px;"></td>
             <td colspan="4" style="${cellBase}"></td>
             <td style="${cellBase} white-space:nowrap; padding-right:10px; letter-spacing:0; text-transform:none;" title="Soma do R$ atualizado em atraso neste grupo">
               <span style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
@@ -6153,7 +6157,7 @@ document.addEventListener("click", function(e) {
           <td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${client.customerName}">
             <span style="text-transform:uppercase;">${client.customerName}</span>
           </td>
-          <td>
+          <td style="width: 1%; white-space: nowrap; text-align: left;">
             <span title="${client.billIds.join(', ')}">
               ${rawTitleNumber}
             </span>

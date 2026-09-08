@@ -144,12 +144,12 @@ const EstoqueComercialApp = {
   filterCostCentersForEmp(ccs) {
     this.syncCcPresenceFromUnits();
     const empty = this.readIdSet(this.CC_EMPTY_KEY);
-    const withU = this.readIdSet(this.CC_WITH_KEY);
     return (ccs || []).filter(c => {
       if (!c) return false;
       if (this.isDeptOnlyCc(c)) return false;
       if (empty.has(String(c.id))) return false;
-      if (withU.size && !withU.has(String(c.id))) return false;
+      // Não exige crm_cc_ids_com_unidade: esse cache é por navegador e incompleto
+      // (operador que só buscou 1 CC via Anexos via só esse empreendimento).
       return true;
     });
   },

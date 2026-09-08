@@ -2040,6 +2040,8 @@ const AnexosApp = {
   },
 
   filterEnterprisesForAnexos(list) {
+    // Mesma tipagem do relacionamento (loteamento/incorporação), sem depender do
+    // cache local de “CCs com unidade” — ele escondia empreendimentos válidos.
     if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
       return EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(list);
     }
@@ -3106,11 +3108,13 @@ const AnexosApp = {
 
       AnexosState.unidades = allUnits;
       AnexosState.mapaMeta = {};
-      if (window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
-        EstoqueComercialApp.markCcUnits(cc, allUnits.length > 0);
+      if (allUnits.length > 0 && window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
+        // Só marca positivo. Nunca grava “sem unidade” daqui — busca vazia/erro
+        // escondia o empreendimento inteiro no autocomplete da operadora.
+        EstoqueComercialApp.markCcUnits(cc, true);
       }
       if (!allUnits.length) {
-        AnexosState.enterprises = (AnexosState.enterprises || []).filter((e) => String(e.id) !== String(cc));
+        // Não remove da lista do autocomplete; só falha esta busca.
       }
       if (AnexosState.mapaUnidades) {
         await this.enrichMapaMeta();
