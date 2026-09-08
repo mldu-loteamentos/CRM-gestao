@@ -12110,6 +12110,181 @@ window.errataOccurrence = function(customerId, occDate) {
   }
 };
 
+window.canOccurrenceEditParcels = function(occ) {
+  if (!occ) return false;
+  const canal = String(occ.canal || "");
+  if (canal === "Nota interna" || canal === "Retorno Agendado" || canal === "Proposta de renegociação") return false;
+  if (typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal)) return false;
+  if (typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal)) return false;
+  return true;
+};
+
+window.buildEditOccurrenceParcelRows = function(occ) {
+  const rows = [];
+  const targetDate = occ && occ.promiseDate
+    ? new Date(String(occ.promiseDate).slice(0, 10) + "T12:00:00")
+    : new Date();
+  if (Number.isNaN(targetDate.getTime())) targetDate.setTime(Date.now());
+
+  const today = new Date();
+  const tzOffset = today.getTimezoneOffset() * 60000;
+  const localToday = new Date(today.getTime() - tzOffset);
+  const todayStr = localToday.toISOString().substring(0, 10);
+  const currentMonthStr = todayStr.substring(0, 7);
+
+  const openInsts = (AppState.currentContractInstallments || []).filter(i => {
+    if (!(i.installmentSituation === 1 || !i.isValidReceipt)) return false;
+    if (!i.dueDate) return true;
+    const dueStr = i.dueDate.substring(0, 10);
+    const dueMonthStr = dueStr.substring(0, 7);
+    return dueStr < todayStr || dueMonthStr === currentMonthStr;
+  });
+
+  const selectedRaw = Array.isArray(occ.promisedInstallments) ? occ.promisedInstallments : [];
+  const selectedNorm = selectedRaw.map(item => ({
+    installmentId: window.getPromisedInstallmentId(item),
+    label: window.getPromisedInstallmentLabel(item)
+  }));
+
+  const matchedKeys = new Set();
+  openInsts.forEach((inst) => {
+    const datePart = inst.dueDate ? new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
+    const baseVal = parseFloat(inst.currentBalance || inst.value || 0);
+    let multa = 0;
+    let juros = 0;
+    let diasAtraso = 0;
+    if (inst.dueDate) {
+      const instDue = new Date(inst.dueDate + "T12:00:00");
+      diasAtraso = Math.round((targetDate - instDue) / (1000 * 60 * 60 * 24));
+      if (diasAtraso > 0) {
+        multa = baseVal * 0.02;
+        juros = baseVal * 0.01 * (diasAtraso / 30);
+      } else {
+        diasAtraso = 0;
+      }
+    }
+    const finalVal = baseVal + multa + juros;
+    const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const valStr = datePart + " - " + formattedVal;
+    const selected = selectedNorm.some(s => {
+      if (s.installmentId != null && Number(s.installmentId) === Number(inst.installmentId)) {
+        matchedKeys.add(String(s.installmentId) + "|" + String(s.label || ""));
+        return true;
+      }
+      if (s.label && (s.label === valStr || s.label.startsWith(datePart + " - "))) {
+        matchedKeys.add(String(s.installmentId) + "|" + String(s.label || ""));
+        return true;
+      }
+      return false;
+    });
+    rows.push({
+      installmentId: inst.installmentId,
+      label: valStr,
+      datePart,
+      diasAtraso,
+      baseVal,
+      multa,
+      juros,
+      formattedVal,
+      selected
+    });
+  });
+
+  // Mantém no modal parcelas já vinculadas que não estão mais na lista "em aberto"
+  selectedNorm.forEach(s => {
+    const key = String(s.installmentId) + "|" + String(s.label || "");
+    if (matchedKeys.has(key)) return;
+    if (!s.label && s.installmentId == null) return;
+    rows.push({
+      installmentId: s.installmentId,
+      label: s.label || String(s.installmentId),
+      datePart: (s.label || "").split(" - ")[0] || "—",
+      diasAtraso: 0,
+      baseVal: 0,
+      multa: 0,
+      juros: 0,
+      formattedVal: (s.label || "").split(" - ")[1] || "—",
+      selected: true,
+      orphan: true
+    });
+  });
+
+  return rows;
+};
+
+window.closeEditOccurrenceModal = function() {
+  const el = document.getElementById("edit-occurrence-modal");
+  if (el) el.remove();
+  window._editOccurrenceCtx = null;
+  window._editOccurrenceParcelRows = null;
+};
+
+window.toggleAllEditOccParcels = function() {
+  const checkAll = document.getElementById("edit-occ-check-all");
+  document.querySelectorAll(".edit-occ-parcel-check").forEach(c => {
+    c.checked = !!(checkAll && checkAll.checked);
+  });
+};
+
+window.saveEditedOccurrence = function() {
+  const ctx = window._editOccurrenceCtx;
+  if (!ctx) return;
+  const { customerId, occDate } = ctx;
+  const list = AppState.notes[customerId] || [];
+  const occ = list.find(x => x.date === occDate);
+  if (!occ) {
+    window.closeEditOccurrenceModal();
+    return;
+  }
+
+  const textEl = document.getElementById("edit-occ-text");
+  const newText = textEl ? textEl.value.trim() : "";
+  if (!newText) {
+    alert("O texto da ocorrência não pode ser vazio.");
+    return;
+  }
+
+  let nextParcels = Array.isArray(occ.promisedInstallments) ? [...occ.promisedInstallments] : [];
+  if (window.canOccurrenceEditParcels(occ)) {
+    const checks = Array.from(document.querySelectorAll(".edit-occ-parcel-check:checked"));
+    const selectedIndices = checks.map(c => parseInt(c.value, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+    if (selectedIndices.length > 1) {
+      let isSequential = true;
+      for (let i = 1; i < selectedIndices.length; i++) {
+        if (selectedIndices[i] !== selectedIndices[i - 1] + 1) {
+          isSequential = false;
+          break;
+        }
+      }
+      if (!isSequential) {
+        alert("As parcelas não podem ser marcadas aleatoriamente. Selecione parcelas sequenciais (sem pular nenhuma).");
+        return;
+      }
+    }
+    const rows = window._editOccurrenceParcelRows || [];
+    nextParcels = selectedIndices.map(idx => {
+      const row = rows[idx];
+      return row ? row.label : null;
+    }).filter(Boolean);
+  }
+
+  const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
+  occ.text = newText.toUpperCase();
+  if (window.canOccurrenceEditParcels(occ)) {
+    occ.promisedInstallments = nextParcels;
+  }
+  occ.lastEdit = { author: currentUser, date: new Date().toISOString() };
+
+  if (window.saveNotesToFirebase) window.saveNotesToFirebase(customerId);
+  else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+
+  window.closeEditOccurrenceModal();
+  renderCustomerOccurrences();
+  if (document.getElementById("tab-agenda") && document.getElementById("tab-agenda").style.display === "block") {
+    loadAgendaTab();
+  }
+};
+
 window.editOccurrenceReal = function(customerId, occDate) {
   const list = AppState.notes[customerId] || [];
   const occ = list.find(x => x.date === occDate);
@@ -12119,32 +12294,105 @@ window.editOccurrenceReal = function(customerId, occDate) {
     if (typeof switchCustomerTab === "function") switchCustomerTab("tab-notificacoes");
     return;
   }
-  
+
   const elapsedMs = new Date() - new Date(occ.date);
   if (elapsedMs > 24 * 60 * 60 * 1000) {
-      alert("O prazo de 24 horas para edição expirou. Utilize a Errata.");
-      return;
+    alert("O prazo de 24 horas para edição expirou. Utilize a Errata.");
+    return;
   }
-  
+
   const currentUser = window.currentUser || (AppState.currentUser ? AppState.currentUser.name : null) || "OPERADOR";
   if (!currentUser || (occ.author !== currentUser && currentUser !== "Operador")) {
     alert("Apenas o autor da ocorrência pode editá-la.");
     return;
   }
-  
-  const newText = prompt("Edite o texto da ocorrência:", occ.text);
-  if (newText === null) return;
-  if (!newText.trim()) {
-    alert("O texto da ocorrência não pode ser vazio.");
-    return;
+
+  window.closeEditOccurrenceModal();
+  window._editOccurrenceCtx = { customerId, occDate };
+  const canParcels = window.canOccurrenceEditParcels(occ);
+  const parcelRows = canParcels ? window.buildEditOccurrenceParcelRows(occ) : [];
+  window._editOccurrenceParcelRows = parcelRows;
+
+  let parcelsHtml = "";
+  if (canParcels) {
+    const rowsHtml = parcelRows.length
+      ? parcelRows.map((row, idx) => `
+        <tr style="border-bottom: 1px solid #f1f5f9;${row.orphan ? " background:#fff7ed;" : ""}">
+          <td style="padding: 8px; text-align: center;">
+            <input type="checkbox" class="edit-occ-parcel-check" value="${idx}" ${row.selected ? "checked" : ""}>
+          </td>
+          <td style="padding: 8px;">
+            <div style="font-weight: 500;">${row.datePart}</div>
+            ${row.orphan ? '<div style="font-size:0.7rem;color:#9a3412;font-weight:600;">Já vinculada (fora da lista em aberto)</div>' : ""}
+          </td>
+          <td style="padding: 8px;">${row.diasAtraso > 0 ? row.diasAtraso : "-"}</td>
+          <td style="padding: 8px;">${Number(row.baseVal || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
+          <td style="padding: 8px; font-weight: 700; text-align: right; color: var(--color-primary);">${row.formattedVal}</td>
+        </tr>
+      `).join("")
+      : `<tr><td colspan="5" style="text-align:center;padding:18px;color:#64748b;">Nenhuma parcela em aberto neste contrato.</td></tr>`;
+
+    parcelsHtml = `
+      <div style="margin-top: 14px;">
+        <label style="display:block;font-size:0.75rem;font-weight:700;color:var(--color-text-muted);margin-bottom:8px;">
+          Parcelas vinculadas
+          <span style="font-weight:500;color:#94a3b8;">(marque as que o cliente confirma pagar)</span>
+        </label>
+        <div style="overflow:auto;max-height:260px;border:1px solid #e2e8f0;border-radius:8px;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead>
+              <tr style="background:#f1f5f9;border-bottom:1px solid #cbd5e1;">
+                <th style="padding:8px;width:40px;text-align:center;">
+                  <input type="checkbox" id="edit-occ-check-all" onclick="window.toggleAllEditOccParcels()">
+                </th>
+                <th style="padding:8px;text-align:left;">Vencimento</th>
+                <th style="padding:8px;text-align:left;">Atraso</th>
+                <th style="padding:8px;text-align:left;">Original</th>
+                <th style="padding:8px;text-align:right;">Atualizado</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
-  
-  occ.text = newText.trim().toUpperCase();
-  occ.lastEdit = { author: currentUser, date: new Date().toISOString() };
-  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-  renderCustomerOccurrences();
-  if (document.getElementById("tab-agenda").style.display === "block") {
-    loadAgendaTab();
+
+  const overlay = document.createElement("div");
+  overlay.id = "edit-occurrence-modal";
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;";
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:720px;max-width:96vw;max-height:92vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,0.25);padding:22px 24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;">
+        <h3 style="margin:0;color:var(--color-primary);font-size:1.1rem;display:flex;align-items:center;gap:8px;">
+          <i data-lucide="edit-3" style="width:18px;height:18px;"></i> Editar ocorrência
+        </h3>
+        <button type="button" onclick="window.closeEditOccurrenceModal()" style="background:none;border:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#64748b;">&times;</button>
+      </div>
+      <div style="font-size:0.78rem;color:#64748b;margin-bottom:12px;">
+        Canal: <strong style="color:#334155;">${String(occ.canal || "—").replace(/</g, "&lt;")}</strong>
+        ${occ.promiseDate ? ` · Promessa: <strong style="color:#334155;">${new Date(occ.promiseDate + "T12:00:00").toLocaleDateString("pt-BR")}</strong>` : ""}
+      </div>
+      <label for="edit-occ-text" style="display:block;font-size:0.75rem;font-weight:700;color:var(--color-text-muted);margin-bottom:6px;">
+        Texto <span style="color:var(--color-danger);">*</span>
+      </label>
+      <textarea id="edit-occ-text" class="form-control" rows="5" style="width:100%;font-size:0.9rem;line-height:1.45;resize:vertical;border-radius:8px;"></textarea>
+      ${parcelsHtml}
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+        <button type="button" class="btn btn-cancel" onclick="window.closeEditOccurrenceModal()">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="window.saveEditedOccurrence()">
+          <i data-lucide="save" style="width:14px;height:14px;"></i> Salvar alterações
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  if (window.lucide) lucide.createIcons();
+  const ta = document.getElementById("edit-occ-text");
+  if (ta) {
+    ta.value = String(occ.text || "");
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 };
 
