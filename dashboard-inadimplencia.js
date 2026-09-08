@@ -175,7 +175,13 @@ const DashboardInadimplencia = (function() {
 
   function clientMatches(c, f) {
     if (f.companies.length && !f.companies.includes(String(c.companyId))) return false;
-    if (f.centers.length && !f.centers.includes(String(c.costCenterId))) return false;
+    const allowedCc = empreendimentoAllowedIds();
+    if (f.centers.length) {
+      if (!f.centers.includes(String(c.costCenterId))) return false;
+    } else if (allowedCc.size && c.costCenterId != null && !allowedCc.has(String(c.costCenterId))) {
+      // "Todos" = só empreendimentos com estoque/venda (mesma regra do relacionamento)
+      return false;
+    }
     if (f.operators.length && !operatorMatchesSelection(clientOperator(c), f.operators)) return false;
     if (f.cities.length) {
       const r = clientCity(c);
@@ -224,6 +230,34 @@ const DashboardInadimplencia = (function() {
     return nome;
   }
 
+  /** Mesma regra do relacionamento / assistente de anexos: loteamento ou incorporação com estoque/venda. */
+  function empreendimentoAllowedIds() {
+    const ccList = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters))
+      || (window.MouraAuth && MouraAuth.costCenters)
+      || [];
+    let list = (ccList || []).map((c) => (c && typeof c === "object" ? c : { id: c, name: "" }));
+    if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+      list = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(list);
+    } else {
+      let customFields = {};
+      try { customFields = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+      list = list.filter((c) => {
+        if (!c) return false;
+        const custom = customFields[c.id] || customFields[String(c.id)] || {};
+        const tipo = custom.tipo_cc || "";
+        return tipo === "Loteamento Aberto" || tipo === "Loteamento Fechado" || tipo === "Incorporação";
+      });
+    }
+    return new Set((list || []).map((c) => String(c.id)).filter(Boolean));
+  }
+
+  function isEmpreendimentoPermitido(centerId) {
+    if (centerId == null || centerId === "") return false;
+    const allowed = empreendimentoAllowedIds();
+    if (!allowed.size) return true;
+    return allowed.has(String(centerId));
+  }
+
   function companyName(id) {
     if (typeof window.getCompanyName === 'function') {
       const n = window.getCompanyName(id);
@@ -243,6 +277,7 @@ const DashboardInadimplencia = (function() {
     function push(companyId, centerId, city, operator) {
       const c = companyId != null && companyId !== '' ? String(companyId) : '';
       const cc = centerId != null && centerId !== '' ? String(centerId) : '';
+      if (cc && !isEmpreendimentoPermitido(cc)) return;
       let cityU = city != null && city !== '' ? String(city) : '';
       if (cityU) {
         cityU = cityU.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
@@ -495,7 +530,12 @@ const DashboardInadimplencia = (function() {
 
   function ccPassesFilters(ccId, companyId, f) {
     if (f.companies.length && !f.companies.includes(String(companyId))) return false;
-    if (f.centers.length && !f.centers.includes(String(ccId))) return false;
+    const allowedCc = empreendimentoAllowedIds();
+    if (f.centers.length) {
+      if (!f.centers.includes(String(ccId))) return false;
+    } else if (allowedCc.size && ccId != null && String(ccId) !== '' && !allowedCc.has(String(ccId))) {
+      return false;
+    }
     if (f.cities.length) {
       if (typeof window.resolveCityRuleId !== 'function') return false;
       const r = window.resolveCityRuleId(ccId) || {};

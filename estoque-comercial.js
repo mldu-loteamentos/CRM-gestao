@@ -76,6 +76,12 @@ const EstoqueComercialApp = {
     return s.charAt(0) === "1" || s.charAt(0) === "2" || s.charAt(0) === "3";
   },
 
+  /** Empreendimentos comerciais (estoque/venda): IDs 1xxxx ou 2xxxx. */
+  isEmpreendimentoCcId(id) {
+    const s = String(id || "").trim();
+    return s.charAt(0) === "1" || s.charAt(0) === "2";
+  },
+
   foldCcName(s) {
     return String(s || "")
       .toUpperCase()
@@ -85,17 +91,23 @@ const EstoqueComercialApp = {
 
   isDeptOnlyCc(cc) {
     const name = this.foldCcName(cc && typeof cc === "object" ? cc.name : cc);
+    if (!name) return false;
+    // "… - OBRA", "… - OBRAS", "… MLES (OBRAS)" etc.
+    if (/\bOBRAS?\b/.test(name)) return true;
     const parts = name.split(" - ").map(p => p.trim()).filter(Boolean);
     const tail = parts[parts.length - 1] || "";
-    return [
+    const deptTails = [
       "OBRAS",
+      "OBRA",
       "MARKETING",
       "COMERCIAL",
       "GESTAO DE PRODUTOS",
       "PARCERIA",
       "NOVOS NEGOCIOS",
       "PROJETOS"
-    ].includes(tail);
+    ];
+    if (deptTails.includes(tail)) return true;
+    return deptTails.some((d) => tail.endsWith(" " + d) || tail.includes("(" + d + ")"));
   },
 
   readIdSet(key) {
@@ -144,17 +156,23 @@ const EstoqueComercialApp = {
   filterCostCentersForEmp(ccs) {
     this.syncCcPresenceFromUnits();
     const empty = this.readIdSet(this.CC_EMPTY_KEY);
+    // Inventário em memória (estoque carregado). Não usa só crm_cc_ids_com_unidade
+    // do localStorage — cache incompleto escondia CCs válidos (ex.: Bianca).
+    const fromUnits = new Set(
+      (this.state.units || []).map((u) => String(u.enterpriseId || "")).filter(Boolean)
+    );
     return (ccs || []).filter(c => {
       if (!c) return false;
+      const id = String(c.id || "").trim();
+      if (!this.isEmpreendimentoCcId(id)) return false;
       if (this.isDeptOnlyCc(c)) return false;
-      if (empty.has(String(c.id))) return false;
-      // Não exige crm_cc_ids_com_unidade: esse cache é por navegador e incompleto
-      // (operador que só buscou 1 CC via Anexos via só esse empreendimento).
+      if (empty.has(id)) return false;
+      if (fromUnits.size && !fromUnits.has(id)) return false;
       return true;
     });
   },
 
-  /** Mesma regra do Buscar Cliente: só loteamento/incorporação com unidade ou venda. */
+  /** IDs 1/2 + loteamento/incorporação + com unidade (quando inventário conhecido). */
   filterEmpreendimentosLikeRelacionamento(ccs) {
     let customFields = {};
     try {
@@ -164,6 +182,8 @@ const EstoqueComercialApp = {
     }
     const typed = (ccs || []).filter((c) => {
       if (!c) return false;
+      if (!this.isEmpreendimentoCcId(c.id)) return false;
+      if (this.isDeptOnlyCc(c)) return false;
       const custom = customFields[c.id] || customFields[String(c.id)] || {};
       const tipo = custom.tipo_cc || "";
       return tipo === "Loteamento Aberto" || tipo === "Loteamento Fechado" || tipo === "Incorporação";
@@ -175,7 +195,7 @@ const EstoqueComercialApp = {
     const empty = this.readIdSet(this.CC_EMPTY_KEY);
     const fromUnits = new Set((this.state.units || []).map(u => String(u.enterpriseId || "")).filter(Boolean));
     let list = (this.state.enterprises || []).filter(cc =>
-      this.isObraCc(cc.id) && !this.isDeptOnlyCc(cc) && !empty.has(String(cc.id))
+      this.isEmpreendimentoCcId(cc.id) && !this.isDeptOnlyCc(cc) && !empty.has(String(cc.id))
     );
     if (fromUnits.size) list = list.filter(cc => fromUnits.has(String(cc.id)));
     return list.sort((a, b) => Number(a.id) - Number(b.id));

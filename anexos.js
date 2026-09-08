@@ -3108,13 +3108,13 @@ const AnexosApp = {
 
       AnexosState.unidades = allUnits;
       AnexosState.mapaMeta = {};
-      if (allUnits.length > 0 && window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
-        // Só marca positivo. Nunca grava “sem unidade” daqui — busca vazia/erro
-        // escondia o empreendimento inteiro no autocomplete da operadora.
-        EstoqueComercialApp.markCcUnits(cc, true);
+      if (window.EstoqueComercialApp && typeof EstoqueComercialApp.markCcUnits === "function") {
+        // Busca concluída: grava presença real. Sem unidades → some do autocomplete
+        // (CCs de obra/departamento sem vínculo). Com unidades → entra no inventário.
+        EstoqueComercialApp.markCcUnits(cc, allUnits.length > 0);
       }
       if (!allUnits.length) {
-        // Não remove da lista do autocomplete; só falha esta busca.
+        // Mantém o CC na tela desta busca; o denylist só afeta o autocomplete.
       }
       if (AnexosState.mapaUnidades) {
         await this.enrichMapaMeta();

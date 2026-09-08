@@ -53,13 +53,18 @@ window.mergeCompromissarioConfigs = function(localStr, cloudStr) {
 };
 
 const CompromissarioApp = {
+  CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
+
   state: {
     prefeituras: [],
     contracts: [],
     loading: false,
     files: {}, // contratoId -> file Object (temporary reference)
     openAccordions: new Set(),
-    notifiedContracts: {}
+    notifiedContracts: {},
+    /** companyId -> { status: 'none'|'has'|null, fileName, records, uploadedAt } */
+    cessaoByCompany: {},
+    cessaoMonth: ''
   },
 
   normalizeCityKey(city) {
@@ -176,15 +181,14 @@ const CompromissarioApp = {
     const root = document.getElementById('compromissario-prefeitura-root');
     if (!root) return;
 
-    // Build options
-    const cityOptions = this.state.prefeituras.map(c => `<option value="${c}">${c}</option>`).join('');
-
-    // Default dates (current month)
     const today = new Date();
     const currentMonth = today.toISOString().slice(0, 7); // YYYY-MM
+    this.ensureCessaoMonth(currentMonth);
 
     root.innerHTML = `
       <div style="padding: 20px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; height: 100%;">
+
+        <div id="comp-cessao-panel" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"></div>
         
         <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <h3 style="margin: 0 0 15px 0; color: #1e293b; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
@@ -193,7 +197,7 @@ const CompromissarioApp = {
           <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
             <div style="width: 200px;">
               <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Mês Referência (Competência)</label>
-              <input type="month" id="comp-pref-month" value="${currentMonth}" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none;">
+              <input type="month" id="comp-pref-month" value="${currentMonth}" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none;" onchange="CompromissarioApp.onMonthChange()">
             </div>
             <div style="flex: 1; min-width: 200px; display: none;">
               <input type="hidden" id="comp-pref-type" value="ALL">
@@ -209,6 +213,7 @@ const CompromissarioApp = {
               </button>
             </div>
           </div>
+          <p id="comp-cessao-gate-hint" style="display:none; margin: 12px 0 0; font-size: 0.8rem; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 8px 10px;"></p>
         </div>
 
         <div style="flex: 1; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
@@ -226,6 +231,8 @@ const CompromissarioApp = {
       </div>
     `;
 
+    this.renderCessaoPanel();
+    this.syncCessaoGateUi();
     if (window.lucide) window.lucide.createIcons();
   },
 
@@ -236,6 +243,432 @@ const CompromissarioApp = {
       .replace(/\s+/g, ' ')
       .trim()
       .toUpperCase();
+  },
+
+  getActivePortfolioCompanies() {
+    const ids = (typeof getConfiguredInternalCompanyIds === 'function'
+      ? getConfiguredInternalCompanyIds()
+      : [1, 2, 3, 6, 13, 28, 32]).map(Number).filter(Number.isFinite);
+    const nameFn = typeof getCompanyName === 'function' ? getCompanyName : null;
+    return ids
+      .map((id) => ({
+        id: String(id),
+        name: nameFn ? nameFn(id, false) : `Empresa #${id}`
+      }))
+      .sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  readCessaoStore() {
+    try {
+      return JSON.parse(localStorage.getItem(this.CESSAO_LS_KEY) || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  },
+
+  writeCessaoStore(store) {
+    try {
+      localStorage.setItem(this.CESSAO_LS_KEY, JSON.stringify(store || {}));
+    } catch (e) {
+      console.warn('[Compromissario] falha ao salvar cessões', e);
+    }
+  },
+
+  ensureCessaoMonth(month) {
+    const m = String(month || '').slice(0, 7);
+    if (!m) return;
+    this.state.cessaoMonth = m;
+    const store = this.readCessaoStore();
+    const monthMap = store[m] || {};
+    const next = {};
+    this.getActivePortfolioCompanies().forEach((c) => {
+      const prev = monthMap[c.id] || {};
+      next[c.id] = {
+        status: prev.status === 'none' || prev.status === 'has' ? prev.status : null,
+        fileName: prev.fileName || '',
+        records: Array.isArray(prev.records) ? prev.records : [],
+        uploadedAt: prev.uploadedAt || null,
+        parseNote: prev.parseNote || ''
+      };
+    });
+    this.state.cessaoByCompany = next;
+  },
+
+  persistCessaoMonth() {
+    const m = this.state.cessaoMonth;
+    if (!m) return;
+    const store = this.readCessaoStore();
+    store[m] = this.state.cessaoByCompany || {};
+    this.writeCessaoStore(store);
+  },
+
+  onMonthChange() {
+    const el = document.getElementById('comp-pref-month');
+    const month = el ? el.value : '';
+    this.ensureCessaoMonth(month);
+    this.state.contracts = [];
+    this.renderCessaoPanel();
+    this.syncCessaoGateUi();
+    const tbody = document.getElementById('comp-pref-tbody');
+    const countLabel = document.getElementById('comp-pref-count');
+    if (tbody) {
+      tbody.innerHTML = `
+        <div style="text-align: center; padding: 40px; color: #94a3b8;">
+          Utilize os filtros acima para buscar contratos.
+        </div>`;
+    }
+    if (countLabel) countLabel.textContent = '0 encontrados';
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  getCessaoPendingCompanies() {
+    const companies = this.getActivePortfolioCompanies();
+    return companies.filter((c) => {
+      const row = this.state.cessaoByCompany[c.id] || {};
+      if (row.status === 'none') return false;
+      if (row.status === 'has' && row.fileName) return false;
+      return true;
+    });
+  },
+
+  isCessaoGateReady() {
+    return this.getCessaoPendingCompanies().length === 0;
+  },
+
+  assertCessaoGate(actionLabel) {
+    if (this.isCessaoGateReady()) return true;
+    const pending = this.getCessaoPendingCompanies();
+    const names = pending.slice(0, 5).map((c) => `${c.id} - ${c.name}`).join('\n');
+    alert(
+      `Antes de ${actionLabel || 'continuar'}, declare a cessão de todas as empresas com carteira ativa:\n` +
+      `marque "Não teve cessão" ou envie o relatório Sienge quando houver.\n\nPendentes:\n${names}` +
+      (pending.length > 5 ? `\n… e mais ${pending.length - 5}` : '')
+    );
+    this.syncCessaoGateUi();
+    return false;
+  },
+
+  syncCessaoGateUi() {
+    const ready = this.isCessaoGateReady();
+    const btn = document.getElementById('comp-pref-btn-search');
+    const hint = document.getElementById('comp-cessao-gate-hint');
+    const pending = this.getCessaoPendingCompanies();
+    if (btn) {
+      btn.disabled = !ready;
+      btn.style.opacity = ready ? '1' : '0.55';
+      btn.style.cursor = ready ? 'pointer' : 'not-allowed';
+      btn.title = ready
+        ? 'Buscar vendas e distratos do mês'
+        : 'Declare cessão (ou ausência) de todas as empresas com carteira ativa';
+    }
+    if (hint) {
+      if (ready) {
+        hint.style.display = 'none';
+        hint.textContent = '';
+      } else {
+        hint.style.display = 'block';
+        hint.textContent = `Pendência de cessão: ${pending.length} empresa(s). Informe se houve cessão e anexe o relatório Sienge quando houver — sem isso não é permitido buscar vendas/distratos.`;
+      }
+    }
+  },
+
+  renderCessaoPanel() {
+    const panel = document.getElementById('comp-cessao-panel');
+    if (!panel) return;
+    const companies = this.getActivePortfolioCompanies();
+    const month = this.state.cessaoMonth || '';
+    const ready = this.isCessaoGateReady();
+    const badge = ready
+      ? '<span style="font-size:0.72rem;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Pronto para buscar</span>'
+      : '<span style="font-size:0.72rem;font-weight:700;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">Obrigatório antes da busca</span>';
+
+    const rows = companies.map((c) => {
+      const row = this.state.cessaoByCompany[c.id] || {};
+      const status = row.status;
+      const hasFile = !!(row.fileName);
+      const recCount = Array.isArray(row.records) ? row.records.length : 0;
+      const noneChecked = status === 'none' ? 'checked' : '';
+      const hasChecked = status === 'has' ? 'checked' : '';
+      const uploadDisabled = status !== 'has' ? 'disabled' : '';
+      let statusLine = '<span style="color:#94a3b8;">Aguardando declaração</span>';
+      if (status === 'none') statusLine = '<span style="color:#047857;font-weight:600;">Sem cessão no período</span>';
+      if (status === 'has' && hasFile) {
+        statusLine = `<span style="color:#0369a1;font-weight:600;">Relatório: ${this.escHtml(row.fileName)}</span>` +
+          (recCount ? ` <span style="color:#64748b;">· ${recCount} evento(s) / título(s)</span>` : '') +
+          (row.parseNote ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
+      } else if (status === 'has' && !hasFile) {
+        statusLine = '<span style="color:#b45309;font-weight:600;">Envie o relatório padrão Sienge (XLS/XLSX/CSV)</span>';
+      }
+
+      return `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;">
+            <div style="font-weight:700;color:#0f172a;font-size:0.9rem;">${c.id} — ${this.escHtml(c.name)}</div>
+            <div style="font-size:0.78rem;">${statusLine}</div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;color:#334155;cursor:pointer;font-weight:600;">
+              <input type="radio" name="comp-cessao-${c.id}" value="none" ${noneChecked}
+                onchange="CompromissarioApp.setCessaoStatus('${c.id}','none')">
+              Não teve cessão
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;color:#334155;cursor:pointer;font-weight:600;">
+              <input type="radio" name="comp-cessao-${c.id}" value="has" ${hasChecked}
+                onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')">
+              Teve cessão — anexar relatório
+            </label>
+            <div style="display:inline-flex;align-items:center;gap:8px;">
+              <input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf"
+                style="font-size:0.78rem;max-width:220px;" ${uploadDisabled}
+                onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">
+              ${hasFile ? `<button type="button" onclick="CompromissarioApp.clearCessaoFile('${c.id}')" style="padding:4px 10px;border:1px solid #f37021;background:#fff7ed;color:#c2410c;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;">Remover</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <h3 style="margin:0 0 6px 0;color:#1e293b;font-size:1rem;display:flex;align-items:center;gap:8px;">
+            <i data-lucide="file-stack" style="width:18px;color:#64748b;"></i>
+            Relatórios de Cessão por Empresa
+          </h3>
+          <p style="margin:0;font-size:0.8rem;color:#64748b;max-width:720px;line-height:1.45;">
+            Para o mês <strong>${this.escHtml(month)}</strong>, declare cada empresa com carteira ativa.
+            Se houve cessão, envie o relatório padrão do Sienge (colunas Data, Empresa-loteamento, Título, Documento, Cliente — com <code>(P)</code>, <code>*</code> e comprador secundário).
+            Preferência: XLS/XLSX/CSV para ler o histórico; PDF também libera o gate.
+            Sem declaração ou anexo, a busca de vendas e distratos fica bloqueada.
+          </p>
+        </div>
+        ${badge}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow:auto;">
+        ${companies.length ? rows : '<p style="color:#64748b;font-size:0.85rem;margin:0;">Nenhuma empresa com carteira ativa configurada.</p>'}
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  },
+
+  setCessaoStatus(companyId, status) {
+    const id = String(companyId);
+    if (!this.state.cessaoByCompany[id]) {
+      this.state.cessaoByCompany[id] = { status: null, fileName: '', records: [], uploadedAt: null, parseNote: '' };
+    }
+    const row = this.state.cessaoByCompany[id];
+    row.status = status === 'none' || status === 'has' ? status : null;
+    if (row.status === 'none') {
+      row.fileName = '';
+      row.records = [];
+      row.uploadedAt = null;
+      row.parseNote = '';
+    }
+    this.persistCessaoMonth();
+    this.renderCessaoPanel();
+    this.syncCessaoGateUi();
+  },
+
+  clearCessaoFile(companyId) {
+    const id = String(companyId);
+    const row = this.state.cessaoByCompany[id];
+    if (!row) return;
+    row.fileName = '';
+    row.records = [];
+    row.uploadedAt = null;
+    row.parseNote = '';
+    if (row.status === 'has') {
+      // permanece "has" até novo upload
+    }
+    this.persistCessaoMonth();
+    this.renderCessaoPanel();
+    this.syncCessaoGateUi();
+  },
+
+  async onCessaoFile(companyId, event) {
+    const id = String(companyId);
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (!this.state.cessaoByCompany[id]) {
+      this.state.cessaoByCompany[id] = { status: 'has', fileName: '', records: [], uploadedAt: null, parseNote: '' };
+    }
+    const row = this.state.cessaoByCompany[id];
+    row.status = 'has';
+    try {
+      const parsed = await this.parseCessaoReportFile(file);
+      row.fileName = file.name;
+      row.records = parsed.records || [];
+      row.parseNote = parsed.note || '';
+      row.uploadedAt = Date.now();
+      this.persistCessaoMonth();
+      this.renderCessaoPanel();
+      this.syncCessaoGateUi();
+    } catch (e) {
+      console.warn('[Compromissario] parse cessão', e);
+      // Mesmo sem parse, o anexo vale para liberar o gate
+      row.fileName = file.name;
+      row.records = [];
+      row.parseNote = 'Arquivo anexado (leitura parcial/indisponível)';
+      row.uploadedAt = Date.now();
+      this.persistCessaoMonth();
+      this.renderCessaoPanel();
+      this.syncCessaoGateUi();
+      alert('Relatório anexado, mas a leitura automática falhou. O gate foi liberado para esta empresa. Detalhe: ' + (e && e.message ? e.message : e));
+    } finally {
+      if (input) input.value = '';
+    }
+  },
+
+  async parseCessaoReportFile(file) {
+    const name = String(file.name || '').toLowerCase();
+    if (name.endsWith('.pdf')) {
+      return {
+        records: [],
+        note: 'PDF anexado (para histórico automático, exporte XLS/CSV no Sienge)'
+      };
+    }
+    let matrix = [];
+    if (name.endsWith('.csv') || name.endsWith('.txt')) {
+      const text = await file.text();
+      matrix = this.matrixFromDelimitedText(text);
+    } else {
+      if (typeof XLSX === 'undefined') {
+        throw new Error('Biblioteca XLSX indisponível');
+      }
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    }
+    return this.parseCessaoMatrix(matrix);
+  },
+
+  matrixFromDelimitedText(text) {
+    const lines = String(text || '').split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return [];
+    const sep = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ';' : ',';
+    return lines.map((line) => line.split(sep).map((c) => c.replace(/^"|"$/g, '').trim()));
+  },
+
+  foldHeader(s) {
+    return String(s || '')
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  parseCessaoMatrix(matrix) {
+    const rows = Array.isArray(matrix) ? matrix : [];
+    let headerIdx = -1;
+    let col = { data: -1, empresa: -1, titulo: -1, documento: -1, cliente: -1 };
+
+    for (let i = 0; i < Math.min(rows.length, 40); i++) {
+      const cells = (rows[i] || []).map((c) => this.foldHeader(c));
+      const find = (...needles) => cells.findIndex((h) => needles.some((n) => h.includes(n)));
+      const data = find('DATA');
+      const empresa = find('EMPRESA-LOTEAMENTO', 'EMPRESA LOTEAMENTO', 'EMPRESA');
+      const titulo = find('TITULO');
+      const documento = find('DOCUMENTO');
+      const cliente = find('CLIENTE');
+      if (data >= 0 && titulo >= 0 && cliente >= 0) {
+        headerIdx = i;
+        col = { data, empresa, titulo, documento, cliente };
+        break;
+      }
+    }
+
+    if (headerIdx < 0) {
+      return { records: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
+    }
+
+    const records = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const data = String(r[col.data] != null ? r[col.data] : '').trim();
+      const empresa = col.empresa >= 0 ? String(r[col.empresa] != null ? r[col.empresa] : '').trim() : '';
+      const titulo = String(r[col.titulo] != null ? r[col.titulo] : '').trim();
+      const documento = col.documento >= 0 ? String(r[col.documento] != null ? r[col.documento] : '').trim() : '';
+      const clienteRaw = String(r[col.cliente] != null ? r[col.cliente] : '').trim();
+      if (!titulo && !clienteRaw) continue;
+      if (!titulo) continue;
+      const clients = this.parseCessaoClientCell(clienteRaw);
+      records.push({
+        data,
+        empresa,
+        titulo: String(titulo).replace(/\.0$/, ''),
+        documento,
+        clients,
+        principal: clients.find((c) => c.principal) || clients.find((c) => c.atual) || clients[0] || null,
+        atuais: clients.filter((c) => c.atual)
+      });
+    }
+
+    return {
+      records,
+      note: records.length
+        ? `${new Set(records.map((r) => r.titulo)).size} título(s) no relatório`
+        : 'Nenhuma linha de cessão lida'
+    };
+  },
+
+  parseCessaoClientCell(raw) {
+    const text = String(raw || '').replace(/\r/g, '\n');
+    const parts = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+    const flat = parts.length ? parts : [text.trim()].filter(Boolean);
+    return flat.map((line) => {
+      const atual = /\*/.test(line);
+      const principal = /\(P\)/i.test(line);
+      const conjuge = /\(C\)/i.test(line);
+      const clean = line
+        .replace(/\*/g, '')
+        .replace(/\(P\)/gi, '')
+        .replace(/\(C\)/gi, '')
+        .replace(/\(\.\.\.\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const m = clean.match(/^(\d+)\s*[-–]\s*(.+)$/);
+      return {
+        id: m ? m[1] : '',
+        name: m ? m[2].trim() : clean,
+        atual,
+        principal,
+        conjuge
+      };
+    }).filter((c) => c.name || c.id);
+  },
+
+  findCessaoHistoryForContract(contract) {
+    if (!contract) return [];
+    const titulo = String(contract.id || '').trim();
+    if (!titulo) return [];
+    const companyId = contract.companyId != null ? String(contract.companyId) : null;
+    const all = [];
+    Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
+      if (row.status !== 'has' || !Array.isArray(row.records)) return;
+      if (companyId && cid !== companyId) return;
+      row.records.forEach((rec) => {
+        if (String(rec.titulo) === titulo) all.push(rec);
+      });
+    });
+    // Ordena por data DD/MM/YYYY se possível
+    all.sort((a, b) => {
+      const pa = String(a.data || '').split('/');
+      const pb = String(b.data || '').split('/');
+      const da = pa.length === 3 ? `${pa[2]}${pa[1]}${pa[0]}` : String(a.data || '');
+      const db = pb.length === 3 ? `${pb[2]}${pb[1]}${pb[0]}` : String(b.data || '');
+      return da.localeCompare(db);
+    });
+    return all;
   },
 
   /**
@@ -276,12 +709,14 @@ const CompromissarioApp = {
 
   async fetchContracts() {
     if (this.state.loading) return;
+    if (!this.assertCessaoGate('buscar vendas e distratos')) return;
     
     const monthVal = document.getElementById('comp-pref-month').value;
     if (!monthVal) {
       alert("Por favor, selecione um mês de referência.");
       return;
     }
+    this.ensureCessaoMonth(monthVal);
 
     // Parse month to first and last day
     const [year, month] = monthVal.split('-');
@@ -523,6 +958,29 @@ const CompromissarioApp = {
         const dropBg = fileLoaded ? (fromAnexos ? '#f0f9ff' : '#ecfdf5') : '#f8fafc';
         const dropColor = fileLoaded ? (fromAnexos ? '#0369a1' : '#047857') : '#64748b';
         const dropIcon = fileLoaded ? (fromAnexos ? 'cloud-download' : 'check-circle') : 'upload-cloud';
+        const cessaoHist = this.findCessaoHistoryForContract(c);
+        let cessaoBadge = '';
+        if (cessaoHist.length) {
+          const latest = cessaoHist[cessaoHist.length - 1];
+          const atuais = (latest.atuais && latest.atuais.length)
+            ? latest.atuais
+            : (latest.clients || []).filter((x) => x.atual);
+          const principal = latest.principal || atuais[0];
+          const secundarios = atuais.filter((x) => principal && String(x.id) !== String(principal.id));
+          const tipLines = cessaoHist.map((h) => {
+            const names = (h.clients || []).map((cl) => {
+              const marks = [cl.principal ? '(P)' : '', cl.atual ? '*' : ''].filter(Boolean).join('');
+              return `${cl.id ? cl.id + ' - ' : ''}${cl.name}${marks ? ' ' + marks : ''}`;
+            }).join(' / ');
+            return `${h.data || '—'} → ${names}`;
+          }).join(' | ');
+          cessaoBadge = `
+            <div style="margin-top:6px;font-size:0.7rem;line-height:1.35;color:#6b21a8;background:#faf5ff;border:1px solid #e9d5ff;border-radius:4px;padding:4px 6px;" title="${this.escHtml(tipLines)}">
+              <strong>Cessão:</strong> ${cessaoHist.length} evento(s)
+              ${principal ? `<br>Atual (P*): ${this.escHtml((principal.id ? principal.id + ' - ' : '') + (principal.name || ''))}` : ''}
+              ${secundarios.length ? `<br>Secundário: ${this.escHtml(secundarios.map((s) => (s.id ? s.id + ' - ' : '') + s.name).join(', '))}` : ''}
+            </div>`;
+        }
 
         return `
           <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.1s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
@@ -531,6 +989,7 @@ const CompromissarioApp = {
               <div style="margin-top: 4px;">
                 <span style="font-size: 0.7rem; font-weight: 700; background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; border: 1px solid ${badgeColor}33; display: inline-block;">${opType}</span>
               </div>
+              ${cessaoBadge}
             </td>
             <td style="padding: 12px 15px; color: #334155;">${customerName}</td>
             <td style="padding: 12px 15px; color: #475569; font-size: 0.8rem;">
@@ -762,6 +1221,7 @@ const CompromissarioApp = {
   },
 
   sendEmail(id) {
+    if (!this.assertCessaoGate('notificar troca de venda/distrato')) return;
     const c = this.state.contracts.find(x => String(x.id) === String(id));
     if (!c) return;
 
@@ -867,6 +1327,7 @@ const CompromissarioApp = {
   },
 
   generateRequirement(id) {
+    if (!this.assertCessaoGate('gerar requerimento de troca')) return;
     const c = this.state.contracts.find(x => String(x.id) === String(id));
     if (!c) return;
 
@@ -960,6 +1421,7 @@ Botucatu, [DATA]
   },
 
   sendGroupedEmail(cityName) {
+    if (!this.assertCessaoGate('notificar vendas/distratos em lote')) return;
     const cityKey = this.normalizeCityKey(cityName);
     const groupContracts = this.state.contracts.filter(c => {
       const entName = c.enterpriseName || '';
