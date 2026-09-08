@@ -11604,6 +11604,7 @@ async function saveCustomerOccurrence() {
   
   const canal = canalEl ? canalEl.value : "";
   const isWebroBaixa = typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal);
+  const isReuniaoSemanal = typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal);
   
   if (canal === "Proposta de renegociação") {
       if (typeof window.applyRenegotiationText === 'function') {
@@ -11624,7 +11625,9 @@ async function saveCustomerOccurrence() {
   const iniciativa = iniciativaEl ? iniciativaEl.value : "";
   
   if (!text) {
-    alert(isWebroBaixa ? "Preencha a observação da baixa Webro." : "Descreva o que foi falado na conversa.");
+    alert(isWebroBaixa
+      ? "Preencha a observação da baixa Webro."
+      : (isReuniaoSemanal ? "Descreva a conversa com a terceirizada." : "Descreva o que foi falado na conversa."));
     return;
   }
   if (!canalEl || !canalEl.value) {
@@ -11639,11 +11642,11 @@ async function saveCustomerOccurrence() {
         : (canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória."));
       return;
     }
-    if (!isWebroBaixa && canal !== "Retorno Agendado" && !reminder) {
+    if (!isWebroBaixa && !isReuniaoSemanal && canal !== "Retorno Agendado" && !reminder) {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
-    if (!isWebroBaixa && canal !== "Retorno Agendado" && !iniciativaEl) {
+    if (!isWebroBaixa && !isReuniaoSemanal && canal !== "Retorno Agendado" && !iniciativaEl) {
       alert("O campo Iniciativa é obrigatório.");
       return;
     }
@@ -11691,14 +11694,15 @@ async function saveCustomerOccurrence() {
     text: text,
     promiseDate: (canal === "Nota interna") ? null : promiseDate,
     promiseStatus: (canal === "Nota interna" || !promiseDate) ? null : "Pendente",
-    reminder: (canal === "Nota interna" || isWebroBaixa) ? null : reminder,
+    reminder: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : reminder,
     canal: canal,
-    iniciativa: (canal === "Nota interna" || isWebroBaixa) ? null : iniciativa,
-    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && !isWebroBaixa
+    iniciativa: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : iniciativa,
+    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && !isWebroBaixa && !isReuniaoSemanal
       ? AppState.selectedPromisedInstallments.map(item => window.getPromisedInstallmentLabel(item) || item)
       : [],
     pinned: (canal === "Nota interna") ? isPinned : false,
-    webroBaixa: !!isWebroBaixa
+    webroBaixa: !!isWebroBaixa,
+    reuniaoSemanalTerceirizada: !!isReuniaoSemanal
   };
   
   // Always reload from localStorage to prevent overwriting from multiple tabs
@@ -12009,6 +12013,26 @@ window.validateOccurrenceForm = function() {
     if (pDateEl) {
       pDateEl.removeAttribute("min");
       pDateEl.max = new Date().toISOString().split("T")[0];
+    }
+
+    const pDate = pDateEl ? pDateEl.value.trim() : "";
+    isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
+  } else if (typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal)) {
+    if (iniciativaGroup) iniciativaGroup.style.display = "none";
+    if (promiseRow) promiseRow.style.display = "grid";
+    if (installmentsGroup) installmentsGroup.style.display = "none";
+    if (pinGroup) pinGroup.style.display = "none";
+    if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
+
+    if (labelNoteText) labelNoteText.innerHTML = 'Conversa com terceirizada <span style="color: var(--color-danger);">*</span>';
+    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Reunião Semanal';
+    if (textEl) textEl.placeholder = "Registrar conversa com a terceirizada...";
+
+    const pDateLabel = document.getElementById('label-promise-date');
+    if (pDateLabel) pDateLabel.innerHTML = 'Data de Promessa <span style="color: var(--color-danger);">*</span>';
+    if (pDateEl) {
+      pDateEl.min = new Date().toISOString().split("T")[0];
+      pDateEl.removeAttribute("max");
     }
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
