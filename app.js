@@ -19405,8 +19405,12 @@ window.fireConfetti = function() {
       return true;
   });
   const unresolvedCount = unresolvedItems.length;
+  const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
+  const filaTrackKey = `${String(selectedOperator || 'Todos')}|${todayStr}`;
+  if (!window._filaHadPendingInSession) window._filaHadPendingInSession = {};
 
   if (unresolvedCount > 0) {
+      window._filaHadPendingInSession[filaTrackKey] = true;
       const summaryDiv = document.createElement("div");
       summaryDiv.style.cssText = "background: #fff7ed; color: #c2410c; padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; border: 1px solid #ffedd5; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;";
       summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${unresolvedCount} atendimentos para finalizar a sua fila hoje.`;
@@ -19446,24 +19450,26 @@ window.fireConfetti = function() {
           `;
           table.parentNode.insertBefore(successDiv, table);
           
-          // Show confetti!
-          const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
           if (typeof window.recordBarrigaSeal === 'function') {
               window.recordBarrigaSeal(selectedOperator, todayStr);
           }
-          const firedDate = localStorage.getItem('confettiFiredDate');
-          
-          if (firedDate !== todayStr) {
-              localStorage.setItem('confettiFiredDate', todayStr);
-              if (typeof window.confetti !== 'function') {
-                  const script = document.createElement('script');
-                  script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
-                  script.onload = () => {
+          // Confete só na transição pendente → zerada nesta sessão (não ao abrir com fila já finalizada)
+          const justZerouNaSessao = !!window._filaHadPendingInSession[filaTrackKey];
+          if (justZerouNaSessao) {
+              window._filaHadPendingInSession[filaTrackKey] = false;
+              const firedKey = `confettiFired:${filaTrackKey}`;
+              if (!sessionStorage.getItem(firedKey)) {
+                  sessionStorage.setItem(firedKey, '1');
+                  if (typeof window.confetti !== 'function') {
+                      const script = document.createElement('script');
+                      script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+                      script.onload = () => {
+                          fireConfetti();
+                      };
+                      document.head.appendChild(script);
+                  } else {
                       fireConfetti();
-                  };
-                  document.head.appendChild(script);
-              } else {
-                  fireConfetti();
+                  }
               }
           }
       }

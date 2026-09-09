@@ -37,6 +37,27 @@ window.MlEmpresaFilter = {
       const wrap = t.closest(".ml-emp-filter");
       if (wrap && wrap.id) this.setQuery(wrap.id, t.value);
     });
+    // capture: o wrap usa stopPropagation no mousedown; sem capture o clique fora nunca fecha
+    document.addEventListener("mousedown", (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      Object.keys(this.adapters).forEach((id) => {
+        const wrap = document.getElementById(id);
+        if (!wrap || !wrap.classList.contains("is-open")) return;
+        if (wrap.contains(t)) return;
+        this.close(id);
+      });
+    }, true);
+  },
+
+  close(id) {
+    const a = this.adapters[id];
+    if (!a) return;
+    if (typeof a.close === "function") {
+      a.close();
+      return;
+    }
+    if (typeof a.toggleOpen === "function") a.toggleOpen();
   },
 
   toggleOpen(id) {
@@ -87,17 +108,19 @@ window.MlEmpresaFilter = {
     return id ? `${id} - ${name}` : name;
   },
 
-  buttonLabel(items, selectedIds, emptyMeansAll, countMode) {
+  buttonLabel(items, selectedIds, emptyMeansAll, countMode, nouns) {
     const all = items || [];
     const sel = (selectedIds || []).map(String);
     const n = sel.length;
-    if (!all.length) return "Nenhuma empresa";
+    const singular = (nouns && nouns.singular) || "empresa";
+    const plural = (nouns && nouns.plural) || "empresas";
+    if (!all.length) return singular === "empresa" ? "Nenhuma empresa" : ("Nenhum " + singular);
     if (countMode) {
-      if (!n) return emptyMeansAll ? `Todos (${all.length})` : "Selecione empresas";
+      if (!n) return emptyMeansAll ? `Todos (${all.length})` : ("Selecione " + plural);
       if (n === all.length) return `Todos (${all.length})`;
-      return `${n} de ${all.length} empresas`;
+      return `${n} de ${all.length} ${plural}`;
     }
-    if (!n) return emptyMeansAll ? "Todos" : "Selecione empresas";
+    if (!n) return emptyMeansAll ? "Todos" : ("Selecione " + plural);
     if (n === all.length) return "Todos";
     if (n === 1) {
       const it = all.find((x) => String(x.id) === sel[0]);
@@ -110,13 +133,18 @@ window.MlEmpresaFilter = {
     const items = this.sortByIdAsc(opts.items || []);
     const selected = new Set((opts.selectedIds || []).map(String));
     const q = String(opts.query || "").toLowerCase().trim();
+    const nouns = opts.nouns || null;
     const filtered = items.filter((it) => {
       if (!q) return true;
       const blob = `${it.id} ${it.label || ""} ${it.name || ""}`.toLowerCase();
       return blob.includes(q);
     });
     if (!filtered.length) {
-      return `<div class="ml-emp-filter-empty">Nenhuma empresa com esse nome.</div>`;
+      const singular = (nouns && nouns.singular) || "empresa";
+      const emptyMsg = singular === "empresa"
+        ? "Nenhuma empresa com esse nome."
+        : ("Nenhum " + singular + " com esse nome.");
+      return `<div class="ml-emp-filter-empty">${emptyMsg}</div>`;
     }
     return filtered.map((it) => {
       const itemId = String(it.id);
@@ -135,7 +163,7 @@ window.MlEmpresaFilter = {
     const open = !!opts.open;
     const label = opts.label || "Empresas";
     const extra = opts.extraClass ? ` ${opts.extraClass}` : "";
-    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode);
+    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode, opts.nouns || null);
     return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
       <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${this.jsArg(id)})`}">

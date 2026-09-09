@@ -115,6 +115,27 @@ const DashboardInadimplencia = (function() {
     return !!(f.companies.length || f.centers.length || f.cities.length || f.operators.length);
   }
 
+  function hasGeoFilter(f) {
+    return !!(f.companies.length || f.centers.length || f.cities.length);
+  }
+
+  function snapDataJson(snap) {
+    if (!snap) return {};
+    let dj = snap.data_json;
+    if (typeof dj === 'string') {
+      try { dj = JSON.parse(dj || '{}'); } catch (e) { dj = {}; }
+    }
+    return dj && typeof dj === 'object' ? dj : {};
+  }
+
+  function opSnapValue(o) {
+    return Number(o && (o.total_value != null ? o.total_value : o.value)) || 0;
+  }
+
+  function opSnapCount(o) {
+    return Number(o && (o.total_count != null ? o.total_count : o.count)) || 0;
+  }
+
   function getLiveClients() {
     const list = window.rawClientList || window.clientList || [];
     return Array.isArray(list) ? list : [];
@@ -544,6 +565,62 @@ const DashboardInadimplencia = (function() {
     return true;
   }
 
+  function pickOperatorsFromSnap(allOps, selectedList) {
+    const ops = [];
+    (selectedList || []).forEach(sel => {
+      const candidates = (allOps || []).filter(o => operatorMatchesSelection(o.name, [sel]));
+      if (!candidates.length) return;
+      const exact = candidates.find(o => normOp(o.name) === normOp(sel));
+      const best = exact || candidates.slice().sort((a, b) => opSnapValue(b) - opSnapValue(a))[0];
+      if (best && !ops.some(x => normOp(x.name) === normOp(best.name))) ops.push(best);
+    });
+    return ops;
+  }
+
+  let _opRatioCacheKey = '';
+  let _opRatioCacheVal = null;
+
+  /** Participação do(s) operador(es) no total — live ou último snapshot com dado. */
+  function operatorShareRatio(f) {
+    if (!f || !f.operators.length) return null;
+    const key = [
+      f.operators.slice().sort().join('|'),
+      f.companies.slice().sort().join('|'),
+      f.centers.slice().sort().join('|'),
+      f.cities.slice().sort().join('|')
+    ].join('||');
+    if (_opRatioCacheKey === key) return _opRatioCacheVal;
+
+    let ratio = null;
+    const live = getLiveClients();
+    if (live.length) {
+      const emptyOps = { companies: f.companies.slice(), centers: f.centers.slice(), cities: f.cities.slice(), operators: [] };
+      const withOps = { companies: f.companies.slice(), centers: f.centers.slice(), cities: f.cities.slice(), operators: f.operators.slice() };
+      const base = aggregateFromLive(live, emptyOps);
+      const filtered = aggregateFromLive(live, withOps);
+      // Só usa live se o operador tiver valor; senão tenta snapshots (carteira ao vivo pode estar sem assignedOperator)
+      if (base.total_value > 0.01 && filtered.total_value > 0.01) {
+        ratio = Math.min(1, filtered.total_value / base.total_value);
+      }
+    }
+    if (ratio == null) {
+      for (let i = snapshots.length - 1; i >= 0; i--) {
+        const snap = snapshots[i];
+        const dj = snapDataJson(snap);
+        const ops = pickOperatorsFromSnap(dj.operators || [], f.operators);
+        const opVal = ops.reduce((s, o) => s + opSnapValue(o), 0);
+        const snapTotal = Number(snap.total_value) || 0;
+        if (opVal > 0.01 && snapTotal > 0.01) {
+          ratio = Math.min(1, opVal / snapTotal);
+          break;
+        }
+      }
+    }
+    _opRatioCacheKey = key;
+    _opRatioCacheVal = ratio;
+    return ratio;
+  }
+
   function aggregateFromSnapshot(snap, f) {
     if (!snap) {
       return {
@@ -553,10 +630,12 @@ const DashboardInadimplencia = (function() {
       };
     }
 
+    const dj = snapDataJson(snap);
+
     if (!hasAnyFilter(f)) {
       const aging = emptyAging();
       const centers = [];
-      (snap.data_json && snap.data_json.companies || []).forEach(comp => {
+      (dj.companies || []).forEach(comp => {
         if (comp.aging) {
           Object.keys(aging).forEach(k => {
             if (comp.aging[k]) {
@@ -577,27 +656,28 @@ const DashboardInadimplencia = (function() {
         subjudice_value: snap.subjudice_value || 0,
         aging,
         centers,
-        operators: (snap.data_json && snap.data_json.operators) ? snap.data_json.operators.slice() : [],
+        operators: (dj.operators || []).slice(),
         source: 'snapshot'
       };
     }
 
-    const onlyOps = f.operators.length && !f.companies.length && !f.centers.length && !f.cities.length;
+    const onlyOps = f.operators.length && !hasGeoFilter(f);
     if (onlyOps) {
-      const allOps = (snap.data_json && snap.data_json.operators) || [];
-      const ops = [];
-      f.operators.forEach(sel => {
-        const candidates = allOps.filter(o => operatorMatchesSelection(o.name, [sel]));
-        if (!candidates.length) return;
-        const exact = candidates.find(o => normOp(o.name) === normOp(sel));
-        const best = exact || candidates.slice().sort((a, b) => (Number(b.total_value) || 0) - (Number(a.total_value) || 0))[0];
-        if (best && !ops.some(x => normOp(x.name) === normOp(best.name))) ops.push(best);
-      });
+      const allOps = dj.operators || [];
+      const ops = pickOperatorsFromSnap(allOps, f.operators);
       let total_value = 0, total_count = 0;
       ops.forEach(o => {
-        total_value += Number(o.total_value) || 0;
-        total_count += Number(o.total_count) || 0;
+        total_value += opSnapValue(o);
+        total_count += opSnapCount(o);
       });
+      // Snapshot antigo sem operadores → estima pela participação atual
+      if (total_value < 0.01 && (Number(snap.total_value) || 0) > 0.01) {
+        const ratio = operatorShareRatio(f);
+        if (ratio != null && ratio > 0) {
+          total_value = (Number(snap.total_value) || 0) * ratio;
+          total_count = Math.round((Number(snap.total_count) || 0) * ratio);
+        }
+      }
       return {
         total_value,
         total_count,
@@ -617,7 +697,7 @@ const DashboardInadimplencia = (function() {
     let total_count = 0;
     let subjudice_count = 0;
     let subjudice_value = 0;
-    const companies = (snap.data_json && snap.data_json.companies) || [];
+    const companies = dj.companies || [];
 
     companies.forEach(comp => {
       const companyId = String(comp.company_id != null ? comp.company_id : comp.id || '');
@@ -660,21 +740,25 @@ const DashboardInadimplencia = (function() {
       }
     });
 
-    let operators = (snap.data_json && snap.data_json.operators) ? snap.data_json.operators.slice() : [];
+    let operators = (dj.operators || []).slice();
     if (f.operators.length) {
-      operators = operators.filter(o => operatorMatchesSelection(o.name, f.operators));
-      if (!f.companies.length && !f.centers.length && !f.cities.length) {
-        // already handled above
+      operators = pickOperatorsFromSnap(operators, f.operators);
+      // Sem cruzamento empresa×operador no snapshot: aplica a participação do operador
+      const ratio = operatorShareRatio(f);
+      if (ratio != null && ratio > 0 && total_value > 0.01) {
+        total_value *= ratio;
+        total_count = Math.round(total_count * ratio);
+        Object.keys(aging).forEach(k => {
+          aging[k].count = Math.round((aging[k].count || 0) * ratio);
+          aging[k].value = (aging[k].value || 0) * ratio;
+        });
       } else {
-        // combina filtros: mantém ops filtrados, totais já vêm de empresas/CCs
-      }
-    }
-
-    // Se filtro de operador + empresa/cc: sem cruzamento no snapshot, escala ops pelo ratio do valor
-    if (f.operators.length && (f.companies.length || f.centers.length || f.cities.length)) {
-      const opVal = operators.reduce((s, o) => s + (Number(o.total_value) || 0), 0);
-      if (opVal > 0 && total_value > 0) {
-        // mantém o menor entre os dois como aproximação não disponível — usa valor de CC/empresa
+        const opVal = operators.reduce((s, o) => s + opSnapValue(o), 0);
+        if (opVal > 0.01 && (Number(snap.total_value) || 0) > 0.01) {
+          const r = Math.min(1, opVal / (Number(snap.total_value) || 1));
+          total_value *= r;
+          total_count = Math.round(total_count * r);
+        }
       }
     }
 
@@ -695,6 +779,14 @@ const DashboardInadimplencia = (function() {
     if (!snap) return 0;
     if (!hasAnyFilter(f)) return Number(snap.total_value) || 0;
     return aggregateFromSnapshot(snap, f).total_value;
+  }
+
+  function formatAxisTick(value) {
+    const n = Number(value) || 0;
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return (n / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + 'M';
+    if (abs >= 1e3) return (n / 1e3).toLocaleString('pt-BR', { minimumFractionDigits: abs >= 1e5 ? 0 : 1, maximumFractionDigits: abs >= 1e5 ? 0 : 1 }) + 'k';
+    return n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
   }
 
   function getCurrentMetrics() {
@@ -885,6 +977,15 @@ const DashboardInadimplencia = (function() {
       return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
     });
     const rawValues = recentSnaps.map(s => filteredSnapshotValue(s, f));
+
+    // Último ponto: alinha com a carteira ao vivo (filtro de operador/geo já refletido nos cards)
+    if (recentSnaps.length && hasAnyFilter(f)) {
+      const liveMetrics = getCurrentMetrics();
+      if (liveMetrics && liveMetrics.total_value > 0.01) {
+        rawValues[rawValues.length - 1] = liveMetrics.total_value;
+      }
+    }
+
     const outlierFlags = detectSnapshotOutliers(recentSnaps, rawValues);
     const displayValues = rawValues.map((v, i) => {
       if (!outlierFlags[i]) return v;
@@ -909,6 +1010,22 @@ const DashboardInadimplencia = (function() {
         noteEl.style.display = 'none';
         noteEl.innerHTML = '';
       }
+    }
+
+    const maxVal = Math.max(0, ...displayValues, ...rawValues);
+    const yScale = {
+      beginAtZero: true,
+      ticks: {
+        callback: function(value) {
+          return formatAxisTick(value);
+        }
+      }
+    };
+    // Evita eixo “fantasma” em ±0.8M quando a série filtrada está zerada/pequena
+    if (maxVal < 0.01) {
+      yScale.max = 1000;
+    } else if (maxVal < 50000) {
+      yScale.suggestedMax = maxVal * 1.15;
     }
 
     chartInstance = new Chart(ctx, {
@@ -955,21 +1072,15 @@ const DashboardInadimplencia = (function() {
                 let label = formatMoney(raw);
                 if (outlierFlags[i]) label += ' (possível carga parcial)';
                 if (snap && snap.is_month_close) label += ' (Fechamento)';
-                if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
+                if (hasAnyFilter(f)) label += ' · filtrado';
+                else if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
                 return label;
               }
             }
           }
         },
         scales: {
-          y: {
-            beginAtZero: false,
-            ticks: {
-              callback: function(value) {
-                return (value / 1000000).toFixed(1) + 'M';
-              }
-            }
-          }
+          y: yScale
         }
       }
     });
@@ -1169,6 +1280,9 @@ const DashboardInadimplencia = (function() {
     try {
       const container = document.getElementById('inadimplencia-dashboard-root');
       if (!container) return;
+
+      _opRatioCacheKey = '';
+      _opRatioCacheVal = null;
 
       const scrollY = opts && opts.keepScroll ? window.scrollY : null;
 

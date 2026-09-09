@@ -355,13 +355,60 @@
     });
   }
 
+  function ccCompanyId(cc) {
+    if (!cc) return "";
+    const raw = cc.companyId != null && cc.companyId !== "" ? cc.companyId
+      : (cc.idCompany != null && cc.idCompany !== "" ? cc.idCompany : "");
+    return raw === "" || raw == null ? "" : String(raw);
+  }
+
+  function resolveCostCentersRaw() {
+    const fromState = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    if (fromState && fromState.length) return fromState;
+    const fromAuth = (window.MouraAuth && MouraAuth.costCenters) || [];
+    if (fromAuth && fromAuth.length) return fromAuth;
+    try {
+      const cached = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "null");
+      if (Array.isArray(cached) && cached.length) return cached;
+    } catch (e) { /* ignore */ }
+    return (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
+  }
+
+  async function ensureCostCentersLoaded() {
+    let all = resolveCostCentersRaw();
+    if (all.length) {
+      if (window.AppState && !(AppState.cachedCostCenters && AppState.cachedCostCenters.length)) {
+        AppState.cachedCostCenters = all;
+      }
+      return all;
+    }
+    try {
+      if (window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
+        all = await SiengeApiService.getCostCenters() || [];
+        if (window.AppState) AppState.cachedCostCenters = all;
+      }
+    } catch (e) {
+      console.warn("[Alçada] Falha ao carregar centros de custo:", e);
+    }
+    return all || [];
+  }
+
   function costCentersList(companyIds) {
-    const all = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    let all = resolveCostCentersRaw().slice();
+    if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+      const typed = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(all);
+      if (typed && typed.length) all = typed;
+    }
     const cos = asIdList(companyIds);
+    const allCompanyIds = companiesList().map(function (c) { return String(c.id); });
+    // Seleção vazia OU todas as SPEs = não restringe por empresa
+    const filterByCompany = cos.length > 0 && !(allCompanyIds.length && cos.length === allCompanyIds.length && allCompanyIds.every(function (id) { return cos.indexOf(id) !== -1; }));
     return all
       .filter(function (cc) {
-        if (!cos.length) return true;
-        return cos.indexOf(String(cc.companyId)) !== -1 || cc.companyId == null;
+        if (!filterByCompany) return true;
+        const cid = ccCompanyId(cc);
+        if (!cid) return true;
+        return cos.indexOf(cid) !== -1;
       })
       .map(function (cc) {
         return {
@@ -369,6 +416,12 @@
           name: cc.name || "",
           label: cc.id + " - " + String(cc.name || "").toUpperCase()
         };
+      })
+      .sort(function (a, b) {
+        const na = Number(a.id);
+        const nb = Number(b.id);
+        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+        return String(a.label).localeCompare(String(b.label), "pt-BR");
       });
   }
 
@@ -422,7 +475,8 @@
       open: ui.ccOpen,
       query: ui.ccQuery,
       emptyMeansAll: true,
-      countMode: true
+      countMode: true,
+      nouns: { singular: "empreendimento", plural: "empreendimentos" }
     });
 
     host.innerHTML =
@@ -433,6 +487,15 @@
       toggleOpen: function () {
         ui.companyOpen = !ui.companyOpen;
         ui.ccOpen = false;
+        renderScopeFilters(Object.assign({}, cfg, {
+          taxaZeroCompanyIds: readScopeFromUiOrCfg(cfg).companyIds,
+          taxaZeroCostCenterIds: readScopeFromUiOrCfg(cfg).costCenterIds
+        }));
+        if (window.lucide) lucide.createIcons();
+      },
+      close: function () {
+        if (!ui.companyOpen) return;
+        ui.companyOpen = false;
         renderScopeFilters(Object.assign({}, cfg, {
           taxaZeroCompanyIds: readScopeFromUiOrCfg(cfg).companyIds,
           taxaZeroCostCenterIds: readScopeFromUiOrCfg(cfg).costCenterIds
@@ -487,6 +550,16 @@
       toggleOpen: function () {
         ui.ccOpen = !ui.ccOpen;
         ui.companyOpen = false;
+        const scope = readScopeFromUiOrCfg(cfg);
+        renderScopeFilters({
+          taxaZeroCompanyIds: scope.companyIds,
+          taxaZeroCostCenterIds: scope.costCenterIds
+        });
+        if (window.lucide) lucide.createIcons();
+      },
+      close: function () {
+        if (!ui.ccOpen) return;
+        ui.ccOpen = false;
         const scope = readScopeFromUiOrCfg(cfg);
         renderScopeFilters({
           taxaZeroCompanyIds: scope.companyIds,
@@ -675,7 +748,7 @@
     return max + 1;
   }
 
-  window.renderAlcadaDescontoTab = function (cfg) {
+  window.renderAlcadaDescontoTab = async function (cfg) {
     const data = cfg || loadConfig();
     const taxaEl = document.getElementById("alcada-taxa-zero-max");
     if (taxaEl) taxaEl.value = fmtPct(data.taxaZeroMaxPct);
@@ -684,6 +757,9 @@
       body.innerHTML = (data.levels || []).map(levelRowHtml).join("");
     }
     renderRoles(data.roleLevels || defaultRoleLevels(data.levels), data.levels || []);
+    try {
+      await ensureCostCentersLoaded();
+    } catch (e) { /* ignore */ }
     renderScopeFilters(data);
     bindAutoSave();
     paintUpdated(data.updatedAt);
