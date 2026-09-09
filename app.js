@@ -1622,6 +1622,14 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       ruleSuffix = "EXTERNO";
     }
 
+    // Cobrança interna (cadastro de empresas): nunca terceiriza (ex.: Thaiane)
+    const cobInterna = typeof window.companyHasCobrancaInterna === "function"
+      && window.companyHasCobrancaInterna(c.companyId);
+    if (cobInterna && requiredType === "externo") {
+      requiredType = "interno";
+      ruleSuffix = "INTERNO / COBRANÇA INTERNA";
+    }
+
     let idCCusto = c.costCenterId;
     const resolved = (typeof window.resolveCityRuleId === "function")
       ? window.resolveCityRuleId(idCCusto)
@@ -4247,6 +4255,9 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
         return null;
     }
     let cleanName = (ccName || "").replace(/^(?:\d+\s*-\s*)+/, '');
+    if (!cleanName && typeof window.knownCostCenterName === "function") {
+        cleanName = window.knownCostCenterName(ccIdStr) || "";
+    }
     if (cleanName.toUpperCase().startsWith("C.C. ")) {
         cleanName = cleanName.substring(5);
     }
@@ -4258,10 +4269,66 @@ window.extractCityFromCostCenter = function(ccId, ccName) {
     if (["137", "138", "139", "140"].some(p => ccIdStr.startsWith(p)) || cleanName.toUpperCase().includes("AVARE")) {
         return "AVARE";
     }
+    // Fallback por prefixo conhecido (ex.: 13100 → Boituva) quando o nome do CC não veio no cache
+    if ((!cityMatch || cityMatch.length <= 2 || !isNaN(cityMatch)) && typeof window.knownCostCenterCity === "function") {
+        const knownCity = window.knownCostCenterCity(ccIdStr);
+        if (knownCity) return knownCity;
+    }
     if (cityMatch && cityMatch.length > 2 && isNaN(cityMatch)) {
         return cityMatch;
     }
     return null;
+};
+
+/** Nomes conhecidos de CC para atribuição quando o cache do Sienge não traz o nome. */
+window.KNOWN_COST_CENTER_NAMES = {
+  "14201": "ARAÇARIGUAMA - TERRA DO ARAÇARI",
+  "10100": "ITATINGA - NOVO HORIZONTE",
+  "10200": "ITATINGA - NOVO HORIZONTE 2",
+  "11100": "ITATINGA - PAULISTA",
+  "12100": "CERQUEIRA CÉSAR - BELA VISTA",
+  "12300": "CERQUEIRA CESAR - BELA VISTA 2",
+  "13100": "BOITUVA - RESERVA DNA",
+  "15200": "AVARÉ - QUINTA DO LAGO",
+  "15300": "AVARÉ - VILLA DO LAGO",
+  "16100": "PARDINHO - NONA INES",
+  "16200": "PARDINHO - NONA INES 2",
+  "16103": "ITATINGA - NOVO HORIZONTE",
+  "30200": "PARDINHO - RECANTO MARISTELA 2"
+};
+
+window.knownCostCenterName = function(ccId) {
+  const id = String(ccId == null ? "" : ccId).trim();
+  return (window.KNOWN_COST_CENTER_NAMES && window.KNOWN_COST_CENTER_NAMES[id]) || "";
+};
+
+window.knownCostCenterCity = function(ccId) {
+  const name = window.knownCostCenterName(ccId);
+  if (!name) return "";
+  return name.split("-")[0].trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+};
+
+/** Empresa marcada como Cobrança Interna no cadastro (não vai para terceirizada). */
+window.companyHasCobrancaInterna = function(companyId) {
+  const id = String(companyId == null ? "" : companyId).trim();
+  if (!id) return false;
+  let custom = null;
+  try {
+    if (window.AppState && AppState.companiesCustom) {
+      custom = AppState.companiesCustom[id] || AppState.companiesCustom[String(Number(id))];
+    }
+  } catch (e) {}
+  if (!custom && window.EmpresasState && EmpresasState.customFields) {
+    custom = EmpresasState.customFields[id] || EmpresasState.customFields[Number(id)];
+  }
+  if (!custom) {
+    try {
+      const map = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+      custom = map[id] || map[String(Number(id))];
+    } catch (e) {}
+  }
+  const v = custom && custom.cobranca_interna;
+  return v === 1 || v === true || v === "1" || v === "true";
 };
 
 window.extractCityDisplayName = function(ccId, ccName) {
@@ -4288,7 +4355,7 @@ window.findCachedCostCenter = function(idCCusto) {
 window.resolveCityRuleId = function(idCCusto, ccNameHint) {
   const cc = typeof window.findCachedCostCenter === "function" ? window.findCachedCostCenter(idCCusto) : null;
   const id = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(idCCusto) : idCCusto) || (cc && cc.id);
-  const name = ccNameHint || (cc && cc.name) || "";
+  const name = ccNameHint || (cc && cc.name) || (typeof window.knownCostCenterName === "function" ? window.knownCostCenterName(id) : "") || "";
   let city = typeof window.extractCityFromCostCenter === "function"
     ? window.extractCityFromCostCenter(id, name)
     : "";
@@ -28437,7 +28504,7 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
           tempEmpId = "10100";
       }
       
-      const empNameMap = {
+      const empNameMap = window.KNOWN_COST_CENTER_NAMES || {
           "14201": "ARAÇARIGUAMA - TERRA DO ARAÇARI",
           "10100": "ITATINGA - NOVO HORIZONTE",
           "10200": "ITATINGA - NOVO HORIZONTE 2",

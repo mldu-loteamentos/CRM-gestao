@@ -291,11 +291,14 @@ const FluxoCaixaApp = {
    * — grupo de saída (02/04/05/07/09.02/09.05) ou conta 2.x / tipo despesa → negativo
    * — redutora nesses grupos (retenção, desconto obtido, flag Sienge) → positivo
    * — redutora em RECEITAS (cancelamento) → negativo
-   * Usa módulo do valor para não depender do sinal cru da API.
+   * Em geral usa módulo do valor (API costuma mandar saída positiva).
+   * Exceção: reapropriação/abatimento de adiantamento — a API manda o par +/− que se zera; preservar o sinal.
    */
-  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType) {
-    const abs = Math.abs(Number(amount) || 0);
-    if (!abs) return 0;
+  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
+    const raw = Number(amount) || 0;
+    if (!raw) return 0;
+    if (mov && this.movAdvanceRole(mov) === "abatimento") return raw;
+    const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
     if (this.isRevenueGroup(node && node.id)) return reduce ? -abs : abs;
@@ -384,7 +387,7 @@ const FluxoCaixaApp = {
         return;
       }
       const node = byId[nid];
-      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType);
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
       this.addInto(node, a.month, amount);
       const idxKey = nk || rawId;
       if (!accIndex[idxKey]) {
@@ -921,6 +924,14 @@ const FluxoCaixaApp = {
     return id != null ? String(id) : "—";
   },
 
+  companyLabelShort(id) {
+    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
+    if (!c) return id != null ? String(id) : "—";
+    const name = String(c.name || "").trim();
+    const short = name.length > 28 ? name.slice(0, 26) + "…" : name;
+    return `${c.id} · ${short} (${c.pct}%)`;
+  },
+
   closeDrill() {
     const el = document.getElementById("fc-drill-modal");
     if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -951,28 +962,31 @@ const FluxoCaixaApp = {
       return t.role === "adiantamento" || t.role === "abatimento";
     });
 
+    const th = "padding:10px 12px;background:#105436;color:#fff;text-align:left;font-size:0.75rem;white-space:nowrap;";
+    const thr = "padding:10px 12px;background:#105436;color:#fff;text-align:right;font-size:0.75rem;white-space:nowrap;";
+
     const body = items.length
       ? `${hasAdvancePair ? `
-          <div style="margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.8rem;line-height:1.45;">
+          <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.82rem;line-height:1.5;">
             <strong>Adiantamento × abatimento:</strong>
             o adiantamento sai no caixa; a “Reaprop. / abatimento de adiant.” no mesmo título
             “mata” a parcela correspondente para o sócio/parceiro não receber de novo no repasse.
             ${pairedTitles.size ? ` Títulos com os dois lados neste detalhe: <strong>${[...pairedTitles].map((k) => this.esc(k)).join(", ")}</strong>.` : ""}
           </div>` : ""}
-        <div style="overflow:auto;max-height:calc(80vh - 170px);" class="crm-scroll-table">
-          <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <div style="overflow:auto;max-height:calc(88vh - 160px);" class="crm-scroll-table">
+          <table class="custom-table" style="width:100%;min-width:1280px;border-collapse:separate;border-spacing:0;font-size:0.8rem;">
             <thead>
               <tr>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Data</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Nº mov.</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Título CP/CR</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Empresa</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">C.C.</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Histórico</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Bruto API</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">% rateio</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Fator MLDU</th>
-                <th style="padding:8px;background:#105436;color:#fff;text-align:right;">Valor no DFC</th>
+                <th style="${th}">Data</th>
+                <th style="${th}">Nº mov.</th>
+                <th style="${th}">Título CP/CR</th>
+                <th style="${th}">Empresa</th>
+                <th style="${th}">C.C.</th>
+                <th style="${th}">Histórico</th>
+                <th style="${thr}">Bruto API</th>
+                <th style="${thr}">% rateio</th>
+                <th style="${thr}">Fator MLDU</th>
+                <th style="${thr}">Valor no DFC</th>
               </tr>
             </thead>
             <tbody>
@@ -983,43 +997,49 @@ const FluxoCaixaApp = {
                 const sharePct = (Number(it.share) || 0) * 100;
                 const factorPct = (Number(it.factor) || 0) * 100;
                 const color = amt < 0 ? "#b91c1c" : (amt > 0 ? "#105436" : "#64748b");
+                const rawColor = Number.isFinite(raw)
+                  ? (raw < 0 ? "#b91c1c" : (raw > 0 ? "#105436" : "#64748b"))
+                  : "#64748b";
                 const title = this.movTitleInfo(mov);
                 const roleBadge = title.role === "adiantamento"
-                  ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:0.68rem;font-weight:800;">ADIANT.</span>`
+                  ? `<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:0.68rem;font-weight:800;vertical-align:middle;">ADIANT.</span>`
                   : (title.role === "abatimento"
-                    ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:0.68rem;font-weight:800;">ABATE</span>`
+                    ? `<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:0.68rem;font-weight:800;vertical-align:middle;">ABATE</span>`
                     : "");
                 const pairMark = title.titleKey && pairedTitles.has(title.titleKey)
                   ? `<span title="Mesmo título com adiantamento e abatimento" style="margin-left:4px;color:#ea580c;">↔</span>`
                   : "";
                 const partyLine = title.party
-                  ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(title.party)}</div>`
+                  ? `<div style="font-size:0.72rem;color:#64748b;margin-top:3px;line-height:1.35;">${this.esc(title.party)}</div>`
                   : "";
+                const ccTxt = [it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—";
                 return `<tr style="border-bottom:1px solid #e2e8f0;">
-                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
-                  <td style="padding:7px 8px;font-weight:700;color:#105436;">${this.esc(this.movNumber(mov))}</td>
-                  <td style="padding:7px 8px;min-width:140px;">
-                    <div style="font-weight:700;color:#0f172a;">${this.esc(title.label)}${pairMark}</div>
+                  <td style="padding:10px 12px;white-space:nowrap;vertical-align:top;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
+                  <td style="padding:10px 12px;font-weight:700;color:#105436;white-space:nowrap;vertical-align:top;">${this.esc(this.movNumber(mov))}</td>
+                  <td style="padding:10px 12px;min-width:200px;max-width:280px;vertical-align:top;">
+                    <div style="font-weight:700;color:#0f172a;line-height:1.35;">${this.esc(title.label)}${pairMark}</div>
                     ${partyLine}
                   </td>
-                  <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.companyLabel(it.companyId || mov.companyId))}</td>
-                  <td style="padding:7px 8px;">${this.esc([it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—")}</td>
-                  <td style="padding:7px 8px;max-width:280px;">${this.esc(this.movHistoric(mov))}${roleBadge}</td>
-                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
-                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? ` <span style="color:#94a3b8;">(API ${this.esc(String(it.rateRaw))})</span>` : ""}</td>
-                  <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
-                  <td style="padding:7px 8px;text-align:right;font-weight:700;color:${color};font-variant-numeric:tabular-nums;">${this.fmt(amt)}</td>
+                  <td style="padding:10px 12px;min-width:150px;max-width:200px;vertical-align:top;line-height:1.35;" title="${this.esc(this.companyLabel(it.companyId || mov.companyId))}">${this.esc(this.companyLabelShort(it.companyId || mov.companyId))}</td>
+                  <td style="padding:10px 12px;min-width:160px;max-width:220px;vertical-align:top;line-height:1.35;" title="${this.esc(ccTxt)}">${this.esc(ccTxt)}</td>
+                  <td style="padding:10px 12px;min-width:220px;max-width:320px;vertical-align:top;line-height:1.4;">
+                    <span>${this.esc(this.movHistoric(mov))}</span>${roleBadge}
+                  </td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:600;color:${rawColor};">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? `<div style="color:#94a3b8;font-size:0.7rem;">API ${this.esc(String(it.rateRaw))}</div>` : ""}</td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
+                  <td style="padding:10px 12px;text-align:right;font-weight:800;color:${color};font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${this.fmt(amt)}</td>
                 </tr>`;
               }).join("")}
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="9" style="padding:8px;font-weight:800;text-align:right;">Soma dos lançamentos (${items.length})</td>
-                <td style="padding:8px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
+                <td colspan="9" style="padding:12px;font-weight:800;text-align:right;border-top:2px solid #e2e8f0;">Soma dos lançamentos (${items.length})</td>
+                <td style="padding:12px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;border-top:2px solid #e2e8f0;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
               </tr>
               <tr>
-                <td colspan="9" style="padding:4px 8px 8px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
-                <td style="padding:4px 8px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
+                <td colspan="9" style="padding:4px 12px 12px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
+                <td style="padding:4px 12px 12px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
               </tr>
             </tfoot>
           </table>
@@ -1029,18 +1049,18 @@ const FluxoCaixaApp = {
     this.closeDrill();
     const overlay = document.createElement("div");
     overlay.id = "fc-drill-modal";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:24px;";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:16px;";
     overlay.onclick = (e) => { if (e.target === overlay) this.closeDrill(); };
     overlay.innerHTML = `
-      <div style="background:#fff;border-radius:12px;width:min(1280px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
-        <div style="padding:14px 16px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;">
+      <div style="background:#fff;border-radius:12px;width:min(1680px,98vw);max-height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
+        <div style="padding:14px 18px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;flex-shrink:0;">
           <div>
-            <div style="font-size:1rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
-            <div style="font-size:0.78rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
+            <div style="font-size:1.05rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
+            <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
           </div>
-          <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+          <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.25rem;line-height:1;">×</button>
         </div>
-        <div style="padding:14px 16px 18px;">${body}</div>
+        <div style="padding:16px 18px 20px;overflow:auto;">${body}</div>
       </div>`;
     document.body.appendChild(overlay);
   },

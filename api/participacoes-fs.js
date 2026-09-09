@@ -22,25 +22,41 @@ function candidateRoots(projectDir) {
 
 function prestacaoRoot(projectDir) {
   const dirs = candidateRoots(projectDir);
+  let best = null;
+  let bestScore = -1;
   for (const dir of dirs) {
     try {
       if (!fs.existsSync(dir)) continue;
       const st = fs.statSync(dir);
+      let root = null;
       if (st.isDirectory() && /PRESTA/i.test(path.basename(dir)) && /CONTAS/i.test(path.basename(dir))) {
-        return dir;
+        root = dir;
+      } else {
+        const names = fs.readdirSync(dir);
+        const hit = names.find((n) => {
+          try {
+            return fs.statSync(path.join(dir, n)).isDirectory() && /PRESTA/i.test(n) && /CONTAS/i.test(n);
+          } catch (e) {
+            return false;
+          }
+        });
+        if (hit) root = path.join(dir, hit);
       }
-      const names = fs.readdirSync(dir);
-      const hit = names.find((n) => {
-        try {
-          return fs.statSync(path.join(dir, n)).isDirectory() && /PRESTA/i.test(n) && /CONTAS/i.test(n);
-        } catch (e) {
-          return false;
-        }
-      });
-      if (hit) return path.join(dir, hit);
+      if (!root) continue;
+      let score = 0;
+      try {
+        score = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).length;
+      } catch (e) {
+        score = 0;
+      }
+      // Prefere pasta com empresas; empate fica com a primeira candidata
+      if (score > bestScore) {
+        best = root;
+        bestScore = score;
+      }
     } catch (e) {}
   }
-  return path.join(projectDir, "PRESTAÇÃO DE CONTAS");
+  return best || path.join(projectDir, "PRESTAÇÃO DE CONTAS");
 }
 
 function parseCompanyFolderName(name) {

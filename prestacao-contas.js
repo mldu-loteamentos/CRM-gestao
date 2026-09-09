@@ -197,10 +197,10 @@ const PrestacaoContasApp = {
     return set;
   },
 
-  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType) {
+  signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const fc = this.fc();
     if (fc && typeof fc.signedAmount === "function") {
-      return fc.signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType);
+      return fc.signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov);
     }
     const abs = Math.abs(Number(amount) || 0);
     const digits = String(categoryId || "").replace(/\D/g, "");
@@ -311,7 +311,7 @@ const PrestacaoContasApp = {
         return;
       }
       const node = byId[nid];
-      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType);
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
       node.amount += amount;
 
       const idxKey = nk || rawId;

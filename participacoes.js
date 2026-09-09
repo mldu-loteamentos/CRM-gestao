@@ -81,7 +81,11 @@ const ParticipacoesApp = {
   },
 
   periodFromFileName(name) {
-    const ym = String(name || "").match(/(\d{4})[_-](\d{2})/);
+    const s = String(name || "");
+    // Prefer YYYY_MM / YYYY-MM (padrão dos PDFs de prestação)
+    let ym = s.match(/(?:^|[^\d])(\d{4})[_-](\d{2})(?:[^\d]|$)/);
+    if (ym) return `${ym[1]}-${ym[2]}`;
+    ym = s.match(/(\d{4})[_-](\d{2})/);
     if (ym) return `${ym[1]}-${ym[2]}`;
     return "";
   },
@@ -91,6 +95,46 @@ const ParticipacoesApp = {
     const [y, m] = String(closing).split("-");
     if (!y || !m) return closing;
     return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  },
+
+  /** Remove ruído de pontuação/data do nome do credor para agrupar variações mínimas. */
+  normalizeCredorName(name) {
+    let s = String(name || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\s*(?:R\$|RS)\s*$/i, "")
+      .replace(/\s+([\d.]+,\d{2})\s*$/g, "")
+      .replace(/\s*[-–—.:;,/|]+\s*$/g, "")
+      .trim();
+    // Tarifas bancárias: "TAR MANUT CONTA 03/26" ≈ "TAR MANUT CONTA 11/25"
+    s = s.replace(/\s+\d{1,2}\/\d{2}(?:\d{2})?\b/g, "");
+    s = s.replace(/\s+\d{4}[_/-]\d{2}\b/g, "");
+    s = s.replace(/\s*[-–—.:;,/|]+\s*$/g, "").replace(/\s+/g, " ").trim();
+    return s || "(sem credor)";
+  },
+
+  /** Chave estável para matriz (ignora hífen final, maiúsculas, datas residuais). */
+  credorGroupKey(name) {
+    return this.normalizeCredorName(name)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9./\s-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  },
+
+  /** Rótulo canônico: preferir a forma mais limpa / mais frequente. */
+  pickCredorLabel(candidates) {
+    const list = (candidates || []).map((s) => this.normalizeCredorName(s)).filter(Boolean);
+    if (!list.length) return "(sem credor)";
+    const counts = {};
+    list.forEach((s) => { counts[s] = (counts[s] || 0) + 1; });
+    return list.slice().sort((a, b) => {
+      const d = (counts[b] || 0) - (counts[a] || 0);
+      if (d) return d;
+      return a.length - b.length || a.localeCompare(b, "pt-BR");
+    })[0];
   },
 
   init() {
@@ -228,22 +272,16 @@ const ParticipacoesApp = {
     return { credor: text, detalhe: "" };
   },
 
-  normalizeCredorName(name) {
-    return String(name || "")
-      .replace(/\s+/g, " ")
-      .replace(/\s*(?:R\$|RS)\s*$/i, "")
-      .replace(/\s+([\d.]+,\d{2})\s*$/g, "")
-      .trim() || "(sem credor)";
-  },
-
-  /** Mês da matriz: prioriza a data do lançamento (PDF), depois o fechamento do arquivo. */
+  /** Mês da matriz: 1 PDF de fechamento = 1 coluna (prioridade ao período do arquivo). */
   expensePeriodKey(r) {
+    const fromFile = (r && r.periodo) || this.periodFromFileName(r && r.sourceFile);
+    if (fromFile && /^\d{4}-\d{2}$/.test(String(fromFile))) return String(fromFile);
     const iso = String((r && r.iso) || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso.slice(0, 7);
     const d = String((r && r.date) || "");
     const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     if (m) return `${m[3]}-${m[2]}`;
-    return (r && r.periodo) || this.periodFromFileName(r && r.sourceFile) || "sem-periodo";
+    return "sem-periodo";
   },
 
   /** Corrige linhas antigas do cache em que o valor ficou colado no nome. */
@@ -378,7 +416,7 @@ const ParticipacoesApp = {
 
   persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v4";
+      const key = "crm_participacoes_cache_v5";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
       all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
@@ -391,7 +429,7 @@ const ParticipacoesApp = {
 
   restoreCacheForCompany() {
     try {
-      const keys = ["crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
+      const keys = ["crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
       let all = {};
       keys.forEach((key) => {
         try {
@@ -430,9 +468,10 @@ const ParticipacoesApp = {
   allExpenses() {
     const list = [];
     this.files.forEach((f) => {
+      const filePeriod = f.closing || this.periodFromFileName(f.name);
       (f.expenses || []).forEach((r) => {
         list.push(Object.assign({}, this.repairExpenseRow(r), {
-          periodo: r.periodo || f.closing || this.periodFromFileName(f.name),
+          periodo: filePeriod || r.periodo || this.periodFromFileName(r.sourceFile),
           sourceFile: r.sourceFile || f.name
         }));
       });
@@ -443,8 +482,9 @@ const ParticipacoesApp = {
   activeExpenses() {
     if (this.fileName) {
       const f = this.files.find((x) => x.name === this.fileName);
+      const filePeriod = f && (f.closing || this.periodFromFileName(f.name));
       return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, this.repairExpenseRow(r), {
-        periodo: r.periodo || (f && f.closing) || "",
+        periodo: filePeriod || r.periodo || "",
         sourceFile: r.sourceFile || (f && f.name) || ""
       })) : [];
     }
@@ -467,18 +507,20 @@ const ParticipacoesApp = {
     });
     const byCredor = {};
     rows.forEach((r) => {
-      byCredor[r.credor] = byCredor[r.credor] || [];
-      byCredor[r.credor].push(r);
+      const k = this.credorGroupKey(r.credor) || r.credor;
+      byCredor[k] = byCredor[k] || [];
+      byCredor[k].push(r);
     });
-    Object.keys(byCredor).forEach((credor) => {
-      const list = byCredor[credor];
+    Object.keys(byCredor).forEach((key) => {
+      const list = byCredor[key];
+      const credorLabel = this.pickCredorLabel(list.map((r) => r.credor)) || key;
       if (list.length < 3) return;
       const vals = list.map((r) => r.valor).filter((v) => v > 0).sort((a, b) => a - b);
       if (vals.length < 3) return;
       const med = vals[Math.floor(vals.length / 2)];
       list.forEach((r) => {
         if (med > 0 && r.valor > med * 2.5) {
-          out.push({ level: "danger", text: `Valor acima do padrão de ${credor}: ${this.fmt(r.valor)} em ${r.date} (mediana ${this.fmt(med)})` });
+          out.push({ level: "danger", text: `Valor acima do padrão de ${credorLabel}: ${this.fmt(r.valor)} em ${r.date} (mediana ${this.fmt(med)})` });
         }
       });
     });
@@ -498,38 +540,56 @@ const ParticipacoesApp = {
     const rows = this.filtered();
     const keyFn = {
       periodo: (r) => this.periodLabel(r.periodo, r.sourceFile || "Sem período"),
-      credor: (r) => r.credor,
+      credor: (r) => this.credorGroupKey(r.credor) || r.credor,
       categoria: (r) => r.categoria,
       data: (r) => r.date
-    }[this.groupBy] || ((r) => r.credor);
+    }[this.groupBy] || ((r) => this.credorGroupKey(r.credor) || r.credor);
     const map = {};
     rows.forEach((r) => {
       const k = keyFn(r) || "(em branco)";
-      if (!map[k]) map[k] = { key: k, rows: [], total: 0 };
+      if (!map[k]) map[k] = { key: k, rows: [], total: 0, _labels: [] };
       map[k].rows.push(r);
       map[k].total += Number(r.valor) || 0;
+      map[k]._labels.push(r.credor);
     });
-    return Object.values(map).sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
+    return Object.values(map).map((g) => {
+      if (this.groupBy === "credor" || !this.groupBy || this.groupBy === "matriz") {
+        g.key = this.pickCredorLabel(g._labels) || g.key;
+      }
+      delete g._labels;
+      return g;
+    }).sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
   },
 
-  /** Matriz: linhas = credor, colunas = mês (YYYY-MM), células = soma + lançamentos. */
+  /** Matriz: linhas = credor (agrupado), colunas = mês do PDF (YYYY-MM). */
   matrixData() {
     const rows = this.filtered();
     const monthSet = new Set();
-    const byCredor = {};
+    // Sempre inclui os meses dos arquivos carregados (mesmo sem despesa parseada)
+    this.files.forEach((f) => {
+      const c = f.closing || this.periodFromFileName(f.name);
+      if (c && /^\d{4}-\d{2}$/.test(c)) monthSet.add(c);
+    });
+    const byKey = {};
     rows.forEach((r) => {
       const periodo = this.expensePeriodKey(r);
-      const credor = r.credor || "(sem credor)";
+      const key = this.credorGroupKey(r.credor) || "(sem credor)";
       monthSet.add(periodo);
-      if (!byCredor[credor]) byCredor[credor] = { credor, cells: {}, total: 0 };
-      if (!byCredor[credor].cells[periodo]) byCredor[credor].cells[periodo] = { total: 0, rows: [] };
-      const cell = byCredor[credor].cells[periodo];
+      if (!byKey[key]) byKey[key] = { key, cells: {}, total: 0, _labels: [] };
+      byKey[key]._labels.push(r.credor);
+      if (!byKey[key].cells[periodo]) byKey[key].cells[periodo] = { total: 0, rows: [] };
+      const cell = byKey[key].cells[periodo];
       cell.total += Number(r.valor) || 0;
       cell.rows.push(r);
-      byCredor[credor].total += Number(r.valor) || 0;
+      byKey[key].total += Number(r.valor) || 0;
     });
-    const months = Array.from(monthSet).sort((a, b) => String(a).localeCompare(String(b)));
-    const creditors = Object.values(byCredor).sort((a, b) => b.total - a.total || a.credor.localeCompare(b.credor, "pt-BR"));
+    const months = Array.from(monthSet).filter((m) => /^\d{4}-\d{2}$/.test(m)).sort((a, b) => String(a).localeCompare(String(b)));
+    const creditors = Object.values(byKey).map((c) => ({
+      credor: this.pickCredorLabel(c._labels) || c.key,
+      groupKey: c.key,
+      cells: c.cells,
+      total: c.total
+    })).sort((a, b) => b.total - a.total || a.credor.localeCompare(b.credor, "pt-BR"));
     const colTotals = {};
     months.forEach((m) => {
       colTotals[m] = creditors.reduce((s, c) => s + ((c.cells[m] && c.cells[m].total) || 0), 0);
@@ -541,7 +601,11 @@ const ParticipacoesApp = {
   openMatrixDetail(credorEnc, periodo) {
     let credor = credorEnc;
     try { credor = decodeURIComponent(credorEnc); } catch (e) {}
-    this.detail = { credor: String(credor || ""), periodo: String(periodo || "") };
+    this.detail = {
+      credor: String(credor || ""),
+      groupKey: this.credorGroupKey(credor),
+      periodo: String(periodo || "")
+    };
     this.render();
   },
 
@@ -552,10 +616,11 @@ const ParticipacoesApp = {
 
   detailRows() {
     if (!this.detail) return [];
-    const { credor, periodo } = this.detail;
+    const { credor, periodo, groupKey } = this.detail;
+    const key = groupKey || this.credorGroupKey(credor);
     return this.filtered().filter((r) => {
       const p = this.expensePeriodKey(r);
-      return String(r.credor || "(sem credor)") === String(credor) && String(p) === String(periodo);
+      return this.credorGroupKey(r.credor) === key && String(p) === String(periodo);
     }).sort((a, b) => String(a.iso || a.date).localeCompare(String(b.iso || b.date)));
   },
 
@@ -668,6 +733,20 @@ const ParticipacoesApp = {
     `;
   },
 
+  async parseAllFiles() {
+    const fails = [];
+    for (const f of this.files) {
+      try {
+        await this.ensureFileParsed(f);
+      } catch (e) {
+        fails.push((f && f.name ? f.name : "PDF") + ": " + (e.message || e));
+      }
+    }
+    if (fails.length) {
+      this.error = "Falha ao ler " + fails.length + " PDF(s). Os demais períodos foram carregados.\n" + fails.slice(0, 4).join("\n");
+    }
+  },
+
   async onCompany(id) {
     this.companyId = String(id || "");
     this.fileName = "";
@@ -688,13 +767,7 @@ const ParticipacoesApp = {
     this.fileName = "";
     this.parsing = true;
     this.render();
-    try {
-      for (const f of this.files) {
-        await this.ensureFileParsed(f);
-      }
-    } catch (e) {
-      this.error = "Não foi possível ler um dos PDFs: " + (e.message || e);
-    }
+    await this.parseAllFiles();
     this.parsing = false;
     this.render();
   },
@@ -704,6 +777,7 @@ const ParticipacoesApp = {
     const rec = this.files.find((f) => f.name === name);
     if (!rec) return;
     this.parsing = true;
+    this.error = "";
     this.render();
     try {
       await this.ensureFileParsed(rec);
@@ -717,14 +791,9 @@ const ParticipacoesApp = {
   async onFileAll() {
     this.fileName = "";
     this.parsing = true;
+    this.error = "";
     this.render();
-    try {
-      for (const f of this.files) {
-        await this.ensureFileParsed(f);
-      }
-    } catch (e) {
-      this.error = "Não foi possível ler um dos PDFs: " + (e.message || e);
-    }
+    await this.parseAllFiles();
     this.parsing = false;
     this.groupBy = "matriz";
     this.render();
