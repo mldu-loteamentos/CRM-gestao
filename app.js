@@ -13444,8 +13444,17 @@ function generateAgreementPDF() {
   })();
 }
 
+function setPdfPrintLogo(enabled) {
+  const overlay = document.getElementById("pdf-view-overlay");
+  if (!overlay) return;
+  overlay.classList.toggle("no-print-logo", !enabled);
+}
+
 function closePdfModal() {
-  document.getElementById("pdf-view-overlay").classList.remove("active");
+  const overlay = document.getElementById("pdf-view-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("active");
+  overlay.classList.remove("no-print-logo");
 }
 
 // ----------------------------------------------------

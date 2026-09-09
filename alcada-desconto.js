@@ -250,29 +250,8 @@
     };
   }
 
-  function paintUpdated(updatedAt, status) {
-    const el = document.getElementById("alcada-desconto-updated");
-    if (!el) return;
-    if (status === "saving") {
-      el.textContent = "salvando…";
-      return;
-    }
-    if (status === "error") {
-      el.textContent = "salvo localmente · falha na nuvem";
-      return;
-    }
-    if (!updatedAt) {
-      el.textContent = "";
-      return;
-    }
-    const d = new Date(updatedAt);
-    if (Number.isNaN(d.getTime())) {
-      el.textContent = "";
-      return;
-    }
-    el.textContent = "salva automaticamente · " + d.toLocaleString("pt-BR", {
-      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-    });
+  function paintUpdated() {
+    /* status de autosave removido da UI */
   }
 
   function levelRowHtml(lv, idx) {

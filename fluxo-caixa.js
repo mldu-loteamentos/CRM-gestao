@@ -854,6 +854,67 @@ const FluxoCaixaApp = {
       || m.documentIdentificationName || m.originDescription || m.observations || "—";
   },
 
+  /** Classifica o histórico de adiantamento / abatimento (reapropriação). */
+  movAdvanceRole(m) {
+    const h = String(this.movHistoric(m) || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    if (/REAPROP|ABATIMENTO\s+DE\s+ADIANT|ABATIMENTO\s+ADIANT/.test(h)) return "abatimento";
+    if (/ADIANTAMENTO/.test(h)) return "adiantamento";
+    return "";
+  },
+
+  /**
+   * Título de Contas a Pagar / Receber ligado ao movimento bancário (Sienge).
+   * Campos típicos: billId, documentIdentificationId/Number, installmentId, creditor/client.
+   */
+  movTitleInfo(m) {
+    if (!m) {
+      return { tipo: "", label: "—", party: "", role: "", billId: "", titleKey: "" };
+    }
+    const billId = m.billId || m.billPayableId || m.billReceivableId
+      || m.payableBillId || m.receivableBillId || m.titleId || "";
+    const docId = String(m.documentIdentificationId || m.documentId || m.documentsId || "").trim();
+    const docNum = String(m.documentIdentificationNumber || m.documentNumber || "").trim();
+    const docName = String(m.documentIdentificationName || "").trim();
+    const installment = m.installmentId || m.installmentNumber || m.installment || "";
+    const origin = String(m.bankMovementOriginId || m.originId || m.origin || "").toUpperCase();
+    const blob = `${docId} ${docName} ${origin}`.toUpperCase();
+
+    let tipo = "";
+    if (m.creditorId && !m.clientId) tipo = "CP";
+    else if (m.clientId && !m.creditorId) tipo = "CR";
+    else if (/PAGAR|PAYABLE|\bCP\b|\bNP\b|\bNF\b|FORNECEDOR|CREDOR/.test(blob)) tipo = "CP";
+    else if (/RECEBER|RECEIVABLE|\bCR\b|\bCT\b|CLIENTE/.test(blob)) tipo = "CR";
+    else if (m.creditorId) tipo = "CP";
+    else if (m.clientId) tipo = "CR";
+
+    const docLabel = `${docId}${docNum}`.trim() || docNum || docId;
+    const parts = [];
+    if (tipo) parts.push(tipo);
+    if (docLabel) parts.push(docLabel);
+    else if (billId) parts.push(`#${billId}`);
+    if (billId && docLabel && String(billId) !== String(docLabel).replace(/\D/g, "") && String(billId) !== String(docLabel)) {
+      parts.push(`id ${billId}`);
+    }
+    if (installment) parts.push(`parc. ${installment}`);
+
+    const party = m.creditorName || m.creditor || m.clientName || m.customerName || m.client || "";
+    const role = this.movAdvanceRole(m);
+    const label = parts.length ? parts.join(" · ") : "—";
+    const titleKey = String(billId || docLabel || "").trim();
+
+    return {
+      tipo,
+      label,
+      party: party ? String(party) : "",
+      role,
+      billId: billId ? String(billId) : "",
+      titleKey
+    };
+  },
+
   companyLabel(id) {
     const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
     if (c) return `${c.id} - ${c.name} (${c.pct}%)`;
@@ -873,13 +934,38 @@ const FluxoCaixaApp = {
       return da.localeCompare(db);
     });
     const sum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+
+    // Pares adiantamento × abatimento pelo mesmo título (billId / documento)
+    const byTitle = {};
+    items.forEach((it) => {
+      const t = this.movTitleInfo(it.mov || {});
+      if (!t.titleKey || !t.role) return;
+      if (!byTitle[t.titleKey]) byTitle[t.titleKey] = { adiantamento: false, abatimento: false };
+      byTitle[t.titleKey][t.role] = true;
+    });
+    const pairedTitles = new Set(
+      Object.keys(byTitle).filter((k) => byTitle[k].adiantamento && byTitle[k].abatimento)
+    );
+    const hasAdvancePair = items.some((it) => {
+      const t = this.movTitleInfo(it.mov || {});
+      return t.role === "adiantamento" || t.role === "abatimento";
+    });
+
     const body = items.length
-      ? `<div style="overflow:auto;max-height:calc(80vh - 170px);" class="crm-scroll-table">
+      ? `${hasAdvancePair ? `
+          <div style="margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.8rem;line-height:1.45;">
+            <strong>Adiantamento × abatimento:</strong>
+            o adiantamento sai no caixa; a “Reaprop. / abatimento de adiant.” no mesmo título
+            “mata” a parcela correspondente para o sócio/parceiro não receber de novo no repasse.
+            ${pairedTitles.size ? ` Títulos com os dois lados neste detalhe: <strong>${[...pairedTitles].map((k) => this.esc(k)).join(", ")}</strong>.` : ""}
+          </div>` : ""}
+        <div style="overflow:auto;max-height:calc(80vh - 170px);" class="crm-scroll-table">
           <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
             <thead>
               <tr>
                 <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Data</th>
                 <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Nº mov.</th>
+                <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Título CP/CR</th>
                 <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Empresa</th>
                 <th style="padding:8px;background:#105436;color:#fff;text-align:left;">C.C.</th>
                 <th style="padding:8px;background:#105436;color:#fff;text-align:left;">Histórico</th>
@@ -897,12 +983,28 @@ const FluxoCaixaApp = {
                 const sharePct = (Number(it.share) || 0) * 100;
                 const factorPct = (Number(it.factor) || 0) * 100;
                 const color = amt < 0 ? "#b91c1c" : (amt > 0 ? "#105436" : "#64748b");
+                const title = this.movTitleInfo(mov);
+                const roleBadge = title.role === "adiantamento"
+                  ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:0.68rem;font-weight:800;">ADIANT.</span>`
+                  : (title.role === "abatimento"
+                    ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:0.68rem;font-weight:800;">ABATE</span>`
+                    : "");
+                const pairMark = title.titleKey && pairedTitles.has(title.titleKey)
+                  ? `<span title="Mesmo título com adiantamento e abatimento" style="margin-left:4px;color:#ea580c;">↔</span>`
+                  : "";
+                const partyLine = title.party
+                  ? `<div style="font-size:0.7rem;color:#64748b;margin-top:2px;">${this.esc(title.party)}</div>`
+                  : "";
                 return `<tr style="border-bottom:1px solid #e2e8f0;">
                   <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
                   <td style="padding:7px 8px;font-weight:700;color:#105436;">${this.esc(this.movNumber(mov))}</td>
+                  <td style="padding:7px 8px;min-width:140px;">
+                    <div style="font-weight:700;color:#0f172a;">${this.esc(title.label)}${pairMark}</div>
+                    ${partyLine}
+                  </td>
                   <td style="padding:7px 8px;white-space:nowrap;">${this.esc(this.companyLabel(it.companyId || mov.companyId))}</td>
                   <td style="padding:7px 8px;">${this.esc([it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—")}</td>
-                  <td style="padding:7px 8px;max-width:280px;">${this.esc(this.movHistoric(mov))}</td>
+                  <td style="padding:7px 8px;max-width:280px;">${this.esc(this.movHistoric(mov))}${roleBadge}</td>
                   <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
                   <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? ` <span style="color:#94a3b8;">(API ${this.esc(String(it.rateRaw))})</span>` : ""}</td>
                   <td style="padding:7px 8px;text-align:right;font-variant-numeric:tabular-nums;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
@@ -912,11 +1014,11 @@ const FluxoCaixaApp = {
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="8" style="padding:8px;font-weight:800;text-align:right;">Soma dos lançamentos (${items.length})</td>
+                <td colspan="9" style="padding:8px;font-weight:800;text-align:right;">Soma dos lançamentos (${items.length})</td>
                 <td style="padding:8px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
               </tr>
               <tr>
-                <td colspan="8" style="padding:4px 8px 8px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
+                <td colspan="9" style="padding:4px 8px 8px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
                 <td style="padding:4px 8px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
               </tr>
             </tfoot>
@@ -930,7 +1032,7 @@ const FluxoCaixaApp = {
     overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:24px;";
     overlay.onclick = (e) => { if (e.target === overlay) this.closeDrill(); };
     overlay.innerHTML = `
-      <div style="background:#fff;border-radius:12px;width:min(1200px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
+      <div style="background:#fff;border-radius:12px;width:min(1280px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
         <div style="padding:14px 16px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;">
           <div>
             <div style="font-size:1rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
