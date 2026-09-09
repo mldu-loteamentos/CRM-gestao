@@ -35087,8 +35087,13 @@ window.syncGlobalConfigFromFirebase = async function() {
                 }
             });
             // Sincroniza permissões dinâmicas
+            // Preferir o JSON local do navegador após a tela de permissões ser salva.
+            // Caso o arquivo da nuvem venha vazio, espelhado ou inconsistente, não
+            // devemos limpar o estado de marcações do perfil com um overwrite do cloud.
             Object.keys(globalData).forEach(k => {
-                if (k.startsWith("crm_perms_") && globalData[k] !== localStorage.getItem(k)) {
+                if (!k.startsWith("crm_perms_")) return;
+                const localPerms = localStorage.getItem(k);
+                if (!localPerms) {
                     _originalSetItem.call(localStorage, k, globalData[k]);
                     changed = true;
                 }

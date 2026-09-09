@@ -354,6 +354,18 @@ const ConfigUsersApp = {
     }
   },
 
+  syncPermsToCloud() {
+    if (typeof window.forceUploadLocalConfig === "function") {
+      try {
+        window.forceUploadLocalConfig(true).catch((e) => {
+          console.warn("[ConfigUsers] upload automático falhou", e);
+        });
+      } catch (e) {
+        console.warn("[ConfigUsers] upload automático falhou", e);
+      }
+    }
+  },
+
   resolveCobrancaProfileId() {
     const cob = (this.profiles || []).find(p => {
       const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1369,6 +1381,8 @@ const ConfigUsersApp = {
     if (!this.safeLocalSet(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms))) {
       // Mantém espelho leve se a cota estiver cheia
       this.seedPermsAsMirror(this.selectedProfile, this.resolveCobrancaProfileId());
+    } else {
+      this.syncPermsToCloud();
     }
     
     const isAdmin = this.selectedProfile === 'admin';
@@ -1440,6 +1454,7 @@ const ConfigUsersApp = {
        alert("Armazenamento local cheio: não foi possível salvar a cópia completa das permissões. Ajuste o Integra no perfil OPERADOR COBRANÇA ou libere espaço no navegador e tente de novo.");
        return;
     }
+    this.syncPermsToCloud();
     
     // Animação de sucesso no botão e sincronização com o Firebase
     const btn = document.querySelector('button[onclick="ConfigUsersApp.savePermissions()"]');
