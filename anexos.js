@@ -246,6 +246,17 @@ function anexosContractPeople() {
   if (!people.length && ac && ac.customerId) {
     people.push({ id: String(ac.customerId), name: anexosPersonLabel(ac.customerId, ac.customerName), role: 'Principal' });
   }
+  // Só Cliente (ou busca sem contrato): anexa no cliente da busca, sem exigir contrato
+  if (!people.length && AnexosState.idCliente) {
+    const cid = String(AnexosState.idCliente).replace(/\D/g, '') || String(AnexosState.idCliente).trim();
+    if (cid) {
+      people.push({
+        id: cid,
+        name: anexosPersonLabel(cid, AnexosState.clienteNome || AnexosState.clienteBuscaNome),
+        role: 'Principal'
+      });
+    }
+  }
   return people;
 }
 
@@ -3695,7 +3706,7 @@ const AnexosApp = {
                 let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
                 let isClienteDest = mainTag && mainTag.destino === 'Cliente';
                 if (!isClienteDest) return '';
-                anexosAssignClientTarget(f);
+                anexosAssignClientTarget(f, { autoDefault: true });
                 const people = anexosContractPeople();
                 const selected = new Set((f.targetCustomerIds || []).map(String));
                 const hasSel = selected.size > 0;
@@ -3703,7 +3714,9 @@ const AnexosApp = {
                   return `
                   <div style="display:flex;align-items:center;gap:8px;background:#fef2f2;padding:6px 8px;border-radius:4px;border:1px solid #fecaca;width:100%;font-size:0.78rem;color:#991b1b;">
                     <i data-lucide="user-x" style="width:14px;"></i>
-                    Nenhum cliente no contrato para vincular este documento.
+                    ${AnexosState.contexto === 'Cliente'
+                      ? 'Busque e confirme o cliente antes de vincular este documento.'
+                      : 'Nenhum cliente no contrato para vincular este documento.'}
                   </div>`;
                 }
                 const checks = people.map(p => {
@@ -3986,7 +3999,7 @@ const AnexosApp = {
         let isClienteDest = mainTag && mainTag.destino === 'Cliente';
         
         if (isClienteDest) {
-          anexosAssignClientTarget(f);
+          anexosAssignClientTarget(f, { autoDefault: true });
           const ids = (f.targetCustomerIds && f.targetCustomerIds.length)
             ? f.targetCustomerIds
             : (f.targetCustomerId ? [f.targetCustomerId] : []);
@@ -4140,7 +4153,7 @@ const AnexosApp = {
       const mainTag = AnexosState.tagsAtivas.find(t => t.name === fileObj.tags[0]);
       const destinoAPI = mainTag ? mainTag.destino : 'Unidade';
       if (destinoAPI === 'Cliente') {
-        anexosAssignClientTarget(fileObj);
+        anexosAssignClientTarget(fileObj, { autoDefault: true });
         const ids = (fileObj.targetCustomerIds && fileObj.targetCustomerIds.length)
           ? fileObj.targetCustomerIds.map(String)
           : (fileObj.targetCustomerId ? [String(fileObj.targetCustomerId)] : []);

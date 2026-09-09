@@ -16340,6 +16340,38 @@ function isBlankLegalField(v) {
   return !s || s === "N/D" || /^n\/?d$/i.test(s) || /^[\s,./_-]+$/.test(s);
 }
 
+/** Forma inclusiva em docs (brasileiro(a), médico(a)) quando há variação de gênero. */
+function toInclusiveGenderPtWord(word) {
+  const raw = String(word || "").trim();
+  if (!raw) return raw;
+  if (raw.length <= 3) return raw.toLowerCase();
+  const lower = raw.toLowerCase();
+  if (/\([oa]s?\)$/i.test(lower)) return lower;
+  if (/(ista|ante|ente|ense)$/i.test(lower)) return lower;
+  if (/eira$/i.test(lower)) return lower.slice(0, -4) + "eiro(a)";
+  if (/eiro$/i.test(lower)) return lower + "(a)";
+  if (/ora$/i.test(lower)) return lower.slice(0, -1) + "(a)";
+  if (/(ador|edor|idor|utor|essor|itor|or)$/i.test(lower)) return lower + "(a)";
+  if (/a$/i.test(lower)) return lower.slice(0, -1) + "o(a)";
+  if (/o$/i.test(lower)) return lower + "(a)";
+  return lower;
+}
+
+window.formatLegalNationality = function(nationality) {
+  if (isBlankLegalField(nationality)) return "brasileiro(a)";
+  const lower = String(nationality).trim().toLowerCase().replace(/\s+/g, " ");
+  if (/^brasileir[oa](\(a\))?s?$/.test(lower) || lower === "brasileiro(a)") return "brasileiro(a)";
+  return toInclusiveGenderPtWord(lower);
+};
+
+window.formatLegalProfession = function(profession) {
+  if (isBlankLegalField(profession)) return "";
+  const s = String(profession).trim().replace(/\s+/g, " ");
+  const m = s.match(/^(\S+)([\s\S]*)$/);
+  if (!m) return "";
+  return toInclusiveGenderPtWord(m[1]) + (m[2] || "");
+};
+
 window.formatLegalCustomerAddress = function(customer) {
   if (!customer) return "";
   if (!isBlankLegalField(customer.address) && !/^,\s*,/.test(String(customer.address))) {
@@ -16508,9 +16540,9 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     CPF_CNPJ: mask(cust.cpfCnpj),
     CPF_CLIENTE: mask(cust.cpfCnpj),
     RG_CLIENTE: window.pickCustomerRg(cust) || "____",
-    NACIONALIDADE_CLIENTE: isBlankLegalField(cust.nationality) ? "brasileiro(a)" : cust.nationality,
+    NACIONALIDADE_CLIENTE: window.formatLegalNationality(cust.nationality),
     ESTADO_CIVIL: civil,
-    PROFISSAO_CLIENTE: isBlankLegalField(cust.profession) ? "" : cust.profession,
+    PROFISSAO_CLIENTE: window.formatLegalProfession(cust.profession || cust.occupation),
     ENDERECO_CLIENTE: window.formatLegalCustomerAddress(cust),
     CIDADE_CLIENTE: cust.city || "",
     DATA_CONTRATO: saleDateStr || "____",
