@@ -316,12 +316,40 @@ const ConfigUsersApp = {
     this.render();
   },
 
+  prunePermissionStorage(keepKey) {
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith("crm_perms_")) continue;
+        if (k !== keepKey) keysToRemove.push(k);
+      }
+      if (!keysToRemove.length) return;
+      keysToRemove.forEach(k => {
+        try { localStorage.removeItem(k); } catch (e) { console.warn("[ConfigUsers] falha ao limpar permissão antiga", k, e); }
+      });
+      console.info("[ConfigUsers] liberou cota do localStorage removendo espelhos antigos de permissões.");
+    } catch (e) {
+      console.warn("[ConfigUsers] falha ao varrer permissões antigas", e);
+    }
+  },
+
   safeLocalSet(key, value) {
     try {
       localStorage.setItem(key, value);
       return true;
     } catch (e) {
       console.warn("[ConfigUsers] localStorage cheio ao gravar", key, e);
+      try {
+        if (key.startsWith("crm_perms_")) {
+          this.prunePermissionStorage(key);
+          localStorage.setItem(key, value);
+          console.info("[ConfigUsers] retry de permissão após limpeza de espelhos.");
+          return true;
+        }
+      } catch (retryErr) {
+        console.warn("[ConfigUsers] retry do localStorage falhou", retryErr);
+      }
       return false;
     }
   },
