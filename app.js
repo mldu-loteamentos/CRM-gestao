@@ -3190,7 +3190,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "atribuicao", "fila", "cartao", "alcada"].forEach(id => {
+  ["regua", "judiciais", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -3203,6 +3203,7 @@ window.applyRulesModulePermissions = function() {
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-alcada"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-alcada-distrato"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-negociacao"), canViewNeg, canEditNeg);
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
@@ -3266,6 +3267,9 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-alcada" && typeof window.renderAlcadaDescontoTab === "function") {
     window.renderAlcadaDescontoTab();
+  }
+  if (tabId === "regra-alcada-distrato" && typeof window.renderAlcadaDistratoTab === "function") {
+    window.renderAlcadaDistratoTab();
   }
   if (tabId === "regra-negociacao" && typeof window.paintRenegotiationBlockSummary === "function") {
     window.paintRenegotiationBlockSummary();
@@ -13963,7 +13967,15 @@ window.handleCustomPctInput = function() {
   if (valEl) {
     valEl.value = val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  const rangeEl = document.getElementById("dist-restitution-pct-range");
+  if (rangeEl) rangeEl.value = String(pct);
   calculateDistrato();
+};
+
+window.handleCustomPctRangeInput = function(val) {
+  const pctEl = document.getElementById("dist-restitution-pct");
+  if (pctEl) pctEl.value = String(val || "0");
+  window.handleCustomPctInput();
 };
 
 window.handleCustomValInput = function() {
@@ -13988,6 +14000,8 @@ window.handleCustomValInput = function() {
     if (pctEl) {
       pctEl.value = pct.toFixed(1);
     }
+    const rangeEl = document.getElementById("dist-restitution-pct-range");
+    if (rangeEl) rangeEl.value = pct.toFixed(1);
   }
   calculateDistrato();
 };
@@ -14004,21 +14018,36 @@ window.handleDistratoChoiceChange = function() {
   calculateDistrato();
 };
 
+  const distUnit = (g_distSale && g_distSale.unitId && AppState.units && AppState.units[g_distSale.unitId]) || {};
+  const distAlcada = typeof window.resolveDistratoAlcada === "function"
+    ? window.resolveDistratoAlcada({
+        companyId: (g_distSale && g_distSale.companyId) || AppState.currentCompanyId || distUnit.companyId || "",
+        costCenterId: AppState.currentCostCenterId || distUnit.costCenterId || (g_distSale && (g_distSale.costCenterId || g_distSale.enterpriseId)) || "",
+        enterpriseName: distUnit.enterpriseName || distUnit.projectName || (g_distSale && g_distSale.enterpriseName) || ""
+      })
+    : { minPct: 55, maxPct: 65, minInstallments: 3, maxInstallments: 12, enabled: true, label: "Padrão" };
+
   // 3. Negociação de Devolução
-  const minRefund = totalPaid * 0.55;
-  const maxRefund = totalPaid * 0.65;
+  const minPctCfg = Number(distAlcada.minPct) || 0;
+  const maxPctCfg = Number(distAlcada.maxPct) || 0;
+  const minRefund = totalPaid * (minPctCfg / 100);
+  const maxRefund = totalPaid * (maxPctCfg / 100);
   const leiRefund = restituicaoLiquida;
   const leiRefundPct = totalPaid > 0 ? ((leiRefund / totalPaid) * 100).toFixed(1).replace('.0', '') : 0;
+  const negotiationEnabled = !!distAlcada.enabled && !isPermuta;
 
-  const minDisabled = minRefund < leiRefund;
-  const maxDisabled = maxRefund < leiRefund;
+  const minDisabled = !negotiationEnabled || minRefund < leiRefund;
+  const maxDisabled = !negotiationEnabled || maxRefund < leiRefund;
 
   // Sort and render options
   const options = [
-    { id: "min", label: "Devolução Mínima (55%)", value: minRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
-    { id: "max", label: "Devolução Máxima (65%)", value: maxRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
+    { id: "min", label: `Devolução Mínima (${minPctCfg}%)`, value: minRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
+    { id: "max", label: `Devolução Máxima (${maxPctCfg}%)`, value: maxRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
     { id: "lei", label: `Lei do Distrato (${leiRefundPct}%)`, value: leiRefund, color: "#f97316", titleColor: "#ea580c", highlight: true, disabled: false }
   ];
+  if (!negotiationEnabled) {
+    options.splice(0, 2);
+  }
   options.sort((a, b) => a.value - b.value);
 
   const container = document.getElementById("dist-negotiation-options");
@@ -14035,15 +14064,23 @@ window.handleDistratoChoiceChange = function() {
     `).join('');
   }
 
+  const customOption = document.querySelector('#dist-restitution-choice option[value="custom"]');
   const minOption = document.querySelector('#dist-restitution-choice option[value="min"]');
   if (minOption) minOption.disabled = minDisabled;
   const maxOption = document.querySelector('#dist-restitution-choice option[value="max"]');
   if (maxOption) maxOption.disabled = maxDisabled;
+  if (customOption) customOption.disabled = !negotiationEnabled;
+  if (minOption) minOption.textContent = `Mínima (${minPctCfg}%)`;
+  if (maxOption) maxOption.textContent = `Máxima (${maxPctCfg}%)`;
 
   const choiceEl = document.getElementById("dist-restitution-choice");
   if (isPermuta && choiceEl) choiceEl.value = "permuta";
   let choice = choiceEl ? choiceEl.value : "custom";
   if (isPermuta) choice = "permuta";
+  if (!negotiationEnabled && choice !== "lei" && choice !== "permuta") {
+    choice = "lei";
+    if (choiceEl) choiceEl.value = "lei";
+  }
   
   if (choice === "min" && minDisabled) {
     choice = "lei";
@@ -14055,6 +14092,9 @@ window.handleDistratoChoiceChange = function() {
   }
 
   const pctContainer = document.getElementById("dist-custom-pct-container");
+  const pctEl = document.getElementById("dist-restitution-pct");
+  const valEl = document.getElementById("dist-restitution-val");
+  const rangeEl = document.getElementById("dist-restitution-pct-range");
   
   let negotiatedRefund = 0;
   let restitutionPct = 0;
@@ -14077,9 +14117,7 @@ window.handleDistratoChoiceChange = function() {
     if (pctContainer) pctContainer.style.display = "none";
   } else {
     // custom
-    let pctEl = document.getElementById("dist-restitution-pct");
-    let valEl = document.getElementById("dist-restitution-val");
-    restitutionPct = Number(pctEl.value) || 0;
+    restitutionPct = Number(pctEl && pctEl.value) || 0;
     
     let valStr = valEl ? valEl.value.replace(/\D/g, '') : '0';
     if (!valStr) valStr = '0';
@@ -14097,6 +14135,15 @@ window.handleDistratoChoiceChange = function() {
       if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     
+    if (negotiationEnabled && restitutionPct > 0 && restitutionPct < minPctCfg) {
+      restitutionPct = minPctCfg;
+      valNum = totalPaid * (restitutionPct / 100);
+    }
+    if (negotiationEnabled && restitutionPct > maxPctCfg) {
+      restitutionPct = maxPctCfg;
+      valNum = totalPaid * (restitutionPct / 100);
+    }
+
     // NUNCA DEIXAR MENOR QUE LEI DO DISTRATO
     if (valNum < leiRefund) {
       valNum = leiRefund;
@@ -14108,16 +14155,28 @@ window.handleDistratoChoiceChange = function() {
     if (totalPaid > 0) {
       restitutionPct = (valNum / totalPaid) * 100;
       if (pctEl) pctEl.value = restitutionPct.toFixed(1);
+      if (rangeEl) rangeEl.value = restitutionPct.toFixed(1);
     }
 
     if (pctContainer) pctContainer.style.display = "flex";
   }
 
   // Parcelamento based on Negotiated Refund
-  let instQty = Number(document.getElementById("dist-restitution-installments").value) || 12;
-  if (instQty > 12) {
-    instQty = 12;
-    document.getElementById("dist-restitution-installments").value = 12;
+  const instEl = document.getElementById("dist-restitution-installments");
+  const instMin = isPermuta ? 1 : Math.max(1, Number(distAlcada.minInstallments) || 1);
+  const instMax = isPermuta ? 12 : Math.max(instMin, Number(distAlcada.maxInstallments) || 12);
+  let instQty = Number(instEl && instEl.value) || instMax;
+  if (instEl) {
+    instEl.min = String(instMin);
+    instEl.max = String(instMax);
+  }
+  if (instQty > instMax) {
+    instQty = instMax;
+    if (instEl) instEl.value = String(instMax);
+  }
+  if (instQty < instMin) {
+    instQty = instMin;
+    if (instEl) instEl.value = String(instMin);
   }
   const refundInstallment = negotiatedRefund / instQty;
   const refundCash = isPermuta ? Math.max(0, negotiatedRefund - Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0)) : negotiatedRefund;
@@ -14134,7 +14193,28 @@ window.handleDistratoChoiceChange = function() {
   const choiceWrap = document.getElementById("dist-restitution-choice");
   if (choiceWrap && choiceWrap.closest("div")) {
     const parent = choiceWrap.parentElement;
-    if (parent) parent.style.display = isPermuta ? "none" : "";
+    if (parent) parent.style.display = (isPermuta || !negotiationEnabled) ? "none" : "";
+  }
+  if (pctContainer) pctContainer.style.display = (!isPermuta && negotiationEnabled && choice === "custom") ? "flex" : "none";
+  if (rangeEl) {
+    rangeEl.min = String(negotiationEnabled ? minPctCfg : 0);
+    rangeEl.max = String(negotiationEnabled ? maxPctCfg : 100);
+    rangeEl.value = String(Number.isFinite(restitutionPct) ? restitutionPct : (negotiationEnabled ? minPctCfg : 0));
+    rangeEl.disabled = !negotiationEnabled || choice !== "custom";
+  }
+  if (pctEl) pctEl.readOnly = !negotiationEnabled;
+  if (valEl) valEl.readOnly = !negotiationEnabled;
+  const approvalText = document.querySelector("#dist-approval-alert span");
+  if (approvalText) {
+    approvalText.textContent = negotiationEnabled
+      ? `Atenção: A devolução negociada está fora da alçada (${minPctCfg}% a ${maxPctCfg}% / ${instMin} a ${instMax} parcelas). Será necessária a aprovação do gestor.`
+      : `Negociação desabilitada para ${distAlcada.label}. Neste caso, o distrato segue apenas pela Lei do Distrato.`;
+  }
+  const instLabel = document.getElementById("dist-restitution-installments-label");
+  if (instLabel) {
+    instLabel.textContent = negotiationEnabled
+      ? `Nº Parcelas (Min ${instMin} · Máx ${instMax}):`
+      : "Nº Parcelas:";
   }
 
   // Preencher DOM
@@ -14154,7 +14234,11 @@ window.handleDistratoChoiceChange = function() {
   const approvalAlert = document.getElementById("dist-approval-alert");
   if (approvalAlert) {
     const isExactlyLei = Math.abs(negotiatedRefund - leiRefund) < 0.01;
-    if (choice !== "lei" && !isExactlyLei && (restitutionPct < 55 || restitutionPct > 65)) {
+    const pctOutside = negotiationEnabled && (restitutionPct < minPctCfg - 0.009 || restitutionPct > maxPctCfg + 0.009);
+    const instOutside = negotiationEnabled && (instQty < instMin || instQty > instMax);
+    if (!negotiationEnabled && !isPermuta) {
+      approvalAlert.style.display = choice === "lei" ? "none" : "flex";
+    } else if (choice !== "lei" && !isExactlyLei && (pctOutside || instOutside)) {
       approvalAlert.style.display = "flex";
     } else {
       approvalAlert.style.display = "none";
@@ -14177,6 +14261,7 @@ window.handleDistratoChoiceChange = function() {
     refundCash,
     instQty,
     refundInstallment,
+    distratoAlcada: distAlcada,
     extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros },
     isPermuta,
     permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
@@ -14372,9 +14457,12 @@ function updateDistratoRefundScheduleAmounts() {
     ? Number(AppState.currentDistratoResult.refundNet) || 0
     : distPermutaTargetRefund();
   const cash = isPermuta ? distPermutaRemainingCash() : negotiated;
+  const alcada = (AppState.currentDistratoResult && AppState.currentDistratoResult.distratoAlcada) || null;
+  const instMin = isPermuta ? 1 : Math.max(1, Number(alcada && alcada.minInstallments) || 1);
+  const instMax = isPermuta ? 12 : Math.max(instMin, Number(alcada && alcada.maxInstallments) || 12);
   let instQty = Number(document.getElementById("dist-restitution-installments") && document.getElementById("dist-restitution-installments").value) || 12;
-  if (instQty > 12) instQty = 12;
-  if (instQty < 1) instQty = 1;
+  if (instQty > instMax) instQty = instMax;
+  if (instQty < instMin) instQty = instMin;
   const refundInstallment = instQty ? cash / instQty : 0;
   if (AppState.currentDistratoResult) {
     AppState.currentDistratoResult.refundCash = cash;
@@ -34325,6 +34413,7 @@ window.SYNC_KEYS = [
     "crm_moura_cartao_taxas",
     "crm_moura_condicoes_pagamento",
     "crm_moura_alcada_desconto",
+    "crm_moura_alcada_distrato",
     "crm_compromissario_configs",
     "crm_compromissario_cessao_v1"
 ];

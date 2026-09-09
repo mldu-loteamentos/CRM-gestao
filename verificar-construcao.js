@@ -982,6 +982,9 @@ window.VerificarConstrucaoApp = {
         }
         document.getElementById('modal-obras-andamento').style.display = 'none';
         this.renderTable();
+        if (typeof window.renderAlcadaDistratoTab === 'function' && document.getElementById('content-regra-alcada-distrato')) {
+            window.renderAlcadaDistratoTab();
+        }
     },
 
     // Mantido para compatibilidade mas não é mais chamado diretamente
