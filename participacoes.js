@@ -82,12 +82,46 @@ const ParticipacoesApp = {
 
   periodFromFileName(name) {
     const s = String(name || "");
-    // Prefer YYYY_MM / YYYY-MM (padrão dos PDFs de prestação)
+    // Prefer YYYY_MM / YYYY-MM no final do nome (padrão Ellenceo: ... 2025_11.pdf)
     let ym = s.match(/(?:^|[^\d])(\d{4})[_-](\d{2})(?:[^\d]|$)/);
     if (ym) return `${ym[1]}-${ym[2]}`;
     ym = s.match(/(\d{4})[_-](\d{2})/);
     if (ym) return `${ym[1]}-${ym[2]}`;
     return "";
+  },
+
+  /** Período impresso no cabeçalho: "DESPESAS PAGAS 01/11/2025 30/11/2025" ou "01/11/2025 até 30/11/2025" */
+  periodFromPdfHeader(text) {
+    const s = String(text || "");
+    let m = s.match(/DESPESAS\s+PAGAS\s+(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{2})\/(\d{2})\/(\d{2,4})/i);
+    if (!m) m = s.match(/(\d{2})\/(\d{2})\/(\d{2,4})\s*(?:a|até|ate)\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
+    if (!m) return "";
+    const end = this.normalizeBrDate(`${m[4]}/${m[5]}/${m[6]}`);
+    const parts = end.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return parts ? `${parts[3]}-${parts[2]}` : "";
+  },
+
+  extractSaldoTotal(text) {
+    const s = String(text || "");
+    const m = s.match(/Saldo\s*Total\s*(?:R\$|RS)?\s*([\d.]+,\d{2})/i);
+    if (!m) return null;
+    const v = this.parseMoney(m[1]);
+    return v > 0 ? v : null;
+  },
+
+  /** Ellenceo usa dd/mm/aaaa ou dd/mm/aa (ex.: 01/12/25). */
+  normalizeBrDate(d) {
+    const m = String(d || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{2,4})$/);
+    if (!m) return String(d || "").trim();
+    let y = m[3];
+    if (y.length === 2) y = `${Number(y) >= 70 ? "19" : "20"}${y}`;
+    return `${m[1]}/${m[2]}/${y}`;
+  },
+
+  brDateToIso(d) {
+    const n = this.normalizeBrDate(d);
+    const m = n.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
   },
 
   periodLabel(closing, fallback) {
@@ -322,13 +356,15 @@ const ParticipacoesApp = {
       .replace(/\s+/g, " ")
       .trim();
     if (!blob) return true;
+    // Tarifas do quadro DESPESAS PAGAS (TAR TED SISPAG, TAR PIX…) — não são extrato
+    if (/^TAR(?:IFA)?\b/.test(blob) || /\bTAR\s+(?:TED|PIX|DOC|MANUT|SISPAG)\b/.test(blob)) return false;
     if (/\bSALDO\s+(APLIC|ANTERIOR|ATUAL|DISPON)/.test(blob)) return true;
     if (/\bAPL(\.|ICACAO|IC)?\s*(AUT|APLIC)/.test(blob)) return true;
     if (/\bINT\s*APLIC/.test(blob)) return true;
     if (/\bHIGHGRADE\b/.test(blob)) return true;
-    if (/\bSISPAG\b/.test(blob) && !/\b(LTDA|EIRELI|S\.?\s?A\.?)\b/.test(blob) && !/\bREF\.?\b/.test(blob)) return true;
+    if (/\bSISPAG\b/.test(blob) && !/\b(LTDA|EIRELI|S\.?\s?A\.?|TAR)\b/.test(blob) && !/\bREF\.?\b/.test(blob)) return true;
     if (/\bRECEBIMENTOS\s+RESERV/.test(blob)) return true;
-    if (/^(TED|PIX|DOC)\b/.test(blob) && blob.length < 48 && !/\bREF\.?\b/.test(blob)) return true;
+    if (/^(TED|PIX|DOC)\b/.test(blob) && blob.length < 48 && !/\bREF\.?\b/.test(blob) && !/\bTAR\b/.test(blob)) return true;
     if (/\bEXTRATO\b|\bCONCILIACAO\b/.test(blob)) return true;
     return false;
   },
@@ -388,13 +424,20 @@ const ParticipacoesApp = {
     return parts.join("\n");
   },
 
-  /** Mês da matriz: 1 PDF de fechamento = 1 coluna (prioridade ao período do arquivo). */
+  /**
+   * Mês da matriz = período do PDF de fechamento (nome do arquivo),
+   * nunca o mês “solto” de uma data no detalhe (ex.: 31/10/2025 no texto da solicitação).
+   */
   expensePeriodKey(r) {
-    const fromFile = (r && r.periodo) || this.periodFromFileName(r && r.sourceFile);
-    if (fromFile && /^\d{4}-\d{2}$/.test(String(fromFile))) return String(fromFile);
+    const fromName = this.periodFromFileName(r && r.sourceFile);
+    if (fromName && /^\d{4}-\d{2}$/.test(fromName)) return fromName;
+    const hit = (this.files || []).find((f) => f && f.name && r && r.sourceFile && f.name === r.sourceFile);
+    if (hit && hit.closing && /^\d{4}-\d{2}$/.test(String(hit.closing))) return String(hit.closing);
+    const stored = r && r.periodo;
+    if (stored && /^\d{4}-\d{2}$/.test(String(stored))) return String(stored);
     const iso = String((r && r.iso) || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso.slice(0, 7);
-    const d = String((r && r.date) || "");
+    const d = this.normalizeBrDate((r && r.date) || "");
     const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     if (m) return `${m[3]}-${m[2]}`;
     return "sem-periodo";
@@ -459,6 +502,7 @@ const ParticipacoesApp = {
    * Layout Ellenceo DESPESAS PAGAS (não extrato):
    * Data | Razão Social (credor) | Detalhamento | Nº Documento | Débitos (valor)
    * Linhas do detalhe podem quebrar; montamos o bloco até achar o valor.
+   * Aceita data dd/mm/aaaa ou dd/mm/aa (comum a partir de dez/2025).
    */
   parseExpenseLines(text, meta) {
     const chunk = this.extractDespesasPagasText(text);
@@ -469,7 +513,7 @@ const ParticipacoesApp = {
 
     const lines = chunk.split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).filter(Boolean);
     const rows = [];
-    const periodo = (meta && meta.closing) || "";
+    const periodo = (meta && meta.closing) || this.periodFromFileName(meta && meta.name) || this.periodFromPdfHeader(text) || "";
     const sourceFile = (meta && meta.name) || "";
 
     let cur = null;
@@ -497,9 +541,10 @@ const ParticipacoesApp = {
         cur = null;
         return;
       }
-      const iso = cur.date.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1");
+      const date = this.normalizeBrDate(cur.date);
+      const iso = this.brDateToIso(date);
       rows.push(this.repairExpenseRow({
-        date: cur.date,
+        date,
         iso,
         credor,
         detalhe,
@@ -507,7 +552,7 @@ const ParticipacoesApp = {
         valor: taken.valor,
         categoria: "",
         categoriaId: "",
-        periodo: periodo || iso.slice(0, 7),
+        periodo: periodo || (iso ? iso.slice(0, 7) : ""),
         sourceFile
       }));
       cur = null;
@@ -519,13 +564,22 @@ const ParticipacoesApp = {
         flush();
         return;
       }
-      // Nova linha de lançamento: data no início
-      const m = line.match(/^(\d{2}\/\d{2}\/\d{4})\b\s*(.*)$/);
+      // Nova linha de lançamento: data no início (aaaa ou aa)
+      const m = line.match(/^(\d{2}\/\d{2}\/\d{2,4})\b\s*(.*)$/);
       if (m) {
         flush();
         const rest = String(m[2] || "").trim();
-        // Cabeçalho de período: "01/11/2025 até 30/11/2025"
-        if (/^(at[eé]\b)/i.test(rest) || (/^\d{2}\/\d{2}\/\d{4}/.test(rest) && !/([\d.]+,\d{2})/.test(rest) && rest.length < 40)) {
+        // Sobras de intervalo no detalhe: "a 31/10/2025)", "até 20/11/2025", só ")"
+        if (!rest || /^[).,;:\-–—]*$/.test(rest)) {
+          cur = null;
+          return;
+        }
+        if (/^(at[eé]\b)/i.test(rest) || (/^(a|à)\s+\d{2}\/\d{2}\/\d{2,4}/i.test(rest) && !/([\d.]+,\d{2})/.test(rest))) {
+          cur = null;
+          return;
+        }
+        // Cabeçalho de período: "01/11/2025 até 30/11/2025" / segunda data sem valor
+        if (/^\d{2}\/\d{2}\/\d{2,4}/.test(rest) && !/([\d.]+,\d{2})/.test(rest) && rest.length < 40) {
           cur = null;
           return;
         }
@@ -534,7 +588,7 @@ const ParticipacoesApp = {
           cur = null;
           return;
         }
-        cur = { date: m[1], buf: rest };
+        cur = { date: this.normalizeBrDate(m[1]), buf: rest };
         return;
       }
       // Continuação do detalhe / valor / nº doc
@@ -543,7 +597,29 @@ const ParticipacoesApp = {
       }
     });
     flush();
-    return rows.filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
+    return this.dedupeExpenseRows(
+      rows.filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
+    );
+  },
+
+  expenseDedupeKey(r) {
+    const iso = String((r && r.iso) || this.brDateToIso(r && r.date) || "");
+    const credor = this.credorGroupKey((r && r.credor) || "");
+    const doc = String((r && (r.doc || r.documento)) || "").trim().toUpperCase();
+    const valor = (Number(r && r.valor) || 0).toFixed(2);
+    return `${iso}|${credor}|${doc}|${valor}`;
+  },
+
+  dedupeExpenseRows(rows) {
+    const seen = new Set();
+    const out = [];
+    (rows || []).forEach((r) => {
+      const k = this.expenseDedupeKey(r);
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(r);
+    });
+    return out;
   },
 
   async extractPdfText(url) {
@@ -551,19 +627,28 @@ const ParticipacoesApp = {
     if (!pdfjs) throw new Error("PDF.js não carregado. Atualize a página.");
     const pdf = await pdfjs.getDocument({ url, withCredentials: false }).promise;
     const pages = [];
+    const yTol = 2.5;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const byY = {};
-      content.items.forEach((it) => {
-        const y = Math.round((it.transform && it.transform[5]) || 0);
-        const x = Number((it.transform && it.transform[4]) || 0);
-        if (!byY[y]) byY[y] = [];
-        byY[y].push({ x, str: String(it.str || "") });
+      const items = (content.items || []).map((it) => ({
+        y: Number((it.transform && it.transform[5]) || 0),
+        x: Number((it.transform && it.transform[4]) || 0),
+        str: String(it.str || "")
+      })).filter((t) => t.str);
+      items.sort((a, b) => b.y - a.y || a.x - b.x);
+      const bands = [];
+      items.forEach((it) => {
+        const last = bands[bands.length - 1];
+        if (!last || Math.abs(last.y - it.y) > yTol) {
+          bands.push({ y: it.y, cells: [it] });
+        } else {
+          last.cells.push(it);
+          last.y = (last.y * (last.cells.length - 1) + it.y) / last.cells.length;
+        }
       });
-      const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
-      pages.push(ys.map((y) => {
-        const cells = byY[y].sort((a, b) => a.x - b.x);
+      pages.push(bands.map((band) => {
+        const cells = band.cells.sort((a, b) => a.x - b.x);
         let line = "";
         let prevX = null;
         cells.forEach((t) => {
@@ -573,7 +658,6 @@ const ParticipacoesApp = {
             line = s;
           } else {
             const gap = t.x - prevX;
-            // Lacuna grande ≈ coluna da tabela Ellenceo (credor | detalhe | doc | valor)
             line += gap > 18 ? "  " : (gap > 2 ? " " : "");
             line += s;
           }
@@ -596,28 +680,55 @@ const ParticipacoesApp = {
     // Muitos "credores" de extrato = cache antigo lendo conta, não DESPESAS PAGAS
     const bankish = repaired.filter((r) => this.isBankStatementNoise(r.credor, r.detalhe)).length;
     if (repaired.length >= 5 && bankish / repaired.length > 0.12) return true;
+    // Cache antigo sem dd/mm/aa
+    const shortOrBadDate = repaired.filter((r) => {
+      const d = String(r.date || "");
+      return /^\d{2}\/\d{2}\/\d{2}$/.test(d) || !/^\d{2}\/\d{2}\/\d{4}$/.test(this.normalizeBrDate(d));
+    }).length;
+    if (repaired.length >= 3 && shortOrBadDate / repaired.length > 0.3) return true;
     return false;
+  },
+
+  expensesMismatchSaldo(fileRec) {
+    const saldo = Number(fileRec && fileRec.saldoTotal) || 0;
+    if (!(saldo > 0)) return false;
+    const sum = (fileRec.expenses || []).reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    return Math.abs(sum - saldo) > Math.max(1, saldo * 0.008);
   },
 
   async ensureFileParsed(fileRec, force) {
     if (!fileRec) return;
-    if (!force && Array.isArray(fileRec.expenses) && fileRec.expenses.length && !this.expensesMostlyBroken(fileRec.expenses)) {
-      fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
-      if (!this.expensesMostlyBroken(fileRec.expenses)) return;
+    const needs = force
+      || !Array.isArray(fileRec.expenses)
+      || this.expensesMostlyBroken(fileRec.expenses)
+      || this.expensesMismatchSaldo(fileRec)
+      || fileRec.cacheVer !== 8;
+    if (!needs && Array.isArray(fileRec.expenses) && fileRec.expenses.length) {
+      fileRec.expenses = this.dedupeExpenseRows(
+        fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
+      );
+      if (!this.expensesMostlyBroken(fileRec.expenses) && !this.expensesMismatchSaldo(fileRec)) return;
     }
     const url = this.fileLink(fileRec.name);
     const text = await this.extractPdfText(url);
+    const headerPeriod = this.periodFromPdfHeader(text);
+    const fromName = this.periodFromFileName(fileRec.name);
+    fileRec.closing = fromName || headerPeriod || fileRec.closing || "";
+    fileRec.saldoTotal = this.extractSaldoTotal(text);
     fileRec.expenses = this.parseExpenseLines(text, fileRec);
+    fileRec.cacheVer = 8;
     this.persistCache(fileRec);
   },
 
   persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v7";
+      const key = "crm_participacoes_cache_v8";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
       all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
+        cacheVer: 8,
         closing: fileRec.closing,
+        saldoTotal: fileRec.saldoTotal || null,
         expenses: fileRec.expenses
       };
       localStorage.setItem(key, JSON.stringify(all));
@@ -626,7 +737,7 @@ const ParticipacoesApp = {
 
   restoreCacheForCompany() {
     try {
-      const keys = ["crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
+      const keys = ["crm_participacoes_cache_v8", "crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
       let all = {};
       keys.forEach((key) => {
         try {
@@ -641,23 +752,35 @@ const ParticipacoesApp = {
         const name = k.slice(String(this.companyId).length + 1);
         const hit = all[k];
         if (!hit || !Array.isArray(hit.expenses)) return;
-        // Cache antigo com extrato/valores zerados: não restaura — força reparse do PDF
-        if (this.expensesMostlyBroken(hit.expenses)) return;
-        const repaired = hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
+        // Só aceita cache v8 íntegro — versões antigas forçam reparse (dd/mm/aa + Saldo Total)
+        if (hit.cacheVer !== 8 || this.expensesMostlyBroken(hit.expenses)) return;
+        const repaired = this.dedupeExpenseRows(
+          hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
+        );
         if (this.expensesMostlyBroken(repaired)) return;
+        const closing = hit.closing || this.periodFromFileName(name);
+        const probe = { expenses: repaired, saldoTotal: hit.saldoTotal, closing };
+        if (this.expensesMismatchSaldo(probe)) return;
         let rec = this.files.find((f) => f.name === name);
         if (!rec) {
           rec = {
             name,
-            closing: hit.closing || this.periodFromFileName(name),
+            closing,
+            saldoTotal: hit.saldoTotal || null,
             expenses: repaired,
+            cacheVer: 8,
             fromCache: true
           };
           this.files.push(rec);
-        } else if (!rec.expenses || this.expensesMostlyBroken(rec.expenses)) {
+        } else if (!rec.expenses || this.expensesMostlyBroken(rec.expenses) || rec.cacheVer !== 8) {
           rec.expenses = repaired;
+          rec.saldoTotal = hit.saldoTotal || rec.saldoTotal;
+          rec.cacheVer = 8;
+          if (!rec.closing) rec.closing = closing;
         } else {
-          rec.expenses = (rec.expenses || []).map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor));
+          rec.expenses = this.dedupeExpenseRows(
+            (rec.expenses || []).map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor))
+          );
         }
       });
     } catch (e) {}
@@ -676,7 +799,7 @@ const ParticipacoesApp = {
         }));
       });
     });
-    return list;
+    return this.dedupeExpenseRows(list);
   },
 
   activeExpenses() {
@@ -761,18 +884,14 @@ const ParticipacoesApp = {
     }).sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
   },
 
-  /** Matriz: linhas = credor (agrupado), colunas = mês do PDF (YYYY-MM). */
+  /** Matriz: linhas = credor (agrupado), colunas = mês com DESPESAS PAGAS (só meses com valor). */
   matrixData() {
     const rows = this.filtered();
     const monthSet = new Set();
-    // Sempre inclui os meses dos arquivos carregados (mesmo sem despesa parseada)
-    this.files.forEach((f) => {
-      const c = f.closing || this.periodFromFileName(f.name);
-      if (c && /^\d{4}-\d{2}$/.test(c)) monthSet.add(c);
-    });
     const byKey = {};
     rows.forEach((r) => {
       const periodo = this.expensePeriodKey(r);
+      if (!periodo || periodo === "sem-periodo" || !/^\d{4}-\d{2}$/.test(periodo)) return;
       const key = this.credorGroupKey(r.credor) || "(sem credor)";
       monthSet.add(periodo);
       if (!byKey[key]) byKey[key] = { key, cells: {}, total: 0, _labels: [] };
@@ -794,8 +913,21 @@ const ParticipacoesApp = {
     months.forEach((m) => {
       colTotals[m] = creditors.reduce((s, c) => s + ((c.cells[m] && c.cells[m].total) || 0), 0);
     });
+    // Remove colunas zeradas (arquivos sem DESPESAS PAGAS / não parseados)
+    const monthsWithValue = months.filter((m) => (colTotals[m] || 0) > 0.004);
     const grand = creditors.reduce((s, c) => s + c.total, 0);
-    return { months, creditors, colTotals, grand };
+    const saldoChecks = [];
+    (this.files || []).forEach((f) => {
+      const p = f.closing || this.periodFromFileName(f.name);
+      if (!p || !monthsWithValue.includes(p)) return;
+      const saldo = Number(f.saldoTotal) || 0;
+      if (!(saldo > 0)) return;
+      const got = colTotals[p] || 0;
+      if (Math.abs(got - saldo) > Math.max(1, saldo * 0.008)) {
+        saldoChecks.push({ periodo: p, saldo, got });
+      }
+    });
+    return { months: monthsWithValue, creditors, colTotals, grand, saldoChecks };
   },
 
   openMatrixDetail(credorEnc, periodo) {
@@ -833,12 +965,16 @@ const ParticipacoesApp = {
       if (parts.length >= 3) return `${parts[0].slice(0, 3)}/${parts[2]}`;
       return lab;
     };
+    const warn = (mx.saldoChecks || []).map((c) =>
+      `${this.periodLabel(c.periodo, c.periodo)}: lido ${this.fmt(c.got)} × Saldo Total PDF ${this.fmt(c.saldo)}`
+    ).join(" · ");
     return `
       <div class="crm-card" style="padding:0;margin-bottom:12px;overflow:hidden;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">
           <div>
             <strong style="color:#14532d;">Matriz por credor × mês</strong>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique em um valor para ver o detalhamento dos lançamentos.</div>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique em um valor para ver o detalhamento dos lançamentos. Somente meses com DESPESAS PAGAS.</div>
+            ${warn ? `<div style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Conferência Saldo Total: ${this.esc(warn)}</div>` : ""}
           </div>
           <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
         </div>
@@ -937,8 +1073,7 @@ const ParticipacoesApp = {
     const fails = [];
     for (const f of this.files) {
       try {
-        const force = !f.expenses || this.expensesMostlyBroken(f.expenses);
-        await this.ensureFileParsed(f, force);
+        await this.ensureFileParsed(f, f.cacheVer !== 8);
       } catch (e) {
         fails.push((f && f.name ? f.name : "PDF") + ": " + (e.message || e));
       }
@@ -1045,9 +1180,10 @@ const ParticipacoesApp = {
         this.uploadProgress = `Lendo ${i + 1}/${picked.length}: ${file.name}`;
         this.render();
         const objectUrl = URL.createObjectURL(file);
-        const closing = this.periodFromFileName(file.name);
-        const ym = closing ? closing.split("-") : [];
+        let closing = this.periodFromFileName(file.name);
         const text = await this.extractPdfText(objectUrl);
+        if (!closing) closing = this.periodFromPdfHeader(text);
+        const ym = closing ? closing.split("-") : [];
         const expenses = this.parseExpenseLines(text, { name: file.name, closing });
         let rec = this.files.find((f) => f.name === file.name);
         if (rec && rec.objectUrl && rec.objectUrl !== objectUrl) {
@@ -1063,6 +1199,8 @@ const ParticipacoesApp = {
         rec.month = ym[1] ? Number(ym[1]) : null;
         rec.objectUrl = objectUrl;
         rec.expenses = expenses;
+        rec.saldoTotal = this.extractSaldoTotal(text);
+        rec.cacheVer = 8;
         rec.fromUpload = true;
         this.persistCache(rec);
       }

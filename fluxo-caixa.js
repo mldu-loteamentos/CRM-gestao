@@ -178,6 +178,8 @@ const FluxoCaixaApp = {
   },
 
   allocate(mov, factor) {
+    // Reaprop./abatimento de adiantamento: só mata o título no Sienge — não é caixa no DFC
+    if (this.movAdvanceRole(mov) === "abatimento") return [];
     const rawBank = Number(mov.bankMovementAmount) || 0;
     const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
@@ -296,16 +298,18 @@ const FluxoCaixaApp = {
    * — redutora nesses grupos (retenção, desconto obtido, flag Sienge) → positivo
    * — redutora em RECEITAS (cancelamento) → negativo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
-   * Exceções do par adiantamento × abatimento:
-   *   — adiantamento → sempre positivo no DFC
-   *   — abatimento/reaprop. → preserva o sinal da API (para o par +/− se zerar)
+   *
+   * Adiantamento × abatimento (reapropriação):
+   * — adiantamento = saída de caixa → negativo (como demais custos em 04.01)
+   * — reaprop./abatimento de adiant. = só contábil (mata o título no Sienge);
+   *   não entra no DFC, senão reduz indevidamente 2.02.04.01 Repasses
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
-    if (role === "abatimento") return raw;
-    if (role === "adiantamento") return Math.abs(raw);
+    // Reapropriação/abatimento: fora do demonstrativo de caixa
+    if (role === "abatimento") return 0;
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
@@ -1056,10 +1060,6 @@ const FluxoCaixaApp = {
     const pairedTitles = new Set(
       Object.keys(byTitle).filter((k) => byTitle[k].adiantamento && byTitle[k].abatimento)
     );
-    const hasAdvancePair = items.some((it) => {
-      const t = this.movTitleInfo(it.mov || {});
-      return t.role === "adiantamento" || t.role === "abatimento";
-    });
 
     this._drillExport = {
       items,
@@ -1077,20 +1077,7 @@ const FluxoCaixaApp = {
     const thr = "padding:10px 12px;background:#105436;color:#fff;text-align:right;font-size:0.75rem;white-space:nowrap;";
 
     const body = items.length
-      ? `${hasAdvancePair ? `
-          <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.82rem;line-height:1.5;">
-            <strong>Adiantamento × abatimento:</strong>
-            o <em>adiantamento</em> entra <strong>positivo</strong> no DFC; a “Reaprop. / abatimento de adiant.” no mesmo título
-            “mata” a parcela correspondente (sinal da API) para o sócio/parceiro não receber de novo no repasse.
-            ${pairedTitles.size ? ` Títulos com os dois lados neste detalhe: <strong>${[...pairedTitles].map((k) => this.esc(k)).join(", ")}</strong>.` : ""}
-          </div>` : ""}
-          <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;font-size:0.82rem;line-height:1.5;">
-            <strong>Rateio por C.C.:</strong>
-            o <em>Total título (API)</em> é o valor integral do movimento (ex.: R$ 52.200).
-            O <em>% rateio</em> da apropriação Sienge (ex.: 53% / 47%) gera o <em>Valor rateado</em> por centro de custo
-            (52.200 × 53% = 27.666; 52.200 × 47% = 24.534). O <em>Valor no DFC</em> aplica ainda o fator MLDU da empresa.
-          </div>
-        <div style="overflow:auto;max-height:calc(88vh - 160px);" class="crm-scroll-table">
+      ? `<div style="overflow:auto;max-height:calc(88vh - 160px);" class="crm-scroll-table">
           <table class="custom-table" style="width:100%;min-width:1380px;border-collapse:separate;border-spacing:0;font-size:0.8rem;">
             <thead>
               <tr>
