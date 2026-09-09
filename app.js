@@ -34198,6 +34198,7 @@ window.SYNC_KEYS = [
     "crm_moura_preambles_list",
     "crm_moura_cartorios_list",
     "crm_moura_cartao_taxas",
+    "crm_moura_condicoes_pagamento",
     "crm_moura_alcada_desconto",
     "crm_compromissario_configs",
     "crm_compromissario_cessao_v1"

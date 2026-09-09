@@ -84,7 +84,8 @@
     { id: "comercial", label: "Comercial", subs: [
       { id: "dash_com", label: "Dashboard" },
       { id: "estoque", label: "Posição de estoque" },
-      { id: "anexos", label: "Assistente de Anexos" }
+      { id: "anexos", label: "Assistente de Anexos" },
+      { id: "condicoes", label: "Condições de Pagamento" }
     ]},
     { id: "marketing", label: "Marketing", subs: [
       { id: "budget", label: "Budget" },
@@ -145,6 +146,7 @@
     "dashboard-comercial": { modulo: "comercial", subitem: "dash_com" },
     "estoque-comercial": { modulo: "comercial", subitem: "estoque" },
     anexos: { modulo: "comercial", subitem: "anexos" },
+    "condicoes-pagamento": { modulo: "comercial", subitem: "condicoes" },
     "marketing-eventos": { modulo: "marketing", subitem: "eventos" },
     "marketing-budget": { modulo: "marketing", subitem: "budget" },
     relacionamento_gestao: { modulo: "relacionamento", subitem: "buscar" },

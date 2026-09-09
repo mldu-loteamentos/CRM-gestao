@@ -2343,6 +2343,26 @@ const SiengeApiService = {
     }
   },
 
+  /** Tipos de condição de pagamento (boletos / planos do contrato). */
+  async getPaymentConditionTypes(filter) {
+    if (s_apiMode === "simulado") {
+      return [
+        { id: "SI", name: "SINAL", description: "Sinal / entrada" },
+        { id: "M", name: "MENSAL", description: "Parcela mensal" },
+        { id: "A", name: "ANUAL", description: "Parcela anual" },
+        { id: "PU", name: "PARCELA UNICA", description: "Parcela única" },
+        { id: "SA", name: "ACORDO", description: "Parcela de acordo" }
+      ];
+    }
+    try {
+      const q = filter ? `?filter=${encodeURIComponent(filter)}` : "";
+      return await siengeFetchAllPages(`/payment-condition-types${q}`, 100);
+    } catch (e) {
+      console.error("[Sienge] Erro ao obter tipos de condição de pagamento:", e);
+      throw e;
+    }
+  },
+
   // 26. Plano Financeiro - Categorias de Pagamento
   async getPaymentCategories() {
     if (s_apiMode === "simulado") {

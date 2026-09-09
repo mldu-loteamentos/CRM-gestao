@@ -163,7 +163,8 @@ const ConfigUsersApp = {
       submodules: [
         { name: "Dashboard", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard", permBase: "sub_com_geral_dashboard" }] },
         { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
-        { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] }
+        { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] },
+        { name: "Condições de Pagamento", key: "sub_com_condicoes", actions: [{ id: "condicoes_pagamento", label: "Condições de Pagamento", permBase: "sub_com_geral_condicoes_pagamento" }] }
       ]
     },
     {
