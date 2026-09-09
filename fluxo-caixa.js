@@ -179,7 +179,6 @@ const FluxoCaixaApp = {
 
   allocate(mov, factor) {
     const rawBank = Number(mov.bankMovementAmount) || 0;
-    const amount = rawBank * factor;
     const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
     if (!cats.length) return [];
@@ -190,8 +189,13 @@ const FluxoCaixaApp = {
       const nk = this.normAccountKey(categoryId);
       if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
       const rateRaw = Number(fc.financialCategoryRate);
+      // Total do título/movimento (ex.: 52.200) × % apropriação C.C. (53% / 47%)
+      const rateadoBruto = rawBank * share;
+      // Depois aplica o fator MLDU da empresa consolidada
+      const amount = rateadoBruto * factor;
       return {
-        amount: amount * share,
+        amount,
+        rateadoBruto,
         rawBankAmount: rawBank,
         factor,
         share,
@@ -956,6 +960,9 @@ const FluxoCaixaApp = {
       const sharePct = (Number(it.share) || 0) * 100;
       const factorPct = (Number(it.factor) || 0) * 100;
       const raw = Number(it.rawBankAmount);
+      const rateado = Number.isFinite(Number(it.rateadoBruto))
+        ? Number(it.rateadoBruto)
+        : (Number.isFinite(raw) ? raw * (Number(it.share) || 0) : "");
       return {
         "Data": this.fmtDatePt(this.cashDate(mov)),
         "Nº mov.": this.movNumber(mov),
@@ -965,8 +972,9 @@ const FluxoCaixaApp = {
         "Empresa": this.companyLabel(it.companyId || mov.companyId),
         "C.C.": [it.costCenterId, it.costCenterName].filter(Boolean).join(" - ") || "",
         "Histórico": this.movHistoric(mov),
-        "Bruto API": Number.isFinite(raw) ? raw : "",
-        "% rateio": sharePct,
+        "Total título (API)": Number.isFinite(raw) ? raw : "",
+        "% rateio C.C.": sharePct,
+        "Valor rateado (título × %)": rateado === "" ? "" : rateado,
         "Fator MLDU %": factorPct,
         "Valor no DFC": Number(it.amount) || 0
       };
@@ -980,8 +988,9 @@ const FluxoCaixaApp = {
       "Empresa": "",
       "C.C.": "",
       "Histórico": `Soma dos lançamentos (${ctx.items.length})`,
-      "Bruto API": "",
-      "% rateio": "",
+      "Total título (API)": "",
+      "% rateio C.C.": "",
+      "Valor rateado (título × %)": "",
       "Fator MLDU %": "",
       "Valor no DFC": Number(ctx.sum) || 0
     });
@@ -994,8 +1003,9 @@ const FluxoCaixaApp = {
       "Empresa": "",
       "C.C.": "",
       "Histórico": "Total exibido na linha",
-      "Bruto API": "",
-      "% rateio": "",
+      "Total título (API)": "",
+      "% rateio C.C.": "",
+      "Valor rateado (título × %)": "",
       "Fator MLDU %": "",
       "Valor no DFC": Number(ctx.lineTotal) || 0
     });
@@ -1004,8 +1014,8 @@ const FluxoCaixaApp = {
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = [
         { wch: 12 }, { wch: 12 }, { wch: 42 }, { wch: 36 }, { wch: 14 },
-        { wch: 42 }, { wch: 32 }, { wch: 40 }, { wch: 14 }, { wch: 10 },
-        { wch: 12 }, { wch: 14 }
+        { wch: 42 }, { wch: 32 }, { wch: 40 }, { wch: 16 }, { wch: 12 },
+        { wch: 22 }, { wch: 12 }, { wch: 14 }
       ];
       const wb = XLSX.utils.book_new();
       const sheetName = String(ctx.sheetName || "Lancamentos").slice(0, 31);
@@ -1070,8 +1080,14 @@ const FluxoCaixaApp = {
             “mata” a parcela correspondente para o sócio/parceiro não receber de novo no repasse.
             ${pairedTitles.size ? ` Títulos com os dois lados neste detalhe: <strong>${[...pairedTitles].map((k) => this.esc(k)).join(", ")}</strong>.` : ""}
           </div>` : ""}
+          <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;font-size:0.82rem;line-height:1.5;">
+            <strong>Rateio por C.C.:</strong>
+            o <em>Total título (API)</em> é o valor integral do movimento (ex.: R$ 52.200).
+            O <em>% rateio</em> da apropriação Sienge (ex.: 53% / 47%) gera o <em>Valor rateado</em> por centro de custo
+            (52.200 × 53% = 27.666; 52.200 × 47% = 24.534). O <em>Valor no DFC</em> aplica ainda o fator MLDU da empresa.
+          </div>
         <div style="overflow:auto;max-height:calc(88vh - 160px);" class="crm-scroll-table">
-          <table class="custom-table" style="width:100%;min-width:1280px;border-collapse:separate;border-spacing:0;font-size:0.8rem;">
+          <table class="custom-table" style="width:100%;min-width:1380px;border-collapse:separate;border-spacing:0;font-size:0.8rem;">
             <thead>
               <tr>
                 <th style="${th}">Data</th>
@@ -1080,8 +1096,9 @@ const FluxoCaixaApp = {
                 <th style="${th}">Empresa</th>
                 <th style="${th}">C.C.</th>
                 <th style="${th}">Histórico</th>
-                <th style="${thr}">Bruto API</th>
+                <th style="${thr}">Total título</th>
                 <th style="${thr}">% rateio</th>
+                <th style="${thr}">Valor rateado</th>
                 <th style="${thr}">Fator MLDU</th>
                 <th style="${thr}">Valor no DFC</th>
               </tr>
@@ -1093,9 +1110,15 @@ const FluxoCaixaApp = {
                 const raw = Number(it.rawBankAmount);
                 const sharePct = (Number(it.share) || 0) * 100;
                 const factorPct = (Number(it.factor) || 0) * 100;
+                const rateado = Number.isFinite(Number(it.rateadoBruto))
+                  ? Number(it.rateadoBruto)
+                  : (Number.isFinite(raw) ? raw * (Number(it.share) || 0) : NaN);
                 const color = amt < 0 ? "#b91c1c" : (amt > 0 ? "#105436" : "#64748b");
                 const rawColor = Number.isFinite(raw)
                   ? (raw < 0 ? "#b91c1c" : (raw > 0 ? "#105436" : "#64748b"))
+                  : "#64748b";
+                const rateadoColor = Number.isFinite(rateado)
+                  ? (rateado < 0 ? "#b91c1c" : (rateado > 0 ? "#105436" : "#64748b"))
                   : "#64748b";
                 const title = this.movTitleInfo(mov);
                 const roleBadge = title.role === "adiantamento"
@@ -1122,8 +1145,9 @@ const FluxoCaixaApp = {
                   <td style="padding:10px 12px;min-width:220px;max-width:320px;vertical-align:top;line-height:1.4;">
                     <span>${this.esc(this.movHistoric(mov))}</span>${roleBadge}
                   </td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:600;color:${rawColor};">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:600;color:${rawColor};" title="Valor integral do título/movimento na API">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
                   <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? `<div style="color:#94a3b8;font-size:0.7rem;">API ${this.esc(String(it.rateRaw))}</div>` : ""}</td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:700;color:${rateadoColor};" title="Total título × % rateio do C.C.">${Number.isFinite(rateado) ? this.fmt(rateado) : "—"}</td>
                   <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
                   <td style="padding:10px 12px;text-align:right;font-weight:800;color:${color};font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${this.fmt(amt)}</td>
                 </tr>`;
@@ -1131,11 +1155,11 @@ const FluxoCaixaApp = {
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="9" style="padding:12px;font-weight:800;text-align:right;border-top:2px solid #e2e8f0;">Soma dos lançamentos (${items.length})</td>
+                <td colspan="10" style="padding:12px;font-weight:800;text-align:right;border-top:2px solid #e2e8f0;">Soma dos lançamentos (${items.length})</td>
                 <td style="padding:12px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;border-top:2px solid #e2e8f0;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
               </tr>
               <tr>
-                <td colspan="9" style="padding:4px 12px 12px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
+                <td colspan="10" style="padding:4px 12px 12px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
                 <td style="padding:4px 12px 12px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
               </tr>
             </tfoot>
