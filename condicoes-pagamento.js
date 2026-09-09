@@ -1,6 +1,6 @@
 /**
  * Comercial · Condições de Pagamento
- * Lista tipos do Sienge (GET /payment-condition-types) e flags locais:
+ * Lista tipos do Sienge (GET /payment-condition-types) e flags:
  * — gera boleto no Sienge
  * — parcela gerada pela Webro
  */
@@ -13,6 +13,8 @@ const CondicoesPagamentoApp = {
   q: "",
   saveTimer: null,
   saving: false,
+  saveMsg: "",
+  _inited: false,
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -27,12 +29,72 @@ const CondicoesPagamentoApp = {
     return origin + path;
   },
 
-  loadFlags() {
+  parseFlagsPayload(raw) {
     try {
-      const raw = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || "{}") || {};
-      this.flags = (raw.byId && typeof raw.byId === "object") ? raw.byId : {};
+      const obj = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
+      if (!obj || typeof obj !== "object") return { byId: {}, updatedAt: 0 };
+      return {
+        byId: (obj.byId && typeof obj.byId === "object") ? obj.byId : {},
+        updatedAt: Number(obj.updatedAt || 0) || 0
+      };
     } catch (e) {
-      this.flags = {};
+      return { byId: {}, updatedAt: 0 };
+    }
+  },
+
+  mergeFlagsPayload(localRaw, cloudRaw) {
+    const local = this.parseFlagsPayload(localRaw);
+    const cloud = this.parseFlagsPayload(cloudRaw);
+    const byId = {};
+    if (local.updatedAt >= cloud.updatedAt) {
+      Object.assign(byId, cloud.byId, local.byId);
+    } else {
+      Object.assign(byId, local.byId, cloud.byId);
+    }
+    return {
+      byId,
+      updatedAt: Math.max(local.updatedAt, cloud.updatedAt, Date.now())
+    };
+  },
+
+  loadFlagsFromLocal() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY) || "{}";
+      const parsed = this.parseFlagsPayload(raw);
+      this.flags = parsed.byId || {};
+      this._flagsUpdatedAt = parsed.updatedAt || 0;
+    } catch (e) {
+      this.flags = this.flags || {};
+    }
+  },
+
+  loadFlags() {
+    this.loadFlagsFromLocal();
+  },
+
+  async loadFlagsFromCloud() {
+    if (!window.firebaseDb || !window.firebaseCollections) return false;
+    try {
+      const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+      const snap = await window.firebaseCollections.getDoc(docRef);
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!exists) return false;
+      const data = snap.data() || {};
+      const cloudRaw = data[this.STORAGE_KEY];
+      if (!cloudRaw) return false;
+      const localRaw = localStorage.getItem(this.STORAGE_KEY) || "{}";
+      const merged = this.mergeFlagsPayload(localRaw, cloudRaw);
+      this.flags = merged.byId;
+      this._flagsUpdatedAt = merged.updatedAt;
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
+      } catch (e) {
+        /* cota cheia: mantém em memória */
+      }
+      return true;
+    } catch (e) {
+      console.warn("[CondicoesPagamento] load cloud:", e);
+      return false;
     }
   },
 
@@ -51,29 +113,60 @@ const CondicoesPagamentoApp = {
       byId: this.flags,
       updatedAt: Date.now()
     };
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(payload));
-    } catch (e) {
-      if (!silent) alert("Não foi possível salvar as condições localmente.");
-      return false;
-    }
+    this._flagsUpdatedAt = payload.updatedAt;
+    const json = JSON.stringify(payload);
+    let localOk = false;
+    let cloudOk = false;
+
     this.saving = true;
+    this.saveMsg = "";
     this.renderStatus();
+
     try {
-      if (window.forceUploadLocalConfig) await window.forceUploadLocalConfig(true);
+      localStorage.setItem(this.STORAGE_KEY, json);
+      localOk = true;
+    } catch (e) {
+      console.warn("[CondicoesPagamento] localStorage cheio:", e);
+    }
+
+    try {
+      if (window.firebaseDb && window.firebaseCollections) {
+        const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+        await window.firebaseCollections.setDoc(docRef, { [this.STORAGE_KEY]: json }, { merge: true });
+        cloudOk = true;
+      }
     } catch (e) {
       console.warn("[CondicoesPagamento] sync cloud:", e);
     }
+
+    // Fallback: upload completo das configs (se o setDoc pontual falhar)
+    if (!cloudOk && localOk && window.forceUploadLocalConfig) {
+      try {
+        await window.forceUploadLocalConfig(true);
+        cloudOk = true;
+      } catch (e) {
+        console.warn("[CondicoesPagamento] forceUpload:", e);
+      }
+    }
+
     this.saving = false;
+    if (localOk || cloudOk) {
+      this.saveMsg = cloudOk ? "Salvo" : "Salvo neste navegador";
+      this.error = "";
+    } else {
+      this.saveMsg = "";
+      this.error = "Não foi possível salvar (armazenamento cheio / sem nuvem).";
+      if (!silent) alert(this.error);
+    }
     this.renderStatus();
-    return true;
+    return localOk || cloudOk;
   },
 
   schedulePersist() {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.persistFlags({ silent: true });
-    }, 400);
+    }, 250);
   },
 
   setFlag(id, field, on) {
@@ -82,8 +175,9 @@ const CondicoesPagamentoApp = {
     const cur = this.flagOf(key);
     cur[field] = !!on;
     this.flags[key] = cur;
+    this.saveMsg = "Salvando…";
+    this.renderStatus();
     this.schedulePersist();
-    this.renderTable();
   },
 
   normalizeItem(raw) {
@@ -105,7 +199,6 @@ const CondicoesPagamentoApp = {
       const list = await SiengeApiService.getPaymentConditionTypes();
       return (list || []).map((x) => this.normalizeItem(x)).filter(Boolean);
     }
-    // Fallback direto no proxy
     const out = [];
     let offset = 0;
     const limit = 100;
@@ -148,10 +241,11 @@ const CondicoesPagamentoApp = {
   renderStatus() {
     const el = document.getElementById("cpag-status");
     if (!el) return;
-    if (this.loading) el.textContent = "Carregando tipos no Sienge…";
+    if (this.loading) el.textContent = "Carregando…";
     else if (this.saving) el.textContent = "Salvando…";
     else if (this.error) el.textContent = this.error;
-    else el.textContent = `${this.items.length} tipo(s) · flags salvas automaticamente`;
+    else if (this.saveMsg) el.textContent = `${this.items.length} tipo(s) · ${this.saveMsg}`;
+    else el.textContent = `${this.items.length} tipo(s)`;
   },
 
   renderTable() {
@@ -189,18 +283,11 @@ const CondicoesPagamentoApp = {
     if (!root) return;
     root.innerHTML = `
       <div style="padding:16px 18px 28px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
-          <div style="max-width:720px;">
-            <h2 style="margin:0 0 6px;display:flex;align-items:center;gap:8px;font-size:1.15rem;font-weight:800;color:#0f172a;">
-              <i data-lucide="file-text" style="width:22px;color:var(--color-primary);"></i>
-              Condições de Pagamento
-            </h2>
-            <div style="font-size:0.82rem;color:#64748b;line-height:1.45;">
-              Tipos de condição do Sienge (<code style="font-size:0.78rem;">/payment-condition-types</code>).
-              Use os interruptores para dizer se a condição <strong>gera boleto no Sienge</strong>
-              e se a parcela é <strong>gerada pela Webro</strong>.
-            </div>
-          </div>
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
+          <h2 style="margin:0;display:flex;align-items:center;gap:8px;font-size:1.15rem;font-weight:800;color:#0f172a;">
+            <i data-lucide="file-text" style="width:22px;color:var(--color-primary);"></i>
+            Condições de Pagamento
+          </h2>
           <button type="button" class="btn btn-primary" onclick="CondicoesPagamentoApp.reload()" ${this.loading ? "disabled" : ""}>
             <i data-lucide="refresh-cw" style="width:16px;"></i> Atualizar
           </button>
@@ -237,7 +324,8 @@ const CondicoesPagamentoApp = {
     this.error = "";
     this.render();
     try {
-      this.loadFlags();
+      this.loadFlagsFromLocal();
+      await this.loadFlagsFromCloud();
       this.items = await this.fetchAllTypes();
       this.items.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     } catch (e) {
@@ -250,12 +338,23 @@ const CondicoesPagamentoApp = {
   },
 
   async init() {
-    this.loadFlags();
+    if (this._inited && this.items.length) {
+      this.render();
+      this.loadFlagsFromLocal();
+      this.renderTable();
+      this.loadFlagsFromCloud().then(() => this.renderTable());
+      return;
+    }
+    this._inited = true;
     await this.reload();
   }
 };
 
 window.CondicoesPagamentoApp = CondicoesPagamentoApp;
+
+window.mergeCondicoesPagamento = function(localStr, cloudStr) {
+  return JSON.stringify(CondicoesPagamentoApp.mergeFlagsPayload(localStr, cloudStr));
+};
 
 window.getPaymentConditionFlags = function(conditionId) {
   CondicoesPagamentoApp.loadFlags();

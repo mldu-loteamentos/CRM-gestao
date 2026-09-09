@@ -2904,11 +2904,24 @@ window.applyPermissions = function(profileName) {
   const matchedProfile = crmProfiles.find(p => p.name === profileName.trim().toUpperCase());
   const profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
   
-  const permsStr = localStorage.getItem(`crm_perms_${profileId}`);
+  let permsStr = localStorage.getItem(`crm_perms_${profileId}`);
+  try {
+    if (permsStr) {
+      const parsed = JSON.parse(permsStr);
+      if (parsed && parsed.__mirror_of__) {
+        permsStr = localStorage.getItem(`crm_perms_${parsed.__mirror_of__}`) || null;
+      }
+    } else if (/terceiriz|back/i.test(String(profileId))) {
+      permsStr = localStorage.getItem("crm_perms_operador_cobranca")
+        || localStorage.getItem("crm_perms_operador_cobrança")
+        || null;
+    }
+  } catch (e) {}
   
   if (permsStr) {
     try {
       const perms = JSON.parse(permsStr);
+      if (perms && perms.__mirror_of__) return;
       const moduleItems = document.querySelectorAll('li[data-module]');
       
       moduleItems.forEach(item => {
@@ -3989,9 +4002,22 @@ async function loadAndApplyPermissions() {
           profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
       }
       let permsStr = localStorage.getItem('crm_perms_' + profileId);
+      try {
+        if (permsStr) {
+          const parsed = JSON.parse(permsStr);
+          if (parsed && parsed.__mirror_of__) {
+            permsStr = localStorage.getItem('crm_perms_' + parsed.__mirror_of__) || permsStr;
+          }
+        } else if (/terceiriz|back/i.test(String(profileId))) {
+          permsStr = localStorage.getItem('crm_perms_operador_cobranca')
+            || localStorage.getItem('crm_perms_operador_cobrança')
+            || null;
+        }
+      } catch (mirrorErr) {}
       
       if (permsStr) {
          let permsObj = JSON.parse(permsStr);
+         if (permsObj && permsObj.__mirror_of__) permsObj = {};
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
          
          if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
@@ -34820,6 +34846,23 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_moura_condicoes_pagamento" && typeof window.mergeCondicoesPagamento === "function") {
+                    const merged = window.mergeCondicoesPagamento(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        try { _originalSetItem.call(localStorage, k, merged); } catch (e) {}
+                        changed = true;
+                        try {
+                          if (window.CondicoesPagamentoApp) {
+                            const parsed = JSON.parse(merged);
+                            CondicoesPagamentoApp.flags = (parsed && parsed.byId) || {};
+                          }
+                        } catch (e) {}
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -34952,6 +34995,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
             );
             try { _originalSetItem.call(localStorage, "crm_moura_rules", payload.crm_moura_rules); } catch (e) {}
             try { AppState.rules = JSON.parse(payload.crm_moura_rules); } catch (e) {}
+          }
+          if (payload.crm_moura_condicoes_pagamento || cloud.crm_moura_condicoes_pagamento) {
+            if (typeof window.mergeCondicoesPagamento === "function") {
+              payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento(
+                payload.crm_moura_condicoes_pagamento || "{}",
+                cloud.crm_moura_condicoes_pagamento || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_moura_condicoes_pagamento", payload.crm_moura_condicoes_pagamento); } catch (e) {}
+            } else if (!payload.crm_moura_condicoes_pagamento && cloud.crm_moura_condicoes_pagamento) {
+              payload.crm_moura_condicoes_pagamento = cloud.crm_moura_condicoes_pagamento;
+            }
           }
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });

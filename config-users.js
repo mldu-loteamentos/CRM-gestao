@@ -275,6 +275,7 @@ const ConfigUsersApp = {
   selectedProfile: "admin",
 
   async loadUsers() {
+    try {
     const savedUsers = localStorage.getItem('crm_users');
     if (savedUsers) {
        this.users = JSON.parse(savedUsers);
@@ -297,15 +298,84 @@ const ConfigUsersApp = {
         { id: "gerente_fpa", name: "GERENTE FP&A" },
         { id: "engenharia", name: "ENGENHARIA" }
       ];
-      localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
+      this.safeLocalSet('crm_moura_profiles', JSON.stringify(this.profiles));
     }
 
     this.ensureAlcadaProfiles();
-    this.seedBackOfficePermsFromCobranca();
-    this.seedTerceirizadoPermsFromCobranca();
+    try { this.seedBackOfficePermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed back-office:", e); }
+    try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
+    } catch (e) {
+      console.error("[ConfigUsers] loadUsers:", e);
+      if (!Array.isArray(this.profiles) || !this.profiles.length) {
+        this.profiles = [{ id: "admin", name: "ADMINISTRADOR" }];
+      }
+      if (!Array.isArray(this.users)) this.users = [];
+    }
     
     // Aqui no futuro poderia fazer um fetch para a API de usuários
     this.render();
+  },
+
+  safeLocalSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (e) {
+      console.warn("[ConfigUsers] localStorage cheio ao gravar", key, e);
+      return false;
+    }
+  },
+
+  resolveCobrancaProfileId() {
+    const cob = (this.profiles || []).find(p => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n === "OPERADOR COBRANCA";
+    });
+    if (cob) return cob.id;
+    if (localStorage.getItem("crm_perms_operador_cobranca")) return "operador_cobranca";
+    if (localStorage.getItem("crm_perms_operador_cobrança")) return "operador_cobrança";
+    return "operador_cobranca";
+  },
+
+  getProfilePermsObject(profileId) {
+    const read = (id) => {
+      try {
+        const raw = localStorage.getItem(`crm_perms_${id}`);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
+      }
+    };
+    let obj = read(profileId);
+    if (obj && obj.__mirror_of__) {
+      const mirrored = read(obj.__mirror_of__);
+      return mirrored && typeof mirrored === "object" ? { ...mirrored } : {};
+    }
+    if (obj && typeof obj === "object") return obj;
+
+    // Fallback sem duplicar blob: espelhos conhecidos leem o OPERADOR COBRANÇA
+    const n = String(profileId || "");
+    if (n.includes("terceiriz") || n.includes("back")) {
+      const cobId = this.resolveCobrancaProfileId();
+      const cob = read(cobId);
+      if (cob && typeof cob === "object" && !cob.__mirror_of__) return { ...cob };
+    }
+    return {};
+  },
+
+  seedPermsAsMirror(targetId, preferredSourceId) {
+    if (!targetId) return;
+    if (localStorage.getItem(`crm_perms_${targetId}`)) return;
+    const sourceId = preferredSourceId || this.resolveCobrancaProfileId();
+    const hasSource = !!(
+      localStorage.getItem(`crm_perms_${sourceId}`)
+      || localStorage.getItem("crm_perms_operador_cobrança")
+      || localStorage.getItem("crm_perms_operador_cobranca")
+    );
+    if (!hasSource) return;
+    // Espelho leve (evita QuotaExceeded ao duplicar o JSON inteiro)
+    this.safeLocalSet(`crm_perms_${targetId}`, JSON.stringify({ __mirror_of__: sourceId }));
   },
 
   ensureAlcadaProfiles() {
@@ -327,41 +397,25 @@ const ConfigUsersApp = {
         changed = true;
       }
     });
-    if (changed) localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+    if (changed) this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
   },
 
   seedBackOfficePermsFromCobranca() {
-    const cob = this.profiles.find(p => {
-      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return n === "OPERADOR COBRANCA";
-    });
     const back = this.profiles.find(p => {
       const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
     });
-    if (!cob || !back) return;
-    if (localStorage.getItem(`crm_perms_${back.id}`)) return;
-    const src = localStorage.getItem(`crm_perms_${cob.id}`)
-      || localStorage.getItem("crm_perms_operador_cobrança")
-      || localStorage.getItem("crm_perms_operador_cobranca");
-    if (src) localStorage.setItem(`crm_perms_${back.id}`, src);
+    if (!back) return;
+    this.seedPermsAsMirror(back.id, this.resolveCobrancaProfileId());
   },
 
   seedTerceirizadoPermsFromCobranca() {
-    const cob = this.profiles.find(p => {
-      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return n === "OPERADOR COBRANCA";
-    });
     const terc = this.profiles.find(p => {
       const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
     });
-    if (!cob || !terc) return;
-    if (localStorage.getItem(`crm_perms_${terc.id}`)) return;
-    const src = localStorage.getItem(`crm_perms_${cob.id}`)
-      || localStorage.getItem("crm_perms_operador_cobrança")
-      || localStorage.getItem("crm_perms_operador_cobranca");
-    if (src) localStorage.setItem(`crm_perms_${terc.id}`, src);
+    if (!terc) return;
+    this.seedPermsAsMirror(terc.id, this.resolveCobrancaProfileId());
   },
 
   closeProfileNameModal() {
@@ -532,12 +586,10 @@ const ConfigUsersApp = {
          }
 
          this.profiles.push({ id: newId, name: profileName.trim().toUpperCase() });
-         localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+         this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
 
-         const savedPermsStr = localStorage.getItem(`crm_perms_${sourceId}`);
-         if (savedPermsStr) {
-           localStorage.setItem(`crm_perms_${newId}`, savedPermsStr);
-         }
+         // Espelho leve das permissões (evita estourar localStorage)
+         this.seedPermsAsMirror(newId, sourceId);
 
          this.selectedProfile = newId;
          this.render();
@@ -1044,8 +1096,7 @@ const ConfigUsersApp = {
     `;
 
     // Load saved permissions for selected profile
-    const savedPermsStr = localStorage.getItem(`crm_perms_${this.selectedProfile}`);
-    let savedPerms = savedPermsStr ? JSON.parse(savedPermsStr) : {};
+    let savedPerms = this.getProfilePermsObject(this.selectedProfile);
     this.hydrateSubmoduleFlags(savedPerms);
     
     const isAdmin = this.selectedProfile === 'admin';
@@ -1287,7 +1338,10 @@ const ConfigUsersApp = {
     }
 
     window.syncConfiguracoesPermAliases(perms);
-    localStorage.setItem(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms));
+    if (!this.safeLocalSet(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms))) {
+      // Mantém espelho leve se a cota estiver cheia
+      this.seedPermsAsMirror(this.selectedProfile, this.resolveCobrancaProfileId());
+    }
     
     const isAdmin = this.selectedProfile === 'admin';
     if (isAdmin) return; // Se for admin, ignora a lógica de cascata no click pois já é bloqueado
@@ -1354,7 +1408,10 @@ const ConfigUsersApp = {
        return;
     }
 
-    localStorage.setItem(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms));
+    if (!this.safeLocalSet(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms))) {
+       alert("Armazenamento local cheio: não foi possível salvar a cópia completa das permissões. Ajuste o Integra no perfil OPERADOR COBRANÇA ou libere espaço no navegador e tente de novo.");
+       return;
+    }
     
     // Animação de sucesso no botão e sincronização com o Firebase
     const btn = document.querySelector('button[onclick="ConfigUsersApp.savePermissions()"]');

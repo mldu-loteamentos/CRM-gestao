@@ -937,6 +937,91 @@ const FluxoCaixaApp = {
     if (el && el.parentNode) el.parentNode.removeChild(el);
   },
 
+  exportDrillExcel() {
+    const ctx = this._drillExport;
+    if (!ctx || !Array.isArray(ctx.items) || !ctx.items.length) {
+      alert("Não há lançamentos para exportar.");
+      return;
+    }
+    if (typeof XLSX === "undefined") {
+      alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+      return;
+    }
+    const rows = ctx.items.map((it) => {
+      const mov = it.mov || {};
+      const title = this.movTitleInfo(mov);
+      const role =
+        title.role === "adiantamento" ? "ADIANTAMENTO"
+          : (title.role === "abatimento" ? "ABATIMENTO" : "");
+      const sharePct = (Number(it.share) || 0) * 100;
+      const factorPct = (Number(it.factor) || 0) * 100;
+      const raw = Number(it.rawBankAmount);
+      return {
+        "Data": this.fmtDatePt(this.cashDate(mov)),
+        "Nº mov.": this.movNumber(mov),
+        "Título CP/CR": title.label || "",
+        "Favorecido / parte": title.party || "",
+        "Tipo (adiant./abate)": role,
+        "Empresa": this.companyLabel(it.companyId || mov.companyId),
+        "C.C.": [it.costCenterId, it.costCenterName].filter(Boolean).join(" - ") || "",
+        "Histórico": this.movHistoric(mov),
+        "Bruto API": Number.isFinite(raw) ? raw : "",
+        "% rateio": sharePct,
+        "Fator MLDU %": factorPct,
+        "Valor no DFC": Number(it.amount) || 0
+      };
+    });
+    rows.push({
+      "Data": "",
+      "Nº mov.": "",
+      "Título CP/CR": "",
+      "Favorecido / parte": "",
+      "Tipo (adiant./abate)": "",
+      "Empresa": "",
+      "C.C.": "",
+      "Histórico": `Soma dos lançamentos (${ctx.items.length})`,
+      "Bruto API": "",
+      "% rateio": "",
+      "Fator MLDU %": "",
+      "Valor no DFC": Number(ctx.sum) || 0
+    });
+    rows.push({
+      "Data": "",
+      "Nº mov.": "",
+      "Título CP/CR": "",
+      "Favorecido / parte": "",
+      "Tipo (adiant./abate)": "",
+      "Empresa": "",
+      "C.C.": "",
+      "Histórico": "Total exibido na linha",
+      "Bruto API": "",
+      "% rateio": "",
+      "Fator MLDU %": "",
+      "Valor no DFC": Number(ctx.lineTotal) || 0
+    });
+
+    try {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [
+        { wch: 12 }, { wch: 12 }, { wch: 42 }, { wch: 36 }, { wch: 14 },
+        { wch: 42 }, { wch: 32 }, { wch: 40 }, { wch: 14 }, { wch: 10 },
+        { wch: 12 }, { wch: 14 }
+      ];
+      const wb = XLSX.utils.book_new();
+      const sheetName = String(ctx.sheetName || "Lancamentos").slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      const safeName = String(ctx.fileBase || "lancamentos_dfc")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9._-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 80);
+      XLSX.writeFile(wb, `${safeName || "lancamentos_dfc"}.xlsx`);
+    } catch (e) {
+      console.error("[FluxoCaixa] export drill:", e);
+      alert("Erro ao exportar Excel: " + (e.message || e));
+    }
+  },
+
   openDrill(id, isAccount) {
     const info = this.resolveDrill(id, !!isAccount);
     const items = [...(info.items || [])].sort((a, b) => {
@@ -961,6 +1046,18 @@ const FluxoCaixaApp = {
       const t = this.movTitleInfo(it.mov || {});
       return t.role === "adiantamento" || t.role === "abatimento";
     });
+
+    this._drillExport = {
+      items,
+      sum,
+      lineTotal: info.total,
+      title: info.title,
+      subtitle: info.subtitle,
+      startDate: this.startDate,
+      endDate: this.endDate,
+      sheetName: "Lancamentos",
+      fileBase: `dfc_${info.title || "conta"}_${this.startDate}_${this.endDate}`
+    };
 
     const th = "padding:10px 12px;background:#105436;color:#fff;text-align:left;font-size:0.75rem;white-space:nowrap;";
     const thr = "padding:10px 12px;background:#105436;color:#fff;text-align:right;font-size:0.75rem;white-space:nowrap;";
@@ -1054,15 +1151,23 @@ const FluxoCaixaApp = {
     overlay.innerHTML = `
       <div style="background:#fff;border-radius:12px;width:min(1680px,98vw);max-height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
         <div style="padding:14px 18px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;flex-shrink:0;">
-          <div>
+          <div style="min-width:0;">
             <div style="font-size:1.05rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
             <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
           </div>
-          <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.25rem;line-height:1;">×</button>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <button type="button" onclick="event.stopPropagation();FluxoCaixaApp.exportDrillExcel()" ${items.length ? "" : "disabled"}
+              title="Exportar quadro em Excel"
+              style="border:none;background:rgba(255,255,255,0.16);color:#fff;height:34px;padding:0 12px;border-radius:8px;cursor:${items.length ? "pointer" : "not-allowed"};font-size:0.82rem;font-weight:700;display:inline-flex;align-items:center;gap:6px;opacity:${items.length ? "1" : "0.55"};">
+              <i data-lucide="file-spreadsheet" style="width:16px;height:16px;"></i> Excel
+            </button>
+            <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.25rem;line-height:1;">×</button>
+          </div>
         </div>
         <div style="padding:16px 18px 20px;overflow:auto;">${body}</div>
       </div>`;
     document.body.appendChild(overlay);
+    try { if (window.lucide) lucide.createIcons({ nodes: [overlay] }); } catch (e) {}
   },
 
   esc(s) {
