@@ -2504,9 +2504,8 @@ const SiengeApiService = {
               d0_30: { count: 0, value: 0 },
               d31_60: { count: 0, value: 0 },
               d61_90: { count: 0, value: 0 },
-              d91_180: { count: 0, value: 0 },
-              d181_365: { count: 0, value: 0 },
-              d365p: { count: 0, value: 0 }
+              d91_120: { count: 0, value: 0 },
+              d120p: { count: 0, value: 0 }
             }
           };
         }
@@ -2529,9 +2528,8 @@ const SiengeApiService = {
         if (delay <= 30) agingKey = 'd0_30';
         else if (delay <= 60) agingKey = 'd31_60';
         else if (delay <= 90) agingKey = 'd61_90';
-        else if (delay <= 180) agingKey = 'd91_180';
-        else if (delay <= 365) agingKey = 'd181_365';
-        else agingKey = 'd365p';
+        else if (delay <= 120) agingKey = 'd91_120';
+        else agingKey = 'd120p';
         
         comp.aging[agingKey].count++;
         comp.aging[agingKey].value += billVal;

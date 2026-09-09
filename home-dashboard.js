@@ -921,7 +921,7 @@ const HomeDashboard = {
     if (snap && snap.data_json && snap.data_json.companies) {
       snap.data_json.companies.forEach(comp => {
         if (!comp.aging) return;
-        ['d31_60', 'd61_90', 'd91_180', 'd181_365', 'd365p'].forEach(k => {
+        ['d31_60', 'd61_90', 'd91_120', 'd120p', 'd91_180', 'd181_365', 'd365p'].forEach(k => {
           if (!comp.aging[k]) return;
           v += comp.aging[k].value || 0;
           c += comp.aging[k].count || 0;

@@ -34851,16 +34851,26 @@ window.syncGlobalConfigFromFirebase = async function() {
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         try { _originalSetItem.call(localStorage, k, merged); } catch (e) {}
                         changed = true;
-                        try {
-                          if (window.CondicoesPagamentoApp) {
-                            const parsed = JSON.parse(merged);
-                            CondicoesPagamentoApp.flags = (parsed && parsed.byId) || {};
-                          }
-                        } catch (e) {}
                     }
-                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                    try {
+                      if (window.CondicoesPagamentoApp) {
+                        const parsed = CondicoesPagamentoApp.parseFlagsPayload(merged || "{}");
+                        // Só aplica se não houver alteração mais nova em memória
+                        CondicoesPagamentoApp.applyFlagsPayload(parsed);
+                        if (typeof CondicoesPagamentoApp.renderTable === "function"
+                            && document.getElementById("cpag-tbody")) {
+                          CondicoesPagamentoApp.renderTable();
+                        }
+                      }
+                    } catch (e) {}
+                    // Só reenvia se o byId local/memória for mais novo que o da nuvem
+                    try {
+                      const localP = CondicoesPagamentoApp.parseFlagsPayload(merged || "{}");
+                      const cloudP = CondicoesPagamentoApp.parseFlagsPayload(globalData[k] || "{}");
+                      if (localP.updatedAt > cloudP.updatedAt && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
-                    }
+                      }
+                    } catch (e) {}
                     return;
                 }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
@@ -34996,13 +35006,30 @@ window.forceUploadLocalConfig = async function(silent = true) {
             try { _originalSetItem.call(localStorage, "crm_moura_rules", payload.crm_moura_rules); } catch (e) {}
             try { AppState.rules = JSON.parse(payload.crm_moura_rules); } catch (e) {}
           }
-          if (payload.crm_moura_condicoes_pagamento || cloud.crm_moura_condicoes_pagamento) {
+          if (payload.crm_moura_condicoes_pagamento || cloud.crm_moura_condicoes_pagamento || (window.CondicoesPagamentoApp && CondicoesPagamentoApp.flags)) {
+            // Garante que toggles só em memória (localStorage cheio) entrem no upload
+            if (window.CondicoesPagamentoApp && typeof CondicoesPagamentoApp.flagsToRaw === "function") {
+              const memRaw = CondicoesPagamentoApp.flagsToRaw();
+              const memAt = Number(CondicoesPagamentoApp._flagsUpdatedAt || 0) || 0;
+              if (memAt > 0 && memRaw && memRaw !== "{}") {
+                payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento
+                  ? window.mergeCondicoesPagamento(memRaw, payload.crm_moura_condicoes_pagamento || "{}")
+                  : memRaw;
+              }
+            }
             if (typeof window.mergeCondicoesPagamento === "function") {
               payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento(
                 payload.crm_moura_condicoes_pagamento || "{}",
                 cloud.crm_moura_condicoes_pagamento || "{}"
               );
               try { _originalSetItem.call(localStorage, "crm_moura_condicoes_pagamento", payload.crm_moura_condicoes_pagamento); } catch (e) {}
+              try {
+                if (window.CondicoesPagamentoApp) {
+                  CondicoesPagamentoApp.applyFlagsPayload(
+                    CondicoesPagamentoApp.parseFlagsPayload(payload.crm_moura_condicoes_pagamento)
+                  );
+                }
+              } catch (e) {}
             } else if (!payload.crm_moura_condicoes_pagamento && cloud.crm_moura_condicoes_pagamento) {
               payload.crm_moura_condicoes_pagamento = cloud.crm_moura_condicoes_pagamento;
             }

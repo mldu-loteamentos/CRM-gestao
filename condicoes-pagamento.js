@@ -34,7 +34,7 @@ const CondicoesPagamentoApp = {
       const obj = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
       if (!obj || typeof obj !== "object") return { byId: {}, updatedAt: 0 };
       return {
-        byId: (obj.byId && typeof obj.byId === "object") ? obj.byId : {},
+        byId: (obj.byId && typeof obj.byId === "object") ? { ...obj.byId } : {},
         updatedAt: Number(obj.updatedAt || 0) || 0
       };
     } catch (e) {
@@ -42,27 +42,55 @@ const CondicoesPagamentoApp = {
     }
   },
 
+  flagsToRaw() {
+    return JSON.stringify({
+      byId: this.flags || {},
+      updatedAt: Number(this._flagsUpdatedAt || 0) || 0
+    });
+  },
+
+  /**
+   * Merge por updatedAt: o lado mais novo ganha por chave.
+   * Não bumpa updatedAt com Date.now() (isso fazia o sync achar “mudança”
+   * e reenviar defaults, resetando os toggles).
+   */
   mergeFlagsPayload(localRaw, cloudRaw) {
     const local = this.parseFlagsPayload(localRaw);
     const cloud = this.parseFlagsPayload(cloudRaw);
     const byId = {};
-    if (local.updatedAt >= cloud.updatedAt) {
+    if (local.updatedAt > cloud.updatedAt) {
       Object.assign(byId, cloud.byId, local.byId);
-    } else {
+    } else if (cloud.updatedAt > local.updatedAt) {
       Object.assign(byId, local.byId, cloud.byId);
+    } else {
+      // Empate: une as duas (preferência ao valor local em conflito)
+      Object.assign(byId, cloud.byId, local.byId);
     }
     return {
       byId,
-      updatedAt: Math.max(local.updatedAt, cloud.updatedAt, Date.now())
+      updatedAt: Math.max(local.updatedAt || 0, cloud.updatedAt || 0)
     };
+  },
+
+  applyFlagsPayload(parsed, opts) {
+    if (!parsed || typeof parsed !== "object") return;
+    const incomingAt = Number(parsed.updatedAt || 0) || 0;
+    const memAt = Number(this._flagsUpdatedAt || 0) || 0;
+    const force = !!(opts && opts.force);
+    // Não sobrescreve memória se o usuário acabou de alterar e ainda não sincronizou
+    if (!force && memAt > incomingAt && this.flags && Object.keys(this.flags).length) {
+      return false;
+    }
+    this.flags = (parsed.byId && typeof parsed.byId === "object") ? { ...parsed.byId } : {};
+    this._flagsUpdatedAt = Math.max(memAt, incomingAt);
+    return true;
   },
 
   loadFlagsFromLocal() {
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY) || "{}";
       const parsed = this.parseFlagsPayload(raw);
-      this.flags = parsed.byId || {};
-      this._flagsUpdatedAt = parsed.updatedAt || 0;
+      this.applyFlagsPayload(parsed);
     } catch (e) {
       this.flags = this.flags || {};
     }
@@ -82,14 +110,21 @@ const CondicoesPagamentoApp = {
       const data = snap.data() || {};
       const cloudRaw = data[this.STORAGE_KEY];
       if (!cloudRaw) return false;
-      const localRaw = localStorage.getItem(this.STORAGE_KEY) || "{}";
-      const merged = this.mergeFlagsPayload(localRaw, cloudRaw);
-      this.flags = merged.byId;
-      this._flagsUpdatedAt = merged.updatedAt;
+      const localRaw = (() => {
+        try { return localStorage.getItem(this.STORAGE_KEY) || "{}"; } catch (e) { return "{}"; }
+      })();
+      const memRaw = this.flagsToRaw();
+      // Memória (alteração recente) > localStorage > cloud
+      let merged = this.mergeFlagsPayload(localRaw, cloudRaw);
+      merged = this.mergeFlagsPayload(JSON.stringify(merged), memRaw);
+      this.applyFlagsPayload(merged, { force: true });
       try {
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+          byId: this.flags,
+          updatedAt: this._flagsUpdatedAt
+        }));
       } catch (e) {
-        /* cota cheia: mantém em memória */
+        /* cota cheia: mantém em memória + Firebase */
       }
       return true;
     } catch (e) {
@@ -110,10 +145,11 @@ const CondicoesPagamentoApp = {
   async persistFlags(opts) {
     const silent = !!(opts && opts.silent);
     const payload = {
-      byId: this.flags,
+      byId: { ...(this.flags || {}) },
       updatedAt: Date.now()
     };
     this._flagsUpdatedAt = payload.updatedAt;
+    this.flags = payload.byId;
     const json = JSON.stringify(payload);
     let localOk = false;
     let cloudOk = false;
@@ -122,13 +158,7 @@ const CondicoesPagamentoApp = {
     this.saveMsg = "";
     this.renderStatus();
 
-    try {
-      localStorage.setItem(this.STORAGE_KEY, json);
-      localOk = true;
-    } catch (e) {
-      console.warn("[CondicoesPagamento] localStorage cheio:", e);
-    }
-
+    // Firebase primeiro — fonte da verdade entre navegadores
     try {
       if (window.firebaseDb && window.firebaseCollections) {
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
@@ -139,9 +169,18 @@ const CondicoesPagamentoApp = {
       console.warn("[CondicoesPagamento] sync cloud:", e);
     }
 
+    try {
+      localStorage.setItem(this.STORAGE_KEY, json);
+      localOk = true;
+    } catch (e) {
+      console.warn("[CondicoesPagamento] localStorage cheio:", e);
+    }
+
     // Fallback: upload completo das configs (se o setDoc pontual falhar)
-    if (!cloudOk && localOk && window.forceUploadLocalConfig) {
+    if (!cloudOk && window.forceUploadLocalConfig) {
       try {
+        // Garante que o upload leve a memória atual mesmo sem localStorage
+        try { localStorage.setItem(this.STORAGE_KEY, json); } catch (e) {}
         await window.forceUploadLocalConfig(true);
         cloudOk = true;
       } catch (e) {
@@ -151,11 +190,11 @@ const CondicoesPagamentoApp = {
 
     this.saving = false;
     if (localOk || cloudOk) {
-      this.saveMsg = cloudOk ? "Salvo" : "Salvo neste navegador";
+      this.saveMsg = cloudOk ? "Salvo no Firebase" : "Salvo neste navegador";
       this.error = "";
     } else {
       this.saveMsg = "";
-      this.error = "Não foi possível salvar (armazenamento cheio / sem nuvem).";
+      this.error = "Não foi possível salvar (Firebase / armazenamento).";
       if (!silent) alert(this.error);
     }
     this.renderStatus();
@@ -166,7 +205,7 @@ const CondicoesPagamentoApp = {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.persistFlags({ silent: true });
-    }, 250);
+    }, 180);
   },
 
   setFlag(id, field, on) {
@@ -175,6 +214,7 @@ const CondicoesPagamentoApp = {
     const cur = this.flagOf(key);
     cur[field] = !!on;
     this.flags[key] = cur;
+    this._flagsUpdatedAt = Date.now();
     this.saveMsg = "Salvando…";
     this.renderStatus();
     this.schedulePersist();
@@ -324,8 +364,8 @@ const CondicoesPagamentoApp = {
     this.error = "";
     this.render();
     try {
-      this.loadFlagsFromLocal();
       await this.loadFlagsFromCloud();
+      this.loadFlagsFromLocal();
       this.items = await this.fetchAllTypes();
       this.items.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     } catch (e) {
@@ -340,9 +380,8 @@ const CondicoesPagamentoApp = {
   async init() {
     if (this._inited && this.items.length) {
       this.render();
-      this.loadFlagsFromLocal();
+      await this.loadFlagsFromCloud();
       this.renderTable();
-      this.loadFlagsFromCloud().then(() => this.renderTable());
       return;
     }
     this._inited = true;
@@ -353,12 +392,39 @@ const CondicoesPagamentoApp = {
 window.CondicoesPagamentoApp = CondicoesPagamentoApp;
 
 window.mergeCondicoesPagamento = function(localStr, cloudStr) {
-  return JSON.stringify(CondicoesPagamentoApp.mergeFlagsPayload(localStr, cloudStr));
+  const app = window.CondicoesPagamentoApp;
+  if (!app || typeof app.mergeFlagsPayload !== "function") {
+    return localStr || cloudStr || "{}";
+  }
+  // Preferência: memória (toggle recente) → localStorage → cloud
+  let merged = app.mergeFlagsPayload(localStr || "{}", cloudStr || "{}");
+  try {
+    if (app.flags && typeof app._flagsUpdatedAt === "number") {
+      const memRaw = app.flagsToRaw ? app.flagsToRaw() : JSON.stringify({
+        byId: app.flags,
+        updatedAt: app._flagsUpdatedAt || 0
+      });
+      merged = app.mergeFlagsPayload(JSON.stringify(merged), memRaw);
+    }
+  } catch (e) {}
+  return JSON.stringify(merged);
 };
 
 window.getPaymentConditionFlags = function(conditionId) {
-  CondicoesPagamentoApp.loadFlags();
-  return CondicoesPagamentoApp.flagOf(conditionId);
+  const app = window.CondicoesPagamentoApp;
+  if (app) {
+    const memAt = Number(app._flagsUpdatedAt || 0) || 0;
+    let localAt = 0;
+    try {
+      localAt = app.parseFlagsPayload(localStorage.getItem(app.STORAGE_KEY) || "{}").updatedAt || 0;
+    } catch (e) {}
+    // Só relê localStorage se for mais novo (ou memória vazia)
+    if (!memAt || localAt > memAt || !app.flags || !Object.keys(app.flags).length) {
+      app.loadFlagsFromLocal();
+    }
+    return app.flagOf(conditionId);
+  }
+  return { boletoSienge: true, parcelaWebro: false };
 };
 
 window.paymentConditionAllowsBoleto = function(conditionId) {

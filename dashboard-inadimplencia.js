@@ -216,19 +216,42 @@ const DashboardInadimplencia = (function() {
       d0_30: { count: 0, value: 0 },
       d31_60: { count: 0, value: 0 },
       d61_90: { count: 0, value: 0 },
-      d91_180: { count: 0, value: 0 },
-      d181_365: { count: 0, value: 0 },
-      d365p: { count: 0, value: 0 }
+      d91_120: { count: 0, value: 0 },
+      d120p: { count: 0, value: 0 }
     };
   }
 
   function agingKeyFromDelay(delay) {
-    if (delay <= 30) return 'd0_30';
-    if (delay <= 60) return 'd31_60';
-    if (delay <= 90) return 'd61_90';
-    if (delay <= 180) return 'd91_180';
-    if (delay <= 365) return 'd181_365';
-    return 'd365p';
+    const d = Number(delay) || 0;
+    if (d <= 30) return 'd0_30';
+    if (d <= 60) return 'd31_60';
+    if (d <= 90) return 'd61_90';
+    if (d <= 120) return 'd91_120';
+    return 'd120p';
+  }
+
+  /** Soma buckets de aging; aceita chaves novas e snapshots antigos (91–180 / 181–365 / +365). */
+  function absorbAging(target, src) {
+    if (!target || !src) return;
+    const add = (k, row) => {
+      if (!row || !target[k]) return;
+      target[k].count += Number(row.count) || 0;
+      target[k].value += Number(row.value) || 0;
+    };
+    add('d0_30', src.d0_30);
+    add('d31_60', src.d31_60);
+    add('d61_90', src.d61_90);
+    if (src.d91_120 || src.d120p) {
+      add('d91_120', src.d91_120);
+      add('d120p', src.d120p);
+      add('d120p', src.d181_365);
+      add('d120p', src.d365p);
+    } else {
+      // legado: 91–180 ≈ 91–120; 181+ → acima 120
+      add('d91_120', src.d91_180);
+      add('d120p', src.d181_365);
+      add('d120p', src.d365p);
+    }
   }
 
   function costCenterName(id) {
@@ -636,14 +659,7 @@ const DashboardInadimplencia = (function() {
       const aging = emptyAging();
       const centers = [];
       (dj.companies || []).forEach(comp => {
-        if (comp.aging) {
-          Object.keys(aging).forEach(k => {
-            if (comp.aging[k]) {
-              aging[k].count += comp.aging[k].count || 0;
-              aging[k].value += comp.aging[k].value || 0;
-            }
-          });
-        }
+        if (comp.aging) absorbAging(aging, comp.aging);
         (comp.cost_centers || []).forEach(cc => {
           centers.push({ id: cc.id, count: cc.count, value: cc.value });
         });
@@ -718,25 +734,18 @@ const DashboardInadimplencia = (function() {
         const matchedVal = matchingCcs.reduce((s, cc) => s + (Number(cc.value) || 0), 0);
         const ratio = compVal > 0 ? matchedVal / compVal : 0;
         if (comp.aging && ratio > 0) {
+          const tmp = emptyAging();
+          absorbAging(tmp, comp.aging);
           Object.keys(aging).forEach(k => {
-            if (comp.aging[k]) {
-              aging[k].count += Math.round((comp.aging[k].count || 0) * ratio);
-              aging[k].value += (comp.aging[k].value || 0) * ratio;
-            }
+            aging[k].count += Math.round((tmp[k].count || 0) * ratio);
+            aging[k].value += (tmp[k].value || 0) * ratio;
           });
         }
       } else {
         total_value += Number(comp.value) || 0;
         total_count += Number(comp.count) || 0;
         ccs.forEach(cc => centers.push({ id: cc.id, count: cc.count, value: cc.value }));
-        if (comp.aging) {
-          Object.keys(aging).forEach(k => {
-            if (comp.aging[k]) {
-              aging[k].count += comp.aging[k].count || 0;
-              aging[k].value += comp.aging[k].value || 0;
-            }
-          });
-        }
+        if (comp.aging) absorbAging(aging, comp.aging);
       }
     });
 
@@ -1135,22 +1144,20 @@ const DashboardInadimplencia = (function() {
   function renderAging(metrics) {
     if (!metrics || !metrics.aging) return '';
     const agings = metrics.aging;
-    const order = ['d0_30', 'd31_60', 'd61_90', 'd91_180', 'd181_365', 'd365p'];
+    const order = ['d0_30', 'd31_60', 'd61_90', 'd91_120', 'd120p'];
     const labels = {
-      d0_30: '0–30',
-      d31_60: '31–60',
-      d61_90: '61–90',
-      d91_180: '91–180',
-      d181_365: '181–365',
-      d365p: '+365'
+      d0_30: 'até 30',
+      d31_60: '31 a 60',
+      d61_90: '61 a 90',
+      d91_120: '91 a 120',
+      d120p: 'Acima 120'
     };
     const tones = {
       d0_30: '#fbbf24',
       d31_60: '#f59e0b',
       d61_90: '#f37021',
-      d91_180: '#ea580c',
-      d181_365: '#c2410c',
-      d365p: '#9a3412'
+      d91_120: '#ea580c',
+      d120p: '#9a3412'
     };
     const maxVal = Math.max(1, ...order.map((k) => (agings[k] && agings[k].value) || 0));
 
@@ -1540,11 +1547,13 @@ const DashboardInadimplencia = (function() {
           if (snap && snap.data_json && snap.data_json.companies) {
               snap.data_json.companies.forEach(c => {
                   if (c.aging) {
-                      d30 += (c.aging.d0_30 && c.aging.d0_30.value) || 0;
-                      d60 += (c.aging.d31_60 && c.aging.d31_60.value) || 0;
-                      d90 += (c.aging.d61_90 && c.aging.d61_90.value) || 0;
-                      d120 += (c.aging.d91_180 && c.aging.d91_180.value) || 0;
-                      above120 += ((c.aging.d181_365 && c.aging.d181_365.value) || 0) + ((c.aging.d365p && c.aging.d365p.value) || 0);
+                      const a = emptyAging();
+                      absorbAging(a, c.aging);
+                      d30 += (a.d0_30 && a.d0_30.value) || 0;
+                      d60 += (a.d31_60 && a.d31_60.value) || 0;
+                      d90 += (a.d61_90 && a.d61_90.value) || 0;
+                      d120 += (a.d91_120 && a.d91_120.value) || 0;
+                      above120 += (a.d120p && a.d120p.value) || 0;
                   }
               });
           }
@@ -1742,10 +1751,12 @@ const DashboardInadimplencia = (function() {
         if (snap && snap.data_json && snap.data_json.companies) {
             snap.data_json.companies.forEach(comp => {
                 if (comp.aging) {
-                    ['d31_60', 'd61_90', 'd91_180', 'd181_365', 'd365p'].forEach(k => {
-                        if (comp.aging[k]) {
-                            v += comp.aging[k].value || 0;
-                            c += comp.aging[k].count || 0;
+                    const a = emptyAging();
+                    absorbAging(a, comp.aging);
+                    ['d31_60', 'd61_90', 'd91_120', 'd120p'].forEach(k => {
+                        if (a[k]) {
+                            v += a[k].value || 0;
+                            c += a[k].count || 0;
                         }
                     });
                 }
