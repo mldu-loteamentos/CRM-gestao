@@ -7,6 +7,12 @@ const AnexosState = {
   unidades: [],
   selectedUnidade: null,
   idCliente: '',
+  clienteNome: '',
+  clienteBuscaId: '',
+  clienteBuscaDoc: '',
+  clienteBuscaNome: '',
+  clienteBuscaTel: '',
+  clienteBuscaEmail: '',
   dataDocumento: '',
   files: [], // Array de { id, file, base64, size, tagOriginal, tags: [], status: 'Processando'|'Pronto'|'Revisar'|'Erro', uploadProgress: 0, previewUrl, dateOverride: '', downloadedId: '' }
   tagsAtivas: [], // Agora guardaremos o objeto inteiro {name, destino}
@@ -1239,12 +1245,52 @@ function renderAnexosModule(opts) {
             </div>
           ` : `
             <div class="form-group anexos-field" style="margin:0;">
-              <label>ID Cliente ou CPF/CNPJ</label>
-              <input type="text" id="anexos-idcliente" class="form-control anexos-ctrl" placeholder="ID ou CPF/CNPJ" value="${AnexosState.idCliente}" onchange="AnexosState.idCliente = this.value; anexosSoftRender();">
+              <label>ID Cliente</label>
+              <input type="text" id="anexos-cli-id" class="form-control anexos-ctrl" placeholder="Ex.: 12275"
+                value="${anexosEsc(AnexosState.clienteBuscaId || AnexosState.idCliente || '')}"
+                oninput="AnexosState.clienteBuscaId=this.value.replace(/[^0-9]/g,'')"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarCliente();}">
+            </div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>CPF/CNPJ</label>
+              <input type="text" id="anexos-cli-doc" class="form-control anexos-ctrl" placeholder="000.000.000-00"
+                value="${anexosEsc(AnexosState.clienteBuscaDoc || '')}"
+                oninput="if(window.maskCpfCnpj)maskCpfCnpj(this);AnexosState.clienteBuscaDoc=this.value"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarCliente();}">
             </div>
             <div class="form-group anexos-field" style="margin:0;">
               <label>Data Global do Documento</label>
               ${anexosDateFieldHtml({ textId: "anexos-data", pickerId: "anexos-data-picker", stored: AnexosState.dataDocumento })}
+            </div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>Nome do Cliente</label>
+              <input type="text" id="anexos-cli-nome" class="form-control anexos-ctrl" placeholder="Digite para buscar..." autocomplete="off"
+                value="${anexosEsc(AnexosState.clienteBuscaNome || '')}"
+                oninput="AnexosState.clienteBuscaNome=this.value;AnexosApp.sugerirCliente('nome', this.value)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarCliente();}">
+              <div id="anexos-dd-nome" class="anexos-cli-suggest"></div>
+            </div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>Telefone</label>
+              <input type="text" id="anexos-cli-tel" class="form-control anexos-ctrl" placeholder="Digite para buscar..." autocomplete="off"
+                value="${anexosEsc(AnexosState.clienteBuscaTel || '')}"
+                oninput="AnexosApp.onClienteTelInput(this)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarCliente();}">
+              <div id="anexos-dd-tel" class="anexos-cli-suggest"></div>
+            </div>
+            <div class="form-group anexos-field" style="margin:0;">
+              <label>E-mail</label>
+              <div class="anexos-cli-search-actions">
+                <input type="text" id="anexos-cli-email" class="form-control anexos-ctrl" placeholder="Digite para buscar..." autocomplete="off"
+                  value="${anexosEsc(AnexosState.clienteBuscaEmail || '')}"
+                  oninput="AnexosState.clienteBuscaEmail=this.value;AnexosApp.sugerirCliente('email', this.value)"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();AnexosApp.buscarCliente();}"
+                  style="flex:1;min-width:0;">
+                <button type="button" class="btn btn-primary anexos-ctrl anexos-buscar-btn" onclick="AnexosApp.buscarCliente()" style="flex-shrink:0;">
+                  <i data-lucide="search" style="width:16px;"></i> Buscar
+                </button>
+              </div>
+              <div id="anexos-dd-email" class="anexos-cli-suggest"></div>
             </div>
           `}
         </div>
@@ -1263,7 +1309,7 @@ function renderAnexosModule(opts) {
             <div class="anexos-contract-line">
               ${AnexosState.activeContract || AnexosState.idCliente ? `
                 <span><i data-lucide="user" style="width:15px;height:15px;color:var(--color-primary);"></i>
-                  ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : 'Cliente'}
+                  ${AnexosState.idCliente ? AnexosState.idCliente + ' - ' : ''}${AnexosState.activeContract ? AnexosState.activeContract.customerName : (AnexosState.clienteNome || 'Cliente')}
                 </span>` : ''}
               ${AnexosState.ccName || AnexosState.cc ? `
               <span><i data-lucide="map-pin" style="width:15px;height:15px;color:var(--color-primary);"></i>
@@ -1587,6 +1633,12 @@ const AnexosApp = {
     AnexosState.unidades = [];
     AnexosState.selectedUnidade = null;
     AnexosState.idCliente = '';
+    AnexosState.clienteNome = '';
+    AnexosState.clienteBuscaId = '';
+    AnexosState.clienteBuscaDoc = '';
+    AnexosState.clienteBuscaNome = '';
+    AnexosState.clienteBuscaTel = '';
+    AnexosState.clienteBuscaEmail = '';
     AnexosState.dataDocumento = '';
     AnexosState.files = [];
     AnexosState.isUploading = false;
@@ -2443,6 +2495,264 @@ const AnexosApp = {
 
   setContexto(val) {
     AnexosState.contexto = val;
+    if (val === 'Cliente' && typeof window.startCustomerBackgroundSync === 'function') {
+      window.startCustomerBackgroundSync(false, true);
+    }
+    anexosSoftRender();
+  },
+
+  _normCli(str) {
+    return str ? String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+  },
+
+  _cliCache() {
+    return (window.GlobalCustomerCache && Array.isArray(window.GlobalCustomerCache.data))
+      ? window.GlobalCustomerCache.data
+      : [];
+  },
+
+  _formatCliDoc(doc) {
+    const d = String(doc || '').replace(/\D/g, '');
+    if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+    return String(doc || '');
+  },
+
+  _maskPhoneValue(raw) {
+    let v = String(raw || '').replace(/\D/g, '');
+    if (!v) return '';
+    if (v.length <= 10) {
+      v = v.replace(/^(\d{2})(\d)/g, '($1) $2').replace(/(\d{4})(\d)/, '$1-$2');
+    } else {
+      v = v.replace(/^(\d{2})(\d)/g, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2');
+    }
+    return v.substring(0, 15);
+  },
+
+  onClienteTelInput(el) {
+    if (!el) return;
+    const masked = this._maskPhoneValue(el.value);
+    el.value = masked;
+    AnexosState.clienteBuscaTel = masked;
+    this.sugerirCliente('tel', masked);
+  },
+
+  _closeCliSuggest(exceptId) {
+    ['anexos-dd-nome', 'anexos-dd-tel', 'anexos-dd-email'].forEach((id) => {
+      if (exceptId && id === exceptId) return;
+      const box = document.getElementById(id);
+      if (box) {
+        box.classList.remove('is-open');
+        box.innerHTML = '';
+      }
+    });
+  },
+
+  sugerirCliente(type, query) {
+    if (typeof window.startCustomerBackgroundSync === 'function') {
+      window.startCustomerBackgroundSync(false, true);
+    }
+    const map = { nome: 'anexos-dd-nome', tel: 'anexos-dd-tel', email: 'anexos-dd-email' };
+    const ddId = map[type];
+    const box = ddId ? document.getElementById(ddId) : null;
+    if (!box) return;
+    this._closeCliSuggest(ddId);
+
+    const q = String(query || '').trim();
+    const qNorm = this._normCli(q);
+    const qNum = q.replace(/\D/g, '');
+    if ((type === 'nome' || type === 'email') && qNorm.length < 2) {
+      box.classList.remove('is-open');
+      box.innerHTML = '';
+      return;
+    }
+    if (type === 'tel' && qNum.length < 4) {
+      box.classList.remove('is-open');
+      box.innerHTML = '';
+      return;
+    }
+
+    clearTimeout(AnexosState._cliSuggestTimer);
+    AnexosState._cliSuggestTimer = setTimeout(() => {
+      const cache = this._cliCache();
+      let matches = [];
+      if (type === 'nome') {
+        const terms = qNorm.split(/\s+/).filter(Boolean);
+        matches = cache.filter((c) => {
+          const name = this._normCli(c.name);
+          return terms.every((t) => name.includes(t));
+        });
+      } else if (type === 'tel') {
+        matches = cache.filter((c) => {
+          const phones = c.phones || [];
+          return phones.some((p) => {
+            const full = String(p.areaCode || '') + String(p.number || p.phoneNumber || '');
+            return full.replace(/\D/g, '').includes(qNum);
+          });
+        });
+      } else if (type === 'email') {
+        matches = cache.filter((c) => this._normCli(c.email).includes(qNorm));
+      }
+
+      matches.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
+      const top = matches.slice(0, 80);
+      if (!top.length) {
+        const loading = window.GlobalCustomerCache && window.GlobalCustomerCache.status === 'loading';
+        box.innerHTML = loading
+          ? `<div class="anexos-cli-suggest-empty">Carregando base de clientes…</div>`
+          : `<div class="anexos-cli-suggest-empty">Nenhum cliente encontrado.</div>`;
+        box.classList.add('is-open');
+        return;
+      }
+
+      box.innerHTML = top.map((c) => {
+        const doc = this._formatCliDoc(c.cpf || c.cnpj || c.cpfCnpj || '');
+        const label = `${c.id} - ${anexosEsc(c.name || '')}${doc ? ' - ' + anexosEsc(doc) : ''}`;
+        return `<div class="anexos-cli-suggest-item" onmousedown="event.preventDefault();AnexosApp.selecionarClienteCache('${String(c.id).replace(/'/g, '')}')">${label}</div>`;
+      }).join('');
+      box.classList.add('is-open');
+    }, 280);
+  },
+
+  selecionarClienteCache(customerId) {
+    const c = this._cliCache().find((x) => String(x.id) === String(customerId));
+    if (!c) return;
+    this._aplicarCliente(c);
+    this._closeCliSuggest();
+    anexosSoftRender();
+  },
+
+  _aplicarCliente(c) {
+    if (!c) return;
+    const docRaw = c.cpf || c.cnpj || c.cpfCnpj || '';
+    AnexosState.idCliente = String(c.id || '');
+    AnexosState.clienteNome = c.name || '';
+    AnexosState.clienteBuscaId = String(c.id || '');
+    AnexosState.clienteBuscaDoc = this._formatCliDoc(docRaw);
+    AnexosState.clienteBuscaNome = c.name || '';
+    AnexosState.clienteBuscaEmail = c.email || AnexosState.clienteBuscaEmail || '';
+    if (!AnexosState.clienteBuscaTel && Array.isArray(c.phones) && c.phones[0]) {
+      const p = c.phones[0];
+      const full = String(p.areaCode || '') + String(p.number || p.phoneNumber || '');
+      AnexosState.clienteBuscaTel = this._maskPhoneValue(full);
+    }
+    AnexosState.activeContract = null;
+  },
+
+  async buscarCliente() {
+    if (typeof window.startCustomerBackgroundSync === 'function') {
+      window.startCustomerBackgroundSync(false, true);
+    }
+
+    const idEl = document.getElementById('anexos-cli-id');
+    const docEl = document.getElementById('anexos-cli-doc');
+    const nomeEl = document.getElementById('anexos-cli-nome');
+    const telEl = document.getElementById('anexos-cli-tel');
+    const emailEl = document.getElementById('anexos-cli-email');
+
+    AnexosState.clienteBuscaId = idEl ? idEl.value.replace(/\D/g, '') : (AnexosState.clienteBuscaId || '');
+    AnexosState.clienteBuscaDoc = docEl ? docEl.value : (AnexosState.clienteBuscaDoc || '');
+    AnexosState.clienteBuscaNome = nomeEl ? nomeEl.value.trim() : (AnexosState.clienteBuscaNome || '');
+    AnexosState.clienteBuscaTel = telEl ? telEl.value : (AnexosState.clienteBuscaTel || '');
+    AnexosState.clienteBuscaEmail = emailEl ? emailEl.value.trim() : (AnexosState.clienteBuscaEmail || '');
+
+    const idQ = AnexosState.clienteBuscaId;
+    const docQ = String(AnexosState.clienteBuscaDoc || '').replace(/\D/g, '');
+    const nomeQ = AnexosState.clienteBuscaNome;
+    const telQ = String(AnexosState.clienteBuscaTel || '').replace(/\D/g, '');
+    const emailQ = AnexosState.clienteBuscaEmail;
+
+    if (!idQ && !docQ && !nomeQ && !telQ && !emailQ) {
+      alert('Preencha ID, CPF/CNPJ, nome, telefone ou e-mail para buscar o cliente.');
+      return;
+    }
+
+    const cache = this._cliCache();
+    let match = null;
+
+    if (idQ) {
+      match = cache.find((c) => String(c.id) === String(idQ)) || null;
+      if (!match) {
+        // Aceita ID digitado mesmo fora do cache local
+        AnexosState.idCliente = idQ;
+        AnexosState.clienteNome = AnexosState.clienteNome || '';
+        AnexosState.clienteBuscaId = idQ;
+        try {
+          if (window.SiengeApiService && typeof SiengeApiService.getCustomer === 'function') {
+            const cData = await SiengeApiService.getCustomer(idQ);
+            if (cData && (cData.id || cData.name)) {
+              this._aplicarCliente({
+                id: cData.id || idQ,
+                name: cData.name || cData.nome || '',
+                email: cData.email || '',
+                cpf: cData.cpf || '',
+                cnpj: cData.cnpj || '',
+                cpfCnpj: cData.cpfCnpj || '',
+                phones: cData.phones || []
+              });
+            }
+          }
+        } catch (e) { /* segue com o ID */ }
+        this._closeCliSuggest();
+        anexosSoftRender();
+        return;
+      }
+    }
+
+    if (!match && docQ.length >= 11) {
+      match = cache.find((c) => {
+        const d = String(c.cpf || c.cnpj || c.cpfCnpj || '').replace(/\D/g, '');
+        return d && d === docQ;
+      }) || null;
+      if (!match) {
+        try {
+          const cRes = await fetch(anexosApiUrl(`/sienge-proxy/customers?cpfCnpj=${encodeURIComponent(docQ)}`), {
+            headers: { Authorization: typeof getBasicAuthHeader !== 'undefined' ? getBasicAuthHeader() : '' }
+          });
+          if (cRes.ok) {
+            const cData = await cRes.json();
+            const hit = cData && cData.results && cData.results[0];
+            if (hit) {
+              this._aplicarCliente(hit);
+              this._closeCliSuggest();
+              anexosSoftRender();
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('[Anexos] busca CPF/CNPJ', e);
+        }
+      }
+    }
+
+    if (!match && nomeQ) {
+      const terms = this._normCli(nomeQ).split(/\s+/).filter(Boolean);
+      match = cache.find((c) => {
+        const name = this._normCli(c.name);
+        return terms.every((t) => name.includes(t));
+      }) || null;
+    }
+    if (!match && telQ.length >= 4) {
+      match = cache.find((c) => {
+        const phones = c.phones || [];
+        return phones.some((p) => {
+          const full = String(p.areaCode || '') + String(p.number || p.phoneNumber || '');
+          return full.replace(/\D/g, '').includes(telQ);
+        });
+      }) || null;
+    }
+    if (!match && emailQ) {
+      const em = this._normCli(emailQ);
+      match = cache.find((c) => this._normCli(c.email).includes(em)) || null;
+    }
+
+    if (!match) {
+      alert('Cliente não encontrado na base geral. Confira os dados ou aguarde a sincronização da base de clientes.');
+      return;
+    }
+
+    this._aplicarCliente(match);
+    this._closeCliSuggest();
     anexosSoftRender();
   },
 

@@ -181,54 +181,149 @@ const ParticipacoesApp = {
     return Number.isFinite(v) ? v : 0;
   },
 
+  /** Extrai o último valor monetário (aceita sufixo R$ / nº doc depois) e devolve o texto sem ele. */
+  takeMoneyFromText(text) {
+    let rest = String(text || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[\u2000-\u200B\uFEFF]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!rest) return { valor: 0, rest: "" };
+
+    // ... 1.234,56 R$   |   ... 1.234,56 R$ 42   |   ... 1.234,56 42
+    let m = rest.match(/([\d.]+,\d{2})\s*(?:R\$|RS)?\s*(?:TARIFA|[A-Z]?\d{1,8})?\s*$/i);
+    if (!m) {
+      const all = [...rest.matchAll(/([\d.]+,\d{2})/g)];
+      if (all.length) m = all[all.length - 1];
+    }
+    if (!m) return { valor: 0, rest };
+
+    const valor = this.parseMoney(m[1]);
+    if (!(valor > 0)) return { valor: 0, rest };
+
+    const idx = typeof m.index === "number" ? m.index : rest.lastIndexOf(m[1]);
+    let before = idx >= 0 ? rest.slice(0, idx).trim() : rest;
+    let after = idx >= 0 ? rest.slice(idx + String(m[0]).length).trim() : "";
+    after = after.replace(/^(?:R\$|RS)\s*/i, "").replace(/^(?:TARIFA|[A-Z]?\d{1,8})\s*/i, "").trim();
+    before = before.replace(/\s+(?:TARIFA|[A-Z]?\d{1,8})$/i, "").trim();
+    rest = (before + (after ? " " + after : "")).replace(/\s+/g, " ").trim();
+    return { valor, rest };
+  },
+
+  /** Separa razão social do detalhe (REF., observação, nº doc residual). */
+  splitCredorDetalhe(rest) {
+    let text = String(rest || "").trim();
+    if (!text) return { credor: "(sem credor)", detalhe: "" };
+    text = text.replace(/\s+(?:TARIFA|[A-Z]?\d{1,8})$/i, "").trim();
+    const gap = text.match(/^(.{3,120}?)\s{2,}(.+)$/);
+    if (gap) return { credor: gap[1].trim(), detalhe: gap[2].trim() };
+    const parts = text.split(/\s{2,}/);
+    if (parts.length >= 2) {
+      return { credor: parts[0].trim(), detalhe: parts.slice(1).join(" ").trim() };
+    }
+    const corp = text.match(/^(.+?\b(?:LTDA|S\.?\s?A\.?|EIRELI|ME|EPP|SS|LTDA\.)\b\.?)\s+(.+)$/i);
+    if (corp) return { credor: corp[1].replace(/\s+/g, " ").trim(), detalhe: corp[2].trim() };
+    const ref = text.match(/^(.+?)\s+(REF\.?\s*.+)$/i);
+    if (ref && ref[1].length >= 3) return { credor: ref[1].trim(), detalhe: ref[2].trim() };
+    return { credor: text, detalhe: "" };
+  },
+
+  normalizeCredorName(name) {
+    return String(name || "")
+      .replace(/\s+/g, " ")
+      .replace(/\s*(?:R\$|RS)\s*$/i, "")
+      .replace(/\s+([\d.]+,\d{2})\s*$/g, "")
+      .trim() || "(sem credor)";
+  },
+
+  /** Mês da matriz: prioriza a data do lançamento (PDF), depois o fechamento do arquivo. */
+  expensePeriodKey(r) {
+    const iso = String((r && r.iso) || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso.slice(0, 7);
+    const d = String((r && r.date) || "");
+    const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}`;
+    return (r && r.periodo) || this.periodFromFileName(r && r.sourceFile) || "sem-periodo";
+  },
+
+  /** Corrige linhas antigas do cache em que o valor ficou colado no nome. */
+  repairExpenseRow(row) {
+    if (!row || typeof row !== "object") return row;
+    let credor = String(row.credor || "");
+    let detalhe = String(row.detalhe || "");
+    let valor = Number(row.valor) || 0;
+    const blob = `${credor} ${detalhe}`.trim();
+
+    if (valor < 0.005) {
+      const fromBlob = this.takeMoneyFromText(blob);
+      if (fromBlob.valor > 0) {
+        valor = fromBlob.valor;
+        const split = this.splitCredorDetalhe(fromBlob.rest);
+        credor = split.credor;
+        detalhe = split.detalhe || detalhe;
+      }
+    } else {
+      const cleaned = this.takeMoneyFromText(credor);
+      if (cleaned.rest) credor = cleaned.rest;
+      const cleanedDet = this.takeMoneyFromText(detalhe);
+      if (cleanedDet.rest !== detalhe) detalhe = cleanedDet.rest;
+    }
+
+    if (!detalhe && credor) {
+      const split = this.splitCredorDetalhe(credor);
+      credor = split.credor;
+      detalhe = split.detalhe;
+    }
+
+    credor = this.normalizeCredorName(credor);
+    const cat = this.categoryOf({ credor, detalhe });
+    return Object.assign({}, row, {
+      credor,
+      detalhe,
+      valor,
+      categoria: cat.name,
+      categoriaId: cat.id
+    });
+  },
+
   parseExpenseLines(text, meta) {
     const raw = String(text || "").replace(/\r/g, "");
     let chunk = raw;
     const start = raw.search(/DESPESAS\s+PAGAS/i);
     if (start >= 0) chunk = raw.slice(start);
-    const cut = chunk.search(/\n[=\-]{8,}[\s\S]{0,80}(RECEITAS|RECEBIMENTOS|SALDO|EXTRATO BANC)/i);
+    const cut = chunk.search(/\n[=\-]{8,}[\s\S]{0,80}(RECEITAS|RECEBIMENTOS|SALDO|EXTRATO BANC|Saldo Total)/i);
     if (cut > 80) chunk = chunk.slice(0, cut);
-    const lines = chunk.split("\n").map((l) => l.replace(/\s+$/g, ""));
+    const lines = chunk.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
     const rows = [];
     const periodo = (meta && meta.closing) || "";
     const sourceFile = (meta && meta.name) || "";
     lines.forEach((line) => {
-      const m = line.match(/^(\d{2}\/\d{2}\/\d{4})\s+(.+)$/);
+      // Data no início ou após lixo de cabeçalho na mesma linha
+      const m = line.match(/(\d{2}\/\d{2}\/\d{4})\s+(.+)$/);
       if (!m) return;
+      if (/saldo\s*total|raz[aã]o\s*social|detalhamento|d[eé]bitos/i.test(line) && !/REF\./i.test(line)) return;
       const date = m[1];
-      let rest = m[2].trim();
-      let valor = 0;
-      const money = rest.match(/([\d.]+,\d{2})\s*$/);
-      if (money) {
-        valor = this.parseMoney(money[1]);
-        rest = rest.slice(0, rest.length - money[1].length).trim();
+      const taken = this.takeMoneyFromText(m[2].trim());
+      if (!(taken.valor > 0) && !taken.rest) return;
+      const split = this.splitCredorDetalhe(taken.rest);
+      let credor = this.normalizeCredorName(split.credor);
+      let detalhe = split.detalhe;
+      if (!credor || credor === "(sem credor)") {
+        if (detalhe) credor = "(sem credor)";
+        else return;
       }
-      let credor = rest;
-      let detalhe = "";
-      const gap = rest.match(/^(.{3,90}?)\s{2,}(.+)$/);
-      if (gap) {
-        credor = gap[1].trim();
-        detalhe = gap[2].trim();
-      } else {
-        const parts = rest.split(/\s{2,}/);
-        if (parts.length >= 2) {
-          credor = parts[0].trim();
-          detalhe = parts.slice(1).join(" ").trim();
-        }
-      }
-      if (!credor && detalhe) credor = "(sem credor)";
-      const cat = this.categoryOf({ credor, detalhe });
-      rows.push({
+      const iso = date.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1");
+      rows.push(this.repairExpenseRow({
         date,
-        iso: date.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1"),
-        credor: credor || "(sem credor)",
+        iso,
+        credor,
         detalhe,
-        valor,
-        categoria: cat.name,
-        categoriaId: cat.id,
-        periodo,
+        valor: taken.valor,
+        categoria: "",
+        categoriaId: "",
+        periodo: periodo || iso.slice(0, 7),
         sourceFile
-      });
+      }));
     });
     return rows;
   },
@@ -244,17 +339,37 @@ const ParticipacoesApp = {
       const byY = {};
       content.items.forEach((it) => {
         const y = Math.round((it.transform && it.transform[5]) || 0);
-        byY[y] = (byY[y] || "") + (it.str || "") + " ";
+        const x = Number((it.transform && it.transform[4]) || 0);
+        if (!byY[y]) byY[y] = [];
+        byY[y].push({ x, str: String(it.str || "") });
       });
       const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
-      pages.push(ys.map((y) => byY[y].replace(/\s+/g, " ").trim()).join("\n"));
+      pages.push(ys.map((y) => {
+        return byY[y]
+          .sort((a, b) => a.x - b.x)
+          .map((t) => t.str)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }).filter(Boolean).join("\n"));
     }
     return pages.join("\n");
   },
 
-  async ensureFileParsed(fileRec) {
+  expensesMostlyBroken(expenses) {
+    const list = Array.isArray(expenses) ? expenses : [];
+    if (!list.length) return true;
+    const repaired = list.map((r) => this.repairExpenseRow(r));
+    const withVal = repaired.filter((r) => Number(r.valor) > 0).length;
+    return withVal / repaired.length < 0.45;
+  },
+
+  async ensureFileParsed(fileRec, force) {
     if (!fileRec) return;
-    if (Array.isArray(fileRec.expenses)) return;
+    if (!force && Array.isArray(fileRec.expenses) && fileRec.expenses.length && !this.expensesMostlyBroken(fileRec.expenses)) {
+      fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r));
+      return;
+    }
     const url = this.fileLink(fileRec.name);
     const text = await this.extractPdfText(url);
     fileRec.expenses = this.parseExpenseLines(text, fileRec);
@@ -263,7 +378,7 @@ const ParticipacoesApp = {
 
   persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v2";
+      const key = "crm_participacoes_cache_v4";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
       all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
@@ -276,24 +391,37 @@ const ParticipacoesApp = {
 
   restoreCacheForCompany() {
     try {
-      const key = "crm_participacoes_cache_v2";
-      const all = JSON.parse(localStorage.getItem(key) || "{}");
+      const keys = ["crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
+      let all = {};
+      keys.forEach((key) => {
+        try {
+          const chunk = JSON.parse(localStorage.getItem(key) || "{}") || {};
+          Object.keys(chunk).forEach((k) => {
+            if (!all[k]) all[k] = chunk[k];
+          });
+        } catch (e) {}
+      });
       Object.keys(all).forEach((k) => {
         if (!k.startsWith(String(this.companyId) + "|")) return;
         const name = k.slice(String(this.companyId).length + 1);
         const hit = all[k];
         if (!hit || !Array.isArray(hit.expenses)) return;
+        // Cache antigo com valores zerados: não restaura — força reparse do PDF
+        if (this.expensesMostlyBroken(hit.expenses)) return;
+        const repaired = hit.expenses.map((r) => this.repairExpenseRow(r));
         let rec = this.files.find((f) => f.name === name);
         if (!rec) {
           rec = {
             name,
             closing: hit.closing || this.periodFromFileName(name),
-            expenses: hit.expenses,
+            expenses: repaired,
             fromCache: true
           };
           this.files.push(rec);
-        } else if (!rec.expenses) {
-          rec.expenses = hit.expenses;
+        } else if (!rec.expenses || this.expensesMostlyBroken(rec.expenses)) {
+          rec.expenses = repaired;
+        } else {
+          rec.expenses = (rec.expenses || []).map((r) => this.repairExpenseRow(r));
         }
       });
     } catch (e) {}
@@ -303,7 +431,7 @@ const ParticipacoesApp = {
     const list = [];
     this.files.forEach((f) => {
       (f.expenses || []).forEach((r) => {
-        list.push(Object.assign({}, r, {
+        list.push(Object.assign({}, this.repairExpenseRow(r), {
           periodo: r.periodo || f.closing || this.periodFromFileName(f.name),
           sourceFile: r.sourceFile || f.name
         }));
@@ -315,7 +443,7 @@ const ParticipacoesApp = {
   activeExpenses() {
     if (this.fileName) {
       const f = this.files.find((x) => x.name === this.fileName);
-      return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, r, {
+      return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, this.repairExpenseRow(r), {
         periodo: r.periodo || (f && f.closing) || "",
         sourceFile: r.sourceFile || (f && f.name) || ""
       })) : [];
@@ -390,7 +518,7 @@ const ParticipacoesApp = {
     const monthSet = new Set();
     const byCredor = {};
     rows.forEach((r) => {
-      const periodo = r.periodo || this.periodFromFileName(r.sourceFile) || "sem-periodo";
+      const periodo = this.expensePeriodKey(r);
       const credor = r.credor || "(sem credor)";
       monthSet.add(periodo);
       if (!byCredor[credor]) byCredor[credor] = { credor, cells: {}, total: 0 };
@@ -426,7 +554,7 @@ const ParticipacoesApp = {
     if (!this.detail) return [];
     const { credor, periodo } = this.detail;
     return this.filtered().filter((r) => {
-      const p = r.periodo || this.periodFromFileName(r.sourceFile) || "sem-periodo";
+      const p = this.expensePeriodKey(r);
       return String(r.credor || "(sem credor)") === String(credor) && String(p) === String(periodo);
     }).sort((a, b) => String(a.iso || a.date).localeCompare(String(b.iso || b.date)));
   },
@@ -558,6 +686,16 @@ const ParticipacoesApp = {
     this.loading = false;
     // Mantém "Todos os períodos" para a matriz credor × mês
     this.fileName = "";
+    this.parsing = true;
+    this.render();
+    try {
+      for (const f of this.files) {
+        await this.ensureFileParsed(f);
+      }
+    } catch (e) {
+      this.error = "Não foi possível ler um dos PDFs: " + (e.message || e);
+    }
+    this.parsing = false;
     this.render();
   },
 
