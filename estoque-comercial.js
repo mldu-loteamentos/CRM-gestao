@@ -7,6 +7,13 @@ const EstoqueComercialApp = {
   FB_CHUNK: 400,
   /** Pausado até nova régua de APIs Sienge (pacote ~75k/dia estourando). */
   BATIMENTO_AUTO_PAUSED: true,
+  /**
+   * Modo "delta" para reduzir consumo de API no batimento diário:
+   * recalcula só clientes que tiveram pagamento recente (via paidMap do app).
+   */
+  BATIMENTO_DELTA_ENABLED: true,
+  BATIMENTO_DELTA_DAYS: 5,
+  BATIMENTO_DELTA_MAX_CUSTOMERS: 1200,
   SOLD_CODES: ["V", "O", "G", "P", "L"],
   STATUS_PILLS: [
     { id: "all", label: "Todas" },
@@ -656,16 +663,47 @@ const EstoqueComercialApp = {
       return;
     }
     el.style.display = "block";
-    el.innerHTML = "<strong>Batimento automático pausado</strong> — consumo de API Sienge acima do pacote diário (~75k). Até a nova régua: escolha <em>um empreendimento</em> e use Vincular / Classificar. Não rode em “Todos”.";
+    el.innerHTML = "<strong>Batimento automático pausado</strong> — consumo de API Sienge. " +
+      "Para batimento manual diário: use <em>Vincular / Classificar</em>. " +
+      "Se quiser rodar em <em>Todos</em>, o sistema recalcula só quem teve <em>pagamento recente</em> (modo delta via <code>paidMap</code>). " +
+      "Se o <code>paidMap</code> não estiver pronto, filtre <em>um empreendimento</em>.";
   },
 
   requireEmpForApiHeavy() {
     const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
     if (this.BATIMENTO_AUTO_PAUSED && !empSel) {
-      alert("Batimento pausado por cota de API. Selecione um empreendimento (não “Todos”) e tente de novo.");
-      return null;
+      // Para permitir "Todos" sem estourar API, liberamos apenas quando:
+      // o modo delta está ativo e o paidMap (pagamento recente) já existe.
+      const hasPaidMap = !!(window.paidMapHasBillDays
+        && window.advFilters
+        && window.advFilters.paidMap
+        && window.paidMapHasBillDays(window.advFilters.paidMap));
+      if (!(this.BATIMENTO_DELTA_ENABLED && hasPaidMap)) {
+        alert("Batimento pausado por cota de API. Selecione um empreendimento (não “Todos”) e tente de novo. " +
+          "Dica: abra o módulo de Fila/“Pagamento recente” para popular o paidMap e rodar em modo delta.");
+        return null;
+      }
     }
     return empSel;
+  },
+
+  paidDaysForBillId(billId) {
+    const paidMap = window.advFilters && window.advFilters.paidMap;
+    if (!paidMap || typeof paidMap.get !== "function") return null;
+    const raw = String(billId || "").trim();
+    if (!raw) return null;
+    const candidates = [];
+    candidates.push(raw);
+    candidates.push(raw.replace(/^B-/, ""));
+    const norm = raw.replace(/^B-/, "").split("-")[0];
+    if (norm) candidates.push(norm);
+    for (const c of candidates) {
+      if (!paidMap.has(c)) continue;
+      const v = paidMap.get(c);
+      const n = typeof v === "string" ? Number(v) : v;
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
   },
 
   async autoStartDailyBatimento() {
@@ -2002,7 +2040,7 @@ const EstoqueComercialApp = {
     }
   },
 
-  async applyRelacionamentoBatimento(ccId) {
+  async applyRelacionamentoBatimento(ccId, opts) {
     this.buildDefaulterIndex();
     const sold = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isFinanceUnit(u));
     const byCust = new Map();
@@ -2013,10 +2051,12 @@ const EstoqueComercialApp = {
       byCust.get(id).push(u);
     });
     const custIds = [...byCust.keys()];
+    const refreshSet = opts && opts.custIdsToRefresh ? opts.custIdsToRefresh : null;
     let marked = 0;
     for (let i = 0; i < custIds.length; i++) {
       if (this.state.stopSync) break;
       const customerId = custIds[i];
+      if (refreshSet && !refreshSet.has(String(customerId))) continue;
       this.setProgress(`Valores da ficha ${i + 1}/${custIds.length} — cliente ${customerId}…`, ((i + 1) / Math.max(custIds.length, 1)) * 100);
       const bills = await this.fetchReceivableBillsCached(customerId);
       const statements = await this.fetchStatementsCached(customerId);
@@ -2087,6 +2127,63 @@ const EstoqueComercialApp = {
         alert("Não há empreendimentos com unidades para bater. Baixe as unidades do Sienge ou escolha um centro que tenha lote.");
         return;
       }
+
+      // -----------------------------
+      // Batimento DELTA (pagamento recente)
+      // -----------------------------
+      let custIdsToRefreshByCc = null;
+      const deltaEnabled = this.BATIMENTO_DELTA_ENABLED
+        && window.advFilters
+        && window.advFilters.paidMap
+        && window.paidMapHasBillDays
+        && window.paidMapHasBillDays(window.advFilters.paidMap);
+      if (deltaEnabled) {
+        const deltaDays = Number(this.BATIMENTO_DELTA_DAYS) || 5;
+        custIdsToRefreshByCc = new Map();
+        const customerMinDays = new Map(); // customerId -> minDays
+
+        this.state.units.forEach(u => {
+          if (!u) return;
+          if (empSel && String(u.enterpriseId) !== String(empSel)) return;
+          if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return;
+          const bid = u.receivableBillId || u.contractId || u.contractNumber || "";
+          const d = this.paidDaysForBillId(bid);
+          if (d == null || !Number.isFinite(d)) return;
+          if (d > deltaDays) return;
+
+          const ccKey = String(u.enterpriseId);
+          if (!custIdsToRefreshByCc.has(ccKey)) custIdsToRefreshByCc.set(ccKey, new Set());
+          custIdsToRefreshByCc.get(ccKey).add(String(u.customerId));
+
+          const cur = customerMinDays.get(String(u.customerId));
+          if (cur == null || d < cur) customerMinDays.set(String(u.customerId), d);
+        });
+
+        if (custIdsToRefreshByCc.size) {
+          // Cap de segurança para não extrapolar API mesmo em delta.
+          const totalCustomers = customerMinDays.size;
+          if (totalCustomers > this.BATIMENTO_DELTA_MAX_CUSTOMERS) {
+            const sorted = [...customerMinDays.entries()].sort((a, b) => a[1] - b[1]); // menor dias primeiro
+            const allowed = new Set(sorted.slice(0, this.BATIMENTO_DELTA_MAX_CUSTOMERS).map(x => String(x[0])));
+            custIdsToRefreshByCc.forEach((set, k) => {
+              const next = new Set([...set].filter(id => allowed.has(String(id))));
+              if (!next.size) custIdsToRefreshByCc.delete(k);
+              else custIdsToRefreshByCc.set(k, next);
+            });
+          }
+
+          const impactedCcIds = new Set([...custIdsToRefreshByCc.keys()].map(String));
+          ccIds = ccIds.filter(id => impactedCcIds.has(String(id)));
+        }
+      }
+
+      if (custIdsToRefreshByCc && !ccIds.length) {
+        // Sem impacto recente: inadimplência do dia continua via defaulters/fila.
+        // Quitados podem ficar 1-janela dia atrasados (corrigimos no próximo impacto ou no full).
+        this.setProgress("Batimento delta: sem clientes com pagamento recente na janela configurada.");
+        return 0;
+      }
+
       this.state._autoFinanceRunning = true;
       this.state.stopSync = false;
       this.setBusy(true);
@@ -2098,7 +2195,8 @@ const EstoqueComercialApp = {
         const ccId = ccIds[i];
         const soldN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isSoldUnit(u)).length;
         this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${soldN} vendidas)…`, ((i + 1) / ccIds.length) * 100);
-        marked += await this.applyRelacionamentoBatimento(ccId);
+        const refreshSet = custIdsToRefreshByCc ? custIdsToRefreshByCc.get(String(ccId)) : null;
+        marked += await this.applyRelacionamentoBatimento(ccId, { custIdsToRefresh: refreshSet });
       }
       const inScope = u => !empSel || String(u.enterpriseId) === empSel;
       const qtdQ = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Quitado").length;
