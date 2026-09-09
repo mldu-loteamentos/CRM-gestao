@@ -13,6 +13,9 @@ const ParticipacoesApp = {
   parsing: false,
   uploadProgress: "",
   detail: null, // { credor, periodo } | null
+  companyPickerOpen: false,
+  exportScope: "current", // current | all
+  cloudSyncing: false,
 
   CATEGORIES: [
     { id: "relacionada", name: "Parte relacionada / sócio", test: /ellenco|ellenceo|moura leite|mutuo|mútuo|devolução de mutuo|socio|sócio/i },
@@ -177,6 +180,119 @@ const ParticipacoesApp = {
     this.loadFolderMeta();
   },
 
+  periodKeyOfFile(f) {
+    if (!f) return "";
+    return String(f.closing || this.periodFromFileName(f.name) || "").trim();
+  },
+
+  removeFilesForPeriod(closing, keepName) {
+    const key = String(closing || "");
+    if (!key) return;
+    this.files = this.files.filter((f) => {
+      const pk = this.periodKeyOfFile(f);
+      if (pk !== key) return true;
+      if (keepName && f.name === keepName) return true;
+      if (f.objectUrl) {
+        try { URL.revokeObjectURL(f.objectUrl); } catch (e) { /* ignore */ }
+      }
+      return false;
+    });
+  },
+
+  fbReady() {
+    return !!(window.firebaseDb && window.firebaseStorage && window.firebaseCollections);
+  },
+
+  cloudDocId(companyId, closing) {
+    return `${String(companyId || "").trim()}_${String(closing || "").trim()}`.replace(/[^\w.-]+/g, "_");
+  },
+
+  async uploadPdfToFirebase(file, companyId, closing) {
+    if (!this.fbReady()) return { url: "", path: "" };
+    const { ref, uploadBytes, getDownloadURL } = window.firebaseCollections;
+    const safe = String(file.name || "arquivo.pdf").replace(/[^\w.\-()+ ]+/g, "_");
+    const path = `participacoes/${companyId}/${closing || "sem-periodo"}/${safe}`;
+    const storageRef = ref(window.firebaseStorage, path);
+    await uploadBytes(storageRef, file, { contentType: file.type || "application/pdf" });
+    const url = await getDownloadURL(storageRef);
+    return { url, path };
+  },
+
+  async savePeriodToFirebase(rec, companyId) {
+    if (!this.fbReady() || !rec || !companyId) return false;
+    const closing = this.periodKeyOfFile(rec);
+    if (!closing) return false;
+    const { doc, setDoc, serverTimestamp } = window.firebaseCollections;
+    const userName = (window.AppState && AppState.currentUser && AppState.currentUser.name) || "";
+    const payload = {
+      companyId: String(companyId),
+      closing,
+      fileName: rec.name || "",
+      saldoTotal: rec.saldoTotal != null ? Number(rec.saldoTotal) : null,
+      expenses: Array.isArray(rec.expenses) ? rec.expenses : [],
+      pdfUrl: rec.pdfUrl || "",
+      pdfPath: rec.pdfPath || "",
+      cacheVer: 9,
+      updatedAt: Date.now(),
+      updatedBy: userName,
+      updatedAtServer: typeof serverTimestamp === "function" ? serverTimestamp() : null
+    };
+    await setDoc(doc(window.firebaseDb, "participacoes_periods", this.cloudDocId(companyId, closing)), payload, { merge: true });
+    return true;
+  },
+
+  async loadPeriodsFromFirebase(companyId) {
+    if (!this.fbReady() || !companyId) return [];
+    const { collection, query, where, getDocs } = window.firebaseCollections;
+    const q = query(collection(window.firebaseDb, "participacoes_periods"), where("companyId", "==", String(companyId)));
+    const snap = await getDocs(q);
+    const out = [];
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      if (!data.closing && !data.fileName) return;
+      out.push({
+        name: data.fileName || `${data.closing}.pdf`,
+        closing: data.closing || this.periodFromFileName(data.fileName),
+        year: data.closing ? Number(String(data.closing).slice(0, 4)) : null,
+        month: data.closing ? Number(String(data.closing).slice(5, 7)) : null,
+        expenses: Array.isArray(data.expenses) ? data.expenses : [],
+        saldoTotal: data.saldoTotal != null ? Number(data.saldoTotal) : null,
+        pdfUrl: data.pdfUrl || "",
+        pdfPath: data.pdfPath || "",
+        cacheVer: 9,
+        fromCloud: true,
+        objectUrl: ""
+      });
+    });
+    return out;
+  },
+
+  async mergeCloudPeriods(companyId) {
+    try {
+      const cloud = await this.loadPeriodsFromFirebase(companyId);
+      cloud.forEach((c) => {
+        const pk = this.periodKeyOfFile(c);
+        const existing = this.files.find((f) => this.periodKeyOfFile(f) === pk || f.name === c.name);
+        if (existing) {
+          if ((!existing.expenses || !existing.expenses.length) && c.expenses && c.expenses.length) {
+            existing.expenses = c.expenses;
+            existing.saldoTotal = c.saldoTotal;
+            existing.cacheVer = 9;
+          }
+          if (c.pdfUrl) existing.pdfUrl = c.pdfUrl;
+          if (c.pdfPath) existing.pdfPath = c.pdfPath;
+          existing.fromCloud = true;
+        } else {
+          this.files.push(c);
+        }
+        if (c.expenses && c.expenses.length) this.persistCache(c);
+      });
+      this.files.sort((a, b) => String(b.closing || "").localeCompare(String(a.closing || "")) || b.name.localeCompare(a.name));
+    } catch (e) {
+      console.warn("[Participacoes] Firebase períodos:", e);
+    }
+  },
+
   refreshCompanyList() {
     this.companies = this.crmCompanies().map((c) => ({
       companyId: String(c.id),
@@ -248,6 +364,9 @@ const ParticipacoesApp = {
   fileLink(name) {
     const local = this.files.find((f) => f.name === name);
     if (local && local.objectUrl) return local.objectUrl;
+    if (local && local.pdfUrl) return local.pdfUrl;
+    const byPeriod = this.files.find((f) => this.periodKeyOfFile(f) === this.periodFromFileName(name) && f.pdfUrl);
+    if (byPeriod && byPeriod.pdfUrl) return byPeriod.pdfUrl;
     return this.apiUrl("/api/participacoes/file?companyId=" + encodeURIComponent(this.companyId) + "&file=" + encodeURIComponent(name));
   },
 
@@ -259,7 +378,7 @@ const ParticipacoesApp = {
     return Number.isFinite(v) ? v : 0;
   },
 
-  /** Extrai o último valor monetário (aceita R$ antes/depois e nº doc residual). */
+  /** Extrai o valor da coluna Débitos (aceita R$ / nº doc). Evita preço unitário no texto (ex.: "X R$ 150,00)"). */
   takeMoneyFromText(text) {
     let rest = String(text || "")
       .replace(/\u00a0/g, " ")
@@ -268,12 +387,30 @@ const ParticipacoesApp = {
       .trim();
     if (!rest) return { valor: 0, rest: "", doc: "" };
 
-    // Preferir "R$ 1.234,56" no fim (coluna Débitos do Ellenceo)
+    // 1) Padrão Ellenceo no fim: "… 302   1.020,00" / "… TARIFA   87,35"
+    let mDoc = rest.match(/((?:TARIFA)|(?:\d{1,8}))\s+([\d.]+,\d{2})\s*$/i);
+    if (mDoc) {
+      const valor = this.parseMoney(mDoc[2]);
+      if (valor > 0) {
+        const before = rest.slice(0, mDoc.index).trim();
+        return { valor, rest: before, doc: String(mDoc[1]).trim() };
+      }
+    }
+
+    // 2) "R$ 1.234,56" no fim (coluna Débitos)
     let m = rest.match(/(?:R\$|RS)\s*([\d.]+,\d{2})\s*$/i);
     if (!m) m = rest.match(/([\d.]+,\d{2})\s*(?:R\$|RS)?\s*$/i);
     if (!m) {
+      // Último valor que NÃO seja preço unitário no detalhe ("X R$ 150,00)" / "meses … R$ 150,00)")
       const all = [...rest.matchAll(/(?:R\$|RS)?\s*([\d.]+,\d{2})/gi)];
-      if (all.length) m = all[all.length - 1];
+      for (let i = all.length - 1; i >= 0; i--) {
+        const hit = all[i];
+        const start = hit.index || 0;
+        const prev = rest.slice(Math.max(0, start - 12), start).toUpperCase();
+        if (/\bX\s*$/.test(prev) || /\(\s*$/.test(prev) || /MESES?\s*$/.test(prev)) continue;
+        m = hit;
+        break;
+      }
     }
     if (!m) return { valor: 0, rest, doc: "" };
 
@@ -302,6 +439,11 @@ const ParticipacoesApp = {
     }).trim();
     rest = (before + (after ? " " + after : "")).replace(/\s+/g, " ").trim();
     return { valor, rest, doc };
+  },
+
+  /** Linha já completa no layout Ellenceo (nº doc + débito no fim). */
+  isCompleteExpenseBuf(buf) {
+    return /(?:TARIFA|\d{1,8})\s+[\d.]+,\d{2}\s*$/i.test(String(buf || "").trim());
   },
 
   /** Separa razão social do detalhe (REF., observação, nº doc residual). */
@@ -517,6 +659,7 @@ const ParticipacoesApp = {
     const sourceFile = (meta && meta.name) || "";
 
     let cur = null;
+    let pendingPrefix = "";
     const flush = () => {
       if (!cur) return;
       const taken = this.takeMoneyFromText(cur.buf);
@@ -528,6 +671,9 @@ const ParticipacoesApp = {
       const split = this.splitCredorDetalhe(taken.rest);
       let credor = this.normalizeCredorName(split.credor);
       let detalhe = split.detalhe;
+      if (cur.extraDetalhe) {
+        detalhe = (String(cur.extraDetalhe) + (detalhe ? " " + detalhe : "")).replace(/\s+/g, " ").trim();
+      }
       if (this.isNoiseCredor(credor) || this.isBankStatementNoise(credor, detalhe)) {
         if (detalhe && !this.isNoiseCredor(detalhe) && !this.isBankStatementNoise(detalhe, "")) {
           credor = this.normalizeCredorName(detalhe);
@@ -562,6 +708,7 @@ const ParticipacoesApp = {
       if (this.isExpenseNoiseLine(line)) return;
       if (/saldo\s*total/i.test(line)) {
         flush();
+        pendingPrefix = "";
         return;
       }
       // Nova linha de lançamento: data no início (aaaa ou aa)
@@ -572,28 +719,44 @@ const ParticipacoesApp = {
         // Sobras de intervalo no detalhe: "a 31/10/2025)", "até 20/11/2025", só ")"
         if (!rest || /^[).,;:\-–—]*$/.test(rest)) {
           cur = null;
+          pendingPrefix = "";
           return;
         }
         if (/^(at[eé]\b)/i.test(rest) || (/^(a|à)\s+\d{2}\/\d{2}\/\d{2,4}/i.test(rest) && !/([\d.]+,\d{2})/.test(rest))) {
           cur = null;
+          pendingPrefix = "";
           return;
         }
         // Cabeçalho de período: "01/11/2025 até 30/11/2025" / segunda data sem valor
         if (/^\d{2}\/\d{2}\/\d{2,4}/.test(rest) && !/([\d.]+,\d{2})/.test(rest) && rest.length < 40) {
           cur = null;
+          pendingPrefix = "";
           return;
         }
         // Linha tipicamente de extrato (aplicação / saldo) — descartar
         if (this.isBankStatementNoise(rest, "")) {
           cur = null;
+          pendingPrefix = "";
           return;
         }
-        cur = { date: this.normalizeBrDate(m[1]), buf: rest };
+        const extra = pendingPrefix;
+        pendingPrefix = "";
+        cur = { date: this.normalizeBrDate(m[1]), buf: rest, extraDetalhe: extra };
         return;
       }
       // Continuação do detalhe / valor / nº doc
       if (cur) {
+        // Buffer já tem doc+débito: pedaço "REF. …" solto é da próxima linha (PDF fora de ordem)
+        if (this.isCompleteExpenseBuf(cur.buf) && /^(REF\.?|SOLICITA)/i.test(line)) {
+          flush();
+          pendingPrefix = line;
+          return;
+        }
         cur.buf = (cur.buf ? cur.buf + " " : "") + line;
+        return;
+      }
+      if (/^(REF\.?|SOLICITA)/i.test(line)) {
+        pendingPrefix = pendingPrefix ? (pendingPrefix + " " + line) : line;
       }
     });
     flush();
@@ -702,7 +865,7 @@ const ParticipacoesApp = {
       || !Array.isArray(fileRec.expenses)
       || this.expensesMostlyBroken(fileRec.expenses)
       || this.expensesMismatchSaldo(fileRec)
-      || fileRec.cacheVer !== 8;
+      || fileRec.cacheVer !== 9;
     if (!needs && Array.isArray(fileRec.expenses) && fileRec.expenses.length) {
       fileRec.expenses = this.dedupeExpenseRows(
         fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
@@ -716,17 +879,17 @@ const ParticipacoesApp = {
     fileRec.closing = fromName || headerPeriod || fileRec.closing || "";
     fileRec.saldoTotal = this.extractSaldoTotal(text);
     fileRec.expenses = this.parseExpenseLines(text, fileRec);
-    fileRec.cacheVer = 8;
+    fileRec.cacheVer = 9;
     this.persistCache(fileRec);
   },
 
   persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v8";
+      const key = "crm_participacoes_cache_v9";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
       all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
-        cacheVer: 8,
+        cacheVer: 9,
         closing: fileRec.closing,
         saldoTotal: fileRec.saldoTotal || null,
         expenses: fileRec.expenses
@@ -737,7 +900,7 @@ const ParticipacoesApp = {
 
   restoreCacheForCompany() {
     try {
-      const keys = ["crm_participacoes_cache_v8", "crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
+      const keys = ["crm_participacoes_cache_v9", "crm_participacoes_cache_v8", "crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
       let all = {};
       keys.forEach((key) => {
         try {
@@ -752,8 +915,8 @@ const ParticipacoesApp = {
         const name = k.slice(String(this.companyId).length + 1);
         const hit = all[k];
         if (!hit || !Array.isArray(hit.expenses)) return;
-        // Só aceita cache v8 íntegro — versões antigas forçam reparse (dd/mm/aa + Saldo Total)
-        if (hit.cacheVer !== 8 || this.expensesMostlyBroken(hit.expenses)) return;
+        // Só aceita cache v9 íntegro — versões antigas forçam reparse (dd/mm/aa + Saldo Total)
+        if (hit.cacheVer !== 9 || this.expensesMostlyBroken(hit.expenses)) return;
         const repaired = this.dedupeExpenseRows(
           hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
         );
@@ -768,14 +931,14 @@ const ParticipacoesApp = {
             closing,
             saldoTotal: hit.saldoTotal || null,
             expenses: repaired,
-            cacheVer: 8,
+            cacheVer: 9,
             fromCache: true
           };
           this.files.push(rec);
-        } else if (!rec.expenses || this.expensesMostlyBroken(rec.expenses) || rec.cacheVer !== 8) {
+        } else if (!rec.expenses || this.expensesMostlyBroken(rec.expenses) || rec.cacheVer !== 9) {
           rec.expenses = repaired;
           rec.saldoTotal = hit.saldoTotal || rec.saldoTotal;
-          rec.cacheVer = 8;
+          rec.cacheVer = 9;
           if (!rec.closing) rec.closing = closing;
         } else {
           rec.expenses = this.dedupeExpenseRows(
@@ -1073,7 +1236,7 @@ const ParticipacoesApp = {
     const fails = [];
     for (const f of this.files) {
       try {
-        await this.ensureFileParsed(f, f.cacheVer !== 8);
+        await this.ensureFileParsed(f, f.cacheVer !== 9);
       } catch (e) {
         fails.push((f && f.name ? f.name : "PDF") + ": " + (e.message || e));
       }
@@ -1085,6 +1248,7 @@ const ParticipacoesApp = {
 
   async onCompany(id) {
     this.companyId = String(id || "");
+    this.companyPickerOpen = false;
     this.fileName = "";
     this.files.forEach((f) => {
       if (f.objectUrl) {
@@ -1097,9 +1261,9 @@ const ParticipacoesApp = {
     this.restoreCacheForCompany();
     this.loading = true;
     this.render();
+    await this.mergeCloudPeriods(this.companyId);
     await this.loadFilesFromServer();
     this.loading = false;
-    // Mantém "Todos os períodos" para a matriz credor × mês
     this.fileName = "";
     this.parsing = true;
     this.render();
@@ -1171,7 +1335,7 @@ const ParticipacoesApp = {
       await this.tryServerUpload(picked);
       serverOk = true;
     } catch (e) {
-      this.hint = "Upload no servidor indisponível nesta sessão — os PDFs serão lidos só neste navegador.";
+      this.hint = "Upload no servidor local indisponível — salvando no Firebase / navegador.";
     }
 
     try {
@@ -1185,6 +1349,10 @@ const ParticipacoesApp = {
         if (!closing) closing = this.periodFromPdfHeader(text);
         const ym = closing ? closing.split("-") : [];
         const expenses = this.parseExpenseLines(text, { name: file.name, closing });
+
+        // Reenvio do mesmo período: sobrescreve
+        if (closing) this.removeFilesForPeriod(closing, file.name);
+
         let rec = this.files.find((f) => f.name === file.name);
         if (rec && rec.objectUrl && rec.objectUrl !== objectUrl) {
           try { URL.revokeObjectURL(rec.objectUrl); } catch (e) {}
@@ -1200,8 +1368,22 @@ const ParticipacoesApp = {
         rec.objectUrl = objectUrl;
         rec.expenses = expenses;
         rec.saldoTotal = this.extractSaldoTotal(text);
-        rec.cacheVer = 8;
+        rec.cacheVer = 9;
         rec.fromUpload = true;
+
+        this.cloudSyncing = true;
+        this.uploadProgress = `Salvando ${i + 1}/${picked.length} no Firebase...`;
+        this.render();
+        try {
+          const up = await this.uploadPdfToFirebase(file, this.companyId, closing || "sem-periodo");
+          rec.pdfUrl = up.url || "";
+          rec.pdfPath = up.path || "";
+          await this.savePeriodToFirebase(rec, this.companyId);
+        } catch (cloudErr) {
+          console.warn("[Participacoes] Falha ao salvar no Firebase:", cloudErr);
+          this.hint = "Dados lidos neste navegador; falhou o envio ao Firebase: " + (cloudErr && cloudErr.message ? cloudErr.message : cloudErr);
+        }
+        this.cloudSyncing = false;
         this.persistCache(rec);
       }
       this.files.sort((a, b) => String(b.closing || "").localeCompare(String(a.closing || "")) || b.name.localeCompare(a.name));
@@ -1219,13 +1401,303 @@ const ParticipacoesApp = {
     this.render();
   },
 
+  async ensureExcelJS() {
+    if (window.ExcelJS) return window.ExcelJS;
+    if (window.InvestimentoApp && typeof InvestimentoApp.ensureExcelJS === "function") {
+      return InvestimentoApp.ensureExcelJS();
+    }
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("Falha ao carregar ExcelJS"));
+      document.head.appendChild(s);
+    });
+    return window.ExcelJS;
+  },
+
+  excelSheetName(companyId, used) {
+    const usual = String(this.companyLabel(companyId) || "").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim();
+    let base = `${companyId}-${usual || "EMPRESA"}`;
+    if (base.length > 31) base = base.slice(0, 31);
+    let name = base;
+    let n = 2;
+    while (used.has(name.toLowerCase())) {
+      const suf = `-${n++}`;
+      name = (base.slice(0, Math.max(1, 31 - suf.length)) + suf).slice(0, 31);
+    }
+    used.add(name.toLowerCase());
+    return name;
+  },
+
+  monthShort(closing) {
+    const [y, m] = String(closing || "").split("-");
+    if (!y || !m) return closing || "";
+    const names = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    return `${names[Number(m) - 1]}/${y}`;
+  },
+
+  fillParticipacoesSheet(ws, opts) {
+    const Inv = window.InvestimentoApp;
+    const paint = Inv && typeof Inv.excelPaint === "function"
+      ? (cell, o) => Inv.excelPaint(cell, o)
+      : (cell, o) => {
+          if (o.font) cell.font = Object.assign({ name: "Calibri", size: 9 }, o.font);
+          if (o.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: o.fill } };
+          if (o.align) cell.alignment = o.align;
+          if (o.numFmt) cell.numFmt = o.numFmt;
+          if (o.border) {
+            const s = { style: "thin", color: { argb: "FFE2E8F0" } };
+            cell.border = { top: s, bottom: s, left: s, right: s };
+          }
+        };
+    const moneyFmt = "#,##0.00";
+    const months = opts.months || [];
+    const creditors = opts.creditors || [];
+    const companyLabel = opts.companyLabel || "";
+    const subtitle = opts.subtitle || "";
+
+    ws.properties.showGridLines = false;
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+    ws.columns = [{ width: 42 }, ...months.map(() => ({ width: 14 })), { width: 14 }];
+
+    ws.mergeCells(1, 1, 2, 1);
+    ws.getRow(1).height = 22;
+    ws.getRow(2).height = 18;
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 13, bold: true, color: { argb: "FF0F172A" } }, text: "Prestação de Contas — DESPESAS PAGAS\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: `${companyLabel}${subtitle ? " · " + subtitle : ""}` }
+      ]
+    };
+    paint(title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true } });
+
+    const head = ws.getRow(4);
+    head.height = 20;
+    const heads = ["Credor", ...months.map((m) => this.monthShort(m)), "Total"];
+    heads.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      paint(cell, {
+        fill: "FF105436",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+
+    let rIdx = 5;
+    creditors.forEach((c) => {
+      const row = ws.getRow(rIdx++);
+      row.getCell(1).value = c.label || c.key;
+      paint(row.getCell(1), { border: true, align: { horizontal: "left" } });
+      months.forEach((m, i) => {
+        const cell = row.getCell(i + 2);
+        const v = (c.cells[m] && c.cells[m].total) || 0;
+        cell.value = v || null;
+        paint(cell, { border: true, align: { horizontal: "right" }, numFmt: moneyFmt });
+      });
+      const tot = row.getCell(months.length + 2);
+      tot.value = c.total || 0;
+      paint(tot, {
+        border: true,
+        align: { horizontal: "right" },
+        numFmt: moneyFmt,
+        font: { bold: true }
+      });
+    });
+
+    const totRow = ws.getRow(rIdx);
+    totRow.getCell(1).value = "Total";
+    paint(totRow.getCell(1), { fill: "FFF1F5F9", font: { bold: true }, border: true });
+    months.forEach((m, i) => {
+      const sum = creditors.reduce((s, c) => s + ((c.cells[m] && c.cells[m].total) || 0), 0);
+      const cell = totRow.getCell(i + 2);
+      cell.value = sum;
+      paint(cell, { fill: "FFF1F5F9", font: { bold: true }, border: true, align: { horizontal: "right" }, numFmt: moneyFmt });
+    });
+    const grand = creditors.reduce((s, c) => s + (c.total || 0), 0);
+    const gCell = totRow.getCell(months.length + 2);
+    gCell.value = grand;
+    paint(gCell, { fill: "FFF1F5F9", font: { bold: true }, border: true, align: { horizontal: "right" }, numFmt: moneyFmt });
+
+    // Aba de lançamentos no mesmo sheet abaixo? Better separate sheet - caller adds detail sheet
+    return { grand };
+  },
+
+  fillLancamentosSheet(ws, rows, companyLabel) {
+    const Inv = window.InvestimentoApp;
+    const paint = Inv && typeof Inv.excelPaint === "function"
+      ? (cell, o) => Inv.excelPaint(cell, o)
+      : (cell, o) => {
+          if (o.font) cell.font = Object.assign({ name: "Calibri", size: 9 }, o.font);
+          if (o.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: o.fill } };
+          if (o.align) cell.alignment = o.align;
+          if (o.numFmt) cell.numFmt = o.numFmt;
+          if (o.border) {
+            const s = { style: "thin", color: { argb: "FFE2E8F0" } };
+            cell.border = { top: s, bottom: s, left: s, right: s };
+          }
+        };
+    ws.properties.showGridLines = false;
+    ws.columns = [
+      { width: 12 }, { width: 14 }, { width: 36 }, { width: 48 }, { width: 22 }, { width: 14 }, { width: 10 }
+    ];
+    ws.getCell("A1").value = `Lançamentos — ${companyLabel}`;
+    paint(ws.getCell("A1"), { font: { bold: true, size: 12 }, fill: "FFFFFFFF" });
+    ws.mergeCells("A1:G1");
+    const heads = ["Data", "Período", "Credor", "Detalhe", "Categoria", "Valor", "Doc"];
+    const head = ws.getRow(3);
+    heads.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      paint(cell, {
+        fill: "FF105436",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        border: true
+      });
+    });
+    (rows || []).forEach((r, idx) => {
+      const row = ws.getRow(4 + idx);
+      row.getCell(1).value = r.date || "";
+      row.getCell(2).value = this.periodLabel(r.periodo, r.periodo || "");
+      row.getCell(3).value = r.credor || "";
+      row.getCell(4).value = r.detalhe || "";
+      row.getCell(5).value = r.categoria || "";
+      row.getCell(6).value = Number(r.valor) || 0;
+      row.getCell(7).value = r.doc || "";
+      for (let c = 1; c <= 7; c++) {
+        paint(row.getCell(c), {
+          border: true,
+          align: { horizontal: c === 6 ? "right" : "left", wrapText: c === 4 },
+          numFmt: c === 6 ? "#,##0.00" : undefined
+        });
+      }
+    });
+  },
+
+  async exportExcel() {
+    const scope = this.exportScope || "current";
+    let companyIds = [];
+    if (scope === "all") {
+      const fromCrm = this.crmCompanies().map((c) => String(c.id));
+      const withData = new Set();
+      try {
+        const raw = localStorage.getItem("crm_participacoes_cache_v9") || "{}";
+        const all = JSON.parse(raw);
+        Object.keys(all || {}).forEach((k) => {
+          const cid = String(k).split("|")[0];
+          if (cid) withData.add(cid);
+        });
+      } catch (e) { /* ignore */ }
+      if (this.companyId) withData.add(String(this.companyId));
+      companyIds = fromCrm.filter((id) => withData.has(id));
+      if (!companyIds.length && this.companyId) companyIds = [String(this.companyId)];
+    } else {
+      if (!this.companyId) {
+        alert("Selecione uma empresa para exportar.");
+        return;
+      }
+      companyIds = [String(this.companyId)];
+    }
+
+    let ExcelJS;
+    try {
+      ExcelJS = await this.ensureExcelJS();
+    } catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const usedNames = new Set();
+    const currentId = String(this.companyId || "");
+    const currentFiles = this.files.slice();
+    const currentFileName = this.fileName;
+
+    for (const cid of companyIds) {
+      if (String(cid) !== currentId) {
+        // carrega cache local da outra empresa sem trocar a UI inteira
+        const snapFiles = [];
+        try {
+          const all = JSON.parse(localStorage.getItem("crm_participacoes_cache_v9") || "{}") || {};
+          Object.keys(all).forEach((k) => {
+            if (!k.startsWith(cid + "|")) return;
+            const hit = all[k];
+            if (!hit || !hit.expenses) return;
+            snapFiles.push({
+              name: k.slice(cid.length + 1),
+              closing: hit.closing || this.periodFromFileName(k.slice(cid.length + 1)),
+              expenses: hit.expenses,
+              saldoTotal: hit.saldoTotal,
+              cacheVer: 9
+            });
+          });
+        } catch (e) { /* ignore */ }
+        if (!snapFiles.length) continue;
+        this.files = snapFiles;
+        this.fileName = "";
+      }
+
+      const mx = this.matrixData();
+      if (!mx.creditors.length && !this.filtered().length) {
+        if (String(cid) !== currentId) {
+          this.files = currentFiles;
+          this.fileName = currentFileName;
+        }
+        continue;
+      }
+      const label = this.companyLabel(cid) || cid;
+      const sheetName = this.excelSheetName(cid, usedNames);
+      const ws = wb.addWorksheet(sheetName, { properties: { showGridLines: false } });
+      this.fillParticipacoesSheet(ws, {
+        months: mx.months,
+        creditors: mx.creditors,
+        companyLabel: `${cid} — ${label}`,
+        subtitle: this.fileName ? this.periodLabel(this.periodKeyOfFile(this.files.find((f) => f.name === this.fileName)), this.fileName) : "Todos os períodos"
+      });
+
+      const detailName = this.excelSheetName(cid + "-lanc", usedNames);
+      const ws2 = wb.addWorksheet(detailName.slice(0, 31), { properties: { showGridLines: false } });
+      this.fillLancamentosSheet(ws2, this.filtered(), `${cid} — ${label}`);
+
+      if (String(cid) !== currentId) {
+        this.files = currentFiles;
+        this.fileName = currentFileName;
+      }
+    }
+
+    this.files = currentFiles;
+    this.fileName = currentFileName;
+
+    if (!wb.worksheets.length) {
+      alert("Não há despesas para exportar nesse escopo.");
+      return;
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = URL.createObjectURL(blob);
+    a.download = `prestacao_contas_ellenceo_${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1000);
+  },
+
   render() {
     const root = document.getElementById("participacoes-root");
     if (!root) return;
     this.refreshCompanyList();
     const crm = this.crmCompany(this.companyId);
     const groups = this.grouped();
-    const alerts = this.alerts();
     const rows = this.filtered();
     const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
     const selectedFile = this.files.find((f) => f.name === this.fileName);
@@ -1234,126 +1706,164 @@ const ParticipacoesApp = {
       : (this.files.length ? "Todos os períodos" : "—");
     const coList = this.filteredCompanies();
     const uploadDisabled = !this.companyId;
+    const companyTitle = (crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa";
+    const companyUsual = this.companyLabel(this.companyId);
+
+    const segBtn = (id, label, icon) => {
+      const on = this.groupBy === id;
+      return `<button type="button" onclick="ParticipacoesApp.groupBy='${id}';ParticipacoesApp.detail=null;ParticipacoesApp.render()"
+        style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};font-size:0.78rem;font-weight:700;cursor:pointer;">
+        ${icon ? `<i data-lucide="${icon}" style="width:13px;height:13px;"></i>` : ""}${label}
+      </button>`;
+    };
 
     root.innerHTML = `
-      <div style="padding:16px 18px 28px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
-          <div style="max-width:720px;">
-            <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">Prestação Contas Ellenceo</div>
-            <div style="font-size:0.82rem;color:#64748b;margin-top:4px;">
-              1) Escolha a <strong>empresa</strong> no cadastro · 2) Envie <strong>vários PDFs</strong> de uma vez · 3) Agrupe as despesas pagas por <strong>período</strong>.
+      <div style="padding:14px 18px 28px;">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px;">
+          <div>
+            <div style="font-size:1.2rem;font-weight:800;color:#0f172a;">Prestação de Contas Ellenceo</div>
+            <div style="font-size:0.8rem;color:#64748b;margin-top:3px;">DESPESAS PAGAS por empresa e período · PDF salvo no Firebase para consulta</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <select class="form-control" style="width:auto;min-width:160px;font-size:0.8rem;font-weight:600;"
+              onchange="ParticipacoesApp.exportScope=this.value">
+              <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Excel: empresa atual</option>
+              <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Excel: todas (1 aba cada)</option>
+            </select>
+            <button type="button" class="btn btn-outline" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""}
+              style="display:inline-flex;align-items:center;gap:6px;">
+              <i data-lucide="file-spreadsheet" style="width:15px;"></i> Exportar Excel
+            </button>
+            <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;margin:0;">
+              <i data-lucide="upload" style="width:15px;"></i> Enviar PDFs
+              <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
+            </label>
+          </div>
+        </div>
+
+        <div class="crm-card" style="padding:12px 14px;margin-bottom:12px;position:relative;">
+          <div style="display:grid;grid-template-columns:minmax(280px,1.2fr) minmax(220px,1fr);gap:12px;align-items:end;">
+            <div>
+              <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Empresa</div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button type="button" class="form-control" onclick="ParticipacoesApp.companyPickerOpen=!ParticipacoesApp.companyPickerOpen;ParticipacoesApp.render()"
+                  style="text-align:left;font-weight:700;color:#105436;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ${this.companyId ? `${this.esc(String(this.companyId))} — ${this.esc(companyUsual || companyTitle)}` : "Buscar e selecionar empresa..."}
+                  </span>
+                  <i data-lucide="chevron-down" style="width:16px;flex-shrink:0;"></i>
+                </button>
+              </div>
+              ${this.companyPickerOpen ? `
+                <div style="position:absolute;left:14px;right:14px;top:78px;z-index:40;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,0.12);padding:10px;max-width:520px;">
+                  <input class="form-control" placeholder="Buscar ID ou nome..." value="${this.esc(this.companyQ)}"
+                    oninput="ParticipacoesApp.companyQ=this.value;ParticipacoesApp.render()"
+                    style="margin-bottom:8px;font-size:0.82rem;" autofocus>
+                  <div style="max-height:260px;overflow:auto;">
+                    ${coList.length ? coList.map((c) => {
+                      const active = String(c.id) === String(this.companyId);
+                      const label = this.companyLabel(c.id) || c.name || "";
+                      return `<button type="button" onclick="ParticipacoesApp.onCompany('${String(c.id).replace(/'/g, "\\'")}')"
+                        style="display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:${active ? "#ecfdf5" : "transparent"};cursor:pointer;margin-bottom:2px;">
+                        <div style="font-weight:800;color:#105436;font-size:0.82rem;">${c.id} — ${this.esc(label)}</div>
+                        ${label !== c.name && c.name ? `<div style="font-size:0.7rem;color:#94a3b8;">${this.esc(c.name)}</div>` : ""}
+                      </button>`;
+                    }).join("") : `<div style="padding:10px;color:#64748b;font-size:0.82rem;">Nenhuma empresa encontrada.</div>`}
+                  </div>
+                </div>` : ""}
+            </div>
+            <div>
+              <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Buscar nas despesas</div>
+              <input class="form-control" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
+                oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="font-size:0.82rem;">
             </div>
           </div>
-          <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;">
-            <i data-lucide="upload" style="width:16px;"></i> Enviar PDFs
-            <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
-          </label>
         </div>
+
         ${this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;">${this.esc(this.error)}</div>` : ""}
         ${this.hint && !this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:0.82rem;">${this.esc(this.hint)}</div>` : ""}
         ${this.uploadProgress ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;font-size:0.85rem;">${this.esc(this.uploadProgress)}</div>` : ""}
 
-        <div style="display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:14px;align-items:start;">
-          <div class="crm-card" style="padding:12px;">
-            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:8px;">1. Empresa</div>
-            <input class="form-control" placeholder="Buscar ID ou nome..." value="${this.esc(this.companyQ)}"
-              oninput="ParticipacoesApp.companyQ=this.value;ParticipacoesApp.render()"
-              style="margin-bottom:8px;font-size:0.82rem;">
-            <div style="max-height:280px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
-              ${coList.length ? coList.map((c) => {
-                const active = String(c.id) === String(this.companyId);
-                const label = this.companyLabel(c.id) || c.name || "";
-                return `<button type="button" onclick="ParticipacoesApp.onCompany('${String(c.id).replace(/'/g, "\\'")}')"
-                  style="display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-bottom:1px solid #f1f5f9;background:${active ? "#ecfdf5" : "#fff"};cursor:pointer;">
-                  <div style="font-weight:800;color:#105436;font-size:0.82rem;">${c.id} — ${this.esc(label)}</div>
-                  ${label !== c.name && c.name ? `<div style="font-size:0.7rem;color:#94a3b8;">${this.esc(c.name)}</div>` : ""}
-                </button>`;
-              }).join("") : `<div style="padding:12px;font-size:0.82rem;color:#64748b;">Nenhuma empresa no cadastro.</div>`}
+        ${this.companyId ? `
+          <div class="crm-card" style="padding:12px 14px;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px;">
+              <div>
+                <div style="font-weight:800;color:#0f172a;font-size:1.05rem;">${this.esc(companyTitle)}</div>
+                <div style="font-size:0.8rem;color:#64748b;margin-top:2px;">
+                  Ellenceo · <strong style="text-transform:capitalize;">${this.esc(periodTitle)}</strong>
+                  · ${rows.length} despesa(s) · ${this.fmt(total)}
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${this.fileName ? `<a class="btn btn-outline btn-sm" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener"
+                  style="display:inline-flex;align-items:center;gap:5px;"><i data-lucide="file-text" style="width:14px;"></i> Abrir PDF</a>` : ""}
+                ${!this.fileName && this.files.some((f) => f.pdfUrl) ? `<span style="font-size:0.75rem;color:#64748b;align-self:center;">PDFs no Firebase · selecione um período</span>` : ""}
+              </div>
             </div>
 
-            <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin:14px 0 8px;">2. Períodos (PDFs)</div>
-            ${!this.companyId ? `<div style="font-size:0.82rem;color:#64748b;">Selecione uma empresa para liberar o envio.</div>` : `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
               <button type="button" onclick="ParticipacoesApp.onFileAll()"
-                style="display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border-radius:8px;border:1px solid ${!this.fileName && this.files.length ? "#105436" : "#e2e8f0"};background:${!this.fileName && this.files.length ? "#ecfdf5" : "#fff"};cursor:pointer;font-size:0.8rem;">
-                <div style="font-weight:700;">Todos os períodos</div>
-                <div style="font-size:0.68rem;color:#94a3b8;">${this.files.length} arquivo(s)</div>
+                style="padding:6px 11px;border-radius:999px;border:1px solid ${!this.fileName && this.files.length ? "#105436" : "#e2e8f0"};background:${!this.fileName && this.files.length ? "#ecfdf5" : "#fff"};color:${!this.fileName && this.files.length ? "#105436" : "#475569"};font-size:0.75rem;font-weight:700;cursor:pointer;">
+                Todos (${this.files.length})
               </button>
-              ${this.files.length ? this.files.map((f) => {
+              ${this.files.map((f) => {
                 const active = f.name === this.fileName;
                 const lab = this.periodLabel(f.closing, f.name);
-                const n = Array.isArray(f.expenses) ? f.expenses.length : "…";
+                const cloud = f.pdfUrl ? " · nuvem" : "";
                 return `<button type="button" onclick="ParticipacoesApp.onFile(${JSON.stringify(f.name)})"
-                  style="display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border-radius:8px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};cursor:pointer;font-size:0.8rem;">
-                  <div style="font-weight:700;text-transform:capitalize;">${this.esc(lab)}</div>
-                  <div style="font-size:0.68rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(f.name)} · ${n} desp.</div>
+                  style="padding:6px 11px;border-radius:999px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};color:${active ? "#1d4ed8" : "#475569"};font-size:0.75rem;font-weight:700;cursor:pointer;text-transform:capitalize;"
+                  title="${this.esc(f.name)}${cloud}">
+                  ${this.esc(lab)}
                 </button>`;
-              }).join("") : `<div style="font-size:0.82rem;color:#64748b;">Nenhum PDF ainda. Use <strong>Enviar PDFs</strong> e selecione vários arquivos.</div>`}
-            `}
-          </div>
-
-          <div>
-            <div class="crm-card" style="padding:14px;margin-bottom:12px;">
-              <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
-                <div>
-                  <div style="font-weight:800;color:#0f172a;">${this.esc((crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa")}</div>
-                  <div style="font-size:0.8rem;color:#64748b;">Administrador: Ellenceo · Visão: <strong style="text-transform:capitalize;">${this.esc(periodTitle)}</strong> · ${rows.length} despesa(s) · ${this.fmt(total)}</div>
-                </div>
-                ${this.fileName ? `<a class="btn btn-outline" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener">Abrir PDF</a>` : ""}
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;">
-                <input class="form-control" placeholder="Filtrar credor, detalhe, categoria..." value="${this.esc(this.q)}" oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="max-width:280px;">
-                ${[
-                  ["matriz", "Matriz"],
-                  ["periodo", "Por período"],
-                  ["credor", "Por credor"],
-                  ["categoria", "Por categoria"],
-                  ["data", "Por data"]
-                ].map(([g, lab]) => {
-                  return `<button type="button" class="btn ${this.groupBy === g ? "btn-primary" : "btn-outline"}" onclick="ParticipacoesApp.groupBy='${g}';ParticipacoesApp.detail=null;ParticipacoesApp.render()">${lab}</button>`;
-                }).join("")}
-              </div>
+              }).join("")}
+              ${!this.files.length ? `<span style="font-size:0.8rem;color:#64748b;align-self:center;">Nenhum PDF ainda — use Enviar PDFs.</span>` : ""}
             </div>
-            ${this.parsing || this.loading ? `<div class="crm-card" style="padding:20px;text-align:center;color:#64748b;">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
-            ${!this.parsing && !this.loading && alerts.length ? `
-              <div class="crm-card" style="padding:12px;margin-bottom:12px;border-left:4px solid #ea580c;">
-                <div style="font-weight:800;color:#9a3412;margin-bottom:8px;">Pontos de atenção (${alerts.length})</div>
-                ${alerts.slice(0, 12).map((a) => `<div style="font-size:0.8rem;margin-bottom:6px;color:${a.level === "danger" ? "#991b1b" : "#9a3412"};">• ${this.esc(a.text)}</div>`).join("")}
-              </div>` : ""}
-            ${!this.parsing && !this.loading && this.groupBy === "matriz" ? this.matrixHtml() : ""}
-            ${!this.parsing && !this.loading && this.groupBy !== "matriz" ? groups.map((g) => `
-              <div class="crm-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
-                <div style="display:flex;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-                  <strong style="text-transform:capitalize;">${this.esc(g.key)}</strong>
-                  <span style="font-weight:800;color:#105436;">${this.fmt(g.total)} · ${g.rows.length}</span>
-                </div>
-                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
-                  <thead>
-                    <tr style="background:#105436;color:#fff;">
-                      <th style="text-align:left;padding:6px 10px;">Data</th>
-                      ${this.groupBy === "periodo" ? "" : `<th style="text-align:left;padding:6px 10px;">Período</th>`}
-                      <th style="text-align:left;padding:6px 10px;">Credor</th>
-                      <th style="text-align:left;padding:6px 10px;">Detalhe</th>
-                      <th style="text-align:left;padding:6px 10px;">Categoria</th>
-                      <th style="text-align:right;padding:6px 10px;">Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${g.rows.map((r) => `<tr style="border-bottom:1px solid #f1f5f9;${r.categoriaId === "relacionada" ? "background:#fff7ed;" : ""}">
-                      <td style="padding:6px 10px;white-space:nowrap;">${this.esc(r.date)}</td>
-                      ${this.groupBy === "periodo" ? "" : `<td style="padding:6px 10px;text-transform:capitalize;">${this.esc(this.periodLabel(r.periodo, "—"))}</td>`}
-                      <td style="padding:6px 10px;">${this.esc(r.credor)}</td>
-                      <td style="padding:6px 10px;">${this.esc(r.detalhe || "—")}</td>
-                      <td style="padding:6px 10px;">${this.esc(r.categoria)}</td>
-                      <td style="padding:6px 10px;text-align:right;font-weight:700;">${r.valor ? this.fmt(r.valor) : "—"}</td>
-                    </tr>`).join("")}
-                  </tbody>
-                </table>
-              </div>
-            `).join("") : ""}
-            ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada. O Integra não usa o extrato da conta — confira se o PDF Ellenceo tem a seção “DESPESAS PAGAS” em texto.</div>` : ""}
-            ${!this.parsing && !this.loading && this.companyId && !this.files.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Empresa selecionada. Envie um ou mais PDFs de fechamento para agrupar as despesas por período.</div>` : ""}
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              ${segBtn("matriz", "Matriz", "table")}
+              ${segBtn("periodo", "Por período", "calendar")}
+              ${segBtn("credor", "Por credor", "building-2")}
+              ${segBtn("categoria", "Por categoria", "tags")}
+              ${segBtn("data", "Por data", "clock")}
+            </div>
           </div>
-        </div>
+        ` : `<div class="crm-card" style="padding:22px;color:#64748b;">Selecione a empresa no topo para ver a matriz e enviar PDFs.</div>`}
+
+        ${this.parsing || this.loading ? `<div class="crm-card" style="padding:20px;text-align:center;color:#64748b;">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
+        ${!this.parsing && !this.loading && this.companyId && this.groupBy === "matriz" ? this.matrixHtml() : ""}
+        ${!this.parsing && !this.loading && this.companyId && this.groupBy !== "matriz" ? groups.map((g) => `
+          <div class="crm-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
+            <div style="display:flex;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+              <strong style="text-transform:capitalize;">${this.esc(g.key)}</strong>
+              <span style="font-weight:800;color:#105436;">${this.fmt(g.total)} · ${g.rows.length}</span>
+            </div>
+            <div style="overflow:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
+                <thead>
+                  <tr style="background:#105436;color:#fff;">
+                    <th style="text-align:left;padding:6px 10px;">Data</th>
+                    ${this.groupBy === "periodo" ? "" : `<th style="text-align:left;padding:6px 10px;">Período</th>`}
+                    <th style="text-align:left;padding:6px 10px;">Credor</th>
+                    <th style="text-align:left;padding:6px 10px;">Detalhe</th>
+                    <th style="text-align:left;padding:6px 10px;">Categoria</th>
+                    <th style="text-align:right;padding:6px 10px;">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${g.rows.map((r) => `<tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:6px 10px;white-space:nowrap;">${this.esc(r.date)}</td>
+                    ${this.groupBy === "periodo" ? "" : `<td style="padding:6px 10px;text-transform:capitalize;">${this.esc(this.periodLabel(r.periodo, "—"))}</td>`}
+                    <td style="padding:6px 10px;">${this.esc(r.credor)}</td>
+                    <td style="padding:6px 10px;">${this.esc(r.detalhe || "—")}</td>
+                    <td style="padding:6px 10px;">${this.esc(r.categoria)}</td>
+                    <td style="padding:6px 10px;text-align:right;font-weight:700;">${r.valor ? this.fmt(r.valor) : "—"}</td>
+                  </tr>`).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `).join("") : ""}
+        ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
         ${this.detailModalHtml()}
       </div>
     `;
