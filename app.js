@@ -113,6 +113,72 @@
       return Promise.resolve(nativeConfirm(message));
     }
   };
+
+  window.mouraPrompt = function(message, defaultValue) {
+    return new Promise((resolve) => {
+      try {
+        let overlay = document.getElementById("moura-app-prompt");
+        if (!overlay) {
+          overlay = document.createElement("div");
+          overlay.id = "moura-app-prompt";
+          overlay.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483001;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+          overlay.innerHTML = `
+            <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);padding:22px 22px 18px;font-family:inherit;">
+              <div style="font-size:0.95rem;font-weight:800;color:#105436;letter-spacing:0.02em;margin-bottom:10px;">${TITLE}</div>
+              <div id="moura-app-prompt-msg" style="font-size:0.92rem;color:#1e293b;line-height:1.45;margin-bottom:12px;"></div>
+              <input id="moura-app-prompt-input" type="text" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:0.95rem;outline:none;" />
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+                <button type="button" class="btn btn-cancel" id="moura-app-prompt-cancel" style="padding:8px 16px;border-radius:8px;">Cancelar</button>
+                <button type="button" id="moura-app-prompt-ok" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">Confirmar</button>
+              </div>
+            </div>`;
+          (document.body || document.documentElement).appendChild(overlay);
+          const finish = (val) => {
+            const resolveFn = overlay._mouraPromptResolve;
+            overlay._mouraPromptResolve = null;
+            overlay.style.display = "none";
+            if (typeof resolveFn === "function") resolveFn(val);
+          };
+          overlay.querySelector("#moura-app-prompt-ok").addEventListener("click", function() {
+            const input = overlay.querySelector("#moura-app-prompt-input");
+            finish(input ? input.value : "");
+          });
+          overlay.querySelector("#moura-app-prompt-cancel").addEventListener("click", function() {
+            finish(null);
+          });
+          overlay.addEventListener("click", function(e) {
+            if (e.target === overlay) finish(null);
+          });
+          overlay.querySelector("#moura-app-prompt-input").addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              overlay.querySelector("#moura-app-prompt-ok").click();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              finish(null);
+            }
+          });
+        }
+        const msgEl = overlay.querySelector("#moura-app-prompt-msg");
+        const input = overlay.querySelector("#moura-app-prompt-input");
+        if (msgEl) msgEl.textContent = message == null ? "" : String(message);
+        if (input) {
+          input.value = defaultValue == null ? "" : String(defaultValue);
+          input.onfocus = function() { this.style.borderColor = "#105436"; };
+          input.onblur = function() { this.style.borderColor = "#e2e8f0"; };
+        }
+        overlay._mouraPromptResolve = resolve;
+        overlay.style.display = "flex";
+        setTimeout(() => {
+          if (!input) return;
+          input.focus();
+          input.select();
+        }, 30);
+      } catch (e) {
+        resolve(window.prompt(message, defaultValue == null ? "" : String(defaultValue)));
+      }
+    });
+  };
 })();
 // Override lucide.createIcons para evitar que ícones inválidos travem o app
 if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
@@ -176,7 +242,20 @@ window.updateOperatorTabsUI = function(useActualData = true) {
 
   let opsToShow;
   const fromFila = [...activeFromFila].map(n => displayByNorm.get(n)).filter(Boolean);
-  if (useActualData && clients.length > 0) {
+  if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients()) {
+    const u = (typeof AppState !== "undefined" && AppState.currentUser) || window.AppState && window.AppState.currentUser;
+    const selfNames = [];
+    if (u) {
+      if (u.sienge_user) selfNames.push(String(u.sienge_user).replace(/\./g, " ").toUpperCase());
+      if (u.name) selfNames.push(String(u.name).toUpperCase());
+    }
+    const selfFromFila = fromFila.filter(op => selfNames.some(sn => normOp(op) === normOp(sn) || (typeof window.occurrenceAuthorMatchesOperator === "function" && window.occurrenceAuthorMatchesOperator(op, sn))));
+    opsToShow = selfFromFila.length ? selfFromFila : (selfNames[0] ? [selfNames[0]] : []);
+    if (opsToShow.length === 1) {
+      window.activeOperatorFilter = opsToShow[0];
+      try { activeOperatorFilter = opsToShow[0]; } catch (e) {}
+    }
+  } else if (useActualData && clients.length > 0) {
     const seen = new Set();
     opsToShow = [];
     fromFila.forEach(op => {
@@ -196,15 +275,20 @@ window.updateOperatorTabsUI = function(useActualData = true) {
     if (!tabs) return;
     const existingOpBtns = tabs.querySelectorAll(".operator-tab-btn");
     existingOpBtns.forEach(btn => btn.remove());
+    const lockedSelf = typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients();
     const prev = String(window[filterStateKey] || "TODOS");
-    const stillVisible = prev === "TODOS" || opsToShow.some(op => normOp(op) === normOp(prev));
-    const activeName = stillVisible ? (opsToShow.find(op => normOp(op) === normOp(prev)) || prev) : "TODOS";
-    if (!stillVisible) window[filterStateKey] = "TODOS";
+    const stillVisible = (!lockedSelf && prev === "TODOS") || opsToShow.some(op => normOp(op) === normOp(prev));
+    const activeName = stillVisible
+      ? (opsToShow.find(op => normOp(op) === normOp(prev)) || (lockedSelf ? (opsToShow[0] || prev) : prev))
+      : (lockedSelf ? (opsToShow[0] || "TODOS") : "TODOS");
+    window[filterStateKey] = activeName;
     if (filterStateKey === "activeOperatorFilter") {
       try { activeOperatorFilter = window[filterStateKey]; } catch (e) {}
     }
 
-    let opBtnsHtml = `<button class="operator-tab-btn${normOp(activeName) === "TODOS" || activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
+    let opBtnsHtml = lockedSelf
+      ? ""
+      : `<button class="operator-tab-btn${normOp(activeName) === "TODOS" || activeName === "TODOS" ? " active" : ""}" data-operator="TODOS">TODOS</button>`;
     opsToShow.forEach(op => {
       const isActive = normOp(op) === normOp(activeName);
       opBtnsHtml += `<button class="operator-tab-btn${isActive ? " active" : ""}" data-operator="${op}">${op}</button>`;
@@ -501,6 +585,9 @@ window.handleAgendaAutocomplete = function(query) {
             const cName = normalizeStr(c.name);
             return terms.every(term => cName.includes(term));
         });
+        if (typeof window.filterCustomersToAssignedPortfolio === "function") {
+            matches = window.filterCustomersToAssignedPortfolio(matches);
+        }
         
         const inputEl = document.getElementById('agenda-search-input');
         if (!inputEl) return;
@@ -628,6 +715,9 @@ window.handleDynamicCustomerSearch = function(query, type) {
             }
         } else if (type === 'email') {
             matches = window.GlobalCustomerCache.data.filter(c => normalizeStr(c.email).includes(qNorm));
+        }
+        if (typeof window.filterCustomersToAssignedPortfolio === "function") {
+            matches = window.filterCustomersToAssignedPortfolio(matches);
         }
         
         const inputEl = document.getElementById(`relacionamento-filter-${type}`);
@@ -5863,6 +5953,11 @@ document.addEventListener("click", function(e) {
 
   let clientList = [...rawList]; // Mostrar sub judice na fila principal
 
+  // Terceirizado: só a própria carteira atribuída
+  if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients()) {
+    clientList = clientList.filter(c => window.clientAssignedToCurrentUser(c));
+  }
+
 // Filtro de Operador (Abas do Switch) para Fila de Cobrança
   if (activeOperatorFilter !== "TODOS") {
     const want = (typeof window.normalizeOperatorName === "function")
@@ -7423,6 +7518,10 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
 }
 
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
+  if (typeof window.currentUserCanViewCustomer === "function" && !window.currentUserCanViewCustomer(customerId)) {
+    alert("Você só pode visualizar clientes atribuídos à sua carteira.");
+    return;
+  }
   AppState.selectedCustomerId = customerId;
   AppState.selectedContractId = saleId || null;
   AppState.selectedTitulo = specificTitulo || null;

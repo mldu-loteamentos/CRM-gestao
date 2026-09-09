@@ -5,6 +5,55 @@ window.isOperadorCobrancaProfile = function(name) {
   return n.includes("OPERADOR COBRANCA");
 };
 
+window.isOperadorCobrancaTerceirizadoProfile = function(name) {
+  const n = String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
+};
+
+/** Perfis/usuários que só enxergam clientes da própria carteira atribuída. */
+window.userSeesOnlyAssignedClients = function(user) {
+  const u = user || (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+  if (!u) return false;
+  if (window.isOperadorCobrancaTerceirizadoProfile(u.profile_name)) return true;
+  return window.isOperadorCobrancaProfile(u.profile_name) && String(u.operator_type || "") === "externo";
+};
+
+window.clientAssignedToCurrentUser = function(clientOrOp) {
+  const assigned = typeof clientOrOp === "string"
+    ? clientOrOp
+    : (clientOrOp && (clientOrOp.assignedOperator || clientOrOp.operator)) || "";
+  const u = (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+  if (!u || !assigned) return false;
+  const match = typeof window.occurrenceAuthorMatchesOperator === "function"
+    ? window.occurrenceAuthorMatchesOperator
+    : function(a, b) { return String(a || "").toUpperCase() === String(b || "").toUpperCase(); };
+  const candidates = [u.name, u.sienge_user];
+  if (u.sienge_user) candidates.push(String(u.sienge_user).replace(/\./g, " "));
+  return candidates.filter(Boolean).some(function(c) { return match(assigned, c); });
+};
+
+window.currentUserCanViewCustomer = function(customerId) {
+  if (!window.userSeesOnlyAssignedClients()) return true;
+  const id = String(customerId == null ? "" : customerId);
+  if (!id) return false;
+  const list = window.rawClientList || [];
+  const mine = list.filter(function(c) { return String(c.customerId) === id; });
+  if (!mine.length) return false;
+  return mine.some(function(c) { return window.clientAssignedToCurrentUser(c); });
+};
+
+window.filterCustomersToAssignedPortfolio = function(customers) {
+  if (!window.userSeesOnlyAssignedClients() || !Array.isArray(customers)) return customers || [];
+  const allowed = new Set();
+  (window.rawClientList || []).forEach(function(c) {
+    if (window.clientAssignedToCurrentUser(c)) allowed.add(String(c.customerId));
+  });
+  return customers.filter(function(c) {
+    const id = String((c && (c.customerId != null ? c.customerId : c.id)) || "");
+    return id && allowed.has(id);
+  });
+};
+
 window.syncConfiguracoesPermAliases = function(perms) {
   if (!perms) return perms;
   ["acessar", "visualizar", "editar"].forEach(flag => {
@@ -241,6 +290,7 @@ const ConfigUsersApp = {
         { id: "operador_pagadoria", name: "OPERADOR PAGADORIA" },
         { id: "operador_cobranca", name: "OPERADOR COBRANÇA" },
         { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE" },
+        { id: "operador_cobranca_terceirizado", name: "OPERADOR COBRANÇA TERCEIRIZADO" },
         { id: "time_relacionamento", name: "TIME RELACIONAMENTO" },
         { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO" },
         { id: "supervisor_tesouraria", name: "SUPERVISOR TESOURARIA" },
@@ -252,6 +302,7 @@ const ConfigUsersApp = {
 
     this.ensureAlcadaProfiles();
     this.seedBackOfficePermsFromCobranca();
+    this.seedTerceirizadoPermsFromCobranca();
     
     // Aqui no futuro poderia fazer um fetch para a API de usuários
     this.render();
@@ -262,6 +313,7 @@ const ConfigUsersApp = {
     const norm = (name) => String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " E ").replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
     const extras = [
       { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE", match: (n) => n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n)) },
+      { id: "operador_cobranca_terceirizado", name: "OPERADOR COBRANÇA TERCEIRIZADO", match: (n) => n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ") },
       { id: "time_relacionamento", name: "TIME RELACIONAMENTO", match: (n) => n === "TIME RELACIONAMENTO" || (n.includes("TIME") && n.includes("RELACIONAMENTO")) },
       { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO", match: (n) => n.includes("SUPERVISOR") && n.includes("RELACIONAMENTO") },
       { id: "supervisor_tesouraria", name: "SUPERVISOR TESOURARIA", match: (n) => n.includes("SUPERVISOR") && n.includes("TESOURARIA") },
@@ -295,88 +347,206 @@ const ConfigUsersApp = {
     if (src) localStorage.setItem(`crm_perms_${back.id}`, src);
   },
 
+  seedTerceirizadoPermsFromCobranca() {
+    const cob = this.profiles.find(p => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n === "OPERADOR COBRANCA";
+    });
+    const terc = this.profiles.find(p => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
+    });
+    if (!cob || !terc) return;
+    if (localStorage.getItem(`crm_perms_${terc.id}`)) return;
+    const src = localStorage.getItem(`crm_perms_${cob.id}`)
+      || localStorage.getItem("crm_perms_operador_cobrança")
+      || localStorage.getItem("crm_perms_operador_cobranca");
+    if (src) localStorage.setItem(`crm_perms_${terc.id}`, src);
+  },
+
+  closeProfileNameModal() {
+    const el = document.getElementById("config-profile-name-modal");
+    if (el) el.remove();
+    this._profileNameCtx = null;
+  },
+
+  openProfileNameModal(opts) {
+    const options = opts || {};
+    this.closeProfileNameModal();
+    this._profileNameCtx = options;
+    const title = options.title || "Perfil";
+    const label = options.label || "Nome do perfil";
+    const hint = options.hint || "";
+    const defaultValue = options.defaultValue || "";
+    const confirmLabel = options.confirmLabel || "Salvar";
+    const icon = options.icon || "shield-plus";
+
+    const overlay = document.createElement("div");
+    overlay.id = "config-profile-name-modal";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;";
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;width:520px;max-width:96vw;box-shadow:0 20px 50px rgba(0,0,0,0.25);padding:22px 24px;" onclick="event.stopPropagation()">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;">
+          <h3 style="margin:0;color:var(--color-primary);font-size:1.1rem;display:flex;align-items:center;gap:8px;">
+            <i data-lucide="${icon}" style="width:18px;height:18px;"></i> ${title}
+          </h3>
+          <button type="button" onclick="ConfigUsersApp.closeProfileNameModal()" style="background:none;border:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#64748b;">&times;</button>
+        </div>
+        ${hint ? `<p style="margin:0 0 14px;font-size:0.85rem;color:#64748b;line-height:1.45;">${hint}</p>` : ""}
+        <label for="config-profile-name-input" style="display:block;font-size:0.75rem;font-weight:700;color:var(--color-text-muted);margin-bottom:6px;">
+          ${label} <span style="color:var(--color-danger);">*</span>
+        </label>
+        <input id="config-profile-name-input" type="text" class="form-control"
+          style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:0.95rem;text-transform:uppercase;"
+          value="${String(defaultValue).replace(/"/g, "&quot;")}">
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+          <button type="button" class="btn btn-cancel" onclick="ConfigUsersApp.closeProfileNameModal()">Cancelar</button>
+          <button type="button" class="btn btn-primary" onclick="ConfigUsersApp.confirmProfileNameModal()">
+            <i data-lucide="check" style="width:14px;height:14px;"></i> ${confirmLabel}
+          </button>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) this.closeProfileNameModal();
+    });
+    document.body.appendChild(overlay);
+    if (window.lucide) lucide.createIcons();
+    const input = document.getElementById("config-profile-name-input");
+    if (input) {
+      input.focus();
+      input.select();
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.confirmProfileNameModal();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          this.closeProfileNameModal();
+        }
+      });
+    }
+  },
+
+  confirmProfileNameModal() {
+    const ctx = this._profileNameCtx;
+    const input = document.getElementById("config-profile-name-input");
+    const name = input ? input.value.trim() : "";
+    if (!name) {
+      alert("Informe o nome do perfil.");
+      if (input) input.focus();
+      return;
+    }
+    this.closeProfileNameModal();
+    if (ctx && typeof ctx.onConfirm === "function") ctx.onConfirm(name);
+  },
+
   addProfile() {
-    const profileName = prompt("Digite o nome do novo perfil (ex: Operador Financeiro):");
-    if (profileName && profileName.trim() !== "") {
-       const id = profileName.trim().toLowerCase().replace(/\s+/g, '_');
-       
-       if (this.profiles.find(p => p.id === id)) {
+    this.openProfileNameModal({
+      title: "Novo perfil",
+      label: "Nome do perfil",
+      hint: "O nome será salvo em maiúsculas. Depois ajuste as permissões e clique em Salvar Permissões.",
+      defaultValue: "",
+      confirmLabel: "Criar perfil",
+      icon: "shield-plus",
+      onConfirm: (profileName) => {
+        const id = profileName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        if (!id) {
+          alert("Nome inválido.");
+          return;
+        }
+        if (this.profiles.find(p => p.id === id || String(p.name).toUpperCase() === profileName.trim().toUpperCase())) {
           alert("Este perfil já existe.");
           return;
-       }
-
-       this.profiles.push({ id: id, name: profileName.trim().toUpperCase() });
-       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
-       if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
-         this.seedBackOfficePermsFromCobranca();
-       }
-       this.selectedProfile = id;
-       this.render();
-    }
+        }
+        this.profiles.push({ id, name: profileName.trim().toUpperCase() });
+        localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+        if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
+          this.seedBackOfficePermsFromCobranca();
+        }
+        if (window.isOperadorCobrancaTerceirizadoProfile(profileName)) {
+          this.seedTerceirizadoPermsFromCobranca();
+        }
+        this.selectedProfile = id;
+        this.render();
+      }
+    });
   },
 
   editProfile(id) {
-    if (id === 'admin') return;
+    if (id === "admin") return;
     const profile = this.profiles.find(p => p.id === id);
     if (!profile) return;
-    
-    const newName = prompt("Editar nome do perfil:", profile.name);
-    if (newName && newName.trim() !== "" && newName.trim() !== profile.name) {
-       profile.name = newName.trim().toUpperCase();
-       localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
-       this.render();
-    }
+
+    this.openProfileNameModal({
+      title: "Editar perfil",
+      label: "Nome do perfil",
+      defaultValue: profile.name,
+      confirmLabel: "Salvar nome",
+      icon: "pencil",
+      onConfirm: (newName) => {
+        const next = newName.trim().toUpperCase();
+        if (!next || next === profile.name) return;
+        if (this.profiles.some(p => p.id !== id && String(p.name).toUpperCase() === next)) {
+          alert("Já existe outro perfil com esse nome.");
+          return;
+        }
+        profile.name = next;
+        localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+        this.render();
+      }
+    });
   },
 
   duplicateProfile(sourceId) {
-     if (sourceId === 'admin') {
+     if (sourceId === "admin") {
          alert("Operação bloqueada: Por medidas de segurança, não é permitido copiar o perfil de Administrador.");
          return;
      }
 
      const sourceProfile = this.profiles.find(p => p.id === sourceId);
      if (!sourceProfile) return;
-     
-     const profileName = prompt(`Digite o nome do novo perfil (Cópia de ${sourceProfile.name}):`);
-     if (profileName && profileName.trim() !== "") {
-        const newId = profileName.trim().toLowerCase().replace(/\s+/g, '_');
-        
-        if (this.profiles.find(p => p.id === newId)) {
+
+     const sourceNorm = String(sourceProfile.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+     const suggestTerc = sourceNorm === "OPERADOR COBRANCA";
+     const defaultName = suggestTerc
+       ? "OPERADOR COBRANÇA TERCEIRIZADO"
+       : `CÓPIA DE ${sourceProfile.name}`;
+
+     this.openProfileNameModal({
+       title: "Copiar perfil",
+       label: "Nome do novo perfil",
+       hint: `Espelho de <strong>${sourceProfile.name}</strong>. As permissões serão copiadas; você pode ajustar Integra e demais acessos em seguida.${suggestTerc ? " Perfis terceirizados só enxergam clientes atribuídos a eles." : ""}`,
+       defaultValue: defaultName,
+       confirmLabel: "Criar cópia",
+       icon: "copy",
+       onConfirm: (profileName) => {
+         const newId = profileName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+         if (!newId) {
+           alert("Nome inválido.");
+           return;
+         }
+         if (this.profiles.find(p => p.id === newId || String(p.name).toUpperCase() === profileName.trim().toUpperCase())) {
            alert("Este perfil já existe.");
            return;
-        }
+         }
 
-        this.profiles.push({ id: newId, name: profileName.trim().toUpperCase() });
-        localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
-        
-        // Copiar as permissões
-        const savedPermsStr = localStorage.getItem(`crm_perms_${sourceId}`);
-        if (savedPermsStr) {
-            localStorage.setItem(`crm_perms_${newId}`, savedPermsStr);
-        } else if (sourceId === 'admin') {
-            let allPerms = {};
-            this.modules.forEach(m => {
-               allPerms[m.key] = true;
-               m.submodules.forEach(sub => {
-                  allPerms[sub.key] = true;
-                  sub.actions.forEach(act => {
-                     const f = this.permFlags(sub, act);
-                     allPerms[f.acessar] = true;
-                     allPerms[f.visualizar] = true;
-                     allPerms[f.editar] = true;
-                  });
-               });
-            });
-            localStorage.setItem(`crm_perms_${newId}`, JSON.stringify(allPerms));
-        }
+         this.profiles.push({ id: newId, name: profileName.trim().toUpperCase() });
+         localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
 
-        this.selectedProfile = newId;
-        this.render();
-     }
+         const savedPermsStr = localStorage.getItem(`crm_perms_${sourceId}`);
+         if (savedPermsStr) {
+           localStorage.setItem(`crm_perms_${newId}`, savedPermsStr);
+         }
+
+         this.selectedProfile = newId;
+         this.render();
+       }
+     });
   },
 
-  deleteProfile(id) {
-     if (id === 'admin') {
+  async deleteProfile(id) {
+     if (id === "admin") {
          alert("Não é possível excluir o perfil de Administrador.");
          return;
      }
@@ -390,14 +560,16 @@ const ConfigUsersApp = {
          return;
      }
 
-     if (confirm(`Tem certeza que deseja excluir o perfil "${profile.name}"? Esta ação não pode ser desfeita.`)) {
-         this.profiles = this.profiles.filter(p => p.id !== id);
-         localStorage.setItem('crm_moura_profiles', JSON.stringify(this.profiles));
-         localStorage.removeItem(`crm_perms_${id}`);
-         
-         this.selectedProfile = 'admin';
-         this.render();
-     }
+     const ok = typeof window.mouraConfirm === "function"
+       ? await window.mouraConfirm(`Tem certeza que deseja excluir o perfil "${profile.name}"? Esta ação não pode ser desfeita.`)
+       : confirm(`Tem certeza que deseja excluir o perfil "${profile.name}"? Esta ação não pode ser desfeita.`);
+     if (!ok) return;
+
+     this.profiles = this.profiles.filter(p => p.id !== id);
+     localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+     localStorage.removeItem(`crm_perms_${id}`);
+     this.selectedProfile = "admin";
+     this.render();
   },
 
   // Método movido para dentro do modal de edição
@@ -627,15 +799,15 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="const isOp = window.isOperadorCobrancaProfile(this.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
                <div id="umodal-operator-type-container" style="flex: 1; display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Tipo de Operador</label>
                   <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
-                     <option value="interno" ${user && user.operator_type === 'interno' ? 'selected' : ''}>Interno</option>
-                     <option value="externo" ${user && user.operator_type === 'externo' ? 'selected' : ''}>Externo (Terceirizada)</option>
+                     <option value="interno" ${user && user.operator_type === 'interno' && !window.isOperadorCobrancaTerceirizadoProfile(user.profile_name) ? 'selected' : ''}>Interno</option>
+                     <option value="externo" ${user && (user.operator_type === 'externo' || window.isOperadorCobrancaTerceirizadoProfile(user.profile_name)) ? 'selected' : (!user ? '' : '')}>Externo (Terceirizada)</option>
                      <option value="apoio_juridico" ${user && user.operator_type === 'apoio_juridico' ? 'selected' : ''}>Apoio Jurídico (Interno)</option>
                      <option value="advogado" ${user && user.operator_type === 'advogado' ? 'selected' : ''}>Advogado (Jurídico)</option>
                   </select>
@@ -732,7 +904,10 @@ const ConfigUsersApp = {
       const managerName = document.getElementById('umodal-manager-name').value.trim();
       const managerEmail = document.getElementById('umodal-manager-email').value.trim();
       const operatorTypeEl = document.getElementById('umodal-operator-type');
-      const operatorType = operatorTypeEl ? operatorTypeEl.value : null;
+      let operatorType = operatorTypeEl ? operatorTypeEl.value : null;
+      if (window.isOperadorCobrancaTerceirizadoProfile(profileName)) {
+        operatorType = "externo";
+      }
       const badgeColor = document.getElementById('umodal-badge-color') ? document.getElementById('umodal-badge-color').value : null;
 
       const advCompanies = Array.from(document.querySelectorAll('input[name="umodal-adv-companies"]:checked')).map(el => el.value);

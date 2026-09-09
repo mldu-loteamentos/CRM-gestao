@@ -378,13 +378,16 @@ const RelacionamentoApp = {
     const matches = window.GlobalCustomerCache.data.filter((c) => {
       const cName = normalizeStr(c.name);
       return terms.every((term) => cName.includes(term));
-    }).slice(0, 12);
-    if (!matches.length) {
+    });
+    const scoped = (typeof window.filterCustomersToAssignedPortfolio === "function"
+      ? window.filterCustomersToAssignedPortfolio(matches)
+      : matches).slice(0, 12);
+    if (!scoped.length) {
       dd.style.display = "none";
       return;
     }
     dd.innerHTML = "";
-    matches.forEach((c) => {
+    scoped.forEach((c) => {
       const item = document.createElement("div");
       item.style.cssText = "padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f3f4f6;";
       item.textContent = (c.id ? c.id + " - " : "") + (c.name || "");
