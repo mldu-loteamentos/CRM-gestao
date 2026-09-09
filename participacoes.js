@@ -307,12 +307,36 @@ const ParticipacoesApp = {
     if (/empreendedora|loteadora|participa[cç][aã]o|ellenc/i.test(s) && !/REF\./i.test(s) && !/([\d.]+,\d{2})/.test(s)) return true;
     if (/^\d{1,2}:\d{2}(:\d{2})?\b/.test(s)) return true;
     if (/^(at[eé]|periodo|per[ií]odo)\b/i.test(s)) return true;
+    // Cabeçalhos / linhas típicas do EXTRATO (não são DESPESAS PAGAS)
+    if (/\bextrato\b|\bconcilia|\bmovimenta[cç][aã]o\s*banc/i.test(s)) return true;
+    if (/^saldo\s+(anterior|atual|dispon|aplic)/i.test(s)) return true;
+    if (/^(apl\.?\s*aplic|aplic\.?\s*aut|int\.?\s*aplic)/i.test(s)) return true;
+    return false;
+  },
+
+  /** Credores/histórico típicos de extrato bancário — NÃO entram na matriz Ellenceo. */
+  isBankStatementNoise(name, detalhe) {
+    const blob = `${name || ""} ${detalhe || ""}`
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!blob) return true;
+    if (/\bSALDO\s+(APLIC|ANTERIOR|ATUAL|DISPON)/.test(blob)) return true;
+    if (/\bAPL(\.|ICACAO|IC)?\s*(AUT|APLIC)/.test(blob)) return true;
+    if (/\bINT\s*APLIC/.test(blob)) return true;
+    if (/\bHIGHGRADE\b/.test(blob)) return true;
+    if (/\bSISPAG\b/.test(blob) && !/\b(LTDA|EIRELI|S\.?\s?A\.?)\b/.test(blob) && !/\bREF\.?\b/.test(blob)) return true;
+    if (/\bRECEBIMENTOS\s+RESERV/.test(blob)) return true;
+    if (/^(TED|PIX|DOC)\b/.test(blob) && blob.length < 48 && !/\bREF\.?\b/.test(blob)) return true;
+    if (/\bEXTRATO\b|\bCONCILIACAO\b/.test(blob)) return true;
     return false;
   },
 
   isNoiseCredor(name) {
     const s = String(name || "").trim();
     if (!s || s === "(sem credor)") return true;
+    if (this.isBankStatementNoise(s, "")) return true;
     if (/^\d{1,2}:\d{2}/.test(s)) return true;
     if (/^(at[eé]\s*\/?\s*\d{2,4}|hor[aá]rio)/i.test(s)) return true;
     if (/^folha\s+\d/i.test(s)) return true;
@@ -322,6 +346,46 @@ const ParticipacoesApp = {
     if (/^[aàá]\s*\/\s*\d{4}\b/i.test(s)) return true; // lixo de quebra "A/2026 - PARA A EXECUÇÃO…"
     if (s.length < 3) return true;
     return false;
+  },
+
+  /**
+   * Recorta SOMENTE o(s) quadro(s) "DESPESAS PAGAS" do PDF Ellenceo.
+   * Ignora extrato da conta, aplicações, saldos e demais seções.
+   */
+  extractDespesasPagasText(rawText) {
+    const raw = String(rawText || "").replace(/\r/g, "");
+    if (!raw.trim()) return "";
+    const re = /DESPESAS\s+PAGAS/gi;
+    const starts = [];
+    let m;
+    while ((m = re.exec(raw)) !== null) starts.push(m.index);
+    if (!starts.length) return "";
+
+    const endRe = /Saldo\s*Total\b|\bEXTRATO\s*(BANC|\bDA\s*CONTA)?\b|\bMOVIMENTA[CÇ][AÃ]O\s*BANC|\bCONCILIA[CÇ][AÃ]O\b|\bRECEITAS\s+(RECEBIDAS|PAGAS)?\b|\bRECEBIMENTOS\b|\bSALDO\s+ANTERIOR\b/i;
+    const parts = [];
+    starts.forEach((start, idx) => {
+      const hardEnd = starts[idx + 1] != null ? starts[idx + 1] : raw.length;
+      let part = raw.slice(start, hardEnd);
+      // Preferir corte no "Saldo Total" do próprio quadro de despesas
+      const saldoIdx = part.search(/\n[ \t]*Saldo\s*Total\b/i);
+      if (saldoIdx > 60) {
+        part = part.slice(0, saldoIdx);
+      } else {
+        const endIdx = part.search(endRe);
+        // "DESPESAS PAGAS" no início: não cortar no próprio título; achar após ~40 chars
+        if (endIdx > 40) part = part.slice(0, endIdx);
+      }
+      // Remove qualquer trecho residual de extrato que tenha vazado
+      part = part.split(/\n/).filter((line) => {
+        const t = String(line || "").trim();
+        if (!t) return false;
+        if (/\bEXTRATO\b|\bCONCILIA/i.test(t)) return false;
+        if (/^SALDO\s+(ANTERIOR|APLIC|ATUAL)/i.test(t) && !/REF\./i.test(t)) return false;
+        return true;
+      }).join("\n");
+      if (part.trim().length > 40) parts.push(part);
+    });
+    return parts.join("\n");
   },
 
   /** Mês da matriz: 1 PDF de fechamento = 1 coluna (prioridade ao período do arquivo). */
@@ -377,6 +441,9 @@ const ParticipacoesApp = {
         detalhe = split.detalhe || detalhe;
       }
     }
+    if (this.isBankStatementNoise(credor, detalhe)) {
+      return Object.assign({}, row, { credor, detalhe, doc, valor: 0, categoria: "", categoriaId: "" });
+    }
     const cat = this.categoryOf({ credor, detalhe });
     return Object.assign({}, row, {
       credor,
@@ -389,18 +456,16 @@ const ParticipacoesApp = {
   },
 
   /**
-   * Layout Ellenceo DESPESAS PAGAS:
+   * Layout Ellenceo DESPESAS PAGAS (não extrato):
    * Data | Razão Social (credor) | Detalhamento | Nº Documento | Débitos (valor)
    * Linhas do detalhe podem quebrar; montamos o bloco até achar o valor.
    */
   parseExpenseLines(text, meta) {
-    const raw = String(text || "").replace(/\r/g, "");
-    let chunk = raw;
-    const start = raw.search(/DESPESAS\s+PAGAS/i);
-    if (start >= 0) chunk = raw.slice(start);
-    // Corta no rodapé / próxima seção (não cortar no "Saldo Total" se ainda houver lançamentos — só após)
-    const cut = chunk.search(/\n[=\-]{8,}[\s\S]{0,120}(RECEITAS|RECEBIMENTOS|EXTRATO BANC)/i);
-    if (cut > 80) chunk = chunk.slice(0, cut);
+    const chunk = this.extractDespesasPagasText(text);
+    if (!chunk) {
+      console.warn("[Participacoes] PDF sem quadro DESPESAS PAGAS — extrato/outras seções ignorados.", meta && meta.name);
+      return [];
+    }
 
     const lines = chunk.split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).filter(Boolean);
     const rows = [];
@@ -419,14 +484,18 @@ const ParticipacoesApp = {
       const split = this.splitCredorDetalhe(taken.rest);
       let credor = this.normalizeCredorName(split.credor);
       let detalhe = split.detalhe;
-      if (this.isNoiseCredor(credor)) {
-        if (detalhe && !this.isNoiseCredor(detalhe)) {
+      if (this.isNoiseCredor(credor) || this.isBankStatementNoise(credor, detalhe)) {
+        if (detalhe && !this.isNoiseCredor(detalhe) && !this.isBankStatementNoise(detalhe, "")) {
           credor = this.normalizeCredorName(detalhe);
           detalhe = "";
         } else {
           cur = null;
           return;
         }
+      }
+      if (this.isBankStatementNoise(credor, detalhe)) {
+        cur = null;
+        return;
       }
       const iso = cur.date.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1");
       rows.push(this.repairExpenseRow({
@@ -460,6 +529,11 @@ const ParticipacoesApp = {
           cur = null;
           return;
         }
+        // Linha tipicamente de extrato (aplicação / saldo) — descartar
+        if (this.isBankStatementNoise(rest, "")) {
+          cur = null;
+          return;
+        }
         cur = { date: m[1], buf: rest };
         return;
       }
@@ -469,7 +543,7 @@ const ParticipacoesApp = {
       }
     });
     flush();
-    return rows;
+    return rows.filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
   },
 
   async extractPdfText(url) {
@@ -517,15 +591,18 @@ const ParticipacoesApp = {
     const repaired = list.map((r) => this.repairExpenseRow(r));
     const withVal = repaired.filter((r) => Number(r.valor) > 0).length;
     if (withVal / repaired.length < 0.45) return true;
-    const noisy = repaired.filter((r) => this.isNoiseCredor(r.credor)).length;
-    if (repaired.length >= 8 && noisy / repaired.length > 0.25) return true;
+    const noisy = repaired.filter((r) => this.isNoiseCredor(r.credor) || this.isBankStatementNoise(r.credor, r.detalhe)).length;
+    if (repaired.length >= 8 && noisy / repaired.length > 0.2) return true;
+    // Muitos "credores" de extrato = cache antigo lendo conta, não DESPESAS PAGAS
+    const bankish = repaired.filter((r) => this.isBankStatementNoise(r.credor, r.detalhe)).length;
+    if (repaired.length >= 5 && bankish / repaired.length > 0.12) return true;
     return false;
   },
 
   async ensureFileParsed(fileRec, force) {
     if (!fileRec) return;
     if (!force && Array.isArray(fileRec.expenses) && fileRec.expenses.length && !this.expensesMostlyBroken(fileRec.expenses)) {
-      fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor));
+      fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
       if (!this.expensesMostlyBroken(fileRec.expenses)) return;
     }
     const url = this.fileLink(fileRec.name);
@@ -536,7 +613,7 @@ const ParticipacoesApp = {
 
   persistCache(fileRec) {
     try {
-      const key = "crm_participacoes_cache_v6";
+      const key = "crm_participacoes_cache_v7";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
       all[this.companyId + "|" + fileRec.name] = {
         at: Date.now(),
@@ -549,7 +626,7 @@ const ParticipacoesApp = {
 
   restoreCacheForCompany() {
     try {
-      const keys = ["crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
+      const keys = ["crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
       let all = {};
       keys.forEach((key) => {
         try {
@@ -564,9 +641,9 @@ const ParticipacoesApp = {
         const name = k.slice(String(this.companyId).length + 1);
         const hit = all[k];
         if (!hit || !Array.isArray(hit.expenses)) return;
-        // Cache antigo com valores zerados / credores-lixo: não restaura — força reparse do PDF
+        // Cache antigo com extrato/valores zerados: não restaura — força reparse do PDF
         if (this.expensesMostlyBroken(hit.expenses)) return;
-        const repaired = hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor));
+        const repaired = hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
         if (this.expensesMostlyBroken(repaired)) return;
         let rec = this.files.find((f) => f.name === name);
         if (!rec) {
@@ -592,7 +669,7 @@ const ParticipacoesApp = {
       const filePeriod = f.closing || this.periodFromFileName(f.name);
       (f.expenses || []).forEach((r) => {
         const fixed = this.repairExpenseRow(r);
-        if (!(Number(fixed.valor) > 0) || this.isNoiseCredor(fixed.credor)) return;
+        if (!(Number(fixed.valor) > 0) || this.isNoiseCredor(fixed.credor) || this.isBankStatementNoise(fixed.credor, fixed.detalhe)) return;
         list.push(Object.assign({}, fixed, {
           periodo: filePeriod || fixed.periodo || this.periodFromFileName(fixed.sourceFile),
           sourceFile: fixed.sourceFile || f.name
@@ -609,7 +686,7 @@ const ParticipacoesApp = {
       return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, this.repairExpenseRow(r), {
         periodo: filePeriod || r.periodo || "",
         sourceFile: r.sourceFile || (f && f.name) || ""
-      })).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor)) : [];
+      })).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe)) : [];
     }
     return this.allExpenses();
   },
@@ -1135,7 +1212,7 @@ const ParticipacoesApp = {
                 </table>
               </div>
             `).join("") : ""}
-            ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha de despesa paga identificada. Confira se a página “DESPESAS PAGAS” está em texto no PDF.</div>` : ""}
+            ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada. O Integra não usa o extrato da conta — confira se o PDF Ellenceo tem a seção “DESPESAS PAGAS” em texto.</div>` : ""}
             ${!this.parsing && !this.loading && this.companyId && !this.files.length ? `<div class="crm-card" style="padding:18px;color:#64748b;">Empresa selecionada. Envie um ou mais PDFs de fechamento para agrupar as despesas por período.</div>` : ""}
           </div>
         </div>

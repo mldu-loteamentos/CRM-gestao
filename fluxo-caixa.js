@@ -296,12 +296,16 @@ const FluxoCaixaApp = {
    * — redutora nesses grupos (retenção, desconto obtido, flag Sienge) → positivo
    * — redutora em RECEITAS (cancelamento) → negativo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
-   * Exceção: reapropriação/abatimento de adiantamento — a API manda o par +/− que se zera; preservar o sinal.
+   * Exceções do par adiantamento × abatimento:
+   *   — adiantamento → sempre positivo no DFC
+   *   — abatimento/reaprop. → preserva o sinal da API (para o par +/− se zerar)
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
-    if (mov && this.movAdvanceRole(mov) === "abatimento") return raw;
+    const role = mov ? this.movAdvanceRole(mov) : "";
+    if (role === "abatimento") return raw;
+    if (role === "adiantamento") return Math.abs(raw);
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
@@ -1076,8 +1080,8 @@ const FluxoCaixaApp = {
       ? `${hasAdvancePair ? `
           <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.82rem;line-height:1.5;">
             <strong>Adiantamento × abatimento:</strong>
-            o adiantamento sai no caixa; a “Reaprop. / abatimento de adiant.” no mesmo título
-            “mata” a parcela correspondente para o sócio/parceiro não receber de novo no repasse.
+            o <em>adiantamento</em> entra <strong>positivo</strong> no DFC; a “Reaprop. / abatimento de adiant.” no mesmo título
+            “mata” a parcela correspondente (sinal da API) para o sócio/parceiro não receber de novo no repasse.
             ${pairedTitles.size ? ` Títulos com os dois lados neste detalhe: <strong>${[...pairedTitles].map((k) => this.esc(k)).join(", ")}</strong>.` : ""}
           </div>` : ""}
           <div style="margin:0 0 14px;padding:12px 14px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;font-size:0.82rem;line-height:1.5;">
