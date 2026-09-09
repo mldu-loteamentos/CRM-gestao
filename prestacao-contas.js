@@ -230,11 +230,18 @@ const PrestacaoContasApp = {
     }
     if (!cats.length) return [];
 
+    const beforeAbate = cats.length;
+    if (fcApp && typeof fcApp.isAbatimentoCategory === "function") {
+      cats = cats.filter((fc) => !fcApp.isAbatimentoCategory(fc));
+    }
+    const removedAbate = cats.length < beforeAbate;
+    if (!cats.length) return [];
+
     const ignored = this.ignoredAccountKeys();
     const part = this.activePartnership();
     const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
     const shareEntries = (fcApp && typeof fcApp.categoryShareEntries === "function")
-      ? fcApp.categoryShareEntries(cats)
+      ? fcApp.categoryShareEntries(cats, { renormalize: removedAbate })
       : cats.map((fc) => ({ fc, share: 1 / cats.length }));
 
     return shareEntries.map(({ fc, share }) => {
@@ -425,6 +432,10 @@ const PrestacaoContasApp = {
   rebuildFromMovements() {
     const allocs = [];
     (this.movements || []).forEach(mov => this.allocate(mov).forEach(a => allocs.push(a)));
+    const fcApp = this.fc();
+    if (fcApp && typeof fcApp.settleAdvancesInAllocs === "function") {
+      fcApp.settleAdvancesInAllocs(allocs, this.movements);
+    }
     this.buildTree(allocs);
   },
 

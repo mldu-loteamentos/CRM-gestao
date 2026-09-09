@@ -337,6 +337,10 @@ window.VerificarConstrucaoApp = {
                 if (cloud !== local) {
                     localStorage.setItem('crm_obras_andamento', cloud);
                     if (document.getElementById('vc-tbody')) this.renderTable();
+                    if (typeof window.renderAlcadaDistratoTab === 'function' && document.getElementById('content-regra-alcada-distrato')) {
+                        const pane = document.getElementById('content-regra-alcada-distrato');
+                        if (pane && pane.style.display !== 'none') window.renderAlcadaDistratoTab();
+                    }
                 }
             } else {
                 this._seedObrasCloudFromLocal();

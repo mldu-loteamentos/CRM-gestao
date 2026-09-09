@@ -1,7 +1,9 @@
 (function () {
   const STORAGE_KEY = "crm_moura_alcada_distrato";
+  const OBRAS_KEY = "crm_obras_andamento";
   let saveTimer = null;
   let saving = false;
+  let obrasSaveTimer = null;
 
   function num(v) {
     const n = Number(String(v == null ? "" : v).replace(",", "."));
@@ -83,13 +85,22 @@
     return window.hasFinCrAction("regras_cobranca", "editar");
   }
 
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function readObrasState() {
     try {
-      const raw = JSON.parse(localStorage.getItem("crm_obras_andamento") || "{}");
+      const raw = JSON.parse(localStorage.getItem(OBRAS_KEY) || "{}");
       const out = {};
       Object.keys(raw || {}).forEach((k) => {
-        const v = raw[k] || {};
-        out[String(k)] = { isOn: !!v.isOn, previsao: v.previsao || "" };
+        const v = raw[k];
+        if (typeof v === "boolean") out[String(k)] = { isOn: v, previsao: "" };
+        else if (v && typeof v === "object") out[String(k)] = { isOn: !!v.isOn, previsao: v.previsao || "" };
       });
       return out;
     } catch (e) {
@@ -134,17 +145,93 @@
     };
   }
 
-  function currentObrasSummary() {
+  function resolveCostCentersRaw() {
+    const fromState = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    if (fromState && fromState.length) return fromState;
+    try {
+      const cached = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "null");
+      if (Array.isArray(cached) && cached.length) return cached;
+    } catch (e) { /* ignore */ }
+    return [];
+  }
+
+  function isEmpreendimentoCcId(id) {
+    const s = String(id || "").trim();
+    return s.charAt(0) === "1" || s.charAt(0) === "2";
+  }
+
+  function listEmpreendimentosForObras() {
+    let all = resolveCostCentersRaw().slice();
+    if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+      const typed = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(all);
+      if (typed && typed.length) all = typed;
+    } else {
+      all = all.filter((cc) => isEmpreendimentoCcId(cc && cc.id));
+    }
+
+    const byId = new Map();
+    all.forEach((cc) => {
+      if (!cc || cc.id == null) return;
+      const id = String(cc.id);
+      byId.set(id, {
+        id: id,
+        label: id + " - " + String(cc.name || "").toUpperCase()
+      });
+    });
+
+    // Mantém empreendimentos já marcados mesmo se sumirem do inventário atual.
     const state = readObrasState();
-    const allCcs = ((window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || []).slice();
-    return Object.keys(state)
-      .filter((k) => state[k] && state[k].isOn)
-      .map((k) => {
-        const cc = allCcs.find((x) => String(x.id) === String(k));
-        const label = cc ? `${cc.id} - ${String(cc.name || "").toUpperCase()}` : String(k);
-        return { id: String(k), label, previsao: state[k].previsao || "" };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
+    Object.keys(state).forEach((k) => {
+      if (!/^\d+$/.test(k)) return;
+      if (byId.has(k)) return;
+      byId.set(k, { id: k, label: k });
+    });
+
+    return [...byId.values()].sort((a, b) => {
+      const na = Number(a.id);
+      const nb = Number(b.id);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      return String(a.label).localeCompare(String(b.label), "pt-BR", { numeric: true });
+    });
+  }
+
+  function persistObrasState(nextState) {
+    const toSave = {};
+    Object.keys(nextState || {}).forEach((k) => {
+      const v = nextState[k];
+      if (!v) return;
+      toSave[k] = { isOn: !!v.isOn, previsao: v.previsao || "" };
+    });
+    localStorage.setItem(OBRAS_KEY, JSON.stringify(toSave));
+    if (window.firebaseDb && window.firebaseCollections) {
+      const { doc, setDoc } = window.firebaseCollections;
+      const userName = (window.AppState && window.AppState.currentUser && window.AppState.currentUser.name) || "";
+      setDoc(doc(window.firebaseDb, "config", "global"), {
+        crm_obras_andamento: JSON.stringify(toSave),
+        crm_obras_andamento_meta: JSON.stringify({ updatedAt: Date.now(), updatedBy: userName })
+      }, { merge: true }).catch((err) => console.error("[Alçada Distrato] Falha ao sincronizar obras:", err));
+    }
+    if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.renderTable === "function") {
+      try { window.VerificarConstrucaoApp.renderTable(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function scheduleObrasSave() {
+    if (!canEdit()) return;
+    if (obrasSaveTimer) clearTimeout(obrasSaveTimer);
+    obrasSaveTimer = setTimeout(function () {
+      const host = document.getElementById("dist-alcada-obras-editor");
+      if (!host) return;
+      const next = readObrasState();
+      host.querySelectorAll(".dist-obra-row").forEach((row) => {
+        const id = row.getAttribute("data-id");
+        if (!id) return;
+        const on = !!(row.querySelector(".dist-obra-toggle") || {}).checked;
+        const previsao = String(((row.querySelector(".dist-obra-previsao") || {}).value) || "");
+        next[id] = { isOn: on, previsao: on ? previsao : (previsao || "") };
+      });
+      persistObrasState(next);
+    }, 280);
   }
 
   function collectForm() {
@@ -244,20 +331,45 @@
     );
   }
 
-  function renderObrasSummary() {
-    const host = document.getElementById("dist-alcada-obras-summary");
+  function obraRowHtml(emp, state) {
+    const isOn = !!(state && state.isOn);
+    const previsao = (state && state.previsao) || "";
+    const disabled = canEdit() ? "" : " disabled";
+    return (
+      '<div class="dist-obra-row" data-id="' + escapeHtml(emp.id) + '" style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-bottom:1px solid #e2e8f0;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">' +
+          '<strong style="color:#1e293b;font-size:0.84rem;line-height:1.35;">' + escapeHtml(emp.label) + '</strong>' +
+          '<label class="moura-switch" title="Marcar obra em andamento">' +
+            '<input type="checkbox" class="dist-obra-toggle"' + (isOn ? " checked" : "") + disabled + '>' +
+            '<span class="moura-switch-track" aria-hidden="true"></span>' +
+          '</label>' +
+        '</div>' +
+        '<div class="dist-obra-date-wrap" style="display:' + (isOn ? "flex" : "none") + ';align-items:center;gap:8px;">' +
+          '<span style="font-size:0.8rem;color:#64748b;">Previsão de término:</span>' +
+          '<input type="date" class="dist-obra-previsao" value="' + escapeHtml(previsao) + '"' + disabled +
+            ' style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.8rem;color:#334155;outline:none;">' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderObrasEditor() {
+    const host = document.getElementById("dist-alcada-obras-editor");
     if (!host) return;
-    const rows = currentObrasSummary();
-    if (!rows.length) {
-      host.innerHTML = '<div style="padding:14px 16px;color:#64748b;font-size:0.82rem;">Nenhum empreendimento marcado com obra em andamento no momento.</div>';
+    const state = readObrasState();
+    const list = listEmpreendimentosForObras();
+    if (!list.length) {
+      host.innerHTML = '<div style="padding:14px 16px;color:#64748b;font-size:0.82rem;">Nenhum empreendimento encontrado para marcar obra em andamento.</div>';
       return;
     }
-    host.innerHTML = rows.map((row) => (
-      '<div style="display:flex;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">' +
-        '<strong style="color:#1e293b;font-size:0.83rem;">' + row.label + "</strong>" +
-        '<span style="font-size:0.8rem;color:#64748b;">' + (row.previsao ? ("Previsão: " + row.previsao.split("-").reverse().join("/")) : "Sem previsão") + "</span>" +
-      "</div>"
-    )).join("");
+    const onCount = list.filter((e) => state[e.id] && state[e.id].isOn).length;
+    host.innerHTML =
+      '<div style="padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:0.78rem;color:#64748b;">' +
+        '<strong style="color:#334155;">' + onCount + '</strong> com obra ativa · ' + list.length + ' empreendimento(s)' +
+      '</div>' +
+      '<div style="max-height:420px;overflow:auto;">' +
+        list.map((emp) => obraRowHtml(emp, state[emp.id])).join("") +
+      '</div>';
   }
 
   function bind() {
@@ -267,11 +379,24 @@
     root.addEventListener("input", function (ev) {
       const t = ev.target;
       if (!t) return;
+      if (t.classList && (t.classList.contains("dist-obra-toggle") || t.classList.contains("dist-obra-previsao"))) {
+        const row = t.closest(".dist-obra-row");
+        if (row && t.classList.contains("dist-obra-toggle")) {
+          const wrap = row.querySelector(".dist-obra-date-wrap");
+          if (wrap) wrap.style.display = t.checked ? "flex" : "none";
+        }
+        scheduleObrasSave();
+        return;
+      }
       if (t.matches("input")) scheduleAutoSave();
     });
     root.addEventListener("change", function (ev) {
       const t = ev.target;
       if (!t) return;
+      if (t.classList && (t.classList.contains("dist-obra-toggle") || t.classList.contains("dist-obra-previsao"))) {
+        scheduleObrasSave();
+        return;
+      }
       if (t.matches("input")) scheduleAutoSave();
     });
   }
@@ -297,29 +422,29 @@
         ruleCardHtml("dist-alcada-tvo", "Com TVO · sem obra", "Aplica quando o empreendimento não estiver marcado como obra em andamento.", cfg.withTvo) +
       "</div>" +
       '<section class="alcada-card" style="margin-top:14px;">' +
-        '<div class="alcada-card-h" style="justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
-          "<span>Obras em andamento usadas no Distrato</span>" +
-          '<button type="button" class="btn btn-outline btn-sm" onclick="window.openDistratoObrasAndamentoConfig()">' +
-            '<i data-lucide="building" style="width:14px;height:14px;"></i> Editar lista' +
-          "</button>" +
+        '<div class="alcada-card-h">' +
+          "<span>Obras em andamento</span>" +
         "</div>" +
-        '<div style="padding:14px 16px 0;color:#64748b;font-size:0.82rem;line-height:1.45;">Essa lista é a mesma da tela <strong>Vistoria → Obras em andamento</strong> e sincroniza via Firebase.</div>' +
-        '<div id="dist-alcada-obras-summary" style="margin-top:12px;border-top:1px solid #e2e8f0;"></div>' +
+        '<div id="dist-alcada-obras-editor"></div>' +
       "</section>";
-    renderObrasSummary();
+    renderObrasEditor();
     bind();
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   };
 
   window.openDistratoObrasAndamentoConfig = function () {
+    if (typeof window.renderAlcadaDistratoTab === "function") {
+      window.renderAlcadaDistratoTab();
+      const editor = document.getElementById("dist-alcada-obras-editor");
+      if (editor && editor.scrollIntoView) editor.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.abrirModalObrasAndamento === "function") {
       if (typeof window.VerificarConstrucaoApp._ensureModals === "function") {
         window.VerificarConstrucaoApp._ensureModals();
       }
       window.VerificarConstrucaoApp.abrirModalObrasAndamento();
-      return;
     }
-    alert("A tela de obras em andamento não está disponível nesta sessão.");
   };
 
   window.saveAlcadaDistratoConfig = function () {

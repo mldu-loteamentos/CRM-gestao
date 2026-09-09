@@ -142,8 +142,12 @@ const FluxoCaixaApp = {
    * Rateio das categorias do movimento.
    * Sienge manda % (0–100). Se houver linhas duplicadas ou soma > 100,
    * normaliza — senão o DFC infla (caso visto em 2.11.03 Adiantamento a Parceiros).
+   * @param {object} [opts]
+   * @param {boolean} [opts.renormalize] quando true, o % restante vira 100% do título
+   *   (usado após remover linhas de abatimento/reapropriação do mesmo movimento).
    */
-  categoryShareEntries(cats) {
+  categoryShareEntries(cats, opts) {
+    const renormalize = !!(opts && opts.renormalize);
     const list = Array.isArray(cats) ? cats : [];
     const merged = new Map();
     list.forEach((fc) => {
@@ -172,20 +176,141 @@ const FluxoCaixaApp = {
       const eq = 1 / entries.length;
       return entries.map((e) => ({ fc: e.fc, share: eq }));
     }
-    // Soma > 100: normaliza. Senão divide por 100 (rateio parcial permanece parcial).
-    const denom = sum > 100.0001 ? sum : 100;
+    // Com abatimento removido: o caixa do título fica 100% nas contas restantes.
+    // Senão: soma > 100 normaliza; parcial (ex. 53%) permanece parcial.
+    const denom = renormalize ? sum : (sum > 100.0001 ? sum : 100);
     return entries.map((e) => ({ fc: e.fc, share: e.points / denom }));
+  },
+
+  /** Conta / nome de linha de abatimento-reapropriação (não é caixa). */
+  isAbatimentoCategory(fc) {
+    if (!fc) return false;
+    const n = String(fc.financialCategoryName || this.catName(fc.financialCategoryId) || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /REAPROP|ABATIMENTO\s+DE\s+ADIANT|ABATIMENTO\s+ADIANT/.test(n);
+  },
+
+  isAdiantamentoParceirosAccount(categoryId, categoryName) {
+    const nk = this.normAccountKey(categoryId);
+    if (nk === "21103") return true;
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /ADIANTAMENTO A PARCEIRO/.test(n);
+  },
+
+  creditorSettlementKey(mov) {
+    if (!mov) return "";
+    const title = this.movTitleInfo(mov);
+    const cred = String(
+      mov.creditorId
+      || mov.creditor
+      || (title && title.party)
+      || ""
+    ).trim();
+    if (!cred) return "";
+    return String(mov.companyId || "") + "|" + cred.toUpperCase();
+  },
+
+  /**
+   * Créditos de reapropriação no período: matam adiantamentos do mesmo credor/título.
+   * O movimento de abatimento em si não entra no DFC.
+   * Par +/− no mesmo credor: usa max(positivos, negativos) para não dobrar a capacidade.
+   */
+  collectAdvanceSettlementPool(movements) {
+    const pos = {};
+    const neg = {};
+    const byTitle = new Set();
+    (movements || []).forEach((mov) => {
+      if (this.movAdvanceRole(mov) !== "abatimento") return;
+      const factor = this.factorForCompany(mov.companyId);
+      if (factor <= 0) return;
+      const title = this.movTitleInfo(mov);
+      if (title.titleKey) byTitle.add(String(title.titleKey));
+      const key = this.creditorSettlementKey(mov);
+      const raw = Number(mov.bankMovementAmount) || 0;
+      const amt = Math.abs(raw) * factor;
+      if (!key || !(amt > 0)) return;
+      if (raw >= 0) pos[key] = (pos[key] || 0) + amt;
+      else neg[key] = (neg[key] || 0) + amt;
+    });
+    const byCreditor = {};
+    new Set([...Object.keys(pos), ...Object.keys(neg)]).forEach((key) => {
+      byCreditor[key] = Math.max(pos[key] || 0, neg[key] || 0);
+    });
+    return { byCreditor, byTitle };
+  },
+
+  /**
+   * Adiantamento já “matado” pela reapropriação vira Repasse no demonstrativo
+   * (caixa saiu como adiantamento, mas economicamente é repasse do período).
+   * Ex.: 2.11.03 −173.700 com 155.400 matados → −18.300 em adiant. e −574.778,83 em repasses.
+   */
+  settleAdvancesInAllocs(allocs, movements) {
+    const pool = this.collectAdvanceSettlementPool(movements || this.movements || []);
+    const REPASSE_ID = "2.02.04.01";
+    const REPASSE_NAME = "Repasses";
+    const eps = 0.02;
+
+    const ranked = (allocs || [])
+      .map((a, idx) => ({ a, idx }))
+      .filter(({ a }) => {
+        const role = this.movAdvanceRole(a.mov);
+        return role === "adiantamento" || this.isAdiantamentoParceirosAccount(a.categoryId, a.categoryName);
+      })
+      .sort((x, y) => {
+        const dx = this.cashDate(x.a.mov || {}) || "";
+        const dy = this.cashDate(y.a.mov || {}) || "";
+        if (dx !== dy) return dx.localeCompare(dy);
+        return x.idx - y.idx;
+      });
+
+    ranked.forEach(({ a }) => {
+      const title = this.movTitleInfo(a.mov || {});
+      const need = Math.abs(Number(a.amount) || 0);
+      if (!(need > 0)) return;
+      let settle = false;
+
+      if (title.titleKey && pool.byTitle.has(String(title.titleKey))) {
+        settle = true;
+        const key = this.creditorSettlementKey(a.mov);
+        if (key && (pool.byCreditor[key] || 0) > 0) {
+          pool.byCreditor[key] = Math.max(0, (pool.byCreditor[key] || 0) - need);
+        }
+      } else {
+        const key = this.creditorSettlementKey(a.mov);
+        if (key && (pool.byCreditor[key] || 0) >= need - eps) {
+          pool.byCreditor[key] -= need;
+          settle = true;
+        }
+      }
+
+      if (!settle) return;
+      a.categoryId = REPASSE_ID;
+      a.categoryName = REPASSE_NAME;
+      a.settledAdvance = true;
+    });
+    return allocs;
   },
 
   allocate(mov, factor) {
     // Reaprop./abatimento de adiantamento: só mata o título no Sienge — não é caixa no DFC
     if (this.movAdvanceRole(mov) === "abatimento") return [];
     const rawBank = Number(mov.bankMovementAmount) || 0;
-    const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+    const catsAll = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
-    if (!cats.length) return [];
+    if (!catsAll.length) return [];
+
+    // Linhas de abatimento no mesmo título: fora do rateio; o caixa fica nas contas restantes (100%).
+    const cashCats = catsAll.filter((fc) => !this.isAbatimentoCategory(fc));
+    const removedAbate = cashCats.length < catsAll.length;
+    if (!cashCats.length) return [];
+
     const ignored = this.ignoredAccountKeys();
-    return this.categoryShareEntries(cats).map(({ fc, share }) => {
+    return this.categoryShareEntries(cashCats, { renormalize: removedAbate }).map(({ fc, share }) => {
       const categoryId = String(fc.financialCategoryId || "").trim();
       if (!categoryId) return null;
       const nk = this.normAccountKey(categoryId);
@@ -300,9 +425,10 @@ const FluxoCaixaApp = {
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
    * Adiantamento × abatimento (reapropriação):
-   * — adiantamento = saída de caixa → negativo (como demais custos em 04.01)
-   * — reaprop./abatimento de adiant. = só contábil (mata o título no Sienge);
-   *   não entra no DFC, senão reduz indevidamente 2.02.04.01 Repasses
+   * — adiantamento = saída de caixa → negativo
+   * — reaprop./abatimento = fora do DFC (só mata o título)
+   * — adiantamento matado no período é reclassificado para 2.02.04.01 Repasses
+   *   (settleAdvancesInAllocs), restando em 2.11.03 só o saldo em aberto
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
@@ -565,6 +691,7 @@ const FluxoCaixaApp = {
         if (factor <= 0) return;
         this.allocate(mov, factor).forEach(a => allocs.push(a));
       });
+      this.settleAdvancesInAllocs(allocs, this.movements);
       this.build(allocs);
       if (!this.movements.length) this.error = "Nenhum movimento de caixa/banco no período para as empresas selecionadas.";
     } catch (err) {
@@ -698,6 +825,7 @@ const FluxoCaixaApp = {
       if (factor <= 0) return;
       this.allocate(mov, factor).forEach(a => allocs.push(a));
     });
+    this.settleAdvancesInAllocs(allocs, this.movements);
     this.build(allocs);
     this.render();
   },
