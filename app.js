@@ -17084,6 +17084,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
 
   document.getElementById("pdf-modal-title").textContent = "Termo de Rescisão e Distrato - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
+  if (typeof setPdfPrintLogo === "function") setPdfPrintLogo(false);
   document.getElementById("pdf-view-overlay").classList.add("active");
   try { if (window.lucide) lucide.createIcons(); } catch (e) {}
   } catch (err) {
