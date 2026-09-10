@@ -387,7 +387,16 @@ const ConfigUsersApp = {
         return null;
       }
     };
-    let obj = read(profileId);
+    const normalize = (s) => String(s || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9_]/g, "_").replace(/_+/g, "_");
+    const aliasMap = {
+      "OPERADOR_COBRANCA_BACK_OFFICE": "operador_cobranca_back_office",
+      "OPERADOR_COBRANCA_INTERNO_BACK_OFFICE": "operador_cobranca_back_office",
+      "OPERADOR_COBRANCA_BACKOFFICE": "operador_cobranca_back_office",
+      "OPERADOR_COBRANCA_TERCEIRIZADO": "operador_cobranca_terceirizado"
+    };
+    const canonical = aliasMap[normalize(profileId)] || profileId;
+
+    let obj = read(canonical);
     if (obj && obj.__mirror_of__) {
       const mirrored = read(obj.__mirror_of__);
       return mirrored && typeof mirrored === "object" ? { ...mirrored } : {};
@@ -395,7 +404,7 @@ const ConfigUsersApp = {
     if (obj && typeof obj === "object") return obj;
 
     // Fallback sem duplicar blob: espelhos conhecidos leem o OPERADOR COBRANÇA
-    const n = String(profileId || "");
+    const n = String(canonical || "");
     if (n.includes("terceiriz") || n.includes("back")) {
       const cobId = this.resolveCobrancaProfileId();
       const cob = read(cobId);

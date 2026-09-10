@@ -2946,14 +2946,32 @@ window.applyPermissions = function(profileName) {
   
   // Administrador tem acesso a tudo
   if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
+
+  const normalizeProfileName = (s) => String(s || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " E ")
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const resolvedBackOfficeProfileId = function(name) {
+    const n = normalizeProfileName(name);
+    if (n.includes("OPERADOR COBRANCA") && n.includes("BACK")) return "operador_cobranca_back_office";
+    if (n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ")) return "operador_cobranca_terceirizado";
+    return null;
+  };
   
   let crmProfiles = [];
   try {
     crmProfiles = JSON.parse(localStorage.getItem('crm_moura_profiles')) || [];
   } catch(e) {}
   
-  const matchedProfile = crmProfiles.find(p => p.name === profileName.trim().toUpperCase());
-  const profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  const matchedProfile = crmProfiles.find(p => normalizeProfileName(p.name) === normalizeProfileName(profileName.trim()));
+  const fallbackProfileId = resolvedBackOfficeProfileId(profileName) || profileName.trim().toLowerCase().replace(/\s+/g, '_');
+  const profileId = matchedProfile ? matchedProfile.id : fallbackProfileId;
   
   let permsStr = localStorage.getItem(`crm_perms_${profileId}`);
   try {
