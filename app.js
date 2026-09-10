@@ -24037,6 +24037,7 @@ window.renderNexHistory = async function() {
             const valid = window.nexIsLegallyValid(it);
             const entregue = window.nexIsEntregue(it.status);
             const author = window.shortOperatorName(it.author);
+            const canDelete = window.nexCanDeleteItem(it);
             const moraIso = entregue && it.deliveredAt ? window.nexAddDays(it.deliveredAt, 30) : "";
             const left = moraIso ? window.nexDaysBetween(window.nexTodayIso(), moraIso) : null;
             let prazoTxt = "—";
@@ -24084,10 +24085,10 @@ window.renderNexHistory = async function() {
               </td>
               <td style="text-align:center;white-space:nowrap;">${arCell}</td>
               <td style="text-align:center;">
-                <button type="button" title="Excluir esta NEX" onclick="window.deleteNexItem('${it.id}')"
+                ${canDelete ? `<button type="button" title="Excluir esta NEX" onclick="window.deleteNexItem('${it.id}')"
                   style="border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.75rem;font-weight:700;display:inline-flex;align-items:center;gap:4px;">
                   <i data-lucide="trash-2" style="width:14px;height:16px;"></i> Excluir
-                </button>
+                </button>` : `<span title="Somente o autor da NEX ou o administrador pode excluir" style="color:#64748b;font-size:0.75rem;">—</span>`}
               </td>
             </tr>`;
           }).join("")}
@@ -24101,6 +24102,28 @@ window.renderNexHistory = async function() {
     root.insertAdjacentHTML("afterbegin", `<div style="margin-bottom:10px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;font-weight:600;">Esta NEX perdeu validade jurídica porque houve pagamento de parcela depois da data de envio.</div>`);
   }
   if (window.lucide) lucide.createIcons();
+};
+
+window.nexNormalizeName = function(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+window.nexCurrentUserName = function() {
+  const user = (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+  return String((user && user.name) || "").trim() || "Operador";
+};
+
+window.nexCanDeleteItem = function(item) {
+  if (!item) return false;
+  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(window.AppState && AppState.currentUser)) return true;
+  const current = window.nexNormalizeName(window.nexCurrentUserName());
+  const author = window.nexNormalizeName(item.author || "");
+  return current && author && current === author;
 };
 
 window.nexFindItem = function(id) {
@@ -24185,8 +24208,16 @@ window.updateNexDeliveredAt = async function(id, value) {
 };
 
 window.deleteNexItem = async function(id, opts) {
-  const ctx = window.nexFindItem(id) || {};
   if (!id) return;
+  let ctx = await window.nexResolveItem(id);
+  if (!ctx.item) {
+    alert("NEX não encontrada para exclusão.");
+    return;
+  }
+  if (!window.nexCanDeleteItem(ctx.item)) {
+    alert("Só o usuário que gerou a NEX e o administrador podem excluir esta NEX.");
+    return;
+  }
   if (!(opts && opts.silent) && !confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return;
   await window.purgeNexItems((it) => String(it.id) === String(id));
   if (ctx.customerId) {
@@ -24738,6 +24769,7 @@ window.renderNexFollowup = function() {
     const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
     const unitLabel = window.nexUnitLabelForSale(it.customerId, it.titulo, it);
     const author = window.shortOperatorName(it.author);
+    const canDelete = window.nexCanDeleteItem(it);
     const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
     const arCell = it.arDigital
       ? `<button type="button" onclick="event.stopPropagation(); window.viewNexAr('${it.id}')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:0.72rem;font-weight:700;">Ver AR</button>`
@@ -24754,7 +24786,7 @@ window.renderNexFollowup = function() {
       <td onclick="event.stopPropagation()">${window.nexStatusSelectHtml(it)}</td>
       <td style="text-align:center;" onclick="event.stopPropagation()">${arCell}</td>
       <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
-      <td style="text-align:center;" onclick="event.stopPropagation()"><button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button></td>
+      <td style="text-align:center;" onclick="event.stopPropagation()">${canDelete ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button>` : `<span title="Somente o autor da NEX ou o administrador pode excluir" style="color:#64748b;font-size:0.75rem;">—</span>`}</td>
     </tr>`;
   }).join("");
 };
