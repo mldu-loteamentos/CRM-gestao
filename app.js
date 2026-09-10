@@ -3443,8 +3443,22 @@ async function initializeApplication() {
 
   window.getCustomerNotesList = function(store, customerId) {
       if (!store) return [];
-      const s = window.normalizeCustomerNotesKey(customerId);
-      const list = store[s] || store[customerId] || [];
+      const target = String(customerId == null ? "" : customerId);
+      const norm = window.normalizeCustomerNotesKey(target);
+      const rawKeys = new Set([
+        target,
+        norm,
+        String(Number(target) || target),
+        target.replace(/^B-/i, ""),
+        norm.replace(/^B-/i, "")
+      ]);
+      const candidates = Object.keys(store || {}).filter(k => rawKeys.has(String(k)) || rawKeys.has(String(k).replace(/^B-/i, "")) || String(Number(k)) === String(Number(target)));
+      const merged = [];
+      candidates.forEach(k => {
+        const arr = Array.isArray(store[k]) ? store[k] : [];
+        arr.forEach(n => merged.push(n));
+      });
+      const list = merged.length ? merged : (store[norm] || store[target] || []);
       return Array.isArray(list) ? list : [];
   };
 
@@ -3662,11 +3676,15 @@ async function initializeApplication() {
         if (window.firebaseDb && window.firebaseCollections) {
             if (customerId) {
                const customerKey = window.normalizeCustomerNotesKey(customerId);
-               const notesToSave = window.mergeOccurrenceLists(
-                   window.getCustomerNotesList(AppState.notes, customerKey),
-                   window.getCustomerNotesList(AppState.notes, customerId)
-               ).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
+               const sourceList = window.getCustomerNotesList(AppState.notes, customerKey);
+               const notesToSave = window.mergeOccurrenceLists(sourceList, []).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
                AppState.notes[customerKey] = notesToSave;
+               if (AppState.notes[customerId] && customerId !== customerKey) {
+                   AppState.notes[customerId] = window.mergeOccurrenceLists(
+                     window.getCustomerNotesList(AppState.notes, customerId),
+                     notesToSave
+                   );
+               }
                if (!notesToSave.length) {
                    console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
                    return;
@@ -12162,9 +12180,16 @@ window.crossContractAction = function(action) {
 };
 
 window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skipFormClear = false) {
-  const customerNotes = AppState.notes[AppState.selectedCustomerId] || (AppState.notes[AppState.selectedCustomerId] = []);
-  const alreadySaved = occurrence.id && customerNotes.some(item => item.id === occurrence.id);
-  if (!alreadySaved) customerNotes.push(occurrence);
+  const customerKey = window.normalizeCustomerNotesKey
+    ? window.normalizeCustomerNotesKey(AppState.selectedCustomerId)
+    : String(AppState.selectedCustomerId);
+  const existingNotes = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.notes, customerKey)
+    : (AppState.notes[customerKey] || []);
+  const alreadySaved = occurrence.id && existingNotes.some(item => item.id === occurrence.id);
+  AppState.notes[customerKey] = window.mergeOccurrenceLists
+    ? window.mergeOccurrenceLists(existingNotes, alreadySaved ? [] : [occurrence])
+    : (alreadySaved ? existingNotes : [...existingNotes, occurrence]);
   if(window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   
   // Limpar contador de dias na fila do contrato ATUAL apenas se tiver promessa pendente
