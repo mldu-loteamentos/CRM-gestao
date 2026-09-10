@@ -1769,6 +1769,15 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     let city = resolved.city || "";
     const ruleId = resolved.ruleId;
 
+    const forcedAcordoJudicialLucelia = typeof window.clientForcedAcordoJudicialTitulo === "function"
+      && window.clientForcedAcordoJudicialTitulo(c)
+      && requiredType === "apoio_juridico";
+    if (forcedAcordoJudicialLucelia) {
+      c.assignedOperator = "LUCELIA JUSTO";
+      c.appliedRule = "RÉGUA (" + ruleSuffix + ") - FORÇADO LUCELIA";
+      return;
+    }
+
     if (requiredType === "advogado") {
       let matchedAdv = null;
       for (const adv of advogados) {
