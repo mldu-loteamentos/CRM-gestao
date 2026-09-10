@@ -467,8 +467,10 @@ const ParticipacoesApp = {
     if (corp) return { credor: corp[1].replace(/\s+/g, " ").trim(), detalhe: corp[2].trim() };
     const ref = text.match(/^(.+?)\s+(REF\.?\s*.+)$/i);
     if (ref && ref[1].length >= 3) return { credor: ref[1].trim(), detalhe: ref[2].trim() };
+    const leadDetail = text.match(/^(.+?)\s+(PROTOCOL?O\s+.+|PROTOCOLO\s+.+|SOLICITAÇÃO\s+.+|SOLICITACAO\s+.+|PAGAMENTO\s+.+|COMPRA\s+.+|LOCAÇÃO\s+.+|PAGAMENTOS\s+.+)$/i);
+    if (leadDetail && leadDetail[1].length >= 3) return { credor: leadDetail[1].trim(), detalhe: leadDetail[2].trim() };
     // Nome pessoa + detalhe sem REF: primeiras 2–5 palavras maiúsculas
-    const person = text.match(/^([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç' .-]{2,60}?)\s+(REF\.?\s+.+|SOLICITAÇÃO.+|COMPRA.+|PAGAMENTO.+|LOCAÇÃO.+)$/i);
+    const person = text.match(/^([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç' .-]{2,60}?)\s+(REF\.?\s+.+|SOLICITAÇÃO.+|SOLICITACAO.+|PROTOCOLO.+|PROTOCOL?O.+|COMPRA.+|PAGAMENTO.+|LOCAÇÃO.+)$/i);
     if (person) return { credor: person[1].replace(/\s+/g, " ").trim(), detalhe: person[2].trim() };
     return { credor: text, detalhe: "" };
   },
@@ -760,9 +762,7 @@ const ParticipacoesApp = {
       }
     });
     flush();
-    return this.dedupeExpenseRows(
-      rows.filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
-    );
+    return rows.filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
   },
 
   expenseDedupeKey(r) {
@@ -962,7 +962,7 @@ const ParticipacoesApp = {
         }));
       });
     });
-    return this.dedupeExpenseRows(list);
+    return list;
   },
 
   activeExpenses() {
