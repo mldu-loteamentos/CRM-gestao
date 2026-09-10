@@ -318,11 +318,28 @@ const ConfigUsersApp = {
 
   prunePermissionStorage(keepKey) {
     try {
+      const protectedKeys = new Set([
+        "crm_perms_operador_cobranca",
+        "crm_perms_operador_cobrança",
+        "crm_perms_admin",
+        "crm_perms_operador_cobranca_back_office",
+        "crm_perms_operador_cobranca_terceirizado"
+      ]);
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith("crm_perms_")) continue;
-        if (k !== keepKey) keysToRemove.push(k);
+        if (k === keepKey || protectedKeys.has(k)) continue;
+        const raw = localStorage.getItem(k);
+        try {
+          const obj = raw ? JSON.parse(raw) : null;
+          // mantém apenas o espelho leve e remove os espelhos redundantes;
+          // nunca apaga o perfil-base da cobrança, porque ele alimenta o espelho.
+          if (obj && obj.__mirror_of__) keysToRemove.push(k);
+          else keysToRemove.push(k);
+        } catch (e) {
+          keysToRemove.push(k);
+        }
       }
       if (!keysToRemove.length) return;
       keysToRemove.forEach(k => {
@@ -352,6 +369,22 @@ const ConfigUsersApp = {
       }
       return false;
     }
+  },
+
+  writePermissionPayload(profileId, perms) {
+    const payload = JSON.stringify(perms);
+    const keys = new Set([String(profileId || "")]);
+    const fallback = this.resolveCobrancaProfileId();
+    const n = String(profileId || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (n.includes("back_office") || n.includes("backoffice") || n.includes("terceiriz") || n.includes("terceirizado")) {
+      keys.add(fallback);
+    }
+    let ok = true;
+    keys.forEach(k => {
+      const permKey = `crm_perms_${k}`;
+      if (!this.safeLocalSet(permKey, payload)) ok = false;
+    });
+    return ok;
   },
 
   syncPermsToCloud() {
@@ -1387,7 +1420,8 @@ const ConfigUsersApp = {
     }
 
     window.syncConfiguracoesPermAliases(perms);
-    if (!this.safeLocalSet(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms))) {
+    const permSaved = this.writePermissionPayload(this.selectedProfile, perms);
+    if (!permSaved) {
       // Mantém espelho leve se a cota estiver cheia
       this.seedPermsAsMirror(this.selectedProfile, this.resolveCobrancaProfileId());
     } else {
@@ -1459,7 +1493,7 @@ const ConfigUsersApp = {
        return;
     }
 
-    if (!this.safeLocalSet(`crm_perms_${this.selectedProfile}`, JSON.stringify(perms))) {
+    if (!this.writePermissionPayload(this.selectedProfile, perms)) {
        alert("Armazenamento local cheio: não foi possível salvar a cópia completa das permissões. Ajuste o Integra no perfil OPERADOR COBRANÇA ou libere espaço no navegador e tente de novo.");
        return;
     }
