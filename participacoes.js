@@ -777,15 +777,7 @@ const ParticipacoesApp = {
   },
 
   dedupeExpenseRows(rows) {
-    const seen = new Set();
-    const out = [];
-    (rows || []).forEach((r) => {
-      const k = this.expenseDedupeKey(r);
-      if (seen.has(k)) return;
-      seen.add(k);
-      out.push(r);
-    });
-    return out;
+    return Array.isArray(rows) ? rows.slice() : [];
   },
 
   async extractPdfText(url) {
