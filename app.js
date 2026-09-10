@@ -1665,14 +1665,22 @@ window.clientHasJuridicoTrail = function(client, history) {
 };
 
 window.clientIsAcordoInternoQuebrado = function(client, history) {
-  if (!client || !client.hasOverdueAgreement) return false;
+  if (!client) return false;
   if (client.subjudice === "S" || client.subjudice === true) return false;
+  if (typeof window.clientForcedAcordoJudicialTitulo === "function" && window.clientForcedAcordoJudicialTitulo(client)) {
+    return false;
+  }
+  if (!client.hasOverdueAgreement) return false;
   return !window.clientHasJuridicoTrail(client, history);
 };
 
 window.clientIsAcordoJudicialQuebrado = function(client, history) {
-  if (!client || !client.hasOverdueAgreement) return false;
+  if (!client) return false;
   if (client.subjudice === "S" || client.subjudice === true) return false;
+  if (typeof window.clientForcedAcordoJudicialTitulo === "function" && window.clientForcedAcordoJudicialTitulo(client)) {
+    return true;
+  }
+  if (!client.hasOverdueAgreement) return false;
   return !!window.clientHasJuridicoTrail(client, history);
 };
 
@@ -1703,9 +1711,12 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     const juridicoTrail = typeof window.clientHasJuridicoTrail === "function"
       ? window.clientHasJuridicoTrail(c, subjudiceMemory)
       : passedJuridico;
+    const forcedJudicial = typeof window.clientForcedAcordoJudicialTitulo === "function"
+      ? window.clientForcedAcordoJudicialTitulo(c)
+      : false;
     const recenteLucelia = isRecenteJuridicoComLucelia(subjudiceMemory, c.customerId);
     c.isInternalBrokenAgreement = !!(c.hasOverdueAgreement && !juridicoTrail && c.subjudice !== "S");
-    c.isAcordoJudicialQuebrado = !!(c.hasOverdueAgreement && juridicoTrail && c.subjudice !== "S");
+    c.isAcordoJudicialQuebrado = !!(((c.hasOverdueAgreement && juridicoTrail) || forcedJudicial) && c.subjudice !== "S");
 
     if (c.subjudice === "S") {
       requiredType = "advogado";
@@ -11877,10 +11888,11 @@ async function saveCustomerOccurrence() {
       const iniciativaEl = document.querySelector('input[name="note-iniciativa"]:checked');
   
   const canal = canalEl ? canalEl.value : "";
+  const isProposalReneg = canal === "Proposta de renegociação";
   const isWebroBaixa = typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal);
   const isReuniaoSemanal = typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal);
   
-  if (canal === "Proposta de renegociação") {
+  if (isProposalReneg) {
       if (typeof window.applyRenegotiationText === 'function') {
           if (window.applyRenegotiationText() === false) {
               return;
@@ -11909,38 +11921,56 @@ async function saveCustomerOccurrence() {
     return;
   }
   
-  if (canal !== "Nota interna" && !isReuniaoSemanal) {
+  const isInternalLikeCanal = canal === "Nota interna" || isProposalReneg || isReuniaoSemanal;
+
+  if (!isInternalLikeCanal && !isWebroBaixa && canal !== "Retorno Agendado") {
     if (!promiseDate) {
-      alert(isWebroBaixa
-        ? "A data da baixa Webro é obrigatória."
-        : (canal === "Retorno Agendado" ? "A data de retorno é obrigatória." : "A data de promessa é obrigatória."));
+      alert("A data de promessa é obrigatória.");
       return;
     }
-    if (!isWebroBaixa && canal !== "Retorno Agendado" && !reminder) {
+    if (!reminder) {
       alert("O campo Lembrete é obrigatório.");
       return;
     }
-    if (!isWebroBaixa && canal !== "Retorno Agendado" && !iniciativaEl) {
+    if (!iniciativaEl) {
       alert("O campo Iniciativa é obrigatório.");
       return;
     }
-  
-    if (!isWebroBaixa) {
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      const pDate = new Date(promiseDate + "T00:00:00");
-      if (pDate < today) {
-        alert("A data de promessa não pode ser no passado.");
-        return;
-      }
-    } else {
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      const pDate = new Date(promiseDate + "T00:00:00");
-      if (pDate > today) {
-        alert("A data da baixa Webro não pode ser futura. Informe a data do pagamento (pode ser retroativa).");
-        return;
-      }
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const pDate = new Date(promiseDate + "T00:00:00");
+    if (pDate < today) {
+      alert("A data de promessa não pode ser no passado.");
+      return;
+    }
+  }
+
+  if (isWebroBaixa) {
+    if (!promiseDate) {
+      alert("A data da baixa Webro é obrigatória.");
+      return;
+    }
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const pDate = new Date(promiseDate + "T00:00:00");
+    if (pDate > today) {
+      alert("A data da baixa Webro não pode ser futura. Informe a data do pagamento (pode ser retroativa).");
+      return;
+    }
+  }
+
+  if (canal === "Retorno Agendado") {
+    if (!promiseDate) {
+      alert("A data de retorno é obrigatória.");
+      return;
+    }
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const pDate = new Date(promiseDate + "T00:00:00");
+    if (pDate < today) {
+      alert("A data de retorno não pode ser no passado.");
+      return;
     }
   }
   
@@ -11966,12 +11996,12 @@ async function saveCustomerOccurrence() {
     saleId: canonicalSaleId || AppState.selectedSaleId || null,
     unitId: currentSale.unitId || null,
     text: text,
-    promiseDate: (canal === "Nota interna" || isReuniaoSemanal) ? null : promiseDate,
-    promiseStatus: (canal === "Nota interna" || isReuniaoSemanal || !promiseDate) ? null : "Pendente",
-    reminder: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : reminder,
+    promiseDate: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal) ? null : promiseDate,
+    promiseStatus: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal || !promiseDate) ? null : "Pendente",
+    reminder: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal) ? null : reminder,
     canal: canal,
-    iniciativa: (canal === "Nota interna" || isWebroBaixa || isReuniaoSemanal) ? null : iniciativa,
-    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && !isWebroBaixa && !isReuniaoSemanal
+    iniciativa: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal) ? null : iniciativa,
+    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && canal !== "Proposta de renegociação" && !isWebroBaixa && !isReuniaoSemanal
       ? AppState.selectedPromisedInstallments.map(item => window.getPromisedInstallmentLabel(item) || item)
       : [],
     pinned: (canal === "Nota interna") ? isPinned : false,
