@@ -34,7 +34,7 @@ const ParticipacoesApp = {
   },
 
   fmt(v) {
-    return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
 
   apiUrl(p) {
@@ -469,6 +469,9 @@ const ParticipacoesApp = {
     if (ref && ref[1].length >= 3) return { credor: ref[1].trim(), detalhe: ref[2].trim() };
     const leadDetail = text.match(/^(.+?)\s+(PROTOCOL?O\s+.+|PROTOCOLO\s+.+|SOLICITAÇÃO\s+.+|SOLICITACAO\s+.+|PAGAMENTO\s+.+|COMPRA\s+.+|LOCAÇÃO\s+.+|PAGAMENTOS\s+.+)$/i);
     if (leadDetail && leadDetail[1].length >= 3) return { credor: leadDetail[1].trim(), detalhe: leadDetail[2].trim() };
+    // Caso de linha do tipo “FERNANDA CARDOSO caixa, e também atualizaram...”
+    const leadNarrative = text.match(/^(.+?)\s+(caixa\b[,;: ]?.*|e\s+tamb\[ée\]m\b.*|tamb\[ée\]m\b.*)$/i);
+    if (leadNarrative && leadNarrative[1].length >= 3) return { credor: leadNarrative[1].replace(/\s+/g, " ").trim(), detalhe: leadNarrative[2].trim() };
     // Nome pessoa + detalhe sem REF: primeiras 2–5 palavras maiúsculas
     const person = text.match(/^([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇa-záéíóúâêôãõç' .-]{2,60}?)\s+(REF\.?\s+.+|SOLICITAÇÃO.+|SOLICITACAO.+|PROTOCOLO.+|PROTOCOL?O.+|COMPRA.+|PAGAMENTO.+|LOCAÇÃO.+)$/i);
     if (person) return { credor: person[1].replace(/\s+/g, " ").trim(), detalhe: person[2].trim() };
