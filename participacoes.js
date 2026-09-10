@@ -867,9 +867,7 @@ const ParticipacoesApp = {
       || this.expensesMismatchSaldo(fileRec)
       || fileRec.cacheVer !== 9;
     if (!needs && Array.isArray(fileRec.expenses) && fileRec.expenses.length) {
-      fileRec.expenses = this.dedupeExpenseRows(
-        fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
-      );
+      fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
       if (!this.expensesMostlyBroken(fileRec.expenses) && !this.expensesMismatchSaldo(fileRec)) return;
     }
     const url = this.fileLink(fileRec.name);
@@ -917,9 +915,7 @@ const ParticipacoesApp = {
         if (!hit || !Array.isArray(hit.expenses)) return;
         // Só aceita cache v9 íntegro — versões antigas forçam reparse (dd/mm/aa + Saldo Total)
         if (hit.cacheVer !== 9 || this.expensesMostlyBroken(hit.expenses)) return;
-        const repaired = this.dedupeExpenseRows(
-          hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe))
-        );
+        const repaired = hit.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
         if (this.expensesMostlyBroken(repaired)) return;
         const closing = hit.closing || this.periodFromFileName(name);
         const probe = { expenses: repaired, saldoTotal: hit.saldoTotal, closing };
@@ -941,9 +937,7 @@ const ParticipacoesApp = {
           rec.cacheVer = 9;
           if (!rec.closing) rec.closing = closing;
         } else {
-          rec.expenses = this.dedupeExpenseRows(
-            (rec.expenses || []).map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor))
-          );
+          rec.expenses = (rec.expenses || []).map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor));
         }
       });
     } catch (e) {}
