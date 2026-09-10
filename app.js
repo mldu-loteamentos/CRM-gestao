@@ -1616,7 +1616,7 @@ window.clientPassedJuridicoRecently = function(client, history) {
 
 /** Já teve passagem pelo jurídico (memória e/ou ocorrências judiciais), mesmo fora da janela de 180 dias. */
 window.FILA_FORCE_ACORDO_JUDICIAL_TITULOS = new Set([
-  "6456", "1584", "7005", "7429", "11711", "8206"
+  "6456", "1584", "7005", "7429", "11711", "8206", "10766"
 ]);
 
 window.clientForcedAcordoJudicialTitulo = function(client) {
