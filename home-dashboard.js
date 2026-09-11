@@ -572,7 +572,7 @@ const HomeDashboard = {
                       <button type="button" onclick="window.closeHomeInsightList()" style="border:none; background:#f1f5f9; border-radius:6px; padding:4px 8px; font-size:0.75rem; font-weight:700; cursor:pointer; color:#334155;">Voltar</button>
                     </div>
                     ${clients.length ? clients.map(c => `
-                      <button type="button" onclick="window.openHomeInsightClient(${Number(c.customerId)}, ${JSON.stringify(String(c.saleId || ''))})" style="display:block; width:100%; text-align:left; border:none; background:transparent; padding:7px 4px; cursor:pointer; font-size:0.84rem; font-weight:600; color:#105436; border-bottom:1px solid #f1f5f9;">
+                      <button type="button" class="home-insight-client-btn" data-customer-id="${this.escHtml(c.customerId)}" data-sale-id="${this.escHtml(c.saleId)}" data-titulo="${this.escHtml(this.displayedTitle(c) || c.saleId || '')}" style="display:block; width:100%; text-align:left; border:none; background:transparent; padding:7px 4px; cursor:pointer; font-size:0.84rem; font-weight:600; color:#105436; border-bottom:1px solid #f1f5f9;">
                         ${this.escHtml(c.customerName || ('Cliente ' + c.customerId))}
                         <span style="display:block; font-size:0.7rem; font-weight:500; color:#94a3b8;">Título ${this.escHtml(this.displayedTitle(c) || c.saleId || '')}</span>
                       </button>`).join('') : `<div style="padding:8px; font-size:0.8rem; color:#64748b;">Nenhum cliente listado.</div>`}
@@ -599,8 +599,20 @@ const HomeDashboard = {
       <style>@media (max-width: 900px) { #home-op-insights-container .home-insights-layout { grid-template-columns: 1fr !important; } }</style>
       <div id="home-op-sprint-chart" style="margin-bottom:20px;"></div>
       ${insightsCards}`;
+    this.bindInsightClientClicks(box);
     this.renderOpSprintChart();
     if (window.lucide) lucide.createIcons();
+  },
+
+  bindInsightClientClicks(box) {
+    if (!box) return;
+    box.querySelectorAll('.home-insight-client-btn').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.openHomeInsightClient(btn.getAttribute('data-customer-id'), btn.getAttribute('data-sale-id'), btn.getAttribute('data-titulo'));
+      });
+    });
   },
 
   renderPreviewBar() {
@@ -1845,7 +1857,8 @@ window.closeHomeInsightList = function() {
   HomeDashboard.renderInsights();
 };
 
-window.openHomeInsightClient = async function(customerId, saleId) {
+window.openHomeInsightClient = async function(customerId, saleId, titulo) {
+  if (customerId == null || customerId === '') return;
   window._homeInsightReturn = true;
   const btnBack = document.getElementById('btn-back-to-list');
   const textBack = document.getElementById('text-back-to-list');
@@ -1853,8 +1866,9 @@ window.openHomeInsightClient = async function(customerId, saleId) {
   if (btnBack) {
     btnBack.onclick = function() { goBackToDashboard(); };
   }
-  if (typeof viewCustomerCard === 'function') {
-    await viewCustomerCard(customerId, saleId);
+  const opener = window.viewCustomerCard || (typeof viewCustomerCard === 'function' ? viewCustomerCard : null);
+  if (typeof opener === 'function') {
+    await opener(customerId, saleId, titulo || saleId || null);
   }
 };
 

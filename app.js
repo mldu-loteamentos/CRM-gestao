@@ -11176,6 +11176,8 @@ function formatCpfCnpj(val) {
   }
 }
 
+window.viewCustomerCard = viewCustomerCard;
+
 function goBackToDashboard() {
   try { sessionStorage.removeItem("currentSubView"); } catch (e) {}
   if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
