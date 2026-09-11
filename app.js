@@ -3645,7 +3645,32 @@ async function initializeApplication() {
      AppState.notes = JSON.parse(localStorage.getItem("crm_moura_notes")) || window.MOCK_DATA.INITIAL_MOCK_NOTES || {};
   }
   
-  window.saveNotesToFirebase = async function(customerId) {
+  window.notesDropSet = function(opts) {
+      const drop = new Set();
+      const ids = (opts && opts.dropIdentities) || [];
+      ids.forEach(id => { if (id != null && id !== '') drop.add(String(id)); });
+      return drop;
+  };
+
+  window.filterDroppedNotes = function(list, drop) {
+      if (!drop || !drop.size) return list;
+      return (list || []).filter(n => {
+          const ident = window.occurrenceIdentity(n);
+          return !drop.has(ident) && !drop.has(String(n && n.date || '')) && !drop.has(String(n && n.id || ''));
+      });
+  };
+
+  window.persistCustomerNotesList = function(customerKey, customerId, notesToSave) {
+      AppState.notes[customerKey] = notesToSave;
+      if (customerId != null && String(customerId) !== String(customerKey) && AppState.notes[customerId]) {
+          AppState.notes[customerId] = window.mergeOccurrenceLists(
+              window.getCustomerNotesList(AppState.notes, customerId),
+              notesToSave
+          );
+      }
+  };
+
+  window.saveNotesToFirebase = async function(customerId, opts) {
       window._isFirebaseSyncing = true;
       try {
         try {
@@ -3656,7 +3681,6 @@ async function initializeApplication() {
           if (isQuota) {
             console.warn("[Notes] localStorage cheio (crm_moura_notes). Seguindo só com Firebase.", quotaErr);
             try {
-              // Reduz espelho local: mantém só o cliente atual + últimos tocados
               const slim = {};
               const keepId = customerId != null ? window.normalizeCustomerNotesKey(customerId) : null;
               if (keepId && AppState.notes[keepId]) slim[keepId] = AppState.notes[keepId];
@@ -3674,35 +3698,76 @@ async function initializeApplication() {
           }
         }
         if (window.firebaseDb && window.firebaseCollections) {
+            const drop = window.notesDropSet(opts);
+            const strip4868 = (n, key) => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, key));
             if (customerId) {
                const customerKey = window.normalizeCustomerNotesKey(customerId);
-               const sourceList = window.getCustomerNotesList(AppState.notes, customerKey);
-               const notesToSave = window.mergeOccurrenceLists(sourceList, []).filter(n => !(typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerKey)));
-               AppState.notes[customerKey] = notesToSave;
-               if (AppState.notes[customerId] && customerId !== customerKey) {
-                   AppState.notes[customerId] = window.mergeOccurrenceLists(
-                     window.getCustomerNotesList(AppState.notes, customerId),
-                     notesToSave
-                   );
-               }
-               if (!notesToSave.length) {
+               const sourceList = window.getCustomerNotesList(AppState.notes, customerKey).filter(n => strip4868(n, customerKey));
+               const chunkId = window.getCustomerNoteChunkId(customerKey);
+               const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
+               const applyMerged = (remote) => {
+                   let notesToSave = window.mergeOccurrenceLists(sourceList, Array.isArray(remote) ? remote : []).filter(n => strip4868(n, customerKey));
+                   notesToSave = window.filterDroppedNotes(notesToSave, drop);
+                   return notesToSave;
+               };
+               const writeMerged = async () => {
+                   const runTransaction = window.firebaseCollections.runTransaction;
+                   if (typeof runTransaction === "function") {
+                       let saved = [];
+                       await runTransaction(window.firebaseDb, async (transaction) => {
+                           const snap = await transaction.get(docRef);
+                           const data = snap.exists() ? (snap.data() || {}) : {};
+                           const remote = Array.isArray(data[customerKey]) ? data[customerKey] : [];
+                           saved = applyMerged(remote);
+                           if (!saved.length && !drop.size) return;
+                           transaction.set(docRef, { [customerKey]: saved }, { merge: true });
+                       });
+                       return saved;
+                   }
+                   const snap = await window.firebaseCollections.getDoc(docRef);
+                   const data = snap && snap.exists() ? (snap.data() || {}) : {};
+                   const remote = Array.isArray(data[customerKey]) ? data[customerKey] : [];
+                   return applyMerged(remote);
+               };
+               const notesToSave = await writeMerged();
+               window.persistCustomerNotesList(customerKey, customerId, notesToSave);
+               if (!notesToSave.length && !drop.size) {
                    console.warn("[Firebase RT] Lista local vazia para o cliente", customerKey, "- não sobrescreve a nuvem com array vazio.");
                    return;
                }
-               console.log("[Firebase RT] Iniciando salvamento da ocorrência do cliente", customerKey, notesToSave.length, "registro(s)");
-               const chunkId = window.getCustomerNoteChunkId(customerKey);
-               const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
-               await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
-               console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!");
+               if (typeof window.firebaseCollections.runTransaction !== "function") {
+                   await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
+               }
+               console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!", customerKey, notesToSave.length, "registro(s)");
             } else {
                console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
+               const { collection, getDocs } = window.firebaseCollections;
+               const remoteMap = {};
+               try {
+                   const notesSnap = await getDocs(collection(window.firebaseDb, 'customer_notes_shards'));
+                   notesSnap.forEach(d => {
+                       Object.entries(d.data() || {}).forEach(([k, v]) => {
+                           if (Array.isArray(v)) remoteMap[String(k)] = v;
+                       });
+                   });
+               } catch (remoteErr) {
+                   console.warn("[Firebase RT] Não foi possível ler shards remotos no save em massa:", remoteErr);
+               }
                const chunks = {};
                for (const custId of Object.keys(AppState.notes)) {
-                   const list = window.getCustomerNotesList(AppState.notes, custId);
+                   const key = String(custId);
+                   const list = window.filterDroppedNotes(
+                       window.mergeOccurrenceLists(
+                           window.getCustomerNotesList(AppState.notes, custId),
+                           remoteMap[key] || []
+                       ).filter(n => strip4868(n, key)),
+                       drop
+                   );
                    if (!list.length) continue;
+                   AppState.notes[key] = list;
                    const chunkId = window.getCustomerNoteChunkId(custId);
                    if (!chunks[chunkId]) chunks[chunkId] = {};
-                   chunks[chunkId][String(custId)] = list;
+                   chunks[chunkId][key] = list;
                }
                for (const [chunkId, data] of Object.entries(chunks)) {
                    const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
@@ -3735,7 +3800,7 @@ async function initializeApplication() {
       const shardId = window.getCustomerNoteChunkId(customerKey);
       const shardRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', shardId);
       window.activeCustomerNotesUnsubscribe = window.firebaseCollections.onSnapshot(shardRef, snapshot => {
-        if (window._isFirebaseSyncing || window._isNotesHydrating) return;
+        if (window._isFirebaseSyncing) return;
         const data = snapshot.exists() ? snapshot.data() : {};
         if (!data || !Object.prototype.hasOwnProperty.call(data, customerKey)) return;
         const remote = data && Array.isArray(data[customerKey]) ? data[customerKey] : [];
@@ -12755,7 +12820,9 @@ window.editOccurrenceReal = function(customerId, occDate) {
 };
 
 window.cancelOccurrence = function(customerId, occDate) {
-  const list = AppState.notes[customerId] || [];
+  const list = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.notes, customerId)
+    : (AppState.notes[customerId] || []);
   const occ = list.find(x => x.date === occDate);
   if (!occ) return;
   if (occ.nexLocked || String(occ.canal || "").toUpperCase() === "NEX") {
@@ -12784,15 +12851,22 @@ window.cancelOccurrence = function(customerId, occDate) {
   const confirmDelete = confirm("Tem certeza que deseja apagar/excluir esta ocorrência?");
   if (!confirmDelete) return;
   
-  const localNotes = localStorage.getItem("crm_moura_notes");
-  if (localNotes) {
-    AppState.notes = JSON.parse(localNotes);
-  }
+  const customerKey = window.normalizeCustomerNotesKey
+    ? window.normalizeCustomerNotesKey(customerId)
+    : String(customerId);
+  const dropIdentities = [];
+  if (typeof window.occurrenceIdentity === "function") dropIdentities.push(window.occurrenceIdentity(occ));
+  if (occ.date) dropIdentities.push(occ.date);
+  if (occ.id) dropIdentities.push(occ.id);
+
+  const currentList = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.notes, customerKey)
+    : (AppState.notes[customerKey] || AppState.notes[customerId] || []);
+  const nextList = currentList.filter(x => x.date !== occDate && x !== occ);
+  if (!AppState.notes) AppState.notes = {};
+  AppState.notes[customerKey] = nextList;
   
-  const currentList = AppState.notes[customerId] || [];
-  AppState.notes[customerId] = currentList.filter(x => x.date !== occDate);
-  
-  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  if(window.saveNotesToFirebase) window.saveNotesToFirebase(customerId, { dropIdentities }); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
   renderCustomerOccurrences();
   updateSidebarAgendaBadge();
   if (document.getElementById("tab-agenda").style.display === "block") {
