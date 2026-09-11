@@ -1752,5 +1752,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typeof window.checkVistoriasValidationAlerts === "function") {
             window.checkVistoriasValidationAlerts();
         }
+        if (typeof window.checkNexDueAlerts === "function") {
+            window.checkNexDueAlerts();
+        }
     }, 3000);
 });

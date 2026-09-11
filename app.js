@@ -2841,6 +2841,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (typeof window.checkVistoriasValidationAlerts === "function") {
         window.checkVistoriasValidationAlerts();
       }
+      if (typeof window.checkNexDueAlerts === "function") {
+        window.checkNexDueAlerts();
+      }
     }, 2500);
   } catch (err) {
     const errorMsg = document.getElementById("login-error-msg");
@@ -24792,16 +24795,352 @@ window.switchWesendPanel = function(panel) {
   const follow = document.getElementById("wesend-panel-followup");
   const zero = document.getElementById("wesend-panel-zero");
   const d61 = document.getElementById("wesend-panel-61");
+  const cfg = document.getElementById("wesend-panel-config");
+  const filters = document.getElementById("wesend-filters-card");
   const b1 = document.getElementById("btn-wesend-followup");
   const b2 = document.getElementById("btn-wesend-zero");
   const b3 = document.getElementById("btn-wesend-61");
+  const b4 = document.getElementById("btn-wesend-config");
   if (follow) follow.style.display = panel === "followup" ? "block" : "none";
   if (zero) zero.style.display = panel === "elegiveis-zero" ? "block" : "none";
   if (d61) d61.style.display = panel === "elegiveis-61" ? "block" : "none";
+  if (cfg) cfg.style.display = panel === "config" ? "block" : "none";
+  if (filters) filters.style.display = panel === "config" ? "none" : "";
   if (b1) b1.classList.toggle("active", panel === "followup");
   if (b2) b2.classList.toggle("active", panel === "elegiveis-zero");
   if (b3) b3.classList.toggle("active", panel === "elegiveis-61");
+  if (b4) b4.classList.toggle("active", panel === "config");
+  if (panel === "config" && typeof window.renderNexDueConfigPanel === "function") window.renderNexDueConfigPanel();
   if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
+};
+
+window.NEX_DUE_CONFIG_KEY = "crm_nex_due_days_config";
+window.NEX_DUE_SNOOZE_KEY = "crm_nex_due_alert_snooze_until";
+window.NEX_DUE_ACK_KEY = "crm_nex_due_alert_ack_cycles";
+
+window.defaultNexDueConfig = function() {
+  return { enabled: true, dueDays: [], openOffset: 1, maxOffset: 3 };
+};
+
+window.readNexDueConfig = function() {
+  const def = window.defaultNexDueConfig();
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(window.NEX_DUE_CONFIG_KEY) || "{}") || {}; } catch (e) { raw = {}; }
+  const days = Array.isArray(raw.dueDays) ? raw.dueDays.map(Number).filter(n => n >= 1 && n <= 31) : [];
+  const openOffset = Math.max(1, Math.min(10, Number(raw.openOffset) || def.openOffset));
+  let maxOffset = Math.max(1, Math.min(15, Number(raw.maxOffset) || def.maxOffset));
+  if (maxOffset < openOffset) maxOffset = openOffset;
+  return {
+    enabled: raw.enabled !== false,
+    dueDays: [...new Set(days)].sort((a, b) => a - b),
+    openOffset,
+    maxOffset
+  };
+};
+
+window.writeNexDueConfig = function(cfg) {
+  const payload = {
+    enabled: !!(cfg && cfg.enabled),
+    dueDays: (cfg && Array.isArray(cfg.dueDays) ? cfg.dueDays : []).map(Number).filter(n => n >= 1 && n <= 31),
+    openOffset: Math.max(1, Number(cfg && cfg.openOffset) || 1),
+    maxOffset: Math.max(1, Number(cfg && cfg.maxOffset) || 3),
+    updatedAt: Date.now()
+  };
+  payload.dueDays = [...new Set(payload.dueDays)].sort((a, b) => a - b);
+  if (payload.maxOffset < payload.openOffset) payload.maxOffset = payload.openOffset;
+  localStorage.setItem(window.NEX_DUE_CONFIG_KEY, JSON.stringify(payload));
+  return payload;
+};
+
+window.nexDueDateForMonth = function(year, month, day) {
+  const last = new Date(year, month, 0).getDate();
+  const d = Math.min(Math.max(1, Number(day) || 1), last);
+  return year + "-" + String(month).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+};
+
+window.collectNexDueConfigFromForm = function() {
+  const enabledEl = document.getElementById("nex-due-alert-enabled");
+  const openEl = document.getElementById("nex-due-open-offset");
+  const maxEl = document.getElementById("nex-due-max-offset");
+  const selected = [];
+  document.querySelectorAll("#nex-due-days-grid [data-day].nex-due-day-on").forEach(btn => {
+    selected.push(Number(btn.getAttribute("data-day")));
+  });
+  return {
+    enabled: !!(enabledEl && enabledEl.checked),
+    dueDays: selected,
+    openOffset: Number(openEl && openEl.value) || 1,
+    maxOffset: Number(maxEl && maxEl.value) || 3
+  };
+};
+
+window.nexDueCyclesForConfig = function(cfg, todayIso) {
+  const config = cfg || window.readNexDueConfig();
+  const today = String(todayIso || (window.nexTodayIso ? window.nexTodayIso() : "")).slice(0, 10);
+  if (!today || !config.dueDays.length) return [];
+  const parts = today.split("-").map(Number);
+  const year = parts[0];
+  const month = parts[1];
+  const months = [];
+  months.push({ y: year, m: month });
+  if (month === 1) months.push({ y: year - 1, m: 12 });
+  else months.push({ y: year, m: month - 1 });
+  if (month === 12) months.push({ y: year + 1, m: 1 });
+  else months.push({ y: year, m: month + 1 });
+  const seen = new Set();
+  const out = [];
+  months.forEach(mm => {
+    config.dueDays.forEach(day => {
+      const dueIso = window.nexDueDateForMonth(mm.y, mm.m, day);
+      if (seen.has(dueIso)) return;
+      seen.add(dueIso);
+      const openIso = window.addBusinessDaysIso(dueIso, config.openOffset);
+      const maxIso = window.addBusinessDaysIso(dueIso, config.maxOffset);
+      out.push({ dueDay: day, dueIso, openIso, maxIso, openOffset: config.openOffset, maxOffset: config.maxOffset });
+    });
+  });
+  return out.sort((a, b) => String(a.dueIso).localeCompare(String(b.dueIso)));
+};
+
+window.nexDueActiveCycles = function(todayIso) {
+  const today = String(todayIso || (window.nexTodayIso ? window.nexTodayIso() : "")).slice(0, 10);
+  const cfg = window.readNexDueConfig();
+  if (!cfg.enabled) return [];
+  const ack = new Set(window.getNexDueAckCycles());
+  return window.nexDueCyclesForConfig(cfg, today).filter(c => {
+    if (ack.has(c.dueIso)) return false;
+    return today >= c.openIso && today <= c.maxIso;
+  });
+};
+
+window.getNexDueAckCycles = function() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(window.NEX_DUE_ACK_KEY) || "[]");
+    return Array.isArray(raw) ? raw.map(String) : [];
+  } catch (e) { return []; }
+};
+
+window.setNexDueAckCycles = function(ids) {
+  try { localStorage.setItem(window.NEX_DUE_ACK_KEY, JSON.stringify((ids || []).map(String))); } catch (e) {}
+};
+
+window.getNexDueSnoozeUntil = function() {
+  const n = Number(localStorage.getItem(window.NEX_DUE_SNOOZE_KEY) || 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+window.previewNexDueConfig = function() {
+  const box = document.getElementById("nex-due-config-preview");
+  if (!box) return;
+  const cfg = window.collectNexDueConfigFromForm();
+  if (cfg.maxOffset < cfg.openOffset) cfg.maxOffset = cfg.openOffset;
+  const today = window.nexTodayIso ? window.nexTodayIso() : "";
+  const fmt = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
+  if (!cfg.dueDays.length) {
+    box.innerHTML = "Marque ao menos um dia de vencimento para calcular as datas do alerta.";
+    return;
+  }
+  const cycles = window.nexDueCyclesForConfig(cfg, today).filter(c => c.maxIso >= today).slice(0, 6);
+  if (!cycles.length) {
+    box.innerHTML = "Nenhum ciclo futuro encontrado com esses dias.";
+    return;
+  }
+  const lines = cycles.map(c => {
+    const dueLabel = fmt(c.dueIso);
+    return "• Dia " + c.dueDay + " (" + dueLabel + "): pop-up em <strong>" + fmt(c.openIso) + "</strong> (D+" + cfg.openOffset + "); adiar até <strong>" + fmt(c.maxIso) + "</strong> (D+" + cfg.maxOffset + ").";
+  });
+  box.innerHTML = (cfg.enabled ? "" : "<div style=\"color:#b45309;font-weight:700;margin-bottom:6px;\">Alerta desativado — o pop-up não abre.</div>") +
+    "Próximos ciclos (dias úteis, sem sábado/domingo/feriado):<br>" + lines.join("<br>");
+};
+
+window.renderNexDueConfigPanel = function() {
+  const cfg = window.readNexDueConfig();
+  const enabledEl = document.getElementById("nex-due-alert-enabled");
+  const openEl = document.getElementById("nex-due-open-offset");
+  const maxEl = document.getElementById("nex-due-max-offset");
+  const grid = document.getElementById("nex-due-days-grid");
+  if (enabledEl) enabledEl.checked = cfg.enabled;
+  if (openEl) openEl.value = cfg.openOffset;
+  if (maxEl) maxEl.value = cfg.maxOffset;
+  if (grid) {
+    const selected = new Set(cfg.dueDays);
+    grid.innerHTML = "";
+    for (let d = 1; d <= 31; d++) {
+      const on = selected.has(d);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-day", String(d));
+      btn.className = on ? "nex-due-day-on" : "";
+      btn.textContent = String(d);
+      btn.style.cssText = "border:1px solid " + (on ? "#105436" : "#e2e8f0") + "; background:" + (on ? "#105436" : "#fff") + "; color:" + (on ? "#fff" : "#334155") + "; border-radius:8px; padding:8px 0; font-size:0.82rem; font-weight:700; cursor:pointer;";
+      btn.onclick = function() {
+        const active = btn.classList.toggle("nex-due-day-on");
+        btn.style.borderColor = active ? "#105436" : "#e2e8f0";
+        btn.style.background = active ? "#105436" : "#fff";
+        btn.style.color = active ? "#fff" : "#334155";
+        window.previewNexDueConfig();
+      };
+      grid.appendChild(btn);
+    }
+  }
+  window.previewNexDueConfig();
+  if (window.lucide) lucide.createIcons();
+};
+
+window.saveNexDueConfig = function() {
+  const cfg = window.collectNexDueConfigFromForm();
+  if (cfg.maxOffset < cfg.openOffset) {
+    alert("O limite para adiar (D+" + cfg.maxOffset + ") precisa ser maior ou igual ao dia de abertura (D+" + cfg.openOffset + ").");
+    return;
+  }
+  window.writeNexDueConfig(cfg);
+  window.renderNexDueConfigPanel();
+  if (typeof window.showToast === "function") window.showToast("Configurações de NEX salvas.", "success");
+  else alert("Configurações de NEX salvas.");
+  setTimeout(function() {
+    if (typeof window.checkNexDueAlerts === "function") window.checkNexDueAlerts();
+  }, 300);
+};
+
+window.scheduleNexDueAlertWake = function() {
+  if (window._nexDueAlertSnoozeTimer) {
+    clearTimeout(window._nexDueAlertSnoozeTimer);
+    window._nexDueAlertSnoozeTimer = null;
+  }
+  const until = window.getNexDueSnoozeUntil();
+  const delay = until - Date.now();
+  if (delay <= 0) return;
+  window._nexDueAlertSnoozeTimer = setTimeout(function() {
+    window._nexDueAlertSnoozeTimer = null;
+    if (typeof window.checkNexDueAlerts === "function") window.checkNexDueAlerts();
+  }, Math.min(delay, 2147483647));
+};
+
+window.snoozeNexDueAlertNextBusinessDay = function() {
+  const today = window.nexTodayIso();
+  const cycles = window.nexDueActiveCycles(today);
+  if (!cycles.length) return;
+  const nextIso = window.addBusinessDaysIso(today, 1);
+  const maxIso = cycles.reduce((m, c) => (!m || c.maxIso > m ? c.maxIso : m), "");
+  if (!nextIso || nextIso > maxIso) {
+    alert("Não é possível adiar: o prazo máximo (D+" + (cycles[0].maxOffset || 3) + " dias úteis) já foi atingido. Gere as NEX hoje.");
+    return;
+  }
+  const until = new Date(nextIso + "T06:00:00");
+  try { localStorage.setItem(window.NEX_DUE_SNOOZE_KEY, String(until.getTime())); } catch (e) {}
+  const modal = document.getElementById("modal-nex-due-alerts");
+  if (modal) modal.style.display = "none";
+  window.scheduleNexDueAlertWake();
+  const label = typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(nextIso) : nextIso;
+  if (typeof window.showToast === "function") window.showToast("Alerta de NEX adiado para " + label + ".", "info");
+};
+
+window.markNexDueAlertsSeen = function() {
+  const today = window.nexTodayIso();
+  const pending = window.nexDueActiveCycles(today);
+  const ack = new Set(window.getNexDueAckCycles());
+  pending.forEach(c => ack.add(c.dueIso));
+  const cutoff = window.addDaysIso(today, -90);
+  window.setNexDueAckCycles([...ack].filter(iso => !cutoff || iso >= cutoff));
+  try { localStorage.removeItem(window.NEX_DUE_SNOOZE_KEY); } catch (e) {}
+  if (window._nexDueAlertSnoozeTimer) {
+    clearTimeout(window._nexDueAlertSnoozeTimer);
+    window._nexDueAlertSnoozeTimer = null;
+  }
+  const modal = document.getElementById("modal-nex-due-alerts");
+  if (modal) modal.style.display = "none";
+};
+
+window.goToNexFromDueAlert = function() {
+  const modal = document.getElementById("modal-nex-due-alerts");
+  if (modal) modal.style.display = "none";
+  sessionStorage.setItem("wesendActivePanel", "elegiveis-zero");
+  if (typeof window.switchTab === "function") window.switchTab("wesend", "Notificações");
+};
+
+window.ensureNexDueAlertModal = function() {
+  let modal = document.getElementById("modal-nex-due-alerts");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "modal-nex-due-alerts";
+  modal.style.cssText = "display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;";
+  modal.innerHTML = `
+    <div style="background:white; width:620px; max-width:90vw; border-radius:12px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2); max-height:85vh; display:flex; flex-direction:column;">
+      <h2 style="margin:0 0 10px 0; color:#0f172a; font-size:1.25rem;">Gerar NEX — vencimento da carteira</h2>
+      <p id="nex-due-alert-intro" style="color:#64748b; font-size:0.9rem; margin:0 0 16px; line-height:1.45;"></p>
+      <div id="nex-due-alerts-list" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:20px;"></div>
+      <div style="display:flex; justify-content:flex-end; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button type="button" id="btn-nex-due-snooze" class="btn btn-outline" style="border:1px solid #cbd5e1; background:#f8fafc; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.snoozeNexDueAlertNextBusinessDay()">Adiar para o próximo dia útil</button>
+        <button type="button" class="btn btn-outline" style="border:1px solid #cbd5e1; background:#fff; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.markNexDueAlertsSeen()">Ciente</button>
+        <button type="button" class="btn btn-primary" style="background:#105436; color:white; border:none; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.goToNexFromDueAlert()">Ir para Notificações</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  return modal;
+};
+
+window.checkNexDueAlerts = function(isTest) {
+  const gate = typeof window.userIsCobrancaBackOffice === "function"
+    ? window.userIsCobrancaBackOffice()
+    : { ok: false, isAdmin: true };
+  if (!isTest && (!gate.ok || gate.isAdmin)) {
+    const existing = document.getElementById("modal-nex-due-alerts");
+    if (existing) existing.style.display = "none";
+    return;
+  }
+  const cfg = window.readNexDueConfig();
+  if (!cfg.enabled || !cfg.dueDays.length) {
+    const existing = document.getElementById("modal-nex-due-alerts");
+    if (existing) existing.style.display = "none";
+    return;
+  }
+  const today = window.nexTodayIso();
+  if (typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today) && !isTest) {
+    return;
+  }
+  if (!isTest) {
+    const snoozeUntil = window.getNexDueSnoozeUntil();
+    if (snoozeUntil && Date.now() < snoozeUntil) {
+      window.scheduleNexDueAlertWake();
+      return;
+    }
+    if (snoozeUntil && Date.now() >= snoozeUntil) {
+      try { localStorage.removeItem(window.NEX_DUE_SNOOZE_KEY); } catch (e) {}
+    }
+  }
+  const pending = window.nexDueActiveCycles(today);
+  if (!pending.length) {
+    if (isTest) alert("Nenhum vencimento de NEX no prazo de alerta hoje.");
+    const existing = document.getElementById("modal-nex-due-alerts");
+    if (existing) existing.style.display = "none";
+    return;
+  }
+  const modal = window.ensureNexDueAlertModal();
+  const listEl = document.getElementById("nex-due-alerts-list");
+  const intro = document.getElementById("nex-due-alert-intro");
+  const snoozeBtn = document.getElementById("btn-nex-due-snooze");
+  const fmt = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
+  const nextIso = window.addBusinessDaysIso(today, 1);
+  const maxIso = pending.reduce((m, c) => (!m || c.maxIso > m ? c.maxIso : m), "");
+  const canSnooze = nextIso && nextIso <= maxIso;
+  if (intro) {
+    intro.textContent = "Hoje é dia útil para gerar as NEX dos vencimentos parametrizados. Confira o prazo e abra Notificações.";
+  }
+  if (listEl) {
+    listEl.innerHTML = pending.map(c => {
+      return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;">
+        <div style="font-weight:700;color:#0f172a;font-size:0.92rem;">Vencimento dia ${c.dueDay} · ${fmt(c.dueIso)}</div>
+        <div style="font-size:0.8rem;color:#64748b;margin-top:4px;">Pop-up a partir de ${fmt(c.openIso)} (D+${c.openOffset} dia útil)</div>
+        <div style="margin-top:6px;font-size:0.75rem;font-weight:700;color:#105436;">Adiar no máximo até ${fmt(c.maxIso)} (D+${c.maxOffset} dias úteis)</div>
+      </div>`;
+    }).join("");
+  }
+  if (snoozeBtn) {
+    snoozeBtn.style.display = canSnooze ? "inline-flex" : "none";
+    snoozeBtn.disabled = !canSnooze;
+  }
+  modal.style.display = "flex";
+  if (isTest && !pending.length) alert("Nenhum vencimento no prazo.");
 };
 
 window.nexFindFilaClient = function(customerId, saleId) {
@@ -34673,6 +35012,7 @@ window.SYNC_KEYS = [
     "crm_moura_timeline_acoes",
     "crm_moura_timeline_gatilhos",
     "crm_moura_vistoria_recurrence_days",
+    "crm_nex_due_days_config",
     "crm_centros_custo_custom",
     "crm_centros_custo_tipos",
     "crm_plano_visoes_v2",
