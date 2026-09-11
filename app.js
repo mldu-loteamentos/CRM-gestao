@@ -1562,6 +1562,110 @@ function billHasOverdueAgreementInstallment(bill) {
   return installments.some(inst => isAgreementInstallmentType(getInstallmentConditionCode(inst)));
 }
 
+function installmentOverdueDays(inst) {
+  if (!inst) return 0;
+  const api = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay);
+  if (Number.isFinite(api) && api > 0) return api;
+  const dueRaw = inst.dueDate || inst.due;
+  if (!dueRaw) return Number.isFinite(api) && api >= 0 ? api : 0;
+  const due = new Date(dueRaw);
+  if (Number.isNaN(due.getTime())) return 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueDay = new Date(due);
+  dueDay.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - dueDay) / 86400000);
+  return diff > 0 ? diff : 0;
+}
+
+function maxAgreementInstallmentDays(installments) {
+  let max = 0;
+  (installments || []).forEach((inst) => {
+    if (!isAgreementInstallmentType(getInstallmentConditionCode(inst))) return;
+    const d = installmentOverdueDays(inst);
+    if (d > max) max = d;
+  });
+  return max;
+}
+
+window.ACORDO_JUDICIAL_INTERNO_DIAS = 60;
+
+window.installmentDueIsoDate = function(instOrDate) {
+  if (!instOrDate) return "";
+  if (instOrDate instanceof Date && !isNaN(instOrDate.getTime())) {
+    const y = instOrDate.getFullYear();
+    const m = String(instOrDate.getMonth() + 1).padStart(2, "0");
+    const d = String(instOrDate.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+  const raw = (typeof instOrDate === "object")
+    ? (instOrDate.dueDate || instOrDate.due || "")
+    : instOrDate;
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return br[3] + "-" + br[2] + "-" + br[1];
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+  return "";
+};
+
+window.getSimuladorTaxaMultiplier = function() {
+  const el = document.getElementById("simulador-taxa");
+  const n = el ? parseFloat(el.value) : NaN;
+  return Number.isFinite(n) ? n : 1;
+};
+
+window.daysOverdueUntilTarget = function(inst, targetDate) {
+  const dueIso = typeof window.installmentDueIsoDate === "function"
+    ? window.installmentDueIsoDate(inst)
+    : String((inst && inst.dueDate) || "").slice(0, 10);
+  let target = targetDate;
+  if (!(target instanceof Date) || isNaN(target.getTime())) {
+    const tIso = typeof window.installmentDueIsoDate === "function"
+      ? (window.installmentDueIsoDate({ dueDate: targetDate }) || String(targetDate || "").slice(0, 10))
+      : String(targetDate || "").slice(0, 10);
+    target = tIso ? new Date(tIso + "T12:00:00") : new Date();
+  }
+  if (dueIso) {
+    const due = new Date(dueIso + "T12:00:00");
+    if (!isNaN(due.getTime()) && !isNaN(target.getTime())) {
+      const diff = Math.round((target.getTime() - due.getTime()) / 86400000);
+      if (Number.isFinite(diff)) return diff > 0 ? diff : 0;
+    }
+  }
+  const api = Number(inst && (inst.apiDaysDelay != null ? inst.apiDaysDelay
+    : (inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay)));
+  return Number.isFinite(api) && api > 0 ? api : 0;
+};
+
+window.computeLateCharges = function(baseVal, diasAtraso, taxaMultiplier) {
+  const base = Number(baseVal) || 0;
+  const days = Number(diasAtraso) || 0;
+  const taxa = Number.isFinite(Number(taxaMultiplier)) ? Number(taxaMultiplier) : 1;
+  const finePct = 2 * taxa;
+  const interestPct = 1 * taxa;
+  if (days < 1 || base <= 0 || taxa <= 0) {
+    return { multa: 0, juros: 0, finePct, interestPct, diasAtraso: Math.max(0, days), taxa };
+  }
+  return {
+    multa: (base * 0.02) * taxa,
+    juros: (base * 0.01 * (days / 30)) * taxa,
+    finePct,
+    interestPct,
+    diasAtraso: days,
+    taxa
+  };
+};
+
+window.getAcordoJudicialQuebradoDays = function(client) {
+  const agr = Number(client && client.agreementDaysDelay);
+  if (Number.isFinite(agr) && agr > 0) return agr;
+  return Number(client && client.maxDaysDelay) || 0;
+};
+
 function getSubjudiceMemoryRecord(memory, customerId) {
   if (!memory || customerId == null) return null;
   return memory[customerId] || memory[String(customerId)] || memory[Number(customerId)] || null;
@@ -1684,6 +1788,17 @@ window.clientIsAcordoJudicialQuebrado = function(client, history) {
   return !!window.clientHasJuridicoTrail(client, history);
 };
 
+window.clientIsExecutarAcordoQuebrado = function(client, history) {
+  if (typeof window.clientIsAcordoJudicialQuebrado !== "function") return false;
+  if (!window.clientIsAcordoJudicialQuebrado(client, history)) return false;
+  const lim = Number(window.ACORDO_JUDICIAL_INTERNO_DIAS);
+  const cutoff = Number.isFinite(lim) ? lim : 60;
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
+  return days >= cutoff + 1;
+};
+
 function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
   if (getSiengeApiMode() === "simulado") return;
 
@@ -1721,9 +1836,13 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     if (c.subjudice === "S") {
       requiredType = "advogado";
       ruleSuffix = "JURÍDICO";
-    } else if (c.hasOverdueAgreement && juridicoTrail) {
+    } else if (c.isAcordoJudicialQuebrado) {
       requiredType = "apoio_juridico";
-      ruleSuffix = "APOIO_JURIDICO / ACORDO JUDICIAL QUEBRADO";
+      const executar = typeof window.clientIsExecutarAcordoQuebrado === "function"
+        && window.clientIsExecutarAcordoQuebrado(c);
+      ruleSuffix = executar
+        ? "APOIO_JURIDICO / EXECUTAR ACORDO QUEBRADO"
+        : "APOIO_JURIDICO / ACORDO JUDICIAL QUEBRADO";
     } else if (passedJuridico && recenteLucelia) {
       requiredType = "apoio_juridico";
       ruleSuffix = "APOIO_JURIDICO / RECENTE 90D";
@@ -4266,10 +4385,11 @@ window.FILA_QUEUE_GROUPS = {
   ZERO_PAGO: 1,
   SUBJUDICE: 2,
   ACORDO_JURIDICO: 3,
-  RECENTE_JURIDICO: 4,
-  ANALISE_INTERNA_JURIDICO: 5,
-  ENVIAR_JURIDICO: 6,
-  SEM_CATEGORIA: 7
+  EXECUTAR_ACORDO_QUEBRADO: 4,
+  RECENTE_JURIDICO: 5,
+  ANALISE_INTERNA_JURIDICO: 6,
+  ENVIAR_JURIDICO: 7,
+  SEM_CATEGORIA: 8
 };
 
 window.getAnaliseInternaJuridicoThreshold = function() {
@@ -4301,8 +4421,11 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
-  // Judicial antes de interno: quem tem rastro no jurídico (memória/notas) não cai no grupo interno
+  // Acordo judicial quebrado fica com a Lucelia; só o grupo muda no 61º dia
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
+    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
+      return G.EXECUTAR_ACORDO_QUEBRADO;
+    }
     return G.ACORDO_JURIDICO;
   }
   if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) {
@@ -4310,7 +4433,12 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   }
   if (client && client.isZeroPaid) return G.ZERO_PAGO;
   if (client && (client.subjudice === "S" || client.subjudice === true)) return G.SUBJUDICE;
-  if (client && client.hasOverdueAgreement) return G.ACORDO_JURIDICO;
+  if (client && client.hasOverdueAgreement) {
+    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
+      return G.EXECUTAR_ACORDO_QUEBRADO;
+    }
+    return G.ACORDO_JURIDICO;
+  }
   if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return G.RECENTE_JURIDICO;
   if (typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(client, cutoff)) return G.ANALISE_INTERNA_JURIDICO;
   if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return G.ENVIAR_JURIDICO;
@@ -4324,6 +4452,7 @@ window.getFilaQueueGroupMeta = function(group) {
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     [G.SUBJUDICE]: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
     [G.ACORDO_JURIDICO]: { label: 'Acordo Judicial Quebrado', bg: '#fef3c7', color: '#92400e' },
+    [G.EXECUTAR_ACORDO_QUEBRADO]: { label: 'Executar Acordo Quebrado', bg: '#ffe4e6', color: '#9f1239' },
     [G.RECENTE_JURIDICO]: { label: 'Recente Jurídico', bg: '#e0e7ff', color: '#3730a3' },
     [G.ANALISE_INTERNA_JURIDICO]: { label: 'Análise Interna Jurídico', bg: '#ede9fe', color: '#5b21b6' },
     [G.ENVIAR_JURIDICO]: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
@@ -4343,10 +4472,22 @@ window.clientIsRecenteJuridico = function(client, history) {
 };
 
 window.getAcordoJuridicoAgingHtml = function(client) {
-  const days = Number(client && client.maxDaysDelay) || 0;
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo (SA, A1, A2…) vencida e cliente com passagem pelo jurídico (histórico ou ocorrências judiciais).">
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece com o Apoio Jurídico (Lucelia). No 61º dia o grupo passa a Executar Acordo Quebrado, ainda com a Lucelia.">
     <i data-lucide="handshake" style="width: 14px; height: 14px;"></i> Acordo Judicial Quebrado - ${dayLabel}
+  </span>`;
+};
+
+window.getExecutarAcordoQuebradoAgingHtml = function(client) {
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fb7185; background-color: #ffe4e6; color: #9f1239; font-weight: 600;" title="Acordo judicial quebrado há 61 dias ou mais. Encaminhar para execução (Apoio Jurídico).">
+    <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Executar Acordo Quebrado - ${dayLabel}
   </span>`;
 };
 
@@ -5885,6 +6026,7 @@ document.addEventListener("click", function(e) {
         billIds: [],
         isZeroPaid: false,
         hasOverdueAgreement: false,
+        agreementDaysDelay: 0,
         oldestDueDateMs: null,
         dueDay: null
       };
@@ -5943,6 +6085,13 @@ document.addEventListener("click", function(e) {
     }
     if (hasAgreementOverdue) {
       consolidated[key].hasOverdueAgreement = true;
+      const agrDays = Math.max(
+        maxAgreementInstallmentDays(instSource),
+        maxAgreementInstallmentDays(bill.defaulterInstallments)
+      );
+      if (agrDays > (consolidated[key].agreementDaysDelay || 0)) {
+        consolidated[key].agreementDaysDelay = agrDays;
+      }
     }
 
     consolidated[key].overdueValue += billVal;
@@ -6665,12 +6814,20 @@ document.addEventListener("click", function(e) {
               </span>
               ` : (() => {
                   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
+                      if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)
+                        && typeof window.getExecutarAcordoQuebradoAgingHtml === "function") {
+                          return window.getExecutarAcordoQuebradoAgingHtml(client);
+                      }
                       return window.getAcordoJuridicoAgingHtml(client);
                   }
                   if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) {
                       return window.getAcordoQuebradoAgingHtml(client);
                   }
                   if (client.hasOverdueAgreement) {
+                      if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)
+                        && typeof window.getExecutarAcordoQuebradoAgingHtml === "function") {
+                          return window.getExecutarAcordoQuebradoAgingHtml(client);
+                      }
                       return window.getAcordoJuridicoAgingHtml(client);
                   }
                   if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client, subjudiceHistory)) {
@@ -8073,7 +8230,11 @@ function formatCpfCnpj(val) {
     (saleId == null || String(c.saleId) === String(saleId) || (Array.isArray(c.billIds) && c.billIds.some(id => String(id).replace(/^B-/i, "").split("-")[0] === String(saleId))))
   ) || (window.rawClientList || []).find(c => String(c.customerId) === String(customerId));
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(filaMatch)) {
-    subjudiceAlertHtml += `<span style="background-color: #d97706; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo (SA, A1, A2…) vencida e saída do jurídico nos últimos 180 dias.">Acordo Judicial Quebrado</span>`;
+    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(filaMatch)) {
+      subjudiceAlertHtml += `<span style="background-color: #be123c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Acordo judicial quebrado há 61 dias ou mais. Encaminhar para execução (Apoio Jurídico).">Executar Acordo Quebrado</span>`;
+    } else {
+      subjudiceAlertHtml += `<span style="background-color: #d97706; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece na cobrança interna por 60 dias.">Acordo Judicial Quebrado</span>`;
+    }
   } else if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(filaMatch)) {
     subjudiceAlertHtml += `<span style="background-color: #ea580c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo interno (SA, A1, A2…) vencida. Não passou pelo jurídico nos últimos 180 dias.">Acordo quebrado</span>`;
   }
@@ -10573,14 +10734,19 @@ function formatCpfCnpj(val) {
             AppState.currentContractInstallments.forEach(inst => {
                const cb = inst.currentBalance || 0;
                const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
-               if (isPaid || cb <= 0 || inst.installmentSituation !== 1 || !inst.dueDate) return;
-               const overdue = inst.dueDate < hojeIso;
+               const dueIso = typeof window.installmentDueIsoDate === "function"
+                 ? window.installmentDueIsoDate(inst)
+                 : String(inst.dueDate || "").slice(0, 10);
+               if (isPaid || cb <= 0 || inst.installmentSituation !== 1 || !dueIso) return;
+               const overdue = dueIso < hojeIso;
                const hasBoletoFlag = inst.generatedBillet === true || (recentFresh && recentIds.includes(String(inst.installmentId)));
                if (!overdue && !hasBoletoFlag) return;
                vencidasSimulador.push({
                   ...inst,
                   cb: cb,
-                  due: new Date(inst.dueDate + 'T12:00:00'),
+                  due: new Date((typeof window.installmentDueIsoDate === "function"
+                    ? (window.installmentDueIsoDate(inst) || String(inst.dueDate || "").slice(0, 10))
+                    : String(inst.dueDate || "").slice(0, 10)) + 'T12:00:00'),
                   selected: !!overdue,
                   isOverdue: !!overdue,
                   generatedBillet: !!hasBoletoFlag,
@@ -10720,19 +10886,14 @@ function formatCpfCnpj(val) {
             }
 
             vencidasSimulador.forEach((inst, index) => {
-               // Calculate fine/interest
-               let diasAtraso = Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24));
-               if (diasAtraso < 0) diasAtraso = 0;
-               
-               let multa = 0;
-               let juros = 0;
-               
-               if (diasAtraso >= 1) {
-                  // A multa contratual é fixa (2% do valor original)
-                  multa = (inst.cb * 0.02) * taxaMultiplier;
-                  // Os juros são proporcionais aos dias de atraso (1% a.m)
-                  juros = (inst.cb * 0.01 * (diasAtraso / 30)) * taxaMultiplier;
-               }
+               const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
+                 ? window.daysOverdueUntilTarget(inst, targetDate)
+                 : Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)) || 0);
+               const charges = typeof window.computeLateCharges === "function"
+                 ? window.computeLateCharges(inst.cb, diasAtraso, taxaMultiplier)
+                 : { multa: 0, juros: 0 };
+               const multa = charges.multa;
+               const juros = charges.juros;
                
                if (inst.selected) {
                   totalPrincipal += inst.cb;
@@ -10842,12 +11003,13 @@ function formatCpfCnpj(val) {
             
             // KPI cards: valor = soma de TODAS as vencidas (independente de seleção)
             const totalAtualizadoKPI = vencidasSimulador.filter(i => i.isOverdue).reduce((acc, inst) => {
-              const diasAtraso2 = Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)));
-              const multaK = diasAtraso2 >= 1
-                 ? (inst.cb * 0.02) * taxaMultiplier
-                : 0;
-              const jurosK = diasAtraso2 >= 1 ? inst.cb * 0.01 * (diasAtraso2 / 30) * taxaMultiplier : 0;
-               return acc + inst.cb + multaK + jurosK;
+              const diasAtraso2 = typeof window.daysOverdueUntilTarget === "function"
+                ? window.daysOverdueUntilTarget(inst, targetDate)
+                : Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)) || 0);
+              const ch = typeof window.computeLateCharges === "function"
+                ? window.computeLateCharges(inst.cb, diasAtraso2, taxaMultiplier)
+                : { multa: 0, juros: 0 };
+               return acc + inst.cb + ch.multa + ch.juros;
             }, 0);
 
             if (leftVencidasCount) leftVencidasCount.textContent = countVencidas === 1 ? '1 parcela' : `${countVencidas} parcelas`;
@@ -11733,19 +11895,17 @@ window.populatePromisedInstallmentsDropdown = function() {
   
   openInsts.forEach(inst => {
     try {
-      const datePart = inst.dueDate ? new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
+      const datePart = inst.dueDate ? new Date((typeof window.installmentDueIsoDate === "function" ? (window.installmentDueIsoDate(inst) || String(inst.dueDate).slice(0, 10)) : String(inst.dueDate).slice(0, 10)) + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
       const baseVal = parseFloat(inst.currentBalance || inst.value || 0);
-      
-      let multa = 0;
-      let juros = 0;
-      if (inst.dueDate) {
-        const instDue = new Date(inst.dueDate + 'T12:00:00');
-        let diasAtraso = Math.round((targetDate - instDue) / (1000 * 60 * 60 * 24));
-        if (diasAtraso > 0) {
-          multa = baseVal * 0.02;
-          juros = baseVal * 0.01 * (diasAtraso / 30);
-        }
-      }
+      const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
+        ? window.daysOverdueUntilTarget(inst, targetDate)
+        : 0;
+      const taxa = typeof window.getSimuladorTaxaMultiplier === "function" ? window.getSimuladorTaxaMultiplier() : 1;
+      const charges = typeof window.computeLateCharges === "function"
+        ? window.computeLateCharges(baseVal, diasAtraso, taxa)
+        : { multa: 0, juros: 0 };
+      const multa = charges.multa;
+      const juros = charges.juros;
       
       const finalVal = baseVal + multa + juros;
       const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
@@ -11840,22 +12000,17 @@ window.openPromisedInstallmentsModal = function() {
   const selectedVals = AppState.selectedPromisedInstallments || [];
   
   openInsts.forEach((inst, idx) => {
-    const datePart = inst.dueDate ? new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
+    const datePart = inst.dueDate ? new Date((typeof window.installmentDueIsoDate === "function" ? (window.installmentDueIsoDate(inst) || String(inst.dueDate).slice(0, 10)) : String(inst.dueDate).slice(0, 10)) + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
     const baseVal = parseFloat(inst.currentBalance || inst.value || 0);
-    
-    let multa = 0;
-    let juros = 0;
-    let diasAtraso = 0;
-    if (inst.dueDate) {
-      const instDue = new Date(inst.dueDate + 'T12:00:00');
-      diasAtraso = Math.round((targetDate - instDue) / (1000 * 60 * 60 * 24));
-      if (diasAtraso > 0) {
-        multa = baseVal * 0.02;
-        juros = baseVal * 0.01 * (diasAtraso / 30);
-      } else {
-        diasAtraso = 0;
-      }
-    }
+    const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
+      ? window.daysOverdueUntilTarget(inst, targetDate)
+      : 0;
+    const taxa = typeof window.getSimuladorTaxaMultiplier === "function" ? window.getSimuladorTaxaMultiplier() : 1;
+    const charges = typeof window.computeLateCharges === "function"
+      ? window.computeLateCharges(baseVal, diasAtraso, taxa)
+      : { multa: 0, juros: 0 };
+    const multa = charges.multa;
+    const juros = charges.juros;
     
     const finalVal = baseVal + multa + juros;
     const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"});
@@ -12579,21 +12734,17 @@ window.buildEditOccurrenceParcelRows = function(occ) {
 
   const matchedKeys = new Set();
   openInsts.forEach((inst) => {
-    const datePart = inst.dueDate ? new Date(inst.dueDate + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
+    const datePart = inst.dueDate ? new Date((typeof window.installmentDueIsoDate === "function" ? (window.installmentDueIsoDate(inst) || String(inst.dueDate).slice(0, 10)) : String(inst.dueDate).slice(0, 10)) + "T00:00:00").toLocaleDateString("pt-BR") : "S/ Data";
     const baseVal = parseFloat(inst.currentBalance || inst.value || 0);
-    let multa = 0;
-    let juros = 0;
-    let diasAtraso = 0;
-    if (inst.dueDate) {
-      const instDue = new Date(inst.dueDate + "T12:00:00");
-      diasAtraso = Math.round((targetDate - instDue) / (1000 * 60 * 60 * 24));
-      if (diasAtraso > 0) {
-        multa = baseVal * 0.02;
-        juros = baseVal * 0.01 * (diasAtraso / 30);
-      } else {
-        diasAtraso = 0;
-      }
-    }
+    const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
+      ? window.daysOverdueUntilTarget(inst, targetDate)
+      : 0;
+    const taxa = typeof window.getSimuladorTaxaMultiplier === "function" ? window.getSimuladorTaxaMultiplier() : 1;
+    const charges = typeof window.computeLateCharges === "function"
+      ? window.computeLateCharges(baseVal, diasAtraso, taxa)
+      : { multa: 0, juros: 0 };
+    const multa = charges.multa;
+    const juros = charges.juros;
     const finalVal = baseVal + multa + juros;
     const formattedVal = isNaN(finalVal) ? "R$ 0,00" : finalVal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
     const valStr = datePart + " - " + formattedVal;
@@ -18004,6 +18155,8 @@ let currentReprocessInstId = null;
 let currentReprocessCostCenterId = null;
 let currentReprocessCompanyId = null;
 let currentReprocessSource = 'avulso';
+let currentReprocessFinePct = 2;
+let currentReprocessInterestPct = 1;
 
 window.normalizeBoletoCostCenterId = function(passed) {
   if (passed == null || passed === "" || passed === "N/D" || passed === "undefined") return null;
@@ -18236,6 +18389,44 @@ window.isCheckPaymentOccurrence = function(occ) {
   return r === "checar pagamento" || r.indexOf("checar pagamento") !== -1;
 };
 
+window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultiplier) {
+  const box = document.getElementById("reprocess-charges-summary");
+  if (!box) return { multa: 0, juros: 0, principal: 0 };
+  const ids = (Array.isArray(instIds) ? instIds : [instIds]).map(String).filter(Boolean);
+  const insts = (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  const taxa = Number.isFinite(Number(taxaMultiplier)) ? Number(taxaMultiplier)
+    : (typeof window.getSimuladorTaxaMultiplier === "function" ? window.getSimuladorTaxaMultiplier() : 1);
+  const money = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  let principal = 0;
+  let multa = 0;
+  let juros = 0;
+  ids.forEach((id) => {
+    const inst = insts.find(i => String(i.installmentId) === String(id) || String(i.installmentNumber) === String(id));
+    if (!inst) return;
+    const base = Number(inst.currentBalance != null ? inst.currentBalance : inst.value) || 0;
+    const days = typeof window.daysOverdueUntilTarget === "function"
+      ? window.daysOverdueUntilTarget(inst, dueDateStr)
+      : 0;
+    const ch = typeof window.computeLateCharges === "function"
+      ? window.computeLateCharges(base, days, taxa)
+      : { multa: 0, juros: 0 };
+    principal += base;
+    multa += ch.multa;
+    juros += ch.juros;
+  });
+  const finePct = 2 * taxa;
+  const interestPct = 1 * taxa;
+  const isento = !(finePct > 0 || interestPct > 0);
+  if (isento) {
+    box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;font-size:0.82rem;line-height:1.45;";
+    box.innerHTML = `<strong>Sem multa e sem juros neste boleto.</strong> A API do Sienge receberá multa <b>0%</b> e juros <b>0%</b>. Principal: ${money(principal)}.`;
+  } else {
+    box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;font-size:0.82rem;line-height:1.45;";
+    box.innerHTML = `<strong>Este boleto será gerado COM acréscimos.</strong> A API do Sienge receberá multa <b>${finePct.toFixed(2)}%</b> e juros <b>${interestPct.toFixed(2)}% a.m.</b>${(multa + juros) > 0.009 ? ` · Estimativa: multa ${money(multa)} + juros ${money(juros)} · Total ${money(principal + multa + juros)}` : ""}.`;
+  }
+  return { multa, juros, principal, finePct, interestPct };
+};
+
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
   currentReprocessBillId = billId;
   currentReprocessInstId = instId;
@@ -18246,8 +18437,15 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   const modal = document.getElementById('modal-reprocessar-boleto');
   const accountSelect = document.getElementById('reprocess-account');
   const dueDateInput = document.getElementById('reprocess-duedate');
+  const titleEl = document.getElementById('reprocess-modal-title');
   
   if (!modal || !accountSelect) return;
+
+  if (titleEl) {
+    titleEl.textContent = (source === "simulacao" || source === "ocorrencia")
+      ? "Confirmar boleto e ocorrência"
+      : "Reprocessar Boleto";
+  }
 
   // Limpa e reseta
   accountSelect.innerHTML = '<option value="">Carregando contas...</option>';
@@ -18273,13 +18471,13 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   dueDateInput.readOnly = true;
   dueDateInput.removeAttribute("min");
 
-  const simTaxaSelect = document.getElementById("simulador-taxa");
-  let taxaMultiplier = 1;
-  if (simTaxaSelect && !isNaN(parseFloat(simTaxaSelect.value))) {
-      taxaMultiplier = parseFloat(simTaxaSelect.value);
-  }
-  const defaultMulta = (2.00 * taxaMultiplier).toFixed(2);
-  const defaultJuros = (1.00 * taxaMultiplier).toFixed(2);
+  const taxaMultiplier = typeof window.getSimuladorTaxaMultiplier === "function"
+    ? window.getSimuladorTaxaMultiplier()
+    : 1;
+  currentReprocessFinePct = 2 * taxaMultiplier;
+  currentReprocessInterestPct = 1 * taxaMultiplier;
+  const defaultMulta = currentReprocessFinePct.toFixed(2);
+  const defaultJuros = currentReprocessInterestPct.toFixed(2);
 
   const fineEl = document.getElementById('reprocess-fine');
   const interestEl = document.getElementById('reprocess-interest');
@@ -18290,6 +18488,9 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   if (interestEl) {
     interestEl.value = defaultJuros;
     interestEl.readOnly = true;
+  }
+  if (typeof window.renderReprocessChargesSummary === "function") {
+    window.renderReprocessChargesSummary(instId, dueDateInput.value, taxaMultiplier);
   }
 
   // Tenta puxar valores da aba de ocorrências se já estiverem preenchidos
@@ -18399,6 +18600,8 @@ window.closeReprocessModal = function() {
   if (modal) modal.classList.remove('active');
   currentReprocessBillId = null;
   currentReprocessInstId = null;
+  currentReprocessFinePct = 2;
+  currentReprocessInterestPct = 1;
 };
 
 window.validateReprocessForm = function() {
@@ -18435,8 +18638,14 @@ window.submitReprocessBoleto = async function() {
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
   const account = String((selectedOpt && selectedOpt.dataset.accountNumber) || (accountSelectEl && accountSelectEl.value) || "").trim();
   const dueDate = document.getElementById('reprocess-duedate').value;
-  const fine = parseFloat(document.getElementById('reprocess-fine').value) || 0;
-  const interest = parseFloat(document.getElementById('reprocess-interest').value) || 0;
+  const fineRaw = (typeof currentReprocessFinePct === "number" && Number.isFinite(currentReprocessFinePct))
+    ? currentReprocessFinePct
+    : parseFloat(document.getElementById('reprocess-fine') && document.getElementById('reprocess-fine').value);
+  const interestRaw = (typeof currentReprocessInterestPct === "number" && Number.isFinite(currentReprocessInterestPct))
+    ? currentReprocessInterestPct
+    : parseFloat(document.getElementById('reprocess-interest') && document.getElementById('reprocess-interest').value);
+  const fine = Number.isFinite(fineRaw) ? fineRaw : 0;
+  const interest = Number.isFinite(interestRaw) ? interestRaw : 0;
 
   if (!account) {
     alert("Selecione uma conta corrente.");
