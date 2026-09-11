@@ -10598,7 +10598,10 @@ function formatCpfCnpj(val) {
             simInst.isFetchingBoleto = true;
             try {
                const slip = await SiengeApiService.getPaymentSlipNotification(saleId, simInst.installmentId);
-               if (slip && slip.results && slip.results.length > 0) {
+               const usable = typeof window.siengePaymentSlipIsUsable === "function"
+                 ? window.siengePaymentSlipIsUsable(slip)
+                 : !!(slip && slip.results && slip.results.length > 0);
+               if (usable) {
                   simInst.isActiveBoleto = true;
                   const barcode = slip.results[0].digitableLine || slip.results[0].digitableNumber || "";
                   let dtFebraban = null;
@@ -10757,7 +10760,7 @@ function formatCpfCnpj(val) {
                   let vencBoleto = "—";
                   if (inst.isFetchingBoleto) vencBoleto = "Buscando…";
                   else if (inst.dtFebraban) vencBoleto = inst.dtFebraban.toLocaleDateString("pt-BR");
-                  else if (inst.generatedBillet || inst.isActiveBoleto) vencBoleto = "N/D";
+                  else vencBoleto = "—";
 
                   let statusHtml = `<span style="color:#94a3b8;font-size:0.72rem;">Sem boleto</span>`;
                   let acoesHtml = "";
@@ -11882,12 +11885,14 @@ window.openPromisedInstallmentsModal = function() {
     // Check boletos async
     if (AppState.selectedSaleId && inst.installmentId) {
       SiengeApiService.getPaymentSlipNotification(AppState.selectedSaleId, inst.installmentId).then(slip => {
-        if (slip && slip.results && slip.results.length > 0) {
-          const warn = document.getElementById(`prom-modal-boleto-${idx}`);
-          if (warn) warn.style.display = "block";
-          const row = document.getElementById(`prom-modal-row-${idx}`);
-          if (row) row.style.background = "#fef3c7";
-        }
+        const usable = typeof window.siengePaymentSlipIsUsable === "function"
+          ? window.siengePaymentSlipIsUsable(slip)
+          : !!(slip && slip.results && slip.results.length > 0);
+        if (!usable) return;
+        const warn = document.getElementById(`prom-modal-boleto-${idx}`);
+        if (warn) warn.style.display = "block";
+        const row = document.getElementById(`prom-modal-row-${idx}`);
+        if (row) row.style.background = "#fef3c7";
       }).catch(e => console.error(e));
     }
   });
@@ -28452,6 +28457,26 @@ window.copyCustomerName = function() {
   }
 };
 
+window.siengePaymentSlipIsUsable = function(slip) {
+  const rec = slip && Array.isArray(slip.results) && slip.results[0];
+  if (!rec) return false;
+  const digits = String(rec.digitableNumber || rec.digitableLine || rec.barcode || "").replace(/\D/g, "");
+  return digits.length >= 47;
+};
+
+window.refreshBoletosTabIfEmpty = function(container, customerId, saleId) {
+  if (!container) return;
+  const rows = container.querySelectorAll("tbody tr[id^='row-inst-']");
+  const visible = [...rows].filter(tr => tr.style.display !== "none");
+  const badge = container.querySelector("h3 span");
+  if (badge) badge.textContent = String(visible.length);
+  if (visible.length) return;
+  container.innerHTML = `
+    <h3 style="font-size: 1.1rem; color: var(--color-primary); margin-bottom: 15px;">Boletos do Contrato</h3>
+    <p style="font-size: 0.9rem; color: #666;">Não há boletos gerados e em aberto para este contrato no momento.</p>
+  `;
+};
+
 async function loadCustomerBoletos(customerId, saleId) {
   const container = document.getElementById("tab-boletos").querySelector('.crm-card');
   if (!container) return;
@@ -28544,12 +28569,9 @@ async function loadCustomerBoletos(customerId, saleId) {
             statusBadge = `<span style="background:var(--color-primary); color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem;">A Vencer</span>`;
         }
 
-        let actionsHtml = '';
+        let actionsHtml = `<span style="font-size:0.75rem;color:#94a3b8;">Verificando no Sienge…</span>`;
         if (isBaixado) {
             actionsHtml = `<button class="btn btn-primary btn-sm btn-reprocess-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; background:var(--color-danger); border-color:var(--color-danger);" onclick="reprocessBoleto(${JSON.stringify(boletoBillId)}, ${JSON.stringify(inst.installmentId)}, ${boletoCostCenterArg}, 'boletos')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Reprocessar Boleto</button>`;
-        } else {
-            actionsHtml = `<button class="btn btn-primary btn-sm btn-view-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; white-space: nowrap;" onclick="openBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="file-text" style="width:12px;height:12px;"></i> Ver Boleto</button>
-                           <button class="btn btn-outline btn-sm btn-download-${inst.installmentId}" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; margin-left: 5px; white-space: nowrap;" onclick="downloadBoletoPdf(${saleId}, ${inst.installmentId}, this)"><i data-lucide="download" style="width:12px;height:12px;"></i> Download</button>`;
         }
         
         const valorCorrigido = inst.correctedValue || inst.balanceDue || inst.originalValue || 0;
@@ -28601,6 +28623,22 @@ async function loadCustomerBoletos(customerId, saleId) {
         if ((inst.generatedBillet === true || isRecentGen) && !isPaid) {
           try {
             const slip = await SiengeApiService.getPaymentSlipNotification(saleId, inst.installmentId);
+            const hasSlip = typeof window.siengePaymentSlipIsUsable === "function"
+              ? window.siengePaymentSlipIsUsable(slip)
+              : !!(slip && slip.results && slip.results.length);
+            const row = document.getElementById(`row-inst-${inst.installmentId}`);
+            if (!hasSlip) {
+              if (isRecentGen && row) {
+                const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
+                const tdActions = document.getElementById(`actions-col-${inst.installmentId}`);
+                if (tdDate) tdDate.textContent = "Aguardando Sienge";
+                if (tdActions) tdActions.innerHTML = `<button class="btn btn-outline btn-sm" style="font-size:0.75rem;padding:4px 8px;" onclick="loadCustomerBoletos(${JSON.stringify(customerId)}, ${JSON.stringify(saleId)})">Atualizar</button>`;
+              } else if (row) {
+                row.remove();
+                window.refreshBoletosTabIfEmpty(container, customerId, saleId);
+              }
+              continue;
+            }
             let trueDateStr = 'N/D';
             let dtFebraban = null;
             if (slip && slip.results && slip.results.length > 0) {
@@ -28661,11 +28699,17 @@ async function loadCustomerBoletos(customerId, saleId) {
                }
             } else {
                const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
-               if (tdDate) tdDate.textContent = 'Não disponivel';
+               if (tdDate) tdDate.textContent = trueDateStr || "—";
             }
           } catch(e) {
-             const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
-             if (tdDate) tdDate.textContent = 'Erro';
+             const row = document.getElementById(`row-inst-${inst.installmentId}`);
+             if (isRecentGen) {
+               const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
+               if (tdDate) tdDate.textContent = "Aguardando Sienge";
+             } else if (row) {
+               row.remove();
+               window.refreshBoletosTabIfEmpty(container, customerId, saleId);
+             }
           }
         }
       }
