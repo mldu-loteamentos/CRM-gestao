@@ -24931,26 +24931,61 @@ window.getNexDueSnoozeUntil = function() {
 
 window.previewNexDueConfig = function() {
   const box = document.getElementById("nex-due-config-preview");
-  if (!box) return;
+  const selectedLabel = document.getElementById("nex-due-selected-label");
   const cfg = window.collectNexDueConfigFromForm();
   if (cfg.maxOffset < cfg.openOffset) cfg.maxOffset = cfg.openOffset;
+  if (selectedLabel) {
+    selectedLabel.textContent = cfg.dueDays.length
+      ? cfg.dueDays.length + " dia" + (cfg.dueDays.length === 1 ? "" : "s") + " · " + cfg.dueDays.join(", ")
+      : "Nenhum dia marcado";
+  }
+  if (!box) return;
   const today = window.nexTodayIso ? window.nexTodayIso() : "";
   const fmt = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
   if (!cfg.dueDays.length) {
-    box.innerHTML = "Marque ao menos um dia de vencimento para calcular as datas do alerta.";
+    box.innerHTML = "<div style=\"font-size:0.84rem;color:#94a3b8;padding-top:6px;\">Marque os dias de vencimento para ver as datas do alerta.</div>";
     return;
   }
-  const cycles = window.nexDueCyclesForConfig(cfg, today).filter(c => c.maxIso >= today).slice(0, 6);
+  const cycles = window.nexDueCyclesForConfig(cfg, today).filter(c => c.maxIso >= today).slice(0, 8);
   if (!cycles.length) {
-    box.innerHTML = "Nenhum ciclo futuro encontrado com esses dias.";
+    box.innerHTML = "<div style=\"font-size:0.84rem;color:#94a3b8;padding-top:6px;\">Nenhum ciclo futuro com esses dias.</div>";
     return;
   }
-  const lines = cycles.map(c => {
-    const dueLabel = fmt(c.dueIso);
-    return "• Dia " + c.dueDay + " (" + dueLabel + "): pop-up em <strong>" + fmt(c.openIso) + "</strong> (D+" + cfg.openOffset + "); adiar até <strong>" + fmt(c.maxIso) + "</strong> (D+" + cfg.maxOffset + ").";
-  });
-  box.innerHTML = (cfg.enabled ? "" : "<div style=\"color:#b45309;font-weight:700;margin-bottom:6px;\">Alerta desativado — o pop-up não abre.</div>") +
-    "Próximos ciclos (dias úteis, sem sábado/domingo/feriado):<br>" + lines.join("<br>");
+  const offNote = cfg.enabled ? "" : "<div style=\"color:#b45309;font-weight:700;font-size:0.82rem;margin-bottom:8px;\">Pop-up desativado — as datas abaixo não disparam alerta.</div>";
+  box.innerHTML = offNote + cycles.map(c => {
+    return "<div class=\"nex-due-preview-row\">"
+      + "<div><strong>Dia " + c.dueDay + "</strong> · " + fmt(c.dueIso) + "</div>"
+      + "<div style=\"color:#64748b;\">Abre <strong style=\"color:#105436;\">" + fmt(c.openIso) + "</strong> · limite " + fmt(c.maxIso) + "</div>"
+      + "</div>";
+  }).join("");
+};
+
+window.flashNexDueSaved = function() {
+  const el = document.getElementById("nex-due-save-status");
+  if (!el) return;
+  el.classList.add("show");
+  clearTimeout(window._nexDueSavedFlash);
+  window._nexDueSavedFlash = setTimeout(function() { el.classList.remove("show"); }, 1400);
+};
+
+window.persistNexDueConfigSilent = function() {
+  const cfg = window.collectNexDueConfigFromForm();
+  if (cfg.maxOffset < cfg.openOffset) {
+    cfg.maxOffset = cfg.openOffset;
+    const maxEl = document.getElementById("nex-due-max-offset");
+    if (maxEl) maxEl.value = cfg.maxOffset;
+  }
+  window.writeNexDueConfig(cfg);
+  window.previewNexDueConfig();
+  window.flashNexDueSaved();
+};
+
+window.queueNexDueConfigSave = function() {
+  window.previewNexDueConfig();
+  clearTimeout(window._nexDueSaveTimer);
+  window._nexDueSaveTimer = setTimeout(function() {
+    window.persistNexDueConfigSilent();
+  }, 350);
 };
 
 window.renderNexDueConfigPanel = function() {
@@ -24970,37 +25005,19 @@ window.renderNexDueConfigPanel = function() {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.setAttribute("data-day", String(d));
-      btn.className = on ? "nex-due-day-on" : "";
+      btn.className = "nex-due-day-btn" + (on ? " nex-due-day-on" : "");
       btn.textContent = String(d);
-      btn.style.cssText = "border:1px solid " + (on ? "#105436" : "#e2e8f0") + "; background:" + (on ? "#105436" : "#fff") + "; color:" + (on ? "#fff" : "#334155") + "; border-radius:8px; padding:8px 0; font-size:0.82rem; font-weight:700; cursor:pointer;";
       btn.onclick = function() {
-        const active = btn.classList.toggle("nex-due-day-on");
-        btn.style.borderColor = active ? "#105436" : "#e2e8f0";
-        btn.style.background = active ? "#105436" : "#fff";
-        btn.style.color = active ? "#fff" : "#334155";
-        window.previewNexDueConfig();
+        btn.classList.toggle("nex-due-day-on");
+        window.persistNexDueConfigSilent();
       };
       grid.appendChild(btn);
     }
   }
   window.previewNexDueConfig();
-  if (window.lucide) lucide.createIcons();
 };
 
-window.saveNexDueConfig = function() {
-  const cfg = window.collectNexDueConfigFromForm();
-  if (cfg.maxOffset < cfg.openOffset) {
-    alert("O limite para adiar (D+" + cfg.maxOffset + ") precisa ser maior ou igual ao dia de abertura (D+" + cfg.openOffset + ").");
-    return;
-  }
-  window.writeNexDueConfig(cfg);
-  window.renderNexDueConfigPanel();
-  if (typeof window.showToast === "function") window.showToast("Configurações de NEX salvas.", "success");
-  else alert("Configurações de NEX salvas.");
-  setTimeout(function() {
-    if (typeof window.checkNexDueAlerts === "function") window.checkNexDueAlerts();
-  }, 300);
-};
+window.saveNexDueConfig = window.persistNexDueConfigSilent;
 
 window.scheduleNexDueAlertWake = function() {
   if (window._nexDueAlertSnoozeTimer) {
