@@ -4,28 +4,48 @@
 const AZURE_CONFIG_KEY = "crm_moura_azure_config";
 const USER_SESSION_KEY = "crm_moura_user_session";
 
-// Configurações padrão do Azure AD (inicialmente em branco ou placeholder)
 const DEFAULT_AZURE_CONFIG = {
   clientId: "643259b4-6f72-4f25-8a2d-ac131a34f169",
   tenantId: "34bf99e3-12de-4814-ab19-0d0f90fab15b",
   redirectUri: window.location.origin + window.location.pathname,
-  enabled: true // MUDADO PARA TRUE (Usa o MSAL real do Microsoft Azure)
+  enabled: true
 };
 
-// Carregar configuração (Forçando a configuração padrão sem cache de localStorage já que não haverá painel de admin)
 let g_authConfig = DEFAULT_AZURE_CONFIG;
-
-// Instância MSAL (inicializada apenas se o login real estiver habilitado)
 let msalInstance = null;
+let msalReady = null;
+let loginInFlight = false;
 
 function saveAuthConfig(config) {
   g_authConfig = { ...g_authConfig, ...config };
-  localStorage.setItem(AZURE_CONFIG_KEY, JSON.stringify(g_authConfig));
+  try {
+    localStorage.setItem(AZURE_CONFIG_KEY, JSON.stringify(g_authConfig));
+  } catch (e) {}
   initializeMsal();
 }
 
+function clearMsalInteractionLock() {
+  const wipe = (store) => {
+    if (!store) return;
+    const keys = [];
+    try {
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (!k) continue;
+        const kl = k.toLowerCase();
+        if (kl.includes("msal") && (kl.includes("interaction") || kl.includes("request.origin"))) {
+          keys.push(k);
+        }
+      }
+      keys.forEach((k) => store.removeItem(k));
+    } catch (e) {}
+  };
+  wipe(window.sessionStorage);
+  wipe(window.localStorage);
+}
+
 function initializeMsal() {
-  if (g_authConfig.enabled && g_authConfig.clientId && g_authConfig.tenantId) {
+  if (g_authConfig.enabled && g_authConfig.clientId && g_authConfig.tenantId && window.msal) {
     const msalConfig = {
       auth: {
         clientId: g_authConfig.clientId,
@@ -39,42 +59,70 @@ function initializeMsal() {
     };
     try {
       msalInstance = new msal.PublicClientApplication(msalConfig);
+      msalReady = (typeof msalInstance.initialize === "function")
+        ? msalInstance.initialize().catch((e) => {
+            console.warn("MSAL initialize:", e);
+          })
+        : Promise.resolve();
     } catch (e) {
       console.error("Erro ao inicializar o MSAL.js:", e);
+      msalInstance = null;
+      msalReady = Promise.resolve();
     }
   } else {
     msalInstance = null;
+    msalReady = Promise.resolve();
   }
 }
 
-// Obter usuário atual logado
 function getCurrentUser() {
-  return JSON.parse(localStorage.getItem(USER_SESSION_KEY)) || null;
+  try {
+    return JSON.parse(localStorage.getItem(USER_SESSION_KEY)) || null;
+  } catch (e) {
+    return null;
+  }
 }
 
-// Validar se o domínio do e-mail é @mouraleite.com ou @mouraleite.com.br
 function validateDomain(email) {
   if (!email) return false;
   const domain = email.split("@")[1];
   return domain && (domain.toLowerCase() === "mouraleite.com" || domain.toLowerCase() === "mouraleite.com.br");
 }
 
-// Fluxo de Login
+function isInteractionInProgress(error) {
+  const code = String((error && error.errorCode) || "");
+  const msg = String((error && error.message) || error || "");
+  return code === "interaction_in_progress" || /interaction_in_progress|interaction is currently in progress/i.test(msg);
+}
+
 async function login() {
-  if (g_authConfig.enabled && msalInstance) {
-    // Login Real via Microsoft Azure AD
-    try {
+  if (loginInFlight) {
+    throw new Error("Login já em andamento. Feche o popup da Microsoft ou atualize a página.");
+  }
+  loginInFlight = true;
+  try {
+    if (g_authConfig.enabled && msalInstance) {
+      if (msalReady) await msalReady;
       const loginRequest = {
         scopes: ["user.read"],
         prompt: "select_account"
       };
-      const loginResponse = await msalInstance.loginPopup(loginRequest);
-      
+      let loginResponse;
+      try {
+        loginResponse = await msalInstance.loginPopup(loginRequest);
+      } catch (error) {
+        if (isInteractionInProgress(error)) {
+          clearMsalInteractionLock();
+          loginResponse = await msalInstance.loginPopup(loginRequest);
+        } else {
+          throw error;
+        }
+      }
+
       const email = loginResponse.account.username;
-      
-      // Validação crítica de domínio corporativo
+
       if (!validateDomain(email)) {
-        await msalInstance.logoutPopup();
+        try { await msalInstance.logoutPopup(); } catch (e) {}
         throw new Error("Acesso negado. Apenas e-mails do domínio @mouraleite.com.br são permitidos.");
       }
 
@@ -85,42 +133,33 @@ async function login() {
         method: "Azure AD"
       };
 
-      localStorage.setItem(USER_SESSION_KEY, JSON.stringify(user));
+      try {
+        localStorage.setItem(USER_SESSION_KEY, JSON.stringify(user));
+      } catch (e) {
+        console.warn("Nao foi possivel gravar a sessao no localStorage:", e);
+      }
       return user;
-    } catch (error) {
-      console.error("Falha no login Azure AD:", error);
-      throw error;
     }
-  } else {
-    // LOGIN SIMULADO (caso Azure AD não esteja ativado)
-    // O programador pode testar de forma interativa
+
     return new Promise((resolve, reject) => {
-      // Abriremos um prompt ou modal amigável no app.js
-      // Esta função retornará uma promessa que o app.js resolverá após obter o e-mail no modal
       window.showMockLoginModal(resolve, reject);
     });
+  } catch (error) {
+    console.error("Falha no login Azure AD:", error);
+    if (isInteractionInProgress(error)) {
+      clearMsalInteractionLock();
+    }
+    throw error;
+  } finally {
+    loginInFlight = false;
   }
 }
 
-// Fluxo de Logout
 async function logout() {
-  const user = getCurrentUser();
   localStorage.removeItem(USER_SESSION_KEY);
-  
-  // A pedido do usuário, não vamos deslogar globalmente a conta Microsoft
-  // para evitar que o usuário perca o acesso a outras ferramentas do trabalho.
-  // if (g_authConfig.enabled && msalInstance && user && user.method === "Azure AD") {
-  //   try {
-  //     await msalInstance.logoutPopup();
-  //   } catch (e) {
-  //     console.error("Erro no logout do Azure AD:", e);
-  //   }
-  // }
-  
   window.location.reload();
 }
 
-// Inicializa o MSAL ao carregar o script
 initializeMsal();
 
 window.MouraAuth = {
@@ -129,5 +168,6 @@ window.MouraAuth = {
   getCurrentUser,
   getAuthConfig: () => g_authConfig,
   saveAuthConfig,
-  validateDomain
+  validateDomain,
+  clearMsalInteractionLock
 };

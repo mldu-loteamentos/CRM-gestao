@@ -262,7 +262,19 @@ window.isApoioJuridicoOperatorName = function(name) {
   });
 };
 
+window.safeSetLocalJson = function(key, value) {
+  try {
+    const raw = typeof value === "string" ? value : JSON.stringify(value);
+    localStorage.setItem(key, raw);
+    return true;
+  } catch (e) {
+    console.warn("[storage] nao gravou", key, e && e.name);
+    return false;
+  }
+};
+
 window.updateOperatorTabsUI = function(useActualData = true) {
+  if (typeof window.getDynamicOperators !== "function") return;
   const dynOps = window.getDynamicOperators() || [];
   const normOp = window.normalizeOperatorName;
   const skip = (n) => !n || n === "NAO ATRIBUIDO" || n === "TODOS" || n === "OUTROS" || n === "SEM CARTEIRA INADIMPLENTE" || n === "NAO COBRAR";
@@ -394,7 +406,7 @@ window.updateOperatorTabsUI = function(useActualData = true) {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-    window.updateOperatorTabsUI();
+    if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI();
     if (typeof window.syncWebroHideToggleUI === "function") window.syncWebroHideToggleUI();
     setTimeout(() => {
       if (typeof window.ensureAllNexCleared === "function") window.ensureAllNexCleared();
@@ -3083,6 +3095,10 @@ async function checkAuthentication() {
       btn.style.marginTop = "20px";
       
       btn.onclick = () => {
+        if (btn.dataset.loginBusy === "1") return;
+        btn.dataset.loginBusy = "1";
+        const prevText = btn.textContent;
+        btn.textContent = "Aguardando Microsoft...";
         MouraAuth.login().then(async loggedUser => {
           await processSuccessfulLogin(loggedUser);
         }).catch(err => {
@@ -3091,6 +3107,9 @@ async function checkAuthentication() {
             errorMsg.textContent = "Falha no login com a Microsoft: " + err.message;
             errorMsg.style.display = "block";
           }
+        }).finally(() => {
+          btn.dataset.loginBusy = "0";
+          btn.textContent = prevText || "Entrar com Microsoft";
         });
       };
     } else {
@@ -6351,7 +6370,10 @@ document.addEventListener("click", function(e) {
 
   // 1. Calcular Carga de Trabalho por Operador (Workload)
   const workload = {};
-  window.getDynamicOperators().forEach(op => {
+  const dynOpsList = (typeof window.getDynamicOperators === "function")
+    ? (window.getDynamicOperators() || [])
+    : [];
+  dynOpsList.forEach(op => {
       workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
   });
   workload["NÃO ATRIBUÍDO"] = { name: "NÃO ATRIBUÍDO", uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
@@ -27865,18 +27887,25 @@ window.ensureTimelineAcoesOficiais = function() {
     }
   });
   if (changed) {
-    localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
+    if (typeof window.safeSetLocalJson === "function") {
+      window.safeSetLocalJson("crm_moura_timeline_acoes", window.TimelineAcoesList);
+    } else {
+      try { localStorage.setItem("crm_moura_timeline_acoes", JSON.stringify(window.TimelineAcoesList)); } catch (e) {}
+    }
   }
 };
 
 window.ensureTimelineReguaDefaults = function() {
+  try {
   if (typeof window.ensureTimelineAcoesOficiais === "function") {
     window.ensureTimelineAcoesOficiais();
   }
   if (!Array.isArray(window.TimelineState) || !window.TimelineState.length) {
     try {
       const stored = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "null");
-      if (Array.isArray(stored) && stored.length) window.TimelineState = stored;
+      const plausible = Array.isArray(stored) && stored.length && stored.length <= 80
+        && stored.every(n => n && typeof n === "object" && (n.dias != null || n.acao || n.id) && n.customerId == null);
+      if (plausible) window.TimelineState = stored;
     } catch (e) {}
   }
   let changed = false;
@@ -27947,12 +27976,19 @@ window.ensureTimelineReguaDefaults = function() {
   }
 
   if (changed) {
-    localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+    if (typeof window.safeSetLocalJson === "function") {
+      window.safeSetLocalJson("crm_moura_timeline_nodes", window.TimelineState);
+    } else {
+      try { localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState)); } catch (e) {}
+    }
+  }
+  } catch (e) {
+    console.warn("[regua] ensureTimelineReguaDefaults", e);
   }
 };
 
-window.ensureTimelineAcoesOficiais();
-window.ensureTimelineReguaDefaults();
+try { window.ensureTimelineAcoesOficiais(); } catch (e) { console.warn("[regua] acoes", e); }
+try { window.ensureTimelineReguaDefaults(); } catch (e) { console.warn("[regua] defaults", e); }
 
 window.renderTimelineAcoesSelect = function() {
   const select = document.getElementById('timeline-modal-acao');
@@ -36371,7 +36407,12 @@ window.syncAllNotesToFirebase = async function() {
 // Captura as chamadas de localStorage.setItem e envia pro Firebase
 const _originalSetItem = localStorage.setItem;
 localStorage.setItem = function(key, value) {
-    _originalSetItem.call(this, key, value);
+    try {
+      _originalSetItem.call(this, key, value);
+    } catch (e) {
+      console.warn("[storage] setItem falhou", key, e && e.name);
+      return;
+    }
     
     // Tratamento exclusivo de anotações (mantém a lógica anterior)
     if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing && !window._isNotesHydrating) {
