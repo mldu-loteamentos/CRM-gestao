@@ -228,12 +228,34 @@ window.getCrmUsersCached = function() {
   }
 };
 
+window.valueIsSubjudice = function(v) {
+  if (v === true || v === 1) return true;
+  const s = String(v == null ? "" : v).trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return s === "S" || s === "SIM" || s === "TRUE" || s === "YES" || s === "Y";
+};
+
+window.clientIsSubjudice = function(client) {
+  if (!client) return false;
+  return window.valueIsSubjudice(client.subjudice);
+};
+
+window.isCobrancaBackOfficeUser = function(u) {
+  if (!u || u.status === "INATIVO") return false;
+  if (u.operator_type === "apoio_juridico") return true;
+  const p = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (p.includes("BACK OFFICE") || p.includes("BACKOFFICE")) return true;
+  const n = (typeof window.normalizeOperatorName === "function")
+    ? (window.normalizeOperatorName(u.name || "") + " " + window.normalizeOperatorName(u.sienge_user || ""))
+    : String(u.name || "").toUpperCase();
+  return n.includes("LUCELIA");
+};
+
 window.isApoioJuridicoOperatorName = function(name) {
   const want = window.normalizeOperatorName(name);
   if (!want) return false;
   const users = window.getCrmUsersCached();
   return users.some(u => {
-    if (!u || u.status === "INATIVO" || u.operator_type !== "apoio_juridico") return false;
+    if (!window.isCobrancaBackOfficeUser(u)) return false;
     const a = window.normalizeOperatorName(u.sienge_user || "");
     const b = window.normalizeOperatorName(u.name || "");
     return !!(want && (want === a || want === b || a.includes(want) || b.includes(want) || want.includes(a) || want.includes(b)));
@@ -262,7 +284,7 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   const hasAnaliseInternaJuridico = clients.some(c => typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(c));
   if (hasAnaliseInternaJuridico) {
     (window.getCrmUsersCached() || []).forEach(u => {
-      if (!u || u.status === "INATIVO" || u.operator_type !== "apoio_juridico") return;
+      if (!window.isCobrancaBackOfficeUser(u)) return;
       const label = formatOperatorUserName(u);
       const n = normOp(label);
       if (skip(n)) return;
@@ -1415,15 +1437,21 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
       return p.includes("OPERADOR COBRANCA");
     };
     const userOpType = (u) => (u && u.operator_type) ? u.operator_type : "interno";
-    
-    let candidateOps = cityOps.filter(o => {
-       if (o === "NÃO ATRIBUÍDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃO COBRAR" || o === "OUTROS") return false;
-       const normalizedO = o.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-       const u = users.find(user => {
+    const findUserByLabel = (o) => {
+       const normalizedO = String(o || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+       return users.find(user => {
            const sName = user.sienge_user ? user.sienge_user.toUpperCase().replace(/\./g, ' ').trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
            const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
            return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
        });
+    };
+    
+    let candidateOps = cityOps.filter(o => {
+       if (o === "NÃO ATRIBUÍDO" || o === "SEM CARTEIRA INADIMPLENTE" || o === "NÃO COBRAR" || o === "OUTROS") return false;
+       const u = findUserByLabel(o);
+       if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u) && requiredType !== "apoio_juridico") {
+         return false;
+       }
        const opType = userOpType(u);
        
        if (requiredType === 'interno_absoluto') return opType === 'interno';
@@ -1432,9 +1460,13 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     });
 
     if (candidateOps.length === 0) {
+        if (requiredType === 'externo') {
+            return defaultOp;
+        }
         if (requiredType === 'interno_absoluto' || requiredType === 'interno') {
             const internalNames = users
-              .filter(u => u && isOpCobranca(u) && userOpType(u) === 'interno' && u.status !== 'INATIVO')
+              .filter(u => u && isOpCobranca(u) && userOpType(u) === 'interno' && u.status !== 'INATIVO'
+                && !(typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u)))
               .map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : (u.name ? u.name.toUpperCase() : ''))
               .filter(Boolean);
             if (internalNames.length > 0) {
@@ -1505,6 +1537,27 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
   return defaultOp;
 }
 
+window.cityRuleHasOperatorType = function(ruleId, type) {
+  if (!ruleId || !type) return false;
+  const rule = (typeof window.lookupCityRule === "function" && window.lookupCityRule(ruleId))
+    || (typeof AppState !== "undefined" && AppState.rules && AppState.rules[ruleId]);
+  if (!rule) return false;
+  const ops = (typeof window.mergeCityOperatorValues === "function")
+    ? window.mergeCityOperatorValues(rule.operator)
+    : (Array.isArray(rule.operator) ? rule.operator : (rule.operator ? [rule.operator] : []));
+  const users = typeof window.getCrmUsersCached === "function" ? window.getCrmUsersCached() : [];
+  return ops.some((o) => {
+    const normalizedO = String(o || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const u = users.find((user) => {
+      const sName = user.sienge_user ? user.sienge_user.toUpperCase().replace(/\./g, " ").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+      const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+      return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
+    });
+    const opType = (u && u.operator_type) ? u.operator_type : "interno";
+    return opType === type;
+  });
+};
+
 window.APOIO_JURIDICO_RETORNO_DIAS = 180;
 window.APOIO_JURIDICO_RECENTE_LUCELIA_DIAS = 90;
 
@@ -1521,7 +1574,9 @@ function pickApoioJuridicoOperatorName(customerId) {
   } catch (e) {
     users = [];
   }
-  const ops = users.filter(u => u && u.operator_type === "apoio_juridico" && u.status !== "INATIVO");
+  const ops = users.filter(u => typeof window.isCobrancaBackOfficeUser === "function"
+    ? window.isCobrancaBackOfficeUser(u)
+    : (u && u.operator_type === "apoio_juridico" && u.status !== "INATIVO"));
   const names = ops.map(formatOperatorUserName).filter(Boolean);
   if (names.length === 0) return null;
   if (names.length === 1 || !customerId) return names[0];
@@ -1710,7 +1765,7 @@ window.daysSinceSubjudiceExit = daysSinceSubjudiceExit;
 
 window.clientPassedJuridicoRecently = function(client, history) {
   if (!client) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return true;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return true;
   let hist = history;
   if (!hist) {
     try { hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { hist = {}; }
@@ -1738,7 +1793,7 @@ window.clientForcedAcordoJudicialTitulo = function(client) {
 
 window.clientHasJuridicoTrail = function(client, history) {
   if (!client) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return true;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return true;
   if (client.isAcordoJudicialQuebrado === true) return true;
   if (typeof window.clientForcedAcordoJudicialTitulo === "function" && window.clientForcedAcordoJudicialTitulo(client)) {
     return true;
@@ -1770,7 +1825,7 @@ window.clientHasJuridicoTrail = function(client, history) {
 
 window.clientIsAcordoInternoQuebrado = function(client, history) {
   if (!client) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return false;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
   if (typeof window.clientForcedAcordoJudicialTitulo === "function" && window.clientForcedAcordoJudicialTitulo(client)) {
     return false;
   }
@@ -1780,7 +1835,7 @@ window.clientIsAcordoInternoQuebrado = function(client, history) {
 
 window.clientIsAcordoJudicialQuebrado = function(client, history) {
   if (!client) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return false;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
   if (typeof window.clientForcedAcordoJudicialTitulo === "function" && window.clientForcedAcordoJudicialTitulo(client)) {
     return true;
   }
@@ -1804,9 +1859,15 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
 
   const timelineNodes = window.TimelineState || JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]");
   const nodeTerceirizada = timelineNodes.find(n => n.acao === "cob_terceirizada");
-  const nodeJuridico = timelineNodes.find(n => n.acao === "juridico");
-  const threshTerceirizada = nodeTerceirizada ? nodeTerceirizada.dias : 31;
-  const threshJuridico = nodeJuridico ? nodeJuridico.dias : 151;
+  const threshTerceirizada = nodeTerceirizada && Number.isFinite(Number(nodeTerceirizada.dias))
+    ? Number(nodeTerceirizada.dias)
+    : 31;
+  const threshAnalise = typeof window.getAnaliseInternaJuridicoThreshold === "function"
+    ? window.getAnaliseInternaJuridicoThreshold()
+    : 121;
+  const threshJuridico = typeof window.getEnvioJuridicoThreshold === "function"
+    ? window.getEnvioJuridicoThreshold()
+    : 151;
 
   let users = [];
   try {
@@ -1830,10 +1891,24 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       ? window.clientForcedAcordoJudicialTitulo(c)
       : false;
     const recenteLucelia = isRecenteJuridicoComLucelia(subjudiceMemory, c.customerId);
-    c.isInternalBrokenAgreement = !!(c.hasOverdueAgreement && !juridicoTrail && c.subjudice !== "S");
-    c.isAcordoJudicialQuebrado = !!(((c.hasOverdueAgreement && juridicoTrail) || forcedJudicial) && c.subjudice !== "S");
+    const isSubj = typeof window.clientIsSubjudice === "function"
+      ? window.clientIsSubjudice(c)
+      : (c.subjudice === "S" || c.subjudice === true);
+    c.isInternalBrokenAgreement = !!(c.hasOverdueAgreement && !juridicoTrail && !isSubj);
+    c.isAcordoJudicialQuebrado = !!(((c.hasOverdueAgreement && juridicoTrail) || forcedJudicial) && !isSubj);
 
-    if (c.subjudice === "S") {
+    let idCCusto = c.costCenterId;
+    const resolved = (typeof window.resolveCityRuleId === "function")
+      ? window.resolveCityRuleId(idCCusto)
+      : { city: "", ruleId: null };
+    let city = resolved.city || "";
+    const ruleId = resolved.ruleId;
+    const days = Number(c.maxDaysDelay) || 0;
+    const inAnaliseWindow = days >= threshAnalise && days < threshJuridico;
+    const cityHasExterno = typeof window.cityRuleHasOperatorType === "function"
+      && window.cityRuleHasOperatorType(ruleId, "externo");
+
+    if (isSubj) {
       requiredType = "advogado";
       ruleSuffix = "JURÍDICO";
     } else if (c.isAcordoJudicialQuebrado) {
@@ -1846,8 +1921,17 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     } else if (passedJuridico && recenteLucelia) {
       requiredType = "apoio_juridico";
       ruleSuffix = "APOIO_JURIDICO / RECENTE 90D";
+    } else if (c.isZeroPaid) {
+      requiredType = "interno_absoluto";
+      ruleSuffix = "INTERNO_ABSOLUTO";
+    } else if (days >= threshJuridico) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "APOIO_JURIDICO / ENVIAR JURIDICO";
+    } else if (inAnaliseWindow) {
+      requiredType = "interno";
+      ruleSuffix = "INTERNO / ANALISE INTERNA JURIDICO";
     } else if (passedJuridico) {
-      if (c.maxDaysDelay >= threshTerceirizada) {
+      if (days >= threshTerceirizada && cityHasExterno) {
         requiredType = "externo";
         ruleSuffix = "EXTERNO / RECENTE JURIDICO 90-180";
       } else {
@@ -1855,20 +1939,14 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
         ruleSuffix = "INTERNO / RECENTE JURIDICO 90-180";
       }
     } else if (c.isInternalBrokenAgreement) {
-      if (c.maxDaysDelay >= threshTerceirizada) {
+      if (days >= threshTerceirizada && cityHasExterno) {
         requiredType = "externo";
         ruleSuffix = "EXTERNO / ACORDO INTERNO QUEBRADO";
       } else {
         requiredType = "interno";
         ruleSuffix = "INTERNO / ACORDO INTERNO QUEBRADO";
       }
-    } else if (c.isZeroPaid) {
-      requiredType = "interno_absoluto";
-      ruleSuffix = "INTERNO_ABSOLUTO";
-    } else if (c.maxDaysDelay >= threshJuridico) {
-      requiredType = "apoio_juridico";
-      ruleSuffix = "APOIO_JURIDICO";
-    } else if (c.maxDaysDelay >= threshTerceirizada) {
+    } else if (days >= threshTerceirizada && cityHasExterno) {
       requiredType = "externo";
       ruleSuffix = "EXTERNO";
     }
@@ -1880,13 +1958,6 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       requiredType = "interno";
       ruleSuffix = "INTERNO / COBRANÇA INTERNA";
     }
-
-    let idCCusto = c.costCenterId;
-    const resolved = (typeof window.resolveCityRuleId === "function")
-      ? window.resolveCityRuleId(idCCusto)
-      : { city: "", ruleId: null };
-    let city = resolved.city || "";
-    const ruleId = resolved.ruleId;
 
     const forcedAcordoJudicialLucelia = typeof window.clientForcedAcordoJudicialTitulo === "function"
       && window.clientForcedAcordoJudicialTitulo(c)
@@ -1972,22 +2043,31 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
       const useRuleId = ruleId || ("CID_" + city.replace(/\s+/g, '_'));
       const custId = client ? (client.id || client.customerId) : null;
       
-      let isSubj = false;
-      if (sale && (sale.subjudice === 'S' || sale.subjudice === true)) {
-          isSubj = true;
-      }
-      if (!isSubj && client && client.maxDaysDelay !== undefined) {
-          const judLimit = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
-          if (client.maxDaysDelay >= judLimit) isSubj = true;
-      } else if (!isSubj && clientBills && clientBills.length > 0) {
-          const judLimit = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
-          const maxDelay = Math.max(...clientBills.map(b => b.daysDelay || 0));
-          if (maxDelay >= judLimit) isSubj = true;
-      }
-      
-      if (isSubj) {
+      const saleSubj = sale && (typeof window.valueIsSubjudice === "function"
+        ? window.valueIsSubjudice(sale.subjudice)
+        : (sale.subjudice === "S" || sale.subjudice === true));
+      if (saleSubj) {
           const operator = getRuleOperatorByType(useRuleId, "OUTROS", custId, "advogado");
           return { operator: operator, rule: "REGRA CIDADE (SUB JUDICE) - " + city };
+      }
+      const days = client && Number.isFinite(Number(client.maxDaysDelay))
+        ? Number(client.maxDaysDelay)
+        : (clientBills && clientBills.length
+          ? Math.max(...clientBills.map(b => Number(b.daysDelay) || 0))
+          : 0);
+      const judLimit = typeof window.getEnvioJuridicoThreshold === "function"
+        ? window.getEnvioJuridicoThreshold()
+        : 151;
+      const analiseLimit = typeof window.getAnaliseInternaJuridicoThreshold === "function"
+        ? window.getAnaliseInternaJuridicoThreshold()
+        : 121;
+      if (days >= judLimit) {
+          const operator = getRuleOperatorByType(useRuleId, "OUTROS", custId, "apoio_juridico");
+          return { operator: operator, rule: "REGRA CIDADE (ENVIAR JURIDICO) - " + city };
+      }
+      if (days >= analiseLimit) {
+          const operator = getRuleOperatorByType(useRuleId, "OUTROS", custId, "interno");
+          return { operator: operator, rule: "REGRA CIDADE (ANALISE INTERNA JURIDICO) - " + city };
       }
       
       const operator = getRuleOperator(useRuleId, "OUTROS", custId);
@@ -4132,16 +4212,21 @@ async function initializeApplication() {
   window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [
     { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
     { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
+    { id: 'n_analise', dias: 121, acao: 'analise_interna_juridico', label: 'Análise Interna Jurídico' },
     { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
   ];
   if (!timelineStr) {
       window.TimelineState = [
         { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
         { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
+        { id: 'n_analise', dias: 121, acao: 'analise_interna_juridico', label: 'Análise Interna Jurídico' },
         { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
       ];
       localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
       localStorage.setItem("crm_moura_timeline_v2", "true");
+  }
+  if (typeof window.ensureTimelineReguaDefaults === "function") {
+    window.ensureTimelineReguaDefaults();
   }
 
   if (!localStorage.getItem('crm_moura_vistoria_recurrence_days')) {
@@ -4397,18 +4482,35 @@ window.getAnaliseInternaJuridicoThreshold = function() {
   if (!nodes || !nodes.length) {
     try { nodes = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]"); } catch (e) { nodes = []; }
   }
+  const acoes = window.TimelineAcoesList || [];
   const hit = (nodes || []).find(n => {
-    const label = window.normalizeOperatorName((n && (n.label || n.customLabel || n.acaoLabel)) || "");
+    if (!n) return false;
+    if (n.acao === "analise_interna_juridico") return true;
+    const acaoLabel = ((acoes.find(a => a && a.id === n.acao) || {}).label) || "";
+    const label = window.normalizeOperatorName([n.label, n.customLabel, n.acaoLabel, acaoLabel].filter(Boolean).join(" "));
     return label.includes("ANALISE INTERNA JURIDICO");
   });
   return hit && Number.isFinite(Number(hit.dias)) ? Number(hit.dias) : 121;
 };
 
+window.getEnvioJuridicoThreshold = function() {
+  let nodes = window.TimelineState;
+  if (!nodes || !nodes.length) {
+    try { nodes = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]"); } catch (e) { nodes = []; }
+  }
+  const analise = typeof window.getAnaliseInternaJuridicoThreshold === "function"
+    ? window.getAnaliseInternaJuridicoThreshold()
+    : 121;
+  const hit = (nodes || []).find(n => n && n.acao === "juridico");
+  const dias = hit && Number.isFinite(Number(hit.dias)) ? Number(hit.dias) : 151;
+  return dias > analise ? dias : 151;
+};
+
 window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
   if (!client) return false;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) return false;
   if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return false;
   if (client.hasOverdueAgreement) return false;
   if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return false;
   if (client.isZeroPaid) return false;
@@ -4421,6 +4523,9 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client && (client.subjudice === "S" || client.subjudice === true))) {
+    return G.SUBJUDICE;
+  }
   // Acordo judicial quebrado fica com a Lucelia; só o grupo muda no 61º dia
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
     if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
@@ -4432,7 +4537,6 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
     return G.ACORDO_INTERNO_QUEBRADO;
   }
   if (client && client.isZeroPaid) return G.ZERO_PAGO;
-  if (client && (client.subjudice === "S" || client.subjudice === true)) return G.SUBJUDICE;
   if (client && client.hasOverdueAgreement) {
     if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
       return G.EXECUTAR_ACORDO_QUEBRADO;
@@ -4463,7 +4567,7 @@ window.getFilaQueueGroupMeta = function(group) {
 
 window.clientIsRecenteJuridico = function(client, history) {
   if (!client || client.hasOverdueAgreement) return false;
-  if (client.subjudice === "S" || client.subjudice === true) return false;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
   let hist = history;
   if (!hist) {
     try { hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { hist = {}; }
@@ -4515,7 +4619,7 @@ window.getRecenteJuridicoAgingHtml = function(client, diffDays) {
 window.getAnaliseInternaJuridicoAgingHtml = function(client) {
   const days = Number(client && client.maxDaysDelay) || 0;
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #a78bfa; background-color: #ede9fe; color: #5b21b6; font-weight: 600;" title="Período de análise interna entre a carteira atual e o apoio jurídico interno, sem trocar o responsável do cliente neste momento.">
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #a78bfa; background-color: #ede9fe; color: #5b21b6; font-weight: 600;" title="Análise Interna Jurídico: permanece com o operador interno da cidade. O back office (Lucelia) visualiza o grupo ao filtrar pelo próprio nome, sem assumir a tag de responsável.">
     <i data-lucide="message-circle" style="width: 14px; height: 14px;"></i> Análise Interna Jurídico - ${dayLabel}
   </span>`;
 };
@@ -5488,9 +5592,9 @@ window.applyAdvFiltersTo = (sourceList) => {
         if (window.advFilters.statusJuridico && window.advFilters.statusJuridico !== 'TODOS') {
             const status = window.advFilters.statusJuridico;
             if (status === 'SUBJUDICE_OCULTAR') {
-                filteredList = filteredList.filter(c => c.subjudice !== "S");
+                filteredList = filteredList.filter(c => !(typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(c) : c.subjudice === "S"));
             } else if (status === 'SUBJUDICE_APENAS') {
-                filteredList = filteredList.filter(c => c.subjudice === "S");
+                filteredList = filteredList.filter(c => typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(c) : c.subjudice === "S");
             } else if (status === 'JURIDICO_ENVIAR') {
                 const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
                 const daysAgo = parseInt(window.advFilters.retroMeses, 10) || 90;
@@ -5499,7 +5603,7 @@ window.applyAdvFiltersTo = (sourceList) => {
 
                 filteredList = filteredList.filter(c => {
                     // Exclui clientes que já estão Sub judice
-                    if (c.subjudice === "S") return false;
+                    if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(c) : c.subjudice === "S") return false;
                     
                     // Exclui clientes com marcador 'Recente Jurídico'
                     const mem = subjudiceHistory[c.customerId];
@@ -5512,7 +5616,9 @@ window.applyAdvFiltersTo = (sourceList) => {
                     if (c.isZeroPaid) return false;
                     
                     // Verifica se atingiu os dias de atraso para enviar ao jurídico
-                    const threshold = window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151;
+                    const threshold = typeof window.getEnvioJuridicoThreshold === "function"
+                      ? window.getEnvioJuridicoThreshold()
+                      : (window.TimelineState ? (window.TimelineState.find(n => n.acao === 'juridico')?.dias || 151) : 151);
                     return c.maxDaysDelay >= threshold;
                 });
             } else if (status === 'JURIDICO_PASSOU') {
@@ -5989,7 +6095,9 @@ document.addEventListener("click", function(e) {
         dueDay = new Date(oldestDueDate).getUTCDate();
     }
     
-    let isSubjudiceStr = bill.subjudice === "S" || bill.subjudice === true ? "S" : "N";
+    let isSubjudiceStr = (typeof window.valueIsSubjudice === "function"
+      ? window.valueIsSubjudice(bill.subjudice)
+      : (bill.subjudice === "S" || bill.subjudice === true)) ? "S" : "N";
 
     let hasUnpaidSinal = false;
     let hasAgreementOverdue = false;
@@ -6042,7 +6150,9 @@ document.addEventListener("click", function(e) {
         const sale = sales.find(s => (bill.realSaleId && String(s.id) === String(bill.realSaleId)) || String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
         if (sale) {
           consolidated[key].percPaid = sale.percPaid;
-          consolidated[key].subjudice = sale.subjudice;
+          consolidated[key].subjudice = (typeof window.valueIsSubjudice === "function"
+            ? window.valueIsSubjudice(sale.subjudice)
+            : (sale.subjudice === "S" || sale.subjudice === true)) ? "S" : (sale.subjudice || "N");
         }
         const allClientSales = sales.filter(s => s.customerId === customerId);
         const ruleVal = evaluateOperatorRules(customer, sale, bills, allClientSales);
@@ -6340,10 +6450,14 @@ document.addEventListener("click", function(e) {
         : String(c.assignedOperator || "").toUpperCase();
       if (got === want) return true;
       if (typeof window.isApoioJuridicoOperatorName === "function"
-        && window.isApoioJuridicoOperatorName(activeOperatorFilter)
-        && typeof window.clientIsAnaliseInternaJuridico === "function"
-        && window.clientIsAnaliseInternaJuridico(c)) {
-        return true;
+        && window.isApoioJuridicoOperatorName(activeOperatorFilter)) {
+        if (typeof window.clientIsAnaliseInternaJuridico === "function"
+          && window.clientIsAnaliseInternaJuridico(c)) {
+          return true;
+        }
+        const g = typeof window.getFilaQueueGroup === "function" ? window.getFilaQueueGroup(c) : null;
+        const G = window.FILA_QUEUE_GROUPS || {};
+        if (g && g === G.ENVIAR_JURIDICO) return true;
       }
       return false;
     });
@@ -6360,8 +6474,9 @@ document.addEventListener("click", function(e) {
     ? window.filterOutHiddenWebro(clientList, "fila")
     : clientList;
 
-  const juridicoNode = window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico') : null;
-  const thresholdJuridico = juridicoNode ? juridicoNode.dias : 151;
+  const thresholdJuridico = typeof window.getEnvioJuridicoThreshold === "function"
+    ? window.getEnvioJuridicoThreshold()
+    : ((window.TimelineState && window.TimelineState.find(n => n.acao === 'juridico') || {}).dias || 151);
 
   // Guardamos a lista base para KPIs e Resumo de Empresas, não afetada pelo texto de busca
   const baseClientList = [...clientList];
@@ -6782,7 +6897,7 @@ document.addEventListener("click", function(e) {
 
         const row = document.createElement("tr");
         let rowClass = zeroPaidHighlightClass;
-        if (client.subjudice === "S") {
+        if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") {
             rowClass += " subjudice-highlight";
         } else if (client.maxDaysDelay >= thresholdJuridico) {
             rowClass += " juridico-highlight";
@@ -6808,7 +6923,7 @@ document.addEventListener("click", function(e) {
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
               ${(() => {
-                  const agingInner = client.subjudice === "S" ? `
+                  const agingInner = (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
@@ -10411,13 +10526,9 @@ function formatCpfCnpj(val) {
       if (alreadySubjudice) {
         btnJur.style.display = "none";
       } else {
-        let juridicoDays = 151;
-        if (window.TimelineState) {
-          const juridicoNode = window.TimelineState.find(n => n.acao === 'juridico');
-          if (juridicoNode && juridicoNode.dias !== undefined) {
-            juridicoDays = parseInt(juridicoNode.dias);
-          }
-        }
+        let juridicoDays = typeof window.getEnvioJuridicoThreshold === "function"
+          ? window.getEnvioJuridicoThreshold()
+          : 151;
         
         if (maxDelayDays >= juridicoDays) {
           btnJur.style.display = "flex";
@@ -22175,7 +22286,9 @@ async function _loadZeroPaidTab_Impl() {
 
     const row = document.createElement("tr");
     let rowClass = zeroPaidHighlightClass;
-    if (client.maxDaysDelay >= (window.TimelineState ? window.TimelineState.find(n => n.acao === 'juridico').dias : 151)) {
+    if (client.maxDaysDelay >= (typeof window.getEnvioJuridicoThreshold === "function"
+      ? window.getEnvioJuridicoThreshold()
+      : 151)) {
         rowClass += " juridico-highlight";
     }
     rowClass += " table-row-hover";
@@ -27551,8 +27664,8 @@ window.renderTimeline = function() {
     `;
     
     const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === node.acao);
-    let acaoLabel = acaoObj ? acaoObj.label : node.acao;
-    let color = acaoObj ? (acaoObj.color || '#94a3b8') : '#94a3b8';
+    let acaoLabel = (node.label && (!acaoObj || node.acao === 'custom')) ? node.label : (acaoObj ? acaoObj.label : (node.label || node.acao));
+    let color = (node.acao === 'custom' && node.customColor) ? node.customColor : (acaoObj ? (acaoObj.color || '#94a3b8') : (node.customColor || '#94a3b8'));
     const labelAbove = index % 2 === 0;
 
     nodeEl.innerHTML = `
@@ -27667,8 +27780,8 @@ window.openTimelineListModal = function() {
     
     sortedNodes.forEach(node => {
       const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === node.acao);
-      let acaoLabel = acaoObj ? acaoObj.label : node.acao;
-      let color = acaoObj ? (acaoObj.color || '#94a3b8') : '#94a3b8';
+      let acaoLabel = (node.label && (!acaoObj || node.acao === 'custom')) ? node.label : (acaoObj ? acaoObj.label : (node.label || node.acao));
+      let color = (node.acao === 'custom' && node.customColor) ? node.customColor : (acaoObj ? (acaoObj.color || '#94a3b8') : (node.customColor || '#94a3b8'));
       
       html += `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;">
@@ -27720,11 +27833,126 @@ window.timelineModalAcaoChanged = function() {
   }
 };
 
-window.TimelineAcoesList = JSON.parse(localStorage.getItem('crm_moura_timeline_acoes')) || [
+window.TIMELINE_ACOES_OFICIAIS = [
   { id: 'cob_interna', label: 'Início Cobrança Interna', color: '#3b82f6' },
   { id: 'cob_terceirizada', label: 'Início Terceirizada', color: '#eab308' },
+  { id: 'analise_interna_juridico', label: 'Análise Interna Jurídico', color: '#a855f7' },
   { id: 'juridico', label: 'Envio Jurídico', color: '#ef4444' }
 ];
+
+try {
+  window.TimelineAcoesList = JSON.parse(localStorage.getItem('crm_moura_timeline_acoes') || 'null');
+} catch (e) {
+  window.TimelineAcoesList = null;
+}
+if (!Array.isArray(window.TimelineAcoesList) || !window.TimelineAcoesList.length) {
+  window.TimelineAcoesList = window.TIMELINE_ACOES_OFICIAIS.slice();
+}
+
+window.ensureTimelineAcoesOficiais = function() {
+  const official = window.TIMELINE_ACOES_OFICIAIS || [];
+  if (!Array.isArray(window.TimelineAcoesList)) window.TimelineAcoesList = [];
+  let changed = false;
+  official.forEach(o => {
+    const hit = window.TimelineAcoesList.find(a => a && a.id === o.id);
+    if (!hit) {
+      window.TimelineAcoesList.push(Object.assign({}, o));
+      changed = true;
+    } else if (!hit.label) {
+      hit.label = o.label;
+      if (!hit.color) hit.color = o.color;
+      changed = true;
+    }
+  });
+  if (changed) {
+    localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
+  }
+};
+
+window.ensureTimelineReguaDefaults = function() {
+  if (typeof window.ensureTimelineAcoesOficiais === "function") {
+    window.ensureTimelineAcoesOficiais();
+  }
+  if (!Array.isArray(window.TimelineState) || !window.TimelineState.length) {
+    try {
+      const stored = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "null");
+      if (Array.isArray(stored) && stored.length) window.TimelineState = stored;
+    } catch (e) {}
+  }
+  let changed = false;
+  if (!Array.isArray(window.TimelineState) || !window.TimelineState.length) {
+    window.TimelineState = [
+      { id: "n1", dias: 15, acao: "cob_interna", label: "Início Cobrança Interna" },
+      { id: "n2", dias: 31, acao: "cob_terceirizada", label: "Início Terceirizada" },
+      { id: "n_analise", dias: 121, acao: "analise_interna_juridico", label: "Análise Interna Jurídico" },
+      { id: "n3", dias: 151, acao: "juridico", label: "Envio Jurídico" }
+    ];
+    changed = true;
+  }
+  const nodes = window.TimelineState;
+  const norm = (s) => (typeof window.normalizeOperatorName === "function")
+    ? window.normalizeOperatorName(s)
+    : String(s || "").toUpperCase();
+
+  const analiseHit = nodes.find(n => n && (
+    n.acao === "analise_interna_juridico"
+    || norm([n.label, n.customLabel, n.acaoLabel].filter(Boolean).join(" ")).includes("ANALISE INTERNA JURIDICO")
+  ));
+  if (analiseHit) {
+    if (analiseHit.acao !== "analise_interna_juridico") {
+      analiseHit.acao = "analise_interna_juridico";
+      changed = true;
+    }
+    if (!analiseHit.label) {
+      analiseHit.label = "Análise Interna Jurídico";
+      changed = true;
+    }
+    if (!Number.isFinite(Number(analiseHit.dias))) {
+      analiseHit.dias = 121;
+      changed = true;
+    }
+  } else {
+    nodes.push({
+      id: "n_analise_interna_juridico",
+      dias: 121,
+      acao: "analise_interna_juridico",
+      label: "Análise Interna Jurídico",
+      gatilhos: [],
+      explicacao: "Transição para Análise Interna Jurídico. Permanece com o operador interno da cidade. O back office (Lucelia) visualiza o grupo ao filtrar pelo próprio nome."
+    });
+    changed = true;
+  }
+
+  const juridicoHit = nodes.find(n => n && n.acao === "juridico");
+  if (juridicoHit) {
+    if (!juridicoHit.label) {
+      juridicoHit.label = "Envio Jurídico";
+      changed = true;
+    }
+    const analiseDias = analiseHit && Number.isFinite(Number(analiseHit.dias)) ? Number(analiseHit.dias) : 121;
+    if (Number(juridicoHit.dias) <= analiseDias) {
+      juridicoHit.dias = 151;
+      changed = true;
+    }
+  } else {
+    nodes.push({
+      id: "n_juridico",
+      dias: 151,
+      acao: "juridico",
+      label: "Envio Jurídico",
+      gatilhos: [],
+      explicacao: "Enviar para o Jurídico. Fica com o operador de cobrança back office até o envio ao advogado."
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
+  }
+};
+
+window.ensureTimelineAcoesOficiais();
+window.ensureTimelineReguaDefaults();
 
 window.renderTimelineAcoesSelect = function() {
   const select = document.getElementById('timeline-modal-acao');
@@ -27966,11 +28194,16 @@ window.adicionarTimelineNode = function() {
     
     document.getElementById('timeline-modal-node-id').value = 'new';
     document.getElementById('timeline-modal-dias').value = 0;
-    document.getElementById('timeline-modal-acao').value = 'custom';
+    const acaoSelect = document.getElementById('timeline-modal-acao');
+    if (acaoSelect) {
+      const preferred = (window.TimelineAcoesList || []).find(a => a.id === 'analise_interna_juridico')
+        || (window.TimelineAcoesList || [])[0];
+      acaoSelect.value = preferred ? preferred.id : '';
+    }
     
     const customLabelContainer = document.getElementById('timeline-modal-custom-label-container');
     if (customLabelContainer) {
-      customLabelContainer.style.display = 'block';
+      customLabelContainer.style.display = 'none';
       const labelEl = document.getElementById('timeline-modal-custom-label');
       if(labelEl) labelEl.value = '';
       const colorInput = document.getElementById('timeline-modal-custom-color');
@@ -28023,6 +28256,12 @@ window.saveTimelineNode = function() {
   const acao = document.getElementById('timeline-modal-acao').value;
   const gatilhos = window.currentModalGatilhos || [];
   const exp = document.getElementById('timeline-modal-explicacao').value;
+  const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === acao);
+  const customLabelEl = document.getElementById('timeline-modal-custom-label');
+  const customColorEl = document.getElementById('timeline-modal-custom-color');
+  const customLabel = customLabelEl ? String(customLabelEl.value || '').trim() : '';
+  const label = customLabel || (acaoObj && acaoObj.label) || '';
+  const customColor = customColorEl ? customColorEl.value : '';
   
   let node;
   
@@ -28032,8 +28271,10 @@ window.saveTimelineNode = function() {
       dias: dias,
       acao: acao,
       gatilhos: gatilhos,
-      explicacao: exp
+      explicacao: exp,
+      label: label
     };
+    if (acao === 'custom' && customColor) node.customColor = customColor;
     window.TimelineState.push(node);
   } else {
     node = window.TimelineState.find(n => n.id === id);
@@ -28042,8 +28283,10 @@ window.saveTimelineNode = function() {
       node.acao = acao;
       node.gatilhos = gatilhos;
       node.explicacao = exp;
-      delete node.label;
-      delete node.customColor;
+      if (label) node.label = label;
+      else delete node.label;
+      if (acao === 'custom' && customColor) node.customColor = customColor;
+      else delete node.customColor;
     }
   }
   
@@ -35886,6 +36129,30 @@ window.syncGlobalConfigFromFirebase = async function() {
                     changed = true;
                 }
             });
+            if (typeof window.ensureTimelineReguaDefaults === "function") {
+                try {
+                    const stored = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "null");
+                    if (Array.isArray(stored) && stored.length) window.TimelineState = stored;
+                } catch (e) {}
+                try {
+                    const acoes = JSON.parse(localStorage.getItem("crm_moura_timeline_acoes") || "null");
+                    if (Array.isArray(acoes) && acoes.length) window.TimelineAcoesList = acoes;
+                } catch (e) {}
+                const beforeNodes = localStorage.getItem("crm_moura_timeline_nodes") || "";
+                const beforeAcoes = localStorage.getItem("crm_moura_timeline_acoes") || "";
+                window.ensureTimelineReguaDefaults();
+                const afterNodes = localStorage.getItem("crm_moura_timeline_nodes") || "";
+                const afterAcoes = localStorage.getItem("crm_moura_timeline_acoes") || "";
+                if (afterNodes !== beforeNodes || afterAcoes !== beforeAcoes) {
+                    changed = true;
+                    if (window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1800);
+                    }
+                }
+                if (typeof window.renderTimeline === "function") {
+                    try { window.renderTimeline(); } catch (e) {}
+                }
+            }
             // Sincroniza permissões dinâmicas
             // Preferir o JSON local do navegador após a tela de permissões ser salva.
             // Caso o arquivo da nuvem venha vazio, espelhado ou inconsistente, não
