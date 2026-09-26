@@ -243,7 +243,10 @@ const ConfigUsersApp = {
     {
       name: "Segurança", icon: "shield", key: "mod_seg",
       submodules: [
-        { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [{ id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" }] }
+        { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [
+          { id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" },
+          { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_auditoria" }
+        ] }
       ]
     },
     {

@@ -15,6 +15,57 @@ let g_authConfig = DEFAULT_AZURE_CONFIG;
 let msalInstance = null;
 let msalReady = null;
 let loginInFlight = false;
+let sessionChannel = null;
+
+function readSessionFromStore(store) {
+  if (!store) return null;
+  try {
+    const raw = store.getItem(USER_SESSION_KEY);
+    if (!raw) return null;
+    const user = JSON.parse(raw);
+    if (user && user.email && user.isAuthenticated !== false) return user;
+  } catch (e) {}
+  return null;
+}
+
+function persistSession(user, fromBroadcast) {
+  if (!user || !user.email) return user;
+  const payload = JSON.stringify({
+    name: user.name || "",
+    email: String(user.email || "").toLowerCase(),
+    isAuthenticated: true,
+    method: user.method || "Azure AD"
+  });
+  try { localStorage.setItem(USER_SESSION_KEY, payload); } catch (e) {
+    console.warn("Nao foi possivel gravar a sessao no localStorage:", e);
+  }
+  try { sessionStorage.setItem(USER_SESSION_KEY, payload); } catch (e) {}
+  if (!fromBroadcast && sessionChannel) {
+    try { sessionChannel.postMessage({ type: "session", user: JSON.parse(payload) }); } catch (e) {}
+  }
+  return user;
+}
+
+function clearPersistedSession(fromBroadcast) {
+  try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
+  try { sessionStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
+  if (!fromBroadcast && sessionChannel) {
+    try { sessionChannel.postMessage({ type: "logout" }); } catch (e) {}
+  }
+}
+
+function initSessionChannel() {
+  if (sessionChannel || typeof BroadcastChannel === "undefined") return;
+  try {
+    sessionChannel = new BroadcastChannel("crm_moura_auth");
+    sessionChannel.onmessage = (ev) => {
+      const msg = ev && ev.data;
+      if (!msg) return;
+      if (msg.type === "session" && msg.user) persistSession(msg.user, true);
+      if (msg.type === "logout") clearPersistedSession(true);
+    };
+  } catch (e) {}
+}
 
 function saveAuthConfig(config) {
   g_authConfig = { ...g_authConfig, ...config };
@@ -45,6 +96,7 @@ function clearMsalInteractionLock() {
 }
 
 function initializeMsal() {
+  if (msalInstance) return;
   if (g_authConfig.enabled && g_authConfig.clientId && g_authConfig.tenantId && window.msal) {
     const msalConfig = {
       auth: {
@@ -76,11 +128,40 @@ function initializeMsal() {
 }
 
 function getCurrentUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_SESSION_KEY)) || null;
-  } catch (e) {
-    return null;
+  const fromLocal = readSessionFromStore(window.localStorage);
+  if (fromLocal) {
+    try { sessionStorage.setItem(USER_SESSION_KEY, JSON.stringify(fromLocal)); } catch (e) {}
+    return fromLocal;
   }
+  return readSessionFromStore(window.sessionStorage);
+}
+
+function userFromMsalAccount(account) {
+  if (!account || !account.username) return null;
+  const email = String(account.username || "").toLowerCase();
+  if (!validateDomain(email)) return null;
+  return {
+    name: account.name || email.split("@")[0].toUpperCase(),
+    email: email,
+    isAuthenticated: true,
+    method: "Azure AD"
+  };
+}
+
+async function restoreSession() {
+  initSessionChannel();
+  if (msalReady) {
+    try { await msalReady; } catch (e) {}
+  }
+  const existing = getCurrentUser();
+  if (existing) return existing;
+
+  if (msalInstance && typeof msalInstance.getAllAccounts === "function") {
+    const accounts = msalInstance.getAllAccounts() || [];
+    const user = userFromMsalAccount(accounts[0]);
+    if (user) return persistSession(user);
+  }
+  return null;
 }
 
 function validateDomain(email) {
@@ -133,11 +214,7 @@ async function login() {
         method: "Azure AD"
       };
 
-      try {
-        localStorage.setItem(USER_SESSION_KEY, JSON.stringify(user));
-      } catch (e) {
-        console.warn("Nao foi possivel gravar a sessao no localStorage:", e);
-      }
+      persistSession(user);
       return user;
     }
 
@@ -155,17 +232,20 @@ async function login() {
   }
 }
 
-async function logout() {
-  localStorage.removeItem(USER_SESSION_KEY);
+async function logout(opts) {
+  clearPersistedSession(!!(opts && opts.silent));
   window.location.reload();
 }
 
+initSessionChannel();
 initializeMsal();
 
 window.MouraAuth = {
   login,
   logout,
   getCurrentUser,
+  restoreSession,
+  persistSession,
   getAuthConfig: () => g_authConfig,
   saveAuthConfig,
   validateDomain,

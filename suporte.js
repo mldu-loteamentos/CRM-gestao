@@ -100,7 +100,8 @@
       { id: "associacoes", label: "Associações" }
     ]},
     { id: "seguranca", label: "Segurança", subs: [
-      { id: "auditoria", label: "Auditoria do Sistema" }
+      { id: "auditoria", label: "Auditoria do Sistema" },
+      { id: "consumo", label: "Consumo de API" }
     ]},
     { id: "suporte", label: "Suporte" },
     { id: "configuracoes", label: "Configurações", subs: [
@@ -155,6 +156,7 @@
     compromissario_prefeitura: { modulo: "compromissario", subitem: "prefeitura" },
     compromissario_associacoes: { modulo: "compromissario", subitem: "associacoes" },
     auditoria: { modulo: "seguranca", subitem: "auditoria" },
+    "consumo-api": { modulo: "seguranca", subitem: "consumo" },
     suporte: { modulo: "suporte" },
     preambles: { modulo: "configuracoes", subitem: "preambulos" },
     "config-tags": { modulo: "configuracoes", subitem: "tags" },

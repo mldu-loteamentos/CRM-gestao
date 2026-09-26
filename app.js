@@ -251,6 +251,48 @@ window.isWriteOffReceipt = function(rec) {
   return rType === "3" || rType === "7";
 };
 
+window.parseSiengeDay = function(ds) {
+  if (!ds) return null;
+  const s = String(ds).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+};
+
+window.isGenuineRecebimento = function(rec) {
+  if (!rec) return false;
+  if (window.isWriteOffReceipt(rec)) return false;
+  const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").trim().toLowerCase();
+  const extra = String(rec.typeName || rec.receiptTypeName || rec.description || rec.historic || rec.history || "").toLowerCase();
+  const blob = (rType + " " + extra).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(cancel|distrato|promocao|write-?off)\b/.test(blob) && !blob.includes("recebimento")) return false;
+  if (blob.includes("baixa") && !blob.includes("recebimento")) return false;
+  const val = parseFloat(rec.receiptValue || rec.amount || rec.value || rec.netReceiptValue || 0);
+  if (!(val > 0)) return false;
+  return rType === "2" || rType === "recebimento" || blob.includes("recebimento");
+};
+
+window.installmentRecebimentoDates = function(inst) {
+  const dates = [];
+  const recs = (inst && inst.receipts) || [];
+  recs.forEach((r) => {
+    if (!window.isGenuineRecebimento(r)) return;
+    const d = window.parseSiengeDay(r.receiptDate || r.date || r.paymentDate);
+    if (d) dates.push(d);
+  });
+  if (!dates.length && inst && (inst.installmentSituation === 2 || inst.isValidReceipt)) {
+    const rType = String(inst.receiptTypeStr || inst.receiptId || inst.receiptType || "").toLowerCase();
+    if (rType === "2" || rType.includes("recebimento")) {
+      if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(inst)) return dates;
+      const d = window.parseSiengeDay(inst.receiptDate || inst.payOffDate);
+      if (d) dates.push(d);
+    }
+  }
+  return dates;
+};
+
 window.installmentsOpenBalance = function(installments) {
   if (!Array.isArray(installments)) return 0;
   return installments.reduce((acc, inst) => acc + (Number(inst && inst.currentBalance) || 0), 0);
@@ -1662,18 +1704,11 @@ function billHasOverdueAgreementInstallment(bill) {
 
 function installmentOverdueDays(inst) {
   if (!inst) return 0;
+  if (typeof window.daysOverdueUntilTarget === "function" && (inst.dueDate || inst.due)) {
+    return window.daysOverdueUntilTarget(inst, new Date());
+  }
   const api = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay);
-  if (Number.isFinite(api) && api > 0) return api;
-  const dueRaw = inst.dueDate || inst.due;
-  if (!dueRaw) return Number.isFinite(api) && api >= 0 ? api : 0;
-  const due = new Date(dueRaw);
-  if (Number.isNaN(due.getTime())) return 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const dueDay = new Date(due);
-  dueDay.setHours(0, 0, 0, 0);
-  const diff = Math.round((today - dueDay) / 86400000);
-  return diff > 0 ? diff : 0;
+  return Number.isFinite(api) && api > 0 ? api : 0;
 }
 
 function maxAgreementInstallmentDays(installments) {
@@ -1747,6 +1782,11 @@ window.syncReprocessChargePercents = function() {
   return pct;
 };
 
+window.todayIsoLocal = function() {
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+};
+
 window.daysOverdueUntilTarget = function(inst, targetDate) {
   const dueIso = typeof window.installmentDueIsoDate === "function"
     ? window.installmentDueIsoDate(inst)
@@ -1758,16 +1798,32 @@ window.daysOverdueUntilTarget = function(inst, targetDate) {
       : String(targetDate || "").slice(0, 10);
     target = tIso ? new Date(tIso + "T12:00:00") : new Date();
   }
-  if (dueIso) {
-    const due = new Date(dueIso + "T12:00:00");
-    if (!isNaN(due.getTime()) && !isNaN(target.getTime())) {
-      const diff = Math.round((target.getTime() - due.getTime()) / 86400000);
+  const chargeIso = typeof window.installmentChargeDueIso === "function"
+    ? window.installmentChargeDueIso(dueIso)
+    : dueIso;
+  if (chargeIso) {
+    const charge = new Date(chargeIso + "T12:00:00");
+    if (!isNaN(charge.getTime()) && !isNaN(target.getTime())) {
+      const diff = Math.round((target.getTime() - charge.getTime()) / 86400000);
       if (Number.isFinite(diff)) return diff > 0 ? diff : 0;
     }
   }
   const api = Number(inst && (inst.apiDaysDelay != null ? inst.apiDaysDelay
     : (inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay)));
   return Number.isFinite(api) && api > 0 ? api : 0;
+};
+
+window.installmentIsChargeOverdue = function(inst, targetIso) {
+  const dueIso = typeof window.installmentDueIsoDate === "function"
+    ? window.installmentDueIsoDate(inst)
+    : String((inst && (inst.dueDate || inst.due)) || "").slice(0, 10);
+  if (!dueIso) return false;
+  const target = String(targetIso || (typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : "")).slice(0, 10);
+  if (!target) return false;
+  const chargeIso = typeof window.installmentChargeDueIso === "function"
+    ? window.installmentChargeDueIso(dueIso)
+    : dueIso;
+  return !!(chargeIso && target > chargeIso);
 };
 
 window.computeLateCharges = function(baseVal, diasAtraso, taxaMultiplier) {
@@ -2274,6 +2330,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "marketing-budget": "Budget",
     suporte: "Suporte",
     auditoria: "Auditoria do Sistema",
+    "consumo-api": "Consumo de API",
     acessos: "Acessos"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
@@ -2317,6 +2374,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "marketing-budget": "wallet",
     suporte: "headphones",
     auditoria: "shield",
+    "consumo-api": "activity",
     acessos: "key-round"
   };
 
@@ -2453,6 +2511,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof ParticipacoesApp !== "undefined") ParticipacoesApp.init();
   } else if (tabId === "auditoria") {
     if (typeof window.renderAuditLogs === "function") window.renderAuditLogs(true);
+  } else if (tabId === "consumo-api") {
+    if (window.ConsumoApiApp && typeof ConsumoApiApp.init === "function") ConsumoApiApp.init();
   }
 }
 
@@ -3017,7 +3077,12 @@ window.showMockLoginModal = function(resolve, reject) {
       method: "Simulado"
     };
     
-    localStorage.setItem("crm_moura_user_session", JSON.stringify(user));
+    if (window.MouraAuth && typeof MouraAuth.persistSession === "function") {
+      MouraAuth.persistSession(user);
+    } else {
+      try { localStorage.setItem("crm_moura_user_session", JSON.stringify(user)); } catch (e) {}
+      try { sessionStorage.setItem("crm_moura_user_session", JSON.stringify(user)); } catch (e) {}
+    }
     resolve(user);
   };
 };
@@ -3064,10 +3129,21 @@ async function processSuccessfulLogin(loggedUser) {
     if (window.syncGlobalConfigFromFirebase) {
        await window.syncGlobalConfigFromFirebase();
     }
-    window._crmLoginSync = false;
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
-    window.updateOperatorTabsUI();
+    if (window.MouraAuth && typeof MouraAuth.persistSession === "function") {
+      MouraAuth.persistSession({
+        name: validatedUser.name || loggedUser.name,
+        email: validatedUser.email || loggedUser.email,
+        isAuthenticated: true,
+        method: validatedUser.method || loggedUser.method || "Azure AD"
+      });
+    }
+    try {
+      if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI();
+    } catch (e) {
+      console.warn("updateOperatorTabsUI no login:", e);
+    }
     
     // Determine admin/gestor status based on role OR profile_name
     const _isAdminOrGestor = window.isCrmAgendaSupervisor
@@ -3085,15 +3161,22 @@ async function processSuccessfulLogin(loggedUser) {
             : (validatedUser.name ? validatedUser.name.toUpperCase() : "TODOS");
         window.AgendaSelectedOperator = opName;
     }
-    if (typeof window.updateOperatorTabsUI === 'function') {
-        window.updateOperatorTabsUI();
+    try {
+      if (typeof window.updateOperatorTabsUI === 'function') window.updateOperatorTabsUI();
+    } catch (e) {
+      console.warn("updateOperatorTabsUI no login:", e);
     }
 
-    document.getElementById("login-modal-overlay").classList.remove("active");
+    const overlay = document.getElementById("login-modal-overlay");
+    if (overlay) overlay.classList.remove("active");
     const loginVideo = document.getElementById("login-bg-video");
     if (loginVideo) loginVideo.pause();
     renderUserSession();
-    await initializeApplication();
+    try {
+      await initializeApplication();
+    } catch (initErr) {
+      console.error("Erro ao inicializar o sistema após o login:", initErr);
+    }
     setTimeout(() => {
       if (typeof window.checkMonthlyBilletAlerts === "function") {
         window.checkMonthlyBilletAlerts();
@@ -3109,6 +3192,13 @@ async function processSuccessfulLogin(loggedUser) {
       }
     }, 2500);
   } catch (err) {
+    console.error("Erro no login:", err);
+    if (AppState.currentUser) {
+      const overlay = document.getElementById("login-modal-overlay");
+      if (overlay) overlay.classList.remove("active");
+      try { renderUserSession(); } catch (e) {}
+      return;
+    }
     const errorMsg = document.getElementById("login-error-msg");
     if (errorMsg) {
       errorMsg.textContent = err.message;
@@ -3116,14 +3206,15 @@ async function processSuccessfulLogin(loggedUser) {
     } else {
       alert(err.message);
     }
-    MouraAuth.logout();
   } finally {
     window._crmLoginSync = false;
   }
 }
 
 async function checkAuthentication() {
-  const user = MouraAuth.getCurrentUser();
+  const user = (window.MouraAuth && typeof MouraAuth.restoreSession === "function")
+    ? await MouraAuth.restoreSession()
+    : MouraAuth.getCurrentUser();
   if (!user) {
     const overlay = document.getElementById("login-modal-overlay");
     overlay.classList.add("active");
@@ -4757,7 +4848,9 @@ window.getFilaSortValue = function(client, sortCol) {
     }
     case 'lastPaymentDays': {
       let min = Infinity;
-      const paidMap = (window.advFiltersFila && window.advFiltersFila.paidMap) || (window.advFilters && window.advFilters.paidMap);
+      const paidMap = (typeof window.getRecentPaidMap === "function" && window.getRecentPaidMap())
+        || (window.advFiltersFila && window.advFiltersFila.paidMap)
+        || (window.advFilters && window.advFilters.paidMap);
       if (client.billIds && paidMap && typeof paidMap.has === 'function') {
         client.billIds.forEach(bid => {
           if (paidMap.has(String(bid))) {
@@ -6970,10 +7063,13 @@ document.addEventListener("click", function(e) {
         let ultimoPagamentoStr = `<span style="color: #94a3b8; font-size: 0.75rem;">-</span>`;
         
         let minDiff = Infinity;
-        if (client.billIds && window.advFilters && window.advFilters.paidMap) {
+        const paidMapNow = typeof window.getRecentPaidMap === "function"
+          ? window.getRecentPaidMap()
+          : (window.advFilters && window.advFilters.paidMap);
+        if (client.billIds && paidMapNow) {
             client.billIds.forEach(bid => {
-                if (window.advFilters.paidMap.has(String(bid))) {
-                    const d = window.advFilters.paidMap.get(String(bid));
+                if (paidMapNow.has(String(bid))) {
+                    const d = paidMapNow.get(String(bid));
                     if (d < minDiff) minDiff = d;
                 }
             });
@@ -7707,6 +7803,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // === BACKGROUND FETCH PARA FILA DE COBRANÇA ===
   setTimeout(async () => {
+    if (window._isDefaultersLoading || AppState.defaultersLoaded) return;
     if (!AppState.defaultersLoaded && getSiengeApiMode() === 'real') {
        try {
          if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
@@ -8907,7 +9004,36 @@ function formatCpfCnpj(val) {
       </div>
     `;
 
-    SiengeApiService.getCustomerAttachments(customerId).then(attRes => {
+    (async function loadFichaAnexos() {
+      let rows = [];
+      try {
+        const custAtt = await SiengeApiService.getCustomerAttachments(customerId);
+        rows = rows.concat((custAtt && custAtt.results) || []);
+      } catch (e) {}
+      try {
+        for (let i = 0; i < 20 && !AppState.currentContractNumber && !AppState.currentSalesContractId; i++) {
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        const titleId = String(AppState.currentReceivableBillId || AppState.selectedSaleId || saleId || '').replace(/^B-/i, '');
+        const contractNumber = String(AppState.currentContractNumber || '').trim();
+        let contract = null;
+        if (SiengeApiService.findSalesContract) {
+          contract = await SiengeApiService.findSalesContract({
+            customerId: customerId,
+            contractId: AppState.currentSalesContractId || '',
+            contractNumber: contractNumber && !/^\d{1,8}$/.test(contractNumber) ? contractNumber : '',
+            receivableBillId: titleId,
+            enterpriseId: AppState.currentCostCenterId || ''
+          });
+        }
+        if (contract && contract.id && SiengeApiService.getSalesContractAttachments) {
+          const cAtt = await SiengeApiService.getSalesContractAttachments(contract.id);
+          rows = rows.concat((cAtt && cAtt.results) || []);
+        }
+      } catch (e) {
+        console.warn('[Ficha] anexos do contrato', e);
+      }
+      const attRes = { results: rows };
        if (attRes && attRes.results && attRes.results.length > 0) {
          window.downloadSiengeDocument = async function(url, filename, event) {
            try {
@@ -8973,7 +9099,7 @@ function formatCpfCnpj(val) {
          detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Foi encontrado apenas o cadastro do cliente, porém sem anexos.</span>`;
          lucide.createIcons();
        }
-    }).catch(err => {
+    })().catch(err => {
          detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-danger); font-size: 0.9rem;">Erro ao carregar anexos da API Sienge.</span>`;
     });
   }
@@ -9067,6 +9193,8 @@ function formatCpfCnpj(val) {
   AppState.currentCostCenterId = empIdToUse !== "N/D" ? empIdToUse : null;
   AppState.currentCompanyId = sale.companyId || unit.companyId || null;
   AppState.currentReceivableBillId = specificTitulo || sale.receivableBillId || saleId || sale.id || null;
+  AppState.currentContractNumber = (contractNum && contractNum !== "N/D") ? contractNum : (sale.contractNumber || sale.number || null);
+  AppState.currentSalesContractId = sale.id && String(sale.id) !== String(AppState.currentReceivableBillId) ? sale.id : (sale.salesContractId || null);
 
   // In real mode, getCostCenter to get empreendimento name; in mock, use MOCK_DATA
   if (getSiengeApiMode() === "simulado") {
@@ -9578,7 +9706,9 @@ function formatCpfCnpj(val) {
           let hasDistratoReceipt = false;
           
           if (dbContract) {
-            const today = new Date().toISOString().split('T')[0];
+            const today = typeof window.todayIsoLocal === "function"
+              ? window.todayIsoLocal()
+              : new Date().toISOString().split('T')[0];
             
             if (dbContract.installments && Array.isArray(dbContract.installments)) {
                dbContract.installments.forEach(inst => {
@@ -9587,7 +9717,9 @@ function formatCpfCnpj(val) {
                  
                  // Vencidas / A Vencer (apenas se tiver saldo)
                  if (cb > 0) {
-                   if (inst.dueDate && inst.dueDate < today) {
+                   if (typeof window.installmentIsChargeOverdue === "function"
+                     ? window.installmentIsChargeOverdue(inst, today)
+                     : (inst.dueDate && String(inst.dueDate).slice(0, 10) < today)) {
                      valorVencidas += cb;
                      valorVencidasOriginal += (inst.originalValue || cb);
                      qtdVencidas++;
@@ -10466,15 +10598,21 @@ function formatCpfCnpj(val) {
     let maxDelayDays = 0;
     
     if (dbContract) {
-       const todayIso = new Date().toISOString().split('T')[0];
+       const todayIso = typeof window.todayIsoLocal === "function"
+         ? window.todayIsoLocal()
+         : new Date().toISOString().split('T')[0];
        if (dbContract.installments && Array.isArray(dbContract.installments)) {
           dbContract.installments.forEach(inst => {
              const cb = inst.currentBalance || 0;
              const ov = inst.originalValue || 0;
              kpiSomaOriginal += ov;
              if (cb > 0) {
-                if (inst.dueDate && inst.dueDate < todayIso) {
-                   const delay = Math.round((new Date(todayIso) - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24));
+                if (typeof window.installmentIsChargeOverdue === "function"
+                  ? window.installmentIsChargeOverdue(inst, todayIso)
+                  : (inst.dueDate && String(inst.dueDate).slice(0, 10) < todayIso)) {
+                   const delay = typeof window.daysOverdueUntilTarget === "function"
+                     ? window.daysOverdueUntilTarget(inst, todayIso)
+                     : Math.round((new Date(todayIso) - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24));
                    if (delay > maxDelayDays) maxDelayDays = delay;
                    
                    kpiVencidas += cb;
@@ -10934,7 +11072,9 @@ function formatCpfCnpj(val) {
          if (simTotalEl) simTotalEl.textContent = kpiFmt(0);
       } else {
          const hoje = new Date();
-         const hojeIso = hoje.toISOString().split('T')[0];
+         const hojeIso = typeof window.todayIsoLocal === "function"
+           ? window.todayIsoLocal()
+           : (hoje.getFullYear() + "-" + String(hoje.getMonth() + 1).padStart(2, "0") + "-" + String(hoje.getDate()).padStart(2, "0"));
          simInput.min = hojeIso;
          if (!simInput.value) simInput.value = hojeIso;
          
@@ -10952,7 +11092,9 @@ function formatCpfCnpj(val) {
                  ? window.installmentDueIsoDate(inst)
                  : String(inst.dueDate || "").slice(0, 10);
                if (isPaid || cb <= 0 || inst.installmentSituation !== 1 || !dueIso) return;
-               const overdue = dueIso < hojeIso;
+               const overdue = typeof window.installmentIsChargeOverdue === "function"
+                 ? window.installmentIsChargeOverdue(inst, hojeIso)
+                 : dueIso < hojeIso;
                const hasBoletoFlag = inst.generatedBillet === true || (recentFresh && recentIds.includes(String(inst.installmentId)));
                if (!overdue && !hasBoletoFlag) return;
                vencidasSimulador.push({
@@ -10991,11 +11133,9 @@ function formatCpfCnpj(val) {
                       const factorStr = clean.substring(33, 37);
                       const factor = parseInt(factorStr, 10);
                       if (!isNaN(factor) && factor >= 1000) {
-                        let totalDays = factor;
-                        if (factor < 5000 && new Date().getFullYear() >= 2025) {
-                           totalDays += 9000;
-                        }
-                        dtFebraban = new Date(new Date('1997-10-07T12:00:00Z').getTime() + (totalDays * 24 * 60 * 60 * 1000));
+                        dtFebraban = typeof window.decodeFebrabanDueFactor === "function"
+                          ? window.decodeFebrabanDueFactor(factor, simInst.due)
+                          : new Date(new Date('1997-10-07T12:00:00Z').getTime() + (factor * 24 * 60 * 60 * 1000));
                       }
                     }
                   }
@@ -11044,7 +11184,9 @@ function formatCpfCnpj(val) {
                   cb,
                   due: new Date(src.dueDate + "T12:00:00"),
                   selected: false,
-                  isOverdue: src.dueDate < hojeIso,
+                  isOverdue: typeof window.installmentIsChargeOverdue === "function"
+                    ? window.installmentIsChargeOverdue(src, hojeIso)
+                    : String(src.dueDate || "").slice(0, 10) < hojeIso,
                   generatedBillet: true,
                   isActiveBoleto: false,
                   isFetchingBoleto: true,
@@ -11149,7 +11291,16 @@ function formatCpfCnpj(val) {
                       const today0 = new Date(); today0.setHours(0,0,0,0);
                       const fb = inst.dtFebraban ? new Date(inst.dtFebraban) : null;
                       if (fb) fb.setHours(0,0,0,0);
-                      const diasBol = fb ? Math.floor((today0 - fb) / 86400000) : (diasAtraso > 0 ? diasAtraso : 0);
+                      let diasBol = diasAtraso > 0 ? diasAtraso : 0;
+                      if (fb) {
+                        const fbIso = fb.getFullYear() + "-" + String(fb.getMonth() + 1).padStart(2, "0") + "-" + String(fb.getDate()).padStart(2, "0");
+                        const chargeFb = typeof window.installmentChargeDueIso === "function"
+                          ? window.installmentChargeDueIso(fbIso)
+                          : fbIso;
+                        const chargeFbDate = new Date(chargeFb + "T12:00:00");
+                        chargeFbDate.setHours(0,0,0,0);
+                        diasBol = Math.floor((today0 - chargeFbDate) / 86400000);
+                      }
                       if (diasBol > 0) {
                         const diasVal = Math.max(0, 28 - diasBol);
                         statusHtml = `<span style="color:#856404;background:#fff3cd;border:1px solid #ffeeba;padding:2px 6px;border-radius:4px;font-size:0.7rem;white-space:nowrap;">Vencido (válido por ${diasVal}d)</span>`;
@@ -13341,14 +13492,17 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
     let isOverdue = false;
     
     if (b.dueDate) {
-       const due = new Date(b.dueDate + 'T12:00:00');
-       const diffTime = new Date() - due;
-       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+       const diffDays = typeof window.daysOverdueUntilTarget === "function"
+         ? window.daysOverdueUntilTarget(b, new Date())
+         : Math.floor((new Date() - new Date(b.dueDate + 'T12:00:00')) / (1000 * 60 * 60 * 24));
        
        if (diffDays > 0) {
          isOverdue = true;
-         multa = corrected * 0.02; // 2% multa fixa
-         juros = corrected * 0.01 * (diffDays / 30); // 1% a.m pro-rata
+         const ch = typeof window.computeLateCharges === "function"
+           ? window.computeLateCharges(corrected, diffDays, 1)
+           : { multa: corrected * 0.02, juros: corrected * 0.01 * (diffDays / 30) };
+         multa = ch.multa;
+         juros = ch.juros;
          corrected = corrected + multa + juros;
        }
     }
@@ -15147,6 +15301,9 @@ function flattenCustomerDebtBalance(res) {
 }
 
 function distPermutaIsOverdue(inst) {
+  if (typeof window.installmentIsChargeOverdue === "function") {
+    return window.installmentIsChargeOverdue(inst);
+  }
   const due = String(inst.dueDate || inst.due || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return false;
   const now = new Date();
@@ -15376,7 +15533,9 @@ function quitacaoBuildInstallmentLookups(list) {
 function quitacaoMapOverdueFromSimulador(inst, monthlyRate, lookups) {
   const due = String(inst.dueDate || inst.due || "").slice(0, 10);
   const today = quitacaoTodayIso();
-  const daysOverdue = Math.max(0, quitacaoDaysBetween(due, today) || 0);
+  const daysOverdue = typeof window.daysOverdueUntilTarget === "function"
+    ? window.daysOverdueUntilTarget(inst, today)
+    : Math.max(0, quitacaoDaysBetween(due, today) || 0);
   const original = Number(
     inst.originalValue != null ? inst.originalValue
       : (inst.value != null ? inst.value : inst.installmentValue)
@@ -18407,51 +18566,66 @@ window.addDaysIso = function(iso, days) {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-window.getBrazilianHolidayMap = function() {
-  return {
-    "2025-01-01": "Confraternização Universal",
-    "2025-03-03": "Carnaval",
-    "2025-03-04": "Carnaval",
-    "2025-04-18": "Paixão de Cristo",
-    "2025-04-21": "Tiradentes",
-    "2025-05-01": "Dia do Trabalho",
-    "2025-06-19": "Corpus Christi",
-    "2025-07-09": "Revolução Constitucionalista",
-    "2025-09-07": "Independência do Brasil",
-    "2025-10-12": "Nossa Sra. Aparecida",
-    "2025-11-02": "Finados",
-    "2025-11-15": "Proclamação da República",
-    "2025-11-20": "Consciência Negra",
-    "2025-12-25": "Natal",
-    "2026-01-01": "Confraternização Universal",
-    "2026-02-16": "Carnaval",
-    "2026-02-17": "Carnaval",
-    "2026-04-03": "Paixão de Cristo",
-    "2026-04-21": "Tiradentes",
-    "2026-05-01": "Dia do Trabalho",
-    "2026-06-04": "Corpus Christi",
-    "2026-07-09": "Revolução Constitucionalista",
-    "2026-09-07": "Independência do Brasil",
-    "2026-10-12": "Nossa Sra. Aparecida",
-    "2026-11-02": "Finados",
-    "2026-11-15": "Proclamação da República",
-    "2026-11-20": "Consciência Negra",
-    "2026-12-25": "Natal",
-    "2027-01-01": "Confraternização Universal",
-    "2027-02-08": "Carnaval",
-    "2027-02-09": "Carnaval",
-    "2027-03-26": "Paixão de Cristo",
-    "2027-04-21": "Tiradentes",
-    "2027-05-01": "Dia do Trabalho",
-    "2027-05-27": "Corpus Christi",
-    "2027-07-09": "Revolução Constitucionalista",
-    "2027-09-07": "Independência do Brasil",
-    "2027-10-12": "Nossa Sra. Aparecida",
-    "2027-11-02": "Finados",
-    "2027-11-15": "Proclamação da República",
-    "2027-11-20": "Consciência Negra",
-    "2027-12-25": "Natal"
+window._brHolidayYearCache = {};
+
+window.getBrazilianHolidaysForYear = function(year) {
+  const y = Number(year);
+  if (!y) return {};
+  if (window._brHolidayYearCache[y]) return window._brHolidayYearCache[y];
+  const pad = (n) => String(n).padStart(2, "0");
+  const ymd = (yy, m, d) => yy + "-" + pad(m) + "-" + pad(d);
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const easterMonth = Math.floor((h + l - 7 * m + 114) / 31);
+  const easterDay = ((h + l - 7 * m + 114) % 31) + 1;
+  const addEaster = (delta) => {
+    const dt = new Date(Date.UTC(y, easterMonth - 1, easterDay + delta));
+    return ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
   };
+  const map = {};
+  const add = (iso, name) => { map[iso] = name; };
+  add(ymd(y, 1, 1), "Confraternização Universal");
+  add(addEaster(-48), "Carnaval");
+  add(addEaster(-47), "Carnaval");
+  add(addEaster(-2), "Paixão de Cristo");
+  add(ymd(y, 4, 21), "Tiradentes");
+  add(ymd(y, 5, 1), "Dia do Trabalho");
+  add(addEaster(60), "Corpus Christi");
+  add(ymd(y, 7, 9), "Revolução Constitucionalista");
+  add(ymd(y, 9, 7), "Independência do Brasil");
+  add(ymd(y, 10, 12), "Nossa Sra. Aparecida");
+  add(ymd(y, 11, 2), "Finados");
+  add(ymd(y, 11, 15), "Proclamação da República");
+  add(ymd(y, 11, 20), "Consciência Negra");
+  add(ymd(y, 12, 25), "Natal");
+  window._brHolidayYearCache[y] = map;
+  return map;
+};
+
+window.getBrazilianHolidayMap = function() {
+  const y = new Date().getFullYear();
+  const map = {};
+  for (let i = y - 2; i <= y + 15; i++) {
+    Object.assign(map, window.getBrazilianHolidaysForYear(i));
+  }
+  return map;
+};
+
+window.isHolidayIso = function(iso) {
+  const key = String(iso || "").slice(0, 10);
+  const y = Number(key.slice(0, 4));
+  if (!y) return false;
+  return !!window.getBrazilianHolidaysForYear(y)[key];
 };
 
 window.isBusinessDayIso = function(iso) {
@@ -18461,8 +18635,45 @@ window.isBusinessDayIso = function(iso) {
   if (isNaN(d.getTime())) return false;
   const dow = d.getDay();
   if (dow === 0 || dow === 6) return false;
-  const holidays = window.getBrazilianHolidayMap();
-  return !holidays[key];
+  return !window.isHolidayIso(key);
+};
+
+/** Último dia em que o cliente pode pagar sem juros/multa (próximo dia útil se vencer em sáb/dom/feriado). */
+window.installmentChargeDueIso = function(dueIso) {
+  const due = String(dueIso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return due;
+  if (window.isBusinessDayIso(due)) return due;
+  let cursor = due;
+  let guard = 0;
+  while (cursor && !window.isBusinessDayIso(cursor) && guard < 16) {
+    cursor = window.addDaysIso(cursor, 1);
+    guard++;
+  }
+  return cursor || due;
+};
+
+window.decodeFebrabanDueFactor = function(factor, hintDate) {
+  const n = parseInt(factor, 10);
+  if (!Number.isFinite(n) || n < 1000) return null;
+  const base = new Date("1997-10-07T12:00:00Z").getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const candidates = [0, 9000, 18000].map((extra) => new Date(base + (n + extra) * dayMs));
+  const hint = hintDate instanceof Date && !isNaN(hintDate.getTime()) ? hintDate : null;
+  if (hint) {
+    let best = candidates[0];
+    let bestDiff = Math.abs(best.getTime() - hint.getTime());
+    candidates.forEach((c) => {
+      const diff = Math.abs(c.getTime() - hint.getTime());
+      if (diff < bestDiff) {
+        best = c;
+        bestDiff = diff;
+      }
+    });
+    return best;
+  }
+  const now = Date.now();
+  const futureOk = candidates.find((c) => c.getTime() >= now - 2 * dayMs);
+  return futureOk || candidates[candidates.length - 1];
 };
 
 /** Segunda a domingo da semana que contém iso; só dias úteis (sem FDS e sem feriados nacionais). */
@@ -18603,6 +18814,33 @@ window.isCheckPaymentOccurrence = function(occ) {
   return r === "checar pagamento" || r.indexOf("checar pagamento") !== -1;
 };
 
+window.shouldWaiveBoletoLateCharges = function(instIds, dueDateStr) {
+  const ids = (Array.isArray(instIds) ? instIds : [instIds]).map(String).filter(Boolean);
+  const insts = (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  let anyChargeable = false;
+  const graceLabels = [];
+  ids.forEach((id) => {
+    const inst = insts.find(i => String(i.installmentId) === String(id) || String(i.installmentNumber) === String(id));
+    if (!inst) return;
+    const dueIso = typeof window.installmentDueIsoDate === "function"
+      ? window.installmentDueIsoDate(inst)
+      : String(inst.dueDate || "").slice(0, 10);
+    const chargeIso = typeof window.installmentChargeDueIso === "function"
+      ? window.installmentChargeDueIso(dueIso)
+      : dueIso;
+    const days = typeof window.daysOverdueUntilTarget === "function"
+      ? window.daysOverdueUntilTarget(inst, dueDateStr)
+      : 0;
+    if (days > 0) anyChargeable = true;
+    if (dueIso && chargeIso && chargeIso !== dueIso) {
+      const dueBr = typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(dueIso) : dueIso;
+      const chargeBr = typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(chargeIso) : chargeIso;
+      graceLabels.push(dueBr + " → " + chargeBr);
+    }
+  });
+  return { waive: !anyChargeable, graceLabels };
+};
+
 window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultiplier) {
   const box = document.getElementById("reprocess-charges-summary");
   if (!box) return { multa: 0, juros: 0, principal: 0 };
@@ -18628,17 +18866,23 @@ window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultipl
     multa += ch.multa;
     juros += ch.juros;
   });
-  const finePct = 2 * taxa;
-  const interestPct = 1 * taxa;
+  const waiver = typeof window.shouldWaiveBoletoLateCharges === "function"
+    ? window.shouldWaiveBoletoLateCharges(ids, dueDateStr)
+    : { waive: (multa + juros) <= 0.009, graceLabels: [] };
+  const finePct = waiver.waive ? 0 : 2 * taxa;
+  const interestPct = waiver.waive ? 0 : 1 * taxa;
   const isento = !(finePct > 0 || interestPct > 0);
+  const graceHint = (waiver.graceLabels && waiver.graceLabels.length)
+    ? ` Vencimento em sábado, domingo ou feriado: o cliente pode pagar no próximo dia útil sem juros e multa (${waiver.graceLabels.join("; ")}).`
+    : "";
   if (isento) {
     box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;font-size:0.82rem;line-height:1.45;";
-    box.innerHTML = `<strong>Sem multa e sem juros neste boleto.</strong> A API do Sienge receberá multa <b>0%</b> e juros <b>0%</b>. Principal: ${money(principal)}.`;
+    box.innerHTML = `<strong>Sem multa e sem juros neste boleto.</strong> A API do Sienge receberá multa <b>0%</b> e juros <b>0%</b>. Principal: ${money(principal)}.${graceHint}`;
   } else {
     box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;font-size:0.82rem;line-height:1.45;";
-    box.innerHTML = `<strong>Este boleto será gerado COM acréscimos.</strong> A API do Sienge receberá multa <b>${finePct.toFixed(2)}%</b> e juros <b>${interestPct.toFixed(2)}% a.m.</b>${(multa + juros) > 0.009 ? ` · Estimativa: multa ${money(multa)} + juros ${money(juros)} · Total ${money(principal + multa + juros)}` : ""}.`;
+    box.innerHTML = `<strong>Este boleto será gerado COM acréscimos.</strong> A API do Sienge receberá multa <b>${finePct.toFixed(2)}%</b> e juros <b>${interestPct.toFixed(2)}% a.m.</b>${(multa + juros) > 0.009 ? ` · Estimativa: multa ${money(multa)} + juros ${money(juros)} · Total ${money(principal + multa + juros)}` : ""}.${graceHint}`;
   }
-  return { multa, juros, principal, finePct, interestPct };
+  return { multa, juros, principal, finePct, interestPct, waive: waiver.waive };
 };
 
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
@@ -18845,8 +19089,8 @@ window.submitReprocessBoleto = async function() {
   const pctNow = typeof window.syncReprocessChargePercents === "function"
     ? window.syncReprocessChargePercents()
     : window.resolveBoletoChargePercents();
-  const fine = Number(pctNow && pctNow.fine) || 0;
-  const interest = Number(pctNow && pctNow.interest) || 0;
+  let fine = Number(pctNow && pctNow.fine) || 0;
+  let interest = Number(pctNow && pctNow.interest) || 0;
 
   if (!account) {
     alert("Selecione uma conta corrente.");
@@ -18897,6 +19141,13 @@ window.submitReprocessBoleto = async function() {
     }
     currentReprocessInstId = resolvedInstIds;
     const installmentsArray = resolvedInstIds.map(id => ({ "installmentId": id }));
+    const waiver = typeof window.shouldWaiveBoletoLateCharges === "function"
+      ? window.shouldWaiveBoletoLateCharges(resolvedInstIds, dueDate)
+      : { waive: false };
+    if (waiver.waive) {
+      fine = 0;
+      interest = 0;
+    }
 
     const payload = {
       receivableBillId: Number(currentReprocessBillId),
@@ -29100,17 +29351,18 @@ async function loadCustomerBoletos(customerId, saleId) {
 
       if ((inst.generatedBillet === true || isRecentGen) && !isPaid) {
         count++;
-        const dueDateObj = inst.dueDate ? new Date(inst.dueDate + 'T12:00:00') : null;
-        const dueDateStr = dueDateObj ? dueDateObj.toLocaleDateString('pt-BR') : 'N/D';
+        const dueIsoInit = typeof window.installmentDueIsoDate === "function"
+          ? window.installmentDueIsoDate(inst)
+          : String(inst.dueDate || "").slice(0, 10);
+        const dueDateObj = dueIsoInit ? new Date(dueIsoInit + 'T12:00:00') : (inst.dueDate ? new Date(inst.dueDate + 'T12:00:00') : null);
+        const dueDateStr = dueDateObj && !isNaN(dueDateObj.getTime()) ? dueDateObj.toLocaleDateString('pt-BR') : 'N/D';
         
         let diasAtraso = 0;
         let isOverdue = false;
-        if (dueDateObj) {
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const dueAtMidnight = new Date(dueDateObj);
-            dueAtMidnight.setHours(0,0,0,0);
-            diasAtraso = Math.floor((today - dueAtMidnight) / (1000 * 60 * 60 * 24));
+        if (dueDateObj && !isNaN(dueDateObj.getTime())) {
+            diasAtraso = typeof window.daysOverdueUntilTarget === "function"
+              ? window.daysOverdueUntilTarget(inst, new Date())
+              : 0;
             isOverdue = diasAtraso > 0;
         }
 
@@ -29203,12 +29455,16 @@ async function loadCustomerBoletos(customerId, saleId) {
                if (clean.length >= 47) {
                   const factor = parseInt(clean.substring(33, 37), 10);
                   if (factor >= 1000) {
-                     let totalDays = factor;
-                     if (factor < 5000 && new Date().getFullYear() >= 2025) {
-                        totalDays += 9000; // Rollover 2025
+                     const hintIso = typeof window.installmentDueIsoDate === "function"
+                       ? window.installmentDueIsoDate(inst)
+                       : String(inst.dueDate || "").slice(0, 10);
+                     const hintDate = hintIso ? new Date(hintIso + "T12:00:00") : null;
+                     dtFebraban = typeof window.decodeFebrabanDueFactor === "function"
+                       ? window.decodeFebrabanDueFactor(factor, hintDate)
+                       : new Date(new Date('1997-10-07T12:00:00Z').getTime() + (factor * 24 * 60 * 60 * 1000));
+                     if (dtFebraban && !isNaN(dtFebraban.getTime())) {
+                       trueDateStr = dtFebraban.toLocaleDateString('pt-BR');
                      }
-                     dtFebraban = new Date(new Date('1997-10-07T12:00:00Z').getTime() + (totalDays * 24 * 60 * 60 * 1000));
-                     trueDateStr = dtFebraban.toLocaleDateString('pt-BR');
                   }
                   
                   const valueCents = parseInt(clean.substring(37, 47), 10);
@@ -29226,12 +29482,19 @@ async function loadCustomerBoletos(customerId, saleId) {
             if (tdDate) tdDate.textContent = trueDateStr;
 
             if (dtFebraban) {
-               // Recalcula o atraso baseado na data do boleto
+               // Recalcula o atraso baseado na data do boleto (com carência de dia útil)
                const today = new Date();
                today.setHours(0,0,0,0);
                dtFebraban.setHours(0,0,0,0);
-               const diasAtraso = Math.floor((today - dtFebraban) / (1000 * 60 * 60 * 24));
-               const isBaixado = diasAtraso > 28;
+               const fbIso = dtFebraban.getFullYear() + "-" + String(dtFebraban.getMonth() + 1).padStart(2, "0") + "-" + String(dtFebraban.getDate()).padStart(2, "0");
+               const chargeFb = typeof window.installmentChargeDueIso === "function"
+                 ? window.installmentChargeDueIso(fbIso)
+                 : fbIso;
+               const chargeDate = new Date(chargeFb + "T12:00:00");
+               chargeDate.setHours(0,0,0,0);
+               const diasDoSlip = Math.floor((today - dtFebraban) / (1000 * 60 * 60 * 24));
+               const diasAtraso = Math.floor((today - chargeDate) / (1000 * 60 * 60 * 24));
+               const isBaixado = diasDoSlip > 28;
                const isOverdue = diasAtraso > 0;
                
                const tdBadge = document.getElementById(`status-badge-${inst.installmentId}`);
@@ -31161,7 +31424,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
                     </th>
                     <th style="padding: 10px 5px; font-weight: 600; width: 20%;">
                         Pagou Quantas
-                        <span title="QUANTAS PARCELAS O CLIENTE PAGOU ATÉ O PRÓXIMO ACORDO" style="cursor: help; color: #fff; display: inline-block; text-align: center; margin-left: 4px; font-weight: bold; border-radius: 50%; background: #f39c12; width: 14px; height: 14px; line-height: 14px; font-size: 10px; font-family: sans-serif; vertical-align: middle;">?</span>
+                        <span title="RECEBIMENTOS DEPOIS DESTE ACORDO E ATÉ O PRÓXIMO. NÃO CONTA BAIXA NEM PARCELA FUTURA PAGA ANTES DO ACORDO." style="cursor: help; color: #fff; display: inline-block; text-align: center; margin-left: 4px; font-weight: bold; border-radius: 50%; background: #f39c12; width: 14px; height: 14px; line-height: 14px; font-size: 10px; font-family: sans-serif; vertical-align: middle;">?</span>
                     </th>
                 </tr>
             </thead>
@@ -31178,22 +31441,37 @@ async function loadRenegotiationHistory(customerId, saleId) {
             const cursorStyle = scrollId ? 'cursor: pointer;' : '';
             const hoverClass = scrollId ? 'class="resumo-row-hover"' : '';
 
-            // Calcular pagas até o próximo acordo
+            // Pagas deste acordo: recebimento real APÓS a data do acordo e antes do próximo.
+            // Antecipação de parcela futura (ex.: 2030 paga em 2023–2025) não conta no acordo de jul/2025.
             let endIndex = allInstallments.length;
             if (idx + 1 < gapEvents.length) {
                 endIndex = gapEvents[idx + 1].instIndex;
             }
+            const periodStartOf = (ev) => {
+                if (!ev) return null;
+                if (ev.matchedApi && ev.matchedApi.date && typeof window.parseSiengeDay === "function") {
+                    const apiD = window.parseSiengeDay(ev.matchedApi.date);
+                    if (apiD) return apiD;
+                }
+                const d = typeof window.parseSiengeDay === "function" ? window.parseSiengeDay(ev.date) : new Date(ev.date);
+                if (!d || isNaN(d.getTime())) return null;
+                return new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0);
+            };
+            const start = periodStartOf(e);
+            const end = (idx + 1 < gapEvents.length) ? periodStartOf(gapEvents[idx + 1]) : null;
             let paidCount = 0;
             if (e.instIndex !== undefined) {
                 for (let j = e.instIndex; j < endIndex; j++) {
                     const inst = allInstallments[j];
-                    const hasRecebimento = inst.receipts && inst.receipts.some(r => {
-                        const rt = String(r.receiptType || r.type || "").toLowerCase();
-                        const val = parseFloat(r.receiptValue || r.amount || r.value || 0);
-                        const rd = r.receiptDate || r.date;
-                        return rt === 'recebimento' && val > 0;
+                    const recDates = typeof window.installmentRecebimentoDates === "function"
+                      ? window.installmentRecebimentoDates(inst)
+                      : [];
+                    const paidInPeriod = recDates.some((rd) => {
+                        if (start && rd < start) return false;
+                        if (end && rd >= end) return false;
+                        return true;
                     });
-                    if (hasRecebimento) paidCount++;
+                    if (paidInPeriod) paidCount++;
                 }
             }
 
@@ -31505,6 +31783,122 @@ async function loadRenegotiationHistory(customerId, saleId) {
 // ----------------------------------------------------------------------
 // Aba: Vizinhos Confrontantes
 // ----------------------------------------------------------------------
+window.normKmzLotKey = function(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+};
+
+window.parseKmzCoordPoints = function(raw) {
+  if (!raw) return [];
+  if (typeof raw === "object" && raw.lat != null && (raw.lng != null || raw.lon != null)) {
+    const lat = Number(raw.lat);
+    const lng = Number(raw.lng != null ? raw.lng : raw.lon);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? [{ lat, lng }] : [];
+  }
+  let str = String(raw).trim();
+  if (str.startsWith("[") || str.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed) && parsed.length) {
+        if (typeof parsed[0] === "number") {
+          return Number.isFinite(parsed[0]) && Number.isFinite(parsed[1]) ? [{ lng: Number(parsed[0]), lat: Number(parsed[1]) }] : [];
+        }
+        return parsed.map((p) => {
+          if (Array.isArray(p)) return { lng: Number(p[0]), lat: Number(p[1]) };
+          return { lng: Number(p.lng != null ? p.lng : p.lon), lat: Number(p.lat) };
+        }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      }
+    } catch (e) {}
+  }
+  const points = [];
+  String(str).split(/[\s\n]+/).forEach((tok) => {
+    const p = tok.split(",");
+    const lng = parseFloat(p[0]);
+    const lat = parseFloat(p[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) points.push({ lat, lng });
+  });
+  return points;
+};
+
+window.kmzCentroid = function(points) {
+  if (!points || !points.length) return null;
+  const lat = points.reduce((a, p) => a + p.lat, 0) / points.length;
+  const lng = points.reduce((a, p) => a + p.lng, 0) / points.length;
+  return { lat, lng };
+};
+
+window.haversineMeters = function(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const deg2rad = (deg) => deg * (Math.PI / 180);
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+window.minKmzDistanceMeters = function(ptsA, ptsB) {
+  if (!ptsA || !ptsA.length || !ptsB || !ptsB.length) return Infinity;
+  let min = Infinity;
+  for (const a of ptsA) {
+    for (const b of ptsB) {
+      const d = window.haversineMeters(a.lat, a.lng, b.lat, b.lng);
+      if (d < min) min = d;
+    }
+  }
+  return min;
+};
+
+window.kmzLotMatches = function(placemarkName, unitName, empId) {
+  const ln = window.normKmzLotKey(placemarkName);
+  const un = window.normKmzLotKey(unitName);
+  const emp = window.normKmzLotKey(empId);
+  if (!ln || !un) return false;
+  if (ln === un) return true;
+  const lnNoEmp = emp && ln.startsWith(emp) ? ln.slice(emp.length) : ln;
+  const unNoEmp = emp && un.startsWith(emp) ? un.slice(emp.length) : un;
+  if (lnNoEmp && unNoEmp && lnNoEmp === unNoEmp) return true;
+  if (emp && (ln === emp + un || un === emp + ln || ln === emp + unNoEmp)) return true;
+  if (unNoEmp && (ln.endsWith(unNoEmp) || lnNoEmp.endsWith(unNoEmp))) return true;
+  return false;
+};
+
+window.loadKmzPlacemarks = async function(empId) {
+  const id = String(empId || "").trim();
+  if (!id || id === "N/D") return [];
+  const normalize = (list) => (Array.isArray(list) ? list : []).map((p) => ({
+    lot_name: String((p && (p.lot_name || p.name || p.lotName)) || "").trim(),
+    coordinates: (p && (p.coordinates || p.coords || p.coord)) || ""
+  })).filter((p) => p.lot_name && p.coordinates);
+
+  try {
+    if (window.firebaseDb && window.firebaseCollections) {
+      const { doc, getDoc } = window.firebaseCollections;
+      const snap = await getDoc(doc(window.firebaseDb, "kmz_coordinates", id));
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        const marks = normalize(data.placemarks || data.points || []);
+        if (marks.length) return marks;
+      }
+    }
+  } catch (e) {
+    console.warn("[KMZ] Firebase:", e);
+  }
+
+  try {
+    const res = await fetch("/api/kmz-coords/" + encodeURIComponent(id));
+    if (res.ok) {
+      const json = await res.json();
+      const marks = normalize(Array.isArray(json) ? json : (json.placemarks || json.results || []));
+      if (marks.length) return marks;
+    }
+  } catch (e) {}
+  return [];
+};
+
 window.renderVizinhosTab = async function() {
   const contentEl = document.getElementById("vizinhos-content");
   if (!contentEl) return;
@@ -31517,7 +31911,7 @@ window.renderVizinhosTab = async function() {
   `;
   
   try {
-    const saleId = sessionStorage.getItem('currentSaleId');
+    const saleId = sessionStorage.getItem('currentSaleId') || (typeof AppState !== "undefined" && AppState.selectedSaleId);
     if (!saleId) throw new Error("Venda atual não encontrada.");
     
     let sales = AppState.sales || [];
@@ -31529,29 +31923,33 @@ window.renderVizinhosTab = async function() {
       unitState = await SiengeApiService.getUnit(sale.unitId);
     }
     if (!unitState || !unitState.id) throw new Error("Unidade não localizada.");
-    
-    const blockStr = String(unitState.block || "").trim();
-    const lotStr = String(unitState.lot || "").trim();
-    let enterpriseId = String(unitState.costCenterId || "").trim();
-    if (!enterpriseId || enterpriseId === "N/D") {
-      enterpriseId = String(sale.enterpriseId || sale.companyId || AppState.selectedEnterpriseId || "10100").trim();
+
+    const contractObj = { ...(sale || {}), ...(unitState || {}) };
+    let enterpriseId = "";
+    let unitName = "";
+    if (window.ConstrucaoApp) {
+      if (typeof ConstrucaoApp.extractCostCenterId === "function") enterpriseId = ConstrucaoApp.extractCostCenterId(contractObj);
+      if (typeof ConstrucaoApp.extractUnitName === "function") unitName = ConstrucaoApp.extractUnitName(contractObj);
     }
-    
-    // 1. O nome real da unidade (ex: "10100 - 05-16") pode ser extraído diretamente de sale.unitId (ex: "U-10100-05-16") ou sale.units
-    const unitParts = String(sale.unitId || "").split("-");
-    const unitName = unitParts.slice(2).join("-") || sale.units || "N/D";
-    let realName = enterpriseId !== "N/D" && enterpriseId !== "" ? `${enterpriseId} - ${unitName}` : unitName;
-    
-    console.log("DEBUG VIZINHOS [Lote Atual]:", { blockStr, lotStr, enterpriseId, realName });
-    
-    const kmzRes = await fetch(`/api/kmz-coords/${enterpriseId}`);
-    let allPoints = [];
-    if (kmzRes.ok) {
-      allPoints = await kmzRes.json();
+    if (!enterpriseId) {
+      const parts = String(sale.unitId || "").split("-");
+      if (parts[0] === "U" && parts[1]) enterpriseId = parts[1];
+      else if (/^\d{4,5}$/.test(parts[0])) enterpriseId = parts[0];
     }
+    if (!enterpriseId) enterpriseId = String(unitState.costCenterId || sale.enterpriseId || AppState.currentCostCenterId || "").trim();
+    if (!unitName) {
+      const parts = String(sale.unitId || "").split("-");
+      unitName = (parts[0] === "U" ? parts.slice(2).join("-") : parts.slice(1).join("-")) || sale.units || sale.unitName || "";
+    }
+    if (!unitName && unitState.block && unitState.lot) unitName = String(unitState.block) + "-" + String(unitState.lot);
+
+    const realName = enterpriseId && unitName ? (enterpriseId + " - " + unitName) : (unitName || "N/D");
+    const VIZINHOS_RAIO_M = 30;
+    
+    const allPoints = await window.loadKmzPlacemarks(enterpriseId);
     
     if (!allPoints || allPoints.length === 0) {
-      contentEl.innerHTML = `<div style="padding: 20px; color: #666; text-align: center;">Nenhum arquivo KMZ cadastrado para buscar vizinhos por proximidade.</div>`;
+      contentEl.innerHTML = `<div style="padding: 20px; color: #666; text-align: center;">Nenhum arquivo KMZ cadastrado para o empreendimento ${enterpriseId || "N/D"}. Faça o upload em Upload de KMZ para buscar vizinhos por proximidade.</div>`;
       return;
     }
     
@@ -31564,66 +31962,44 @@ window.renderVizinhosTab = async function() {
       }
     } catch(e) {}
     
-    // Encontrar o ponto principal
-    console.log("DEBUG KMZ [Vizinhos]:", { realName, pointsCount: allPoints.length });
-    const bfn = realName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const centerPoint = allPoints.find(p => {
-      if (!p.lot_name) return false;
-      const ln = p.lot_name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      return ln === bfn || ln.endsWith(bfn) || ln.includes(bfn) || bfn.includes(ln);
-    });
+    const centerPoint = allPoints.find((p) => window.kmzLotMatches(p.lot_name, unitName, enterpriseId) || window.kmzLotMatches(p.lot_name, realName, enterpriseId));
     
     if (!centerPoint) {
       contentEl.innerHTML = `<div style="padding: 20px; color: #c62828; text-align: center;">
-        Lote atual não encontrado no arquivo KMZ.<br><br>
-        <div style="font-size: 11px; color: #666; text-align: left; background: #f5f5f5; padding: 10px; border-radius: 4px;">
-          <b>DEBUG INFO:</b><br>
-          realName: "${realName}"<br>
-          bfn: "${bfn}"<br>
-          allPoints len: ${allPoints.length}<br>
-          allPoints[0] lot_name: "${allPoints[0]?.lot_name}"<br>
-          allPoints[0] bfn: "${allPoints[0]?.lot_name?.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}"
-        </div>
+        Lote <strong>${realName}</strong> não encontrado no KMZ do empreendimento ${enterpriseId}.
       </div>`;
       return;
     }
-    
-    const parseCoord = (cStr) => {
-       const pts = cStr.split(',');
-       return { lng: parseFloat(pts[0]), lat: parseFloat(pts[1]) };
-    };
-    
-    const deg2rad = (deg) => deg * (Math.PI/180);
-    
-    const getDistance = (lat1, lon1, lat2, lon2) => {
-      const R = 6371000;
-      const dLat = deg2rad(lat2-lat1);
-      const dLon = deg2rad(lon2-lon1);
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    };
-    
-    const center = parseCoord(centerPoint.coordinates);
-    let neighborNumbers = [];
-    
-    // Procurar pontos num raio de 40 metros
+
+    const centerPts = window.parseKmzCoordPoints(centerPoint.coordinates);
+    const center = window.kmzCentroid(centerPts);
+    if (!center) {
+      contentEl.innerHTML = `<div style="padding: 20px; color: #c62828; text-align: center;">O ponto KMZ do lote ${realName} não tem coordenada válida.</div>`;
+      return;
+    }
+
+    const neighbors = [];
     for (const pt of allPoints) {
-      if (pt.lot_name === realName) continue;
-      const target = parseCoord(pt.coordinates);
-      const dist = getDistance(center.lat, center.lng, target.lat, target.lng);
-      if (dist <= 40) {
-        neighborNumbers.push(pt.lot_name);
+      if (window.kmzLotMatches(pt.lot_name, unitName, enterpriseId) || window.kmzLotMatches(pt.lot_name, realName, enterpriseId)) continue;
+      const targetPts = window.parseKmzCoordPoints(pt.coordinates);
+      if (!targetPts.length) continue;
+      const targetCenter = window.kmzCentroid(targetPts);
+      const distPts = window.minKmzDistanceMeters(centerPts, targetPts);
+      const distCenters = targetCenter ? window.haversineMeters(center.lat, center.lng, targetCenter.lat, targetCenter.lng) : Infinity;
+      const dist = Math.min(distPts, distCenters);
+      if (dist <= VIZINHOS_RAIO_M) {
+        neighbors.push({ lot_name: pt.lot_name, dist });
       }
     }
-    
-    // Remove duplicatas
-    neighborNumbers = [...new Set(neighborNumbers)];
+    neighbors.sort((a, b) => a.dist - b.dist);
+    const neighborNumbers = [...new Set(neighbors.map((n) => n.lot_name))];
+    const distByLot = {};
+    neighbors.forEach((n) => {
+      if (distByLot[n.lot_name] == null || n.dist < distByLot[n.lot_name]) distByLot[n.lot_name] = n.dist;
+    });
     
     if (neighborNumbers.length === 0) {
-      contentEl.innerHTML = `<div style="padding: 20px; color: #666; text-align: center;">Nenhum vizinho encontrado num raio de 40 metros no KMZ.</div>`;
+      contentEl.innerHTML = `<div style="padding: 20px; color: #666; text-align: center;">Nenhum vizinho encontrado num raio de ${VIZINHOS_RAIO_M} metros a partir do ponto KMZ de ${realName}.</div>`;
       return;
     }
     
@@ -31640,10 +32016,14 @@ window.renderVizinhosTab = async function() {
       if (neighborFullName.includes(" - ")) {
         neighborNameForSearch = neighborFullName.split(" - ").slice(1).join(" - ").trim();
       }
+      const empPrefix = String(enterpriseId || "");
+      if (empPrefix && neighborNameForSearch.toUpperCase().startsWith(empPrefix)) {
+        neighborNameForSearch = neighborNameForSearch.slice(empPrefix.length).replace(/^[\s\-]+/, "");
+      }
       
-      console.log(`DEBUG VIZINHOS [Buscando Vizinho ${neighborFullName} como ${neighborNameForSearch}]:`);
       let vData = { 
         lotNumber: neighborFullName, 
+        dist: distByLot[neighborFullName],
         status: "Não encontrado", 
         customerName: "-", 
         customerPhone: "-", 
@@ -31653,16 +32033,20 @@ window.renderVizinhosTab = async function() {
         saleId: null,
         contractNumber: "-"
       };
-      
-      let neighborUnit = await SiengeApiService.findUnitByName(enterpriseId, neighborNameForSearch);
-      
-      // Fallback: tentar remover os zeros à esquerda da numeração do lote (ex: 05-09 -> 05-9)
-      if (!neighborUnit && neighborNameForSearch.includes("-0")) {
-        const fallbackName = neighborNameForSearch.replace(/-0+/g, '-');
-        neighborUnit = await SiengeApiService.findUnitByName(enterpriseId, fallbackName);
+
+      const nameVariants = [...new Set([
+        neighborNameForSearch,
+        neighborNameForSearch.replace(/\s+/g, "-"),
+        neighborNameForSearch.replace(/-/g, " "),
+        neighborNameForSearch.replace(/-0+/g, "-"),
+        unitName && window.kmzLotMatches(neighborFullName, unitName, enterpriseId) ? unitName : ""
+      ].filter(Boolean))];
+
+      let neighborUnit = null;
+      for (const nameTry of nameVariants) {
+        neighborUnit = await SiengeApiService.findUnitByName(enterpriseId, nameTry);
+        if (neighborUnit) break;
       }
-      
-      console.log(`DEBUG VIZINHOS [Vizinho ${neighborFullName} Result]:`, neighborUnit);
       
       if (neighborUnit) {
         vData.status = neighborUnit.contractId ? "Vendido" : "Disponível";
@@ -31742,11 +32126,15 @@ window.renderVizinhosTab = async function() {
       `;
     }
     
+    html += `<div style="margin-bottom: 10px; font-size: 0.85rem; color: #64748b;">
+      Raio de ${VIZINHOS_RAIO_M} m a partir do ponto KMZ de <strong>${realName}</strong> · ${neighborNumbers.length} lote(s)
+    </div>`;
     html += `<div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
       <table class="crm-table" style="width: 100%; margin: 0; border: none;">
       <thead>
         <tr style="background-color: var(--color-primary); color: white;">
           <th style="padding: 12px 15px; font-weight: 600;">Lote</th>
+          <th style="padding: 12px 15px; font-weight: 600;">Distância</th>
           <th style="padding: 12px 15px; font-weight: 600;">Status</th>
           <th style="padding: 12px 15px; font-weight: 600;">Proprietário</th>
           <th style="padding: 12px 15px; font-weight: 600;">Telefone</th>
@@ -31774,8 +32162,10 @@ window.renderVizinhosTab = async function() {
         actionBtn = `<button class="btn btn-outline btn-sm" style="padding: 4px 10px; font-size: 0.75rem; border-color: var(--color-primary); color: var(--color-primary);" onclick="window.viewCustomerCard(${v.customerId}, ${v.saleId})"><i data-lucide="external-link" style="width: 14px; margin-right: 4px;"></i> Ver Contrato</button>`;
       }
       
+      const distLabel = (v.dist != null && Number.isFinite(v.dist)) ? (Math.round(v.dist) + " m") : "-";
       html += `<tr style="${rowBg}">
         <td style="font-weight: 600; padding: 12px 15px; border-bottom: 1px solid #eee;">${v.lotNumber}</td>
+        <td style="padding: 12px 15px; border-bottom: 1px solid #eee; color: #475569; white-space: nowrap;">${distLabel}</td>
         <td style="padding: 12px 15px; border-bottom: 1px solid #eee;"><span style="background: ${badgeColor}; color: ${textColor}; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: 500;">${v.status}</span></td>
         <td style="padding: 12px 15px; border-bottom: 1px solid #eee; color: #333;">${ownerHtml}</td>
         <td style="padding: 12px 15px; border-bottom: 1px solid #eee; color: #555;">${v.customerPhone}</td>
@@ -34217,8 +34607,7 @@ window.repeatJudicialOcc = function(index) {
   }
 };
 
-window.openAnexosClienteModal = function(customerId) {
-  // Limpar a aba comercial de anexos para evitar conflito de IDs
+window.openAnexosClienteModal = async function(customerId) {
   const otherRoot = document.getElementById('anexos-root');
   if (otherRoot) otherRoot.innerHTML = '';
 
@@ -34228,157 +34617,160 @@ window.openAnexosClienteModal = function(customerId) {
       modal.classList.add('active');
   }
   
-  if (typeof AnexosApp !== 'undefined') {
-    window.anexosTargetId = 'anexos-cliente-root';
-    AnexosApp.resetAndRender();
-    
-    AnexosState.contexto = 'Cliente';
-    AnexosState.idCliente = customerId;
-    
-    // Buscar costCenterId e saleId
-    let costCenterId = null;
-    let saleId = null;
+  if (typeof AnexosApp === 'undefined') {
+     alert('Módulo de anexos não está carregado.');
+     return;
+  }
 
-    if (typeof AppState !== 'undefined') {
-        saleId = AppState.selectedSaleId;
-        if (!saleId && AppState.sales && AppState.sales.length > 0) {
-            saleId = AppState.sales[0].id;
-        }
-        
-        if (saleId && AppState.sales) {
-            const sale = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
-            if (sale) {
-                costCenterId = sale.enterpriseId || sale.costCenterId;
-                saleId = sale.id; // ensure we use the actual sales-contract ID
-            }
-        }
+  window.anexosTargetId = 'anexos-cliente-root';
+  AnexosApp.resetAndRender();
+  AnexosState.contexto = 'Cliente';
+  AnexosState.idCliente = customerId;
+  AnexosState.loadingUnidadeAnexos = true;
 
-        if (!costCenterId) {
-            let clientMatch = null;
-            if (AppState.dashboardList) clientMatch = AppState.dashboardList.find(c => String(c.customerId) === String(customerId));
-            if (!clientMatch && AppState.subjudiceList) clientMatch = AppState.subjudiceList.find(c => String(c.customerId) === String(customerId));
-            if (!clientMatch && AppState.customers) clientMatch = AppState.customers.find(c => String(c.id) === String(customerId));
-            if (clientMatch) costCenterId = clientMatch.costCenterId;
-        }
+  let costCenterId = null;
+  let saleHint = null;
+  if (typeof AppState !== 'undefined') {
+      const titleId = String(AppState.selectedSaleId || AppState.selectedTitulo || AppState.currentReceivableBillId || '').replace(/^B-/i, '');
+      const sales = AppState.sales || [];
+      saleHint = sales.find((s) =>
+        String(s.id) === titleId
+        || String(s.receivableBillId) === titleId
+        || String(s.contractNumber || s.number || '') === String(AppState.currentContractNumber || '')
+      ) || null;
+      if (saleHint) costCenterId = saleHint.enterpriseId || saleHint.costCenterId;
+      if (!costCenterId) {
+          let clientMatch = null;
+          if (AppState.dashboardList) clientMatch = AppState.dashboardList.find(c => String(c.customerId) === String(customerId));
+          if (!clientMatch && AppState.subjudiceList) clientMatch = AppState.subjudiceList.find(c => String(c.customerId) === String(customerId));
+          if (!clientMatch && AppState.customers) {
+            clientMatch = Array.isArray(AppState.customers)
+              ? AppState.customers.find(c => String(c.id) === String(customerId))
+              : (AppState.customers[customerId] || AppState.customers[String(customerId)]);
+          }
+          if (clientMatch) costCenterId = clientMatch.costCenterId || clientMatch.enterpriseId;
+      }
+      if (!costCenterId) costCenterId = AppState.currentCostCenterId || saleHint && saleHint.enterpriseId;
+  }
+
+  if (costCenterId) {
+      AnexosState.contexto = 'Ambos';
+      AnexosState.cc = costCenterId;
+      AnexosState.ccName = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(costCenterId) : costCenterId;
+  }
+  renderAnexosModule();
+
+  try {
+    const titleId = String(
+      (AppState && (AppState.currentReceivableBillId || AppState.selectedSaleId || AppState.selectedTitulo)) || ''
+    ).replace(/^B-/i, '');
+    const rawContractText = String(
+      (AppState && AppState.currentContractNumber)
+      || (saleHint && (saleHint.contractNumber || saleHint.number))
+      || (document.getElementById('det-contract-num') && document.getElementById('det-contract-num').textContent)
+      || ''
+    ).replace(/\s+/g, '').trim();
+    const contractNumberMatch = rawContractText.match(/[A-Z]{2,}[A-Z0-9.\-]{6,}/i);
+    const contractNumber = (contractNumberMatch ? contractNumberMatch[0] : rawContractText).replace(/^CT[\.\-]*/i, '');
+
+    let mainC = null;
+    if (window.SiengeApiService && typeof SiengeApiService.findSalesContract === 'function') {
+      mainC = await SiengeApiService.findSalesContract({
+        customerId: customerId,
+        contractId: (saleHint && saleHint.id && String(saleHint.id) !== titleId) ? saleHint.id : ((AppState && AppState.currentSalesContractId) || ''),
+        contractNumber: contractNumber && !/^\d{1,8}$/.test(contractNumber) ? contractNumber : '',
+        receivableBillId: titleId,
+        enterpriseId: costCenterId || (AppState && AppState.currentCostCenterId) || '',
+        unitName: (document.getElementById('det-block-lot') && document.getElementById('det-block-lot').textContent) || ''
+      });
+    }
+    if (!mainC && window.SiengeApiService && typeof SiengeApiService.getSales === 'function') {
+      const list = await SiengeApiService.getSales(customerId);
+      const hit = (list || []).find((s) =>
+        String(s.receivableBillId) === titleId
+        || String(s.contractNumber || '').toUpperCase() === contractNumber.toUpperCase()
+        || String(s.id) === titleId
+      ) || (list && list[0]);
+      if (hit && hit.id && SiengeApiService.getContractRaw) {
+        mainC = await SiengeApiService.getContractRaw(hit.id);
+      }
     }
 
-    if (costCenterId) {
-        AnexosState.contexto = 'Ambos';
-        AnexosState.cc = costCenterId;
-        AnexosState.ccName = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(costCenterId) : costCenterId;
+    if (!mainC || !mainC.id) {
+      AnexosState.loadingUnidadeAnexos = false;
+      renderAnexosModule();
+      return;
     }
 
+    const mainCust = (mainC.salesContractCustomers || []).find((cust) => cust.main === true)
+      || (mainC.salesContractCustomers || [])[0]
+      || {};
+    let fmtDate = '';
+    if (mainC.contractDate || mainC.saleDate) {
+      const rawD = mainC.contractDate || mainC.saleDate;
+      const parts = String(rawD).split('-');
+      fmtDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : rawD;
+    }
+
+    AnexosState.activeContract = {
+      id: mainC.id,
+      contractNumber: mainC.contractNumber || mainC.number || mainC.id,
+      customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
+      contractDate: fmtDate,
+      customerId: mainCust.customerId || mainCust.id || customerId,
+      customers: mainC.salesContractCustomers || [],
+      receivableBillId: mainC.receivableBillId || titleId,
+      enterpriseId: mainC.enterpriseId || costCenterId
+    };
+
+    if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
+      SiengeApiService.getCustomerDetails(customerId).then((res) => {
+        const cm = { id: customerId, ...res };
+        if (AnexosApp.handleClientMatch) AnexosApp.handleClientMatch(cm);
+      }).catch(() => {});
+    }
+
+    let localFiles = null;
+    try {
+      if (typeof AnexosDB !== 'undefined') localFiles = await AnexosDB.load(customerId);
+    } catch (e) {}
+
+    const [attPack, custPack] = await Promise.all([
+      SiengeApiService.getSalesContractAttachments(mainC.id),
+      SiengeApiService.getCustomerAttachments(customerId)
+    ]);
+    let allAttachments = ((attPack && attPack.results) || []).map((a) => ({
+      ...a, _sourceContractId: mainC.id
+    }));
+    const custRows = (custPack && custPack.results) || [];
+    if (custRows.length) {
+      allAttachments = allAttachments.concat(custRows.map((a) => ({
+        ...a, isCustomerAttachment: true, customerId: customerId
+      })));
+    }
+
+    AnexosState.contractAttachments = typeof anexosDedupeAttachments === 'function'
+      ? anexosDedupeAttachments(allAttachments)
+      : allAttachments;
+    AnexosState.loadingUnidadeAnexos = false;
     renderAnexosModule();
 
-    if (saleId) {
-        const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-        const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-        
-        // Buscar o contrato de venda diretamente pelo ID e não pela unidade
-        fetch(`http://${host}:${port}/sienge-proxy/sales-contracts/${saleId}`, {
-            headers: { 'Authorization': typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '' }
-        }).then(res => res.json()).then(async (mainC) => {
-            if (!mainC || mainC.status === 'CANCELED' || !mainC.id) return;
-            
-            const mainCust = mainC.salesContractCustomers?.find(cust => cust.main === true) || mainC.salesContractCustomers?.[0] || {};
-            let fmtDate = '';
-            if (mainC.contractDate || mainC.saleDate) {
-                const rawD = mainC.contractDate || mainC.saleDate;
-                const parts = rawD.split('-');
-                if (parts.length === 3) fmtDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-                else fmtDate = rawD;
-            }
-
-            AnexosState.activeContract = {
-                id: mainC.id,
-                contractNumber: mainC.contractNumber || mainC.number || mainC.id,
-                customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
-                contractDate: fmtDate,
-                customerId: mainCust.customerId || mainCust.id,
-                customers: mainC.salesContractCustomers || []
-            };
-
-            // Disparar o handleClientMatch nativo do App se disponível, para popular demais informações
-            if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
-                SiengeApiService.getCustomerDetails(customerId).then(res => {
-                    const cm = { id: customerId, ...res };
-                    if (AnexosApp.handleClientMatch) AnexosApp.handleClientMatch(cm);
-                }).catch(() => {});
-            }
-
-            // Tentar carregar anexos locais do IndexedDB primeiro
-            let localFiles = null;
-            try {
-                if (typeof AnexosDB !== 'undefined') {
-                    localFiles = await AnexosDB.load(customerId);
-                }
-            } catch (e) {
-                console.error("Erro ao ler do IndexedDB", e);
-            }
-
-            // Buscar anexos do contrato encontrado
-            const attRes = await fetch(`http://${host}:${port}/sienge-proxy/sales-contracts/${mainC.id}/attachments`, {
-                headers: { 'Authorization': typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '' }
-            }).catch(() => null);
-            
-            // Buscar anexos do cliente
-            const custAttRes = await fetch(`http://${host}:${port}/sienge-proxy/customers/${customerId}/attachments`, {
-                headers: { 'Authorization': typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '' }
-            }).catch(() => null);
-            
-            let allAttachments = [];
-            
-            if (attRes && attRes.ok) {
-                const attData = await attRes.json();
-                allAttachments = allAttachments.concat(attData.results || []);
-            }
-            
-            if (custAttRes && custAttRes.ok) {
-                const custAttData = await custAttRes.json();
-                if (custAttData.results && custAttData.results.length > 0) {
-                    const custResults = custAttData.results.map(a => ({...a, isCustomerAttachment: true, customerId: customerId}));
-                    allAttachments = allAttachments.concat(custResults);
-                }
-            }
-            
-            if (allAttachments.length > 0 || (attRes && attRes.ok)) {
-                AnexosState.contractAttachments = allAttachments;
-                renderAnexosModule();
-                
-                if (localFiles && localFiles.length > 0) {
-                    // Já existem arquivos salvos localmente (tagueados)
-                    // Necessário regerar o previewUrl pois a URL de blob morre com a sessão
-                    localFiles.forEach(f => {
-                        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
-                            try { f.previewUrl = URL.createObjectURL(f.file); } catch(e) {}
-                        }
-                    });
-                    
-                    AnexosState.files = localFiles;
-                    AnexosState.importedContracts.add(mainC.id);
-                    if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
-                } else if (AnexosState.contractAttachments.length > 0) {
-                    // NÃO auto-importa: download em massa + PDF.js congelava a aba.
-                    // Usuário clica em “Baixar N Anexos” quando quiser.
-                    AnexosState.importedContracts.delete(mainC.id);
-                    renderAnexosModule();
-                }
-            }
-        }).catch(err => {
-            console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);
-        });
-    } else {
-        if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
-            SiengeApiService.getCustomerDetails(customerId).then(res => {
-                const cm = { id: customerId, ...res };
-                if (AnexosApp.handleClientMatch) {
-                     AnexosApp.handleClientMatch(cm);
-                }
-            }).catch(() => {});
+    if (localFiles && localFiles.length > 0) {
+      localFiles.forEach((f) => {
+        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
+          try { f.previewUrl = URL.createObjectURL(f.file); } catch (e) {}
         }
+      });
+      AnexosState.files = localFiles;
+      AnexosState.importedContracts.add(mainC.id);
+      if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
+    } else if (AnexosState.contractAttachments.length > 0 && AnexosApp.importarAnexosDoContrato) {
+      AnexosApp.importarAnexosDoContrato({ auto: true, force: true });
     }
-  } else {
-     alert('Módulo de anexos não está carregado.');
+  } catch (err) {
+    console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);
+    AnexosState.loadingUnidadeAnexos = false;
+    renderAnexosModule();
   }
 };
 
@@ -35120,6 +35512,28 @@ window.applyAdvFilters = async function(keepOpen = false) {
 };
 
 window.hasPrefetchedPayments = false;
+window.crmRecentPaidMap = window.crmRecentPaidMap || new Map();
+window.syncRecentPaidMap = function(map) {
+    const src = map && typeof map.forEach === "function" ? map : window.crmRecentPaidMap;
+    if (!src || typeof src.forEach !== "function") return src;
+    window.crmRecentPaidMap = src;
+    const copyTo = (obj) => {
+        if (!obj) return;
+        obj.paidMap = src;
+    };
+    copyTo(window.advFilters);
+    copyTo(window.advFiltersFila);
+    copyTo(window.advFiltersSubjudice);
+    copyTo(window.advFiltersZeroPaid);
+    return src;
+};
+window.getRecentPaidMap = function() {
+    if (window.crmRecentPaidMap && window.crmRecentPaidMap.size) return window.crmRecentPaidMap;
+    return (window.advFilters && window.advFilters.paidMap)
+      || (window.advFiltersFila && window.advFiltersFila.paidMap)
+      || window.crmRecentPaidMap
+      || null;
+};
 window.paidMapHasBillDays = function(map) {
     if (!map || typeof map.size !== "number" || map.size === 0) return false;
     for (const v of map.values()) {
@@ -35129,17 +35543,27 @@ window.paidMapHasBillDays = function(map) {
     return false;
 };
 window.prefetchRecentPayments = async function(forceRefresh = false) {
-    if (window.hasPrefetchedPayments && !forceRefresh) return;
-    
-    if (!forceRefresh && window.paidMapHasBillDays(window.advFilters && window.advFilters.paidMap)) {
+    if (window._prefetchPaymentsInFlight) return window._prefetchPaymentsInFlight;
+    const todayIso = typeof window.todayIsoLocal === "function"
+      ? window.todayIsoLocal()
+      : (new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0") + "-" + String(new Date().getDate()).padStart(2, "0"));
+    const dayFlag = "crm_paidmap_prefetch_" + todayIso;
+    let alreadyToday = false;
+    try { alreadyToday = localStorage.getItem(dayFlag) === "done"; } catch (e) {}
+    if (!forceRefresh && alreadyToday && window.paidMapHasBillDays(window.getRecentPaidMap())) {
         window.hasPrefetchedPayments = true;
+        window.syncRecentPaidMap(window.getRecentPaidMap());
+        return;
+    }
+    
+    if (!forceRefresh && window.paidMapHasBillDays(window.getRecentPaidMap()) && window.hasPrefetchedPayments && alreadyToday) {
         return;
     }
     
     console.log("Iniciando busca de pagamentos recentes em segundo plano...");
     if (!window.rawClientList) return;
-    window.hasPrefetchedPayments = true;
     
+    const runPrefetch = async () => {
     window.advFilters = window.advFilters || {};
     window.advFilters.paymentsLoading = true;
     if (typeof loadDashboardData === 'function') loadDashboardData();
@@ -35151,6 +35575,8 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         });
         
         const today = new Date();
+        today.setHours(12, 0, 0, 0);
+        const isoLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
         const dateChunks = [];
         // Quebra em blocos de 6 dias para garantir que nunca passará do limite de 500 do Sienge
         for (let i = 0; i < 30; i += 6) {
@@ -35163,12 +35589,14 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
             chunkStart.setDate(chunkStart.getDate() - daysToSubtract);
             
             dateChunks.push({
-                start: chunkStart.toISOString().split('T')[0],
-                end: chunkEnd.toISOString().split('T')[0]
+                start: isoLocal(chunkStart),
+                end: isoLocal(chunkEnd)
             });
         }
         
-        window.advFilters.paidMap = window.advFilters.paidMap || new Map();
+        const paidMap = window.getRecentPaidMap() || new Map();
+        window.advFilters.paidMap = paidMap;
+        window.syncRecentPaidMap(paidMap);
         window.advFilters.paidInstallmentIds = window.advFilters.paidInstallmentIds || new Set();
         
         // Faz a busca empresa por empresa, bloco por bloco, de forma sequencial para não travar o navegador
@@ -35236,6 +35664,9 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
             }
         }
         console.log("Busca de pagamentos recentes em segundo plano finalizada com sucesso!");
+        window.syncRecentPaidMap(window.advFilters.paidMap);
+        window.hasPrefetchedPayments = true;
+        try { localStorage.setItem(dayFlag, "done"); } catch (e) {}
         if (window.SiengeApiService && typeof window.SiengeApiService.updateCachePaidMap === 'function' && window.advFilters && window.advFilters.paidMap) {
             let paidMapStr = null;
             try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
@@ -35245,9 +35676,20 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         }
     } catch (e) {
         console.error("Erro geral na busca de pagamentos em segundo plano:", e);
+        window.hasPrefetchedPayments = false;
     } finally {
         if (window.advFilters) window.advFilters.paymentsLoading = false;
+        window.syncRecentPaidMap(window.advFilters && window.advFilters.paidMap);
         if (typeof loadDashboardData === 'function') loadDashboardData();
+    }
+    };
+    window._prefetchPaymentsInFlight = (window.ApiUsage && typeof ApiUsage.withSource === "function")
+      ? ApiUsage.withSource("system", "pagamentos_30d", runPrefetch)
+      : runPrefetch();
+    try {
+      await window._prefetchPaymentsInFlight;
+    } finally {
+      window._prefetchPaymentsInFlight = null;
     }
 };
 
@@ -35262,6 +35704,7 @@ window.clearAdvFilters = function() {
     else if (window.currentAdvFilterContext === 'subjudice') window.advFiltersSubjudice = defaultState;
     else if (window.currentAdvFilterContext === 'zeropaid') window.advFiltersZeroPaid = defaultState;
     window.advFilters = defaultState;
+    if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(window.crmRecentPaidMap);
     
     document.querySelectorAll('.adv-pills-group').forEach(group => {
         group.querySelectorAll('.adv-pill').forEach(p => p.classList.remove('active'));
@@ -36183,25 +36626,15 @@ window.syncGlobalConfigFromFirebase = async function() {
                     const merged = window.mergeCondicoesPagamento(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         try { _originalSetItem.call(localStorage, k, merged); } catch (e) {}
-                        changed = true;
                     }
                     try {
-                      if (window.CondicoesPagamentoApp) {
+                      if (window.CondicoesPagamentoApp && !window._cpagWritingCloud) {
                         const parsed = CondicoesPagamentoApp.parseFlagsPayload(merged || "{}");
-                        // Só aplica se não houver alteração mais nova em memória
                         CondicoesPagamentoApp.applyFlagsPayload(parsed);
                         if (typeof CondicoesPagamentoApp.renderTable === "function"
                             && document.getElementById("cpag-tbody")) {
                           CondicoesPagamentoApp.renderTable();
                         }
-                      }
-                    } catch (e) {}
-                    // Só reenvia se o byId local/memória for mais novo que o da nuvem
-                    try {
-                      const localP = CondicoesPagamentoApp.parseFlagsPayload(merged || "{}");
-                      const cloudP = CondicoesPagamentoApp.parseFlagsPayload(globalData[k] || "{}");
-                      if (localP.updatedAt > cloudP.updatedAt && window.forceUploadLocalConfig) {
-                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                       }
                     } catch (e) {}
                     return;
@@ -36369,31 +36802,30 @@ window.forceUploadLocalConfig = async function(silent = true) {
             try { AppState.rules = JSON.parse(payload.crm_moura_rules); } catch (e) {}
           }
           if (payload.crm_moura_condicoes_pagamento || cloud.crm_moura_condicoes_pagamento || (window.CondicoesPagamentoApp && CondicoesPagamentoApp.flags)) {
-            // Garante que toggles só em memória (localStorage cheio) entrem no upload
-            if (window.CondicoesPagamentoApp && typeof CondicoesPagamentoApp.flagsToRaw === "function") {
-              const memRaw = CondicoesPagamentoApp.flagsToRaw();
-              const memAt = Number(CondicoesPagamentoApp._flagsUpdatedAt || 0) || 0;
-              if (memAt > 0 && memRaw && memRaw !== "{}") {
-                payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento
-                  ? window.mergeCondicoesPagamento(memRaw, payload.crm_moura_condicoes_pagamento || "{}")
-                  : memRaw;
+            let dedicatedRaw = "";
+            try {
+              if (window.firebaseCollections.getDoc) {
+                const dSnap = await window.firebaseCollections.getDoc(
+                  window.firebaseCollections.doc(window.firebaseDb, "config", "condicoes_pagamento")
+                );
+                const dExists = dSnap && (typeof dSnap.exists === "function" ? dSnap.exists() : dSnap.exists);
+                if (dExists) {
+                  const d = dSnap.data() || {};
+                  dedicatedRaw = d.byId ? JSON.stringify(d) : (d.crm_moura_condicoes_pagamento || "");
+                }
               }
-            }
+            } catch (e) {}
+            const memRaw = (window.CondicoesPagamentoApp && typeof CondicoesPagamentoApp.flagsToRaw === "function")
+              ? CondicoesPagamentoApp.flagsToRaw()
+              : (payload.crm_moura_condicoes_pagamento || "{}");
             if (typeof window.mergeCondicoesPagamento === "function") {
               payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento(
-                payload.crm_moura_condicoes_pagamento || "{}",
-                cloud.crm_moura_condicoes_pagamento || "{}"
+                window.mergeCondicoesPagamento(memRaw, dedicatedRaw || "{}"),
+                cloud.crm_moura_condicoes_pagamento || payload.crm_moura_condicoes_pagamento || "{}"
               );
               try { _originalSetItem.call(localStorage, "crm_moura_condicoes_pagamento", payload.crm_moura_condicoes_pagamento); } catch (e) {}
-              try {
-                if (window.CondicoesPagamentoApp) {
-                  CondicoesPagamentoApp.applyFlagsPayload(
-                    CondicoesPagamentoApp.parseFlagsPayload(payload.crm_moura_condicoes_pagamento)
-                  );
-                }
-              } catch (e) {}
-            } else if (!payload.crm_moura_condicoes_pagamento && cloud.crm_moura_condicoes_pagamento) {
-              payload.crm_moura_condicoes_pagamento = cloud.crm_moura_condicoes_pagamento;
+            } else if (!payload.crm_moura_condicoes_pagamento && (dedicatedRaw || cloud.crm_moura_condicoes_pagamento)) {
+              payload.crm_moura_condicoes_pagamento = dedicatedRaw || cloud.crm_moura_condicoes_pagamento;
             }
           }
         } catch (e) {}
@@ -36532,6 +36964,9 @@ localStorage.setItem = function(key, value) {
     }
     
     // Tratamento de Configurações Globais
+    if (key === "crm_moura_condicoes_pagamento") {
+        return;
+    }
     if ((window.SYNC_KEYS && window.SYNC_KEYS.includes(key)) || key.startsWith("crm_perms_")) {
         if (window._fbConfigTimeout) clearTimeout(window._fbConfigTimeout);
         window._fbConfigTimeout = setTimeout(async () => {
@@ -36579,6 +37014,15 @@ localStorage.setItem = function(key, value) {
                         } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
                           payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
                         }
+                      }
+                      if (window.mergeCondicoesPagamento) {
+                        const memRaw = (window.CondicoesPagamentoApp && CondicoesPagamentoApp.flagsToRaw)
+                          ? CondicoesPagamentoApp.flagsToRaw()
+                          : (payload.crm_moura_condicoes_pagamento || "{}");
+                        payload.crm_moura_condicoes_pagamento = window.mergeCondicoesPagamento(
+                          memRaw,
+                          cloud.crm_moura_condicoes_pagamento || payload.crm_moura_condicoes_pagamento || "{}"
+                        );
                       }
                     } catch (mergeErr) {}
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
@@ -36737,13 +37181,16 @@ window.calculateSimpleRenegotiation = function(prefix = '') {
             let juros = 0;
             let isOverdue = false;
             if (b.dueDate) {
-               const due = new Date(b.dueDate + 'T12:00:00');
-               const diffTime = new Date() - due;
-               const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+               const diffDays = typeof window.daysOverdueUntilTarget === "function"
+                 ? window.daysOverdueUntilTarget(b, new Date())
+                 : Math.floor((new Date() - new Date(b.dueDate + 'T12:00:00')) / (1000 * 60 * 60 * 24));
                if (diffDays > 0) {
                  isOverdue = true;
-                 multa = corrected * 0.02;
-                 juros = corrected * 0.01 * (diffDays / 30);
+                 const ch = typeof window.computeLateCharges === "function"
+                   ? window.computeLateCharges(corrected, diffDays, 1)
+                   : { multa: corrected * 0.02, juros: corrected * 0.01 * (diffDays / 30) };
+                 multa = ch.multa;
+                 juros = ch.juros;
                  corrected = corrected + multa + juros;
                }
             }

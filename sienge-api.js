@@ -456,6 +456,209 @@ const IdbDefaultersCache = {
     }
 };
 
+const ApiUsage = {
+  COLLECTION: "api_consumo",
+  LOCAL_KEY: "crm_api_consumo_v1",
+  stack: [],
+  pending: {},
+  flushTimer: null,
+
+  todayIso: function() {
+    const n = new Date();
+    return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+  },
+
+  safeKey: function(s) {
+    return String(s || "unknown").replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g, "_").slice(0, 80) || "unknown";
+  },
+
+  normalizePath: function(urlStr) {
+    let path = String(urlStr || "");
+    try {
+      if (/^https?:/i.test(path)) path = new URL(path, window.location.origin).pathname;
+    } catch (e) {}
+    path = path.split("?")[0];
+    path = path.replace(/^\/api\/sienge-proxy/i, "").replace(/^\/sienge-proxy/i, "");
+    path = path.replace(/^\/api\/sienge-builder-proxy/i, "");
+    path = path.replace(/\/mouraleite\/public\/api(\/v1)?/i, "");
+    path = path.replace(/\/\d+(?=\/|$)/g, "/{id}");
+    if (!path.startsWith("/")) path = "/" + path;
+    return path.replace(/\/+/g, "/") || "/";
+  },
+
+  classify: function(urlStr) {
+    const raw = String(urlStr || "").toLowerCase();
+    const path = this.normalizePath(urlStr);
+    const bulk = raw.includes("/bulk-data/") || path.indexOf("/bulk-data/") === 0;
+    return { kind: bulk ? "bulk" : "rest", path: path };
+  },
+
+  currentActor: function() {
+    const top = this.stack.length ? this.stack[this.stack.length - 1] : null;
+    if (top && top.source === "system") {
+      return { source: "system", reason: top.reason || "automatico", userKey: "_sistema", userLabel: "Sistema (automático)" };
+    }
+    const u = (window.AppState && AppState.currentUser) || null;
+    let name = (u && (u.name || u.email)) || "";
+    if (!name) {
+      try {
+        const s = JSON.parse(localStorage.getItem("crm_moura_user_session") || "null");
+        name = (s && (s.name || s.email)) || "";
+      } catch (e) {}
+    }
+    const label = name || "Usuário";
+    return { source: "user", reason: "tela", userKey: this.safeKey(label.toLowerCase()), userLabel: label };
+  },
+
+  pushSource: function(source, reason) {
+    this.stack.push({ source: source === "system" ? "system" : "user", reason: String(reason || "") });
+    return () => this.popSource();
+  },
+
+  popSource: function() {
+    this.stack.pop();
+  },
+
+  withSource: async function(source, reason, fn) {
+    this.pushSource(source, reason);
+    try {
+      return await fn();
+    } finally {
+      this.popSource();
+    }
+  },
+
+  emptyDay: function(date) {
+    return { date: date, rest: 0, bulk: 0, actors: { user: 0, system: 0 }, apis: {}, users: {}, updatedAt: 0 };
+  },
+
+  bumpLocal: function(date, kind, path, actor) {
+    let store = {};
+    try { store = JSON.parse(localStorage.getItem(this.LOCAL_KEY) || "{}") || {}; } catch (e) { store = {}; }
+    const day = store[date] || this.emptyDay(date);
+    day[kind] = (Number(day[kind]) || 0) + 1;
+    day.actors = day.actors || { user: 0, system: 0 };
+    day.actors[actor.source] = (Number(day.actors[actor.source]) || 0) + 1;
+    const apiKey = path;
+    day.apis = day.apis || {};
+    day.apis[apiKey] = day.apis[apiKey] || { rest: 0, bulk: 0, user: 0, system: 0 };
+    day.apis[apiKey][kind] = (Number(day.apis[apiKey][kind]) || 0) + 1;
+    day.apis[apiKey][actor.source] = (Number(day.apis[apiKey][actor.source]) || 0) + 1;
+    day.users = day.users || {};
+    day.users[actor.userKey] = day.users[actor.userKey] || { rest: 0, bulk: 0, label: actor.userLabel, kind: actor.source };
+    day.users[actor.userKey][kind] = (Number(day.users[actor.userKey][kind]) || 0) + 1;
+    day.users[actor.userKey].label = actor.userLabel;
+    day.users[actor.userKey].kind = actor.source;
+    day.updatedAt = Date.now();
+    store[date] = day;
+    const keys = Object.keys(store).sort();
+    while (keys.length > 14) delete store[keys.shift()];
+    try { localStorage.setItem(this.LOCAL_KEY, JSON.stringify(store)); } catch (e) {}
+    return day;
+  },
+
+  trackFetch: function(urlStr) {
+    const raw = String(urlStr || "");
+    if (!/sienge-proxy|sienge-builder-proxy|api\.sienge\.com\.br/i.test(raw)) return;
+    if (/\/api\/consumo|api_consumo/i.test(raw)) return;
+    const info = this.classify(raw);
+    const actor = this.currentActor();
+    const date = this.todayIso();
+    this.bumpLocal(date, info.kind, info.path, actor);
+    const pend = this.pending[date] || { rest: 0, bulk: 0, apis: {}, users: {}, actors: { user: 0, system: 0 } };
+    pend[info.kind] += 1;
+    pend.actors[actor.source] = (pend.actors[actor.source] || 0) + 1;
+    const pk = this.safeKey(info.path);
+    pend.apis[pk] = pend.apis[pk] || { path: info.path, rest: 0, bulk: 0, user: 0, system: 0 };
+    pend.apis[pk][info.kind] += 1;
+    pend.apis[pk][actor.source] += 1;
+    pend.users[actor.userKey] = pend.users[actor.userKey] || { label: actor.userLabel, kind: actor.source, rest: 0, bulk: 0 };
+    pend.users[actor.userKey][info.kind] += 1;
+    this.pending[date] = pend;
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = setTimeout(() => { this.flush(); }, 4000);
+  },
+
+  flush: async function() {
+    const dates = Object.keys(this.pending || {});
+    if (!dates.length) return;
+    const batch = this.pending;
+    this.pending = {};
+    if (!window.firebaseDb || !window.firebaseCollections || typeof window.firebaseCollections.increment !== "function") return;
+    const { doc, setDoc, increment } = window.firebaseCollections;
+    for (const date of dates) {
+      const pend = batch[date];
+      if (!pend) continue;
+      const payload = {
+        date: date,
+        rest: increment(pend.rest || 0),
+        bulk: increment(pend.bulk || 0),
+        "actors.user": increment(pend.actors.user || 0),
+        "actors.system": increment(pend.actors.system || 0),
+        updatedAt: Date.now()
+      };
+      Object.keys(pend.apis || {}).forEach((k) => {
+        const a = pend.apis[k];
+        payload["apis." + k + ".path"] = a.path;
+        payload["apis." + k + ".rest"] = increment(a.rest || 0);
+        payload["apis." + k + ".bulk"] = increment(a.bulk || 0);
+        payload["apis." + k + ".user"] = increment(a.user || 0);
+        payload["apis." + k + ".system"] = increment(a.system || 0);
+      });
+      Object.keys(pend.users || {}).forEach((k) => {
+        const u = pend.users[k];
+        payload["users." + k + ".label"] = u.label;
+        payload["users." + k + ".kind"] = u.kind;
+        payload["users." + k + ".rest"] = increment(u.rest || 0);
+        payload["users." + k + ".bulk"] = increment(u.bulk || 0);
+      });
+      try {
+        await setDoc(doc(window.firebaseDb, this.COLLECTION, date), payload, { merge: true });
+      } catch (e) {
+        console.warn("[ApiUsage] flush", e);
+        this.pending[date] = pend;
+      }
+    }
+  },
+
+  loadLocalDays: function() {
+    try {
+      const store = JSON.parse(localStorage.getItem(this.LOCAL_KEY) || "{}") || {};
+      return Object.keys(store).sort().reverse().map((k) => store[k]);
+    } catch (e) {
+      return [];
+    }
+  },
+
+  loadDays: async function(n) {
+    const limitN = Math.max(1, Number(n) || 7);
+    const local = this.loadLocalDays();
+    const byDate = {};
+    local.forEach((d) => { if (d && d.date) byDate[d.date] = d; });
+    if (window.firebaseDb && window.firebaseCollections) {
+      const { doc, getDoc } = window.firebaseCollections;
+      const today = this.todayIso();
+      for (let i = 0; i < limitN; i++) {
+        const dt = new Date();
+        dt.setDate(dt.getDate() - i);
+        const iso = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+        try {
+          const snap = await getDoc(doc(window.firebaseDb, this.COLLECTION, iso));
+          const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+          if (exists) byDate[iso] = Object.assign(this.emptyDay(iso), snap.data() || {}, { date: iso });
+          else if (!byDate[iso]) byDate[iso] = this.emptyDay(iso);
+        } catch (e) {
+          if (!byDate[iso]) byDate[iso] = this.emptyDay(iso);
+        }
+        if (iso === today && !byDate[iso]) byDate[iso] = this.emptyDay(iso);
+      }
+    }
+    return Object.keys(byDate).sort().reverse().slice(0, limitN).map((k) => byDate[k]);
+  }
+};
+
+window.ApiUsage = ApiUsage;
+
 // Monkey Patch global fetch to intercept mutating requests
 const originalFetch = window.fetch;
 window.fetch = async function(...args) {
@@ -464,6 +667,9 @@ window.fetch = async function(...args) {
   const method = (options.method || 'GET').toUpperCase();
   
   const urlStr = String(url || "");
+  try {
+    if (window.ApiUsage && typeof ApiUsage.trackFetch === "function") ApiUsage.trackFetch(urlStr);
+  } catch (e) {}
   const skipSemantic = /overdue-receivable-bill|\/attachments/i.test(urlStr);
   if (!skipSemantic && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') && 
       (urlStr.includes('sienge-proxy') || urlStr.includes('/api/') || urlStr.includes('sienge'))) {
@@ -1000,12 +1206,13 @@ const SiengeApiService = {
         console.log('%c[Sienge] 📅 FDS/feriado — primeiro acesso: atualizando base completa da fila.', 'color:#f59e0b;font-weight:bold;');
       }
 
-      if (this._defaultersPromise && !effectiveForce) {
+      if (this._defaultersPromise) {
         return this._defaultersPromise;
       }
       this._lastProgressState = null;
       this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
       const fetchGen = this._defaultersFetchGen;
+      if (window.ApiUsage) ApiUsage.pushSource(effectiveForce ? "user" : "system", "fila_inadimplentes");
       this._defaultersPromise = (async () => {
         const t0 = performance.now();
         const todayStr = filaLocalTodayStr();
@@ -1025,7 +1232,9 @@ const SiengeApiService = {
                    if (localCache.paidMap) {
                        window.advFilters = window.advFilters || {};
                        try {
-                           window.advFilters.paidMap = new Map(JSON.parse(localCache.paidMap));
+                           const restored = new Map(JSON.parse(localCache.paidMap));
+                           window.advFilters.paidMap = restored;
+                           if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(restored);
                            console.log(`%c[Sienge] ✅ Último Pagamento restaurado do IndexedDB.`, 'color:#10b981;font-weight:bold;');
                        } catch(e) {}
                    }
@@ -1075,7 +1284,9 @@ const SiengeApiService = {
                    if (meta.paidMap) {
                      window.advFilters = window.advFilters || {};
                      try {
-                         window.advFilters.paidMap = new Map(JSON.parse(meta.paidMap));
+                         const restored = new Map(JSON.parse(meta.paidMap));
+                         window.advFilters.paidMap = restored;
+                         if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(restored);
                          console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
                      } catch(e) {}
                    }
@@ -1212,6 +1423,7 @@ const SiengeApiService = {
 
           return result;
         } finally {
+          if (window.ApiUsage) ApiUsage.popSource();
           if (fetchGen === this._defaultersFetchGen) {
             this._defaultersPromise = null;
             this._progressListeners = [];
@@ -1514,6 +1726,8 @@ const SiengeApiService = {
 
         return {
           id: c.id,
+          contractNumber: c.contractNumber || c.number || c.documentNumber || "",
+          number: c.number || c.contractNumber || "",
           customerId: mainCustomer.id || customerId,
           companyId: c.companyId,
           unitId: unitId,
@@ -1635,6 +1849,103 @@ const SiengeApiService = {
     } catch (e) {
       console.error("Erro getContractRaw:", e);
       return null;
+    }
+  },
+
+  _siengeAttachmentRows: function(res) {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res.results)) return res.results;
+    if (Array.isArray(res.data)) return res.data;
+    if (Array.isArray(res.attachments)) return res.attachments;
+    return [];
+  },
+
+  async getSalesContractAttachments(contractId) {
+    if (s_apiMode === "simulado" || !contractId) return { results: [] };
+    try {
+      const res = await siengeFetchWithRetry(`/sales-contracts/${encodeURIComponent(contractId)}/attachments?limit=200&offset=0`);
+      return { results: this._siengeAttachmentRows(res) };
+    } catch (e) {
+      console.error("[Sienge] anexos do contrato", e);
+      return { results: [] };
+    }
+  },
+
+  async findSalesContract(opts) {
+    const o = opts || {};
+    const customerId = o.customerId != null ? String(o.customerId).trim() : "";
+    const rawId = o.contractId != null ? String(o.contractId).trim() : "";
+    const contractNumber = String(o.contractNumber || "").replace(/\s+/g, "").trim();
+    const billId = String(o.receivableBillId || "").replace(/^B-/i, "").trim();
+    const enterpriseId = o.enterpriseId != null ? String(o.enterpriseId).trim() : "";
+    const unitName = String(o.unitName || "").replace(/\s+/g, "").toUpperCase();
+    const isCanceled = (c) => {
+      const sit = String((c && (c.situation || c.status || c.salesContractSituation)) || "").toUpperCase();
+      return sit === "CANCELED" || sit === "CANCELADO" || sit === "DISTRATADO";
+    };
+    const usable = (c) => c && c.id != null && !isCanceled(c);
+    const looksLikeContractNumber = contractNumber && !/^\d{1,8}$/.test(contractNumber);
+    // Título a receber (ex.: 16825) não é o id do sales-contract
+    const salesContractId = rawId && rawId !== billId && /^\d+$/.test(rawId) ? rawId : "";
+
+    const pool = [];
+    const pushAll = (arr) => {
+      (arr || []).forEach((c) => {
+        if (!c || c.id == null) return;
+        if (!pool.some((x) => String(x.id) === String(c.id))) pool.push(c);
+      });
+    };
+
+    if (customerId) {
+      try {
+        const res = await siengeFetchWithRetry(`/sales-contracts?customerId=${encodeURIComponent(customerId)}&limit=200&offset=0`);
+        pushAll(res && res.results);
+      } catch (e) {}
+    }
+    if (looksLikeContractNumber) {
+      for (const key of ["number", "contractNumber"]) {
+        try {
+          const res = await siengeFetchWithRetry(`/sales-contracts?${key}=${encodeURIComponent(contractNumber)}&limit=50&offset=0`);
+          pushAll(res && res.results);
+        } catch (e) {}
+      }
+    }
+    if (salesContractId) {
+      try {
+        const one = await this.getContractRaw(salesContractId);
+        if (one && one.id) pushAll([one]);
+      } catch (e) {}
+    }
+
+    const num = contractNumber.toUpperCase();
+    const scored = pool.map((c) => {
+      let score = 0;
+      if (billId && String(c.receivableBillId || c.billReceivableId || "") === billId) score += 8;
+      const cn = String(c.contractNumber || c.number || "").toUpperCase().replace(/\s+/g, "");
+      if (num && cn && (cn === num || cn.includes(num) || num.includes(cn))) score += 12;
+      if (salesContractId && String(c.id) === salesContractId) score += 6;
+      if (enterpriseId && String(c.enterpriseId) === enterpriseId) score += 3;
+      if (unitName) {
+        const units = c.salesContractUnits || c.units || [];
+        const hit = (Array.isArray(units) ? units : []).some((u) => {
+          const n = String((u && (u.name || u.unitName)) || "").replace(/\s+/g, "").toUpperCase();
+          return n && (n === unitName || n.includes(unitName) || unitName.includes(n));
+        });
+        if (hit) score += 4;
+      }
+      if (usable(c)) score += 1;
+      return { c, score };
+    }).sort((a, b) => b.score - a.score);
+
+    const best = (scored[0] && scored[0].score > 0) ? scored[0].c : (pool.filter(usable)[0] || null);
+    if (!best) return null;
+    if (best.salesContractCustomers || best.contractNumber || best.number) return best;
+    try {
+      const full = await this.getContractRaw(best.id);
+      return full && full.id ? full : best;
+    } catch (e) {
+      return best;
     }
   },
 

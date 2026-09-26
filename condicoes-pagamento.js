@@ -33,10 +33,19 @@ const CondicoesPagamentoApp = {
     try {
       const obj = typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
       if (!obj || typeof obj !== "object") return { byId: {}, updatedAt: 0 };
-      return {
-        byId: (obj.byId && typeof obj.byId === "object") ? { ...obj.byId } : {},
-        updatedAt: Number(obj.updatedAt || 0) || 0
-      };
+      const byId = {};
+      const src = (obj.byId && typeof obj.byId === "object") ? obj.byId : obj;
+      Object.keys(src || {}).forEach((k) => {
+        if (k === "updatedAt" || k === "byId") return;
+        const row = src[k];
+        if (!row || typeof row !== "object") return;
+        byId[k] = {
+          boletoSienge: row.boletoSienge !== false,
+          parcelaWebro: row.parcelaWebro === true,
+          updatedAt: Number(row.updatedAt || 0) || 0
+        };
+      });
+      return { byId, updatedAt: Number(obj.updatedAt || 0) || 0 };
     } catch (e) {
       return { byId: {}, updatedAt: 0 };
     }
@@ -49,23 +58,20 @@ const CondicoesPagamentoApp = {
     });
   },
 
-  /**
-   * Merge por updatedAt: o lado mais novo ganha por chave.
-   * Não bumpa updatedAt com Date.now() (isso fazia o sync achar “mudança”
-   * e reenviar defaults, resetando os toggles).
-   */
   mergeFlagsPayload(localRaw, cloudRaw) {
     const local = this.parseFlagsPayload(localRaw);
     const cloud = this.parseFlagsPayload(cloudRaw);
     const byId = {};
-    if (local.updatedAt > cloud.updatedAt) {
-      Object.assign(byId, cloud.byId, local.byId);
-    } else if (cloud.updatedAt > local.updatedAt) {
-      Object.assign(byId, local.byId, cloud.byId);
-    } else {
-      // Empate: une as duas (preferência ao valor local em conflito)
-      Object.assign(byId, cloud.byId, local.byId);
-    }
+    const keys = new Set([...Object.keys(local.byId || {}), ...Object.keys(cloud.byId || {})]);
+    keys.forEach((k) => {
+      const a = local.byId[k];
+      const b = cloud.byId[k];
+      if (!a) { byId[k] = b; return; }
+      if (!b) { byId[k] = a; return; }
+      const at = Number(a.updatedAt || local.updatedAt || 0) || 0;
+      const bt = Number(b.updatedAt || cloud.updatedAt || 0) || 0;
+      byId[k] = bt > at ? b : a;
+    });
     return {
       byId,
       updatedAt: Math.max(local.updatedAt || 0, cloud.updatedAt || 0)
@@ -100,32 +106,47 @@ const CondicoesPagamentoApp = {
     this.loadFlagsFromLocal();
   },
 
-  async loadFlagsFromCloud() {
-    if (!window.firebaseDb || !window.firebaseCollections) return false;
+  async readCloudFlagsRaw() {
+    if (!window.firebaseDb || !window.firebaseCollections) return "";
+    const { doc, getDoc } = window.firebaseCollections;
     try {
-      const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
-      const snap = await window.firebaseCollections.getDoc(docRef);
+      const dedicated = await getDoc(doc(window.firebaseDb, "config", "condicoes_pagamento"));
+      const existsD = dedicated && (typeof dedicated.exists === "function" ? dedicated.exists() : dedicated.exists);
+      if (existsD) {
+        const data = dedicated.data() || {};
+        if (data.byId || data[this.STORAGE_KEY]) {
+          return JSON.stringify(data.byId ? data : (typeof data[this.STORAGE_KEY] === "string" ? JSON.parse(data[this.STORAGE_KEY]) : data));
+        }
+      }
+    } catch (e) {}
+    try {
+      const snap = await getDoc(doc(window.firebaseDb, "config", "global"));
       const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
-      if (!exists) return false;
+      if (!exists) return "";
       const data = snap.data() || {};
-      const cloudRaw = data[this.STORAGE_KEY];
+      return data[this.STORAGE_KEY] || "";
+    } catch (e) {
+      return "";
+    }
+  },
+
+  async loadFlagsFromCloud() {
+    try {
+      const cloudRaw = await this.readCloudFlagsRaw();
       if (!cloudRaw) return false;
       const localRaw = (() => {
         try { return localStorage.getItem(this.STORAGE_KEY) || "{}"; } catch (e) { return "{}"; }
       })();
       const memRaw = this.flagsToRaw();
-      // Memória (alteração recente) > localStorage > cloud
       let merged = this.mergeFlagsPayload(localRaw, cloudRaw);
       merged = this.mergeFlagsPayload(JSON.stringify(merged), memRaw);
-      this.applyFlagsPayload(merged, { force: true });
+      this.applyFlagsPayload(merged, { force: Object.keys(this.flags || {}).length === 0 });
       try {
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
           byId: this.flags,
           updatedAt: this._flagsUpdatedAt
         }));
-      } catch (e) {
-        /* cota cheia: mantém em memória + Firebase */
-      }
+      } catch (e) {}
       return true;
     } catch (e) {
       console.warn("[CondicoesPagamento] load cloud:", e);
@@ -144,68 +165,82 @@ const CondicoesPagamentoApp = {
 
   async persistFlags(opts) {
     const silent = !!(opts && opts.silent);
-    const payload = {
-      byId: { ...(this.flags || {}) },
-      updatedAt: Date.now()
-    };
-    this._flagsUpdatedAt = payload.updatedAt;
-    this.flags = payload.byId;
-    const json = JSON.stringify(payload);
-    let localOk = false;
-    let cloudOk = false;
-
+    const now = Date.now();
+    this._flagsUpdatedAt = Math.max(Number(this._flagsUpdatedAt || 0), now);
     this.saving = true;
-    this.saveMsg = "";
+    this.saveMsg = "Salvando no Firebase…";
     this.renderStatus();
 
-    // Firebase primeiro — fonte da verdade entre navegadores
-    try {
-      if (window.firebaseDb && window.firebaseCollections) {
-        const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
-        await window.firebaseCollections.setDoc(docRef, { [this.STORAGE_KEY]: json }, { merge: true });
-        cloudOk = true;
-      }
-    } catch (e) {
-      console.warn("[CondicoesPagamento] sync cloud:", e);
-    }
-
-    try {
-      localStorage.setItem(this.STORAGE_KEY, json);
-      localOk = true;
-    } catch (e) {
-      console.warn("[CondicoesPagamento] localStorage cheio:", e);
-    }
-
-    // Fallback: upload completo das configs (se o setDoc pontual falhar)
-    if (!cloudOk && window.forceUploadLocalConfig) {
+    let cloudOk = false;
+    let localOk = false;
+    const writeLocal = (json) => {
       try {
-        // Garante que o upload leve a memória atual mesmo sem localStorage
-        try { localStorage.setItem(this.STORAGE_KEY, json); } catch (e) {}
-        await window.forceUploadLocalConfig(true);
-        cloudOk = true;
+        if (typeof _originalSetItem === "function") {
+          _originalSetItem.call(localStorage, this.STORAGE_KEY, json);
+        } else {
+          localStorage.setItem(this.STORAGE_KEY, json);
+        }
+        return true;
       } catch (e) {
-        console.warn("[CondicoesPagamento] forceUpload:", e);
+        console.warn("[CondicoesPagamento] localStorage cheio:", e);
+        return false;
       }
+    };
+    try {
+      const memRaw = this.flagsToRaw();
+      writeLocal(memRaw);
+      localOk = true;
+
+      const cloudRaw = await this.readCloudFlagsRaw();
+      const merged = this.mergeFlagsPayload(cloudRaw || "{}", memRaw);
+      Object.keys(this.flags || {}).forEach((k) => {
+        const mine = this.flags[k];
+        const theirs = merged.byId && merged.byId[k];
+        if (!mine) return;
+        if (!theirs || Number(mine.updatedAt || 0) >= Number(theirs.updatedAt || 0)) {
+          merged.byId[k] = mine;
+        }
+      });
+      this.flags = merged.byId || this.flags;
+      this._flagsUpdatedAt = Math.max(Number(merged.updatedAt || 0), this._flagsUpdatedAt);
+      const payload = { byId: { ...this.flags }, updatedAt: this._flagsUpdatedAt };
+      const json = JSON.stringify(payload);
+      localOk = writeLocal(json) || localOk;
+
+      if (window.firebaseDb && window.firebaseCollections) {
+        const { doc, setDoc } = window.firebaseCollections;
+        window._cpagWritingCloud = true;
+        await setDoc(doc(window.firebaseDb, "config", "condicoes_pagamento"), payload, { merge: false });
+        await setDoc(doc(window.firebaseDb, "config", "global"), { [this.STORAGE_KEY]: json }, { merge: true });
+        cloudOk = true;
+      }
+    } catch (e) {
+      console.warn("[CondicoesPagamento] persist:", e);
+    } finally {
+      window._cpagWritingCloud = false;
     }
 
     this.saving = false;
-    if (localOk || cloudOk) {
-      this.saveMsg = cloudOk ? "Salvo no Firebase" : "Salvo neste navegador";
+    if (cloudOk) {
+      this.saveMsg = "Salvo no Firebase";
+      this.error = "";
+    } else if (localOk) {
+      this.saveMsg = "Salvo neste navegador (Firebase indisponível)";
       this.error = "";
     } else {
       this.saveMsg = "";
-      this.error = "Não foi possível salvar (Firebase / armazenamento).";
+      this.error = "Não foi possível salvar no Firebase.";
       if (!silent) alert(this.error);
     }
     this.renderStatus();
-    return localOk || cloudOk;
+    return cloudOk || localOk;
   },
 
   schedulePersist() {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.persistFlags({ silent: true });
-    }, 180);
+    }, 80);
   },
 
   setFlag(id, field, on) {
@@ -213,9 +248,10 @@ const CondicoesPagamentoApp = {
     if (!key) return;
     const cur = this.flagOf(key);
     cur[field] = !!on;
+    cur.updatedAt = Date.now();
     this.flags[key] = cur;
-    this._flagsUpdatedAt = Date.now();
-    this.saveMsg = "Salvando…";
+    this._flagsUpdatedAt = cur.updatedAt;
+    this.saveMsg = "Salvando no Firebase…";
     this.renderStatus();
     this.schedulePersist();
   },
@@ -365,7 +401,6 @@ const CondicoesPagamentoApp = {
     this.render();
     try {
       await this.loadFlagsFromCloud();
-      this.loadFlagsFromLocal();
       this.items = await this.fetchAllTypes();
       this.items.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     } catch (e) {
