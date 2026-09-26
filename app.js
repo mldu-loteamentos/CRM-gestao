@@ -1441,14 +1441,24 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
     || (AppState.rules && AppState.rules[ruleId]);
   if (rule) {
     const op = rule.operator;
-    let cityOps = Array.isArray(op) ? op : [op];
+    let cityOps = (typeof window.mergeCityOperatorValues === "function")
+      ? window.mergeCityOperatorValues(op)
+      : (Array.isArray(op) ? op : [op]);
     const isOpCobranca = (u) => {
       if (!u) return false;
       if (typeof window.isOperadorCobrancaProfile === "function") return window.isOperadorCobrancaProfile(u.profile_name);
       const p = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return p.includes("OPERADOR COBRANCA");
     };
-    const userOpType = (u) => (u && u.operator_type) ? u.operator_type : "interno";
+    const userOpType = (u, label) => {
+      if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u)) {
+        return "apoio_juridico";
+      }
+      if (u && u.operator_type) return u.operator_type;
+      const n = String(label || (u && (u.sienge_user || u.name)) || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (n.includes("THAIANE")) return "externo";
+      return "interno";
+    };
     const findUserByLabel = (o) => {
        const normalizedO = String(o || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
        return users.find(user => {
@@ -1464,7 +1474,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
        if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u) && requiredType !== "apoio_juridico") {
          return false;
        }
-       const opType = userOpType(u);
+       const opType = userOpType(u, o);
        
        if (requiredType === 'interno_absoluto') return opType === 'interno';
        if (requiredType === 'fallback') return true;
@@ -1565,7 +1575,11 @@ window.cityRuleHasOperatorType = function(ruleId, type) {
       const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
       return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
     });
-    const opType = (u && u.operator_type) ? u.operator_type : "interno";
+    if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u)) {
+      return type === "apoio_juridico";
+    }
+    const opType = (u && u.operator_type) ? u.operator_type
+      : (normalizedO.includes("THAIANE") ? "externo" : "interno");
     return opType === type;
   });
 };
@@ -1869,10 +1883,8 @@ window.clientIsExecutarAcordoQuebrado = function(client, history) {
 function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
   if (getSiengeApiMode() === "simulado") return;
 
-  const timelineNodes = window.TimelineState || JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]");
-  const nodeTerceirizada = timelineNodes.find(n => n.acao === "cob_terceirizada");
-  const threshTerceirizada = nodeTerceirizada && Number.isFinite(Number(nodeTerceirizada.dias))
-    ? Number(nodeTerceirizada.dias)
+  const threshTerceirizada = typeof window.getTerceirizadaThreshold === "function"
+    ? window.getTerceirizadaThreshold()
     : 31;
   const threshAnalise = typeof window.getAnaliseInternaJuridicoThreshold === "function"
     ? window.getAnaliseInternaJuridicoThreshold()
@@ -1961,14 +1973,6 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     } else if (days >= threshTerceirizada && cityHasExterno) {
       requiredType = "externo";
       ruleSuffix = "EXTERNO";
-    }
-
-    // Cobrança interna (cadastro de empresas): nunca terceiriza (ex.: Thaiane)
-    const cobInterna = typeof window.companyHasCobrancaInterna === "function"
-      && window.companyHasCobrancaInterna(c.companyId);
-    if (cobInterna && requiredType === "externo") {
-      requiredType = "interno";
-      ruleSuffix = "INTERNO / COBRANÇA INTERNA";
     }
 
     const forcedAcordoJudicialLucelia = typeof window.clientForcedAcordoJudicialTitulo === "function"
@@ -4494,6 +4498,22 @@ window.FILA_QUEUE_GROUPS = {
   ANALISE_INTERNA_JURIDICO: 6,
   ENVIAR_JURIDICO: 7,
   SEM_CATEGORIA: 8
+};
+
+window.getTerceirizadaThreshold = function() {
+  let nodes = window.TimelineState;
+  if (!nodes || !nodes.length) {
+    try { nodes = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "[]"); } catch (e) { nodes = []; }
+  }
+  const acoes = window.TimelineAcoesList || [];
+  const hit = (nodes || []).find(n => {
+    if (!n) return false;
+    if (n.acao === "cob_terceirizada") return true;
+    const acaoLabel = ((acoes.find(a => a && a.id === n.acao) || {}).label) || "";
+    const label = window.normalizeOperatorName([n.label, n.customLabel, n.acaoLabel, acaoLabel].filter(Boolean).join(" "));
+    return label.includes("INICIO TERCEIRIZADA") || label.includes("TERCEIRIZADA");
+  });
+  return hit && Number.isFinite(Number(hit.dias)) ? Number(hit.dias) : 31;
 };
 
 window.getAnaliseInternaJuridicoThreshold = function() {
