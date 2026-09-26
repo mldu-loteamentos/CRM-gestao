@@ -6055,6 +6055,10 @@ document.addEventListener("click", function(e) {
   // -----------------------------------------------
   if (dataAlreadyLoaded) {
     bills = AppState.defaultersBills;
+    const paidReady = window.hasPrefetchedPayments && window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap && window.getRecentPaidMap());
+    if (!paidReady && typeof window.prefetchRecentPayments === "function") {
+      try { await window.prefetchRecentPayments(forceRefresh); } catch (e) {}
+    }
   } else {
     const dashInput = document.getElementById("dashboard-search-input");
     const dashIcon = dashInput ? dashInput.nextElementSibling : null;
@@ -6176,9 +6180,17 @@ document.addEventListener("click", function(e) {
         if(s3) s3.textContent = "Busca concluída! Montando tabela...";
         
         if (window._siengeDefaultersIv) clearInterval(window._siengeDefaultersIv);
-        await new Promise(resolve => setTimeout(resolve, 1200));
+        if (s1) s1.textContent = "Aplicando pagamentos recentes...";
+        if (s2) s2.textContent = "Aplicando pagamentos recentes...";
+        if (s3) s3.textContent = "Aplicando pagamentos recentes...";
         if (getSiengeApiMode() === "real") {
           AppState.defaultersBills = bills;
+        }
+        if (typeof window.prefetchRecentPayments === "function") {
+          try { await window.prefetchRecentPayments(forceRefresh); } catch (e) {}
+        }
+        await new Promise(resolve => setTimeout(resolve, 200));
+        if (getSiengeApiMode() === "real") {
           AppState.defaultersLoaded = true;
           
           if (typeof window.updateFilaCacheStatusIndicator === "function") {
@@ -7590,10 +7602,6 @@ document.addEventListener("click", function(e) {
       btnAdv.disabled = false;
       btnAdv.style.opacity = '1';
       btnAdv.style.cursor = 'pointer';
-  }
-  
-  if (typeof window.prefetchRecentPayments === 'function') {
-      window.prefetchRecentPayments(window._dashboardForceRefresh);
   }
   
   if (typeof loadAgendaDayTasks === 'function' && window.lastSelectedAgendaDate) {
@@ -31944,7 +31952,7 @@ window.renderVizinhosTab = async function() {
     if (!unitName && unitState.block && unitState.lot) unitName = String(unitState.block) + "-" + String(unitState.lot);
 
     const realName = enterpriseId && unitName ? (enterpriseId + " - " + unitName) : (unitName || "N/D");
-    const VIZINHOS_RAIO_M = 30;
+    const VIZINHOS_RAIO_M = 15;
     
     const allPoints = await window.loadKmzPlacemarks(enterpriseId);
     
@@ -35561,18 +35569,23 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
     }
     
     console.log("Iniciando busca de pagamentos recentes em segundo plano...");
-    if (!window.rawClientList) return;
     
     const runPrefetch = async () => {
     window.advFilters = window.advFilters || {};
     window.advFilters.paymentsLoading = true;
-    if (typeof loadDashboardData === 'function') loadDashboardData();
     
     try {
         const uniqueCompanies = new Set();
-        window.rawClientList.forEach(c => {
+        (window.rawClientList || []).forEach(c => {
             if (c.companyId) uniqueCompanies.add(String(c.companyId));
         });
+        ((window.AppState && AppState.defaultersBills) || []).forEach((b) => {
+            if (b && b.companyId) uniqueCompanies.add(String(b.companyId));
+        });
+        if (!uniqueCompanies.size) {
+            window.advFilters.paymentsLoading = false;
+            return;
+        }
         
         const today = new Date();
         today.setHours(12, 0, 0, 0);
@@ -35670,8 +35683,14 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
         if (window.SiengeApiService && typeof window.SiengeApiService.updateCachePaidMap === 'function' && window.advFilters && window.advFilters.paidMap) {
             let paidMapStr = null;
             try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
+            let paidInstStr = null;
+            try {
+              if (window.advFilters.paidInstallmentIds) {
+                paidInstStr = JSON.stringify(Array.from(window.advFilters.paidInstallmentIds));
+              }
+            } catch (e) {}
             if (paidMapStr) {
-                window.SiengeApiService.updateCachePaidMap(paidMapStr);
+                window.SiengeApiService.updateCachePaidMap(paidMapStr, paidInstStr);
             }
         }
     } catch (e) {
@@ -35680,7 +35699,6 @@ window.prefetchRecentPayments = async function(forceRefresh = false) {
     } finally {
         if (window.advFilters) window.advFilters.paymentsLoading = false;
         window.syncRecentPaidMap(window.advFilters && window.advFilters.paidMap);
-        if (typeof loadDashboardData === 'function') loadDashboardData();
     }
     };
     window._prefetchPaymentsInFlight = (window.ApiUsage && typeof ApiUsage.withSource === "function")

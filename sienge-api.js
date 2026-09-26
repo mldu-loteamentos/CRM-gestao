@@ -181,6 +181,63 @@ function lastPayIsoFromDays(days, todayIso) {
   return d.toISOString().slice(0, 10);
 }
 
+function applyPaidCacheFields(paidMapStr, paidInstStr) {
+  if (typeof window === "undefined") return;
+  window.advFilters = window.advFilters || {};
+  if (paidMapStr) {
+    try {
+      const restored = new Map(JSON.parse(paidMapStr));
+      window.advFilters.paidMap = restored;
+      if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(restored);
+    } catch (e) {}
+  }
+  if (paidInstStr) {
+    try {
+      const arr = JSON.parse(paidInstStr);
+      window.advFilters.paidInstallmentIds = new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) {}
+  }
+  if (window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap ? window.getRecentPaidMap() : window.advFilters.paidMap)) {
+    window.hasPrefetchedPayments = true;
+  }
+}
+
+async function hydratePaidMapsFromDailyCache(todayStr) {
+  const day = todayStr || filaLocalTodayStr();
+  try {
+    const localCache = await IdbDefaultersCache.get(`defaulters_${day}`);
+    if (localCache && (localCache.paidMap || localCache.paidInstallmentIds)) {
+      applyPaidCacheFields(localCache.paidMap, localCache.paidInstallmentIds);
+      if (window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap ? window.getRecentPaidMap() : null)) {
+        return true;
+      }
+    }
+  } catch (e) {}
+  if (typeof window !== "undefined" && window.firebaseDb && window.firebaseCollections) {
+    try {
+      const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", day);
+      const metaSnap = await window.firebaseCollections.getDoc(metaRef);
+      if (metaSnap.exists()) {
+        const meta = metaSnap.data() || {};
+        applyPaidCacheFields(meta.paidMap, meta.paidInstallmentIds);
+        if (window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap ? window.getRecentPaidMap() : null)) {
+          return true;
+        }
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+
+function serializePaidInstallmentIds() {
+  try {
+    if (typeof window !== "undefined" && window.advFilters && window.advFilters.paidInstallmentIds) {
+      return JSON.stringify(Array.from(window.advFilters.paidInstallmentIds));
+    }
+  } catch (e) {}
+  return null;
+}
+
 window.summarizeOpenDefaulterBill = function(bill) {
   const todayIso = new Date().toISOString().slice(0, 10);
   const all = (bill && bill.defaulterInstallments) || [];
@@ -1217,6 +1274,7 @@ const SiengeApiService = {
         const t0 = performance.now();
         const todayStr = filaLocalTodayStr();
         const expectedCompanyIds = getConfiguredInternalCompanyIds();
+        try { await hydratePaidMapsFromDailyCache(todayStr); } catch (e) {}
 
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (INDEXEDDB E FIRESTORE)
         if (!effectiveForce) {
@@ -1229,14 +1287,9 @@ const SiengeApiService = {
                        console.warn('%c[Sienge] ⚠️ Cache IndexedDB incompleto (faltam empresas internas) — ignorando.', 'color:#f59e0b;font-weight:bold;');
                    } else {
                    console.log(`%c[Sienge] ✅ Base carregada do IndexedDB local — ${localCache.data.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
+                   applyPaidCacheFields(localCache.paidMap, localCache.paidInstallmentIds);
                    if (localCache.paidMap) {
-                       window.advFilters = window.advFilters || {};
-                       try {
-                           const restored = new Map(JSON.parse(localCache.paidMap));
-                           window.advFilters.paidMap = restored;
-                           if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(restored);
-                           console.log(`%c[Sienge] ✅ Último Pagamento restaurado do IndexedDB.`, 'color:#10b981;font-weight:bold;');
-                       } catch(e) {}
+                       console.log(`%c[Sienge] ✅ Último Pagamento restaurado do IndexedDB.`, 'color:#10b981;font-weight:bold;');
                    }
                    window._siengeLastFetchTime = {
                      elapsed: "0.1",
@@ -1281,14 +1334,9 @@ const SiengeApiService = {
                      console.warn('%c[Sienge] ⚠️ Cache Firestore incompleto (faltam empresas internas) — buscando base completa.', 'color:#f59e0b;font-weight:bold;');
                    } else {
                    
+                   applyPaidCacheFields(meta.paidMap, meta.paidInstallmentIds);
                    if (meta.paidMap) {
-                     window.advFilters = window.advFilters || {};
-                     try {
-                         const restored = new Map(JSON.parse(meta.paidMap));
-                         window.advFilters.paidMap = restored;
-                         if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(restored);
-                         console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
-                     } catch(e) {}
+                     console.log(`%c[Sienge] ✅ Último Pagamento restaurado do cache.`, 'color:#10b981;font-weight:bold;');
                    }
 
                    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
@@ -1306,6 +1354,7 @@ const SiengeApiService = {
                    IdbDefaultersCache.set(`defaulters_${todayStr}`, {
                        data: result,
                        paidMap: meta.paidMap,
+                       paidInstallmentIds: meta.paidInstallmentIds || serializePaidInstallmentIds(),
                        timestampStr: meta.timestampStr,
                        atFull: meta.atFull || null,
                        companyIds: meta.companyIds || expectedCompanyIds
@@ -1375,6 +1424,7 @@ const SiengeApiService = {
                   if (window.advFilters && window.advFilters.paidMap) {
                       try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
                   }
+                  const paidInstStr = serializePaidInstallmentIds();
                   
                   const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
                   await window.firebaseCollections.setDoc(metaRef, { 
@@ -1383,6 +1433,7 @@ const SiengeApiService = {
                       timestampStr: timestampStr,
                       atFull: atFull,
                       paidMap: paidMapStr,
+                      paidInstallmentIds: paidInstStr,
                       companyIds: fetchedCompanyIds,
                       createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
                   });
@@ -1403,6 +1454,7 @@ const SiengeApiService = {
                    await IdbDefaultersCache.set(`defaulters_${todayStr}`, {
                        data: result,
                        paidMap: paidMapStr,
+                       paidInstallmentIds: serializePaidInstallmentIds(),
                        timestampStr: timestampStr,
                        atFull: atFull,
                        companyIds: fetchedCompanyIds
@@ -1436,15 +1488,25 @@ const SiengeApiService = {
     return await this._getDefaultersInternal(companyId, onProgress);
   },
 
-  async updateCachePaidMap(paidMapStr) {
+  async updateCachePaidMap(paidMapStr, paidInstStr) {
+    const todayStr = filaLocalTodayStr();
+    const instStr = paidInstStr != null ? paidInstStr : serializePaidInstallmentIds();
+    try {
+      const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
+      if (localCache) {
+        localCache.paidMap = paidMapStr || localCache.paidMap;
+        if (instStr) localCache.paidInstallmentIds = instStr;
+        await IdbDefaultersCache.set(`defaulters_${todayStr}`, localCache);
+      }
+    } catch (e) {}
     if (s_apiMode === "simulado" || !window.firebaseDb || !window.firebaseCollections) return;
     try {
-        const todayStr = filaLocalTodayStr();
         const metaRef = window.firebaseCollections.doc(window.firebaseDb, "sienge_defaulters_history", todayStr);
-        // Only update if it exists
         const metaSnap = await window.firebaseCollections.getDoc(metaRef);
         if (metaSnap.exists()) {
-            await window.firebaseCollections.updateDoc(metaRef, { paidMap: paidMapStr });
+            const patch = { paidMap: paidMapStr };
+            if (instStr) patch.paidInstallmentIds = instStr;
+            await window.firebaseCollections.updateDoc(metaRef, patch);
             console.log('%c[Firebase] PaidMap atualizado no cache diário.', 'color:#3b82f6;');
         }
     } catch(e) {
