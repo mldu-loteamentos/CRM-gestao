@@ -181,6 +181,15 @@ function lastPayIsoFromDays(days, todayIso) {
   return d.toISOString().slice(0, 10);
 }
 
+function paidMapDayFlagKey(dayStr) {
+  return "crm_paidmap_prefetch_" + String(dayStr || filaLocalTodayStr()).slice(0, 10);
+}
+
+function markPaidMapDayDone(dayStr) {
+  try { localStorage.setItem(paidMapDayFlagKey(dayStr), "done"); } catch (e) {}
+  if (typeof window !== "undefined") window.hasPrefetchedPayments = true;
+}
+
 function applyPaidCacheFields(paidMapStr, paidInstStr) {
   if (typeof window === "undefined") return;
   window.advFilters = window.advFilters || {};
@@ -198,7 +207,7 @@ function applyPaidCacheFields(paidMapStr, paidInstStr) {
     } catch (e) {}
   }
   if (window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap ? window.getRecentPaidMap() : window.advFilters.paidMap)) {
-    window.hasPrefetchedPayments = true;
+    markPaidMapDayDone();
   }
 }
 
@@ -1403,6 +1412,12 @@ const SiengeApiService = {
           if (isFilaNonBusinessDay(todayStr) && !defaultersCacheLooksIncomplete(result, { companyIds: fetchedCompanyIds }, expectedCompanyIds)) {
             markFilaFullRefreshDone(todayStr);
           }
+
+          try {
+            await this.ensureDailyPaidMaps(fetchedCompanyIds, broadcastProgress);
+          } catch (e) {
+            console.warn("[Sienge] paidMap diário", e);
+          }
           
           if (window.firebaseDb && window.firebaseCollections) {
               const CHUNK_SIZE = 100;
@@ -1486,6 +1501,107 @@ const SiengeApiService = {
       return this._defaultersPromise;
     }
     return await this._getDefaultersInternal(companyId, onProgress);
+  },
+
+  async hydratePaidMaps() {
+    return hydratePaidMapsFromDailyCache(filaLocalTodayStr());
+  },
+
+  ingestBulkIncomeRows(rows, paidMap, paidInst) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    (rows || []).forEach((item) => {
+      const bId = item.billReceivableId || item.receivableBillId || item.billId || item.documentId || item.invoiceId || item.id;
+      const instId = item.installmentId || item.installmentNumber
+        || (item.receipts && item.receipts[0] && (item.receipts[0].installmentId || item.receipts[0].installmentNumber));
+      if (bId && instId && paidInst) paidInst.add(String(bId) + ":" + String(instId));
+      if (!bId || !paidMap) return;
+      const validDates = [];
+      (item.receipts || []).forEach((receipt) => {
+        if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) validDates.push(receipt.paymentDate);
+      });
+      (item.receiptsCategories || []).forEach((cat) => {
+        (cat.receipts || []).forEach((receipt) => {
+          if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) validDates.push(receipt.paymentDate);
+        });
+      });
+      validDates.forEach((dateStr) => {
+        if (!dateStr) return;
+        const cleanDate = typeof dateStr === "string" ? dateStr.substring(0, 10) : dateStr;
+        const rDate = new Date(cleanDate + "T12:00:00");
+        rDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.floor((today - rDate) / (1000 * 60 * 60 * 24));
+        const key = String(bId);
+        const currentVal = paidMap.get(key);
+        if (currentVal === undefined || diffDays < currentVal) paidMap.set(key, diffDays);
+      });
+    });
+  },
+
+  async ensureDailyPaidMaps(companyIds, onProgress) {
+    const todayStr = filaLocalTodayStr();
+    if (await hydratePaidMapsFromDailyCache(todayStr)) return true;
+    if (typeof window !== "undefined" && window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap ? window.getRecentPaidMap() : null)) {
+      markPaidMapDayDone(todayStr);
+      return true;
+    }
+    const companies = [...new Set((companyIds || []).map(String).filter(Boolean))];
+    if (!companies.length) return false;
+
+    if (typeof onProgress === "function") {
+      onProgress(null, null, 0, companies.length, "Pagamentos recentes (1ª atualização do dia)");
+    }
+
+    const paidMap = (typeof window !== "undefined" && window.getRecentPaidMap && window.getRecentPaidMap()) || new Map();
+    const paidInst = (typeof window !== "undefined" && window.advFilters && window.advFilters.paidInstallmentIds) || new Set();
+    if (typeof window !== "undefined") {
+      window.advFilters = window.advFilters || {};
+      window.advFilters.paidMap = paidMap;
+      window.advFilters.paidInstallmentIds = paidInst;
+    }
+
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const isoLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const dateChunks = [];
+    for (let i = 0; i < 30; i += 6) {
+      const chunkEnd = new Date(today);
+      chunkEnd.setDate(chunkEnd.getDate() - i);
+      const chunkStart = new Date(today);
+      chunkStart.setDate(chunkStart.getDate() - Math.min(i + 5, 29));
+      dateChunks.push({ start: isoLocal(chunkStart), end: isoLocal(chunkEnd) });
+    }
+
+    const run = async () => {
+      let step = 0;
+      const total = companies.length * dateChunks.length;
+      for (const companyId of companies) {
+        for (const chunk of dateChunks) {
+          step += 1;
+          if (typeof onProgress === "function") {
+            onProgress(companyId, null, step, total, "Pagamentos recentes (1ª atualização do dia)");
+          }
+          try {
+            const res = await this.getBulkIncome(chunk.start, chunk.end, companyId);
+            this.ingestBulkIncomeRows(res && res.data, paidMap, paidInst);
+          } catch (e) {
+            console.warn("[Sienge] income diário", e);
+          }
+        }
+      }
+    };
+
+    if (typeof window !== "undefined" && window.ApiUsage && typeof ApiUsage.withSource === "function") {
+      await ApiUsage.withSource("system", "pagamentos_30d_diario", run);
+    } else {
+      await run();
+    }
+
+    if (typeof window !== "undefined") {
+      if (typeof window.syncRecentPaidMap === "function") window.syncRecentPaidMap(paidMap);
+      markPaidMapDayDone(todayStr);
+    }
+    return paidMap.size > 0;
   },
 
   async updateCachePaidMap(paidMapStr, paidInstStr) {

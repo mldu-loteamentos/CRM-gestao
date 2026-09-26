@@ -6055,9 +6055,8 @@ document.addEventListener("click", function(e) {
   // -----------------------------------------------
   if (dataAlreadyLoaded) {
     bills = AppState.defaultersBills;
-    const paidReady = window.hasPrefetchedPayments && window.paidMapHasBillDays && window.paidMapHasBillDays(window.getRecentPaidMap && window.getRecentPaidMap());
-    if (!paidReady && typeof window.prefetchRecentPayments === "function") {
-      try { await window.prefetchRecentPayments(forceRefresh); } catch (e) {}
+    if (typeof window.prefetchRecentPayments === "function") {
+      try { await window.prefetchRecentPayments(); } catch (e) {}
     }
   } else {
     const dashInput = document.getElementById("dashboard-search-input");
@@ -6180,16 +6179,12 @@ document.addEventListener("click", function(e) {
         if(s3) s3.textContent = "Busca concluída! Montando tabela...";
         
         if (window._siengeDefaultersIv) clearInterval(window._siengeDefaultersIv);
-        if (s1) s1.textContent = "Aplicando pagamentos recentes...";
-        if (s2) s2.textContent = "Aplicando pagamentos recentes...";
-        if (s3) s3.textContent = "Aplicando pagamentos recentes...";
         if (getSiengeApiMode() === "real") {
           AppState.defaultersBills = bills;
         }
         if (typeof window.prefetchRecentPayments === "function") {
-          try { await window.prefetchRecentPayments(forceRefresh); } catch (e) {}
+          try { await window.prefetchRecentPayments(); } catch (e) {}
         }
-        await new Promise(resolve => setTimeout(resolve, 200));
         if (getSiengeApiMode() === "real") {
           AppState.defaultersLoaded = true;
           
@@ -35550,167 +35545,31 @@ window.paidMapHasBillDays = function(map) {
     }
     return false;
 };
-window.prefetchRecentPayments = async function(forceRefresh = false) {
+window.prefetchRecentPayments = async function() {
     if (window._prefetchPaymentsInFlight) return window._prefetchPaymentsInFlight;
     const todayIso = typeof window.todayIsoLocal === "function"
       ? window.todayIsoLocal()
       : (new Date().getFullYear() + "-" + String(new Date().getMonth() + 1).padStart(2, "0") + "-" + String(new Date().getDate()).padStart(2, "0"));
     const dayFlag = "crm_paidmap_prefetch_" + todayIso;
-    let alreadyToday = false;
-    try { alreadyToday = localStorage.getItem(dayFlag) === "done"; } catch (e) {}
-    if (!forceRefresh && alreadyToday && window.paidMapHasBillDays(window.getRecentPaidMap())) {
-        window.hasPrefetchedPayments = true;
-        window.syncRecentPaidMap(window.getRecentPaidMap());
-        return;
-    }
-    
-    if (!forceRefresh && window.paidMapHasBillDays(window.getRecentPaidMap()) && window.hasPrefetchedPayments && alreadyToday) {
-        return;
-    }
-    
-    console.log("Iniciando busca de pagamentos recentes em segundo plano...");
-    
     const runPrefetch = async () => {
-    window.advFilters = window.advFilters || {};
-    window.advFilters.paymentsLoading = true;
-    
-    try {
-        const uniqueCompanies = new Set();
-        (window.rawClientList || []).forEach(c => {
-            if (c.companyId) uniqueCompanies.add(String(c.companyId));
-        });
-        ((window.AppState && AppState.defaultersBills) || []).forEach((b) => {
-            if (b && b.companyId) uniqueCompanies.add(String(b.companyId));
-        });
-        if (!uniqueCompanies.size) {
-            window.advFilters.paymentsLoading = false;
-            return;
-        }
-        
-        const today = new Date();
-        today.setHours(12, 0, 0, 0);
-        const isoLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-        const dateChunks = [];
-        // Quebra em blocos de 6 dias para garantir que nunca passará do limite de 500 do Sienge
-        for (let i = 0; i < 30; i += 6) {
-            const chunkEnd = new Date(today);
-            chunkEnd.setDate(chunkEnd.getDate() - i);
-            
-            const chunkStart = new Date(today);
-            let daysToSubtract = i + 5;
-            if (daysToSubtract > 29) daysToSubtract = 29;
-            chunkStart.setDate(chunkStart.getDate() - daysToSubtract);
-            
-            dateChunks.push({
-                start: isoLocal(chunkStart),
-                end: isoLocal(chunkEnd)
-            });
-        }
-        
-        const paidMap = window.getRecentPaidMap() || new Map();
-        window.advFilters.paidMap = paidMap;
-        window.syncRecentPaidMap(paidMap);
-        window.advFilters.paidInstallmentIds = window.advFilters.paidInstallmentIds || new Set();
-        
-        // Faz a busca empresa por empresa, bloco por bloco, de forma sequencial para não travar o navegador
-        for (const companyId of uniqueCompanies) {
-            for (const chunk of dateChunks) {
-                try {
-                    const res = await window.SiengeApiService.getBulkIncome(chunk.start, chunk.end, companyId);
-                    if (res && res.data) {
-                        res.data.forEach(item => {
-                            const bId = item.billReceivableId || item.receivableBillId || item.billId || item.documentId || item.invoiceId || item.id;
-                            const instId = item.installmentId || item.installmentNumber || (item.receipts && item.receipts[0] && (item.receipts[0].installmentId || item.receipts[0].installmentNumber));
-                            if (bId && instId) {
-                                window.advFilters.paidInstallmentIds.add(String(bId) + ":" + String(instId));
-                            }
-                            if (bId) {
-                                let validDates = [];
-                                
-                                // No Sienge Bulk Data, 'receipts' vem na raiz do objeto do título (diferente da API v1 padrão)
-                                if (item.receipts && Array.isArray(item.receipts)) {
-                                    item.receipts.forEach(receipt => {
-                                        if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) {
-                                            validDates.push(receipt.paymentDate);
-                                        }
-                                    });
-                                }
-                                
-                                // Fallback caso ainda venha aninhado (só por garantia)
-                                if (item.receiptsCategories && Array.isArray(item.receiptsCategories)) {
-                                    item.receiptsCategories.forEach(cat => {
-                                        if (cat.receipts && Array.isArray(cat.receipts)) {
-                                            cat.receipts.forEach(receipt => {
-                                                if (String(receipt.operationTypeId) === "2" && receipt.paymentDate) {
-                                                    validDates.push(receipt.paymentDate);
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                                
-
-                                
-                                validDates.forEach(dateStr => {
-                                    if (dateStr) {
-                                        const cleanDate = typeof dateStr === 'string' ? dateStr.substring(0, 10) : dateStr;
-                                        const rDate = new Date(cleanDate + 'T12:00:00');
-                                        const todayDate = new Date();
-                                        todayDate.setHours(0,0,0,0);
-                                        const rAtMidnight = new Date(rDate);
-                                        rAtMidnight.setHours(0,0,0,0);
-                                        const diffTime = todayDate - rAtMidnight;
-                                        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                                        
-                                        const currentVal = window.advFilters.paidMap.get(String(bId));
-                                        if (currentVal === undefined || diffDays < currentVal) {
-                                            window.advFilters.paidMap.set(String(bId), diffDays);
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                } catch (err) {
-                    console.error("Erro na busca de pagamentos em segundo plano", err);
-                }
-            }
-        }
-        console.log("Busca de pagamentos recentes em segundo plano finalizada com sucesso!");
-        window.syncRecentPaidMap(window.advFilters.paidMap);
-        window.hasPrefetchedPayments = true;
-        try { localStorage.setItem(dayFlag, "done"); } catch (e) {}
-        if (window.SiengeApiService && typeof window.SiengeApiService.updateCachePaidMap === 'function' && window.advFilters && window.advFilters.paidMap) {
-            let paidMapStr = null;
-            try { paidMapStr = JSON.stringify(Array.from(window.advFilters.paidMap.entries())); } catch(e){}
-            let paidInstStr = null;
-            try {
-              if (window.advFilters.paidInstallmentIds) {
-                paidInstStr = JSON.stringify(Array.from(window.advFilters.paidInstallmentIds));
-              }
-            } catch (e) {}
-            if (paidMapStr) {
-                window.SiengeApiService.updateCachePaidMap(paidMapStr, paidInstStr);
-            }
-        }
-    } catch (e) {
-        console.error("Erro geral na busca de pagamentos em segundo plano:", e);
-        window.hasPrefetchedPayments = false;
-    } finally {
-        if (window.advFilters) window.advFilters.paymentsLoading = false;
-        window.syncRecentPaidMap(window.advFilters && window.advFilters.paidMap);
+    if (window.SiengeApiService && typeof SiengeApiService.hydratePaidMaps === "function") {
+      try { await SiengeApiService.hydratePaidMaps(); } catch (e) {}
     }
+    if (window.paidMapHasBillDays(window.getRecentPaidMap())) {
+      window.hasPrefetchedPayments = true;
+      window.syncRecentPaidMap(window.getRecentPaidMap());
+      try { localStorage.setItem(dayFlag, "done"); } catch (e) {}
+      return;
+    }
+    window.hasPrefetchedPayments = true;
     };
-    window._prefetchPaymentsInFlight = (window.ApiUsage && typeof ApiUsage.withSource === "function")
-      ? ApiUsage.withSource("system", "pagamentos_30d", runPrefetch)
-      : runPrefetch();
+    window._prefetchPaymentsInFlight = runPrefetch();
     try {
       await window._prefetchPaymentsInFlight;
     } finally {
       window._prefetchPaymentsInFlight = null;
     }
 };
-
 window.clearAdvFilters = function() {
     const defaultState = {
         lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
