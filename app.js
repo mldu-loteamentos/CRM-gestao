@@ -8,7 +8,11 @@
       if (key === "crm_moura_notes") {
           window.agendaItemsCache = null;
       }
-      originalSetItem.apply(this, arguments);
+      try {
+        originalSetItem.apply(this, arguments);
+      } catch (e) {
+        console.warn("[storage] setItem falhou", key, e && e.name);
+      }
   };
 
   let originalSaveNotesToFirebase = null;
@@ -237,6 +241,19 @@ window.valueIsSubjudice = function(v) {
 window.clientIsSubjudice = function(client) {
   if (!client) return false;
   return window.valueIsSubjudice(client.subjudice);
+};
+
+window.isWriteOffReceipt = function(rec) {
+  const rType = String((rec && (rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId)) || "").trim().toLowerCase();
+  const extra = String((rec && (rec.typeName || rec.receiptTypeName || rec.description || rec.historic || rec.history)) || "").toLowerCase();
+  const blob = (rType + " " + extra).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (blob.includes("distrato") || blob.includes("cancel")) return true;
+  return rType === "3" || rType === "7";
+};
+
+window.installmentsOpenBalance = function(installments) {
+  if (!Array.isArray(installments)) return 0;
+  return installments.reduce((acc, inst) => acc + (Number(inst && inst.currentBalance) || 0), 0);
 };
 
 window.isCobrancaBackOfficeUser = function(u) {
@@ -1693,10 +1710,41 @@ window.installmentDueIsoDate = function(instOrDate) {
   return "";
 };
 
+window.parseBoletoPercent = function(v) {
+  if (v == null || v === "") return null;
+  const n = parseFloat(String(v).trim().replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+
 window.getSimuladorTaxaMultiplier = function() {
-  const el = document.getElementById("simulador-taxa");
-  const n = el ? parseFloat(el.value) : NaN;
-  return Number.isFinite(n) ? n : 1;
+  const modalEl = document.getElementById("reprocess-taxa");
+  const modal = document.getElementById("modal-reprocessar-boleto");
+  const modalOpen = modal && modal.classList.contains("active") && modalEl;
+  const el = modalOpen ? modalEl : (document.getElementById("simulador-taxa") || modalEl);
+  const n = el ? window.parseBoletoPercent(el.value) : null;
+  return n != null ? n : 1;
+};
+
+window.resolveBoletoChargePercents = function() {
+  const taxa = window.getSimuladorTaxaMultiplier();
+  const fine = Number((2 * taxa).toFixed(4));
+  const interest = Number((1 * taxa).toFixed(4));
+  return { fine, interest, taxa };
+};
+
+window.syncReprocessChargePercents = function() {
+  const pct = window.resolveBoletoChargePercents();
+  currentReprocessFinePct = pct.fine;
+  currentReprocessInterestPct = pct.interest;
+  const fineEl = document.getElementById("reprocess-fine");
+  const interestEl = document.getElementById("reprocess-interest");
+  if (fineEl) fineEl.value = pct.fine.toFixed(2);
+  if (interestEl) interestEl.value = pct.interest.toFixed(2);
+  const dueEl = document.getElementById("reprocess-duedate");
+  if (typeof window.renderReprocessChargesSummary === "function") {
+    window.renderReprocessChargesSummary(currentReprocessInstId, dueEl && dueEl.value, pct.taxa);
+  }
+  return pct;
 };
 
 window.daysOverdueUntilTarget = function(inst, targetDate) {
@@ -3648,22 +3696,20 @@ async function initializeApplication() {
   };
 
   window.applyRemoteNotes = function(local, remote, customerId) {
-      const remoteList = Array.isArray(remote) ? remote : [];
-      const localList = Array.isArray(local) ? local : [];
-      const remoteKeys = new Set(remoteList.map(n => window.occurrenceIdentity(n)));
-      const graceMs = 120000;
-      const now = Date.now();
-      const extras = [];
       const purgedIds = new Set(typeof window.getPurgedBoleto4868Identities === "function" ? window.getPurgedBoleto4868Identities() : []);
       const drop = (n) => purgedIds.has(window.occurrenceIdentity(n))
         || (typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, customerId));
-      localList.forEach(n => {
-          const k = window.occurrenceIdentity(n);
-          if (!k || remoteKeys.has(k) || drop(n)) return;
-          const ts = new Date(n.date).getTime();
-          if (Number.isFinite(ts) && ts <= now && (now - ts) < graceMs) extras.push(n);
+      const localList = (Array.isArray(local) ? local : []).filter(n => n && !drop(n));
+      const remoteList = (Array.isArray(remote) ? remote : []).filter(n => n && !drop(n));
+      return window.mergeOccurrenceLists(localList, remoteList);
+  };
+
+  window.mergeNotesStores = function(base, incoming) {
+      const out = Object.assign({}, base && typeof base === "object" ? base : {});
+      Object.keys(incoming && typeof incoming === "object" ? incoming : {}).forEach((k) => {
+          out[k] = window.mergeOccurrenceLists(out[k], incoming[k]);
       });
-      return remoteList.filter(n => !drop(n)).concat(extras);
+      return out;
   };
 
   window.getCustomerNotesList = function(store, customerId) {
@@ -3886,13 +3932,16 @@ async function initializeApplication() {
   };
 
   window.persistCustomerNotesList = function(customerKey, customerId, notesToSave) {
-      AppState.notes[customerKey] = notesToSave;
-      if (customerId != null && String(customerId) !== String(customerKey) && AppState.notes[customerId]) {
+      const current = window.getCustomerNotesList(AppState.notes, customerKey);
+      const merged = window.mergeOccurrenceLists(current, notesToSave);
+      AppState.notes[customerKey] = merged;
+      if (customerId != null && String(customerId) !== String(customerKey)) {
           AppState.notes[customerId] = window.mergeOccurrenceLists(
               window.getCustomerNotesList(AppState.notes, customerId),
-              notesToSave
+              merged
           );
       }
+      return merged;
   };
 
   window.saveNotesToFirebase = async function(customerId, opts) {
@@ -3931,8 +3980,14 @@ async function initializeApplication() {
                const chunkId = window.getCustomerNoteChunkId(customerKey);
                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'customer_notes_shards', chunkId);
                const applyMerged = (remote) => {
-                   let notesToSave = window.mergeOccurrenceLists(sourceList, Array.isArray(remote) ? remote : []).filter(n => strip4868(n, customerKey));
+                   const remoteList = Array.isArray(remote) ? remote : [];
+                   let notesToSave = window.mergeOccurrenceLists(sourceList, remoteList).filter(n => strip4868(n, customerKey));
                    notesToSave = window.filterDroppedNotes(notesToSave, drop);
+                   if (!drop.size && remoteList.length && notesToSave.length < remoteList.length) {
+                       console.warn("[Notes] Merge ficou menor que a nuvem; mantendo união completa.", customerKey, notesToSave.length, remoteList.length);
+                       notesToSave = window.mergeOccurrenceLists(notesToSave, remoteList).filter(n => strip4868(n, customerKey));
+                       notesToSave = window.filterDroppedNotes(notesToSave, drop);
+                   }
                    return notesToSave;
                };
                const writeMerged = async () => {
@@ -3945,6 +4000,9 @@ async function initializeApplication() {
                            const remote = Array.isArray(data[customerKey]) ? data[customerKey] : [];
                            saved = applyMerged(remote);
                            if (!saved.length && !drop.size) return;
+                           if (!drop.size && remote.length && saved.length < remote.length) {
+                               saved = window.mergeOccurrenceLists(saved, remote);
+                           }
                            transaction.set(docRef, { [customerKey]: saved }, { merge: true });
                        });
                        return saved;
@@ -3964,6 +4022,7 @@ async function initializeApplication() {
                    await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
                }
                console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!", customerKey, notesToSave.length, "registro(s)");
+               if (typeof window.renderCustomerOccurrences === "function") window.renderCustomerOccurrences();
             } else {
                console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
                const { collection, getDocs } = window.firebaseCollections;
@@ -9542,8 +9601,7 @@ function formatCpfCnpj(val) {
                  if (inst.receipts && Array.isArray(inst.receipts)) {
                    inst.receipts.forEach(rec => {
                      // Não contabilizar Baixas Contábeis (Distrato/Cancelamento) como valor pago pelo cliente
-                     const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-                     if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") {
+                     if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) {
                         hasDistratoReceipt = true;
                         return; 
                      }
@@ -9583,7 +9641,8 @@ function formatCpfCnpj(val) {
             });
           }
           
-          if (hasDistratoReceipt) {
+          const openBal = valorVencidas + valorAVencer;
+          if (hasDistratoReceipt && openBal <= 0.009 && !contract.payOffDate) {
             status = "Distrato/Cancelado";
             badgeClass = "badge-secondary";
             payoffStr = "Distrato";
@@ -9776,15 +9835,17 @@ function formatCpfCnpj(val) {
       allInsts.forEach(inst => {
          if (inst.receipts && Array.isArray(inst.receipts)) {
             inst.receipts.forEach(rec => {
-               const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-               if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") {
+               if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) {
                   isDistrato = true;
                }
             });
          }
       });
+      const kpiOpenBal = typeof window.installmentsOpenBalance === "function"
+        ? window.installmentsOpenBalance(allInsts)
+        : allInsts.reduce((acc, inst) => acc + (Number(inst && inst.currentBalance) || 0), 0);
 
-      if (isDistrato || (rbContract && rbContract.active === false)) {
+      if ((isDistrato || (rbContract && rbContract.active === false)) && kpiOpenBal <= 0.009 && !(rbContract && rbContract.payOffDate)) {
          distratosCount++;
       } else if (rbContract && rbContract.payOffDate) {
          globalQuitadoCount++;
@@ -10426,8 +10487,7 @@ function formatCpfCnpj(val) {
              }
              if (inst.receipts && Array.isArray(inst.receipts)) {
                 inst.receipts.forEach(rec => {
-                   const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-                   if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") {
+                   if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) {
                       mainContractHasDistrato = true;
                       return; 
                    }
@@ -10482,7 +10542,8 @@ function formatCpfCnpj(val) {
     }
     
     // UPDATE STATUS Se for distrato
-    if (mainContractHasDistrato || sale.active === false) {
+    const mainOpenBal = kpiVencidas + kpiAVencer;
+    if ((mainContractHasDistrato && mainOpenBal <= 0.009 && !sale.payOffDate) || (sale.active === false && mainOpenBal <= 0.009 && !sale.payOffDate)) {
        sale.status = "Distratado";
        const badgeEl = document.getElementById("det-unit-badge");
        if (badgeEl) {
@@ -12437,15 +12498,15 @@ async function saveCustomerOccurrence() {
     reuniaoSemanalTerceirizada: !!isReuniaoSemanal
   };
   
-  // Always reload from localStorage to prevent overwriting from multiple tabs
-  const localNotes = localStorage.getItem("crm_moura_notes");
-  if (localNotes) {
-    AppState.notes = JSON.parse(localNotes);
-  }
-  
-  if (!AppState.notes[AppState.selectedCustomerId]) {
-    AppState.notes[AppState.selectedCustomerId] = [];
-  }
+  try {
+    const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes") || "null");
+    if (localNotes && typeof localNotes === "object") {
+      AppState.notes = typeof window.mergeNotesStores === "function"
+        ? window.mergeNotesStores(AppState.notes, localNotes)
+        : Object.assign({}, localNotes, AppState.notes);
+    }
+  } catch (e) {}
+  if (!AppState.notes) AppState.notes = {};
   
   // LOGICA CROSS-CONTRACT E LIMPEZA DE TEMPO NA FILA
   let redirectSaleId = null;
@@ -18624,27 +18685,17 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   dueDateInput.readOnly = true;
   dueDateInput.removeAttribute("min");
 
-  const taxaMultiplier = typeof window.getSimuladorTaxaMultiplier === "function"
-    ? window.getSimuladorTaxaMultiplier()
-    : 1;
-  currentReprocessFinePct = 2 * taxaMultiplier;
-  currentReprocessInterestPct = 1 * taxaMultiplier;
-  const defaultMulta = currentReprocessFinePct.toFixed(2);
-  const defaultJuros = currentReprocessInterestPct.toFixed(2);
-
-  const fineEl = document.getElementById('reprocess-fine');
-  const interestEl = document.getElementById('reprocess-interest');
-  if (fineEl) {
-    fineEl.value = defaultMulta;
-    fineEl.readOnly = true;
+  const taxaEl = document.getElementById("reprocess-taxa");
+  const simTaxaEl = document.getElementById("simulador-taxa");
+  if (taxaEl) {
+    const fromSim = simTaxaEl && window.parseBoletoPercent(simTaxaEl.value);
+    taxaEl.value = fromSim != null ? String(fromSim) : "1";
   }
-  if (interestEl) {
-    interestEl.value = defaultJuros;
-    interestEl.readOnly = true;
-  }
-  if (typeof window.renderReprocessChargesSummary === "function") {
-    window.renderReprocessChargesSummary(instId, dueDateInput.value, taxaMultiplier);
-  }
+  const pct = typeof window.syncReprocessChargePercents === "function"
+    ? window.syncReprocessChargePercents()
+    : { fine: 2, interest: 1, taxa: 1 };
+  currentReprocessFinePct = pct.fine;
+  currentReprocessInterestPct = pct.interest;
 
   // Tenta puxar valores da aba de ocorrências se já estiverem preenchidos
   const mainTextEl = document.getElementById('note-text');
@@ -18791,14 +18842,11 @@ window.submitReprocessBoleto = async function() {
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
   const account = String((selectedOpt && selectedOpt.dataset.accountNumber) || (accountSelectEl && accountSelectEl.value) || "").trim();
   const dueDate = document.getElementById('reprocess-duedate').value;
-  const fineRaw = (typeof currentReprocessFinePct === "number" && Number.isFinite(currentReprocessFinePct))
-    ? currentReprocessFinePct
-    : parseFloat(document.getElementById('reprocess-fine') && document.getElementById('reprocess-fine').value);
-  const interestRaw = (typeof currentReprocessInterestPct === "number" && Number.isFinite(currentReprocessInterestPct))
-    ? currentReprocessInterestPct
-    : parseFloat(document.getElementById('reprocess-interest') && document.getElementById('reprocess-interest').value);
-  const fine = Number.isFinite(fineRaw) ? fineRaw : 0;
-  const interest = Number.isFinite(interestRaw) ? interestRaw : 0;
+  const pctNow = typeof window.syncReprocessChargePercents === "function"
+    ? window.syncReprocessChargePercents()
+    : window.resolveBoletoChargePercents();
+  const fine = Number(pctNow && pctNow.fine) || 0;
+  const interest = Number(pctNow && pctNow.interest) || 0;
 
   if (!account) {
     alert("Selecione uma conta corrente.");
@@ -32799,8 +32847,7 @@ window.searchRelacionamento = async function() {
            c._localDebitBalance.installments.forEach(inst => {
                if (inst.receipts && Array.isArray(inst.receipts)) {
                    inst.receipts.forEach(rec => {
-                       const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-                       if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") {
+                       if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) {
                            hasDistratoReceipt = true;
                        }
                    });
@@ -32829,7 +32876,25 @@ window.searchRelacionamento = async function() {
            });
        }
 
-       let isCanceled = cStatus === 'CANCELED' || cStatus === 'DISTRATO' || hasDistratoReceipt || (contractBills.length > 0 && contractBills.every(b => b.active === false && !b.payOffDate));
+       const instList = c._localDebitBalance && Array.isArray(c._localDebitBalance.installments)
+           ? c._localDebitBalance.installments
+           : [];
+       const openBal = typeof window.installmentsOpenBalance === "function"
+           ? window.installmentsOpenBalance(instList)
+           : instList.reduce((acc, inst) => acc + (Number(inst && inst.currentBalance) || 0), 0);
+       const hasInstData = instList.length > 0;
+       const billsAllCanceled = contractBills.length > 0 && contractBills.every(b => b.active === false && !b.payOffDate);
+       let isCanceled = false;
+       if (hasInstData) {
+           isCanceled = openBal <= 0.009 && (
+               hasDistratoReceipt ||
+               billsAllCanceled ||
+               cStatus === 'CANCELED' ||
+               cStatus === 'DISTRATO'
+           );
+       } else {
+           isCanceled = cStatus === 'CANCELED' || cStatus === 'DISTRATO' || billsAllCanceled;
+       }
 
        if (isCanceled) {
            statusText = "Distratado/Cancelado";
@@ -33707,20 +33772,22 @@ window.saveJudicialOccurrence = function() {
     type: "Judicial"
   };
 
-  if (!AppState.judNotes) {
-    const local = localStorage.getItem("crm_moura_jud_notes");
-    AppState.judNotes = local ? JSON.parse(local) : {};
-  }
-  const localJudNotes = localStorage.getItem("crm_moura_jud_notes");
-  if (localJudNotes) {
-    AppState.judNotes = JSON.parse(localJudNotes);
-  }
-
-  if (!AppState.judNotes[AppState.selectedCustomerId]) {
-    AppState.judNotes[AppState.selectedCustomerId] = [];
-  }
-  
-  AppState.judNotes[AppState.selectedCustomerId].push(occurrence);
+  if (!AppState.judNotes) AppState.judNotes = {};
+  try {
+    const localJudNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes") || "null");
+    if (localJudNotes && typeof localJudNotes === "object") {
+      AppState.judNotes = typeof window.mergeNotesStores === "function"
+        ? window.mergeNotesStores(AppState.judNotes, localJudNotes)
+        : Object.assign({}, localJudNotes, AppState.judNotes);
+    }
+  } catch (e) {}
+  const judKey = String(AppState.selectedCustomerId);
+  const judExisting = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.judNotes, judKey)
+    : (AppState.judNotes[judKey] || []);
+  AppState.judNotes[judKey] = window.mergeOccurrenceLists
+    ? window.mergeOccurrenceLists(judExisting, [occurrence])
+    : judExisting.concat([occurrence]);
   localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
   if (window.saveJudNotesToFirebase) {
     window.saveJudNotesToFirebase(AppState.selectedCustomerId);
@@ -37934,8 +38001,7 @@ window.mapaJuridicoKpisFromInstallments = function(installments) {
       }
     }
     (inst.receipts || []).forEach(rec => {
-      const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-      if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") return;
+      if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) return;
       kpiPago += Number(rec.receiptValue || 0);
       kpiAcrescimo += Number(rec.additionalValue || 0);
       kpiDesconto += Number(rec.discountValue || 0);

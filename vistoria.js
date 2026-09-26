@@ -1,3 +1,17 @@
+function formatVistoriaUnidade(v) {
+    const raw = String((v && v.unidade) || "").trim();
+    const blank = !raw || /^n\/d$/i.test(raw) || /^unidade\s*n\/d$/i.test(raw) || raw === "-" || raw === "—";
+    const unit = blank ? "" : raw.replace(/^unidade\s+/i, "");
+    const cc = String((v && (v.costCenterId || v.enterpriseId)) || "").trim();
+    const titulo = String((v && (v.titulo || v.tituloKey)) || "").trim();
+    const parts = [];
+    if (cc && unit) parts.push(cc + " · " + unit);
+    else if (unit) parts.push(unit);
+    else if (cc) parts.push(cc);
+    if (titulo && !/^n\/d$/i.test(titulo)) parts.push("Título " + titulo);
+    return parts.join(" — ") || "Unidade não informada";
+}
+
 let currentVistoriaId = null;
 let currentVistoriaDoc = null;
 let loteCoords = null; // {lat, lng}
@@ -120,7 +134,7 @@ function renderizarLista() {
         item.innerHTML = `
             <div>
                 <div style="font-weight: bold; margin-bottom: 4px;">${v.cidade || '-'} - ${v.empreendimento || '-'}</div>
-                <div style="color: #64748b; font-size: 0.9rem;">Unidade: ${v.unidade || '-'}</div>
+                <div style="color: #64748b; font-size: 0.9rem;">Unidade: ${formatVistoriaUnidade(v)}</div>
             </div>
             <div>${statusBadge}</div>
         `;
@@ -168,7 +182,7 @@ async function abrirVistoria(id) {
     document.getElementById('lbl-cidade').textContent = currentVistoriaDoc.cidade || '-';
     document.getElementById('lbl-empreendimento').textContent = currentVistoriaDoc.empreendimento || '-';
     if (document.getElementById('lbl-unidade')) {
-        document.getElementById('lbl-unidade').textContent = currentVistoriaDoc.unidade || '-';
+        document.getElementById('lbl-unidade').textContent = formatVistoriaUnidade(currentVistoriaDoc);
     }
     
     if (currentVistoriaDoc.createdAt) {

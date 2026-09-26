@@ -58,31 +58,106 @@ window.ConstrucaoApp = {
             .toUpperCase();
     },
 
+    isBlankUnit(n) {
+        const s = String(n || "").replace(/^Quadra-Lote:\s*/i, "").trim();
+        return !s || /^n\/d$/i.test(s) || /^unidade\s*n\/d$/i.test(s) || s === "-" || s === "—";
+    },
+
+    parseUnitFromId(unitId) {
+        const raw = String(unitId || "").trim();
+        if (!raw) return { cc: "", unit: "" };
+        const parts = raw.split("-").filter(Boolean);
+        if (parts[0] === "U" && parts.length >= 3) {
+            return { cc: parts[1] || "", unit: parts.slice(2).join("-") };
+        }
+        if (parts.length >= 2 && /^\d{4,5}$/.test(parts[0])) {
+            return { cc: parts[0], unit: parts.slice(1).join("-") };
+        }
+        return { cc: "", unit: "" };
+    },
+
+    readFichaUnitFallback() {
+        const el = document.getElementById("det-block-lot-span") || document.getElementById("det-block-lot");
+        const raw = el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
+        if (!raw || /^n\/d$/i.test(raw) || raw === "—") return { cc: "", unit: "" };
+        const m = raw.match(/^(\d{4,5})\s*[-–]\s*(.+)$/);
+        if (m) return { cc: m[1], unit: m[2].trim() };
+        return { cc: "", unit: raw };
+    },
+
     extractUnitName(c) {
-        if (!c) return "";
+        if (!c) c = {};
         let n = c.unitName || c.unityName || c.units || c.unit || c.unitIdentifier || c.unidade || "";
-        if (!n && c.property && c.property.unitName) n = c.property.unitName;
-        if (!n && c.block && c.lot) n = String(c.block) + "-" + String(c.lot);
-        if (!n && c.unitId) {
-            const parts = String(c.unitId).split("-");
-            if (parts[0] === "U" && parts.length >= 3) n = parts.slice(2).join("-");
+        if (this.isBlankUnit(n) && c.property && c.property.unitName) n = c.property.unitName;
+        if (this.isBlankUnit(n) && c.block && c.lot) n = String(c.block) + "-" + String(c.lot);
+        if (this.isBlankUnit(n) && c.unitId) {
+            const parsed = this.parseUnitFromId(c.unitId);
+            if (parsed.unit) n = parsed.unit;
         }
         if (typeof AppState !== "undefined" && AppState.units && c.unitId && AppState.units[c.unitId]) {
             const u = AppState.units[c.unitId];
-            if (!n && u.block && u.lot && u.block !== "N/D") n = u.block + "-" + u.lot;
+            if (this.isBlankUnit(n) && u.name && !this.isBlankUnit(u.name)) n = u.name;
+            if (this.isBlankUnit(n) && u.block && u.lot && u.block !== "N/D") n = u.block + "-" + u.lot;
         }
-        return String(n).replace(/^Quadra-Lote:\s*/i, "").trim();
+        if (this.isBlankUnit(n)) {
+            const fb = this.readFichaUnitFallback();
+            if (fb.unit) n = fb.unit;
+        }
+        n = String(n).replace(/^Quadra-Lote:\s*/i, "").replace(/^unidade\s+/i, "").trim();
+        return this.isBlankUnit(n) ? "" : n;
     },
 
     extractCostCenterId(c) {
-        if (!c) return "";
+        if (!c) c = {};
         let cc = c.enterpriseId || c.costCenterId || (c.property && c.property.costCenterId) || "";
         if (!cc && c.unitId) {
-            const parts = String(c.unitId).split("-");
-            if (parts[0] === "U" && parts[1]) cc = parts[1];
+            const parsed = this.parseUnitFromId(c.unitId);
+            if (parsed.cc) cc = parsed.cc;
         }
         if (!cc && typeof AppState !== "undefined") cc = AppState.currentCostCenterId || "";
+        if (!cc) {
+            const fb = this.readFichaUnitFallback();
+            if (fb.cc) cc = fb.cc;
+        }
         return String(cc || "").trim();
+    },
+
+    formatLotLabel(unitName, costCenterId) {
+        const unit = this.isBlankUnit(unitName) ? "" : String(unitName).trim();
+        const cc = String(costCenterId || "").trim();
+        if (cc && unit) return cc + " · " + unit;
+        return unit || cc || "";
+    },
+
+    getActiveContractContext() {
+        let customerId = typeof AppState !== "undefined" ? AppState.selectedCustomerId : null;
+        let saleId = typeof AppState !== "undefined" ? AppState.selectedSaleId : null;
+        if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
+        if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
+        if (!saleId && window.AnexosState && window.AnexosState.activeContract) {
+            saleId = window.AnexosState.activeContract.id;
+        }
+        let saleObj = null;
+        if (typeof AppState !== "undefined" && AppState.sales) {
+            saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
+            if (!saleObj && window.AnexosState && window.AnexosState.activeContract) {
+                saleObj = AppState.sales.find(s => String(s.saleId || s.contractId || s.id) === String(window.AnexosState.activeContract.id));
+            }
+            if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
+        }
+        let contractObj = { ...(saleObj || {}) };
+        if (window.AnexosState && window.AnexosState.activeContract) {
+            contractObj = { ...contractObj, ...window.AnexosState.activeContract };
+        }
+        const unitName = this.extractUnitName(contractObj);
+        const costCenterId = this.extractCostCenterId(contractObj);
+        const titulo = String(
+            contractObj.receivableBillId
+            || (typeof AppState !== "undefined" && AppState.currentReceivableBillId)
+            || saleId
+            || ""
+        ).trim();
+        return { customerId, saleId, saleObj, contractObj, unitName, costCenterId, titulo };
     },
 
     unitMatches(siengeName, wantName) {
@@ -417,19 +492,28 @@ window.loadConstrucoes = async function() {
     try {
         const { collection, query, where, getDocs } = window.firebaseCollections;
         const querySpecs = [
-            { coll: "construction_checks", id: String(customerId) },
-            { coll: "vistorias", id: String(customerId) }
+            { coll: "construction_checks", field: "customerId", id: String(customerId) },
+            { coll: "vistorias", field: "customerId", id: String(customerId) }
         ];
         const numId = Number(customerId);
         if (!isNaN(numId)) {
-            querySpecs.push({ coll: "construction_checks", id: numId });
-            querySpecs.push({ coll: "vistorias", id: numId });
+            querySpecs.push({ coll: "construction_checks", field: "customerId", id: numId });
+            querySpecs.push({ coll: "vistorias", field: "customerId", id: numId });
+        }
+        const billId = (typeof AppState !== "undefined" && AppState.currentReceivableBillId) || saleId;
+        if (billId) {
+            querySpecs.push({ coll: "vistorias", field: "tituloKey", id: String(billId) });
+            querySpecs.push({ coll: "vistorias", field: "titulo", id: String(billId) });
         }
 
         loading.innerHTML = 'Carregando dados do servidor (pode demorar alguns segundos)...';
         const snaps = await Promise.all(querySpecs.map(q =>
-            getDocs(query(collection(window.firebaseDb, q.coll), where("customerId", "==", q.id)))
+            getDocs(query(collection(window.firebaseDb, q.coll), where(q.field || "customerId", "==", q.id)))
                 .then(snap => ({ snap, coll: q.coll }))
+                .catch(err => {
+                    console.warn("[Construção] consulta Firebase ignorada:", q.coll, q.field, err);
+                    return { snap: { forEach: () => {} }, coll: q.coll };
+                })
         ));
 
         const snapshot = [];
@@ -459,6 +543,9 @@ window.loadConstrucoes = async function() {
                 if (saleObj.saleCode) validIds.add(String(saleObj.saleCode));
             }
         }
+        if (typeof AppState !== 'undefined' && AppState.currentReceivableBillId) {
+            validIds.add(String(AppState.currentReceivableBillId));
+        }
         
         console.log('[Construção] IDs válidos para matching:', Array.from(validIds));
         console.log('[Construção] Documentos retornados pelo Firebase (sem filtro):', snapshot.length);
@@ -468,6 +555,9 @@ window.loadConstrucoes = async function() {
             let matches = false;
             
             if (validIds.has(String(data.contractId))) matches = true;
+            if (!matches && (validIds.has(String(data.tituloKey || "")) || validIds.has(String(data.titulo || "")))) {
+                matches = true;
+            }
             
             if (!matches && data.contractKeys && Array.isArray(data.contractKeys)) {
                 for (let k of data.contractKeys) {
@@ -503,7 +593,7 @@ window.loadConstrucoes = async function() {
         const pendingStatus = new Set(['aguardando_fotos', 'aguardando_validacao']);
         window.ConstrucaoApp.allMatchedDocs = results.slice();
         const display = results.filter(data => {
-            if (pendingStatus.has(data.status)) return false;
+            if (pendingStatus.has(data.status)) return true;
             if (!hasInspectionContent(data)) return false;
             if (data._collection === 'vistorias' && data.status === 'concluida') {
                 const hasCheck = results.some(o => o._collection === 'construction_checks' && sameContract(o, data));
@@ -511,6 +601,33 @@ window.loadConstrucoes = async function() {
             }
             return true;
         });
+
+        try {
+            const ctxFix = window.ConstrucaoApp.getActiveContractContext();
+            const unitFix = ctxFix.unitName;
+            const ccFix = ctxFix.costCenterId;
+            if (unitFix && window.firebaseCollections && window.firebaseCollections.updateDoc) {
+                const { updateDoc, doc } = window.firebaseCollections;
+                const pendingBroken = display.filter(d =>
+                    d._collection === 'vistorias'
+                    && pendingStatus.has(d.status)
+                    && window.ConstrucaoApp.isBlankUnit(d.unidade)
+                );
+                await Promise.all(pendingBroken.map(async d => {
+                    const patch = { unidade: unitFix, updatedAt: new Date().toISOString() };
+                    if (ccFix) patch.costCenterId = ccFix;
+                    if (ctxFix.titulo) {
+                        patch.titulo = ctxFix.titulo;
+                        patch.tituloKey = ctxFix.titulo;
+                    }
+                    await updateDoc(doc(window.firebaseDb, 'vistorias', d.id), patch);
+                    d.unidade = unitFix;
+                    if (ccFix) d.costCenterId = ccFix;
+                }));
+            }
+        } catch (repairErr) {
+            console.warn("[Construção] Não foi possível completar a unidade do link pendente:", repairErr);
+        }
 
         for (const check of display) {
             const urls = window.ConstrucaoApp.collectPhotoUrls(check, results);
@@ -577,9 +694,10 @@ function renderConstrucaoHistory(checks) {
             fileLink = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; position:relative;" title="${photoUrls.length} foto${photoUrls.length > 1 ? 's' : ''}"><i data-lucide="image" style="width:14px; height:14px;"></i>${countBadge}</button>`;
         }
 
-        const isAppVistoria = window.ConstrucaoApp.isLinkVistoria(check);
+        const isPendingLink = check.status === 'aguardando_fotos' || check.status === 'aguardando_validacao';
+        const isAppVistoria = window.ConstrucaoApp.isLinkVistoria(check) || isPendingLink;
         let obsBtn = '';
-        if (isAppVistoria) {
+        if (isAppVistoria && !isPendingLink) {
             obsBtn = `<button onclick="window.showVistoriaInfo('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px; color: #3b82f6; border-color: #bfdbfe;" title="Ver Detalhes"><i data-lucide="info" style="width:14px; height:14px;"></i></button>`;
         }
 
@@ -588,6 +706,7 @@ function renderConstrucaoHistory(checks) {
         const linked = allDocs.find(d => d.id === linkedId);
         const respName = window.ConstrucaoApp.resolveResponsibleName({
             ...check,
+            responsible: check.requestedBy || check.responsible,
             cidade: check.cidade || (linked && linked.cidade),
             costCenterId: check.costCenterId || (linked && linked.costCenterId),
             empreendimento: check.empreendimento || (linked && linked.empreendimento)
@@ -598,18 +717,31 @@ function renderConstrucaoHistory(checks) {
         const editBtn = isAppVistoria
             ? ''
             : `<button onclick="window.editNovaVistoria('${check.id}')" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 0.75rem; margin-right: 4px;" title="Editar"><i data-lucide="edit" style="width:14px; height:14px;"></i></button>`;
+        const lotLabel = window.ConstrucaoApp.formatLotLabel(check.unidade, check.costCenterId);
+        const stageLabel = isPendingLink
+            ? (check.status === 'aguardando_validacao' ? 'Aguardando validação' : 'Link enviado')
+            : (check.stage || '-');
+        const stageStyle = isPendingLink
+            ? (check.status === 'aguardando_validacao'
+                ? 'background:#ede9fe;color:#6d28d9'
+                : 'background:#fef3c7;color:#92400e')
+            : 'background:#dcfce7;color:#166534';
+        const pendingObs = isPendingLink
+            ? `Vistoria encaminhada${lotLabel ? ' para o lote ' + lotLabel : ''}${check.titulo || check.tituloKey ? ' · Título ' + (check.titulo || check.tituloKey) : ''}. ${check.status === 'aguardando_validacao' ? 'Fotos recebidas, aguardando validação.' : 'Aguardando fotos do vistoriador.'}`
+            : '';
 
         html += `
         <tr>
             <td style="font-weight: 500; white-space: nowrap;">${dateStr}</td>
             <td>${(window.shortOperatorName ? window.shortOperatorName(respName) : respName)}</td>
             <td>
-                <span style="background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
-                    ${check.stage || '-'}
+                <span style="${stageStyle}; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">
+                    ${stageLabel}
                 </span>
             </td>
             <td style="font-size: 0.8rem; color: #64748b; line-height: 1.3;">
                 ${(() => {
+                    if (pendingObs) return pendingObs;
                     const obs = window.ConstrucaoApp.resolveVistoriaObservation(check);
                     return obs ? obs.replace(/\\n/g, '<br>').replace(/\n/g, '<br>') : '-';
                 })()}
@@ -916,24 +1048,10 @@ window.openNewConstrucaoModal = function(editId = null) {
 };
 
 window.solicitarWhatsAppFromClient = async function() {
-    let customerId = typeof AppState !== 'undefined' ? AppState.selectedCustomerId : null;
-    let saleId = typeof AppState !== 'undefined' ? AppState.selectedSaleId : null;
-    if (!customerId && window.activeCustomerId) customerId = window.activeCustomerId;
-    if (!customerId && window.AnexosState) customerId = window.AnexosState.idCliente;
-    
-    let saleObj = null;
-    if (typeof AppState !== 'undefined' && AppState.sales) {
-        saleObj = AppState.sales.find(s => String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId));
-        if (!saleObj && window.AnexosState && window.AnexosState.activeContract) {
-            saleObj = AppState.sales.find(s => String(s.saleId || s.contractId || s.id) === String(window.AnexosState.activeContract.id));
-        }
-        if (!saleObj && AppState.sales.length > 0) saleObj = AppState.sales[0];
-    }
-    
-    let contractObj = { ...(saleObj || {}) };
-    if (window.AnexosState && window.AnexosState.activeContract) {
-        contractObj = { ...contractObj, ...window.AnexosState.activeContract };
-    }
+    const ctx = window.ConstrucaoApp.getActiveContractContext();
+    const customerId = ctx.customerId;
+    const saleId = ctx.saleId;
+    const contractObj = ctx.contractObj;
 
     if (!contractObj || Object.keys(contractObj).length === 0) {
         alert("Nenhum contrato ativo encontrado para solicitar vistoria.");
@@ -941,7 +1059,7 @@ window.solicitarWhatsAppFromClient = async function() {
     }
 
     let ccName = contractObj.costCenterName || '';
-    const empIdStr = String(contractObj.enterpriseId || contractObj.costCenterId || (contractObj.property && contractObj.property.costCenterId) || contractObj.unitId?.split('-')[1] || '');
+    const empIdStr = String(ctx.costCenterId || contractObj.enterpriseId || contractObj.costCenterId || (contractObj.property && contractObj.property.costCenterId) || '');
     if (!ccName && typeof AppState !== 'undefined' && AppState.cachedCostCenters && empIdStr) {
         const ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === empIdStr);
         if (ccObj) ccName = ccObj.name || '';
@@ -959,21 +1077,30 @@ window.solicitarWhatsAppFromClient = async function() {
             extractedEmp = ccName;
         }
     }
-    
-    let unitStr = (contractObj.unitName || contractObj.unityName || contractObj.units || contractObj.unit || contractObj.unitIdentifier || contractObj.unidade || '').replace('Quadra-Lote: ', '').trim();
-    if (!unitStr && contractObj.property && contractObj.property.unitName) unitStr = contractObj.property.unitName;
-    if (!unitStr && contractObj.block && contractObj.lot) {
-        unitStr = `${contractObj.block}-${contractObj.lot}`;
+
+    let unitStr = ctx.unitName;
+    if (window.ConstrucaoApp.isBlankUnit(unitStr) && contractObj.unitId && window.SiengeApiService && typeof SiengeApiService.getUnit === "function") {
+        try {
+            const u = await SiengeApiService.getUnit(contractObj.unitId);
+            if (u && u.name && !window.ConstrucaoApp.isBlankUnit(u.name)) unitStr = String(u.name).trim();
+            else if (u && u.block && u.lot && u.block !== "N/D") unitStr = String(u.block) + "-" + String(u.lot);
+        } catch (e) {}
     }
-    if (!unitStr) unitStr = 'Unidade N/D';
+    if (window.ConstrucaoApp.isBlankUnit(unitStr)) {
+        alert("Não foi possível identificar a unidade deste título. Abra a ficha de novo e tente encaminhar a vistoria.");
+        return;
+    }
 
     const contractNumber = contractObj.saleCode || contractObj.contractCode || contractObj.contractNumber || contractObj.id || saleId;
     const companyId = contractObj.companyId || '';
     const empreendimento = extractedEmp;
     const unidade = unitStr;
-    const clienteName = contractObj.customerName || 'Cliente';
+    const clienteName = contractObj.customerName || (typeof AppState !== "undefined" && AppState.selectedCustomerName) || 'Cliente';
     const cidade = extractedCity;
-    const tituloKey = contractObj.receivableBillId || '';
+    const tituloKey = String(ctx.titulo || contractObj.receivableBillId || saleId || '');
+    const costCenterId = String(ctx.costCenterId || empIdStr || '');
+    const lotLabel = window.ConstrucaoApp.formatLotLabel(unidade, costCenterId);
+    const requestedBy = (typeof AppState !== "undefined" && AppState.currentUser && AppState.currentUser.name) || "";
 
     try {
         const btn = document.getElementById('btn-solicitar-wpp-client');
@@ -992,23 +1119,32 @@ window.solicitarWhatsAppFromClient = async function() {
         const allKeys = new Set([
             String(contractNumber),
             String(saleId)
-        ]);
+        ].filter(k => k && k !== "undefined" && k !== "null"));
         if (contractObj) {
             if (contractObj.receivableBillId) allKeys.add(String(contractObj.receivableBillId));
             if (contractObj.id) allKeys.add(String(contractObj.id));
             if (contractObj.saleCode) allKeys.add(String(contractObj.saleCode));
+            if (contractObj.contractNumber) allKeys.add(String(contractObj.contractNumber));
+        }
+        if (tituloKey) allKeys.add(tituloKey);
+        if (costCenterId && unidade) {
+            allKeys.add(`unit:${costCenterId}:${String(unidade).replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()}`);
         }
 
         const newData = {
-            customerId: String(customerId),
+            customerId: String(customerId || ""),
             contractId: String(contractNumber),
             contractKeys: Array.from(allKeys),
             companyId: String(companyId),
+            costCenterId: costCenterId,
             empreendimento: empreendimento,
             unidade: unidade,
             clienteName: clienteName,
             cidade: cidade,
-            tituloKey: String(tituloKey),
+            titulo: tituloKey,
+            tituloKey: tituloKey,
+            requestedBy: requestedBy,
+            requestedAt: new Date().toISOString(),
             status: 'aguardando_fotos',
             createdAt: new Date().toISOString()
         };
@@ -1017,7 +1153,20 @@ window.solicitarWhatsAppFromClient = async function() {
             const docRef = await addDoc(collection(window.firebaseDb, 'vistorias'), newData);
             vId = docRef.id;
         } else {
-            await updateDoc(doc(window.firebaseDb, 'vistorias', vId), { updatedAt: new Date().toISOString() });
+            const patch = {
+                updatedAt: new Date().toISOString(),
+                requestedAt: new Date().toISOString(),
+                unidade: unidade,
+                costCenterId: costCenterId,
+                empreendimento: empreendimento,
+                cidade: cidade,
+                titulo: tituloKey,
+                tituloKey: tituloKey,
+                contractKeys: Array.from(allKeys),
+                customerId: String(customerId || "")
+            };
+            if (requestedBy) patch.requestedBy = requestedBy;
+            await updateDoc(doc(window.firebaseDb, 'vistorias', vId), patch);
         }
 
         const url = `${baseUrl}vistoria.html?ids=${vId}`;
@@ -1027,12 +1176,13 @@ window.solicitarWhatsAppFromClient = async function() {
         if (hour >= 12 && hour < 18) greeting = 'Boa tarde';
         else if (hour >= 18) greeting = 'Boa noite';
 
-        const message = `${greeting}! Segue a lista de vistorias a serem realizadas na cidade:\n\n*${cidade.toUpperCase()}*\n· ${empreendimento.toUpperCase()} (1 lote)\n\nAcesse o link abaixo para realizar a(s) vistoria(s):\n${url}`;
+        const message = `${greeting}! Segue a vistoria a ser realizada na cidade:\n\n*${cidade.toUpperCase()}*\n· ${empreendimento.toUpperCase()}\n· Unidade: *${lotLabel || unidade}*\n· Título: ${tituloKey || "-"}\n\nAcesse o link abaixo para realizar a vistoria:\n${url}`;
         
         const phone = '5515998118246'; // Default phone
         window.open(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`, '_blank');
         
         if (btn) btn.disabled = false;
+        if (typeof window.loadConstrucoes === "function") window.loadConstrucoes();
 
     } catch (e) {
         console.error("Erro ao solicitar vistoria via Wpp:", e);
