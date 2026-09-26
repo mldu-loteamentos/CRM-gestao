@@ -203,16 +203,19 @@ const HomeDashboard = {
 
   isSuspenderZero(c) {
     if (!this.isZeroPaidClient(c)) return false;
+    if (typeof window.clientAppliesClausulaSuspensiva === 'function') {
+      return window.clientAppliesClausulaSuspensiva(c);
+    }
     const cc = typeof window.nexCcConfig === 'function' ? window.nexCcConfig(c.costCenterId, c.unitName) : {};
     if (!cc.clausula_suspensiva_ativa) return false;
-    const days = Number(c.maxDaysDelay) || 0;
+    if (!c.hasUnpaidSinal) return false;
+    const days = Number(c.sinalDaysDelay != null ? c.sinalDaysDelay : c.maxDaysDelay) || 0;
     return days >= (Number(cc.clausula_suspensiva_dias) || 30);
   },
 
   isEnviarNexZero(c) {
     if (!this.isZeroPaidClient(c)) return false;
-    const cc = typeof window.nexCcConfig === 'function' ? window.nexCcConfig(c.costCenterId, c.unitName) : {};
-    if (cc.clausula_suspensiva_ativa) return false;
+    if (typeof window.clientAppliesClausulaSuspensiva === 'function' && window.clientAppliesClausulaSuspensiva(c)) return false;
     const days = Number(c.maxDaysDelay) || 0;
     const zeroDays = (typeof window.nexReguaDays === 'function' ? window.nexReguaDays().zero : 31) || 31;
     if (days < zeroDays) return false;

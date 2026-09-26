@@ -1675,7 +1675,9 @@ function getInstallmentConditionCode(inst) {
   if (!inst) return "";
   const raw = [
     inst.conditionType,
+    inst.conditionTypeName,
     inst.paymentConditionType,
+    inst.paymentConditionTypeName,
     inst.installmentType,
     inst.typeName,
     inst.receiptType,
@@ -1685,6 +1687,45 @@ function getInstallmentConditionCode(inst) {
   ].map(v => String(v == null ? "" : v).trim()).find(v => v) || "";
   return raw.toUpperCase();
 }
+
+window.installmentIsSinalSI = function(inst) {
+  const n = String(getInstallmentConditionCode(inst) || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!n) return false;
+  const token = n.split(/[\s\-_\/]/)[0];
+  return token === "SI" || token === "SINAL" || n === "SINAL" || n.indexOf("SINAL") === 0;
+};
+
+window.billHasOverdueSinalSI = function(bill) {
+  const insts = (bill && (bill.defaulterInstallments || [])) || [];
+  return insts.some((inst) => window.installmentIsSinalSI(inst));
+};
+
+window.clientHasOverdueSinalSI = function(client) {
+  if (!client) return false;
+  if (client.hasUnpaidSinal === true) return true;
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  if (!bills.length) return false;
+  const saleIds = new Set([String(client.saleId || "")]);
+  (client.billIds || []).forEach((id) => saleIds.add(String(id)));
+  return bills.some((b) => {
+    if (String(b.customerId) !== String(client.customerId)) return false;
+    const billKey = String(b.saleId != null ? b.saleId : "");
+    const billId = String(b.id != null ? b.id : "");
+    if (!saleIds.has(billKey) && !saleIds.has(billId) && billKey !== String(client.saleId)) return false;
+    return window.billHasOverdueSinalSI(b);
+  });
+};
+
+window.clientAppliesClausulaSuspensiva = function(client) {
+  if (!client) return false;
+  const cc = (typeof window.nexCcConfig === "function")
+    ? window.nexCcConfig(client.costCenterId, client.unitName)
+    : {};
+  if (!cc || !cc.clausula_suspensiva_ativa) return false;
+  if (!window.clientHasOverdueSinalSI(client)) return false;
+  const days = Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : client.maxDaysDelay) || 0;
+  return days >= (Number(cc.clausula_suspensiva_dias) || 30);
+};
 
 function isAgreementInstallmentType(code) {
   const c = String(code || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -5192,12 +5233,15 @@ window.nexAgingSpecialHtml = function(client) {
       window.nexHasLetter(client.customerId, client.saleId) ||
       (titleHint && window.nexHasLetter(client.customerId, titleHint))
     ));
-  const suspensivaDias = Number(ccConfig.clausula_suspensiva_dias) || 30;
+  const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
+    ? window.clientAppliesClausulaSuspensiva(client)
+    : false;
 
-  if (ccConfig.clausula_suspensiva_ativa && days >= suspensivaDias) {
+  if (aplicaSuspensiva) {
+    const tagDays = Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : days) || days;
     return `
-      <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Gerar termo de suspensão (PDF)">
-        <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${days} dias - Suspender
+      <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Gerar termo de suspensão (PDF) — somente parcela SI (sinal)">
+        <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${tagDays} dias - Suspender
       </button>
     `;
   }
@@ -5206,7 +5250,7 @@ window.nexAgingSpecialHtml = function(client) {
   const crossedZero = typeof window.nexCrossedZeroAfterCutoff === "function"
     ? window.nexCrossedZeroAfterCutoff(days, zeroDays)
     : true;
-  if (isZero && days >= zeroDays && crossedZero && !ccConfig.clausula_suspensiva_ativa && !hasNex) {
+  if (isZero && days >= zeroDays && crossedZero && !aplicaSuspensiva && !hasNex) {
     return `
       <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Abrir Notificações — elegíveis 0% pago (régua: ${zeroDays} dias, controle a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff() : "hoje"})">
         <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${days} dias - Enviar Nex
@@ -6298,11 +6342,19 @@ document.addEventListener("click", function(e) {
       : (bill.subjudice === "S" || bill.subjudice === true)) ? "S" : "N";
 
     let hasUnpaidSinal = false;
+    let hasUnpaidPU = false;
+    let sinalDaysDelay = 0;
     let hasAgreementOverdue = false;
     if (instSource.length > 0) {
-      hasUnpaidSinal = instSource.some(inst => {
-        const condition = getInstallmentConditionCode(inst);
-        return condition === 'SI' || condition === 'SINAL' || condition === 'PU';
+      hasUnpaidSinal = instSource.some(inst => typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst));
+      hasUnpaidPU = instSource.some(inst => {
+        const token = String(getInstallmentConditionCode(inst) || "").split(/[\s\-_\/]/)[0];
+        return token === "PU";
+      });
+      instSource.forEach((inst) => {
+        if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
+        const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0;
+        if (delay > sinalDaysDelay) sinalDaysDelay = delay;
       });
       hasAgreementOverdue = billHasOverdueAgreementInstallment(bill);
     }
@@ -6334,7 +6386,9 @@ document.addEventListener("click", function(e) {
         hasOverdueAgreement: false,
         agreementDaysDelay: 0,
         oldestDueDateMs: null,
-        dueDay: null
+        dueDay: null,
+        hasUnpaidSinal: false,
+        sinalDaysDelay: 0
       };
 
       // Se for modo simulado, preenche dados reais do mock
@@ -6389,6 +6443,13 @@ document.addEventListener("click", function(e) {
     }
 
     if (hasUnpaidSinal) {
+      consolidated[key].hasUnpaidSinal = true;
+      consolidated[key].isZeroPaid = true;
+      if (sinalDaysDelay > (consolidated[key].sinalDaysDelay || 0)) {
+        consolidated[key].sinalDaysDelay = sinalDaysDelay;
+      }
+    }
+    if (hasUnpaidPU) {
       consolidated[key].isZeroPaid = true;
     }
     if (hasAgreementOverdue) {
@@ -11959,6 +12020,9 @@ function renderCustomerOccurrences() {
     // if (occ.saleId) {
     //   tagsHtml += `<span style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: #475569; font-weight: 600;"><i data-lucide="tag" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>Tít: ${occ.saleId}</span>`;
     // }
+    if (occ.attachments && occ.attachments.length > 0) {
+      tagsHtml += `<span style="background: #ecfdf5; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; color: #166534; font-weight: 600;"><i data-lucide="paperclip" style="width: 10px; height: 10px; display: inline-block; margin-right: 2px;"></i>${occ.attachments.length} anexo${occ.attachments.length === 1 ? "" : "s"}</span>`;
+    }
     if (occ.promisedInstallments && occ.promisedInstallments.length > 0) {
       let parcelasText = "";
       if (occ.promisedInstallments.length > 3) {
@@ -12122,6 +12186,7 @@ function renderCustomerOccurrences() {
         </div>
       </div>
       <div class="timeline-card-body" style="white-space: pre-wrap; font-size:0.8rem; margin-top: 2px; margin-bottom: 4px; ${isNotaInterna ? 'line-height: 24px; background-image: repeating-linear-gradient(transparent, transparent 23px, rgba(245,158,11,0.2) 23px, rgba(245,158,11,0.2) 24px); background-attachment: local; padding: 0 4px;' : ''}">${pastTextsHtml}${mainText}</div>
+      ${typeof window.occurrenceAttachmentsHtml === "function" ? window.occurrenceAttachmentsHtml(occ) : ""}
       ${editInfoHtml}
       ${repliesHtml}
       ${isCancelled ? cancelInfoHtml : ''}
@@ -12522,6 +12587,129 @@ window.renderPromisedInstallments = function() {
   lucide.createIcons();
 };
 
+window.OCCURRENCE_ANEXO_MAX_FILES = 5;
+window.OCCURRENCE_ANEXO_MAX_BYTES = 10 * 1024 * 1024;
+window._occurrencePendingFiles = [];
+
+window.occurrenceAnexoEsc = function(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+};
+
+window.clearOccurrenceAnexos = function() {
+  window._occurrencePendingFiles = [];
+  const input = document.getElementById("note-ocorrencia-anexos");
+  if (input) input.value = "";
+  if (typeof window.renderOccurrenceAnexoPicker === "function") window.renderOccurrenceAnexoPicker();
+};
+
+window.renderOccurrenceAnexoPicker = function() {
+  const box = document.getElementById("note-ocorrencia-anexos-list");
+  if (!box) return;
+  const files = window._occurrencePendingFiles || [];
+  if (!files.length) {
+    box.innerHTML = '<span style="font-size: 0.75rem; color: #999; margin: auto;">Nenhum anexo selecionado</span>';
+    return;
+  }
+  box.innerHTML = files.map((f, i) => {
+    const name = window.occurrenceAnexoEsc(f.name || "arquivo");
+    const sizeKb = Math.max(1, Math.round((Number(f.size) || 0) / 1024));
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:3px 8px;font-size:0.72rem;color:#334155;max-width:100%;">
+      <i data-lucide="paperclip" style="width:12px;height:12px;flex-shrink:0;"></i>
+      <span title="${name}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;">${name}</span>
+      <span style="color:#94a3b8;">${sizeKb} KB</span>
+      <button type="button" onclick="window.removeOccurrenceAnexo(${i})" title="Remover anexo" style="border:none;background:none;padding:0;cursor:pointer;color:#64748b;font-size:1rem;line-height:1;">&times;</button>
+    </span>`;
+  }).join("");
+  if (window.lucide) lucide.createIcons();
+};
+
+window.removeOccurrenceAnexo = function(index) {
+  const files = window._occurrencePendingFiles || [];
+  files.splice(index, 1);
+  window._occurrencePendingFiles = files;
+  window.renderOccurrenceAnexoPicker();
+};
+
+window.onOccurrenceAnexoChange = function(input) {
+  const incoming = Array.from((input && input.files) || []);
+  if (input) input.value = "";
+  const cur = window._occurrencePendingFiles || [];
+  const maxFiles = window.OCCURRENCE_ANEXO_MAX_FILES || 5;
+  const maxBytes = window.OCCURRENCE_ANEXO_MAX_BYTES || (10 * 1024 * 1024);
+  for (let i = 0; i < incoming.length; i++) {
+    const file = incoming[i];
+    if (!file) continue;
+    if (file.size > maxBytes) {
+      alert("O arquivo \"" + file.name + "\" passa de 10 MB e não pode ser anexado.");
+      continue;
+    }
+    if (cur.length >= maxFiles) {
+      alert("Máximo de " + maxFiles + " anexos por ocorrência.");
+      break;
+    }
+    const dup = cur.some(f => f.name === file.name && f.size === file.size);
+    if (!dup) cur.push(file);
+  }
+  window._occurrencePendingFiles = cur;
+  window.renderOccurrenceAnexoPicker();
+};
+
+window.uploadOccurrenceAnexosToFirebase = async function(customerId, occId, files) {
+  const list = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!list.length) return [];
+  if (!window.firebaseStorage || !window.firebaseCollections || !window.firebaseCollections.ref || !window.firebaseCollections.uploadBytes || !window.firebaseCollections.getDownloadURL) {
+    throw new Error("Firebase Storage não disponível. Não foi possível enviar o anexo.");
+  }
+  const { ref, uploadBytes, getDownloadURL } = window.firebaseCollections;
+  const out = [];
+  const cust = String(customerId || "sem-cliente").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const occ = String(occId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, "_");
+  for (let i = 0; i < list.length; i++) {
+    const file = list[i];
+    const safe = String(file.name || "anexo").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "anexo";
+    const path = "ocorrencias/" + cust + "/" + occ + "/" + Date.now() + "_" + i + "_" + safe;
+    const storageRef = ref(window.firebaseStorage, path);
+    await uploadBytes(storageRef, file, { contentType: file.type || "application/octet-stream" });
+    const url = await getDownloadURL(storageRef);
+    out.push({
+      name: file.name || safe,
+      url: url,
+      type: file.type || "",
+      size: Number(file.size) || 0,
+      path: path
+    });
+  }
+  return out;
+};
+
+window.occurrenceAttachmentsHtml = function(occ) {
+  const atts = (occ && Array.isArray(occ.attachments)) ? occ.attachments : [];
+  if (!atts.length) return "";
+  const items = atts.map((a) => {
+    const name = window.occurrenceAnexoEsc(a && a.name ? a.name : "Anexo");
+    const rawUrl = a && a.url ? String(a.url) : "";
+    const url = rawUrl.replace(/"/g, "&quot;");
+    const isImg = String((a && a.type) || "").indexOf("image/") === 0;
+    if (!url) return "";
+    if (isImg) {
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" title="${name}" style="display:inline-flex;flex-direction:column;gap:4px;max-width:140px;text-decoration:none;color:#0f172a;font-size:0.7rem;">
+        <img src="${url}" alt="${name}" style="width:120px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;background:#f8fafc;">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+      </a>`;
+    }
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;font-size:0.72rem;color:#0f172a;text-decoration:none;max-width:100%;">
+      <i data-lucide="file" style="width:14px;height:14px;flex-shrink:0;color:var(--color-primary);"></i>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+    </a>`;
+  }).filter(Boolean).join("");
+  if (!items) return "";
+  return `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;">${items}</div>`;
+};
+
 async function saveCustomerOccurrence() {
   try {
       const textEl = document.getElementById("note-text");
@@ -12649,8 +12837,42 @@ async function saveCustomerOccurrence() {
       : [],
     pinned: (canal === "Nota interna") ? isPinned : false,
     webroBaixa: !!isWebroBaixa,
-    reuniaoSemanalTerceirizada: !!isReuniaoSemanal
+    reuniaoSemanalTerceirizada: !!isReuniaoSemanal,
+    attachments: []
   };
+
+  const pendingAnexos = window._occurrencePendingFiles || [];
+  if (pendingAnexos.length) {
+    const saveBtn = document.getElementById("btn-save-occurrence");
+    const prevBtnHtml = saveBtn ? saveBtn.innerHTML : "";
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = "0.7";
+      saveBtn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 16px;"></i> Enviando anexo...';
+      if (window.lucide) lucide.createIcons();
+    }
+    try {
+      occurrence.attachments = await window.uploadOccurrenceAnexosToFirebase(
+        AppState.selectedCustomerId,
+        occurrence.id,
+        pendingAnexos
+      );
+    } catch (upErr) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = "";
+        saveBtn.innerHTML = prevBtnHtml || '<i data-lucide="save" style="width: 16px;"></i> Gravar Ocorrência';
+        if (window.lucide) lucide.createIcons();
+      }
+      alert("Não foi possível enviar o anexo para o Firebase. A ocorrência não foi gravada.\n" + ((upErr && upErr.message) || upErr));
+      return;
+    }
+    window.clearOccurrenceAnexos();
+    if (saveBtn) {
+      saveBtn.innerHTML = prevBtnHtml || '<i data-lucide="save" style="width: 16px;"></i> Gravar Ocorrência';
+      if (window.lucide) lucide.createIcons();
+    }
+  }
   
   try {
     const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes") || "null");
@@ -12718,6 +12940,7 @@ async function saveCustomerOccurrence() {
       alert("Erro ao gravar: " + err.message);
   }
 }
+window.saveCustomerOccurrence = saveCustomerOccurrence;
 
 window.crossContractAction = function(action) {
     const modal = document.getElementById("cross-contract-modal");
@@ -12871,6 +13094,7 @@ ${reqInfoLink}`
       radios.forEach(r => r.checked = false);
       AppState.selectedPromisedInstallments = [];
       if (typeof window.renderPromisedInstallments === 'function') window.renderPromisedInstallments();
+      if (typeof window.clearOccurrenceAnexos === "function") window.clearOccurrenceAnexos();
       
       if (typeof window.validateOccurrenceForm === 'function') window.validateOccurrenceForm();
   }
@@ -20842,6 +21066,7 @@ window.showAgendaTooltip = function(event, custId, occIndex) {
         <div style="font-size:0.75rem; color:var(--color-text-muted);">${dateStr}</div>
       </div>
       <div style="font-size:0.8rem; color:var(--color-text-dark); margin-bottom:8px; white-space:pre-wrap;">${occ.text}</div>
+      ${typeof window.occurrenceAttachmentsHtml === "function" ? window.occurrenceAttachmentsHtml(occ) : ""}
       <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--color-border); padding-top: 8px;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size:0.75rem; font-weight:700;">Promessa: ${occ.promiseDate.split('-').reverse().join('/')}</span>
@@ -22202,11 +22427,14 @@ async function _loadZeroPaidTab_Impl() {
     if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
         // Verifica se existe alguma parcela atrasada com o tipo de condição "SI" (Sinal) ou "PU" (Parcela Única)
         const hasUnpaidSinal = bill.defaulterInstallments.some(inst => {
-            const condition = (inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || '').trim().toUpperCase();
-            return condition === 'SI' || condition === 'SINAL' || condition === 'PU';
+            return typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst);
+        });
+        const hasUnpaidPU = bill.defaulterInstallments.some(inst => {
+            const condition = String(getInstallmentConditionCode(inst) || "").split(/[\s\-_\/]/)[0];
+            return condition === "PU";
         });
         
-        if (hasUnpaidSinal) {
+        if (hasUnpaidSinal || hasUnpaidPU) {
             isTarget = true;
         }
     }
@@ -22253,6 +22481,8 @@ async function _loadZeroPaidTab_Impl() {
         billCount: 0,
         lastContactDate: "Sem contato",
         billIds: [],
+        hasUnpaidSinal: false,
+        sinalDaysDelay: 0,
         brokerName: (typeof window.extractSaleBrokerName === 'function' ? window.extractSaleBrokerName(sale) : (sale.brokerName || ''))
       };
       
@@ -22293,6 +22523,12 @@ async function _loadZeroPaidTab_Impl() {
     if (bill.daysDelay > consolidated[key].maxDaysDelay) {
       consolidated[key].maxDaysDelay = bill.daysDelay;
     }
+    (bill.defaulterInstallments || []).forEach((inst) => {
+      if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
+      consolidated[key].hasUnpaidSinal = true;
+      const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0;
+      if (delay > (consolidated[key].sinalDaysDelay || 0)) consolidated[key].sinalDaysDelay = delay;
+    });
   });
   
   let zeroPaidList = Object.values(consolidated);
@@ -23021,10 +23257,22 @@ async function loadWeSendTab() {
   const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31, standard: 61 };
 
   const findSale = (saleId) => sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
-  const hasUnpaidSinal = (bill) => (bill.defaulterInstallments || []).some(inst => {
-    const condition = (inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || inst.receiptType || "").trim().toUpperCase();
-    return condition === "SI" || condition === "SINAL" || condition === "PU";
+  const hasUnpaidSinal = (bill) => (bill.defaulterInstallments || []).some(inst =>
+    typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst)
+  );
+  const hasUnpaidPU = (bill) => (bill.defaulterInstallments || []).some(inst => {
+    const token = String((typeof getInstallmentConditionCode === "function" ? getInstallmentConditionCode(inst) : "") || "").split(/[\s\-_\/]/)[0];
+    return token === "PU";
   });
+  const sinalDaysOf = (bill) => {
+    let max = 0;
+    (bill.defaulterInstallments || []).forEach((inst) => {
+      if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
+      const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0;
+      if (delay > max) max = delay;
+    });
+    return max;
+  };
   const resolveCc = (item) => {
     const unit = (AppState.units && AppState.units[item.unitId]) || {};
     const ccId = unit.costCenterId || item.costCenterId;
@@ -23056,6 +23304,8 @@ async function loadWeSendTab() {
         unitName: unitName,
         percPaid: sale && sale.percPaid != null ? sale.percPaid : 0,
         isZeroPaid: false,
+        hasUnpaidSinal: false,
+        sinalDaysDelay: 0,
         maxDaysDelay: 0,
         totalOverdue: 0,
         billCount: 0,
@@ -23067,7 +23317,13 @@ async function loadWeSendTab() {
     const trueBillCount = bill.totalInstallmentsCount || ((bill.defaulterInstallments && bill.defaulterInstallments.length > 0) ? bill.defaulterInstallments.length : 1);
     grouped[key].billCount += (trueBillCount > 0 ? trueBillCount : 1);
     if (bill.daysDelay > grouped[key].maxDaysDelay) grouped[key].maxDaysDelay = bill.daysDelay;
-    if (hasUnpaidSinal(bill)) grouped[key].isZeroPaid = true;
+    if (hasUnpaidSinal(bill)) {
+      grouped[key].hasUnpaidSinal = true;
+      grouped[key].isZeroPaid = true;
+      const sd = sinalDaysOf(bill);
+      if (sd > (grouped[key].sinalDaysDelay || 0)) grouped[key].sinalDaysDelay = sd;
+    }
+    if (hasUnpaidPU(bill)) grouped[key].isZeroPaid = true;
     if (sale && sale.percPaid != null && Number(sale.percPaid) === 0) grouped[key].isZeroPaid = true;
   });
 
@@ -23095,6 +23351,8 @@ async function loadWeSendTab() {
       item.costCenterId = fila.costCenterId || item.costCenterId;
       if (fila.billCount != null) item.billCount = fila.billCount;
       if (fila.overdueValue != null) item.totalOverdue = fila.overdueValue;
+      if (fila.hasUnpaidSinal) item.hasUnpaidSinal = true;
+      if ((fila.sinalDaysDelay || 0) > (item.sinalDaysDelay || 0)) item.sinalDaysDelay = fila.sinalDaysDelay;
     }
   });
 
@@ -23146,9 +23404,11 @@ async function loadWeSendTab() {
   const d61List = [];
   allItems.forEach(item => {
     const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
-    const suspensiva = !!cc.clausula_suspensiva_ativa;
+    const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
+      ? window.clientAppliesClausulaSuspensiva(item)
+      : (!!cc.clausula_suspensiva_ativa && !!item.hasUnpaidSinal);
     const hasNex = window.nexHasLetter(item.customerId, item.saleId);
-    if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !suspensiva && !hasNex
+    if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !aplicaSuspensiva && !hasNex
         && window.nexCrossedZeroAfterCutoff(item.maxDaysDelay, regua.zero)) {
       zeroList.push(item);
     } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex && window.nexCrossed61AfterCutoff(item.maxDaysDelay)) {
@@ -25304,7 +25564,7 @@ window.updateNexEligibleHelp = function() {
       </button>
       <div id="nex-suspensiva-pop" style="display:none;position:absolute;z-index:40;left:0;top:100%;margin-top:6px;max-width:520px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.12);padding:12px 14px;color:#334155;font-size:0.8rem;line-height:1.4;">
         <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Empreendimentos com cláusula suspensiva</div>
-        <p style="margin:0 0 8px;">Não entram nesta lista; seguem o fluxo de suspender.</p>
+        <p style="margin:0 0 8px;">Só saem desta lista se tiverem parcela <strong>SI (sinal)</strong> em atraso. Demais parcelas seguem a régua NEX 0%.</p>
         ${listHtml}
       </div>`;
     if (window.lucide) lucide.createIcons();
@@ -31947,7 +32207,7 @@ window.renderVizinhosTab = async function() {
     if (!unitName && unitState.block && unitState.lot) unitName = String(unitState.block) + "-" + String(unitState.lot);
 
     const realName = enterpriseId && unitName ? (enterpriseId + " - " + unitName) : (unitName || "N/D");
-    const VIZINHOS_RAIO_M = 15;
+    const VIZINHOS_RAIO_M = 20;
     
     const allPoints = await window.loadKmzPlacemarks(enterpriseId);
     
@@ -34455,6 +34715,7 @@ window.renderJudicialTimeline = function() {
     
     html += `
         <div style="font-size: 0.85rem; color: #334155; white-space: pre-wrap; ${occ.fase === 'Nota Interna' ? 'line-height: 24px; background-image: repeating-linear-gradient(transparent, transparent 23px, rgba(245,158,11,0.2) 23px, rgba(245,158,11,0.2) 24px); background-attachment: local; padding: 0 4px;' : 'line-height: 1.5;'}">${pastTextsHtml}${mainText}</div>
+        ${typeof window.occurrenceAttachmentsHtml === "function" ? window.occurrenceAttachmentsHtml(occ) : ""}
         ${editInfoHtml}
         ${isCancelled ? cancelInfoHtml : ''}
         ${(occ.fase === 'Nota Interna' && occ.replies && occ.replies.length > 0) ? `

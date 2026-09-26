@@ -344,6 +344,7 @@ const CentrosCustoApp = {
                     <input type="number" id="edit-suspensiva-dias-${id}" class="form-control" style="width: 70px; padding: 4px;" value="${suspensiva_dias}" ${!suspensiva_ativa ? 'disabled' : ''}>
                 </div>
             </div>
+            <p style="margin:0;font-size:0.75rem;color:#64748b;line-height:1.4;">Vale somente para parcela <strong>SI (sinal)</strong> em atraso. Mensalidades e demais tipos seguem a régua normal (NEX 0% inclusive).</p>
           </div>
           <div style="padding: 16px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; background: #f9f9f9; border-radius: 0 0 8px 8px;">
             <button class="btn btn-cancel" onclick="CentrosCustoApp.closeModal()">Cancelar</button>
