@@ -3682,8 +3682,6 @@ window.applyRulesModulePermissions = function() {
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
   if (btnSaveCob) btnSaveCob.disabled = !canEditCob;
-  const btnSaveNeg = document.getElementById("btn-save-negociacao-config");
-  if (btnSaveNeg) btnSaveNeg.disabled = !canEditNeg;
   const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
   if (btnFila) btnFila.disabled = !canEditCob;
 
@@ -28273,6 +28271,9 @@ window.addNegotiationRule = function(profile, rule = {}) {
     if(window.lucide) {
         window.lucide.createIcons();
     }
+    if (!window._seedingNegotiationRules && window.scheduleNegotiationRulesAutoSave) {
+        window.scheduleNegotiationRulesAutoSave({ immediate: true });
+    }
 };
 
 window.removeNegotiationRule = function(btn) {
@@ -28283,7 +28284,39 @@ window.removeNegotiationRule = function(btn) {
     const row = btn.closest('.negotiation-rule-row');
     if (row) {
         row.remove();
+        if (window.scheduleNegotiationRulesAutoSave) window.scheduleNegotiationRulesAutoSave({ immediate: true });
     }
+};
+
+window.scheduleNegotiationRulesAutoSave = function(opts) {
+    if (window._seedingNegotiationRules) return;
+    if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_negociacao", "editar")) return;
+    const run = function() {
+        if (window.saveNegotiationRules) window.saveNegotiationRules();
+        if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(function() {});
+    };
+    if (window._negRulesSaveTimer) clearTimeout(window._negRulesSaveTimer);
+    if (opts && opts.immediate) {
+        run();
+        return;
+    }
+    window._negRulesSaveTimer = setTimeout(run, 450);
+};
+
+window.bindNegotiationRulesAutoSave = function() {
+    const root = document.getElementById("content-regra-negociacao");
+    if (!root || root.dataset.negAutoSave === "1") return;
+    root.dataset.negAutoSave = "1";
+    root.addEventListener("input", function(ev) {
+        const t = ev.target;
+        if (!t || !t.closest || !t.closest(".negotiation-rule-row")) return;
+        window.scheduleNegotiationRulesAutoSave();
+    });
+    root.addEventListener("change", function(ev) {
+        const t = ev.target;
+        if (!t || !t.closest || !t.closest(".negotiation-rule-row")) return;
+        window.scheduleNegotiationRulesAutoSave({ immediate: true });
+    });
 };
 
 window.saveNegotiationRules = function() {
@@ -28340,6 +28373,7 @@ window.initializeNegotiationRules = function() {
         }
     });
     window._seedingNegotiationRules = false;
+    if (window.bindNegotiationRulesAutoSave) window.bindNegotiationRulesAutoSave();
     if (window.paintRenegotiationBlockSummary) window.paintRenegotiationBlockSummary();
 };
 
@@ -37447,6 +37481,7 @@ window.syncAllNotesToFirebase = async function() {
 // --- INTERCEPTADOR PARA FIREBASE ---
 // Captura as chamadas de localStorage.setItem e envia pro Firebase
 const _originalSetItem = localStorage.setItem;
+window._originalSetItem = _originalSetItem;
 localStorage.setItem = function(key, value) {
     try {
       _originalSetItem.call(this, key, value);
