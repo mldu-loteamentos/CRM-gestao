@@ -1973,7 +1973,7 @@ const SiengeApiService = {
       if (!isNaN(unitId)) {
         const u = await siengeFetchWithRetry(`/units/${unitId}`);
         const nameParts = (u.name || "").split("-");
-        return { id: u.id, costCenterId: String(u.enterpriseId), block: nameParts[0] || "N/D", lot: nameParts[1] || "N/D", area: u.totalArea || 0, status: u.contractId ? "Vendido" : "Disponível" };
+        return { id: u.id, costCenterId: String(u.enterpriseId), block: nameParts[0] || "N/D", lot: nameParts[1] || "N/D", area: (u.privateArea || u.Privatearea || u.indexedPrivateArea || u.totalArea || 0), privateArea: (u.privateArea || u.Privatearea || u.indexedPrivateArea || null), totalArea: u.totalArea || 0, status: u.contractId ? "Vendido" : "Disponível" };
       }
       const parts = String(unitId).split("-");
       const nameToSearch = parts.slice(2).join("-");
@@ -1983,7 +1983,7 @@ const SiengeApiService = {
       const found = unitsRes.results.find(u => u.name === nameToSearch || u.name.replace(/\s+/g, '') === nameToSearch);
       if (found) {
         const nameParts = (found.name || "").split("-");
-        return { id: found.id, costCenterId: String(found.enterpriseId), block: nameParts[0] || "N/D", lot: nameParts[1] || "N/D", area: found.totalArea || 0, status: found.contractId ? "Vendido" : "Disponível" };
+        return { id: found.id, costCenterId: String(found.enterpriseId), block: nameParts[0] || "N/D", lot: nameParts[1] || "N/D", area: (found.privateArea || found.Privatearea || found.indexedPrivateArea || found.totalArea || 0), privateArea: (found.privateArea || found.Privatearea || found.indexedPrivateArea || null), totalArea: found.totalArea || 0, status: found.contractId ? "Vendido" : "Disponível" };
       }
     } catch (e) { /* silencioso */ }
     return { id: unitId, block: "N/D", lot: "N/D", area: 0, status: "N/D" };

@@ -9244,7 +9244,17 @@ function formatCpfCnpj(val) {
 
   const municipalReg = unitDetails?.realEstateRegistration || unitDetails?.realestateRegistration || "N/D";
   const matricula = unitDetails?.legalRegistrationNumber || unitDetails?.legalregistrationnumber || "N/D";
-  const privateArea = unitDetails?.privateArea || unitDetails?.Privatearea || unit.area || "N/D";
+  const privateArea = unitDetails?.privateArea || unitDetails?.Privatearea || unit.indexedPrivateArea || unit.privateArea || unit.area || "N/D";
+  if (AppState.units && sale.unitId) {
+    const n = typeof window.parseAreaNumber === "function" ? window.parseAreaNumber(privateArea) : (Number(privateArea) || null);
+    const cached = AppState.units[sale.unitId] || unit;
+    AppState.units[sale.unitId] = {
+      ...cached,
+      privateArea: n || cached.privateArea || null,
+      area: n || cached.area || unit.area || 0
+    };
+    unit = AppState.units[sale.unitId];
+  }
   let contractNum = unitDetails?.contractNumber || unitDetails?.contractnumber || sale.contractNumber || sale.id || "N/D";
   if (contractNum !== "N/D" && typeof contractNum === "string") {
     contractNum = contractNum.replace(/^CT[\.\s-]*/i, '').trim();
@@ -10715,10 +10725,12 @@ function formatCpfCnpj(val) {
     }
     
     // OVERRIDE COM DADOS REAIS DE JUROS CALCULADOS DIRETAMENTE DOS BILLS DO SIENGE
+    // Só entra quando há parcela vencida no extrato. Sem isso, a API de inadimplentes
+    // pode ainda devolver juros/multa de parcela já paga (título 18139: 0 parc. + R$ em atraso).
     const allBills = getSiengeApiMode() === "simulado" ? (window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []) : (AppState.defaultersBills || []);
     const customerBills = allBills.filter(b => String(b.customerId) === String(customerId) && String(b.saleId) === String(saleId));
     
-    if (customerBills.length > 0) {
+    if (customerBills.length > 0 && kpiQtdVencidas > 0) {
         let totalValWithAdditions = 0;
         customerBills.forEach(bill => {
             let billWithAdditions = 0;
@@ -10741,6 +10753,11 @@ function formatCpfCnpj(val) {
         if (totalValWithAdditions > 0) {
             kpiVencidas = totalValWithAdditions;
         }
+    }
+
+    if (kpiQtdVencidas === 0) {
+        kpiVencidas = 0;
+        kpiVencidasOriginal = 0;
     }
     
     // UPDATE STATUS Se for distrato
@@ -17700,6 +17717,64 @@ window.resolveCidadeLoteamento = function(unit, sale) {
   return (unit && (unit.city || unit.cidade)) || fromCc || (sale && (sale.city || sale.cidade)) || "Botucatu-SP";
 };
 
+window.parseAreaNumber = function(v) {
+  if (v === undefined || v === null || v === "" || v === "N/D") return null;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  let s = String(v).replace(/m.*/i, "").trim();
+  if (!s) return null;
+  if (/,\d/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+window.formatAreaLoteLabel = function(areaNum) {
+  if (areaNum === "" || areaNum == null) return "____";
+  if (String(areaNum).match(/m/i)) return String(areaNum);
+  const n = typeof window.parseAreaNumber === "function" ? window.parseAreaNumber(areaNum) : Number(areaNum);
+  if (!Number.isFinite(n) || n <= 0) return "____";
+  const text = Math.abs(n - Math.round(n)) < 0.0005
+    ? String(Math.round(n))
+    : n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return text + " m²";
+};
+
+window.resolveUnitPrivateArea = async function(unit, sale) {
+  const unitObj = unit || {};
+  const saleObj = sale || {};
+  const pick = (...vals) => {
+    for (let i = 0; i < vals.length; i++) {
+      const n = window.parseAreaNumber(vals[i]);
+      if (n) return n;
+    }
+    return null;
+  };
+  let n = pick(unitObj.privateArea, unitObj.Privatearea, unitObj.indexedPrivateArea);
+  if (n) return n;
+  const detEl = document.getElementById("det-area");
+  n = pick(detEl && detEl.textContent);
+  if (n) return n;
+  try {
+    const unitParts = String(saleObj.unitId || unitObj.id || "").split("-");
+    const unitName = String(unitObj.name || unitObj.units || unitParts.slice(2).join("-") || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "").trim();
+    const enterpriseId = unitObj.costCenterId || saleObj.enterpriseId || saleObj.costCenterId || unitParts[1] || "";
+    if (window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function" && enterpriseId && unitName && unitName !== "N/D") {
+      const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName);
+      const row = det && Array.isArray(det.results) ? det.results[0] : null;
+      n = pick(row && (row.privateArea || row.Privatearea || row.indexedPrivateArea));
+      if (n) return n;
+    }
+    if (window.SiengeApiService && typeof SiengeApiService.getUnitRaw === "function") {
+      const rawId = (unitObj.id && /^\d+$/.test(String(unitObj.id))) ? unitObj.id : saleObj.unitId;
+      const raw = rawId ? await SiengeApiService.getUnitRaw(rawId) : null;
+      n = pick(raw && (raw.privateArea || raw.Privatearea || raw.indexedPrivateArea));
+      if (n) return n;
+    }
+  } catch (e) {
+    console.warn("[Distrato] área privativa da unidade", e);
+  }
+  return pick(unitObj.area) || "";
+};
+
 window.upgradeCredorPlaceholdersToPreamble = function(text) {
   let s = String(text || "");
   if (!/\{\{CREDOR_NOME\}\}/.test(s)) return s;
@@ -18207,11 +18282,15 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   if (useLegalTemplate) {
     const empName = window.resolveLoteamentoName(unit, g_distSale);
     const cidadeLote = window.resolveCidadeLoteamento(unit, g_distSale);
-    const areaNum = unit.area || unit.privateArea || unit.Privatearea || '';
-    const areaLabel = areaNum === '' || areaNum == null ? '____' : (String(areaNum).match(/m/) ? String(areaNum) : (areaNum + ' m²'));
+    const areaNum = typeof window.resolveUnitPrivateArea === "function"
+      ? await window.resolveUnitPrivateArea(unit, g_distSale)
+      : (unit.privateArea || unit.Privatearea || unit.indexedPrivateArea || unit.area || "");
+    const areaLabel = typeof window.formatAreaLoteLabel === "function"
+      ? window.formatAreaLoteLabel(areaNum)
+      : (areaNum === "" || areaNum == null ? "____" : (String(areaNum).match(/m/) ? String(areaNum) : (areaNum + " m²")));
     const areaExt = areaNum && !isNaN(Number(areaNum))
-      ? (numeroPorExtenso(areaNum) + ' metros quadrados')
-      : '____';
+      ? (numeroPorExtenso(areaNum) + " metros quadrados")
+      : "____";
     const saleDateStr = g_distSale.saleDate
       ? new Date(String(g_distSale.saleDate).slice(0, 10) + 'T12:00:00').toLocaleDateString('pt-BR')
       : '____';
@@ -25438,6 +25517,32 @@ window.uploadNexAr = function(id, required) {
         window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
         if (typeof window.renderNexHistory === "function") window.renderNexHistory();
         if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+        try {
+          if (typeof window.nexToast === "function") window.nexToast("Enviando AR Digital para a unidade no Sienge...");
+          const sent = await window.nexUploadToSiengeUnit(
+            ctx.customerId,
+            ctx.saleId,
+            file,
+            ["AR DIGITAL", "AR Digital"],
+            ctx.item,
+            "nex-ar"
+          );
+          ctx.item.arDigital.siengeSent = true;
+          ctx.item.arDigital.siengeFileName = sent && sent.fileName;
+          ctx.item.arDigital.siengeDescription = sent && sent.description;
+          ctx.item.arDigital.siengeAt = Date.now();
+          await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
+          if (typeof window.nexToast === "function") {
+            window.nexToast("AR Digital gravado na unidade no Sienge" + (sent && sent.fileName ? ": " + sent.fileName : "") + ".");
+          }
+        } catch (e) {
+          console.error("[NEX] Falha ao enviar AR Digital ao Sienge", e);
+          if (typeof window.nexToast === "function") {
+            window.nexToast("AR salvo no IntegrA, mas não subiu para o Sienge: " + ((e && e.message) || e), "erro");
+          } else {
+            alert("AR salvo no IntegrA, mas não subiu para o Sienge: " + ((e && e.message) || e));
+          }
+        }
         resolve(true);
       };
       reader.readAsDataURL(file);
@@ -26166,6 +26271,137 @@ window.nexUnitLabelForSale = function(customerId, saleId, item) {
   return "—";
 };
 
+window.nexToast = function(msg, kind) {
+  let toast = document.getElementById("nex-sienge-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "nex-sienge-toast";
+    document.body.appendChild(toast);
+  }
+  const err = kind === "erro";
+  toast.style.cssText = "position:fixed;bottom:20px;right:20px;background:" + (err ? "#991b1b" : "#105436") + ";color:#fff;padding:12px 18px;border-radius:8px;z-index:10000;max-width:420px;font-size:0.85rem;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.18);";
+  toast.textContent = String(msg || "");
+  toast.style.display = "block";
+  clearTimeout(window._nexToastTimer);
+  window._nexToastTimer = setTimeout(() => { try { toast.remove(); } catch (e) {} }, err ? 8000 : 5000);
+};
+
+window.nexSiengeUnitContext = function(customerId, saleId, item) {
+  const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
+    ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
+    : (AppState && AppState.sales)) || [];
+  const keys = [saleId, item && item.titulo, AppState && AppState.selectedSaleId, AppState && AppState.currentReceivableBillId, AppState && AppState.selectedTitulo]
+    .filter((v) => v !== undefined && v !== null && v !== "")
+    .map((v) => String(v));
+  let sale = sales.find((s) => {
+    const ids = [s.id, s.saleId, s.receivableBillId, s.contractNumber, s.realSaleId].filter(Boolean).map(String);
+    const idHit = ids.some((id) => keys.indexOf(id) >= 0);
+    if (!idHit) return false;
+    if (!customerId || !s.customerId) return true;
+    return String(s.customerId) === String(customerId);
+  }) || {};
+  if (!sale.id && String(AppState && AppState.selectedCustomerId) === String(customerId)) {
+    sale = sales.find((s) => String(s.customerId) === String(customerId) && keys.indexOf(String(s.receivableBillId || s.id || "")) >= 0) || sale;
+  }
+  const fila = typeof window.nexFindFilaClient === "function" ? window.nexFindFilaClient(customerId, saleId) : null;
+  const unit = (AppState && AppState.units && sale.unitId) ? (AppState.units[sale.unitId] || {}) : {};
+  let cc = String(unit.costCenterId || sale.costCenterId || sale.enterpriseId || (fila && (fila.costCenterId || fila.enterpriseId)) || "").trim();
+  if (cc && typeof getPrimaryCostCenter === "function") {
+    const primary = getPrimaryCostCenter(cc);
+    if (primary) cc = String(primary);
+  }
+  let unitName = String(unit.name || unit.units || sale.unitName || sale.units || sale.unityName || (fila && fila.unitName) || "").trim();
+  const label = (item && item.unitLabel) || (typeof window.nexUnitLabelForSale === "function" ? window.nexUnitLabelForSale(customerId, saleId, item) : "");
+  const parsed = String(label || "").match(/^(\d{4,5})\s*[-–]\s*(.+)$/);
+  if (parsed) {
+    if (!cc) cc = parsed[1];
+    if (!unitName || /^n\/d$/i.test(unitName) || unitName === "—") unitName = parsed[2].trim();
+  }
+  if (String(AppState && AppState.selectedCustomerId) === String(customerId)) {
+    if (!cc && AppState.currentCostCenterId) cc = String(AppState.currentCostCenterId);
+    const el = document.getElementById("det-block-lot-span") || document.getElementById("det-block-lot");
+    const raw = el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
+    const m = raw.match(/^(\d{4,5})\s*[-–]\s*(.+)$/);
+    if (m) {
+      if (!cc) cc = m[1];
+      if (!unitName || /^n\/d$/i.test(unitName)) unitName = m[2].trim();
+    }
+  }
+  unitName = String(unitName || "").replace(/^Quadra-Lote:\s*/i, "").trim();
+  return {
+    sale: {
+      ...sale,
+      customerId: customerId || sale.customerId,
+      unitId: sale.unitId || (fila && fila.unitId),
+      unitName: unitName,
+      costCenterId: cc,
+      enterpriseId: cc || sale.enterpriseId,
+      receivableBillId: sale.receivableBillId || saleId
+    },
+    costCenterId: cc,
+    unitName: unitName,
+    unitId: sale.unitId || (fila && fila.unitId) || ""
+  };
+};
+
+window.nexHtmlToPdfFile = async function(html, fileName) {
+  if (typeof html2canvas !== "function" || !window.jspdf) {
+    throw new Error("Gerador de PDF indisponível.");
+  }
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:fixed;left:-12000px;top:0;width:794px;background:#fff;padding:40px 48px;box-sizing:border-box;color:#000;";
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap);
+  try {
+    const canvas = await html2canvas(wrap, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const pageHeightPx = Math.max(1, Math.floor(canvas.width * (pageH / pageW)));
+    let offset = 0;
+    let first = true;
+    while (offset < canvas.height) {
+      const sliceH = Math.min(pageHeightPx, canvas.height - offset);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceH;
+      const ctx = pageCanvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(canvas, 0, offset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      const data = pageCanvas.toDataURL("image/jpeg", 0.93);
+      if (!first) pdf.addPage();
+      first = false;
+      const sliceMm = sliceH * pageW / canvas.width;
+      pdf.addImage(data, "JPEG", 0, 0, pageW, sliceMm);
+      offset += pageHeightPx;
+    }
+    const blob = pdf.output("blob");
+    return new File([blob], fileName || "documento.pdf", { type: "application/pdf" });
+  } finally {
+    try { wrap.remove(); } catch (e) {}
+  }
+};
+
+window.nexUploadToSiengeUnit = async function(customerId, saleId, file, tagHints, item, context) {
+  if (typeof window.anexosUploadUnitAttachment !== "function") {
+    throw new Error("Módulo de anexos indisponível.");
+  }
+  const ctx = window.nexSiengeUnitContext(customerId, saleId, item);
+  const tag = typeof window.anexosResolveTagName === "function"
+    ? await window.anexosResolveTagName(tagHints)
+    : (Array.isArray(tagHints) ? tagHints[0] : tagHints);
+  return window.anexosUploadUnitAttachment({
+    file: file,
+    tagLabel: tag,
+    sale: ctx.sale,
+    unitName: ctx.unitName,
+    costCenterId: ctx.costCenterId,
+    context: context || "nex"
+  });
+};
+
 window.nexStampLetterMeta = function(rec, customerId, saleId) {
   if (!rec) return rec;
   rec.customerId = String(customerId || rec.customerId || "");
@@ -26343,6 +26579,32 @@ window.gerarDocumentoFisicoCEC = async function(customerId, saleId) {
         document.getElementById("pdf-document-content").innerHTML = docHtml;
         document.getElementById("pdf-view-overlay").classList.add("active");
         if (window.lucide) lucide.createIcons();
+        try {
+            if (btn) {
+                btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Enviando ao Sienge...';
+                if (window.lucide) lucide.createIcons();
+            }
+            if (typeof window.nexToast === "function") window.nexToast("Enviando CEC para a unidade no Sienge...");
+            const pdfFile = await window.nexHtmlToPdfFile(docHtml, "CEC.pdf");
+            const sent = await window.nexUploadToSiengeUnit(
+                customerId,
+                saleId,
+                pdfFile,
+                ["CEC", "CARTA DE EFETIVACAO DE CANCELAMENTO", "COMUNICACAO DE EFETIVACAO DE CANCELAMENTO", "CARTA DE EFETIVAÇÃO DE CANCELAMENTO"],
+                ready,
+                "cec"
+            );
+            if (typeof window.nexToast === "function") {
+                window.nexToast("CEC gravada na unidade no Sienge" + (sent && sent.fileName ? ": " + sent.fileName : "") + ".");
+            }
+        } catch (upErr) {
+            console.error("[CEC] Falha ao enviar ao Sienge", upErr);
+            if (typeof window.nexToast === "function") {
+                window.nexToast("CEC gerada, mas não subiu para o Sienge: " + ((upErr && upErr.message) || upErr), "erro");
+            } else {
+                alert("CEC gerada, mas não subiu para o Sienge: " + ((upErr && upErr.message) || upErr));
+            }
+        }
     } catch (e) {
         console.error("[CEC] Falha ao gerar documento", e);
         alert("Não foi possível gerar a CEC. Tente novamente.");
@@ -31384,6 +31646,115 @@ function downloadLoteKml(lotName, lat, lng) {
   a.click();
 }
 
+function parseFlexibleIsoDate(v) {
+  if (!v && v !== 0) return null;
+  if (v instanceof Date && !isNaN(v.getTime())) return v;
+  const s = String(v).trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const d = new Date(iso[1] + "-" + iso[2] + "-" + iso[3] + "T12:00:00");
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) {
+    const d = new Date(br[3] + "-" + br[2] + "-" + br[1] + "T12:00:00");
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function remadeEventDateOf(row) {
+  if (!row) return null;
+  const keys = [
+    "date", "createdAt", "negotiationDate", "remadeDate", "generatedDate",
+    "remadeInstallmentsDate", "generationDate", "operationDate", "movementDate",
+    "occurrenceDate", "eventDate", "createdDate", "registerDate", "issueDate",
+    "adjustmentDate", "renegotiationDate", "lastRenegotiationDate", "remadeAt"
+  ];
+  for (let i = 0; i < keys.length; i++) {
+    const d = parseFlexibleIsoDate(row[keys[i]]);
+    if (d) return d;
+  }
+  const nested = row.remade || row.negotiation || row.agreement;
+  if (nested && nested !== row) {
+    const d = remadeEventDateOf(nested);
+    if (d) return d;
+  }
+  return null;
+}
+
+function remadeListsOf(row) {
+  if (!row) return [];
+  return [row.generatedInstallments, row.remadeInstallments, row.installments, row.originalInstallments]
+    .filter(Array.isArray);
+}
+
+function remadeCoversInstallment(row, inst) {
+  if (!row || !inst) return false;
+  const nums = [inst.installmentNumber, inst.installmentId, inst.number, inst.id]
+    .filter((v) => v !== undefined && v !== null && v !== "")
+    .map(String);
+  if (!nums.length) return false;
+  const lists = remadeListsOf(row);
+  for (let i = 0; i < lists.length; i++) {
+    for (let j = 0; j < lists[i].length; j++) {
+      const x = lists[i][j] || {};
+      const hit = [x.installmentNumber, x.installmentId, x.number, x.id]
+        .filter((v) => v !== undefined && v !== null && v !== "")
+        .map(String);
+      if (hit.some((n) => nums.indexOf(n) >= 0)) return true;
+    }
+  }
+  return false;
+}
+
+function remadeMatchesGap(eventDate, prevDate, currDate) {
+  if (!eventDate || !prevDate || !currDate) return false;
+  const t = eventDate.getTime();
+  const prev = prevDate.getTime();
+  const curr = currDate.getTime();
+  const day = 86400000;
+  if (t >= prev - 7 * day && t <= curr + 15 * day) return true;
+  if (Math.abs(t - curr) <= 120 * day) return true;
+  if (Math.abs(t - prev) <= 120 * day) return true;
+  return false;
+}
+
+async function fetchRemadeInstallmentsForTitle(saleId) {
+  const ids = [];
+  const push = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s || s === "N/D" || ids.indexOf(s) >= 0) return;
+    ids.push(s);
+  };
+  push(saleId);
+  if (typeof AppState !== "undefined") {
+    push(AppState.currentReceivableBillId);
+    push(AppState.selectedTitulo);
+    push(AppState.selectedSaleId);
+    const sales = AppState.sales || [];
+    const sale = sales.find((s) =>
+      String(s.id) === String(saleId) || String(s.receivableBillId) === String(saleId)
+    );
+    if (sale) {
+      push(sale.receivableBillId);
+      push(sale.id);
+    }
+  }
+  let all = [];
+  for (let i = 0; i < ids.length; i++) {
+    const res = await SiengeApiService.getRemadeInstallments(ids[i]).catch(() => []);
+    const arr = Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
+    if (arr.length) {
+      all = arr;
+      break;
+    }
+  }
+  return all;
+}
+
 async function loadRenegotiationHistory(customerId, saleId) {
   const container = document.getElementById("tab-historico-renegociacoes");
   if (!container) return;
@@ -31428,7 +31799,7 @@ async function loadRenegotiationHistory(customerId, saleId) {
   `;
 
   try {
-    const remadeApiResults = await SiengeApiService.getRemadeInstallments(saleId);
+    const remadeApiResults = await fetchRemadeInstallmentsForTitle(saleId);
     let allInstallments = [];
     
     if (AppState.currentContractInstallments && AppState.currentContractInstallments.length > 0) {
@@ -31445,7 +31816,11 @@ async function loadRenegotiationHistory(customerId, saleId) {
       }
     }
     
-    allInstallments = allInstallments.filter(i => i.dueDate).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    allInstallments = allInstallments.filter(i => i.dueDate).sort((a, b) => {
+      const da = parseFlexibleIsoDate(a.dueDate) || new Date(a.dueDate);
+      const db = parseFlexibleIsoDate(b.dueDate) || new Date(b.dueDate);
+      return da - db;
+    });
 
     const events = [];
     const apiEventsList = [];
@@ -31466,15 +31841,15 @@ async function loadRenegotiationHistory(customerId, saleId) {
           let generatedCount = Array.isArray(r.generatedInstallments) ? r.generatedInstallments.length : 0;
           if (generatedCount === 0) generatedCount = extractInstallmentsCount(r.generatedInstallmentsDescription);
           
-          // Todo evento retornado pela API é considerado válido.
-          // Como agora iteramos estritamente pelas LACUNAS, se houver lacuna E evento, é Reparcelamento.
+          const eventDate = remadeEventDateOf(r);
           apiEventsList.push({
              type: 'api',
-             date: r.date || r.createdAt || r.negotiationDate || r.remadeDate || null,
+             date: eventDate,
              info: r,
              remadeCount: remadeCount,
              generatedCount: generatedCount,
-             gapDays: 0
+             gapDays: 0,
+             used: false
           });
       });
     }
@@ -31485,8 +31860,8 @@ async function loadRenegotiationHistory(customerId, saleId) {
        const prevInst = allInstallments[i-1];
        const currInst = allInstallments[i];
 
-       const prevDate = new Date(prevInst.dueDate);
-       const currDate = new Date(currInst.dueDate);
+       const prevDate = parseFlexibleIsoDate(prevInst.dueDate) || new Date(prevInst.dueDate);
+       const currDate = parseFlexibleIsoDate(currInst.dueDate) || new Date(currInst.dueDate);
        const diffTime = currDate - prevDate;
        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
        
@@ -31506,8 +31881,8 @@ async function loadRenegotiationHistory(customerId, saleId) {
 
           let isPolaris = false;
           if (prevReceiptDateStr) {
-             const rDate = new Date(prevReceiptDateStr);
-             if (rDate <= new Date('2016-12-31T23:59:59')) {
+             const rDate = parseFlexibleIsoDate(prevReceiptDateStr) || new Date(prevReceiptDateStr);
+             if (rDate && rDate <= new Date('2016-12-31T23:59:59')) {
                  isPolaris = true;
              }
           }
@@ -31518,10 +31893,17 @@ async function loadRenegotiationHistory(customerId, saleId) {
 
           if (!isPolaris) {
               if (hasApiData) {
-                  // Verifica se tem alguma renegociação oficial (API) perto dessa data (margem de 90 dias)
-                  const matchedApi = apiEventsList.find(e => e.date && Math.abs(new Date(e.date) - currDate) < (1000 * 60 * 60 * 24 * 90));
+                  let matchedApi = apiEventsList.find(e =>
+                    !e.used && remadeMatchesGap(e.date, prevDate, currDate)
+                  );
+                  if (!matchedApi) {
+                    matchedApi = apiEventsList.find(e =>
+                      !e.used && remadeCoversInstallment(e.info, currInst)
+                    );
+                  }
                   if (matchedApi) {
                       isReparcelamento = true;
+                      matchedApi.used = true;
                       matchedApiInfo = matchedApi;
                   } else {
                       isCarencia = true;
@@ -31536,7 +31918,9 @@ async function loadRenegotiationHistory(customerId, saleId) {
           events.push({
              type: 'gap',
              gapDays: diffDays,
-             date: currDate.toISOString(),
+             date: (matchedApiInfo && matchedApiInfo.date)
+               ? (matchedApiInfo.date instanceof Date ? matchedApiInfo.date.toISOString() : String(matchedApiInfo.date))
+               : currDate.toISOString(),
              gapType: gapType,
              matchedApi: matchedApiInfo,
              idForScroll: `gap-row-${i}`,

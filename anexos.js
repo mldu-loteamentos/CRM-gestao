@@ -4601,6 +4601,155 @@ window.anexosUploadCustomerAttachment = async function(customerId, file, tagLabe
   return true;
 };
 
+function anexosFoldTag(s) {
+  return String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+window.anexosResolveTagName = async function(preferred) {
+  const wants = (Array.isArray(preferred) ? preferred : [preferred])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  if (!wants.length) return "DOC";
+  try {
+    if ((!AnexosState.tagsAtivas || !AnexosState.tagsAtivas.length) && window.AnexosApp && typeof AnexosApp.loadTagsAtivas === "function") {
+      await AnexosApp.loadTagsAtivas();
+    }
+  } catch (e) {}
+  const tags = AnexosState.tagsAtivas || [];
+  for (let i = 0; i < wants.length; i++) {
+    const want = anexosFoldTag(wants[i]);
+    const hit = tags.find((t) => anexosFoldTag(t.name) === want);
+    if (hit && hit.name) return String(hit.name).trim();
+  }
+  for (let i = 0; i < wants.length; i++) {
+    const want = anexosFoldTag(wants[i]);
+    const hit = tags.find((t) => {
+      const n = anexosFoldTag(t.name);
+      return n && want && (n.indexOf(want) >= 0 || want.indexOf(n) >= 0);
+    });
+    if (hit && hit.name) return String(hit.name).trim();
+  }
+  return wants[0];
+};
+
+async function anexosFindSiengeUnitId(sale, costCenterId, unitName) {
+  const contractObj = {
+    ...(sale || {}),
+    costCenterId: costCenterId || (sale && sale.costCenterId),
+    enterpriseId: costCenterId || (sale && (sale.enterpriseId || sale.costCenterId)),
+    unitName: unitName || (sale && (sale.unitName || sale.unityName || sale.units))
+  };
+  if (window.ConstrucaoApp && typeof ConstrucaoApp.findSiengeUnitId === "function") {
+    return ConstrucaoApp.findSiengeUnitId(contractObj);
+  }
+  if (sale && sale.unitId && /^\d+$/.test(String(sale.unitId))) return String(sale.unitId);
+  const cc = String(costCenterId || "").trim();
+  const name = String(unitName || "").trim();
+  if (window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function" && cc && name) {
+    const det = await SiengeApiService.getUnitDetails(cc, name);
+    const results = (det && det.results) || [];
+    const fold = (s) => String(s || "").replace(/[\s-]+/g, "").toUpperCase();
+    const want = fold(name);
+    const hit = results.find((u) => {
+      const n = fold(u && u.name);
+      return n && want && (n === want || n.indexOf(want) >= 0 || want.indexOf(n) >= 0);
+    }) || (results.length === 1 ? results[0] : null);
+    if (hit && hit.id) return String(hit.id);
+  }
+  throw new Error("Unidade não encontrada no Sienge.");
+}
+
+window.anexosUploadUnitAttachment = async function(opts) {
+  const o = opts || {};
+  const file = o.file;
+  if (!file) throw new Error("Arquivo não informado.");
+  const tag = String(o.tagLabel || "DOC").replace(/[\\/]+/g, " ").trim();
+  let cc = String(o.costCenterId || "").trim();
+  let unitName = String(o.unitName || "").replace(/^Quadra-Lote:\s*/i, "").trim();
+  const sale = o.sale || {};
+  if ((!cc || !unitName) && window.ConstrucaoApp) {
+    if (!cc && typeof ConstrucaoApp.extractCostCenterId === "function") cc = ConstrucaoApp.extractCostCenterId(sale) || cc;
+    if (!unitName && typeof ConstrucaoApp.extractUnitName === "function") unitName = ConstrucaoApp.extractUnitName(sale) || unitName;
+  }
+  if (!cc) throw new Error("Centro de custo da unidade não identificado.");
+  if (!unitName) throw new Error("Nome da unidade não identificado.");
+  const siengeUnitId = await anexosFindSiengeUnitId(sale, cc, unitName);
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const dataIsoDot = `${y}.${m}.${d}`;
+  const dataSuffix = ` ${d}.${m}.${y}`;
+  const extRaw = (file.name && file.name.includes(".")) ? file.name.split(".").pop() : (file.type === "application/pdf" ? "pdf" : "pdf");
+  const extFinal = String(extRaw || "pdf").toLowerCase() === "jpeg" ? "jpg" : String(extRaw || "pdf").toLowerCase();
+  const unitNameStr = String(unitName).replace(/-/g, " ");
+  const nomeFinalArquivo = anexosSafeFileName(`${cc} ${unitNameStr} - ${tag}${dataSuffix}.${extFinal}`);
+  const descricaoSienge = `${dataIsoDot} - ${tag}`.replace(/\s+/g, " ").trim();
+  const apiUrl = anexosApiUrl(`/sienge-proxy/units/${encodeURIComponent(siengeUnitId)}/attachments?description=${encodeURIComponent(descricaoSienge)}`);
+  const multipart = await anexosMultipartBody(file, nomeFinalArquivo);
+  const auth = (typeof getBasicAuthHeader === "function") ? getBasicAuthHeader() : "";
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: auth,
+      Accept: "application/json",
+      "Content-Type": multipart.contentType
+    },
+    body: multipart.body
+  });
+  const context = o.context || "unidade";
+  if (!res.ok) {
+    if (typeof window.logCrmAudit === "function") {
+      window.logCrmAudit({
+        action: "ANEXO_ERRO",
+        module: "GED / Anexos",
+        status: "erro",
+        customerId: sale.customerId || "",
+        enterpriseId: cc,
+        unitId: siengeUnitId,
+        unitName: unitName,
+        summary: "Falha no anexo da unidade · HTTP " + res.status,
+        details: { tag: tag, fileName: nomeFinalArquivo, destino: "Unidade", context: context, httpStatus: res.status }
+      });
+    }
+    throw new Error("HTTP " + res.status);
+  }
+  if (typeof window.logCrmAudit === "function") {
+    window.logCrmAudit({
+      action: "ANEXO_ENVIADO",
+      module: "GED / Anexos",
+      status: "ok",
+      customerId: sale.customerId || "",
+      enterpriseId: cc,
+      unitId: siengeUnitId,
+      unitName: unitName,
+      summary: tag + " · " + nomeFinalArquivo + " → Unidade",
+      details: { tag: tag, fileName: nomeFinalArquivo, description: descricaoSienge, destino: "Unidade", context: context, unitId: siengeUnitId }
+    });
+  }
+  if (sale && (sale.id || sale.contractId || sale.receivableBillId) && typeof anexosSaveMapaEnvio === "function") {
+    await anexosSaveMapaEnvio({
+      enterpriseId: cc,
+      unitId: siengeUnitId,
+      unitName: unitName,
+      contractId: sale.id || sale.contractId || sale.receivableBillId,
+      contractNumber: sale.contractNumber,
+      tag: String(tag).toUpperCase().split("-")[0].trim() || tag,
+      destination: "Unidade",
+      description: descricaoSienge,
+      fileName: nomeFinalArquivo,
+      sentAt: new Date().toISOString(),
+      sentBy: (window.AppState && AppState.user && (AppState.user.email || AppState.user.name)) || ""
+    });
+  }
+  return { ok: true, fileName: nomeFinalArquivo, description: descricaoSienge, unitId: siengeUnitId, tag: tag };
+};
+
 // Travar saida da página se tiver uploads pendentes
 window.addEventListener('beforeunload', (e) => {
   if (AnexosState.files.length > 0) {
