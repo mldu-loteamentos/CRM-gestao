@@ -1219,65 +1219,6 @@ const DashboardInadimplencia = (function() {
     });
   }
 
-  function renderTabelaComparativa(hojeMetrics, fechMetrics) {
-    if (!hojeMetrics) return '';
-    const rows = [
-      fechMetrics ? {
-        key: 'fech',
-        label: 'Fechamento do mês',
-        hint: 'Último fechamento gravado',
-        count: fechMetrics.total_count,
-        value: fechMetrics.total_value,
-        subj: fechMetrics.subjudice_count
-      } : null,
-      {
-        key: 'hoje',
-        label: 'Hoje',
-        hint: 'Posição atual filtrada',
-        count: hojeMetrics.total_count,
-        value: hojeMetrics.total_value,
-        subj: hojeMetrics.subjudice_count
-      }
-    ].filter(Boolean);
-
-    return `
-      <section class="di-block">
-        <header class="di-block-head">
-          <h3><i data-lucide="calendar-days"></i> Comparativo de períodos</h3>
-        </header>
-        <div class="di-compare-grid">
-          ${rows.map((r) => {
-            const base = r.key === 'hoje' && fechMetrics ? fechMetrics : null;
-            return `
-              <article class="di-compare-card ${r.key === 'hoje' ? 'is-today' : ''}">
-                <div class="di-compare-head">
-                  <div>
-                    <div class="di-compare-label">${escHtml(r.label)}</div>
-                    <div class="di-compare-hint">${escHtml(r.hint)}</div>
-                  </div>
-                  ${base ? deltaBadge(r.value, base.total_value) : ''}
-                </div>
-                <div class="di-compare-stats">
-                  <div class="di-compare-stat">
-                    <span class="di-compare-stat-label">Valor</span>
-                    <span class="di-compare-stat-value">${formatMoney(r.value)}</span>
-                  </div>
-                  <div class="di-compare-stat">
-                    <span class="di-compare-stat-label">Títulos</span>
-                    <span class="di-compare-stat-value">${Number(r.count || 0).toLocaleString('pt-BR')}</span>
-                  </div>
-                  <div class="di-compare-stat">
-                    <span class="di-compare-stat-label">Sub júdice</span>
-                    <span class="di-compare-stat-value">${Number(r.subj || 0).toLocaleString('pt-BR')}</span>
-                  </div>
-                </div>
-              </article>`;
-          }).join('')}
-        </div>
-      </section>
-    `;
-  }
-
   function renderAging(metrics) {
     if (!metrics || !metrics.aging) return '';
     const agings = metrics.aging;
@@ -1483,8 +1424,6 @@ const DashboardInadimplencia = (function() {
               <canvas id="inadimplencia-aging-chart"></canvas>
             </div>
           </div>
-
-          ${renderTabelaComparativa(metrics, fechMetrics)}
 
           <div class="di-panels-row">
             ${renderAging(metrics)}
