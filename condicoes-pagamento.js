@@ -279,7 +279,7 @@ const CondicoesPagamentoApp = {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.persistFlags({ silent: true });
-    }, 250);
+    }, 0);
   },
 
   setFlag(id, field, on) {
@@ -303,7 +303,7 @@ const CondicoesPagamentoApp = {
     this.writeFlagsLocal();
     this.saveMsg = "Salvando…";
     this.renderTable();
-    this.schedulePersist();
+    this.persistFlags({ silent: true });
   },
 
   normalizeItem(raw) {
@@ -356,9 +356,8 @@ const CondicoesPagamentoApp = {
   },
 
   switchHtml(id, field, checked, label) {
-    const idJs = JSON.stringify(String(id));
     return `<label class="moura-switch" title="${this.esc(label)}">
-      <input type="checkbox" ${checked ? "checked" : ""} onchange="CondicoesPagamentoApp.setFlag(${idJs},'${field}',this.checked)">
+      <input type="checkbox" data-cpag-id="${this.esc(String(id))}" data-cpag-field="${this.esc(field)}" ${checked ? "checked" : ""}>
       <span class="moura-switch-track" aria-hidden="true"></span>
       <span class="moura-switch-text">${this.esc(label)}</span>
     </label>`;
@@ -377,12 +376,14 @@ const CondicoesPagamentoApp = {
   renderTable() {
     const tbody = document.getElementById("cpag-tbody");
     if (!tbody) return;
+    this._applyingDom = true;
     const rows = this.filtered();
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">
         ${this.loading ? "Carregando…" : (this.error ? this.esc(this.error) : "Nenhuma condição encontrada.")}
       </td></tr>`;
       this.renderStatus();
+      this._applyingDom = false;
       return;
     }
     tbody.innerHTML = rows.map((it) => {
@@ -402,6 +403,7 @@ const CondicoesPagamentoApp = {
       </tr>`;
     }).join("");
     this.renderStatus();
+    this._applyingDom = false;
   },
 
   render() {
@@ -521,17 +523,34 @@ window.paymentConditionIsWebro = function(conditionId) {
   return window.getPaymentConditionFlags(conditionId).parcelaWebro === true;
 };
 
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (!el || !el.getAttribute || el.getAttribute("data-cpag-field") == null) return;
+  if (CondicoesPagamentoApp._applyingDom) return;
+  const id = el.getAttribute("data-cpag-id");
+  const field = el.getAttribute("data-cpag-field");
+  CondicoesPagamentoApp.setFlag(id, field, !!el.checked);
+});
+
+function flushCondicoesPagamento() {
+  try {
+    CondicoesPagamentoApp.writeFlagsLocal();
+    if (CondicoesPagamentoApp._flagsDirty) {
+      CondicoesPagamentoApp.persistFlags({ silent: true });
+    }
+  } catch (err) {}
+}
+
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "condicoes-pagamento") {
     CondicoesPagamentoApp.init();
     return;
   }
-  if (CondicoesPagamentoApp._flagsDirty) {
-    CondicoesPagamentoApp.writeFlagsLocal();
-    CondicoesPagamentoApp.persistFlags({ silent: true });
-  }
+  flushCondicoesPagamento();
 });
 
-window.addEventListener("beforeunload", () => {
-  try { CondicoesPagamentoApp.writeFlagsLocal(); } catch (e) {}
+window.addEventListener("pagehide", flushCondicoesPagamento);
+window.addEventListener("beforeunload", flushCondicoesPagamento);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushCondicoesPagamento();
 });
