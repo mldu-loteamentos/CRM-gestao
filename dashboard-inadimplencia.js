@@ -2,6 +2,7 @@ const DashboardInadimplencia = (function() {
   let snapshots = [];
   let chartInstance = null;
   let agingBarInstance = null;
+  let chartMetric = 'value';
 
   const filterDraft = {
     companies: [],
@@ -239,13 +240,69 @@ const DashboardInadimplencia = (function() {
     { key: 'd120p', label: 'Acima de 120 dias', color: '#9a3412' }
   ];
 
-  function agingValuesFromMetrics(metrics) {
+  function agingValuesFromMetrics(metrics, metric) {
     const aging = (metrics && metrics.aging) ? metrics.aging : emptyAging();
+    const useCount = metric === 'count';
     const out = {};
     AGING_CHART_SERIES.forEach((s) => {
-      out[s.key] = Number(aging[s.key] && aging[s.key].value) || 0;
+      const row = aging[s.key] || {};
+      out[s.key] = Number(useCount
+        ? (row.clients != null ? row.clients : row.count)
+        : row.value) || 0;
     });
     return out;
+  }
+
+  function isChartCount() {
+    return chartMetric === 'count';
+  }
+
+  function formatChartValue(n) {
+    if (isChartCount()) return Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+    return formatMoney(n);
+  }
+
+  function formatChartTick(value) {
+    if (isChartCount()) {
+      const n = Number(value) || 0;
+      return n.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+    }
+    return formatAxisTick(value);
+  }
+
+  function metricsQuantity(metrics) {
+    if (!metrics) return 0;
+    const customers = Number(metrics.total_customers);
+    if (Number.isFinite(customers) && customers > 0) return customers;
+    return Number(metrics.total_count) || 0;
+  }
+
+  function filteredSnapshotMetric(snap, f) {
+    if (!snap) return 0;
+    if (!isChartCount()) {
+      if (!hasAnyFilter(f)) return Number(snap.total_value) || 0;
+      return aggregateFromSnapshot(snap, f).total_value;
+    }
+    if (!hasAnyFilter(f)) return Number(snap.total_customers || snap.total_count) || 0;
+    return metricsQuantity(aggregateFromSnapshot(snap, f));
+  }
+
+  function chartMetricToggleHtml() {
+    const isVal = !isChartCount();
+    return `
+      <div class="di-metric-toggle" role="group" aria-label="Unidade do gráfico">
+        <button type="button" class="di-metric-btn ${isVal ? 'is-active' : ''}" data-metric="value" onclick="window.DashboardInadimplencia.setChartMetric('value')">Valor (R$)</button>
+        <button type="button" class="di-metric-btn ${isVal ? '' : 'is-active'}" data-metric="count" onclick="window.DashboardInadimplencia.setChartMetric('count')">Clientes</button>
+      </div>`;
+  }
+
+  function setChartMetric(mode) {
+    chartMetric = mode === 'count' ? 'count' : 'value';
+    document.querySelectorAll('.di-metric-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-metric') === chartMetric);
+    });
+    initChart();
+    initAgingBarChart();
   }
 
   /** Soma buckets de aging; aceita chaves novas e snapshots antigos (91–180 / 181–365 / +365). */
@@ -538,6 +595,9 @@ const DashboardInadimplencia = (function() {
   function aggregateFromLive(clients, f) {
     const filtered = clients.filter(c => clientMatches(c, f) && clientValue(c) >= 0.01);
     const aging = emptyAging();
+    const agingCust = {
+      d0_30: new Set(), d31_60: new Set(), d61_90: new Set(), d91_120: new Set(), d120p: new Set()
+    };
     const centerMap = {};
     const opMap = {};
     let total_value = 0;
@@ -560,6 +620,7 @@ const DashboardInadimplencia = (function() {
       const ak = agingKeyFromDelay(delay);
       aging[ak].count += nTit;
       aging[ak].value += val;
+      if (c.customerId != null && agingCust[ak]) agingCust[ak].add(String(c.customerId));
 
       const ccId = String(c.costCenterId || 'N/D');
       if (!centerMap[ccId]) centerMap[ccId] = { id: ccId, count: 0, value: 0 };
@@ -574,6 +635,10 @@ const DashboardInadimplencia = (function() {
         opMap[opName].above31_count += nTit;
         opMap[opName].above31_value += val;
       }
+    });
+
+    Object.keys(aging).forEach((k) => {
+      aging[k].clients = agingCust[k] ? agingCust[k].size : 0;
     });
 
     return {
@@ -685,6 +750,7 @@ const DashboardInadimplencia = (function() {
       return {
         total_value: snap.total_value || 0,
         total_count: snap.total_count || 0,
+        total_customers: snap.total_customers || 0,
         avg_ticket: snap.avg_ticket || 0,
         subjudice_count: snap.subjudice_count || 0,
         subjudice_value: snap.subjudice_value || 0,
@@ -1015,11 +1081,13 @@ const DashboardInadimplencia = (function() {
       const parts = String(s.date || '').split('-');
       return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
     });
-    const rawValues = recentSnaps.map(s => filteredSnapshotValue(s, f));
-
-    if (recentSnaps.length && hasAnyFilter(f)) {
-      const liveMetrics = getCurrentMetrics();
-      if (liveMetrics && liveMetrics.total_value > 0.01) {
+    const rawValues = recentSnaps.map(s => filteredSnapshotMetric(s, f));
+    const liveMetrics = getCurrentMetrics();
+    if (recentSnaps.length && liveMetrics) {
+      if (isChartCount()) {
+        const n = metricsQuantity(liveMetrics);
+        if (n > 0) rawValues[rawValues.length - 1] = n;
+      } else if (hasAnyFilter(f) && liveMetrics.total_value > 0.01) {
         rawValues[rawValues.length - 1] = liveMetrics.total_value;
       }
     }
@@ -1038,7 +1106,7 @@ const DashboardInadimplencia = (function() {
       const bad = [];
       outlierFlags.forEach((flag, i) => {
         if (!flag) return;
-        bad.push(`${labels[i]} (gravado ${formatMoney(rawValues[i])}; tendência ~${formatMoney(displayValues[i])})`);
+        bad.push(`${labels[i]} (gravado ${formatChartValue(rawValues[i])}; tendência ~${formatChartValue(displayValues[i])})`);
       });
       if (bad.length) {
         noteEl.style.display = 'flex';
@@ -1055,11 +1123,14 @@ const DashboardInadimplencia = (function() {
       beginAtZero: true,
       ticks: {
         callback: function(value) {
-          return formatAxisTick(value);
+          return formatChartTick(value);
         }
       }
     };
-    if (maxVal < 0.01) {
+    if (isChartCount()) {
+      if (maxVal < 0.01) yScale.max = 10;
+      else yScale.suggestedMax = Math.ceil(maxVal * 1.15);
+    } else if (maxVal < 0.01) {
       yScale.max = 1000;
     } else if (maxVal < 50000) {
       yScale.suggestedMax = maxVal * 1.15;
@@ -1083,7 +1154,7 @@ const DashboardInadimplencia = (function() {
             order: 2
           },
           {
-            label: 'Valor gravado',
+            label: isChartCount() ? 'Qtd. gravada' : 'Valor gravado',
             data: rawValues,
             borderColor: 'transparent',
             backgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
@@ -1106,11 +1177,11 @@ const DashboardInadimplencia = (function() {
                 const i = context.dataIndex;
                 const snap = recentSnaps[i];
                 const raw = rawValues[i];
-                let label = formatMoney(raw);
+                let label = formatChartValue(raw);
                 if (outlierFlags[i]) label += ' (possível carga parcial)';
                 if (snap && snap.is_month_close) label += ' (Fechamento)';
                 if (hasAnyFilter(f)) label += ' · filtrado';
-                else if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
+                else if (!isChartCount() && snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
                 return label;
               }
             }
@@ -1127,14 +1198,17 @@ const DashboardInadimplencia = (function() {
     const series = {};
     AGING_CHART_SERIES.forEach((s) => { series[s.key] = []; });
     recentSnaps.forEach((snap) => {
-      const vals = agingValuesFromMetrics(aggregateFromSnapshot(snap, f));
+      const vals = agingValuesFromMetrics(aggregateFromSnapshot(snap, f), chartMetric);
       AGING_CHART_SERIES.forEach((s) => {
         series[s.key].push(vals[s.key] || 0);
       });
     });
     const liveMetrics = getCurrentMetrics();
-    if (recentSnaps.length && liveMetrics && liveMetrics.aging && (Number(liveMetrics.total_value) || 0) > 0.01) {
-      const liveAging = agingValuesFromMetrics(liveMetrics);
+    const liveOk = liveMetrics && liveMetrics.aging && (isChartCount()
+      ? metricsQuantity(liveMetrics) > 0
+      : (Number(liveMetrics.total_value) || 0) > 0.01);
+    if (recentSnaps.length && liveOk) {
+      const liveAging = agingValuesFromMetrics(liveMetrics, chartMetric);
       const last = series[AGING_CHART_SERIES[0].key].length - 1;
       AGING_CHART_SERIES.forEach((s) => {
         series[s.key][last] = liveAging[s.key] || 0;
@@ -1193,12 +1267,12 @@ const DashboardInadimplencia = (function() {
           tooltip: {
             callbacks: {
               label: function(context) {
-                return `${context.dataset.label}: ${formatMoney(Number(context.raw) || 0)}`;
+                return `${context.dataset.label}: ${formatChartValue(Number(context.raw) || 0)}`;
               },
               footer: function(items) {
                 if (!items || !items.length) return '';
                 const total = items.reduce((s, it) => s + (Number(it.raw) || 0), 0);
-                return `Total: ${formatMoney(total)}`;
+                return `Total: ${formatChartValue(total)}`;
               }
             }
           }
@@ -1210,7 +1284,7 @@ const DashboardInadimplencia = (function() {
             beginAtZero: true,
             ticks: {
               callback: function(value) {
-                return formatAxisTick(value);
+                return formatChartTick(value);
               }
             }
           }
@@ -1402,10 +1476,11 @@ const DashboardInadimplencia = (function() {
           ${renderCards(metrics, fechMetrics)}
 
           <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
-            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
               <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
                 <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
               </h3>
+              ${chartMetricToggleHtml()}
             </div>
             <div id="inadimplencia-chart-note" style="display:none;padding:10px 16px;background:#fff7ed;color:#9a3412;font-size:0.82rem;border-bottom:1px solid #ffedd5;align-items:center;gap:6px;"></div>
             <div style="padding: 20px; height: 350px;">
@@ -1414,11 +1489,14 @@ const DashboardInadimplencia = (function() {
           </div>
 
           <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
-            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-              <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="bar-chart-3" style="width: 18px; color: #64748b;"></i> Inadimplência por faixa de atraso
-              </h3>
-              <p style="margin: 4px 0 0; font-size: 0.75rem; color: #64748b;">Colunas empilhadas por aging. O topo é o total do dia.</p>
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="bar-chart-3" style="width: 18px; color: #64748b;"></i> Inadimplência por faixa de atraso
+                </h3>
+                <p style="margin: 4px 0 0; font-size: 0.75rem; color: #64748b;">Colunas empilhadas por aging. O topo é o total do dia.</p>
+              </div>
+              ${chartMetricToggleHtml()}
             </div>
             <div style="padding: 16px 20px 20px; height: 380px;">
               <canvas id="inadimplencia-aging-chart"></canvas>
@@ -2117,7 +2195,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     gerarRelatorioDiarioPdf,
     paint,
     aplicarFiltros,
-    limparFiltros
+    limparFiltros,
+    setChartMetric
   };
 })();
 window.DashboardInadimplencia = DashboardInadimplencia;

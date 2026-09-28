@@ -2396,6 +2396,31 @@ circle.donut-segment {
 @media (max-width: 640px) {
   .dash-inad-filters-grid { grid-template-columns: 1fr; }
 }
+
+.di-metric-toggle {
+  display: inline-flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  flex-shrink: 0;
+}
+.di-metric-btn {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.di-metric-btn + .di-metric-btn { border-left: 1px solid #e2e8f0; }
+.di-metric-btn.is-active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
 .ml-emp-filter-item input { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: #105436; }
 .ml-emp-filter-empty { padding: 12px; color: #94a3b8; font-size: 0.8rem; }
 
