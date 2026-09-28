@@ -230,6 +230,23 @@ const DashboardInadimplencia = (function() {
     return 'd120p';
   }
 
+  const AGING_CHART_SERIES = [
+    { key: 'd0_30', label: 'Até 30 dias', border: '#ca8a04', fill: 'rgba(253, 224, 71, 0.88)' },
+    { key: 'd31_60', label: '31 a 60 dias', border: '#ea580c', fill: 'rgba(253, 186, 116, 0.88)' },
+    { key: 'd61_90', label: '61 a 90 dias', border: '#15803d', fill: 'rgba(134, 239, 172, 0.82)' },
+    { key: 'd91_120', label: '91 a 120 dias', border: '#be185d', fill: 'rgba(249, 168, 212, 0.85)' },
+    { key: 'd120p', label: 'Acima de 120 dias', border: '#6d28d9', fill: 'rgba(196, 181, 253, 0.90)' }
+  ];
+
+  function agingValuesFromMetrics(metrics) {
+    const aging = (metrics && metrics.aging) ? metrics.aging : emptyAging();
+    const out = {};
+    AGING_CHART_SERIES.forEach((s) => {
+      out[s.key] = Number(aging[s.key] && aging[s.key].value) || 0;
+    });
+    return out;
+  }
+
   /** Soma buckets de aging; aceita chaves novas e snapshots antigos (91–180 / 181–365 / +365). */
   function absorbAging(target, src) {
     if (!target || !src) return;
@@ -694,13 +711,25 @@ const DashboardInadimplencia = (function() {
           total_count = Math.round((Number(snap.total_count) || 0) * ratio);
         }
       }
+      const aging = emptyAging();
+      const snapTotal = Number(snap.total_value) || 0;
+      if (total_value > 0.01 && snapTotal > 0.01) {
+        const r = Math.min(1, total_value / snapTotal);
+        (dj.companies || []).forEach((comp) => {
+          if (comp.aging) absorbAging(aging, comp.aging);
+        });
+        Object.keys(aging).forEach((k) => {
+          aging[k].count = Math.round((aging[k].count || 0) * r);
+          aging[k].value = (aging[k].value || 0) * r;
+        });
+      }
       return {
         total_value,
         total_count,
         avg_ticket: total_count > 0 ? total_value / total_count : 0,
         subjudice_count: 0,
         subjudice_value: 0,
-        aging: emptyAging(),
+        aging,
         centers: [],
         operators: ops,
         source: 'snapshot'
@@ -985,35 +1014,53 @@ const DashboardInadimplencia = (function() {
       const parts = String(s.date || '').split('-');
       return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
     });
-    const rawValues = recentSnaps.map(s => filteredSnapshotValue(s, f));
 
-    // Último ponto: alinha com a carteira ao vivo (filtro de operador/geo já refletido nos cards)
-    if (recentSnaps.length && hasAnyFilter(f)) {
-      const liveMetrics = getCurrentMetrics();
-      if (liveMetrics && liveMetrics.total_value > 0.01) {
-        rawValues[rawValues.length - 1] = liveMetrics.total_value;
-      }
+    const series = {};
+    AGING_CHART_SERIES.forEach((s) => { series[s.key] = []; });
+    recentSnaps.forEach((snap) => {
+      const vals = agingValuesFromMetrics(aggregateFromSnapshot(snap, f));
+      AGING_CHART_SERIES.forEach((s) => {
+        series[s.key].push(vals[s.key] || 0);
+      });
+    });
+
+    const liveMetrics = getCurrentMetrics();
+    if (recentSnaps.length && liveMetrics && liveMetrics.aging && (Number(liveMetrics.total_value) || 0) > 0.01) {
+      const liveAging = agingValuesFromMetrics(liveMetrics);
+      const last = series[AGING_CHART_SERIES[0].key].length - 1;
+      AGING_CHART_SERIES.forEach((s) => {
+        series[s.key][last] = liveAging[s.key] || 0;
+      });
     }
 
-    const outlierFlags = detectSnapshotOutliers(recentSnaps, rawValues);
-    const displayValues = rawValues.map((v, i) => {
-      if (!outlierFlags[i]) return v;
-      const prev = rawValues[i - 1];
-      const next = rawValues[i + 1];
-      if (prev > 0 && next > 0) return (prev + next) / 2;
-      return v;
+    const rawTotals = labels.map((_, i) =>
+      AGING_CHART_SERIES.reduce((sum, s) => sum + (Number(series[s.key][i]) || 0), 0)
+    );
+    const outlierFlags = detectSnapshotOutliers(recentSnaps, rawTotals);
+    AGING_CHART_SERIES.forEach((s) => {
+      const raw = series[s.key];
+      series[s.key] = raw.map((v, i) => {
+        if (!outlierFlags[i]) return v;
+        const prev = Number(raw[i - 1]) || 0;
+        const next = Number(raw[i + 1]) || 0;
+        if (prev > 0 && next > 0) return (prev + next) / 2;
+        return v;
+      });
     });
+    const displayTotals = labels.map((_, i) =>
+      AGING_CHART_SERIES.reduce((sum, s) => sum + (Number(series[s.key][i]) || 0), 0)
+    );
 
     const noteEl = document.getElementById('inadimplencia-chart-note');
     if (noteEl) {
       const bad = [];
       outlierFlags.forEach((flag, i) => {
         if (!flag) return;
-        bad.push(`${labels[i]} (gravado ${formatMoney(rawValues[i])}; tendência ~${formatMoney(displayValues[i])})`);
+        bad.push(`${labels[i]} (gravado ${formatMoney(rawTotals[i])}; tendência ~${formatMoney(displayTotals[i])})`);
       });
       if (bad.length) {
         noteEl.style.display = 'flex';
-        noteEl.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0;"></i> <span>Possível snapshot parcial: <strong>${bad.join('; ')}</strong>. Linha tracejada usa a média dos dias vizinhos; o ponto vermelho é o valor gravado.</span>`;
+        noteEl.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0;"></i> <span>Possível snapshot parcial: <strong>${bad.join('; ')}</strong>. As faixas empilhadas usam a média dos dias vizinhos nesse ponto.</span>`;
         if (window.lucide) window.lucide.createIcons({ root: noteEl });
       } else {
         noteEl.style.display = 'none';
@@ -1021,8 +1068,9 @@ const DashboardInadimplencia = (function() {
       }
     }
 
-    const maxVal = Math.max(0, ...displayValues, ...rawValues);
+    const maxVal = Math.max(0, ...displayTotals, ...rawTotals);
     const yScale = {
+      stacked: true,
       beginAtZero: true,
       ticks: {
         callback: function(value) {
@@ -1030,66 +1078,76 @@ const DashboardInadimplencia = (function() {
         }
       }
     };
-    // Evita eixo “fantasma” em ±0.8M quando a série filtrada está zerada/pequena
     if (maxVal < 0.01) {
       yScale.max = 1000;
     } else if (maxVal < 50000) {
       yScale.suggestedMax = maxVal * 1.15;
     }
 
+    const datasets = AGING_CHART_SERIES.map((s) => ({
+      label: s.label,
+      data: series[s.key],
+      borderColor: s.border,
+      backgroundColor: s.fill,
+      borderWidth: 1.5,
+      fill: true,
+      tension: 0.15,
+      pointRadius: recentSnaps.map((snap, i) => outlierFlags[i] ? 4 : (snap.is_month_close ? 4 : 0)),
+      pointHoverRadius: 6,
+      pointBackgroundColor: recentSnaps.map((snap, i) => outlierFlags[i] ? '#ef4444' : (snap.is_month_close ? '#105436' : s.border)),
+      pointBorderColor: '#fff',
+      pointBorderWidth: 1,
+      stack: 'aging'
+    }));
+
     chartInstance = new Chart(ctx, {
       type: 'line',
       data: {
         labels: labels,
-        datasets: [
-          {
-            label: 'Tendência (corrige buracos)',
-            data: displayValues,
-            borderColor: '#f37021',
-            backgroundColor: 'rgba(243, 112, 33, 0.12)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.1,
-            pointRadius: 0,
-            borderDash: outlierFlags.some(Boolean) ? [6, 4] : [],
-            order: 2
-          },
-          {
-            label: 'Valor gravado',
-            data: rawValues,
-            borderColor: 'transparent',
-            backgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
-            pointBackgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
-            pointRadius: rawValues.map((_, i) => outlierFlags[i] ? 6 : (recentSnaps[i].is_month_close ? 5 : 3)),
-            pointHoverRadius: 7,
-            showLine: false,
-            order: 1
-          }
-        ]
+        datasets: datasets
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: true,
+            position: 'top',
+            align: 'end',
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              usePointStyle: true,
+              pointStyle: 'rectRounded',
+              padding: 12,
+              font: { size: 11 }
+            }
+          },
+          filler: { propagate: false },
           tooltip: {
             callbacks: {
               label: function(context) {
-                const i = context.dataIndex;
+                const raw = Number(context.raw) || 0;
+                return `${context.dataset.label}: ${formatMoney(raw)}`;
+              },
+              footer: function(items) {
+                if (!items || !items.length) return '';
+                const i = items[0].dataIndex;
+                const total = displayTotals[i] || 0;
                 const snap = recentSnaps[i];
-                const raw = rawValues[i];
-                let label = formatMoney(raw);
-                if (outlierFlags[i]) label += ' (possível carga parcial)';
-                if (snap && snap.is_month_close) label += ' (Fechamento)';
-                if (hasAnyFilter(f)) label += ' · filtrado';
-                else if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
-                return label;
+                let extra = `Total: ${formatMoney(total)}`;
+                if (outlierFlags[i]) extra += ' (possível carga parcial)';
+                if (snap && snap.is_month_close) extra += ' · Fechamento';
+                if (hasAnyFilter(f)) extra += ' · filtrado';
+                return extra;
               }
             }
           }
         },
         scales: {
-          y: yScale
+          y: yScale,
+          x: { grid: { display: false } }
         }
       }
     });
@@ -1333,9 +1391,10 @@ const DashboardInadimplencia = (function() {
               <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
                 <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
               </h3>
+              <p style="margin: 4px 0 0; font-size: 0.75rem; color: #64748b;">Linhas empilhadas por faixa de atraso. O topo é o total do dia.</p>
             </div>
             <div id="inadimplencia-chart-note" style="display:none;padding:10px 16px;background:#fff7ed;color:#9a3412;font-size:0.82rem;border-bottom:1px solid #ffedd5;align-items:center;gap:6px;"></div>
-            <div style="padding: 20px; height: 350px;">
+            <div style="padding: 16px 20px 20px; height: 400px;">
               <canvas id="inadimplencia-chart"></canvas>
             </div>
           </div>
