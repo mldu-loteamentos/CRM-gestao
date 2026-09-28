@@ -2433,15 +2433,49 @@ circle.donut-segment {
 .di-compare-card {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   background: #f8fafc;
 }
 .di-compare-card.is-today {
   background: #f0fdf4;
   border-color: #bbf7d0;
 }
+.di-compare-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
 .di-compare-label { font-size: 0.78rem; font-weight: 800; color: #14532d; text-transform: uppercase; letter-spacing: 0.03em; }
 .di-compare-hint { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; }
+.di-compare-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 18px;
+  margin-top: 14px;
+}
+.di-compare-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.di-compare-stat-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.di-compare-stat-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  word-break: break-word;
+}
 .di-compare-value { font-size: 1.55rem; font-weight: 800; color: #0f172a; margin-top: 10px; letter-spacing: -0.02em; }
 .di-compare-meta {
   display: flex;
@@ -2479,7 +2513,7 @@ circle.donut-segment {
 }
 .di-aging-label { font-size: 0.8rem; font-weight: 700; color: #334155; }
 .di-aging-label em, .di-aging-val em { font-style: normal; font-weight: 600; color: #94a3b8; margin-left: 4px; }
-.di-aging-val { font-size: 0.8rem; font-weight: 800; color: #0f172a; white-space: nowrap; }
+.di-aging-val { font-size: 0.78rem; font-weight: 800; color: #0f172a; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .di-aging-track, .di-rank-track {
   margin-top: 5px;
   height: 7px;
@@ -2517,7 +2551,7 @@ circle.donut-segment {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.di-rank-sub { font-size: 0.68rem; color: #64748b; margin-top: 3px; }
+.di-rank-sub { font-size: 0.68rem; color: #64748b; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .di-rank-metrics {
   flex: 0 0 auto;
   text-align: right;
@@ -2525,7 +2559,7 @@ circle.donut-segment {
   flex-direction: column;
   gap: 1px;
 }
-.di-rank-metrics strong { font-size: 0.82rem; color: #14532d; font-weight: 800; }
+.di-rank-metrics strong { font-size: 0.75rem; color: #14532d; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .di-rank-metrics span { font-size: 0.68rem; color: #94a3b8; }
 .di-rank-more, .di-empty {
   font-size: 0.75rem;
@@ -2536,6 +2570,7 @@ circle.donut-segment {
 @media (max-width: 1100px) {
   .di-panels-row { grid-template-columns: 1fr; }
   .di-compare-grid { grid-template-columns: 1fr; }
+  .di-compare-stats { grid-template-columns: 1fr; }
 }
 
 .est-stock-page { display: flex; flex-direction: column; gap: 12px; }

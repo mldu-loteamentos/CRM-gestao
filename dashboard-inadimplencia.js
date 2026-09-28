@@ -1,6 +1,7 @@
 const DashboardInadimplencia = (function() {
   let snapshots = [];
   let chartInstance = null;
+  let agingBarInstance = null;
 
   const filterDraft = {
     companies: [],
@@ -231,11 +232,11 @@ const DashboardInadimplencia = (function() {
   }
 
   const AGING_CHART_SERIES = [
-    { key: 'd0_30', label: 'Até 30 dias', border: '#ca8a04', fill: 'rgba(253, 224, 71, 0.88)' },
-    { key: 'd31_60', label: '31 a 60 dias', border: '#ea580c', fill: 'rgba(253, 186, 116, 0.88)' },
-    { key: 'd61_90', label: '61 a 90 dias', border: '#15803d', fill: 'rgba(134, 239, 172, 0.82)' },
-    { key: 'd91_120', label: '91 a 120 dias', border: '#be185d', fill: 'rgba(249, 168, 212, 0.85)' },
-    { key: 'd120p', label: 'Acima de 120 dias', border: '#6d28d9', fill: 'rgba(196, 181, 253, 0.90)' }
+    { key: 'd0_30', label: 'Até 30 dias', color: '#1b8253' },
+    { key: 'd31_60', label: '31 a 60 dias', color: '#105436' },
+    { key: 'd61_90', label: '61 a 90 dias', color: '#ff9d5c' },
+    { key: 'd91_120', label: '91 a 120 dias', color: '#f37021' },
+    { key: 'd120p', label: 'Acima de 120 dias', color: '#9a3412' }
   ];
 
   function agingValuesFromMetrics(metrics) {
@@ -1014,53 +1015,34 @@ const DashboardInadimplencia = (function() {
       const parts = String(s.date || '').split('-');
       return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
     });
+    const rawValues = recentSnaps.map(s => filteredSnapshotValue(s, f));
 
-    const series = {};
-    AGING_CHART_SERIES.forEach((s) => { series[s.key] = []; });
-    recentSnaps.forEach((snap) => {
-      const vals = agingValuesFromMetrics(aggregateFromSnapshot(snap, f));
-      AGING_CHART_SERIES.forEach((s) => {
-        series[s.key].push(vals[s.key] || 0);
-      });
-    });
-
-    const liveMetrics = getCurrentMetrics();
-    if (recentSnaps.length && liveMetrics && liveMetrics.aging && (Number(liveMetrics.total_value) || 0) > 0.01) {
-      const liveAging = agingValuesFromMetrics(liveMetrics);
-      const last = series[AGING_CHART_SERIES[0].key].length - 1;
-      AGING_CHART_SERIES.forEach((s) => {
-        series[s.key][last] = liveAging[s.key] || 0;
-      });
+    if (recentSnaps.length && hasAnyFilter(f)) {
+      const liveMetrics = getCurrentMetrics();
+      if (liveMetrics && liveMetrics.total_value > 0.01) {
+        rawValues[rawValues.length - 1] = liveMetrics.total_value;
+      }
     }
 
-    const rawTotals = labels.map((_, i) =>
-      AGING_CHART_SERIES.reduce((sum, s) => sum + (Number(series[s.key][i]) || 0), 0)
-    );
-    const outlierFlags = detectSnapshotOutliers(recentSnaps, rawTotals);
-    AGING_CHART_SERIES.forEach((s) => {
-      const raw = series[s.key];
-      series[s.key] = raw.map((v, i) => {
-        if (!outlierFlags[i]) return v;
-        const prev = Number(raw[i - 1]) || 0;
-        const next = Number(raw[i + 1]) || 0;
-        if (prev > 0 && next > 0) return (prev + next) / 2;
-        return v;
-      });
+    const outlierFlags = detectSnapshotOutliers(recentSnaps, rawValues);
+    const displayValues = rawValues.map((v, i) => {
+      if (!outlierFlags[i]) return v;
+      const prev = rawValues[i - 1];
+      const next = rawValues[i + 1];
+      if (prev > 0 && next > 0) return (prev + next) / 2;
+      return v;
     });
-    const displayTotals = labels.map((_, i) =>
-      AGING_CHART_SERIES.reduce((sum, s) => sum + (Number(series[s.key][i]) || 0), 0)
-    );
 
     const noteEl = document.getElementById('inadimplencia-chart-note');
     if (noteEl) {
       const bad = [];
       outlierFlags.forEach((flag, i) => {
         if (!flag) return;
-        bad.push(`${labels[i]} (gravado ${formatMoney(rawTotals[i])}; tendência ~${formatMoney(displayTotals[i])})`);
+        bad.push(`${labels[i]} (gravado ${formatMoney(rawValues[i])}; tendência ~${formatMoney(displayValues[i])})`);
       });
       if (bad.length) {
         noteEl.style.display = 'flex';
-        noteEl.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0;"></i> <span>Possível snapshot parcial: <strong>${bad.join('; ')}</strong>. As faixas empilhadas usam a média dos dias vizinhos nesse ponto.</span>`;
+        noteEl.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0;"></i> <span>Possível snapshot parcial: <strong>${bad.join('; ')}</strong>. Linha tracejada usa a média dos dias vizinhos; o ponto vermelho é o valor gravado.</span>`;
         if (window.lucide) window.lucide.createIcons({ root: noteEl });
       } else {
         noteEl.style.display = 'none';
@@ -1068,9 +1050,8 @@ const DashboardInadimplencia = (function() {
       }
     }
 
-    const maxVal = Math.max(0, ...displayTotals, ...rawTotals);
+    const maxVal = Math.max(0, ...displayValues, ...rawValues);
     const yScale = {
-      stacked: true,
       beginAtZero: true,
       ticks: {
         callback: function(value) {
@@ -1084,28 +1065,113 @@ const DashboardInadimplencia = (function() {
       yScale.suggestedMax = maxVal * 1.15;
     }
 
-    const datasets = AGING_CHART_SERIES.map((s) => ({
-      label: s.label,
-      data: series[s.key],
-      borderColor: s.border,
-      backgroundColor: s.fill,
-      borderWidth: 1.5,
-      fill: true,
-      tension: 0.15,
-      pointRadius: recentSnaps.map((snap, i) => outlierFlags[i] ? 4 : (snap.is_month_close ? 4 : 0)),
-      pointHoverRadius: 6,
-      pointBackgroundColor: recentSnaps.map((snap, i) => outlierFlags[i] ? '#ef4444' : (snap.is_month_close ? '#105436' : s.border)),
-      pointBorderColor: '#fff',
-      pointBorderWidth: 1,
-      stack: 'aging'
-    }));
-
     chartInstance = new Chart(ctx, {
       type: 'line',
       data: {
         labels: labels,
-        datasets: datasets
+        datasets: [
+          {
+            label: 'Tendência (corrige buracos)',
+            data: displayValues,
+            borderColor: '#f37021',
+            backgroundColor: 'rgba(243, 112, 33, 0.12)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.1,
+            pointRadius: 0,
+            borderDash: outlierFlags.some(Boolean) ? [6, 4] : [],
+            order: 2
+          },
+          {
+            label: 'Valor gravado',
+            data: rawValues,
+            borderColor: 'transparent',
+            backgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
+            pointBackgroundColor: rawValues.map((_, i) => outlierFlags[i] ? '#ef4444' : (recentSnaps[i].is_month_close ? '#105436' : '#f37021')),
+            pointRadius: rawValues.map((_, i) => outlierFlags[i] ? 6 : (recentSnaps[i].is_month_close ? 5 : 3)),
+            pointHoverRadius: 7,
+            showLine: false,
+            order: 1
+          }
+        ]
       },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const i = context.dataIndex;
+                const snap = recentSnaps[i];
+                const raw = rawValues[i];
+                let label = formatMoney(raw);
+                if (outlierFlags[i]) label += ' (possível carga parcial)';
+                if (snap && snap.is_month_close) label += ' (Fechamento)';
+                if (hasAnyFilter(f)) label += ' · filtrado';
+                else if (snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
+                return label;
+              }
+            }
+          }
+        },
+        scales: {
+          y: yScale
+        }
+      }
+    });
+  }
+
+  function collectAgingSeries(recentSnaps, f) {
+    const series = {};
+    AGING_CHART_SERIES.forEach((s) => { series[s.key] = []; });
+    recentSnaps.forEach((snap) => {
+      const vals = agingValuesFromMetrics(aggregateFromSnapshot(snap, f));
+      AGING_CHART_SERIES.forEach((s) => {
+        series[s.key].push(vals[s.key] || 0);
+      });
+    });
+    const liveMetrics = getCurrentMetrics();
+    if (recentSnaps.length && liveMetrics && liveMetrics.aging && (Number(liveMetrics.total_value) || 0) > 0.01) {
+      const liveAging = agingValuesFromMetrics(liveMetrics);
+      const last = series[AGING_CHART_SERIES[0].key].length - 1;
+      AGING_CHART_SERIES.forEach((s) => {
+        series[s.key][last] = liveAging[s.key] || 0;
+      });
+    }
+    return series;
+  }
+
+  function initAgingBarChart() {
+    const ctx = document.getElementById('inadimplencia-aging-chart');
+    if (!ctx) return;
+
+    if (agingBarInstance) {
+      try { agingBarInstance.destroy(); } catch (e) { /* ignore */ }
+      agingBarInstance = null;
+    }
+
+    const f = filterApplied;
+    const recentSnaps = snapshots.slice(-30);
+    const labels = recentSnaps.map(s => {
+      const parts = String(s.date || '').split('-');
+      return parts.length === 3 ? `${parts[2]}/${parts[1]}` : String(s.date || '');
+    });
+    const series = collectAgingSeries(recentSnaps, f);
+
+    const datasets = AGING_CHART_SERIES.map((s) => ({
+      label: s.label,
+      data: series[s.key],
+      backgroundColor: s.color,
+      borderColor: s.color,
+      borderWidth: 0,
+      stack: 'aging'
+    }));
+
+    agingBarInstance = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: labels, datasets: datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -1124,30 +1190,30 @@ const DashboardInadimplencia = (function() {
               font: { size: 11 }
             }
           },
-          filler: { propagate: false },
           tooltip: {
             callbacks: {
               label: function(context) {
-                const raw = Number(context.raw) || 0;
-                return `${context.dataset.label}: ${formatMoney(raw)}`;
+                return `${context.dataset.label}: ${formatMoney(Number(context.raw) || 0)}`;
               },
               footer: function(items) {
                 if (!items || !items.length) return '';
-                const i = items[0].dataIndex;
-                const total = displayTotals[i] || 0;
-                const snap = recentSnaps[i];
-                let extra = `Total: ${formatMoney(total)}`;
-                if (outlierFlags[i]) extra += ' (possível carga parcial)';
-                if (snap && snap.is_month_close) extra += ' · Fechamento';
-                if (hasAnyFilter(f)) extra += ' · filtrado';
-                return extra;
+                const total = items.reduce((s, it) => s + (Number(it.raw) || 0), 0);
+                return `Total: ${formatMoney(total)}`;
               }
             }
           }
         },
         scales: {
-          y: yScale,
-          x: { grid: { display: false } }
+          x: { stacked: true, grid: { display: false } },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                return formatAxisTick(value);
+              }
+            }
+          }
         }
       }
     });
@@ -1184,13 +1250,26 @@ const DashboardInadimplencia = (function() {
             const base = r.key === 'hoje' && fechMetrics ? fechMetrics : null;
             return `
               <article class="di-compare-card ${r.key === 'hoje' ? 'is-today' : ''}">
-                <div class="di-compare-label">${escHtml(r.label)}</div>
-                <div class="di-compare-hint">${escHtml(r.hint)}</div>
-                <div class="di-compare-value">${formatMoneyCompact(r.value)}</div>
-                <div class="di-compare-meta">
-                  <span><strong>${Number(r.count || 0).toLocaleString('pt-BR')}</strong> títulos</span>
-                  <span><strong>${Number(r.subj || 0).toLocaleString('pt-BR')}</strong> sub júdice</span>
+                <div class="di-compare-head">
+                  <div>
+                    <div class="di-compare-label">${escHtml(r.label)}</div>
+                    <div class="di-compare-hint">${escHtml(r.hint)}</div>
+                  </div>
                   ${base ? deltaBadge(r.value, base.total_value) : ''}
+                </div>
+                <div class="di-compare-stats">
+                  <div class="di-compare-stat">
+                    <span class="di-compare-stat-label">Valor</span>
+                    <span class="di-compare-stat-value">${formatMoney(r.value)}</span>
+                  </div>
+                  <div class="di-compare-stat">
+                    <span class="di-compare-stat-label">Títulos</span>
+                    <span class="di-compare-stat-value">${Number(r.count || 0).toLocaleString('pt-BR')}</span>
+                  </div>
+                  <div class="di-compare-stat">
+                    <span class="di-compare-stat-label">Sub júdice</span>
+                    <span class="di-compare-stat-value">${Number(r.subj || 0).toLocaleString('pt-BR')}</span>
+                  </div>
                 </div>
               </article>`;
           }).join('')}
@@ -1210,13 +1289,8 @@ const DashboardInadimplencia = (function() {
       d91_120: '91 a 120',
       d120p: 'Acima 120'
     };
-    const tones = {
-      d0_30: '#fbbf24',
-      d31_60: '#f59e0b',
-      d61_90: '#f37021',
-      d91_120: '#ea580c',
-      d120p: '#9a3412'
-    };
+    const tones = {};
+    AGING_CHART_SERIES.forEach((s) => { tones[s.key] = s.color; });
     const maxVal = Math.max(1, ...order.map((k) => (agings[k] && agings[k].value) || 0));
 
     return `
@@ -1233,7 +1307,7 @@ const DashboardInadimplencia = (function() {
               <div class="di-aging-row">
                 <div class="di-aging-top">
                   <span class="di-aging-label">${labels[k]} <em>${row.count} tít.</em></span>
-                  <span class="di-aging-val">${formatMoneyCompact(row.value)} <em>${pctTot.toFixed(0)}%</em></span>
+                  <span class="di-aging-val">${formatMoney(row.value)} <em>${pctTot.toFixed(0)}%</em></span>
                 </div>
                 <div class="di-aging-track"><div class="di-aging-fill" style="width:${pctBar}%;background:${tones[k]};"></div></div>
               </div>`;
@@ -1268,7 +1342,7 @@ const DashboardInadimplencia = (function() {
                   <div class="di-rank-track"><div class="di-rank-fill" style="width:${pct}%;"></div></div>
                 </div>
                 <div class="di-rank-metrics">
-                  <strong>${formatMoneyCompact(cc.value)}</strong>
+                  <strong>${formatMoney(cc.value)}</strong>
                   <span>${cc.count} tít.</span>
                 </div>
               </div>`;
@@ -1304,10 +1378,10 @@ const DashboardInadimplencia = (function() {
                 <div class="di-rank-main">
                   <div class="di-rank-name">${escHtml(short)}</div>
                   <div class="di-rank-track"><div class="di-rank-fill di-rank-fill--op" style="width:${pct}%;"></div></div>
-                  <div class="di-rank-sub">≥31d ${formatMoneyCompact(above)} · ${share31.toFixed(0)}%</div>
+                  <div class="di-rank-sub">≥31d ${formatMoney(above)} · ${share31.toFixed(0)}%</div>
                 </div>
                 <div class="di-rank-metrics">
-                  <strong>${formatMoneyCompact(op.total_value || 0)}</strong>
+                  <strong>${formatMoney(op.total_value || 0)}</strong>
                   <span>${op.total_count || 0} tít.</span>
                 </div>
               </div>`;
@@ -1391,11 +1465,22 @@ const DashboardInadimplencia = (function() {
               <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
                 <i data-lucide="trending-up" style="width: 18px; color: #64748b;"></i> Evolução Diária da Inadimplência
               </h3>
-              <p style="margin: 4px 0 0; font-size: 0.75rem; color: #64748b;">Linhas empilhadas por faixa de atraso. O topo é o total do dia.</p>
             </div>
             <div id="inadimplencia-chart-note" style="display:none;padding:10px 16px;background:#fff7ed;color:#9a3412;font-size:0.82rem;border-bottom:1px solid #ffedd5;align-items:center;gap:6px;"></div>
-            <div style="padding: 16px 20px 20px; height: 400px;">
+            <div style="padding: 20px; height: 350px;">
               <canvas id="inadimplencia-chart"></canvas>
+            </div>
+          </div>
+
+          <div style="background: white; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 25px;">
+            <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+              <h3 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+                <i data-lucide="bar-chart-3" style="width: 18px; color: #64748b;"></i> Inadimplência por faixa de atraso
+              </h3>
+              <p style="margin: 4px 0 0; font-size: 0.75rem; color: #64748b;">Colunas empilhadas por aging. O topo é o total do dia.</p>
+            </div>
+            <div style="padding: 16px 20px 20px; height: 380px;">
+              <canvas id="inadimplencia-aging-chart"></canvas>
             </div>
           </div>
 
@@ -1417,6 +1502,7 @@ const DashboardInadimplencia = (function() {
 
       setTimeout(() => {
         initChart();
+        initAgingBarChart();
         if (scrollY != null) window.scrollTo(0, scrollY);
       }, 100);
     } catch (err) {
