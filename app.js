@@ -1833,7 +1833,9 @@ window.clientAppliesClausulaSuspensiva = function(client) {
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
   if (!window.clientHasOverdueSinalSI(client)) return false;
   if (!window.clientIsZeroPercentPaid(client)) return false;
-  const minDays = Number(cc.clausula_suspensiva_dias) || 30;
+  const minDays = (typeof window.clausulaSuspensivaDias === "function")
+    ? window.clausulaSuspensivaDias(cc)
+    : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30);
   const days = Math.max(Number(client.sinalDaysDelay) || 0, Number(client.maxDaysDelay) || 0);
   return days >= minDays;
 };
@@ -25977,7 +25979,9 @@ window.nexListSuspensivaRules = function() {
     rows.push({
       id: String(id),
       name: name,
-      dias: Number(cfg.clausula_suspensiva_dias) || 30
+      dias: (typeof window.clausulaSuspensivaDias === "function")
+        ? window.clausulaSuspensivaDias(cfg)
+        : (Number(cfg.clausula_suspensiva_dias) > 0 ? Number(cfg.clausula_suspensiva_dias) : 30)
     });
   });
   rows.sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
@@ -26097,18 +26101,27 @@ window.nexCcConfig = function(costCenterId, unitName) {
     if (typeof getPrimaryCostCenter === "function") pushId(getPrimaryCostCenter(raw));
     const unitMatch = String(unitName || "").match(/^(\d{4,5})/);
     if (unitMatch) pushId(unitMatch[1]);
-    const maps = [configMap, memMap];
-    for (const map of maps) {
-      for (const id of ids) {
-        if (map[id]) return map[id];
-      }
-      const keys = Object.keys(map || {});
-      for (const id of ids) {
-        const hit = keys.find((k) => String(k) === String(id) || (Number(k) && Number(id) && Number(k) === Number(id)));
-        if (hit) return map[hit];
-      }
-    }
-    return {};
+    const lookup = (map, id) => {
+      if (!map) return null;
+      if (map[id]) return map[id];
+      const keys = Object.keys(map);
+      const hit = keys.find((k) => String(k) === String(id) || (Number(k) && Number(id) && Number(k) === Number(id)));
+      return hit ? map[hit] : null;
+    };
+    let best = null;
+    let bestAt = -1;
+    [memMap, configMap].forEach((map) => {
+      ids.forEach((id) => {
+        const row = lookup(map, id);
+        if (!row) return;
+        const at = Number(row.updatedAt || 0) || 0;
+        if (!best || at >= bestAt) {
+          best = row;
+          bestAt = at;
+        }
+      });
+    });
+    return best || {};
   } catch (e) {
     return {};
   }
@@ -37532,6 +37545,52 @@ window.isCobrancaInternaSet = function(custom) {
   return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
 };
 
+window.clausulaSuspensivaDias = function(cc) {
+  const n = Number(cc && cc.clausula_suspensiva_dias);
+  return (Number.isFinite(n) && n > 0) ? n : 30;
+};
+
+window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
+  let local = {};
+  let cloud = {};
+  try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
+  try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
+  const recs = {};
+  const ingest = (src) => {
+    Object.keys(src || {}).forEach((k) => {
+      if (k === "_v2") return;
+      const item = src[k];
+      if (!item || typeof item !== "object") return;
+      const id = String(item.cc_id != null ? item.cc_id : k);
+      if (!id || id === "undefined") return;
+      const prev = recs[id];
+      if (!prev) {
+        recs[id] = { ...item, cc_id: item.cc_id != null ? item.cc_id : k };
+        return;
+      }
+      const pT = Number(prev.updatedAt || 0) || 0;
+      const nT = Number(item.updatedAt || 0) || 0;
+      const newer = nT >= pT ? item : prev;
+      const older = newer === item ? prev : item;
+      recs[id] = { ...older, ...newer, cc_id: newer.cc_id != null ? newer.cc_id : id, updatedAt: Math.max(pT, nT) };
+    });
+  };
+  ingest(cloud);
+  ingest(local);
+  const out = {};
+  Object.keys(recs).forEach((id) => { out[id] = recs[id]; });
+  return JSON.stringify(out);
+};
+
+window.applyCentrosCustoCustomPayload = function(jsonOrObj) {
+  let obj = jsonOrObj;
+  if (typeof jsonOrObj === "string") {
+    try { obj = JSON.parse(jsonOrObj || "{}") || {}; } catch (e) { return; }
+  }
+  if (!obj || typeof obj !== "object") return;
+  if (window.CentrosCustoState) CentrosCustoState.customFields = obj;
+};
+
 window.mergeEmpresasCustom = function(localStr, cloudStr) {
   let local = {};
   let cloud = {};
@@ -37718,6 +37777,20 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_centros_custo_custom" && typeof window.mergeCentrosCustoCustom === "function") {
+                    const merged = window.mergeCentrosCustoCustom(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (typeof window.applyCentrosCustoCustomPayload === "function") {
+                        window.applyCentrosCustoCustomPayload(merged);
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_compromissario_configs" && typeof window.mergeCompromissarioConfigs === "function") {
                     const merged = window.mergeCompromissarioConfigs(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -37885,6 +37958,20 @@ window.forceUploadLocalConfig = async function(silent = true) {
           }
           if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
             payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+          }
+          if (payload.crm_centros_custo_custom || cloud.crm_centros_custo_custom) {
+            if (typeof window.mergeCentrosCustoCustom === "function") {
+              payload.crm_centros_custo_custom = window.mergeCentrosCustoCustom(
+                payload.crm_centros_custo_custom || "{}",
+                cloud.crm_centros_custo_custom || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_centros_custo_custom", payload.crm_centros_custo_custom); } catch (e) {}
+              if (typeof window.applyCentrosCustoCustomPayload === "function") {
+                window.applyCentrosCustoCustomPayload(payload.crm_centros_custo_custom);
+              }
+            } else if (!payload.crm_centros_custo_custom && cloud.crm_centros_custo_custom) {
+              payload.crm_centros_custo_custom = cloud.crm_centros_custo_custom;
+            }
           }
           if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
             if (typeof window.mergeCompromissarioConfigs === "function") {
@@ -38113,6 +38200,18 @@ localStorage.setItem = function(key, value) {
                       }
                       if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
                         payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+                      }
+                      if (payload.crm_centros_custo_custom || cloud.crm_centros_custo_custom) {
+                        if (typeof window.mergeCentrosCustoCustom === "function") {
+                          payload.crm_centros_custo_custom = window.mergeCentrosCustoCustom(
+                            payload.crm_centros_custo_custom || "{}",
+                            cloud.crm_centros_custo_custom || "{}"
+                          );
+                          try { _originalSetItem.call(localStorage, "crm_centros_custo_custom", payload.crm_centros_custo_custom); } catch (e) {}
+                          if (typeof window.applyCentrosCustoCustomPayload === "function") {
+                            window.applyCentrosCustoCustomPayload(payload.crm_centros_custo_custom);
+                          }
+                        }
                       }
                       if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
                         if (typeof window.mergeCompromissarioConfigs === "function") {

@@ -212,7 +212,9 @@ const HomeDashboard = {
       if (!window.clientHasOverdueSinalSI(c)) return false;
     } else if (!c.hasUnpaidSinal) return false;
     const days = Number(c.sinalDaysDelay) || Number(c.maxDaysDelay) || 0;
-    return days >= (Number(cc.clausula_suspensiva_dias) || 30);
+    return days >= ((typeof window.clausulaSuspensivaDias === "function")
+      ? window.clausulaSuspensivaDias(cc)
+      : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30));
   },
 
   isEnviarNexZero(c) {

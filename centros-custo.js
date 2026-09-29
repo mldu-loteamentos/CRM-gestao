@@ -95,7 +95,11 @@ const CentrosCustoApp = {
   },
 
   saveCustom(id) {
-    const custom = CentrosCustoState.customFields[id] || { cc_id: id };
+    const key = String(id);
+    const custom = Object.assign(
+      {},
+      CentrosCustoState.customFields[id] || CentrosCustoState.customFields[key] || { cc_id: key }
+    );
     
     custom.valor_vgv = parseFloat(document.getElementById(`edit-vgv-${id}`).value) || 0;
     custom.perc_ml = parseFloat(document.getElementById(`edit-perc-ml-${id}`).value) || 0;
@@ -110,7 +114,12 @@ const CentrosCustoApp = {
     if (suspensivaAtivaEl) custom.clausula_suspensiva_ativa = suspensivaAtivaEl.checked;
 
     const suspensivaDiasEl = document.getElementById(`edit-suspensiva-dias-${id}`);
-    if (suspensivaDiasEl) custom.clausula_suspensiva_dias = parseInt(suspensivaDiasEl.value) || 30;
+    if (suspensivaDiasEl) {
+      const n = parseInt(String(suspensivaDiasEl.value || "").trim(), 10);
+      custom.clausula_suspensiva_dias = (Number.isFinite(n) && n > 0) ? n : 30;
+    }
+    custom.updatedAt = Date.now();
+    custom.cc_id = key;
 
     const isIncorp = String(custom.tipo_cc || '') === 'Incorporação';
     const lotesPropriosEl = document.getElementById(`edit-incorp-lotes-proprios-${id}`);
@@ -129,6 +138,7 @@ const CentrosCustoApp = {
       custom.incorporacao_lotes_excecao = [];
     }
 
+    CentrosCustoState.customFields[key] = custom;
     CentrosCustoState.customFields[id] = custom;
     localStorage.setItem('crm_centros_custo_custom', JSON.stringify(CentrosCustoState.customFields));
     
@@ -251,7 +261,9 @@ const CentrosCustoApp = {
     const tipo_cc = custom.tipo_cc || '';
     const imposto_pago = custom.imposto_pago_empresa === true;
     const suspensiva_ativa = custom.clausula_suspensiva_ativa === true;
-    const suspensiva_dias = custom.clausula_suspensiva_dias || 30;
+    const suspensiva_dias = (typeof window.clausulaSuspensivaDias === "function")
+      ? window.clausulaSuspensivaDias(custom)
+      : (Number(custom.clausula_suspensiva_dias) > 0 ? Number(custom.clausula_suspensiva_dias) : 30);
     const incorpLotesProprios = custom.incorporacao_lotes_proprios === true;
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
