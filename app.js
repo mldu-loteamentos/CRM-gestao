@@ -1711,18 +1711,29 @@ function getInstallmentConditionCode(inst) {
 }
 
 window.installmentIsSinalSI = function(inst) {
+  if (!inst) return false;
   const parts = collectInstallmentTypeParts(inst);
-  if (!parts.length) return false;
-  return parts.some((raw) => {
+  let blocked = false;
+  const typed = parts.some((raw) => {
     const n = String(raw || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (!n) return false;
-    if (n.indexOf("ACORDO") >= 0) return false;
+    if (n.indexOf("ACORDO") >= 0) { blocked = true; return false; }
     const token = n.split(/[\s\-_\/.,;:]+/)[0];
-    if (token === "SA") return false;
+    if (token === "SA" || token === "PU" || /^E\d+$/.test(token) || /^I\d+$/.test(token) || /^A\d+$/.test(token) || token === "M") {
+      blocked = true;
+      return false;
+    }
     if (token === "SI" || token === "SINAL") return true;
     if (n.indexOf("SINAL") === 0) return true;
     return /(^|[^A-Z0-9])SI([^A-Z0-9]|$)/.test(n);
   });
+  if (typed) return true;
+  if (blocked) return false;
+  const numRaw = inst.installmentNumber != null ? inst.installmentNumber
+    : (inst.number != null ? inst.number : inst.installmentId);
+  const num = Number(String(numRaw == null ? "" : numRaw).replace(/[^\d.-]/g, ""));
+  // Bulk do Sienge costuma vir sem tipo: 1ª parcela = sinal.
+  return Number.isFinite(num) && num === 1;
 };
 
 window.sinalInstallmentOverdueDays = function(inst, bill) {
@@ -1760,30 +1771,33 @@ window.clientHasOverdueSinalSI = function(client) {
 
 window.clientIsZeroPercentPaid = function(client) {
   if (!client) return false;
-  if (client.percPaid != null && Number(client.percPaid) > 0) return false;
+  const last = String(client.lastPaymentDate || client.lastPay || "").trim();
+  const lastLooksPaid = last && last !== "-" && last.toLowerCase().indexOf("sem") < 0 && /\d{2}/.test(last);
+  if (lastLooksPaid) return false;
+  const n = client.percPaid == null || client.percPaid === "" ? null : Number(client.percPaid);
+  const pct = (n != null && Number.isFinite(n)) ? (n > 1.5 ? n : n * 100) : null;
+  if (pct != null && pct < 1) return true;
   if (client.isZeroPaid) return true;
-  if (client.percPaid != null && Number(client.percPaid) === 0) return true;
   if (typeof window.nexClientIsZeroPaid === "function"
       && window.nexClientIsZeroPaid(client.customerId, client.saleId)) return true;
+  // percPaid do contrato Sienge sobe com correção mesmo sem nenhuma baixa no extrato.
+  if (client.hasUnpaidSinal) return true;
   return false;
 };
 
 window.clientAppliesClausulaSuspensiva = function(client) {
   if (!client) return false;
-  if (!window.clientIsZeroPercentPaid(client)) return false;
   const ccId = (typeof getPrimaryCostCenter === "function")
     ? getPrimaryCostCenter(client.costCenterId)
     : client.costCenterId;
   const cc = (typeof window.nexCcConfig === "function")
-    ? window.nexCcConfig(ccId, client.unitName)
+    ? window.nexCcConfig(ccId || client.costCenterId, client.unitName)
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
   if (!window.clientHasOverdueSinalSI(client)) return false;
+  if (!window.clientIsZeroPercentPaid(client)) return false;
   const minDays = Number(cc.clausula_suspensiva_dias) || 30;
-  let days = Number(client.sinalDaysDelay) || 0;
-  if (days <= 0 && (Number(client.billCount) || 0) <= 1) {
-    days = Number(client.maxDaysDelay) || 0;
-  }
+  const days = Math.max(Number(client.sinalDaysDelay) || 0, Number(client.maxDaysDelay) || 0);
   return days >= minDays;
 };
 
@@ -6551,7 +6565,8 @@ document.addEventListener("click", function(e) {
       );
       if (!sale || sale.percPaid == null) return;
       c.percPaid = Number(sale.percPaid);
-      if (Number(sale.percPaid) === 0) c.isZeroPaid = true;
+      const pct = Number(sale.percPaid) > 1.5 ? Number(sale.percPaid) : Number(sale.percPaid) * 100;
+      if (Number.isFinite(pct) && pct < 1) c.isZeroPaid = true;
     });
   }
 
