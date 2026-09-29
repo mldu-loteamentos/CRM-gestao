@@ -1692,7 +1692,8 @@ function collectInstallmentTypeParts(inst) {
   [
     "conditionType", "conditionTypeName", "paymentConditionType", "paymentConditionTypeName",
     "paymentConditionTypeId", "conditionTypeId", "conditionId", "installmentType", "installmentTypeName",
-    "typeName", "receiptType", "condition", "type", "paymentCondition"
+    "typeName", "receiptType", "condition", "type", "paymentCondition", "tipo", "paymentTerm",
+    "paymentTermType", "conditionTypeCode", "tipoParcela", "installmentCondition"
   ].forEach((k) => flattenInstallmentTypeValue(inst[k], out));
   return out;
 }
@@ -1713,27 +1714,18 @@ function getInstallmentConditionCode(inst) {
 window.installmentIsSinalSI = function(inst) {
   if (!inst) return false;
   const parts = collectInstallmentTypeParts(inst);
-  let blocked = false;
-  const typed = parts.some((raw) => {
+  return parts.some((raw) => {
     const n = String(raw || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (!n) return false;
-    if (n.indexOf("ACORDO") >= 0) { blocked = true; return false; }
+    if (n.indexOf("ACORDO") >= 0) return false;
     const token = n.split(/[\s\-_\/.,;:]+/)[0];
     if (token === "SA" || token === "PU" || /^E\d+$/.test(token) || /^I\d+$/.test(token) || /^A\d+$/.test(token) || token === "M") {
-      blocked = true;
       return false;
     }
     if (token === "SI" || token === "SINAL") return true;
     if (n.indexOf("SINAL") === 0) return true;
     return /(^|[^A-Z0-9])SI([^A-Z0-9]|$)/.test(n);
   });
-  if (typed) return true;
-  if (blocked) return false;
-  const numRaw = inst.installmentNumber != null ? inst.installmentNumber
-    : (inst.number != null ? inst.number : inst.installmentId);
-  const num = Number(String(numRaw == null ? "" : numRaw).replace(/[^\d.-]/g, ""));
-  // Bulk do Sienge costuma vir sem tipo: 1ª parcela = sinal.
-  return Number.isFinite(num) && num === 1;
 };
 
 window.sinalInstallmentOverdueDays = function(inst, bill) {
@@ -1749,24 +1741,69 @@ window.sinalInstallmentOverdueDays = function(inst, bill) {
 };
 
 window.billHasOverdueSinalSI = function(bill) {
+  if (bill && bill._hasCachedOverdueSi) return true;
   const insts = (bill && (bill.defaulterInstallments || [])) || [];
   return insts.some((inst) => window.installmentIsSinalSI(inst));
 };
 
+window.clientTitleIdSet = function(client) {
+  const out = new Set();
+  const add = (v) => {
+    const s = String(v == null ? "" : v).replace(/^B-/i, "").split("-")[0].trim();
+    if (s) out.add(s);
+  };
+  if (!client) return out;
+  add(client.saleId);
+  (client.billIds || []).forEach(add);
+  return out;
+};
+
+window.listInstallmentsForSiCheck = function(client) {
+  const out = [];
+  const seen = new Set();
+  const push = (inst) => {
+    if (!inst) return;
+    const k = String(inst.dueDate || inst.due || "") + ":" + String(inst.installmentId || inst.installmentNumber || inst.number || "");
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(inst);
+  };
+  const titles = window.clientTitleIdSet(client);
+  const sameTitle = (v) => titles.has(String(v == null ? "" : v).replace(/^B-/i, "").split("-")[0].trim());
+  if (client && typeof AppState !== "undefined"
+      && String(AppState.selectedCustomerId) === String(client.customerId)
+      && sameTitle(AppState.selectedSaleId || AppState.currentReceivableBillId)) {
+    (AppState.currentContractInstallments || []).forEach(push);
+  }
+  const st = window._quitacaoState;
+  if (st && sameTitle(st.billId)) {
+    [].concat(st.vencidas || [], st.rows || []).forEach((r) => {
+      if (!r) return;
+      if (r.overdue === false) return;
+      push({
+        dueDate: r.due,
+        installmentNumber: r.number,
+        installmentId: r.installmentId,
+        conditionType: r.tipo,
+        daysOfDelay: r.daysOverdue,
+        currentBalance: r.vp || r.original
+      });
+    });
+  }
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  bills.forEach((b) => {
+    if (!client) return;
+    if (String(b.customerId) !== String(client.customerId)) return;
+    if (!sameTitle(b.saleId) && !sameTitle(b.id) && !sameTitle(b.receivableBillId)) return;
+    (b.defaulterInstallments || []).forEach(push);
+  });
+  return out;
+};
+
 window.clientHasOverdueSinalSI = function(client) {
   if (!client) return false;
-  if (client.hasUnpaidSinal === true) return true;
-  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
-  if (!bills.length) return false;
-  const saleIds = new Set([String(client.saleId || "")]);
-  (client.billIds || []).forEach((id) => saleIds.add(String(id)));
-  return bills.some((b) => {
-    if (String(b.customerId) !== String(client.customerId)) return false;
-    const billKey = String(b.saleId != null ? b.saleId : "");
-    const billId = String(b.id != null ? b.id : "");
-    if (!saleIds.has(billKey) && !saleIds.has(billId) && billKey !== String(client.saleId)) return false;
-    return window.billHasOverdueSinalSI(b);
-  });
+  if (window.listInstallmentsForSiCheck(client).some((inst) => window.installmentIsSinalSI(inst))) return true;
+  return client.hasUnpaidSinal === true;
 };
 
 window.clientIsZeroPercentPaid = function(client) {
@@ -1799,6 +1836,198 @@ window.clientAppliesClausulaSuspensiva = function(client) {
   const minDays = Number(cc.clausula_suspensiva_dias) || 30;
   const days = Math.max(Number(client.sinalDaysDelay) || 0, Number(client.maxDaysDelay) || 0);
   return days >= minDays;
+};
+
+window.PARCELA_TIPO_CACHE_KEY = "crm_parcela_tipos_titulo";
+window.PARCELA_TIPO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+window.normalizeTituloId = function(v) {
+  return String(v == null ? "" : v).replace(/^B-/i, "").split("-")[0].trim();
+};
+
+window.readParcelaTipoCache = function() {
+  try { return JSON.parse(localStorage.getItem(window.PARCELA_TIPO_CACHE_KEY) || "{}") || {}; }
+  catch (e) { return {}; }
+};
+
+window.writeParcelaTipoCache = function(cache) {
+  try { localStorage.setItem(window.PARCELA_TIPO_CACHE_KEY, JSON.stringify(cache)); } catch (e) {}
+};
+
+window.extractParcelaTipoMap = function(insts) {
+  const map = { byDue: {}, byNum: {} };
+  (insts || []).forEach((inst) => {
+    if (!inst) return;
+    const code = (typeof getInstallmentConditionCode === "function")
+      ? getInstallmentConditionCode(inst)
+      : String(inst.conditionType || inst.paymentConditionType || inst.tipo || "");
+    if (!code) return;
+    const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+    const num = inst.installmentNumber != null ? inst.installmentNumber
+      : (inst.number != null ? inst.number : inst.installmentId);
+    if (due) map.byDue[due] = String(code);
+    if (num != null && num !== "") map.byNum[String(num)] = String(code);
+  });
+  return map;
+};
+
+window.applyParcelaTipoMap = function(insts, map) {
+  if (!map || !insts) return 0;
+  let n = 0;
+  insts.forEach((inst) => {
+    if (!inst) return;
+    const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+    const num = inst.installmentNumber != null ? inst.installmentNumber
+      : (inst.number != null ? inst.number : inst.installmentId);
+    const code = (due && map.byDue && map.byDue[due])
+      || (num != null && map.byNum && map.byNum[String(num)])
+      || "";
+    if (!code) return;
+    inst.conditionType = code;
+    n++;
+  });
+  return n;
+};
+
+window.rememberParcelaTiposDoTitulo = function(billId, insts) {
+  const id = window.normalizeTituloId(billId);
+  if (!id) return;
+  const map = window.extractParcelaTipoMap(insts);
+  if (!Object.keys(map.byDue).length && !Object.keys(map.byNum).length) return;
+  const cache = window.readParcelaTipoCache();
+  cache[id] = { byDue: map.byDue, byNum: map.byNum, at: Date.now() };
+  window.writeParcelaTipoCache(cache);
+};
+
+window.applyCachedParcelaTiposToBill = function(bill) {
+  if (!bill) return;
+  const cache = window.readParcelaTipoCache();
+  const ids = [bill.id, bill.saleId, bill.receivableBillId].map(window.normalizeTituloId).filter(Boolean);
+  let map = null;
+  ids.forEach((id) => { if (!map && cache[id] && (cache[id].byDue || cache[id].byNum)) map = cache[id]; });
+  if (!map) return;
+  window.applyParcelaTipoMap(bill.defaulterInstallments || [], map);
+  const today = (typeof window.todayIsoLocal === "function")
+    ? window.todayIsoLocal()
+    : new Date().toISOString().slice(0, 10);
+  let cachedSiDelay = 0;
+  Object.keys(map.byDue || {}).forEach((due) => {
+    if (!window.installmentIsSinalSI({ conditionType: map.byDue[due] })) return;
+    if (!(due && due < today)) return;
+    const d = (typeof window.quitacaoDaysBetween === "function")
+      ? window.quitacaoDaysBetween(due, today)
+      : Math.max(0, Math.round((new Date(today + "T12:00:00") - new Date(due + "T12:00:00")) / 86400000));
+    if (Number(d) > cachedSiDelay) cachedSiDelay = Number(d) || 0;
+  });
+  if (cachedSiDelay > 0) {
+    bill._hasCachedOverdueSi = true;
+    if (cachedSiDelay > (bill._cachedSinalDaysDelay || 0)) bill._cachedSinalDaysDelay = cachedSiDelay;
+  }
+};
+
+window.billNeedsQuitacaoTipoEnrich = function(bill) {
+  const ccId = bill && (bill.costCenterId || (bill.costCentersId && bill.costCentersId[0]));
+  const cc = (typeof window.nexCcConfig === "function")
+    ? window.nexCcConfig(ccId, bill && (bill.units || bill.unityName || bill.unitName))
+    : {};
+  if (!cc || !cc.clausula_suspensiva_ativa) return false;
+  const insts = (bill && bill.defaulterInstallments) || [];
+  if (!insts.length) return false;
+  if (insts.some((inst) => window.installmentIsSinalSI(inst))) return false;
+  return true;
+};
+
+window.flattenFinancialStatementBills = function(res) {
+  const results = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+  const nested = results.flatMap((item) => (item && item.billsReceivable) ? item.billsReceivable : []);
+  if (nested.length) return nested;
+  return results.filter((item) => item && (item.installments || item.billReceivableId || item.receivableBillId));
+};
+
+window.syncQuitacaoSiTypesToFila = function(billId, insts) {
+  const id = window.normalizeTituloId(billId
+    || (typeof AppState !== "undefined" && (AppState.selectedSaleId || AppState.currentReceivableBillId))
+    || (window._quitacaoState && window._quitacaoState.billId));
+  const source = insts || (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  if (id && source.length) window.rememberParcelaTiposDoTitulo(id, source);
+  const st = window._quitacaoState;
+  if (st && st.billId) {
+    const rows = [].concat(st.vencidas || [], st.aVencer || [], st.rows || []);
+    if (rows.length) {
+      window.rememberParcelaTiposDoTitulo(st.billId, rows.map((r) => ({
+        dueDate: r.due,
+        installmentNumber: r.number,
+        installmentId: r.installmentId,
+        conditionType: r.tipo
+      })));
+    }
+  }
+  ((typeof AppState !== "undefined" && AppState.defaultersBills) || []).forEach(window.applyCachedParcelaTiposToBill);
+  (window.rawClientList || []).forEach((c) => {
+    if (!c) return;
+    if (id && window.normalizeTituloId(c.saleId) !== id
+        && !(c.billIds || []).some((b) => window.normalizeTituloId(b) === id)) return;
+    if (typeof window.clientHasOverdueSinalSI === "function" && window.clientHasOverdueSinalSI(c)) {
+      c.hasUnpaidSinal = true;
+      const siInsts = (typeof window.listInstallmentsForSiCheck === "function")
+        ? window.listInstallmentsForSiCheck(c).filter((inst) => window.installmentIsSinalSI(inst))
+        : [];
+      siInsts.forEach((inst) => {
+        const delay = (typeof window.sinalInstallmentOverdueDays === "function")
+          ? window.sinalInstallmentOverdueDays(inst)
+          : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0);
+        if (delay > (c.sinalDaysDelay || 0)) c.sinalDaysDelay = delay;
+      });
+    }
+  });
+};
+
+window.enrichDefaulterBillsWithQuitacaoTypes = async function(bills) {
+  if (!Array.isArray(bills) || !bills.length) return;
+  bills.forEach(window.applyCachedParcelaTiposToBill);
+  const need = bills.filter(window.billNeedsQuitacaoTipoEnrich);
+  if (!need.length) return;
+  const byCust = new Map();
+  need.forEach((b) => {
+    const cid = String(b.customerId || "");
+    if (!cid) return;
+    if (!byCust.has(cid)) byCust.set(cid, []);
+    byCust.get(cid).push(b);
+  });
+  const ranked = [...byCust.entries()].sort((a, b) => {
+    const da = Math.max.apply(null, a[1].map((x) => Number(x.daysDelay) || 0));
+    const db = Math.max.apply(null, b[1].map((x) => Number(x.daysDelay) || 0));
+    return db - da;
+  }).slice(0, 40);
+  const conc = 3;
+  for (let i = 0; i < ranked.length; i += conc) {
+    const slice = ranked.slice(i, i + conc);
+    await Promise.all(slice.map(async ([cid, custBills]) => {
+      try {
+        if (window.SiengeApiService && typeof SiengeApiService.getCustomerFinancialStatements === "function") {
+          const fs = await SiengeApiService.getCustomerFinancialStatements(cid);
+          const contracts = window.flattenFinancialStatementBills(fs);
+          contracts.forEach((c) => {
+            const bid = c.billReceivableId || c.receivableBillId || c.id;
+            const insts = c.installments || [];
+            if (bid && insts.length) window.rememberParcelaTiposDoTitulo(bid, insts);
+          });
+        }
+      } catch (e) {}
+      custBills.forEach(window.applyCachedParcelaTiposToBill);
+      const still = custBills.filter(window.billNeedsQuitacaoTipoEnrich).slice(0, 8);
+      await Promise.all(still.map(async (bill) => {
+        try {
+          const bid = bill.id || bill.saleId;
+          if (!bid || !window.SiengeApiService || typeof SiengeApiService.getBillInstallments !== "function") return;
+          const list = await SiengeApiService.getBillInstallments(bid);
+          const arr = Array.isArray(list) ? list : [];
+          if (arr.length) window.rememberParcelaTiposDoTitulo(bid, arr);
+          window.applyCachedParcelaTiposToBill(bill);
+        } catch (e) {}
+      }));
+    }));
+  }
 };
 
 function isAgreementInstallmentType(code) {
@@ -6349,6 +6578,11 @@ document.addEventListener("click", function(e) {
   // -----------------------------------------------
   // PASSO 3: Consolidar devedores únicos por cliente+contrato
   // -----------------------------------------------
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+    try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
+      console.warn("[SI] Falha ao vincular tipo da quitação:", e);
+    }
+  }
   const consolidated = {};
   let subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
   const todayStr = new Date().toISOString().split('T')[0];
@@ -6431,6 +6665,10 @@ document.addEventListener("click", function(e) {
         if (delay > sinalDaysDelay) sinalDaysDelay = delay;
       });
       hasAgreementOverdue = billHasOverdueAgreementInstallment(bill);
+    }
+    if (bill._hasCachedOverdueSi) {
+      hasUnpaidSinal = true;
+      if ((bill._cachedSinalDaysDelay || 0) > sinalDaysDelay) sinalDaysDelay = bill._cachedSinalDaysDelay;
     }
 
 
@@ -10718,6 +10956,14 @@ function formatCpfCnpj(val) {
     }
     
     AppState.currentContractInstallments = currentContractInstallments;
+    if (typeof window.syncQuitacaoSiTypesToFila === "function") {
+      try {
+        window.syncQuitacaoSiTypesToFila(
+          AppState.selectedSaleId || AppState.currentReceivableBillId,
+          currentContractInstallments
+        );
+      } catch (e) {}
+    }
     
     let hasReparcelamento = false;
     for (let i = 0; i < currentContractInstallments.length - 1; i++) {
@@ -16227,6 +16473,9 @@ window.loadQuitacaoDebtReport = async function(force) {
     if (typeof window.updateFunnelChart === "function") window.updateFunnelChart();
     window.renderQuitacaoDebtReport();
     window.syncQuitacaoAbateLiquido();
+    if (typeof window.syncQuitacaoSiTypesToFila === "function") {
+      try { window.syncQuitacaoSiTypesToFila(window._quitacaoState && window._quitacaoState.billId); } catch (e) {}
+    }
     if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(sale) || "—"}`;
   } catch (e) {
     console.error("Erro relatório quitação:", e);
@@ -22562,6 +22811,12 @@ async function _loadZeroPaidTab_Impl() {
     await preloadCustomers(customerIds);
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
+
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+    try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
+      console.warn("[SI] Falha ao vincular tipo da quitação (0% pago):", e);
+    }
+  }
   
   const consolidated = {};
   
@@ -22578,12 +22833,11 @@ async function _loadZeroPaidTab_Impl() {
     
     let isTarget = false;
     
-    if (bill.defaulterInstallments && bill.defaulterInstallments.length > 0) {
-        // Verifica se existe alguma parcela atrasada com o tipo de condição "SI" (Sinal) ou "PU" (Parcela Única)
-        const hasUnpaidSinal = bill.defaulterInstallments.some(inst => {
+    if ((bill.defaulterInstallments && bill.defaulterInstallments.length > 0) || bill._hasCachedOverdueSi) {
+        const hasUnpaidSinal = !!(bill._hasCachedOverdueSi) || (bill.defaulterInstallments || []).some(inst => {
             return typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst);
         });
-        const hasUnpaidPU = bill.defaulterInstallments.some(inst => {
+        const hasUnpaidPU = (bill.defaulterInstallments || []).some(inst => {
             const condition = String(getInstallmentConditionCode(inst) || "").split(/[\s\-_\/]/)[0];
             return condition === "PU";
         });
@@ -23409,11 +23663,16 @@ async function loadWeSendTab() {
     await preloadCustomers(customerIds);
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+    try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
+      console.warn("[SI] Falha ao vincular tipo da quitação (NEX):", e);
+    }
+  }
   const costCenters = AppState.cachedCostCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
   const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31, standard: 61 };
 
   const findSale = (saleId) => sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
-  const hasUnpaidSinal = (bill) => (bill.defaulterInstallments || []).some(inst =>
+  const hasUnpaidSinal = (bill) => !!(bill && bill._hasCachedOverdueSi) || (bill.defaulterInstallments || []).some(inst =>
     typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst)
   );
   const hasUnpaidPU = (bill) => (bill.defaulterInstallments || []).some(inst => {
@@ -23421,7 +23680,7 @@ async function loadWeSendTab() {
     return token === "PU";
   });
   const sinalDaysOf = (bill) => {
-    let max = 0;
+    let max = Number(bill && bill._cachedSinalDaysDelay) || 0;
     (bill.defaulterInstallments || []).forEach((inst) => {
       if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
       const delay = (typeof window.sinalInstallmentOverdueDays === "function")

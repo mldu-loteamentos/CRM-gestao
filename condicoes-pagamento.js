@@ -3,6 +3,8 @@
  * Lista tipos do Sienge (GET /payment-condition-types) e flags:
  * — gera boleto no Sienge
  * — parcela gerada pela Webro
+ * — repasse advogado
+ * No máximo um interruptor ligado por condição.
  */
 const CondicoesPagamentoApp = {
   STORAGE_KEY: "crm_moura_condicoes_pagamento",
@@ -31,14 +33,39 @@ const CondicoesPagamentoApp = {
     return origin + path;
   },
 
+  FLAG_FIELDS: ["boletoSienge", "parcelaWebro", "repasseAdvogado"],
+
+  emptyFlags() {
+    return { boletoSienge: false, parcelaWebro: false, repasseAdvogado: false };
+  },
+
   normalizeFlagRow(row) {
     const src = row && typeof row === "object" ? row : {};
-    const parcelaWebro = src.parcelaWebro === true;
-    // Não dá para gerar boleto nas duas plataformas: Webro ligado desliga Sienge.
-    const boletoSienge = parcelaWebro ? false : src.boletoSienge !== false;
+    const hasBoleto = Object.prototype.hasOwnProperty.call(src, "boletoSienge");
+    const hasWebro = Object.prototype.hasOwnProperty.call(src, "parcelaWebro");
+    const hasRepasse = Object.prototype.hasOwnProperty.call(src, "repasseAdvogado");
+    let boletoSienge = src.boletoSienge === true;
+    let parcelaWebro = src.parcelaWebro === true;
+    let repasseAdvogado = src.repasseAdvogado === true;
+    if (!hasBoleto && !hasWebro && !hasRepasse) {
+      boletoSienge = true;
+    } else if (!hasBoleto && !parcelaWebro && !repasseAdvogado) {
+      boletoSienge = true;
+    }
+    if (repasseAdvogado) {
+      parcelaWebro = false;
+      boletoSienge = false;
+    } else if (parcelaWebro) {
+      boletoSienge = false;
+      repasseAdvogado = false;
+    } else if (boletoSienge) {
+      parcelaWebro = false;
+      repasseAdvogado = false;
+    }
     return {
       boletoSienge,
       parcelaWebro,
+      repasseAdvogado,
       updatedAt: Number(src.updatedAt || 0) || 0
     };
   },
@@ -285,20 +312,13 @@ const CondicoesPagamentoApp = {
   setFlag(id, field, on) {
     const key = String(id == null ? "" : id).trim();
     if (!key) return;
-    const cur = this.normalizeFlagRow(this.flags[key] || {});
-    const nextOn = !!on;
-    if (field === "parcelaWebro") {
-      cur.parcelaWebro = nextOn;
-      if (nextOn) cur.boletoSienge = false;
-    } else if (field === "boletoSienge") {
-      cur.boletoSienge = nextOn;
-      if (nextOn) cur.parcelaWebro = false;
-    } else {
-      cur[field] = nextOn;
-    }
-    cur.updatedAt = Date.now();
-    this.flags[key] = this.normalizeFlagRow(cur);
-    this._flagsUpdatedAt = cur.updatedAt;
+    const fields = this.FLAG_FIELDS || ["boletoSienge", "parcelaWebro", "repasseAdvogado"];
+    if (fields.indexOf(field) < 0) return;
+    const next = this.emptyFlags();
+    if (on) next[field] = true;
+    next.updatedAt = Date.now();
+    this.flags[key] = this.normalizeFlagRow(next);
+    this._flagsUpdatedAt = next.updatedAt;
     this._flagsDirty = true;
     this.writeFlagsLocal();
     this.saveMsg = "Salvando…";
@@ -379,7 +399,7 @@ const CondicoesPagamentoApp = {
     this._applyingDom = true;
     const rows = this.filtered();
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:28px;">
         ${this.loading ? "Carregando…" : (this.error ? this.esc(this.error) : "Nenhuma condição encontrada.")}
       </td></tr>`;
       this.renderStatus();
@@ -399,6 +419,9 @@ const CondicoesPagamentoApp = {
         </td>
         <td style="padding:12px 14px;">
           ${this.switchHtml(it.id, "parcelaWebro", f.parcelaWebro, "Parcela Webro")}
+        </td>
+        <td style="padding:12px 14px;">
+          ${this.switchHtml(it.id, "repasseAdvogado", f.repasseAdvogado, "Repasse Advogado")}
         </td>
       </tr>`;
     }).join("");
@@ -436,6 +459,7 @@ const CondicoesPagamentoApp = {
                   <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;">Condição</th>
                   <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Gera boleto (Sienge)</th>
                   <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Parcela Webro</th>
+                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Repasse Advogado</th>
                 </tr>
               </thead>
               <tbody id="cpag-tbody"></tbody>
@@ -512,15 +536,20 @@ window.getPaymentConditionFlags = function(conditionId) {
     }
     return app.flagOf(conditionId);
   }
-  return { boletoSienge: true, parcelaWebro: false };
+  return { boletoSienge: true, parcelaWebro: false, repasseAdvogado: false };
 };
 
 window.paymentConditionAllowsBoleto = function(conditionId) {
-  return window.getPaymentConditionFlags(conditionId).boletoSienge !== false;
+  const f = window.getPaymentConditionFlags(conditionId);
+  return !!(f && f.boletoSienge);
 };
 
 window.paymentConditionIsWebro = function(conditionId) {
   return window.getPaymentConditionFlags(conditionId).parcelaWebro === true;
+};
+
+window.paymentConditionIsRepasseAdvogado = function(conditionId) {
+  return window.getPaymentConditionFlags(conditionId).repasseAdvogado === true;
 };
 
 document.addEventListener("change", (e) => {
