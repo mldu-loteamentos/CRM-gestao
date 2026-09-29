@@ -1671,28 +1671,70 @@ function pickApoioJuridicoOperatorName(customerId) {
   return names[Math.abs(hash) % names.length];
 }
 
+function flattenInstallmentTypeValue(v, out) {
+  if (v == null || v === "") return;
+  if (typeof v === "object") {
+    flattenInstallmentTypeValue(v.id, out);
+    flattenInstallmentTypeValue(v.code, out);
+    flattenInstallmentTypeValue(v.name, out);
+    flattenInstallmentTypeValue(v.description, out);
+    flattenInstallmentTypeValue(v.type, out);
+    flattenInstallmentTypeValue(v.typeName, out);
+    return;
+  }
+  const s = String(v).trim();
+  if (s && s.toUpperCase() !== "[OBJECT OBJECT]") out.push(s);
+}
+
+function collectInstallmentTypeParts(inst) {
+  if (!inst || typeof inst !== "object") return [];
+  const out = [];
+  [
+    "conditionType", "conditionTypeName", "paymentConditionType", "paymentConditionTypeName",
+    "paymentConditionTypeId", "conditionTypeId", "conditionId", "installmentType", "installmentTypeName",
+    "typeName", "receiptType", "condition", "type", "paymentCondition"
+  ].forEach((k) => flattenInstallmentTypeValue(inst[k], out));
+  return out;
+}
+
 function getInstallmentConditionCode(inst) {
   if (!inst) return "";
-  const raw = [
-    inst.conditionType,
-    inst.conditionTypeName,
-    inst.paymentConditionType,
-    inst.paymentConditionTypeName,
-    inst.installmentType,
-    inst.typeName,
-    inst.receiptType,
-    inst.conditionId,
-    inst.condition,
-    inst.type
-  ].map(v => String(v == null ? "" : v).trim()).find(v => v) || "";
-  return raw.toUpperCase();
+  const parts = collectInstallmentTypeParts(inst);
+  const si = parts.find((p) => {
+    const n = String(p).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const token = n.split(/[\s\-_\/]/)[0];
+    return token === "SI" || token === "SINAL" || n.indexOf("SINAL") === 0;
+  });
+  if (si) return String(si).toUpperCase();
+  const raw = parts[0] || "";
+  return String(raw).toUpperCase();
 }
 
 window.installmentIsSinalSI = function(inst) {
-  const n = String(getInstallmentConditionCode(inst) || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (!n) return false;
-  const token = n.split(/[\s\-_\/]/)[0];
-  return token === "SI" || token === "SINAL" || n === "SINAL" || n.indexOf("SINAL") === 0;
+  const parts = collectInstallmentTypeParts(inst);
+  if (!parts.length) return false;
+  return parts.some((raw) => {
+    const n = String(raw || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (!n) return false;
+    if (n.indexOf("ACORDO") >= 0) return false;
+    const token = n.split(/[\s\-_\/.,;:]+/)[0];
+    if (token === "SA") return false;
+    if (token === "SI" || token === "SINAL") return true;
+    if (n.indexOf("SINAL") === 0) return true;
+    return /(^|[^A-Z0-9])SI([^A-Z0-9]|$)/.test(n);
+  });
+};
+
+window.sinalInstallmentOverdueDays = function(inst, bill) {
+  if (!inst) return 0;
+  if (typeof installmentOverdueDays === "function") {
+    const d = installmentOverdueDays(inst);
+    if (d > 0) return d;
+  }
+  const api = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay);
+  if (Number.isFinite(api) && api > 0) return api;
+  const billDelay = Number(bill && (bill.daysDelay != null ? bill.daysDelay : bill.daysOfDelay));
+  return Number.isFinite(billDelay) && billDelay > 0 ? billDelay : 0;
 };
 
 window.billHasOverdueSinalSI = function(bill) {
@@ -1716,15 +1758,33 @@ window.clientHasOverdueSinalSI = function(client) {
   });
 };
 
+window.clientIsZeroPercentPaid = function(client) {
+  if (!client) return false;
+  if (client.percPaid != null && Number(client.percPaid) > 0) return false;
+  if (client.isZeroPaid) return true;
+  if (client.percPaid != null && Number(client.percPaid) === 0) return true;
+  if (typeof window.nexClientIsZeroPaid === "function"
+      && window.nexClientIsZeroPaid(client.customerId, client.saleId)) return true;
+  return false;
+};
+
 window.clientAppliesClausulaSuspensiva = function(client) {
   if (!client) return false;
+  if (!window.clientIsZeroPercentPaid(client)) return false;
+  const ccId = (typeof getPrimaryCostCenter === "function")
+    ? getPrimaryCostCenter(client.costCenterId)
+    : client.costCenterId;
   const cc = (typeof window.nexCcConfig === "function")
-    ? window.nexCcConfig(client.costCenterId, client.unitName)
+    ? window.nexCcConfig(ccId, client.unitName)
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
   if (!window.clientHasOverdueSinalSI(client)) return false;
-  const days = Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : client.maxDaysDelay) || 0;
-  return days >= (Number(cc.clausula_suspensiva_dias) || 30);
+  const minDays = Number(cc.clausula_suspensiva_dias) || 30;
+  let days = Number(client.sinalDaysDelay) || 0;
+  if (days <= 0 && (Number(client.billCount) || 0) <= 1) {
+    days = Number(client.maxDaysDelay) || 0;
+  }
+  return days >= minDays;
 };
 
 function isAgreementInstallmentType(code) {
@@ -5218,7 +5278,7 @@ window.nexAgingSpecialHtml = function(client) {
   if (!client) return "";
   const days = Number(client.maxDaysDelay) || 0;
   const percKnownZero = client.percPaid != null && Number(client.percPaid) === 0;
-  const isZero = !!(client.isZeroPaid || percKnownZero || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
+  const isZero = !!(client.isZeroPaid || percKnownZero || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client)) || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
   const ccConfig = (typeof window.nexCcConfig === "function")
     ? window.nexCcConfig(client.costCenterId, client.unitName)
     : {};
@@ -5238,7 +5298,7 @@ window.nexAgingSpecialHtml = function(client) {
   if (aplicaSuspensiva) {
     const tagDays = Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : days) || days;
     return `
-      <button class="btn btn-sm" onclick="event.stopPropagation(); gerarTermoSuspensaoPdf(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Gerar termo de suspensão (PDF) — somente parcela SI (sinal)">
+      <button class="btn btn-sm" onclick="event.stopPropagation(); openSuspenderContratoModal(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Suspender contrato — anexar print da baixa Webro e gerar carta">
         <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${tagDays} dias - Suspender
       </button>
     `;
@@ -6351,7 +6411,9 @@ document.addEventListener("click", function(e) {
       });
       instSource.forEach((inst) => {
         if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
-        const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0;
+        const delay = (typeof window.sinalInstallmentOverdueDays === "function")
+          ? window.sinalInstallmentOverdueDays(inst, bill)
+          : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0);
         if (delay > sinalDaysDelay) sinalDaysDelay = delay;
       });
       hasAgreementOverdue = billHasOverdueAgreementInstallment(bill);
@@ -22603,7 +22665,9 @@ async function _loadZeroPaidTab_Impl() {
     (bill.defaulterInstallments || []).forEach((inst) => {
       if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
       consolidated[key].hasUnpaidSinal = true;
-      const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0;
+      const delay = (typeof window.sinalInstallmentOverdueDays === "function")
+        ? window.sinalInstallmentOverdueDays(inst, bill)
+        : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0);
       if (delay > (consolidated[key].sinalDaysDelay || 0)) consolidated[key].sinalDaysDelay = delay;
     });
   });
@@ -23345,7 +23409,9 @@ async function loadWeSendTab() {
     let max = 0;
     (bill.defaulterInstallments || []).forEach((inst) => {
       if (!(typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst))) return;
-      const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0;
+      const delay = (typeof window.sinalInstallmentOverdueDays === "function")
+        ? window.sinalInstallmentOverdueDays(inst, bill)
+        : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0);
       if (delay > max) max = delay;
     });
     return max;
@@ -25744,14 +25810,29 @@ window.nexReguaDays = function() {
 window.nexCcConfig = function(costCenterId, unitName) {
   try {
     const configMap = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
+    const memMap = (window.CentrosCustoState && CentrosCustoState.customFields) || {};
     const ids = [];
+    const pushId = (v) => {
+      if (v == null || v === "") return;
+      const s = String(v).trim();
+      if (s && s !== "C.C. N/D") ids.push(s);
+    };
     const raw = costCenterId;
-    if (Array.isArray(raw)) raw.forEach(id => ids.push(String(id)));
-    else if (raw != null && String(raw).trim() !== "") ids.push(String(raw));
+    if (Array.isArray(raw)) raw.forEach(pushId);
+    else pushId(raw);
+    if (typeof getPrimaryCostCenter === "function") pushId(getPrimaryCostCenter(raw));
     const unitMatch = String(unitName || "").match(/^(\d{4,5})/);
-    if (unitMatch) ids.push(unitMatch[1]);
-    for (const id of ids) {
-      if (configMap[id]) return configMap[id];
+    if (unitMatch) pushId(unitMatch[1]);
+    const maps = [configMap, memMap];
+    for (const map of maps) {
+      for (const id of ids) {
+        if (map[id]) return map[id];
+      }
+      const keys = Object.keys(map || {});
+      for (const id of ids) {
+        const hit = keys.find((k) => String(k) === String(id) || (Number(k) && Number(id) && Number(k) === Number(id)));
+        if (hit) return map[hit];
+      }
     }
     return {};
   } catch (e) {
@@ -30450,10 +30531,212 @@ async function loadDocPadraoTemplates() {
 }
 
 // ----------------------------------------------------
+// SUSPENDER CONTRATO — print Webro obrigatório + upload GED na unidade
+window.ensureSuspenderContratoModal = function() {
+  let overlay = document.getElementById("suspender-contrato-overlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "suspender-contrato-overlay";
+  overlay.className = "modal-overlay";
+  overlay.style.zIndex = "10050";
+  overlay.innerHTML = `
+    <div class="modal-box" style="width:560px;max-width:95%;">
+      <div class="modal-header">
+        <h3 style="display:flex;align-items:center;gap:8px;margin:0;">
+          <i data-lucide="file-warning" style="width:18px;height:18px;color:#ea580c;"></i>
+          Suspender contrato
+        </h3>
+        <button type="button" class="modal-close" onclick="closeSuspenderContratoModal()"><i data-lucide="x"></i></button>
+      </div>
+      <p style="margin:12px 0 8px;font-size:0.88rem;color:#334155;line-height:1.45;">
+        Para suspender, anexe o <strong>print da tela da Webro</strong> com os boletos já <strong>baixados</strong> na plataforma.
+        Em seguida a <strong>carta de suspensão</strong> e esse print sobem na unidade no Sienge (padrão GED).
+      </p>
+      <div id="suspender-contrato-meta" style="font-size:0.8rem;color:#64748b;margin-bottom:12px;"></div>
+      <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Print da baixa Webro (obrigatório)</label>
+      <input type="file" id="suspender-webro-file" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
+        onchange="previewSuspenderWebroFile(this)"
+        style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
+      <div id="suspender-webro-preview" style="margin-top:10px;font-size:0.8rem;color:#64748b;"></div>
+      <p id="suspender-contrato-status" style="margin:12px 0 0;font-size:0.8rem;color:#64748b;min-height:1.2em;"></p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+        <button type="button" class="btn btn-cancel" onclick="closeSuspenderContratoModal()">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="suspender-contrato-confirm" onclick="confirmSuspenderContrato()">
+          Suspender e enviar
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", function(e) {
+    if (e.target === overlay) window.closeSuspenderContratoModal();
+  });
+  return overlay;
+};
+
+window.previewSuspenderWebroFile = function(input) {
+  const preview = document.getElementById("suspender-webro-preview");
+  const file = input && input.files && input.files[0];
+  if (!preview) return;
+  if (!file) {
+    preview.innerHTML = "";
+    return;
+  }
+  const sizeKb = Math.max(1, Math.round(file.size / 1024));
+  const isImg = /^image\//i.test(file.type || "");
+  if (isImg) {
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <img src="${url}" alt="Preview" style="max-width:180px;max-height:110px;border-radius:8px;border:1px solid #e2e8f0;object-fit:contain;background:#fff;">
+      <div><strong style="color:#0f172a;">${String(file.name).replace(/</g, "&lt;")}</strong><br>${sizeKb} KB</div>
+    </div>`;
+  } else {
+    preview.innerHTML = `<strong style="color:#0f172a;">${String(file.name).replace(/</g, "&lt;")}</strong> · ${sizeKb} KB`;
+  }
+};
+
+window.openSuspenderContratoModal = function(customerId, saleId) {
+  const overlay = window.ensureSuspenderContratoModal();
+  window._suspenderContrato = { customerId: customerId, saleId: saleId };
+  const fileEl = document.getElementById("suspender-webro-file");
+  const preview = document.getElementById("suspender-webro-preview");
+  const status = document.getElementById("suspender-contrato-status");
+  const meta = document.getElementById("suspender-contrato-meta");
+  if (fileEl) fileEl.value = "";
+  if (preview) preview.innerHTML = "";
+  if (status) { status.textContent = ""; status.style.color = "#64748b"; }
+  const fila = (typeof window.nexFindFilaClient === "function") ? window.nexFindFilaClient(customerId, saleId) : null;
+  const name = (fila && fila.customerName) || "";
+  const unit = (fila && (fila.unitName || fila.unitLabel)) || "";
+  if (meta) {
+    meta.textContent = [name, unit ? ("Unidade " + unit) : "", "Título " + saleId].filter(Boolean).join(" · ");
+  }
+  overlay.classList.add("active");
+  if (window.lucide) lucide.createIcons();
+};
+
+window.closeSuspenderContratoModal = function() {
+  const overlay = document.getElementById("suspender-contrato-overlay");
+  if (overlay) overlay.classList.remove("active");
+  const confirmBtn = document.getElementById("suspender-contrato-confirm");
+  if (confirmBtn) confirmBtn.disabled = false;
+};
+
+window.confirmSuspenderContrato = async function() {
+  const st = window._suspenderContrato || {};
+  const customerId = st.customerId;
+  const saleId = st.saleId;
+  const fileEl = document.getElementById("suspender-webro-file");
+  const file = fileEl && fileEl.files && fileEl.files[0];
+  const status = document.getElementById("suspender-contrato-status");
+  const confirmBtn = document.getElementById("suspender-contrato-confirm");
+  const setStatus = (msg, kind) => {
+    if (!status) return;
+    status.textContent = msg || "";
+    status.style.color = kind === "erro" ? "#b91c1c" : "#64748b";
+  };
+  if (!file) {
+    setStatus("Anexe o print da tela da Webro com os boletos baixados.", "erro");
+    if (fileEl) fileEl.focus();
+    return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    setStatus("O arquivo deve ter no máximo 20 MB.", "erro");
+    return;
+  }
+  if (confirmBtn) confirmBtn.disabled = true;
+  setStatus("Gerando carta de suspensão…");
+  let carta = null;
+  try {
+    carta = await window.gerarTermoSuspensaoPdf(customerId, saleId, { returnHtml: true, skipBtn: true });
+  } catch (e) {
+    console.error("[Suspensão] Falha ao montar carta", e);
+    setStatus("Não foi possível gerar a carta: " + ((e && e.message) || e), "erro");
+    if (confirmBtn) confirmBtn.disabled = false;
+    return;
+  }
+  if (!carta || !carta.html) {
+    if (confirmBtn) confirmBtn.disabled = false;
+    return;
+  }
+
+  const toast = (msg, kind) => {
+    if (typeof window.nexToast === "function") window.nexToast(msg, kind);
+  };
+
+  let cartaFile = null;
+  try {
+    setStatus("Convertendo a carta em PDF…");
+    cartaFile = await window.nexHtmlToPdfFile(carta.html, "CARTA-SUSPENSAO.pdf");
+  } catch (e) {
+    console.error("[Suspensão] PDF da carta", e);
+    setStatus("Carta gerada, mas o PDF falhou: " + ((e && e.message) || e), "erro");
+  }
+
+  const uploadOne = async (theFile, tags, context, label) => {
+    setStatus("Enviando " + label + " para a unidade no Sienge…");
+    toast("Enviando " + label + " para a unidade no Sienge…");
+    return window.nexUploadToSiengeUnit(customerId, saleId, theFile, tags, null, context);
+  };
+
+  const errs = [];
+  let cartaSent = null;
+  let printSent = null;
+  if (!cartaFile) {
+    errs.push("Carta: não foi possível gerar o PDF.");
+  } else {
+    try {
+      cartaSent = await uploadOne(
+        cartaFile,
+        ["CARTA DE SUSPENSAO", "SUSPENSAO DE CONTRATO", "CARTA DE SUSPENSÃO", "SUSPENSAO"],
+        "suspensao-carta",
+        "a carta de suspensão"
+      );
+    } catch (e) {
+      errs.push("Carta: " + ((e && e.message) || e));
+    }
+  }
+  try {
+    printSent = await uploadOne(
+      file,
+      ["BAIXA WEBRO", "PRINT WEBRO", "WEBRO", "COMPROVANTE BAIXA WEBRO"],
+      "suspensao-webro",
+      "o print da baixa Webro"
+    );
+  } catch (e) {
+    errs.push("Print Webro: " + ((e && e.message) || e));
+  }
+
+  if (confirmBtn) confirmBtn.disabled = false;
+  if (errs.length || !cartaSent || !printSent) {
+    const msg = "Não foi possível enviar tudo para a unidade. " + (errs.join(" · ") || "Tente novamente.");
+    setStatus(msg, "erro");
+    toast(msg, "erro");
+    return;
+  }
+
+  window.closeSuspenderContratoModal();
+  const names = [cartaSent && cartaSent.fileName, printSent && printSent.fileName].filter(Boolean).join(" e ");
+  toast("Carta e print da Webro gravados na unidade" + (names ? ": " + names : ".") );
+
+  try {
+    document.getElementById("pdf-modal-title").textContent = "Carta de Suspensão de Contrato";
+    document.getElementById("pdf-document-content").innerHTML = carta.html;
+    const overlay = document.getElementById("pdf-view-overlay");
+    if (overlay) {
+      overlay.style.opacity = "";
+      overlay.style.pointerEvents = "";
+      overlay.classList.add("active");
+    }
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {}
+};
+
+// ----------------------------------------------------
 // GERAR PDF DE SUSPENSÃO (Zero Paid)
-window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
+window.gerarTermoSuspensaoPdf = async function(customerId, saleId, opts) {
+  const options = opts || {};
   // Show a loading state if called from a button
-  const btn = document.activeElement;
+  const btn = options.skipBtn ? null : document.activeElement;
   let oldHtml = null;
   if (btn && btn.tagName === 'BUTTON' && btn.innerText.includes('Suspender')) {
       oldHtml = btn.innerHTML;
@@ -30873,6 +31156,11 @@ window.gerarTermoSuspensaoPdf = async function(customerId, saleId) {
       <div style="white-space:pre-wrap; font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; text-align: justify; margin: 0;">${text}</div>
     </div>
   `;
+
+  if (options.returnHtml) {
+    if (btn && oldHtml) btn.innerHTML = oldHtml;
+    return { html: docHtml, customer, tituloAReceber, uName, sale };
+  }
   
   document.getElementById("pdf-modal-title").textContent = "Carta de Suspensão de Contrato";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
