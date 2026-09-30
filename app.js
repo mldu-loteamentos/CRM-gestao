@@ -5960,17 +5960,83 @@ window.updateFilaCacheStatusIndicator = function() {
   });
 };
 
+window.normalizeSearchText = function(s) {
+  return String(s == null ? "" : s)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+};
+
+window.clientMatchesSearch = function(c, rawQuery) {
+  const q = window.normalizeSearchText(rawQuery);
+  if (!q) return true;
+  const terms = q.split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const ids = [];
+  const pushId = (v) => {
+    const s = String(v == null ? "" : v);
+    if (!s) return;
+    ids.push(s);
+    ids.push(s.replace(/^B-/i, "").split("-")[0]);
+  };
+  pushId(c && c.saleId);
+  (c && c.billIds ? c.billIds : []).forEach(pushId);
+  const blob = window.normalizeSearchText([
+    c && c.customerName,
+    c && c.clientName,
+    c && c.customerCpf,
+    c && c.cpfCnpj,
+    c && c.unitName,
+    ids.join(" ")
+  ].join(" "));
+  const digits = String((c && (c.customerCpf || c.cpfCnpj)) || "").replace(/\D/g, "");
+  return terms.every((term) => {
+    if (!term) return true;
+    if (blob.indexOf(term) >= 0) return true;
+    const d = term.replace(/\D/g, "");
+    return !!(d && (digits.indexOf(d) >= 0 || ids.some((id) => String(id).indexOf(d) >= 0)));
+  });
+};
+
+window.scheduleFilaTextSearch = function(which) {
+  clearTimeout(window._filaSearchTimer);
+  window._filaSearchTimer = setTimeout(() => {
+    if (which === "zeropaid") {
+      if (typeof loadZeroPaidTab === "function") loadZeroPaidTab();
+      return;
+    }
+    if (typeof loadDashboardData === "function") loadDashboardData(false);
+  }, 180);
+};
+
+window.handleSubjudiceAutocomplete = function() {
+  const suggestionsDiv = document.getElementById("subjudice-suggestions");
+  if (suggestionsDiv) suggestionsDiv.style.display = "none";
+  window.scheduleFilaTextSearch("subjudice");
+};
+
+window.handleZeropaidAutocomplete = function() {
+  const suggestionsDiv = document.getElementById("zeropaid-suggestions");
+  if (suggestionsDiv) suggestionsDiv.style.display = "none";
+  window.scheduleFilaTextSearch("zeropaid");
+};
+
 async function loadDashboardData(forceRefresh = false) {
-    if (window._isDefaultersLoading) return;
+    const filterOnly = AppState.defaultersLoaded && !forceRefresh;
+    if (window._isDefaultersLoading) {
+      window._filaSearchPending = true;
+      return;
+    }
     window._isDefaultersLoading = true;
     try {
       if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
         EmpresasApp.ensureDefaultCobrancaFlags();
       }
       let force = !!forceRefresh;
-      if (!force && typeof window.shouldForceFilaRefreshOnNonBusinessAccess === "function") {
+      if (!force && !filterOnly && typeof window.shouldForceFilaRefreshOnNonBusinessAccess === "function") {
         force = window.shouldForceFilaRefreshOnNonBusinessAccess();
-      } else if (!force) {
+      } else if (!force && !filterOnly) {
         try {
           const today = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : null;
           if (today && typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today)) {
@@ -5980,7 +6046,13 @@ async function loadDashboardData(forceRefresh = false) {
       }
       await _loadDashboardData_Impl(force);
     }
-    finally { window._isDefaultersLoading = false; }
+    finally {
+      window._isDefaultersLoading = false;
+      if (window._filaSearchPending) {
+        window._filaSearchPending = false;
+        loadDashboardData(false);
+      }
+    }
 }
 const defaultAdvFilterState = {
     lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
@@ -6261,90 +6333,10 @@ window.applyAdvFiltersTo = (sourceList) => {
 async function _loadDashboardData_Impl(forceRefresh = false) {
   window._dashboardForceRefresh = forceRefresh;
   const searchInput = document.getElementById("dashboard-search-input");
-  const searchValue = searchInput ? searchInput.value.trim().toLowerCase() : "";
-
-window.handleSubjudiceAutocomplete = function(val) {
-  const suggestionsDiv = document.getElementById("subjudice-suggestions");
-  if (!suggestionsDiv) return;
-  
-  val = val.trim().toLowerCase();
-  if (val.length < 2) {
-    suggestionsDiv.style.display = 'none';
-    loadDashboardData();
-    return;
-  }
-  
-  const subjudiceBills = AppState.defaultersBills.filter(client => {
-    return client.subjudice === "S" || client.subjudice === true;
-  });
-  
-  const matches = subjudiceBills.filter(c => {
-    return (c.customerName && c.customerName.toLowerCase().includes(val)) ||
-           (c.cpfCnpj && c.cpfCnpj.includes(val)) ||
-           (c.billIds && c.billIds.join(", ").toLowerCase().includes(val));
-  });
-  
-  const uniqueCustomers = [];
-  const seen = new Set();
-  for (let c of matches) {
-    if (!seen.has(c.customerId)) {
-      seen.add(c.customerId);
-      uniqueCustomers.push(c);
-    }
-  }
-  
-  if (uniqueCustomers.length === 0) {
-    suggestionsDiv.style.display = 'none';
-  } else {
-    suggestionsDiv.innerHTML = "";
-    uniqueCustomers.slice(0, 10).forEach(c => {
-      const item = document.createElement("div");
-      item.style.padding = "10px";
-      item.style.cursor = "pointer";
-      item.style.borderBottom = "1px solid #f1f5f9";
-      
-      item.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.85rem; color: #0f172a;">${c.customerId} - ${c.customerName.toUpperCase()}</div>
-        <div style="font-size: 0.75rem; color: #64748b;">${c.cpfCnpj || 'Sem Documento'}</div>
-      `;
-      
-      item.onmouseover = () => { item.style.backgroundColor = "#f8fafc"; };
-      item.onmouseout = () => { item.style.backgroundColor = "transparent"; };
-      
-      item.onclick = () => {
-        const input = document.getElementById("subjudice-search-input");
-        if(input) input.value = c.customerName;
-        suggestionsDiv.style.display = "none";
-        loadDashboardData();
-      };
-      
-      suggestionsDiv.appendChild(item);
-    });
-    suggestionsDiv.style.display = 'block';
-  }
-  
-  loadDashboardData();
-};
-
-window.handleZeropaidAutocomplete = function(val) {
-  const suggestionsDiv = document.getElementById("zeropaid-suggestions");
-  if (suggestionsDiv) suggestionsDiv.style.display = 'none';
-  loadZeroPaidTab();
-};
-
-document.addEventListener("click", function(e) {
-  if (e.target.id !== "subjudice-search-input") {
-    const sugg = document.getElementById("subjudice-suggestions");
-    if (sugg) sugg.style.display = "none";
-  }
-  if (e.target.id !== "zeropaid-search-input") {
-    const suggZ = document.getElementById("zeropaid-suggestions");
-    if (suggZ) suggZ.style.display = "none";
-  }
-});
+  const searchValue = searchInput ? searchInput.value.trim() : "";
 
   const subjudiceSearchInput = document.getElementById("subjudice-search-input");
-  const subjudiceSearchValue = subjudiceSearchInput ? subjudiceSearchInput.value.trim().toLowerCase() : "";
+  const subjudiceSearchValue = subjudiceSearchInput ? subjudiceSearchInput.value.trim() : "";
 
   // -----------------------------------------------
   // PASSO 1: Buscar parcelas vencidas dos inadimplentes
@@ -6580,7 +6572,7 @@ document.addEventListener("click", function(e) {
   // -----------------------------------------------
   // PASSO 3: Consolidar devedores únicos por cliente+contrato
   // -----------------------------------------------
-  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+  if (!dataAlreadyLoaded && typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
     try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
       console.warn("[SI] Falha ao vincular tipo da quitação:", e);
     }
@@ -7059,38 +7051,14 @@ document.addEventListener("click", function(e) {
   const baseClientList = [...clientList];
 
   // Filtro de Busca para a Fila de Cobrança
-  if (searchValue && window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
-     const matches = window.GlobalCustomerCache.data.filter(c => 
-        (c.name && c.name.toLowerCase().includes(searchValue)) ||
-        (c.cpfCnpj && c.cpfCnpj.toLowerCase().includes(searchValue)) ||
-        (c.phones && c.phones.some(p => p.number && p.number.includes(searchValue))) ||
-        (c.emails && c.emails.some(e => e.email && e.email.toLowerCase().includes(searchValue)))
-     );
-     if(matches.length > 0) {
-         if (!searchedCustomerIds) searchedCustomerIds = new Set();
-         matches.forEach(m => searchedCustomerIds.add(m.customerId));
-     }
-  }
-
   if (searchValue) {
-    const searchTerms = searchValue.split(' ').filter(t => t);
-    clientList = clientList.filter(c => {
-      if (searchedCustomerIds && searchedCustomerIds.has(c.customerId)) {
-        return true;
-      }
-      const targetStr = c.customerName.toLowerCase() + " " + c.billIds.join(",");
-      return searchTerms.every(term => targetStr.includes(term));
-    });
+    clientList = clientList.filter((c) => window.clientMatchesSearch(c, searchValue));
   }
 
   // Filtro de Busca para a lista de Sub Judice
   let filteredSubjudice = subjudiceList;
   if (subjudiceSearchValue) {
-    const subTerms = subjudiceSearchValue.split(' ').filter(t => t);
-    filteredSubjudice = subjudiceList.filter(c => {
-      const targetStr = c.customerName.toLowerCase() + " " + c.billIds.join(",");
-      return subTerms.every(term => targetStr.includes(term));
-    });
+    filteredSubjudice = subjudiceList.filter((c) => window.clientMatchesSearch(c, subjudiceSearchValue));
   }
   
   // Aplica os filtros avançados também na lista de Sub Judice!
@@ -8158,15 +8126,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("dashboard-search-input");
   if (searchInput) {
     searchInput.oninput = () => {
-      loadDashboardData();
-      if (typeof renderAgendaCalendar === 'function') {
-         renderAgendaCalendar();
-         if (window.selectedAgendaDate && typeof loadAgendaDayTasks === 'function') {
-            loadAgendaDayTasks(window.localDateStr(window.selectedAgendaDate || selectedAgendaDate));
-         }
-      }
+      window.scheduleFilaTextSearch("fila");
     };
   }
+  document.addEventListener("click", function(e) {
+    const id = e.target && e.target.id;
+    if (id !== "subjudice-search-input") {
+      const sugg = document.getElementById("subjudice-suggestions");
+      if (sugg) sugg.style.display = "none";
+    }
+    if (id !== "zeropaid-search-input") {
+      const suggZ = document.getElementById("zeropaid-suggestions");
+      if (suggZ) suggZ.style.display = "none";
+    }
+  });
   
     const refreshBtn = document.getElementById("btn-refresh-dashboard");
   if (refreshBtn) {
@@ -22699,10 +22672,19 @@ function updateSidebarAgendaBadge() {
 }
 
 async function loadZeroPaidTab() {
-    if (window._isDefaultersLoading) return;
-    window._isDefaultersLoading = true;
+    if (window._isZeroPaidLoading) {
+      window._zeroSearchPending = true;
+      return;
+    }
+    window._isZeroPaidLoading = true;
     try { await _loadZeroPaidTab_Impl(); }
-    finally { window._isDefaultersLoading = false; }
+    finally {
+      window._isZeroPaidLoading = false;
+      if (window._zeroSearchPending) {
+        window._zeroSearchPending = false;
+        loadZeroPaidTab();
+      }
+    }
 }
 
 async function _loadZeroPaidTab_Impl() {
@@ -22711,7 +22693,7 @@ async function _loadZeroPaidTab_Impl() {
   body.innerHTML = "";
 
   const searchInput = document.getElementById("zeropaid-search-input");
-  const searchValue = searchInput ? searchInput.value.trim().toLowerCase() : "";
+  const searchValue = searchInput ? searchInput.value.trim() : "";
 
   let bills;
   if (getSiengeApiMode() === "simulado") {
@@ -22814,7 +22796,7 @@ async function _loadZeroPaidTab_Impl() {
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
 
-  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function" && !AppState.defaultersLoaded) {
     try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
       console.warn("[SI] Falha ao vincular tipo da quitação (0% pago):", e);
     }
@@ -23226,15 +23208,7 @@ async function _loadZeroPaidTab_Impl() {
 
   // Aplica filtro de busca se houver
   if (searchValue) {
-    const searchTerms = searchValue.split(' ').filter(t => t);
-    zeroPaidList = zeroPaidList.filter(c => {
-      const targetStr = (
-        c.customerName.toLowerCase() + " " + 
-        (c.customerCpf || "") + " " + 
-        c.billIds.join(",")
-      );
-      return searchTerms.every(term => targetStr.includes(term));
-    });
+    zeroPaidList = zeroPaidList.filter((c) => window.clientMatchesSearch(c, searchValue));
   }
 
   if (window._currentSortZeroCol) {
@@ -37550,11 +37524,24 @@ window.clausulaSuspensivaDias = function(cc) {
   return (Number.isFinite(n) && n > 0) ? n : 30;
 };
 
+window.parseCentrosCustoCustomMap = function(raw) {
+  if (!raw) return {};
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    if (raw.byId && typeof raw.byId === "object") return raw.byId;
+    return raw;
+  }
+  try {
+    const obj = JSON.parse(String(raw || "{}") || "{}") || {};
+    if (obj && typeof obj === "object" && obj.byId && typeof obj.byId === "object") return obj.byId;
+    return obj && typeof obj === "object" ? obj : {};
+  } catch (e) {
+    return {};
+  }
+};
+
 window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
-  let local = {};
-  let cloud = {};
-  try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
-  try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
+  const local = window.parseCentrosCustoCustomMap(localStr);
+  const cloud = window.parseCentrosCustoCustomMap(cloudStr);
   const recs = {};
   const ingest = (src) => {
     Object.keys(src || {}).forEach((k) => {
@@ -37777,17 +37764,26 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
-                if (k === "crm_centros_custo_custom" && typeof window.mergeCentrosCustoCustom === "function") {
-                    const merged = window.mergeCentrosCustoCustom(localStorage.getItem(k), globalData[k] || "{}");
-                    if (merged && merged !== (localStorage.getItem(k) || "")) {
-                        _originalSetItem.call(localStorage, k, merged);
-                        changed = true;
-                    }
-                    if (typeof window.applyCentrosCustoCustomPayload === "function") {
-                        window.applyCentrosCustoCustomPayload(merged);
-                    }
-                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
-                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                if (k === "crm_centros_custo_custom") {
+                    if (window._ccCustomWritingCloud) return;
+                    if (typeof window.mergeCentrosCustoCustom === "function") {
+                        let dedicatedRaw = "";
+                        try {
+                          if (window.firebaseCollections && window.firebaseCollections.getDoc && window.firebaseDb) {
+                            /* filled in persist; snapshot of global still merges */
+                          }
+                        } catch (e) {}
+                        const merged = window.mergeCentrosCustoCustom(
+                          localStorage.getItem(k),
+                          dedicatedRaw || globalData[k] || "{}"
+                        );
+                        const cur = localStorage.getItem(k) || "";
+                        if (merged && merged !== cur) {
+                            _originalSetItem.call(localStorage, k, merged);
+                        }
+                        if (typeof window.applyCentrosCustoCustomPayload === "function") {
+                            window.applyCentrosCustoCustomPayload(merged || cur);
+                        }
                     }
                     return;
                 }

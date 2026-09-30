@@ -8,23 +8,27 @@ const DashboardInadimplencia = (function() {
     companies: [],
     centers: [],
     cities: [],
-    operators: []
+    operators: [],
+    aging: []
   };
   const filterApplied = {
     companies: [],
     centers: [],
     cities: [],
-    operators: []
+    operators: [],
+    aging: []
   };
   const filterUi = {
     openEmp: false,
     openCc: false,
     openCid: false,
     openOp: false,
+    openAging: false,
     qEmp: "",
     qCc: "",
     qCid: "",
-    qOp: ""
+    qOp: "",
+    qAging: ""
   };
 
   async function carregarDados() {
@@ -113,8 +117,18 @@ const DashboardInadimplencia = (function() {
     return { val: pct, text: `${sign}${pct.toFixed(1)}%`, class: colorClass };
   }
 
+  function selectedAgingKeys(f) {
+    const keys = (f && f.aging) ? f.aging.map(String) : [];
+    if (!keys.length || keys.length >= AGING_CHART_SERIES.length) return [];
+    return keys;
+  }
+
+  function hasAgingFilter(f) {
+    return selectedAgingKeys(f).length > 0;
+  }
+
   function hasAnyFilter(f) {
-    return !!(f.companies.length || f.centers.length || f.cities.length || f.operators.length);
+    return !!(f.companies.length || f.centers.length || f.cities.length || f.operators.length || hasAgingFilter(f));
   }
 
   function hasGeoFilter(f) {
@@ -210,6 +224,8 @@ const DashboardInadimplencia = (function() {
       const r = clientCity(c);
       if (!f.cities.includes(String(r.city || '')) && !f.cities.includes(String(r.ruleId || ''))) return false;
     }
+    const agingKeys = selectedAgingKeys(f);
+    if (agingKeys.length && !agingKeys.includes(agingKeyFromDelay(clientDelay(c)))) return false;
     return true;
   }
 
@@ -239,6 +255,43 @@ const DashboardInadimplencia = (function() {
     { key: 'd91_120', label: '91 a 120 dias', color: '#f37021' },
     { key: 'd120p', label: 'Acima de 120 dias', color: '#9a3412' }
   ];
+
+  function applyAgingFilterToMetrics(metrics, f) {
+    if (!metrics) return metrics;
+    const keys = selectedAgingKeys(f);
+    if (!keys.length) return metrics;
+    const allow = new Set(keys);
+    const aging = emptyAging();
+    let total_value = 0;
+    let total_count = 0;
+    let total_customers = 0;
+    Object.keys(aging).forEach((k) => {
+      if (!allow.has(k)) {
+        aging[k] = { count: 0, value: 0, clients: 0 };
+        return;
+      }
+      const row = (metrics.aging && metrics.aging[k]) || {};
+      aging[k] = {
+        count: Number(row.count) || 0,
+        value: Number(row.value) || 0,
+        clients: Number(row.clients) || 0
+      };
+      total_value += aging[k].value;
+      total_count += aging[k].count;
+      total_customers += aging[k].clients || 0;
+    });
+    return Object.assign({}, metrics, {
+      total_value,
+      total_count,
+      total_customers: total_customers || metrics.total_customers || 0,
+      avg_ticket: total_count > 0 ? total_value / total_count : 0,
+      aging
+    });
+  }
+
+  function agingFilterItems() {
+    return AGING_CHART_SERIES.map((s) => ({ id: s.key, label: s.label }));
+  }
 
   function agingValuesFromMetrics(metrics, metric) {
     const aging = (metrics && metrics.aging) ? metrics.aging : emptyAging();
@@ -552,7 +605,8 @@ const DashboardInadimplencia = (function() {
         companies: filterDraft.companies,
         centers: filterDraft.centers,
         cities: filterDraft.cities,
-        operators: []
+        operators: [],
+        aging: filterDraft.aging || []
       };
       const liveOps = [];
       getLiveClients().forEach(c => {
@@ -693,15 +747,28 @@ const DashboardInadimplencia = (function() {
       f.operators.slice().sort().join('|'),
       f.companies.slice().sort().join('|'),
       f.centers.slice().sort().join('|'),
-      f.cities.slice().sort().join('|')
+      f.cities.slice().sort().join('|'),
+      (f.aging || []).slice().sort().join('|')
     ].join('||');
     if (_opRatioCacheKey === key) return _opRatioCacheVal;
 
     let ratio = null;
     const live = getLiveClients();
     if (live.length) {
-      const emptyOps = { companies: f.companies.slice(), centers: f.centers.slice(), cities: f.cities.slice(), operators: [] };
-      const withOps = { companies: f.companies.slice(), centers: f.centers.slice(), cities: f.cities.slice(), operators: f.operators.slice() };
+      const emptyOps = {
+        companies: f.companies.slice(),
+        centers: f.centers.slice(),
+        cities: f.cities.slice(),
+        operators: [],
+        aging: (f.aging || []).slice()
+      };
+      const withOps = {
+        companies: f.companies.slice(),
+        centers: f.centers.slice(),
+        cities: f.cities.slice(),
+        operators: f.operators.slice(),
+        aging: (f.aging || []).slice()
+      };
       const base = aggregateFromLive(live, emptyOps);
       const filtered = aggregateFromLive(live, withOps);
       // Só usa live se o operador tiver valor; senão tenta snapshots (carteira ao vivo pode estar sem assignedOperator)
@@ -747,7 +814,7 @@ const DashboardInadimplencia = (function() {
           centers.push({ id: cc.id, count: cc.count, value: cc.value });
         });
       });
-      return {
+      return applyAgingFilterToMetrics({
         total_value: snap.total_value || 0,
         total_count: snap.total_count || 0,
         total_customers: snap.total_customers || 0,
@@ -758,7 +825,7 @@ const DashboardInadimplencia = (function() {
         centers,
         operators: (dj.operators || []).slice(),
         source: 'snapshot'
-      };
+      }, f);
     }
 
     const onlyOps = f.operators.length && !hasGeoFilter(f);
@@ -790,7 +857,7 @@ const DashboardInadimplencia = (function() {
           aging[k].value = (aging[k].value || 0) * r;
         });
       }
-      return {
+      return applyAgingFilterToMetrics({
         total_value,
         total_count,
         avg_ticket: total_count > 0 ? total_value / total_count : 0,
@@ -800,7 +867,7 @@ const DashboardInadimplencia = (function() {
         centers: [],
         operators: ops,
         source: 'snapshot'
-      };
+      }, f);
     }
 
     const aging = emptyAging();
@@ -867,7 +934,7 @@ const DashboardInadimplencia = (function() {
       }
     }
 
-    return {
+    return applyAgingFilterToMetrics({
       total_value,
       total_count,
       avg_ticket: total_count > 0 ? total_value / total_count : 0,
@@ -877,7 +944,7 @@ const DashboardInadimplencia = (function() {
       centers,
       operators,
       source: 'snapshot'
-    };
+    }, f);
   }
 
   function filteredSnapshotValue(snap, f) {
@@ -963,12 +1030,14 @@ const DashboardInadimplencia = (function() {
     bindOne("dash-inad-cc", "centers", "openCc", "qCc", options.centers);
     bindOne("dash-inad-cid", "cities", "openCid", "qCid", options.cities);
     bindOne("dash-inad-op", "operators", "openOp", "qOp", options.operators);
+    bindOne("dash-inad-aging", "aging", "openAging", "qAging", agingFilterItems());
   }
 
-  function filterDropHtml(id, label, items, selectedIds, open, query) {
+  function filterDropHtml(id, label, items, selectedIds, open, query, extra) {
     if (!window.MlEmpresaFilter) {
       return `<div class="dash-inad-filter-slot"><div class="ml-emp-filter-label">${label}</div><span style="color:#94a3b8;font-size:0.8rem;">Filtro indisponível</span></div>`;
     }
+    extra = extra || {};
     return `<div class="dash-inad-filter-slot">${MlEmpresaFilter.html({
       id,
       label,
@@ -976,7 +1045,8 @@ const DashboardInadimplencia = (function() {
       selectedIds: selectedIds.map(String),
       open: !!open,
       query: query || "",
-      emptyMeansAll: true
+      emptyMeansAll: true,
+      nouns: extra.nouns || null
     })}</div>`;
   }
 
@@ -1002,6 +1072,7 @@ const DashboardInadimplencia = (function() {
           ${filterDropHtml("dash-inad-cc", "EMPREENDIMENTOS", options.centers, filterDraft.centers, filterUi.openCc, filterUi.qCc)}
           ${filterDropHtml("dash-inad-cid", "CIDADES", options.cities, filterDraft.cities, filterUi.openCid, filterUi.qCid)}
           ${filterDropHtml("dash-inad-op", "OPERADORES", options.operators, filterDraft.operators, filterUi.openOp, filterUi.qOp)}
+          ${filterDropHtml("dash-inad-aging", "AGING", agingFilterItems(), filterDraft.aging, filterUi.openAging, filterUi.qAging, { nouns: { singular: "faixa", plural: "faixas" } })}
         </div>
       </div>
     `;
@@ -1014,37 +1085,29 @@ const DashboardInadimplencia = (function() {
     const varTicket = calcularVariacao(metrics.avg_ticket, compareMetrics ? compareMetrics.avg_ticket : 0);
 
     return `
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 25px;">
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Valor Total</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(metrics.total_value)}</div>
-          <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varValor.class}">
-            ${varValor.text} vs Fechamento Mês
-          </div>
+      <div class="di-kpi-grid">
+        <div class="di-kpi-card di-kpi-card--orange">
+          <h4>Valor Total</h4>
+          <div class="di-kpi-value">${formatMoney(metrics.total_value)}</div>
+          <div class="di-kpi-meta ${varValor.class}">${varValor.text} vs Fechamento Mês</div>
         </div>
 
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #105436; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Qtd. de Títulos</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${Number(metrics.total_count || 0).toLocaleString('pt-BR')}</div>
-          <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varQtd.class}">
-            ${varQtd.text} vs Fechamento Mês
-          </div>
+        <div class="di-kpi-card di-kpi-card--green">
+          <h4>Qtd. de Títulos</h4>
+          <div class="di-kpi-value">${Number(metrics.total_count || 0).toLocaleString('pt-BR')}</div>
+          <div class="di-kpi-meta ${varQtd.class}">${varQtd.text} vs Fechamento Mês</div>
         </div>
 
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #105436; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Ticket Médio</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${formatMoney(metrics.avg_ticket)}</div>
-          <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500;" class="${varTicket.class}">
-            ${varTicket.text} vs Fechamento Mês
-          </div>
+        <div class="di-kpi-card di-kpi-card--green">
+          <h4>Ticket Médio</h4>
+          <div class="di-kpi-value">${formatMoney(metrics.avg_ticket)}</div>
+          <div class="di-kpi-meta ${varTicket.class}">${varTicket.text} vs Fechamento Mês</div>
         </div>
 
-        <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #f37021; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h4 style="margin: 0 0 10px 0; color: #64748b; font-size: 0.9rem; font-weight: 600;">Sub Júdice</h4>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">${Number(metrics.subjudice_count || 0).toLocaleString('pt-BR')} <span style="font-size: 1rem; color: #64748b; font-weight: 500;">títulos</span></div>
-          <div style="margin-top: 8px; font-size: 0.85rem; font-weight: 500; color: #64748b;">
-            Total: ${formatMoney(metrics.subjudice_value)}
-          </div>
+        <div class="di-kpi-card di-kpi-card--orange">
+          <h4>Sub Júdice</h4>
+          <div class="di-kpi-value">${Number(metrics.subjudice_count || 0).toLocaleString('pt-BR')} <span>títulos</span></div>
+          <div class="di-kpi-meta">Total: ${formatMoney(metrics.subjudice_value)}</div>
         </div>
       </div>
     `;
@@ -1308,6 +1371,9 @@ const DashboardInadimplencia = (function() {
     AGING_CHART_SERIES.forEach((s) => { tones[s.key] = s.color; });
     const maxVal = Math.max(1, ...order.map((k) => (agings[k] && agings[k].value) || 0));
 
+    const selected = selectedAgingKeys(filterApplied);
+    const selectedSet = new Set(selected);
+
     return `
       <section class="di-block di-block--fill">
         <header class="di-block-head">
@@ -1318,8 +1384,10 @@ const DashboardInadimplencia = (function() {
             const row = agings[k] || { count: 0, value: 0 };
             const pctTot = metrics.total_value > 0 ? (row.value / metrics.total_value) * 100 : 0;
             const pctBar = (row.value / maxVal) * 100;
+            const isOn = !selected.length || selectedSet.has(k);
+            const rowClass = selected.length ? (isOn ? 'is-on' : 'is-off') : '';
             return `
-              <div class="di-aging-row">
+              <div class="di-aging-row ${rowClass}" role="button" tabindex="0" title="Filtrar ${labels[k]}" onclick="window.DashboardInadimplencia.toggleAgingKey('${k}')">
                 <div class="di-aging-top">
                   <span class="di-aging-label">${labels[k]} <em>${row.count} tít.</em></span>
                   <span class="di-aging-val">${formatMoney(row.value)} <em>${pctTot.toFixed(0)}%</em></span>
@@ -1412,7 +1480,8 @@ const DashboardInadimplencia = (function() {
     filterApplied.centers = filterDraft.centers.slice();
     filterApplied.cities = filterDraft.cities.slice();
     filterApplied.operators = filterDraft.operators.slice();
-    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = false;
+    filterApplied.aging = (filterDraft.aging || []).slice();
+    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = filterUi.openAging = false;
     paint();
   }
 
@@ -1421,13 +1490,24 @@ const DashboardInadimplencia = (function() {
     filterDraft.centers = [];
     filterDraft.cities = [];
     filterDraft.operators = [];
+    filterDraft.aging = [];
     filterApplied.companies = [];
     filterApplied.centers = [];
     filterApplied.cities = [];
     filterApplied.operators = [];
-    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = false;
-    filterUi.qEmp = filterUi.qCc = filterUi.qCid = filterUi.qOp = "";
+    filterApplied.aging = [];
+    filterUi.openEmp = filterUi.openCc = filterUi.openCid = filterUi.openOp = filterUi.openAging = false;
+    filterUi.qEmp = filterUi.qCc = filterUi.qCid = filterUi.qOp = filterUi.qAging = "";
     paint();
+  }
+
+  function toggleAgingKey(key) {
+    const k = String(key || "");
+    if (!AGING_CHART_SERIES.some((s) => s.key === k)) return;
+    const cur = (filterDraft.aging || []).map(String);
+    filterDraft.aging = cur.includes(k) ? cur.filter((x) => x !== k) : cur.concat(k);
+    filterApplied.aging = filterDraft.aging.slice();
+    paint({ keepScroll: true });
   }
 
   function paint(opts) {
@@ -2196,6 +2276,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     paint,
     aplicarFiltros,
     limparFiltros,
+    toggleAgingKey,
     setChartMetric
   };
 })();
