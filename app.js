@@ -2555,10 +2555,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     let perms = {};
     try {
       const profileName = (AppState.currentUser && AppState.currentUser.profile_name) || "";
-      const crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
-      const matched = crmProfiles.find(p => p.name === String(profileName).trim().toUpperCase());
-      const profileId = matched ? matched.id : String(profileName).trim().toLowerCase().replace(/\s+/g, "_");
-      perms = JSON.parse(localStorage.getItem("crm_perms_" + profileId) || "{}") || {};
+      perms = typeof window.readCrmProfilePerms === "function"
+        ? window.readCrmProfilePerms(profileName)
+        : {};
     } catch (e) { perms = {}; }
     if (!window.permCoversMenuKey(perms, "sub_com_geral_estoque_acessar")) {
       alert("Sem permissão para Posição de estoque.");
@@ -3645,19 +3644,8 @@ function renderUserSession() {
   }
 }
 
-function applyMenuPermissions() {
-  if (!AppState.currentUser) return;
-  const profileName = AppState.currentUser.profile_name || "";
-  window.applyPermissions(profileName);
-}
-
-window.applyPermissions = function(profileName) {
-  if (!profileName) return;
-  
-  // Administrador tem acesso a tudo
-  if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
-
-  const normalizeProfileName = (s) => String(s || "")
+window.normalizeCrmProfileName = function(s) {
+  return String(s || "")
     .trim()
     .toUpperCase()
     .normalize("NFD")
@@ -3666,40 +3654,138 @@ window.applyPermissions = function(profileName) {
     .replace(/[^A-Z0-9 ]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+};
 
-  const resolvedBackOfficeProfileId = function(name) {
-    const n = normalizeProfileName(name);
-    if (n.includes("OPERADOR COBRANCA") && n.includes("BACK")) return "operador_cobranca_back_office";
-    if (n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ")) return "operador_cobranca_terceirizado";
-    return null;
-  };
-  
+window.crmProfileKind = function(nameOrId) {
+  const n = window.normalizeCrmProfileName(String(nameOrId || "").replace(/_/g, " "));
+  if (n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n))) return "back_office";
+  if (n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ")) return "terceirizado";
+  if (n === "OPERADOR COBRANCA" || n === "OPERADOR COBRANCA INTERNO") return "cobranca";
+  return "other";
+};
+
+window.resolveCrmProfileId = function(profileName) {
+  const n = window.normalizeCrmProfileName(profileName);
   let crmProfiles = [];
+  try { crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || []; } catch (e) {}
+  const matched = (crmProfiles || []).find((p) => window.normalizeCrmProfileName(p.name) === n);
+  if (matched && matched.id) return String(matched.id);
+  const kind = window.crmProfileKind(profileName);
+  if (kind === "back_office") return "operador_cobranca_back_office";
+  if (kind === "terceirizado") return "operador_cobranca_terceirizado";
+  if (kind === "cobranca") {
+    if (localStorage.getItem("crm_perms_operador_cobranca")) return "operador_cobranca";
+    if (localStorage.getItem("crm_perms_operador_cobrança")) return "operador_cobrança";
+    return "operador_cobranca";
+  }
+  return String(profileName || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+};
+
+window.readCrmPermsJson = function(profileId) {
+  if (!profileId) return null;
   try {
-    crmProfiles = JSON.parse(localStorage.getItem('crm_moura_profiles')) || [];
-  } catch(e) {}
-  
-  const matchedProfile = crmProfiles.find(p => normalizeProfileName(p.name) === normalizeProfileName(profileName.trim()));
-  const fallbackProfileId = resolvedBackOfficeProfileId(profileName) || profileName.trim().toLowerCase().replace(/\s+/g, '_');
-  const profileId = matchedProfile ? matchedProfile.id : fallbackProfileId;
-  
-  let permsStr = localStorage.getItem(`crm_perms_${profileId}`);
+    const raw = localStorage.getItem("crm_perms_" + profileId);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+window.materializeCrmProfilePerms = function(profileId) {
+  if (!profileId) return {};
+  const obj = window.readCrmPermsJson(profileId);
+  if (obj && obj.__mirror_of__) {
+    const src = window.readCrmPermsJson(obj.__mirror_of__) || {};
+    const copy = (src && typeof src === "object" && !src.__mirror_of__) ? Object.assign({}, src) : {};
+    delete copy.__mirror_of__;
+    try { localStorage.setItem("crm_perms_" + profileId, JSON.stringify(copy)); } catch (e) {}
+    return copy;
+  }
+  if (obj) return obj;
+  return {};
+};
+
+window.readCrmProfilePerms = function(profileNameOrId) {
+  const id = window.resolveCrmProfileId(profileNameOrId);
+  let obj = window.materializeCrmProfilePerms(id);
+  if (obj && Object.keys(obj).length) return obj;
+  const kind = window.crmProfileKind(profileNameOrId);
+  const canonical = kind === "back_office" ? "operador_cobranca_back_office"
+    : kind === "terceirizado" ? "operador_cobranca_terceirizado"
+    : kind === "cobranca" ? "operador_cobranca"
+    : "";
+  if (canonical && canonical !== id) {
+    obj = window.materializeCrmProfilePerms(canonical);
+  }
+  return obj && typeof obj === "object" ? obj : {};
+};
+
+window.ensureLuceliaBackOfficeProfile = function() {
   try {
-    if (permsStr) {
-      const parsed = JSON.parse(permsStr);
-      if (parsed && parsed.__mirror_of__) {
-        permsStr = localStorage.getItem(`crm_perms_${parsed.__mirror_of__}`) || null;
+    const usersRaw = localStorage.getItem("crm_users");
+    if (!usersRaw) return;
+    const users = JSON.parse(usersRaw);
+    if (!Array.isArray(users)) return;
+    let profiles = [];
+    try { profiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || []; } catch (e) {}
+    const back = (profiles || []).find((p) => {
+      const n = window.normalizeCrmProfileName(p.name);
+      return n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n));
+    });
+    const targetName = (back && back.name) || "OPERADOR COBRANÇA INTERNO BACK OFFICE";
+    let changed = false;
+    users.forEach((u) => {
+      const blob = String((u && u.name) || "") + " " + String((u && u.sienge_user) || "");
+      if (!/LUCELIA/i.test(blob)) return;
+      const n = window.normalizeCrmProfileName(u.profile_name);
+      if (n.includes("BACK") || n === "ADMINISTRADOR") return;
+      u.profile_name = targetName;
+      changed = true;
+    });
+    if (changed) {
+      localStorage.setItem("crm_users", JSON.stringify(users));
+      const cu = window.AppState && AppState.currentUser;
+      if (cu) {
+        const blob = String(cu.name || "") + " " + String(cu.sienge_user || "");
+        if (/LUCELIA/i.test(blob)) cu.profile_name = targetName;
       }
-    } else if (/terceiriz|back/i.test(String(profileId))) {
-      permsStr = localStorage.getItem("crm_perms_operador_cobranca")
-        || localStorage.getItem("crm_perms_operador_cobrança")
-        || null;
     }
   } catch (e) {}
+};
+
+function applyMenuPermissions() {
+  if (!AppState.currentUser) return;
+  const profileName = AppState.currentUser.profile_name || "";
+  window.applyPermissions(profileName);
+}
+
+window.applyPermissions = function(profileName) {
+  if (!profileName) return;
+  if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
+    window.ensureLuceliaBackOfficeProfile();
+    if (window.AppState && AppState.currentUser && AppState.currentUser.profile_name) {
+      profileName = AppState.currentUser.profile_name;
+    }
+  }
+  
+  // Administrador tem acesso a tudo
+  if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
+
+  const perms = typeof window.readCrmProfilePerms === "function"
+    ? window.readCrmProfilePerms(profileName)
+    : {};
+  const permsStr = perms && Object.keys(perms).length ? JSON.stringify(perms) : "";
   
   if (permsStr) {
     try {
-      const perms = JSON.parse(permsStr);
       if (perms && perms.__mirror_of__) return;
       const moduleItems = document.querySelectorAll('li[data-module]');
       
@@ -3916,12 +4002,11 @@ window.hasCrmPerm = function(key) {
   const u = window.AppState && AppState.currentUser;
   if (u && Array.isArray(u.permissions) && u.permissions.includes(key)) return true;
   try {
-    let crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
-    const profileName = u && u.profile_name ? String(u.profile_name).trim().toUpperCase() : "";
-    const matched = crmProfiles.find(p => p.name === profileName);
-    const profileId = matched ? matched.id : (profileName.toLowerCase().replace(/\s+/g, "_") || "");
-    if (!profileId) return false;
-    const perms = JSON.parse(localStorage.getItem("crm_perms_" + profileId) || "{}") || {};
+    const profileName = u && u.profile_name ? String(u.profile_name) : "";
+    if (!profileName) return false;
+    const perms = typeof window.readCrmProfilePerms === "function"
+      ? window.readCrmProfilePerms(profileName)
+      : {};
     return perms[key] === true;
   } catch (e) {
     return false;
@@ -4871,40 +4956,23 @@ async function loadAndApplyPermissions() {
   // Buscar permissões do usuário se estiver no modo real e logado
   if (AppState.currentUser && AppState.currentUser.email) {
     try {
-      let profileName = AppState.currentUser.profile_name || '';
-      let profileId = 'admin';
-      if (profileName) {
-          let crmProfiles = [];
-          try {
-             crmProfiles = JSON.parse(localStorage.getItem('crm_moura_profiles')) || [];
-          } catch(e) {}
-          const matchedProfile = crmProfiles.find(p => p.name === profileName.trim().toUpperCase());
-          profileId = matchedProfile ? matchedProfile.id : profileName.trim().toLowerCase().replace(/\s+/g, '_');
+      if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
+        window.ensureLuceliaBackOfficeProfile();
       }
-      let permsStr = localStorage.getItem('crm_perms_' + profileId);
-      try {
-        if (permsStr) {
-          const parsed = JSON.parse(permsStr);
-          if (parsed && parsed.__mirror_of__) {
-            permsStr = localStorage.getItem('crm_perms_' + parsed.__mirror_of__) || permsStr;
-          }
-        } else if (/terceiriz|back/i.test(String(profileId))) {
-          permsStr = localStorage.getItem('crm_perms_operador_cobranca')
-            || localStorage.getItem('crm_perms_operador_cobrança')
-            || null;
-        }
-      } catch (mirrorErr) {}
+      let profileName = AppState.currentUser.profile_name || '';
+      let permsObj = typeof window.readCrmProfilePerms === "function"
+        ? window.readCrmProfilePerms(profileName)
+        : {};
+      if (permsObj && permsObj.__mirror_of__) permsObj = {};
       
-      if (permsStr) {
-         let permsObj = JSON.parse(permsStr);
-         if (permsObj && permsObj.__mirror_of__) permsObj = {};
+      if (permsObj && Object.keys(permsObj).length) {
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
          
          if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
              AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
          }
       } else {
-         console.warn("Permissões não encontradas no localStorage para o perfil:", profileId, "Aplicando padrão.");
+         console.warn("Permissões não encontradas no localStorage para o perfil:", profileName, "Aplicando padrão.");
          AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
       }
     } catch (e) {

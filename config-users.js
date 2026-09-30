@@ -89,7 +89,7 @@ const ConfigUsersApp = {
     { id: 4, name: "MICHELLE PEREIRA YAMASHIRO", email: "michelle.pereira@mouraleite.com.br", sienge_user: "MICHELLE.PEREIRA", phone: "(14) 99144-8775", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
     { id: 5, name: "THAIANE CRISTINA", email: "thaiane.oliveira@mouraleite.com.br", sienge_user: "THAIANE.CORDEIRO", phone: "(19) 99453-6608", profile_name: "OPERADOR COBRANÇA", operator_type: "externo", status: "PENDENTE", manager_name: "", manager_email: "" },
     { id: 6, name: "CARLOS EDUARDO COLENCI", email: "caco@colenci.com.br", sienge_user: "CACO", phone: "(14) 99671-2870", profile_name: "OPERADOR COBRANÇA", operator_type: "advogado", status: "PENDENTE", manager_name: "", manager_email: "", adv_companies: [], adv_cities: [], adv_cost_centers: [] },
-    { id: 7, name: "LUCELIA SALVADOR JUSTO", email: "lucelia.justo@mouraleite.com.br", sienge_user: "LUCELIA JUSTO", phone: "(14) 99704-2756", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" }
+    { id: 7, name: "LUCELIA SALVADOR JUSTO", email: "lucelia.justo@mouraleite.com.br", sienge_user: "LUCELIA JUSTO", phone: "(14) 99704-2756", profile_name: "OPERADOR COBRANÇA INTERNO BACK OFFICE", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" }
   ],
 
   profiles: [], // Será carregado dinamicamente
@@ -305,8 +305,10 @@ const ConfigUsersApp = {
     }
 
     this.ensureAlcadaProfiles();
+    try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
     try { this.seedBackOfficePermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed back-office:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
+    try { this.migrateLuceliaToBackOffice(); } catch (e) { console.warn("[ConfigUsers] migrate lucelia:", e); }
     } catch (e) {
       console.error("[ConfigUsers] loadUsers:", e);
       if (!Array.isArray(this.profiles) || !this.profiles.length) {
@@ -377,13 +379,19 @@ const ConfigUsersApp = {
   writePermissionPayload(profileId, perms) {
     const payload = JSON.stringify(perms);
     const keys = new Set([String(profileId || "")]);
-    const fallback = this.resolveCobrancaProfileId();
-    const n = String(profileId || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (n.includes("back_office") || n.includes("backoffice") || n.includes("terceiriz") || n.includes("terceirizado")) {
-      keys.add(fallback);
+    const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
+    const kind = typeof window.crmProfileKind === "function"
+      ? window.crmProfileKind((profile && profile.name) || profileId)
+      : "";
+    if (kind === "back_office") keys.add("operador_cobranca_back_office");
+    else if (kind === "terceirizado") keys.add("operador_cobranca_terceirizado");
+    else if (kind === "cobranca") {
+      keys.add("operador_cobranca");
+      keys.add("operador_cobrança");
     }
     let ok = true;
-    keys.forEach(k => {
+    keys.forEach((k) => {
+      if (!k) return;
       const permKey = `crm_perms_${k}`;
       if (!this.safeLocalSet(permKey, payload)) ok = false;
     });
@@ -414,6 +422,15 @@ const ConfigUsersApp = {
   },
 
   getProfilePermsObject(profileId) {
+    if (typeof window.materializeCrmProfilePerms === "function") {
+      const own = window.materializeCrmProfilePerms(profileId);
+      if (own && Object.keys(own).length) return own;
+      const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
+      if (profile && typeof window.readCrmProfilePerms === "function") {
+        return window.readCrmProfilePerms(profile.name || profileId);
+      }
+      return own || {};
+    }
     const read = (id) => {
       try {
         const raw = localStorage.getItem(`crm_perms_${id}`);
@@ -423,44 +440,45 @@ const ConfigUsersApp = {
         return null;
       }
     };
-    const normalize = (s) => String(s || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9_]/g, "_").replace(/_+/g, "_");
-    const aliasMap = {
-      "OPERADOR_COBRANCA_BACK_OFFICE": "operador_cobranca_back_office",
-      "OPERADOR_COBRANCA_INTERNO_BACK_OFFICE": "operador_cobranca_back_office",
-      "OPERADOR_COBRANCA_BACKOFFICE": "operador_cobranca_back_office",
-      "OPERADOR_COBRANCA_TERCEIRIZADO": "operador_cobranca_terceirizado"
-    };
-    const canonical = aliasMap[normalize(profileId)] || profileId;
-
-    let obj = read(canonical);
+    let obj = read(profileId);
     if (obj && obj.__mirror_of__) {
       const mirrored = read(obj.__mirror_of__);
-      return mirrored && typeof mirrored === "object" ? { ...mirrored } : {};
+      const copy = mirrored && typeof mirrored === "object" && !mirrored.__mirror_of__ ? { ...mirrored } : {};
+      delete copy.__mirror_of__;
+      try { this.safeLocalSet(`crm_perms_${profileId}`, JSON.stringify(copy)); } catch (e) {}
+      return copy;
     }
     if (obj && typeof obj === "object") return obj;
-
-    // Fallback sem duplicar blob: espelhos conhecidos leem o OPERADOR COBRANÇA
-    const n = String(canonical || "");
-    if (n.includes("terceiriz") || n.includes("back")) {
-      const cobId = this.resolveCobrancaProfileId();
-      const cob = read(cobId);
-      if (cob && typeof cob === "object" && !cob.__mirror_of__) return { ...cob };
-    }
     return {};
   },
 
-  seedPermsAsMirror(targetId, preferredSourceId) {
+  seedIndependentPermsCopy(targetId, preferredSourceId) {
     if (!targetId) return;
-    if (localStorage.getItem(`crm_perms_${targetId}`)) return;
+    const existing = localStorage.getItem(`crm_perms_${targetId}`);
+    if (existing) {
+      try {
+        const obj = JSON.parse(existing);
+        if (obj && obj.__mirror_of__ && typeof window.materializeCrmProfilePerms === "function") {
+          window.materializeCrmProfilePerms(targetId);
+        }
+      } catch (e) {}
+      return;
+    }
     const sourceId = preferredSourceId || this.resolveCobrancaProfileId();
-    const hasSource = !!(
-      localStorage.getItem(`crm_perms_${sourceId}`)
+    const srcRaw = localStorage.getItem(`crm_perms_${sourceId}`)
       || localStorage.getItem("crm_perms_operador_cobrança")
-      || localStorage.getItem("crm_perms_operador_cobranca")
-    );
-    if (!hasSource) return;
-    // Espelho leve (evita QuotaExceeded ao duplicar o JSON inteiro)
-    this.safeLocalSet(`crm_perms_${targetId}`, JSON.stringify({ __mirror_of__: sourceId }));
+      || localStorage.getItem("crm_perms_operador_cobranca");
+    if (!srcRaw) return;
+    let src = {};
+    try { src = JSON.parse(srcRaw) || {}; } catch (e) { src = {}; }
+    if (src && src.__mirror_of__) src = {};
+    const copy = Object.assign({}, src);
+    delete copy.__mirror_of__;
+    this.safeLocalSet(`crm_perms_${targetId}`, JSON.stringify(copy));
+  },
+
+  seedPermsAsMirror(targetId, preferredSourceId) {
+    this.seedIndependentPermsCopy(targetId, preferredSourceId);
   },
 
   ensureAlcadaProfiles() {
@@ -491,7 +509,7 @@ const ConfigUsersApp = {
       return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
     });
     if (!back) return;
-    this.seedPermsAsMirror(back.id, this.resolveCobrancaProfileId());
+    this.seedIndependentPermsCopy(back.id, this.resolveCobrancaProfileId());
   },
 
   seedTerceirizadoPermsFromCobranca() {
@@ -500,7 +518,44 @@ const ConfigUsersApp = {
       return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
     });
     if (!terc) return;
-    this.seedPermsAsMirror(terc.id, this.resolveCobrancaProfileId());
+    this.seedIndependentPermsCopy(terc.id, this.resolveCobrancaProfileId());
+  },
+
+  breakSharedCobrancaMirrors() {
+    const ids = new Set();
+    (this.profiles || []).forEach((p) => { if (p && p.id) ids.add(String(p.id)); });
+    ids.add("operador_cobranca_back_office");
+    ids.add("operador_cobranca_terceirizado");
+    ids.forEach((id) => {
+      if (typeof window.materializeCrmProfilePerms === "function") {
+        window.materializeCrmProfilePerms(id);
+      }
+    });
+  },
+
+  migrateLuceliaToBackOffice() {
+    const backName = "OPERADOR COBRANÇA INTERNO BACK OFFICE";
+    if (!(this.profiles || []).some((p) => String(p.name).toUpperCase() === backName)) {
+      const exists = (this.profiles || []).some((p) => {
+        const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
+      });
+      if (!exists) this.profiles.push({ id: "operador_cobranca_back_office", name: backName });
+    }
+    const targetName = ((this.profiles || []).find((p) => {
+      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
+    }) || { name: backName }).name;
+    let changed = false;
+    (this.users || []).forEach((u) => {
+      const blob = String((u && u.name) || "") + " " + String((u && u.sienge_user) || "");
+      if (!/LUCELIA/i.test(blob)) return;
+      const n = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (n.includes("BACK") || n === "ADMINISTRADOR") return;
+      u.profile_name = targetName;
+      changed = true;
+    });
+    if (changed) this.safeLocalSet("crm_users", JSON.stringify(this.users));
   },
 
   closeProfileNameModal() {
@@ -655,7 +710,7 @@ const ConfigUsersApp = {
      this.openProfileNameModal({
        title: "Copiar perfil",
        label: "Nome do novo perfil",
-       hint: `Espelho de <strong>${sourceProfile.name}</strong>. As permissões serão copiadas; você pode ajustar Integra e demais acessos em seguida.${suggestTerc ? " Perfis terceirizados só enxergam clientes atribuídos a eles." : ""}`,
+         hint: `Cópia de <strong>${sourceProfile.name}</strong>. As permissões serão copiadas neste momento; depois cada perfil se edita sozinho.`,
        defaultValue: defaultName,
        confirmLabel: "Criar cópia",
        icon: "copy",
@@ -1424,10 +1479,7 @@ const ConfigUsersApp = {
 
     window.syncConfiguracoesPermAliases(perms);
     const permSaved = this.writePermissionPayload(this.selectedProfile, perms);
-    if (!permSaved) {
-      // Mantém espelho leve se a cota estiver cheia
-      this.seedPermsAsMirror(this.selectedProfile, this.resolveCobrancaProfileId());
-    } else {
+    if (permSaved) {
       this.syncPermsToCloud();
     }
     
@@ -1497,7 +1549,7 @@ const ConfigUsersApp = {
     }
 
     if (!this.writePermissionPayload(this.selectedProfile, perms)) {
-       alert("Armazenamento local cheio: não foi possível salvar a cópia completa das permissões. Ajuste o Integra no perfil OPERADOR COBRANÇA ou libere espaço no navegador e tente de novo.");
+       alert("Armazenamento local cheio: não foi possível salvar as permissões deste perfil. Libere espaço no navegador e tente de novo.");
        return;
     }
     this.syncPermsToCloud();

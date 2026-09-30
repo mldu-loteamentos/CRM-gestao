@@ -77,7 +77,7 @@ const HomeDashboard = {
       { name: 'MICHELLE FRANCINE VIEIRA', sienge_user: 'MICHELLE.VIEIRA', profile_name: 'OPERADOR COBRANÇA' },
       { name: 'MICHELLE PEREIRA YAMASHIRO', sienge_user: 'MICHELLE.PEREIRA', profile_name: 'OPERADOR COBRANÇA' },
       { name: 'THAIANE CRISTINA', sienge_user: 'THAIANE.CORDEIRO', profile_name: 'OPERADOR COBRANÇA' },
-      { name: 'LUCELIA SALVADOR JUSTO', sienge_user: 'LUCELIA JUSTO', profile_name: 'OPERADOR COBRANÇA' }
+      { name: 'LUCELIA SALVADOR JUSTO', sienge_user: 'LUCELIA JUSTO', profile_name: 'OPERADOR COBRANÇA INTERNO BACK OFFICE' }
     ];
   },
 
