@@ -1272,14 +1272,21 @@ const SiengeApiService = {
         console.log('%c[Sienge] 📅 FDS/feriado — primeiro acesso: atualizando base completa da fila.', 'color:#f59e0b;font-weight:bold;');
       }
 
-      if (this._defaultersPromise) {
+      if (this._defaultersPromise && !effectiveForce) {
         return this._defaultersPromise;
+      }
+      if (effectiveForce && this._defaultersPromise) {
+        this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
+        this._defaultersPromise = null;
+        this._progressListeners = [];
+        this._lastProgressState = null;
       }
       this._lastProgressState = null;
       this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
       const fetchGen = this._defaultersFetchGen;
       if (window.ApiUsage) ApiUsage.pushSource(effectiveForce ? "user" : "system", "fila_inadimplentes");
       this._defaultersPromise = (async () => {
+        try {
         const t0 = performance.now();
         const todayStr = filaLocalTodayStr();
         const expectedCompanyIds = getConfiguredInternalCompanyIds();
@@ -1381,8 +1388,7 @@ const SiengeApiService = {
         }
 
         console.log('%c[Sienge] ⏱ Iniciando busca completa de inadimplentes na API...', 'color:#f59e0b;font-weight:bold;');
-        try {
-          const broadcastProgress = (cId, cc, idx, total, cName, wData) => {
+        const broadcastProgress = (cId, cc, idx, total, cName, wData) => {
              this._lastProgressState = [cId, cc, idx, total, cName, wData];
              if (this._progressListeners) {
                this._progressListeners.forEach(listener => listener(cId, cc, idx, total, cName, wData));

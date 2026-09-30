@@ -6093,7 +6093,8 @@ window.handleZeropaidAutocomplete = function() {
 async function loadDashboardData(forceRefresh = false) {
     const filterOnly = AppState.defaultersLoaded && !forceRefresh;
     if (window._isDefaultersLoading) {
-      window._filaSearchPending = true;
+      if (forceRefresh) window._filaForcePending = true;
+      else window._filaSearchPending = true;
       return;
     }
     window._isDefaultersLoading = true;
@@ -6116,7 +6117,11 @@ async function loadDashboardData(forceRefresh = false) {
     }
     finally {
       window._isDefaultersLoading = false;
-      if (window._filaSearchPending) {
+      if (window._filaForcePending) {
+        window._filaForcePending = false;
+        window._filaSearchPending = false;
+        loadDashboardData(true);
+      } else if (window._filaSearchPending) {
         window._filaSearchPending = false;
         loadDashboardData(false);
       }
@@ -6410,7 +6415,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // PASSO 1: Buscar parcelas vencidas dos inadimplentes
   // -----------------------------------------------
   let bills;
-  const dataAlreadyLoaded = getSiengeApiMode() === "real" && AppState.defaultersLoaded;
+  const dataAlreadyLoaded = getSiengeApiMode() === "real" && AppState.defaultersLoaded && !forceRefresh;
   const body = document.getElementById("defaulters-table-body");
   
   if (!dataAlreadyLoaded) {
@@ -8212,12 +8217,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const refreshBtn = document.getElementById("btn-refresh-dashboard");
   if (refreshBtn) {
     refreshBtn.onclick = async () => {
+      if (window.SiengeApiService) {
+        SiengeApiService._defaultersFetchGen = (SiengeApiService._defaultersFetchGen || 0) + 1;
+        SiengeApiService._defaultersPromise = null;
+        SiengeApiService._progressListeners = [];
+        SiengeApiService._lastProgressState = null;
+      }
       AppState.defaultersBills = [];
       AppState.defaultersLoaded = false;
       AppState.dashboardRendered = false;
       AppState.customers = {};
       AppState.sales = [];
-      await loadDashboardData(true); // Pass true to force refresh from Sienge
+      window._isDefaultersLoading = false;
+      await loadDashboardData(true);
     };
   }
 
