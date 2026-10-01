@@ -89,7 +89,7 @@ const ConfigUsersApp = {
     { id: 4, name: "MICHELLE PEREIRA YAMASHIRO", email: "michelle.pereira@mouraleite.com.br", sienge_user: "MICHELLE.PEREIRA", phone: "(14) 99144-8775", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
     { id: 5, name: "THAIANE CRISTINA", email: "thaiane.oliveira@mouraleite.com.br", sienge_user: "THAIANE.CORDEIRO", phone: "(19) 99453-6608", profile_name: "OPERADOR COBRANÇA", operator_type: "externo", status: "PENDENTE", manager_name: "", manager_email: "" },
     { id: 6, name: "CARLOS EDUARDO COLENCI", email: "caco@colenci.com.br", sienge_user: "CACO", phone: "(14) 99671-2870", profile_name: "OPERADOR COBRANÇA", operator_type: "advogado", status: "PENDENTE", manager_name: "", manager_email: "", adv_companies: [], adv_cities: [], adv_cost_centers: [] },
-    { id: 7, name: "LUCELIA SALVADOR JUSTO", email: "lucelia.justo@mouraleite.com.br", sienge_user: "LUCELIA JUSTO", phone: "(14) 99704-2756", profile_name: "OPERADOR COBRANÇA INTERNO BACK OFFICE", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" }
+    { id: 7, name: "LUCELIA SALVADOR JUSTO", email: "lucelia.justo@mouraleite.com.br", sienge_user: "LUCELIA JUSTO", phone: "(14) 99704-2756", profile_name: "OPERADOR COBRANÇA BACK OFFICE", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" }
   ],
 
   profiles: [], // Será carregado dinamicamente
@@ -293,7 +293,7 @@ const ConfigUsersApp = {
         { id: "admin", name: "ADMINISTRADOR" },
         { id: "operador_pagadoria", name: "OPERADOR PAGADORIA" },
         { id: "operador_cobranca", name: "OPERADOR COBRANÇA" },
-        { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE" },
+        { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA BACK OFFICE" },
         { id: "operador_cobranca_terceirizado", name: "OPERADOR COBRANÇA TERCEIRIZADO" },
         { id: "time_relacionamento", name: "TIME RELACIONAMENTO" },
         { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO" },
@@ -305,8 +305,8 @@ const ConfigUsersApp = {
     }
 
     this.ensureAlcadaProfiles();
+    try { this.unifyBackOfficeProfiles(); } catch (e) { console.warn("[ConfigUsers] unify back-office:", e); }
     try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
-    try { this.seedBackOfficePermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed back-office:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
     try { this.migrateLuceliaToBackOffice(); } catch (e) { console.warn("[ConfigUsers] migrate lucelia:", e); }
     } catch (e) {
@@ -378,16 +378,21 @@ const ConfigUsersApp = {
 
   writePermissionPayload(profileId, perms) {
     const payload = JSON.stringify(perms);
-    const keys = new Set([String(profileId || "")]);
     const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
     const kind = typeof window.crmProfileKind === "function"
       ? window.crmProfileKind((profile && profile.name) || profileId)
       : "";
-    if (kind === "back_office") keys.add("operador_cobranca_back_office");
-    else if (kind === "terceirizado") keys.add("operador_cobranca_terceirizado");
-    else if (kind === "cobranca") {
+    const keys = new Set();
+    if (kind === "back_office") {
+      keys.add(window.CRM_BACK_OFFICE_PROFILE_ID || "operador_cobranca_back_office");
+      window._crmBackOfficePermsSavedAt = Date.now();
+    } else if (kind === "terceirizado") {
+      keys.add("operador_cobranca_terceirizado");
+    } else if (kind === "cobranca") {
       keys.add("operador_cobranca");
       keys.add("operador_cobrança");
+    } else {
+      keys.add(String(profileId || ""));
     }
     let ok = true;
     keys.forEach((k) => {
@@ -422,14 +427,18 @@ const ConfigUsersApp = {
   },
 
   getProfilePermsObject(profileId) {
-    if (typeof window.materializeCrmProfilePerms === "function") {
-      const own = window.materializeCrmProfilePerms(profileId);
-      if (own && Object.keys(own).length) return own;
-      const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
-      if (profile && typeof window.readCrmProfilePerms === "function") {
-        return window.readCrmProfilePerms(profile.name || profileId);
+    const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
+    const label = (profile && profile.name) || profileId;
+    if (typeof window.crmProfileKind === "function" && window.crmProfileKind(label) === "back_office") {
+      if (typeof window.readCrmProfilePerms === "function") {
+        return window.readCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_NAME || label);
       }
-      return own || {};
+    }
+    if (typeof window.readCrmProfilePerms === "function" && profile) {
+      return window.readCrmProfilePerms(profile.name || profileId);
+    }
+    if (typeof window.materializeCrmProfilePerms === "function") {
+      return window.materializeCrmProfilePerms(profileId) || {};
     }
     const read = (id) => {
       try {
@@ -485,7 +494,7 @@ const ConfigUsersApp = {
     if (!Array.isArray(this.profiles)) this.profiles = [];
     const norm = (name) => String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " E ").replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
     const extras = [
-      { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA INTERNO BACK OFFICE", match: (n) => n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n)) },
+      { id: "operador_cobranca_back_office", name: "OPERADOR COBRANÇA BACK OFFICE", match: (n) => n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n)) },
       { id: "operador_cobranca_terceirizado", name: "OPERADOR COBRANÇA TERCEIRIZADO", match: (n) => n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ") },
       { id: "time_relacionamento", name: "TIME RELACIONAMENTO", match: (n) => n === "TIME RELACIONAMENTO" || (n.includes("TIME") && n.includes("RELACIONAMENTO")) },
       { id: "supervisor_relacionamento", name: "SUPERVISOR RELACIONAMENTO", match: (n) => n.includes("SUPERVISOR") && n.includes("RELACIONAMENTO") },
@@ -504,12 +513,30 @@ const ConfigUsersApp = {
   },
 
   seedBackOfficePermsFromCobranca() {
-    const back = this.profiles.find(p => {
-      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
+    return;
+  },
+
+  unifyBackOfficeProfiles() {
+    const backId = window.CRM_BACK_OFFICE_PROFILE_ID || "operador_cobranca_back_office";
+    const backName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
+    const kindOf = (p) => (typeof window.crmProfileKind === "function" ? window.crmProfileKind(p.name || p.id) : "");
+    const backs = (this.profiles || []).filter((p) => kindOf(p) === "back_office");
+    const selectedWasBack = backs.some((p) => String(p.id) === String(this.selectedProfile));
+    const keep = backs[0] || { id: backId, name: backName };
+    keep.id = backId;
+    keep.name = backName;
+    this.profiles = (this.profiles || []).filter((p) => kindOf(p) !== "back_office");
+    this.profiles.push(keep);
+    this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+    let usersChanged = false;
+    (this.users || []).forEach((u) => {
+      if (kindOf({ name: u.profile_name }) === "back_office" && u.profile_name !== backName) {
+        u.profile_name = backName;
+        usersChanged = true;
+      }
     });
-    if (!back) return;
-    this.seedIndependentPermsCopy(back.id, this.resolveCobrancaProfileId());
+    if (usersChanged) this.safeLocalSet("crm_users", JSON.stringify(this.users));
+    if (selectedWasBack) this.selectedProfile = backId;
   },
 
   seedTerceirizadoPermsFromCobranca() {
@@ -534,28 +561,22 @@ const ConfigUsersApp = {
   },
 
   migrateLuceliaToBackOffice() {
-    const backName = "OPERADOR COBRANÇA INTERNO BACK OFFICE";
-    if (!(this.profiles || []).some((p) => String(p.name).toUpperCase() === backName)) {
-      const exists = (this.profiles || []).some((p) => {
-        const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
-      });
-      if (!exists) this.profiles.push({ id: "operador_cobranca_back_office", name: backName });
-    }
-    const targetName = ((this.profiles || []).find((p) => {
-      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return n.includes("OPERADOR COBRANCA") && n.includes("BACK");
-    }) || { name: backName }).name;
+    const targetName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
     let changed = false;
     (this.users || []).forEach((u) => {
-      const blob = String((u && u.name) || "") + " " + String((u && u.sienge_user) || "");
+      const blob = String((u && u.name) || "") + " " + String((u && u.sienge_user) || "") + " " + String((u && u.email) || "");
       if (!/LUCELIA/i.test(blob)) return;
       const n = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (n.includes("BACK") || n === "ADMINISTRADOR") return;
-      u.profile_name = targetName;
-      changed = true;
+      if (n === "ADMINISTRADOR") return;
+      if (u.profile_name !== targetName) {
+        u.profile_name = targetName;
+        changed = true;
+      }
     });
-    if (changed) this.safeLocalSet("crm_users", JSON.stringify(this.users));
+    if (changed) {
+      this.safeLocalSet("crm_users", JSON.stringify(this.users));
+      this.syncPermsToCloud();
+    }
   },
 
   closeProfileNameModal() {
@@ -656,7 +677,7 @@ const ConfigUsersApp = {
         this.profiles.push({ id, name: profileName.trim().toUpperCase() });
         localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
         if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
-          this.seedBackOfficePermsFromCobranca();
+          this.unifyBackOfficeProfiles();
         }
         if (window.isOperadorCobrancaTerceirizadoProfile(profileName)) {
           this.seedTerceirizadoPermsFromCobranca();
@@ -1553,6 +1574,11 @@ const ConfigUsersApp = {
        return;
     }
     this.syncPermsToCloud();
+    try {
+      if (typeof window.applyPermissions === "function" && window.AppState && AppState.currentUser) {
+        window.applyPermissions(AppState.currentUser.profile_name);
+      }
+    } catch (e) {}
     
     // Animação de sucesso no botão e sincronização com o Firebase
     const btn = document.querySelector('button[onclick="ConfigUsersApp.savePermissions()"]');

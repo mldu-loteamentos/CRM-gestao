@@ -303,6 +303,8 @@ window.isCobrancaBackOfficeUser = function(u) {
   if (u.operator_type === "apoio_juridico") return true;
   const p = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (p.includes("BACK OFFICE") || p.includes("BACKOFFICE")) return true;
+  const email = String(u.email || "").toLowerCase();
+  if (email.includes("lucelia")) return true;
   const n = (typeof window.normalizeOperatorName === "function")
     ? (window.normalizeOperatorName(u.name || "") + " " + window.normalizeOperatorName(u.sienge_user || ""))
     : String(u.name || "").toUpperCase();
@@ -3463,6 +3465,15 @@ function validateAndLoadCrmUser(user) {
     matchedUser.status = "ATIVO";
     localStorage.setItem('crm_users', JSON.stringify(crmUsers));
   }
+
+  const luceliaBlob = String(matchedUser.name || "") + " " + String(matchedUser.sienge_user || "") + " " + String(matchedUser.email || "") + " " + String(user.name || "") + " " + String(user.email || "");
+  if (/LUCELIA/i.test(luceliaBlob)) {
+    const backName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
+    if (matchedUser.profile_name !== backName) {
+      matchedUser.profile_name = backName;
+      localStorage.setItem("crm_users", JSON.stringify(crmUsers));
+    }
+  }
   
   // Mescla o perfil do CRM com o usuário logado
   return { ...user, ...matchedUser };
@@ -3656,6 +3667,9 @@ window.normalizeCrmProfileName = function(s) {
     .trim();
 };
 
+window.CRM_BACK_OFFICE_PROFILE_ID = "operador_cobranca_back_office";
+window.CRM_BACK_OFFICE_PROFILE_NAME = "OPERADOR COBRANÇA BACK OFFICE";
+
 window.crmProfileKind = function(nameOrId) {
   const n = window.normalizeCrmProfileName(String(nameOrId || "").replace(/_/g, " "));
   if (n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n))) return "back_office";
@@ -3664,15 +3678,36 @@ window.crmProfileKind = function(nameOrId) {
   return "other";
 };
 
+window.crmProfileStorageIds = function(profileId, profileName) {
+  const kind = window.crmProfileKind(profileName || profileId);
+  const ids = new Set();
+  if (profileId) ids.add(String(profileId));
+  if (kind === "back_office") {
+    ids.add(window.CRM_BACK_OFFICE_PROFILE_ID);
+    ids.add("operador_cobranca_interno_back_office");
+    ids.add("operador_cobrança_back_office");
+    ids.add("operador_cobrança_interno_back_office");
+  } else if (kind === "terceirizado") {
+    ids.add("operador_cobranca_terceirizado");
+  } else if (kind === "cobranca") {
+    ids.add("operador_cobranca");
+    ids.add("operador_cobrança");
+  }
+  return Array.from(ids).filter(Boolean);
+};
+
 window.resolveCrmProfileId = function(profileName) {
+  const kind = window.crmProfileKind(profileName);
+  if (kind === "back_office") return window.CRM_BACK_OFFICE_PROFILE_ID;
+  if (kind === "terceirizado") return "operador_cobranca_terceirizado";
   const n = window.normalizeCrmProfileName(profileName);
   let crmProfiles = [];
   try { crmProfiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || []; } catch (e) {}
   const matched = (crmProfiles || []).find((p) => window.normalizeCrmProfileName(p.name) === n);
-  if (matched && matched.id) return String(matched.id);
-  const kind = window.crmProfileKind(profileName);
-  if (kind === "back_office") return "operador_cobranca_back_office";
-  if (kind === "terceirizado") return "operador_cobranca_terceirizado";
+  if (matched && matched.id) {
+    if (window.crmProfileKind(matched.name) === "back_office") return window.CRM_BACK_OFFICE_PROFILE_ID;
+    return String(matched.id);
+  }
   if (kind === "cobranca") {
     if (localStorage.getItem("crm_perms_operador_cobranca")) return "operador_cobranca";
     if (localStorage.getItem("crm_perms_operador_cobrança")) return "operador_cobrança";
@@ -3703,59 +3738,96 @@ window.materializeCrmProfilePerms = function(profileId) {
   if (!profileId) return {};
   const obj = window.readCrmPermsJson(profileId);
   if (obj && obj.__mirror_of__) {
-    const src = window.readCrmPermsJson(obj.__mirror_of__) || {};
-    const copy = (src && typeof src === "object" && !src.__mirror_of__) ? Object.assign({}, src) : {};
+    return {};
+  }
+  if (obj && typeof obj === "object") {
+    const copy = Object.assign({}, obj);
     delete copy.__mirror_of__;
-    try { localStorage.setItem("crm_perms_" + profileId, JSON.stringify(copy)); } catch (e) {}
     return copy;
   }
-  if (obj) return obj;
   return {};
 };
 
+window.crmPermsHasAnyTrue = function(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  return Object.keys(obj).some((k) => k !== "__mirror_of__" && obj[k] === true);
+};
+
+window.crmTruePermKeys = function(obj) {
+  if (!obj || typeof obj !== "object") return [];
+  return Object.keys(obj).filter((k) => k !== "__mirror_of__" && obj[k] === true).sort();
+};
+
+window.crmPermsLookLikeCobrancaClone = function(obj) {
+  if (!window.crmPermsHasAnyTrue(obj)) return false;
+  let cob = window.materializeCrmProfilePerms("operador_cobranca");
+  if (!window.crmPermsHasAnyTrue(cob)) cob = window.materializeCrmProfilePerms("operador_cobrança");
+  if (!window.crmPermsHasAnyTrue(cob)) return false;
+  return window.crmTruePermKeys(obj).join("\n") === window.crmTruePermKeys(cob).join("\n");
+};
+
+window.sanitizeBackOfficePerms = function(obj) {
+  const copy = obj && typeof obj === "object" ? Object.assign({}, obj) : {};
+  delete copy.__mirror_of__;
+  if (window.crmPermsLookLikeCobrancaClone(copy)) return {};
+  return copy;
+};
+
 window.readCrmProfilePerms = function(profileNameOrId) {
+  const kind = window.crmProfileKind(profileNameOrId);
   const id = window.resolveCrmProfileId(profileNameOrId);
+  const ids = typeof window.crmProfileStorageIds === "function"
+    ? window.crmProfileStorageIds(id, profileNameOrId)
+    : [id];
+  if (kind === "back_office") {
+    const raw = window.materializeCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_ID) || {};
+    if (window.crmPermsLookLikeCobrancaClone(raw)) {
+      try { localStorage.setItem("crm_perms_" + window.CRM_BACK_OFFICE_PROFILE_ID, "{}"); } catch (e) {}
+      return {};
+    }
+    return window.sanitizeBackOfficePerms(raw);
+  }
   let obj = window.materializeCrmProfilePerms(id);
   if (obj && Object.keys(obj).length) return obj;
-  const kind = window.crmProfileKind(profileNameOrId);
-  const canonical = kind === "back_office" ? "operador_cobranca_back_office"
-    : kind === "terceirizado" ? "operador_cobranca_terceirizado"
-    : kind === "cobranca" ? "operador_cobranca"
-    : "";
-  if (canonical && canonical !== id) {
-    obj = window.materializeCrmProfilePerms(canonical);
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i] === id) continue;
+    obj = window.materializeCrmProfilePerms(ids[i]);
+    if (obj && Object.keys(obj).length) return obj;
   }
-  return obj && typeof obj === "object" ? obj : {};
+  return {};
 };
 
 window.ensureLuceliaBackOfficeProfile = function() {
   try {
+    const targetName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
+    const isLuceliaUser = (u) => {
+      if (!u) return false;
+      const blob = [u.name, u.sienge_user, u.email].map((v) => String(v || "")).join(" ");
+      return /LUCELIA/i.test(blob);
+    };
     const usersRaw = localStorage.getItem("crm_users");
     if (!usersRaw) return;
     const users = JSON.parse(usersRaw);
     if (!Array.isArray(users)) return;
-    let profiles = [];
-    try { profiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || []; } catch (e) {}
-    const back = (profiles || []).find((p) => {
-      const n = window.normalizeCrmProfileName(p.name);
-      return n.includes("OPERADOR COBRANCA") && (n.includes("BACK OFFICE") || n.includes("BACKOFFICE") || /\bBACK\b/.test(n));
-    });
-    const targetName = (back && back.name) || "OPERADOR COBRANÇA INTERNO BACK OFFICE";
     let changed = false;
     users.forEach((u) => {
-      const blob = String((u && u.name) || "") + " " + String((u && u.sienge_user) || "");
-      if (!/LUCELIA/i.test(blob)) return;
+      if (!isLuceliaUser(u)) return;
       const n = window.normalizeCrmProfileName(u.profile_name);
-      if (n.includes("BACK") || n === "ADMINISTRADOR") return;
-      u.profile_name = targetName;
-      changed = true;
+      if (n === "ADMINISTRADOR") return;
+      if (n !== window.normalizeCrmProfileName(targetName)) {
+        u.profile_name = targetName;
+        changed = true;
+      }
     });
+    const cu = window.AppState && AppState.currentUser;
+    if (cu && isLuceliaUser(cu) && window.normalizeCrmProfileName(cu.profile_name) !== window.normalizeCrmProfileName(targetName)) {
+      cu.profile_name = targetName;
+      changed = true;
+    }
     if (changed) {
       localStorage.setItem("crm_users", JSON.stringify(users));
-      const cu = window.AppState && AppState.currentUser;
-      if (cu) {
-        const blob = String(cu.name || "") + " " + String(cu.sienge_user || "");
-        if (/LUCELIA/i.test(blob)) cu.profile_name = targetName;
+      if (typeof window.forceUploadLocalConfig === "function") {
+        try { window.forceUploadLocalConfig(true); } catch (e) {}
       }
     }
   } catch (e) {}
@@ -3766,15 +3838,20 @@ function applyMenuPermissions() {
   const profileName = AppState.currentUser.profile_name || "";
   window.applyPermissions(profileName);
 }
+window.applyMenuPermissions = applyMenuPermissions;
 
 window.applyPermissions = function(profileName) {
-  if (!profileName) return;
   if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
     window.ensureLuceliaBackOfficeProfile();
-    if (window.AppState && AppState.currentUser && AppState.currentUser.profile_name) {
-      profileName = AppState.currentUser.profile_name;
-    }
   }
+  const current = window.AppState && AppState.currentUser;
+  if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
+    profileName = window.CRM_BACK_OFFICE_PROFILE_NAME;
+    current.profile_name = profileName;
+  } else if (current && current.profile_name) {
+    profileName = current.profile_name;
+  }
+  if (!profileName) return;
   
   // Administrador tem acesso a tudo
   if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
@@ -3782,11 +3859,10 @@ window.applyPermissions = function(profileName) {
   const perms = typeof window.readCrmProfilePerms === "function"
     ? window.readCrmProfilePerms(profileName)
     : {};
-  const permsStr = perms && Object.keys(perms).length ? JSON.stringify(perms) : "";
+  const hasAny = !!(perms && Object.keys(perms).some((k) => String(k).startsWith("mod_") && perms[k] === true));
   
-  if (permsStr) {
+  if (hasAny) {
     try {
-      if (perms && perms.__mirror_of__) return;
       const moduleItems = document.querySelectorAll('li[data-module]');
       
       moduleItems.forEach(item => {
@@ -4958,6 +5034,9 @@ async function loadAndApplyPermissions() {
     try {
       if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
         window.ensureLuceliaBackOfficeProfile();
+      }
+      if (typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(AppState.currentUser)) {
+        AppState.currentUser.profile_name = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
       }
       let profileName = AppState.currentUser.profile_name || '';
       let permsObj = typeof window.readCrmProfilePerms === "function"
@@ -37983,6 +38062,35 @@ window.syncGlobalConfigFromFirebase = async function() {
             Object.keys(globalData).forEach(k => {
                 if (!k.startsWith("crm_perms_")) return;
                 const localPerms = localStorage.getItem(k);
+                const isBackOfficeKey = /crm_perms_operador_cobran[cç]a(_interno)?_back_office/i.test(k);
+                if (isBackOfficeKey) {
+                    const recentLocal = Date.now() - (window._crmBackOfficePermsSavedAt || 0) < 60000;
+                    let localObj = null;
+                    let cloudObj = null;
+                    try { localObj = localPerms ? JSON.parse(localPerms) : null; } catch (e) { localObj = null; }
+                    try { cloudObj = globalData[k] ? JSON.parse(globalData[k]) : null; } catch (e) { cloudObj = null; }
+                    const looksClone = typeof window.crmPermsLookLikeCobrancaClone === "function"
+                      ? (window.crmPermsLookLikeCobrancaClone(localObj) || window.crmPermsLookLikeCobrancaClone(cloudObj))
+                      : false;
+                    if (looksClone && !recentLocal) {
+                        if (localPerms !== "{}") {
+                            _originalSetItem.call(localStorage, k, "{}");
+                            changed = true;
+                        }
+                        if (window.forceUploadLocalConfig) {
+                            setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                        }
+                        return;
+                    }
+                    if (!recentLocal && globalData[k] != null && globalData[k] !== localPerms) {
+                        _originalSetItem.call(localStorage, k, globalData[k]);
+                        changed = true;
+                    } else if (!localPerms && globalData[k]) {
+                        _originalSetItem.call(localStorage, k, globalData[k]);
+                        changed = true;
+                    }
+                    return;
+                }
                 if (!localPerms) {
                     _originalSetItem.call(localStorage, k, globalData[k]);
                     changed = true;
@@ -38002,6 +38110,13 @@ window.syncGlobalConfigFromFirebase = async function() {
             } else {
                 console.log("[Firebase] Configurações globais já estão atualizadas com a nuvem.");
             }
+            try {
+                if (typeof window.ensureLuceliaBackOfficeProfile === "function") window.ensureLuceliaBackOfficeProfile();
+                if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
+                else if (typeof window.applyPermissions === "function" && window.AppState && AppState.currentUser) {
+                    window.applyPermissions(AppState.currentUser.profile_name);
+                }
+            } catch (e) {}
         }
     } catch(e) {
         console.error("Erro na sincronização:", e);
