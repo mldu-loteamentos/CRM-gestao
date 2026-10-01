@@ -377,7 +377,9 @@ const ConfigUsersApp = {
   },
 
   writePermissionPayload(profileId, perms) {
-    const payload = JSON.stringify(perms);
+    const toSave = Object.assign({}, perms || {}, { _savedAt: Date.now() });
+    delete toSave.__mirror_of__;
+    const payload = JSON.stringify(toSave);
     const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
     const kind = typeof window.crmProfileKind === "function"
       ? window.crmProfileKind((profile && profile.name) || profileId)
@@ -537,6 +539,12 @@ const ConfigUsersApp = {
     });
     if (usersChanged) this.safeLocalSet("crm_users", JSON.stringify(this.users));
     if (selectedWasBack) this.selectedProfile = backId;
+    try {
+      const savedSel = localStorage.getItem("crm_selected_profile");
+      if (savedSel && (this.profiles || []).some((p) => String(p.id) === String(savedSel))) {
+        this.selectedProfile = savedSel;
+      }
+    } catch (e) {}
   },
 
   seedTerceirizadoPermsFromCobranca() {
@@ -1432,6 +1440,7 @@ const ConfigUsersApp = {
 
   selectProfile(profileId) {
     this.selectedProfile = profileId;
+    try { localStorage.setItem("crm_selected_profile", profileId); } catch (e) {}
     this.render();
   },
 

@@ -3750,27 +3750,41 @@ window.materializeCrmProfilePerms = function(profileId) {
 
 window.crmPermsHasAnyTrue = function(obj) {
   if (!obj || typeof obj !== "object") return false;
-  return Object.keys(obj).some((k) => k !== "__mirror_of__" && obj[k] === true);
+  return Object.keys(obj).some((k) => k !== "__mirror_of__" && k !== "_savedAt" && obj[k] === true);
 };
 
-window.crmTruePermKeys = function(obj) {
-  if (!obj || typeof obj !== "object") return [];
-  return Object.keys(obj).filter((k) => k !== "__mirror_of__" && obj[k] === true).sort();
+window.crmPermsPayloadHasTrue = function(raw) {
+  if (!raw) return false;
+  try {
+    const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return window.crmPermsHasAnyTrue(obj);
+  } catch (e) {
+    return false;
+  }
 };
 
-window.crmPermsLookLikeCobrancaClone = function(obj) {
-  if (!window.crmPermsHasAnyTrue(obj)) return false;
-  let cob = window.materializeCrmProfilePerms("operador_cobranca");
-  if (!window.crmPermsHasAnyTrue(cob)) cob = window.materializeCrmProfilePerms("operador_cobrança");
-  if (!window.crmPermsHasAnyTrue(cob)) return false;
-  return window.crmTruePermKeys(obj).join("\n") === window.crmTruePermKeys(cob).join("\n");
+window.crmPermsSavedAt = function(raw) {
+  try {
+    const obj = typeof raw === "string" ? JSON.parse(raw || "null") : raw;
+    const n = Number(obj && obj._savedAt);
+    return Number.isFinite(n) ? n : 0;
+  } catch (e) {
+    return 0;
+  }
 };
 
-window.sanitizeBackOfficePerms = function(obj) {
-  const copy = obj && typeof obj === "object" ? Object.assign({}, obj) : {};
-  delete copy.__mirror_of__;
-  if (window.crmPermsLookLikeCobrancaClone(copy)) return {};
-  return copy;
+window.pickPreferredCrmPerms = function(localStr, cloudStr) {
+  const localHas = window.crmPermsPayloadHasTrue(localStr);
+  const cloudHas = window.crmPermsPayloadHasTrue(cloudStr);
+  if (localHas && !cloudHas) return localStr || "{}";
+  if (!localHas && cloudHas) return cloudStr || "{}";
+  if (localHas && cloudHas) {
+    const localAt = window.crmPermsSavedAt(localStr);
+    const cloudAt = window.crmPermsSavedAt(cloudStr);
+    if (cloudAt > localAt) return cloudStr;
+    return localStr;
+  }
+  return localStr || cloudStr || "{}";
 };
 
 window.readCrmProfilePerms = function(profileNameOrId) {
@@ -3780,12 +3794,7 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     ? window.crmProfileStorageIds(id, profileNameOrId)
     : [id];
   if (kind === "back_office") {
-    const raw = window.materializeCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_ID) || {};
-    if (window.crmPermsLookLikeCobrancaClone(raw)) {
-      try { localStorage.setItem("crm_perms_" + window.CRM_BACK_OFFICE_PROFILE_ID, "{}"); } catch (e) {}
-      return {};
-    }
-    return window.sanitizeBackOfficePerms(raw);
+    return window.materializeCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_ID) || {};
   }
   let obj = window.materializeCrmProfilePerms(id);
   if (obj && Object.keys(obj).length) return obj;
@@ -38055,45 +38064,31 @@ window.syncGlobalConfigFromFirebase = async function() {
                     try { window.renderTimeline(); } catch (e) {}
                 }
             }
-            // Sincroniza permissões dinâmicas
-            // Preferir o JSON local do navegador após a tela de permissões ser salva.
-            // Caso o arquivo da nuvem venha vazio, espelhado ou inconsistente, não
-            // devemos limpar o estado de marcações do perfil com um overwrite do cloud.
-            Object.keys(globalData).forEach(k => {
-                if (!k.startsWith("crm_perms_")) return;
+            // Sincroniza permissões dinâmicas.
+            // Nunca sobrescrever um perfil marcado com nuvem vazia/espelho.
+            // Se os dois tiverem marcações, fica o que tiver _savedAt mais novo.
+            const permKeys = new Set();
+            Object.keys(globalData).forEach((k) => {
+                if (k.startsWith("crm_perms_")) permKeys.add(k);
+            });
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith("crm_perms_")) permKeys.add(k);
+            }
+            permKeys.forEach((k) => {
                 const localPerms = localStorage.getItem(k);
-                const isBackOfficeKey = /crm_perms_operador_cobran[cç]a(_interno)?_back_office/i.test(k);
-                if (isBackOfficeKey) {
-                    const recentLocal = Date.now() - (window._crmBackOfficePermsSavedAt || 0) < 60000;
-                    let localObj = null;
-                    let cloudObj = null;
-                    try { localObj = localPerms ? JSON.parse(localPerms) : null; } catch (e) { localObj = null; }
-                    try { cloudObj = globalData[k] ? JSON.parse(globalData[k]) : null; } catch (e) { cloudObj = null; }
-                    const looksClone = typeof window.crmPermsLookLikeCobrancaClone === "function"
-                      ? (window.crmPermsLookLikeCobrancaClone(localObj) || window.crmPermsLookLikeCobrancaClone(cloudObj))
-                      : false;
-                    if (looksClone && !recentLocal) {
-                        if (localPerms !== "{}") {
-                            _originalSetItem.call(localStorage, k, "{}");
-                            changed = true;
-                        }
-                        if (window.forceUploadLocalConfig) {
-                            setTimeout(() => window.forceUploadLocalConfig(true), 1500);
-                        }
-                        return;
-                    }
-                    if (!recentLocal && globalData[k] != null && globalData[k] !== localPerms) {
-                        _originalSetItem.call(localStorage, k, globalData[k]);
-                        changed = true;
-                    } else if (!localPerms && globalData[k]) {
-                        _originalSetItem.call(localStorage, k, globalData[k]);
-                        changed = true;
-                    }
-                    return;
-                }
-                if (!localPerms) {
-                    _originalSetItem.call(localStorage, k, globalData[k]);
+                const cloudPerms = globalData[k];
+                const chosen = typeof window.pickPreferredCrmPerms === "function"
+                    ? window.pickPreferredCrmPerms(localPerms, cloudPerms)
+                    : (localPerms || cloudPerms);
+                if (chosen && chosen !== localPerms) {
+                    _originalSetItem.call(localStorage, k, chosen);
                     changed = true;
+                }
+                if (chosen && cloudPerms && chosen !== cloudPerms && window.forceUploadLocalConfig) {
+                    setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                } else if (chosen && !cloudPerms && window.crmPermsPayloadHasTrue && window.crmPermsPayloadHasTrue(chosen) && window.forceUploadLocalConfig) {
+                    setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                 }
             });
             
@@ -38224,6 +38219,16 @@ window.forceUploadLocalConfig = async function(silent = true) {
               payload.crm_moura_condicoes_pagamento = dedicatedRaw || cloud.crm_moura_condicoes_pagamento;
             }
           }
+          Object.keys(cloud || {}).forEach((k) => {
+            if (!k || !k.startsWith("crm_perms_")) return;
+            const chosen = typeof window.pickPreferredCrmPerms === "function"
+              ? window.pickPreferredCrmPerms(payload[k], cloud[k])
+              : (payload[k] || cloud[k]);
+            if (chosen) payload[k] = chosen;
+            if (chosen && chosen !== localStorage.getItem(k)) {
+              try { _originalSetItem.call(localStorage, k, chosen); } catch (err) {}
+            }
+          });
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
         if (!silent) {
@@ -38433,6 +38438,13 @@ localStorage.setItem = function(key, value) {
                           cloud.crm_moura_condicoes_pagamento || payload.crm_moura_condicoes_pagamento || "{}"
                         );
                       }
+                      Object.keys(cloud || {}).forEach((k) => {
+                        if (!k || !k.startsWith("crm_perms_")) return;
+                        const chosen = typeof window.pickPreferredCrmPerms === "function"
+                          ? window.pickPreferredCrmPerms(payload[k], cloud[k])
+                          : (payload[k] || cloud[k]);
+                        if (chosen) payload[k] = chosen;
+                      });
                     } catch (mergeErr) {}
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
                     console.log("[Firebase] Upload automático: Configurações globais atualizadas na nuvem.");
