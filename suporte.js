@@ -11,6 +11,7 @@
     { id: "ficha-procuradores", label: "Procuradores" },
     { id: "ficha-anexos", label: "Anexos (ficha)" },
     { id: "ficha-score", label: "Score Interno" },
+    { id: "ficha-compradores", label: "Compradores" },
     { id: "tab-contrato", label: "Contrato de Venda" },
     { id: "tab-outros", label: "Outros Contratos" },
     { id: "tab-quitacao", label: "Valor Quitação" },

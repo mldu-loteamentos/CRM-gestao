@@ -6343,12 +6343,432 @@ window.clientMatchesSearch = function(c, rawQuery) {
     ids.join(" ")
   ].join(" "));
   const digits = String((c && (c.customerCpf || c.cpfCnpj)) || "").replace(/\D/g, "");
+  const extraPeople = typeof window.salesContractPeopleForClient === "function"
+    ? window.salesContractPeopleForClient(c)
+    : [];
+  const extraBlob = window.normalizeSearchText(extraPeople.map((p) => [p.name, p.id].join(" ")).join(" "));
+  const extraDigits = extraPeople.map((p) => String(p.cpfCnpj || "").replace(/\D/g, "")).filter(Boolean);
   return terms.every((term) => {
     if (!term) return true;
     if (blob.indexOf(term) >= 0) return true;
+    if (extraBlob.indexOf(term) >= 0) return true;
     const d = term.replace(/\D/g, "");
-    return !!(d && (digits.indexOf(d) >= 0 || ids.some((id) => String(id).indexOf(d) >= 0)));
+    return !!(d && (
+      digits.indexOf(d) >= 0
+      || extraDigits.some((ed) => ed.indexOf(d) >= 0)
+      || ids.some((id) => String(id).indexOf(d) >= 0)
+    ));
   });
+};
+
+window.escapeHtmlText = function(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+};
+
+window._contractBuyersIndex = window._contractBuyersIndex || { byTitle: {} };
+window._secondaryBuyerSearchCache = window._secondaryBuyerSearchCache || {};
+
+window.salesContractPeople = function(contract) {
+  if (!contract) return [];
+  const raw = contract.salesContractCustomers || contract.customers || [];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p) => {
+    const pctRaw = p && (p.participationPercentage != null ? p.participationPercentage : p.percentage);
+    const pct = (pctRaw != null && pctRaw !== "" && Number.isFinite(Number(pctRaw))) ? Number(pctRaw) : null;
+    const main = p && (p.main === true || p.main === "true" || p.main === "S" || p.main === "s");
+    return {
+      id: p && (p.id != null ? p.id : p.customerId),
+      name: (p && (p.name || p.customerName)) || ("Cliente " + (p && (p.id || p.customerId) || "")),
+      main: !!main,
+      spouse: !!(p && (p.spouse === true || p.spouse === "true" || p.spouse === "S")),
+      participationPercentage: pct,
+      cpfCnpj: (p && (p.cpfCnpj || p.cpf || p.cnpj)) || ""
+    };
+  }).filter((p) => p.id != null && p.id !== "");
+};
+
+window.rememberContractBuyers = function(contract) {
+  if (!contract) return [];
+  const people = window.salesContractPeople(contract);
+  if (!people.length) return [];
+  const keys = [];
+  const pushKey = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s) return;
+    keys.push(s);
+    keys.push(s.replace(/^B-/i, "").split("-")[0]);
+  };
+  pushKey(contract.receivableBillId);
+  pushKey(contract.billReceivableId);
+  pushKey(contract.id);
+  pushKey(contract.contractId);
+  pushKey(contract.contractNumber);
+  pushKey(contract.number);
+  const uniq = [...new Set(keys.filter(Boolean))];
+  const payload = {
+    people,
+    main: people.find((p) => p.main) || people[0] || null
+  };
+  window._contractBuyersIndex = window._contractBuyersIndex || { byTitle: {} };
+  uniq.forEach((k) => {
+    window._contractBuyersIndex.byTitle[String(k)] = payload;
+  });
+  return people;
+};
+
+window.indexBuyersFromKnownSales = function() {
+  const sales = (typeof AppState !== "undefined" && AppState.sales) ? AppState.sales : [];
+  sales.forEach((s) => window.rememberContractBuyers(s));
+};
+
+window.titleKeysFromClient = function(c) {
+  const keys = [];
+  const pushKey = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s) return;
+    keys.push(s);
+    keys.push(s.replace(/^B-/i, "").split("-")[0]);
+  };
+  if (!c) return [];
+  pushKey(c.saleId);
+  pushKey(c.receivableBillId);
+  pushKey(c.contractId);
+  (c.billIds || []).forEach(pushKey);
+  return [...new Set(keys.filter(Boolean))];
+};
+
+window.salesContractPeopleForClient = function(c) {
+  const idx = window._contractBuyersIndex && window._contractBuyersIndex.byTitle;
+  if (idx) {
+    const keys = window.titleKeysFromClient(c);
+    for (let i = 0; i < keys.length; i++) {
+      const hit = idx[String(keys[i])];
+      if (hit && hit.people && hit.people.length) return hit.people;
+    }
+  }
+  const sales = (typeof AppState !== "undefined" && AppState.sales) ? AppState.sales : [];
+  const cid = c && c.customerId != null ? String(c.customerId) : "";
+  const keys = new Set(window.titleKeysFromClient(c));
+  const sale = sales.find((s) => {
+    if (!s) return false;
+    if (keys.has(String(s.receivableBillId)) || keys.has(String(s.id))) return true;
+    return cid && String(s.customerId) === cid;
+  });
+  return sale ? window.rememberContractBuyers(sale) : [];
+};
+
+window.saleBelongsToCustomer = function(s, customerId) {
+  if (!s) return false;
+  const cid = String(customerId);
+  if (String(s.customerId) === cid || String(s.queriedCustomerId) === cid) return true;
+  return window.salesContractPeople(s).some((p) => String(p.id) === cid);
+};
+
+window.formatBuyerPct = function(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) return "—";
+  return Number(pct).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%";
+};
+
+window.secondaryHitForClient = function(c, rawQuery) {
+  const q = window.normalizeSearchText(rawQuery);
+  if (!q) return null;
+  const terms = q.split(/\s+/).filter(Boolean);
+  if (!terms.length) return null;
+  const people = window.salesContractPeopleForClient(c);
+  if (!people.length) return null;
+  const main = people.find((p) => p.main) || people[0];
+  const principalBlob = window.normalizeSearchText((c && (c.customerName || c.clientName)) || (main && main.name) || "");
+  const principalMatch = terms.every((t) => principalBlob.indexOf(t) >= 0);
+  if (principalMatch) return null;
+  const me = people.find((p) => {
+    if (p.main) return false;
+    const blob = window.normalizeSearchText([p.name, p.id].join(" "));
+    const dgs = String(p.cpfCnpj || "").replace(/\D/g, "");
+    return terms.every((term) => {
+      if (blob.indexOf(term) >= 0) return true;
+      const d = term.replace(/\D/g, "");
+      return !!(d && (String(p.id).indexOf(d) >= 0 || (dgs && dgs.indexOf(d) >= 0)));
+    });
+  });
+  if (!me) return null;
+  return {
+    searchedId: me.id,
+    searchedName: me.name,
+    searchedPct: me.participationPercentage,
+    mainId: main && main.id,
+    mainName: main && main.name,
+    role: "secundario"
+  };
+};
+
+window.matchSecondaryApiHit = function(c, hits) {
+  if (!c || !Array.isArray(hits) || !hits.length) return null;
+  const keys = new Set(window.titleKeysFromClient(c).map(String));
+  return hits.find((h) =>
+    (h.receivableBillId != null && keys.has(String(h.receivableBillId)))
+    || (h.saleId != null && keys.has(String(h.saleId)))
+  ) || null;
+};
+
+window.lookupSecondaryBuyerHits = async function(rawQuery) {
+  const q = window.normalizeSearchText(rawQuery);
+  if (!q || q.replace(/\s/g, "").length < 3) return [];
+  const cache = window._secondaryBuyerSearchCache;
+  if (cache[q] && (Date.now() - cache[q].at) < 5 * 60 * 1000) return cache[q].hits || [];
+
+  let customers = [];
+  const terms = q.split(/\s+/).filter(Boolean);
+  const digits = String(rawQuery || "").replace(/\D/g, "");
+  if (window.GlobalCustomerCache && Array.isArray(window.GlobalCustomerCache.data)) {
+    customers = window.GlobalCustomerCache.data.filter((c) => {
+      const n = window.normalizeSearchText(c && c.name);
+      const idOk = digits && String(c.id || c.customerId || "") === digits;
+      const nameOk = terms.every((t) => n.indexOf(t) >= 0);
+      const doc = String(c.cpf || c.cnpj || c.cpfCnpj || "").replace(/\D/g, "");
+      const docOk = digits.length >= 6 && doc.indexOf(digits) >= 0;
+      return idOk || nameOk || docOk;
+    }).slice(0, 8);
+  }
+  if (!customers.length && window.SiengeApiService && typeof SiengeApiService.searchCustomers === "function") {
+    try {
+      customers = (await SiengeApiService.searchCustomers(rawQuery) || []).slice(0, 8);
+    } catch (e) {
+      customers = [];
+    }
+  }
+
+  const hits = [];
+  for (const cust of customers) {
+    const cid = cust && (cust.id != null ? cust.id : cust.customerId);
+    if (cid == null) continue;
+    let sales = [];
+    try {
+      sales = (window.SiengeApiService && typeof SiengeApiService.getSales === "function")
+        ? (await SiengeApiService.getSales(cid)) || []
+        : [];
+    } catch (e) {
+      sales = [];
+    }
+    for (const s of sales) {
+      let row = s;
+      if ((!row.receivableBillId || !window.salesContractPeople(row).length) && row.id
+        && window.SiengeApiService && typeof SiengeApiService.getContractRaw === "function") {
+        try {
+          const raw = await SiengeApiService.getContractRaw(row.id);
+          if (raw) {
+            row = Object.assign({}, row, raw, {
+              customers: raw.salesContractCustomers || row.customers,
+              salesContractCustomers: raw.salesContractCustomers || row.salesContractCustomers,
+              receivableBillId: raw.receivableBillId || row.receivableBillId
+            });
+          }
+        } catch (e) {}
+      }
+      window.rememberContractBuyers(row);
+      const people = window.salesContractPeople(row);
+      const me = people.find((p) => String(p.id) === String(cid));
+      const main = people.find((p) => p.main) || people[0];
+      if (!me || !main) continue;
+      if (me.main || String(me.id) === String(main.id)) continue;
+      hits.push({
+        searchedId: me.id,
+        searchedName: me.name || cust.name,
+        searchedPct: me.participationPercentage,
+        mainId: main.id,
+        mainName: main.name,
+        saleId: row.id,
+        receivableBillId: row.receivableBillId,
+        role: "secundario"
+      });
+    }
+  }
+  cache[q] = { hits, at: Date.now() };
+  return hits;
+};
+
+window.filterClientsWithSecondaryBuyers = async function(list, rawQuery) {
+  const arr = Array.isArray(list) ? list : [];
+  arr.forEach((c) => { if (c) delete c._searchBuyerHit; });
+  if (!rawQuery || !String(rawQuery).trim()) return arr;
+  window.indexBuyersFromKnownSales();
+  const q = window.normalizeSearchText(rawQuery);
+  const local = arr.filter((c) => window.clientMatchesSearch(c, rawQuery));
+  const localSecondary = local.filter((c) => window.secondaryHitForClient(c, rawQuery));
+  let apiHits = [];
+  if (q.replace(/\s/g, "").length >= 3 && local.length === 0 && localSecondary.length === 0) {
+    try { apiHits = await window.lookupSecondaryBuyerHits(rawQuery); } catch (e) { apiHits = []; }
+  }
+  return arr.filter((c) => {
+    const direct = window.clientMatchesSearch(c, rawQuery);
+    const idxHit = window.secondaryHitForClient(c, rawQuery);
+    const apiHit = window.matchSecondaryApiHit(c, apiHits);
+    if (idxHit) c._searchBuyerHit = idxHit;
+    else if (apiHit) c._searchBuyerHit = apiHit;
+    return direct || !!idxHit || !!apiHit;
+  });
+};
+
+window.filaCustomerNameCellHtml = function(client) {
+  const hit = client && client._searchBuyerHit;
+  const mainName = window.escapeHtmlText(String((hit && hit.mainName) || (client && client.customerName) || "").toUpperCase());
+  if (!hit) {
+    return `<span style="text-transform:uppercase;">${mainName}</span>`;
+  }
+  const secName = window.escapeHtmlText(String(hit.searchedName || "").toUpperCase());
+  const pct = hit.searchedPct != null ? " · " + window.formatBuyerPct(hit.searchedPct) : "";
+  return `<div style="display:flex;flex-direction:column;gap:3px;line-height:1.25;white-space:normal;">
+    <span style="text-transform:uppercase;">${mainName}</span>
+    <span style="font-size:0.65rem;font-weight:700;color:#105436;text-transform:none;">Cliente principal: ${mainName}</span>
+    <span style="font-size:0.65rem;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:2px 6px;width:fit-content;text-transform:none;">Pesquisado: ${secName} (cliente secundário${pct})</span>
+  </div>`;
+};
+
+window.buyerRoleLabel = function(p, currentCustomerId) {
+  if (!p) return "Comprador";
+  if (p.main) return "Principal";
+  if (p.spouse) return "Cônjuge";
+  if (currentCustomerId != null && String(p.id) === String(currentCustomerId)) return "Ficha atual";
+  return "Secundário";
+};
+
+window.renderFichaCompradores = async function(sale, currentCustomerId) {
+  const el = document.getElementById("det-compradores-content");
+  if (!el) return;
+  let contract = sale || null;
+  let people = window.salesContractPeople(contract);
+  if ((!people.length || people.length < 2) && contract && contract.id && window.SiengeApiService && typeof SiengeApiService.getContractRaw === "function") {
+    try {
+      const raw = await SiengeApiService.getContractRaw(contract.id);
+      if (raw) {
+        contract = Object.assign({}, contract, raw);
+        if (typeof AppState !== "undefined") {
+          AppState.sales = AppState.sales || [];
+          const idx = AppState.sales.findIndex((s) => String(s.id) === String(contract.id));
+          if (idx >= 0) {
+            AppState.sales[idx].customers = raw.salesContractCustomers || AppState.sales[idx].customers;
+            AppState.sales[idx].salesContractCustomers = raw.salesContractCustomers || AppState.sales[idx].salesContractCustomers;
+          }
+        }
+        people = window.salesContractPeople(contract);
+      }
+    } catch (e) {}
+  }
+  window.rememberContractBuyers(contract);
+  if (!people.length) {
+    el.innerHTML = `<p style="margin:0;color:var(--color-text-muted);font-size:0.9rem;">Nenhum comprador informado neste contrato de venda.</p>`;
+    return;
+  }
+  const rows = people.map((p) => {
+    const isMain = !!p.main;
+    const isCurrent = currentCustomerId != null && String(p.id) === String(currentCustomerId);
+    const clickable = !isMain && !isCurrent;
+    const role = window.buyerRoleLabel(p, currentCustomerId);
+    const pct = window.formatBuyerPct(p.participationPercentage);
+    const name = window.escapeHtmlText(String(p.name || "").toUpperCase());
+    const badgeColor = isMain ? "#105436" : "#c2410c";
+    const badgeBg = isMain ? "#ecfdf5" : "#fff7ed";
+    const cursor = clickable ? "pointer" : "default";
+    const onclick = clickable ? `onclick="openSecondaryBuyerPopup('${String(p.id).replace(/'/g, "")}')"` : "";
+    const hint = clickable ? `<div style="font-size:0.7rem;color:#64748b;margin-top:4px;">Clique para ver os dados cadastrais</div>` : "";
+    return `<div class="ficha-buyer-card" ${onclick} style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fff;cursor:${cursor};transition:box-shadow 0.15s,border-color 0.15s;" ${clickable ? `onmouseover="this.style.borderColor='#f37021';this.style.boxShadow='0 4px 12px rgba(243,112,33,0.12)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'"` : ""}>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:800;color:#0f172a;font-size:0.95rem;text-transform:uppercase;">${name}</div>
+          <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">ID ${window.escapeHtmlText(p.id)}</div>
+          ${hint}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <span style="background:${badgeBg};color:${badgeColor};border:1px solid ${badgeColor}33;padding:3px 10px;border-radius:999px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.3px;">${role}</span>
+          <span style="font-size:1.05rem;font-weight:800;color:#105436;">${pct}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${rows}</div>`;
+};
+
+window.closeSecondaryBuyerModal = function() {
+  const overlay = document.getElementById("secondary-buyer-modal");
+  if (overlay) overlay.style.display = "none";
+};
+
+window.formatBuyerPhoneList = function(customer) {
+  const phones = (customer && Array.isArray(customer.phones)) ? customer.phones : [];
+  if (!phones.length) {
+    const fallback = (customer && customer.phone) ? String(customer.phone) : "";
+    return fallback || "N/D";
+  }
+  return phones.map((p) => {
+    const ddd = String(p.areaCode || "").replace(/\D/g, "").replace(/^0+/, "");
+    const num = String(p.number || p.phoneNumber || "").replace(/\D/g, "");
+    const full = ddd + num;
+    let formatted = full;
+    if (full.length === 11) formatted = `(${full.slice(0, 2)}) ${full.slice(2, 7)}-${full.slice(7)}`;
+    else if (full.length === 10) formatted = `(${full.slice(0, 2)}) ${full.slice(2, 6)}-${full.slice(6)}`;
+    return formatted;
+  }).filter(Boolean).join(" · ") || "N/D";
+};
+
+window.formatBuyerDoc = function(val) {
+  const v = String(val || "").replace(/\D/g, "");
+  if (v.length === 11) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (v.length === 14) return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return val || "N/D";
+};
+
+window.openSecondaryBuyerPopup = async function(customerId) {
+  const overlay = document.getElementById("secondary-buyer-modal");
+  const body = document.getElementById("secondary-buyer-modal-body");
+  const title = document.getElementById("secondary-buyer-modal-title");
+  if (!overlay || !body) return;
+  overlay.style.display = "flex";
+  if (title) title.textContent = "Dados do comprador secundário";
+  body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:#64748b;"><div class="loading-spinner" style="width:18px;height:18px;border:2px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div> Carregando cadastro...</div>`;
+  let customer = (typeof AppState !== "undefined" && AppState.customers && AppState.customers[customerId]) || null;
+  if (!customer && window.SiengeApiService && typeof SiengeApiService.getCustomer === "function") {
+    try { customer = await SiengeApiService.getCustomer(customerId); } catch (e) { customer = null; }
+  }
+  if (customer && typeof AppState !== "undefined") {
+    AppState.customers = AppState.customers || {};
+    AppState.customers[customerId] = customer;
+  }
+  if (!customer) {
+    body.innerHTML = `<p style="margin:0;color:var(--color-danger);">Não foi possível carregar os dados deste comprador (ID ${window.escapeHtmlText(customerId)}).</p>`;
+    return;
+  }
+  let age = "N/D";
+  const birth = customer.birthDate || customer.birthday;
+  if (birth) {
+    const d = new Date(birth);
+    if (!isNaN(d.getTime())) {
+      const today = new Date();
+      let diff = today.getFullYear() - d.getFullYear();
+      const m = today.getMonth() - d.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < d.getDate())) diff--;
+      age = diff + " anos";
+    }
+  }
+  const addr0 = Array.isArray(customer.addresses) && customer.addresses[0] ? customer.addresses[0] : null;
+  const addr = customer.address || (addr0 && [addr0.streetName || addr0.street, addr0.number, addr0.district || addr0.neighborhood, addr0.cityName || addr0.city, addr0.state].filter(Boolean).join(", ")) || "N/D";
+  const doc = window.formatBuyerDoc(customer.cpfCnpj || customer.cpf || customer.cnpj);
+  const name = window.escapeHtmlText(customer.name || ("Cliente " + customerId));
+  if (title) title.textContent = name;
+  body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;">
+    <div style="grid-column:1 / -1;"><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Nome completo</div><div style="font-weight:800;color:#0f172a;margin-top:4px;">${name}</div></div>
+    <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">ID Sienge</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(customerId)}</div></div>
+    <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">CPF/CNPJ</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(doc)}</div></div>
+    <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Idade</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(age)}</div></div>
+    <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Estado civil</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(customer.civilStatus || customer.maritalStatus || "N/D")}</div></div>
+    <div style="grid-column:1 / -1;"><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Telefones</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(window.formatBuyerPhoneList(customer))}</div></div>
+    <div style="grid-column:1 / -1;"><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">E-mail</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(customer.email || "N/D")}</div></div>
+    <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Profissão</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(customer.profession || customer.occupation || "N/D")}</div></div>
+    <div style="grid-column:1 / -1;"><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;">Endereço</div><div style="font-weight:700;margin-top:4px;">${window.escapeHtmlText(addr)}</div></div>
+  </div>`;
 };
 
 window.scheduleFilaTextSearch = function(which) {
@@ -7407,15 +7827,19 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // Guardamos a lista base para KPIs e Resumo de Empresas, não afetada pelo texto de busca
   const baseClientList = [...clientList];
 
-  // Filtro de Busca para a Fila de Cobrança
+  // Filtro de Busca para a Fila de Cobrança (inclui comprador secundário)
   if (searchValue) {
-    clientList = clientList.filter((c) => window.clientMatchesSearch(c, searchValue));
+    clientList = await window.filterClientsWithSecondaryBuyers(clientList, searchValue);
+  } else {
+    clientList.forEach((c) => { if (c) delete c._searchBuyerHit; });
   }
 
   // Filtro de Busca para a lista de Sub Judice
   let filteredSubjudice = subjudiceList;
   if (subjudiceSearchValue) {
-    filteredSubjudice = subjudiceList.filter((c) => window.clientMatchesSearch(c, subjudiceSearchValue));
+    filteredSubjudice = await window.filterClientsWithSecondaryBuyers(subjudiceList, subjudiceSearchValue);
+  } else {
+    (subjudiceList || []).forEach((c) => { if (c) delete c._searchBuyerHit; });
   }
   
   // Aplica os filtros avançados também na lista de Sub Judice!
@@ -7811,8 +8235,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         row.className = rowClass.trim();
         row.innerHTML = `
           <td><span>${client.companyId}</span></td>
-          <td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${client.customerName}">
-            <span style="text-transform:uppercase;">${client.customerName}</span>
+          <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
+            ${typeof window.filaCustomerNameCellHtml === "function" ? window.filaCustomerNameCellHtml(client) : `<span style="text-transform:uppercase;">${client.customerName}</span>`}
           </td>
           <td style="width: 1%; white-space: nowrap; text-align: left;">
             <span title="${client.billIds.join(', ')}">
@@ -8198,8 +8622,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         row.className = "table-row-hover";
         row.innerHTML = `
           <td style="text-align: center; width: 1%; white-space: nowrap;"><span>${client.companyId}</span></td>
-          <td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${client.customerName}">
-            <span style="text-transform:uppercase;">${client.customerName}</span>
+          <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
+            ${typeof window.filaCustomerNameCellHtml === "function" ? window.filaCustomerNameCellHtml(client) : `<span style="text-transform:uppercase;">${client.customerName}</span>`}
           </td>
           <td>
             <span>
@@ -9007,10 +9431,12 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   // --- Abas Superiores ---
   const fichaAnexosBtn = document.querySelector('button[data-target="ficha-anexos"]');
   const fichaScoreBtn = document.querySelector('button[data-target="ficha-score"]');
+  const fichaCompradoresBtn = document.querySelector('button[data-target="ficha-compradores"]');
   const fichaConjugeBtn = document.querySelector('button[data-target="ficha-conjuge"]');
   const fichaComplementoBtn = document.querySelector('button[data-target="ficha-complemento"]');
   const fichaProcuradoresBtn = document.querySelector('button[data-target="ficha-procuradores"]');
   
+  if (fichaCompradoresBtn) fichaCompradoresBtn.style.display = 'inline-block';
   if (isAdvogado) {
       if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
       if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
@@ -9820,13 +10246,15 @@ function formatCpfCnpj(val) {
     });
   }
 
-  // Buscar contratos
-  let sales = (AppState.sales || []).filter(s => s.customerId === customerId);
+  // Buscar contratos (inclui comprador secundário do salesContractCustomers)
+  let sales = (AppState.sales || []).filter(s => window.saleBelongsToCustomer(s, customerId));
   if (sales.length === 0) {
     try {
       sales = await SiengeApiService.getSales(customerId);
       sales.forEach(s => {
-        if (!AppState.sales.find(x => x.id === s.id)) AppState.sales.push(s);
+        const idx = AppState.sales.findIndex(x => String(x.id) === String(s.id));
+        if (idx < 0) AppState.sales.push(s);
+        else AppState.sales[idx] = { ...AppState.sales[idx], ...s };
       });
     } catch (e) {
       console.error("Erro ao buscar contratos no Sienge para " + customerId, e);
@@ -9858,6 +10286,10 @@ function formatCpfCnpj(val) {
       status: "Ativo",
       contractValue: 0
     };
+  }
+
+  if (typeof window.renderFichaCompradores === "function") {
+    window.renderFichaCompradores(sale, customerId);
   }
 
   // Carregar renegociações/acordos anteriores e detalhes da unidade concorrentemente para otimizar velocidade
@@ -23570,9 +24002,11 @@ async function _loadZeroPaidTab_Impl() {
     }
   }
 
-  // Aplica filtro de busca se houver
+  // Aplica filtro de busca se houver (inclui comprador secundário)
   if (searchValue) {
-    zeroPaidList = zeroPaidList.filter((c) => window.clientMatchesSearch(c, searchValue));
+    zeroPaidList = await window.filterClientsWithSecondaryBuyers(zeroPaidList, searchValue);
+  } else {
+    zeroPaidList.forEach((c) => { if (c) delete c._searchBuyerHit; });
   }
 
   if (window._currentSortZeroCol) {
@@ -23630,8 +24064,8 @@ async function _loadZeroPaidTab_Impl() {
     
     row.innerHTML = `
       <td style="text-align: center;"><span>${client.companyId}</span></td>
-      <td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${client.customerName}">
-        <span style="text-transform:uppercase;">${client.customerName}</span> ${newBadgeHtml}
+      <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
+        ${typeof window.filaCustomerNameCellHtml === "function" ? window.filaCustomerNameCellHtml(client) : `<span style="text-transform:uppercase;">${client.customerName}</span>`} ${newBadgeHtml}
       </td>
       <td>
         <span title="${client.billIds.join(', ')}">
@@ -34359,6 +34793,9 @@ window.searchRelacionamento = async function() {
          } catch(e) { console.error("Erro ao enriquecer contrato", c.id); }
          return c;
     }));
+    contratos.forEach((c) => {
+      if (typeof window.rememberContractBuyers === "function") window.rememberContractBuyers(c);
+    });
 
     // Buscar Cliente Completo (Nome, Doc, Telefones, Endereço)
     let fullCustomer = null;
@@ -34496,7 +34933,23 @@ window.searchRelacionamento = async function() {
             else if (lowerProf.includes("aposent")) profIcon = "sunset";
 
             const docLabel = (customerDocCache || '').replace(/\D/g, '').length > 11 ? 'CNPJ' : 'CPF';
+            const secondaryMains = [];
+            if (typeof window.salesContractPeople === 'function') {
+              (contratos || []).forEach((ct) => {
+                const people = window.salesContractPeople(ct);
+                const mainP = people.find((p) => p.main) || people[0];
+                const me = people.find((p) => String(p.id) === String(customerId));
+                if (me && mainP && !me.main && String(me.id) !== String(mainP.id) && mainP.name) {
+                  secondaryMains.push(mainP.name);
+                }
+              });
+            }
+            const uniqueMains = [...new Set(secondaryMains)];
+            const secondaryBannerHtml = uniqueMains.length
+              ? `<div style="margin:0 18px 10px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.85rem;font-weight:700;">Este cliente é <strong>comprador secundário</strong> no contrato. Cliente principal: ${window.escapeHtmlText(uniqueMains.join(", "))}.</div>`
+              : "";
             infoContainer.innerHTML = `
+              ${secondaryBannerHtml}
               <div class="cessao-customer-grid" style="padding:16px 18px;">
                   <div class="cessao-customer-field cessao-customer-field--wide">
                      <span class="cessao-lbl">Nome</span>
@@ -34907,6 +35360,18 @@ window.searchRelacionamento = async function() {
            }
        }
 
+       const people = typeof window.salesContractPeople === "function" ? window.salesContractPeople(c) : [];
+       const mainP = people.find((p) => p.main) || people[0] || null;
+       const searchedP = people.find((p) => String(p.id) === String(customerId)) || null;
+       const isSecondaryBuyer = !!(searchedP && mainP && !searchedP.main && String(searchedP.id) !== String(mainP.id));
+       const openCustomerId = (isSecondaryBuyer && mainP && mainP.id != null) ? mainP.id : customerId;
+       const pctStr = searchedP && searchedP.participationPercentage != null
+         ? window.formatBuyerPct(searchedP.participationPercentage)
+         : "";
+       const buyerNoteHtml = isSecondaryBuyer
+         ? `<div style="font-size:0.62rem;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:3px 6px;white-space:normal;line-height:1.35;">Cliente principal: ${window.escapeHtmlText(String(mainP.name || "").toUpperCase())}<br>Pesquisado: ${window.escapeHtmlText(String((searchedP && searchedP.name) || customerNameCache || "").toUpperCase())} (cliente secundário${pctStr ? " · " + pctStr : ""})</div>`
+         : "";
+
        return {
          nome: c.customerName || customerNameCache || `Cliente (${customerId})`,
          contrato: realContractStr,
@@ -34918,7 +35383,10 @@ window.searchRelacionamento = async function() {
          rawId: tituloId,
          isHighlight: isTarget,
          rawDate: c.contractDate ? new Date(c.contractDate).getTime() : 0,
-         contractId: c.id
+         contractId: c.id,
+         isSecondaryBuyer,
+         openCustomerId,
+         buyerNoteHtml
        };
     }));
 
@@ -34955,12 +35423,13 @@ window.searchRelacionamento = async function() {
     if (tbody) {
       tbody.innerHTML = results.map((r, index) => `
         <tr style="transition: background-color 0.2s;">
-          <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap;">
+          <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums;">
             <div style="display: flex; flex-direction: column; gap: 4px;">
                <div style="display: flex; align-items: center; gap: 6px;">
                   ${r.contrato}
                </div>
                ${r.isHighlight ? '<div style="font-size: 0.6rem; background: var(--color-primary); color: white; padding: 2px 4px; border-radius: 6px; display: inline-block; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; width: fit-content;"><i data-lucide="target" style="width:8px; height:8px; margin-right:4px;"></i>PESQUISADO</div>' : ''}
+               ${r.buyerNoteHtml || ''}
             </div>
           </td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; font-weight: 800; font-size: 0.75rem; text-align: left; color: #1e293b;">
@@ -34973,13 +35442,13 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
-            <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
               <i data-lucide="briefcase" style="width:14px;height:14px; margin-right:4px;"></i> Gestão
             </button>
-            <button class="btn btn-secondary btn-sm" data-customer-id="${customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" data-cc="${String((r.unidade || '').split(' - ')[0] || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
+            <button class="btn btn-secondary btn-sm" data-customer-id="${r.openCustomerId || customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" data-cc="${String((r.unidade || '').split(' - ')[0] || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
               <i data-lucide="file-text" style="width:14px;height:14px; margin-right:4px;"></i> Extrato
             </button>
-            <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
+            <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${r.openCustomerId || customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
               <i data-lucide="eye" style="width:14px;height:14px; margin-right:4px;"></i> Detalhes
             </button>
           </td>

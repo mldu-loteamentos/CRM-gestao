@@ -1908,11 +1908,12 @@ const SiengeApiService = {
         const brokerName = (mainBroker && (mainBroker.name || mainBroker.brokerName || mainBroker.personName || mainBroker.fantasyName))
           || c.salespersonName || c.salesmanName || c.brokerName || "";
 
-        return {
+        const mappedSale = {
           id: c.id,
           contractNumber: c.contractNumber || c.number || c.documentNumber || "",
           number: c.number || c.contractNumber || "",
           customerId: mainCustomer.id || customerId,
+          queriedCustomerId: customerId,
           companyId: c.companyId,
           unitId: unitId,
           saleDate: c.contractDate,
@@ -1927,9 +1928,14 @@ const SiengeApiService = {
           receivableBillId: c.receivableBillId,
           enterpriseId: c.enterpriseId,
           customers: c.salesContractCustomers || [],
+          salesContractCustomers: c.salesContractCustomers || [],
           brokers,
           brokerName: String(brokerName || "").trim()
         };
+        if (typeof window !== "undefined" && typeof window.rememberContractBuyers === "function") {
+          window.rememberContractBuyers(mappedSale);
+        }
+        return mappedSale;
       });
 
       return mapped;
