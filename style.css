@@ -2750,14 +2750,72 @@ circle.donut-segment {
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  position: relative;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .suporte-fab:hover {
   color: var(--color-primary);
   border-color: var(--color-primary);
   background: #fff;
 }
+.suporte-fab.has-unread {
+  color: #fff;
+  background: var(--color-secondary, #f37021);
+  border-color: var(--color-secondary, #f37021);
+  box-shadow: 0 0 0 3px rgba(243, 112, 33, 0.22);
+  animation: suporte-fab-pulse 2.2s ease-in-out infinite;
+}
+.suporte-fab.has-unread:hover {
+  color: #fff;
+  background: var(--color-secondary-hover, #ff9d5c);
+  border-color: var(--color-secondary-hover, #ff9d5c);
+}
 .suporte-fab svg { width: 16px; height: 16px; }
+.suporte-fab-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #fff;
+  pointer-events: none;
+}
+.suporte-fab-badge[hidden] { display: none !important; }
+@keyframes suporte-fab-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(243, 112, 33, 0.22); }
+  50% { box-shadow: 0 0 0 6px rgba(243, 112, 33, 0.08); }
+}
+.suporte-menu button.has-unread {
+  font-weight: 700;
+  color: #9a3412;
+}
+.suporte-menu-unread {
+  float: right;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f37021;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+.suporte-card.has-unread {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+.suporte-badge.new { background: #ffedd5; color: #c2410c; }
 .suporte-menu {
   display: none;
   position: absolute;

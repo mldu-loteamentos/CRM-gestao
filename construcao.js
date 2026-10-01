@@ -593,7 +593,7 @@ window.loadConstrucoes = async function() {
         const pendingStatus = new Set(['aguardando_fotos', 'aguardando_validacao']);
         window.ConstrucaoApp.allMatchedDocs = results.slice();
         const display = results.filter(data => {
-            if (pendingStatus.has(data.status)) return true;
+            if (pendingStatus.has(data.status)) return false;
             if (!hasInspectionContent(data)) return false;
             if (data._collection === 'vistorias' && data.status === 'concluida') {
                 const hasCheck = results.some(o => o._collection === 'construction_checks' && sameContract(o, data));
@@ -608,7 +608,7 @@ window.loadConstrucoes = async function() {
             const ccFix = ctxFix.costCenterId;
             if (unitFix && window.firebaseCollections && window.firebaseCollections.updateDoc) {
                 const { updateDoc, doc } = window.firebaseCollections;
-                const pendingBroken = display.filter(d =>
+                const pendingBroken = results.filter(d =>
                     d._collection === 'vistorias'
                     && pendingStatus.has(d.status)
                     && window.ConstrucaoApp.isBlankUnit(d.unidade)

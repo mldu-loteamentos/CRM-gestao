@@ -2133,30 +2133,71 @@ window.parseBoletoPercent = function(v) {
   return Number.isFinite(n) ? n : null;
 };
 
-window.getSimuladorTaxaMultiplier = function() {
-  const modalEl = document.getElementById("reprocess-taxa");
-  const modal = document.getElementById("modal-reprocessar-boleto");
-  const modalOpen = modal && modal.classList.contains("active") && modalEl;
-  const el = modalOpen ? modalEl : (document.getElementById("simulador-taxa") || modalEl);
-  const n = el ? window.parseBoletoPercent(el.value) : null;
-  return n != null ? n : 1;
+window.setBoletoTaxaSelect = function(el, taxa) {
+  if (!el) return false;
+  const n = window.parseBoletoPercent(taxa);
+  const want = n != null ? n : 1;
+  const opts = Array.from(el.options || []);
+  const match = opts.find(function(o) { return window.parseBoletoPercent(o.value) === want; })
+    || opts.find(function(o) { return String(o.value) === String(want); });
+  if (match) {
+    el.value = match.value;
+    match.selected = true;
+    return window.parseBoletoPercent(el.value) === want;
+  }
+  el.value = String(want);
+  return window.parseBoletoPercent(el.value) === want;
 };
 
-window.resolveBoletoChargePercents = function() {
-  const taxa = window.getSimuladorTaxaMultiplier();
+window.readBoletoTaxaMultiplier = function(preferSimulador) {
+  const simEl = document.getElementById("simulador-taxa");
+  const modalEl = document.getElementById("reprocess-taxa");
+  const modal = document.getElementById("modal-reprocessar-boleto");
+  const modalOpen = !!(modal && modal.classList.contains("active") && modalEl);
+  const source = typeof currentReprocessSource !== "undefined" ? currentReprocessSource : "";
+  const useSim = preferSimulador || source === "simulacao" || !modalOpen;
+  const first = useSim ? simEl : modalEl;
+  const second = useSim ? modalEl : simEl;
+  const n1 = first ? window.parseBoletoPercent(first.value) : null;
+  if (n1 != null) return n1;
+  const n2 = second ? window.parseBoletoPercent(second.value) : null;
+  if (n2 != null) return n2;
+  if (typeof currentReprocessTaxa === "number" && Number.isFinite(currentReprocessTaxa)) return currentReprocessTaxa;
+  return 1;
+};
+
+window.getSimuladorTaxaMultiplier = function() {
+  return window.readBoletoTaxaMultiplier(false);
+};
+
+window.resolveBoletoChargePercents = function(preferSimulador) {
+  const taxa = window.readBoletoTaxaMultiplier(!!preferSimulador);
   const fine = Number((2 * taxa).toFixed(4));
   const interest = Number((1 * taxa).toFixed(4));
   return { fine, interest, taxa };
 };
 
-window.syncReprocessChargePercents = function() {
-  const pct = window.resolveBoletoChargePercents();
+window.syncReprocessChargePercents = function(fromModal) {
+  if (fromModal) {
+    const modalEl = document.getElementById("reprocess-taxa");
+    const simEl = document.getElementById("simulador-taxa");
+    const n = window.parseBoletoPercent(modalEl && modalEl.value);
+    if (n != null && typeof window.setBoletoTaxaSelect === "function") {
+      window.setBoletoTaxaSelect(simEl, n);
+    }
+  }
+  const preferSim = (typeof currentReprocessSource !== "undefined" && currentReprocessSource === "simulacao" && !fromModal);
+  const pct = window.resolveBoletoChargePercents(preferSim);
   currentReprocessFinePct = pct.fine;
   currentReprocessInterestPct = pct.interest;
+  currentReprocessTaxa = pct.taxa;
+  if (typeof window.setBoletoTaxaSelect === "function") {
+    window.setBoletoTaxaSelect(document.getElementById("reprocess-taxa"), pct.taxa);
+  }
   const fineEl = document.getElementById("reprocess-fine");
   const interestEl = document.getElementById("reprocess-interest");
-  if (fineEl) fineEl.value = pct.fine.toFixed(2);
-  if (interestEl) interestEl.value = pct.interest.toFixed(2);
+  if (fineEl) fineEl.value = Number(pct.fine).toFixed(2);
+  if (interestEl) interestEl.value = Number(pct.interest).toFixed(2);
   const dueEl = document.getElementById("reprocess-duedate");
   if (typeof window.renderReprocessChargesSummary === "function") {
     window.renderReprocessChargesSummary(currentReprocessInstId, dueEl && dueEl.value, pct.taxa);
@@ -5434,7 +5475,31 @@ window.FILA_QUEUE_GROUPS = {
   RECENTE_JURIDICO: 5,
   ANALISE_INTERNA_JURIDICO: 6,
   ENVIAR_JURIDICO: 7,
+  SEM_CATEGORIA_SEM_PAGTO: 8,
+  SEM_CATEGORIA_COM_PAGTO: 9,
   SEM_CATEGORIA: 8
+};
+
+window.clientLastPaymentDays = function(client) {
+  let minDiff = Infinity;
+  const paidMapNow = typeof window.getRecentPaidMap === "function"
+    ? window.getRecentPaidMap()
+    : ((window.advFiltersFila && window.advFiltersFila.paidMap)
+      || (window.advFilters && window.advFilters.paidMap));
+  if (client && client.billIds && paidMapNow && typeof paidMapNow.has === "function") {
+    client.billIds.forEach(function(bid) {
+      if (paidMapNow.has(String(bid))) {
+        const d = Number(paidMapNow.get(String(bid)));
+        if (Number.isFinite(d) && d < minDiff) minDiff = d;
+      }
+    });
+  }
+  return minDiff;
+};
+
+window.clientHasPaymentLast30Days = function(client) {
+  const d = window.clientLastPaymentDays(client);
+  return Number.isFinite(d) && d <= 30;
 };
 
 window.getTerceirizadaThreshold = function() {
@@ -5522,7 +5587,10 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return G.RECENTE_JURIDICO;
   if (typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(client, cutoff)) return G.ANALISE_INTERNA_JURIDICO;
   if (client && (Number(client.maxDaysDelay) || 0) >= cutoff) return G.ENVIAR_JURIDICO;
-  return G.SEM_CATEGORIA;
+  if (typeof window.clientHasPaymentLast30Days === "function" && window.clientHasPaymentLast30Days(client)) {
+    return G.SEM_CATEGORIA_COM_PAGTO;
+  }
+  return G.SEM_CATEGORIA_SEM_PAGTO != null ? G.SEM_CATEGORIA_SEM_PAGTO : G.SEM_CATEGORIA;
 };
 
 window.getFilaQueueGroupMeta = function(group) {
@@ -5536,9 +5604,11 @@ window.getFilaQueueGroupMeta = function(group) {
     [G.RECENTE_JURIDICO]: { label: 'Recente Jurídico', bg: '#e0e7ff', color: '#3730a3' },
     [G.ANALISE_INTERNA_JURIDICO]: { label: 'Análise Interna Jurídico', bg: '#ede9fe', color: '#5b21b6' },
     [G.ENVIAR_JURIDICO]: { label: 'Enviar para Jurídico', bg: '#ffedd5', color: '#9a3412' },
-    [G.SEM_CATEGORIA]: { label: 'Sem categoria', bg: '#f8fafc', color: '#475569' }
+    [G.SEM_CATEGORIA_SEM_PAGTO]: { label: 'Sem pagamento nos últimos 30 dias', bg: '#f8fafc', color: '#475569' },
+    [G.SEM_CATEGORIA_COM_PAGTO]: { label: 'Com pagamento nos últimos 30 dias', bg: '#ecfdf5', color: '#047857' },
+    [G.SEM_CATEGORIA]: { label: 'Sem pagamento nos últimos 30 dias', bg: '#f8fafc', color: '#475569' }
   };
-  return map[group] || map[G.SEM_CATEGORIA];
+  return map[group] || map[G.SEM_CATEGORIA_SEM_PAGTO] || map[G.SEM_CATEGORIA];
 };
 
 window.clientIsRecenteJuridico = function(client, history) {
@@ -5634,18 +5704,9 @@ window.getFilaSortValue = function(client, sortCol) {
       return { value: max, type: 'number', missing: max === 0 };
     }
     case 'lastPaymentDays': {
-      let min = Infinity;
-      const paidMap = (typeof window.getRecentPaidMap === "function" && window.getRecentPaidMap())
-        || (window.advFiltersFila && window.advFiltersFila.paidMap)
-        || (window.advFilters && window.advFilters.paidMap);
-      if (client.billIds && paidMap && typeof paidMap.has === 'function') {
-        client.billIds.forEach(bid => {
-          if (paidMap.has(String(bid))) {
-            const d = Number(paidMap.get(String(bid)));
-            if (Number.isFinite(d) && d < min) min = d;
-          }
-        });
-      }
+      const min = typeof window.clientLastPaymentDays === "function"
+        ? window.clientLastPaymentDays(client)
+        : Infinity;
       const missing = !Number.isFinite(min);
       return { value: missing ? 0 : min, type: 'number', missing };
     }
@@ -8306,19 +8367,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
 
         let ultimoPagamentoStr = `<span style="color: #94a3b8; font-size: 0.75rem;">-</span>`;
-        
-        let minDiff = Infinity;
-        const paidMapNow = typeof window.getRecentPaidMap === "function"
-          ? window.getRecentPaidMap()
-          : (window.advFilters && window.advFilters.paidMap);
-        if (client.billIds && paidMapNow) {
-            client.billIds.forEach(bid => {
-                if (paidMapNow.has(String(bid))) {
-                    const d = paidMapNow.get(String(bid));
-                    if (d < minDiff) minDiff = d;
-                }
-            });
-        }
+        const minDiff = typeof window.clientLastPaymentDays === "function"
+          ? window.clientLastPaymentDays(client)
+          : Infinity;
         
         if (window.advFilters && window.advFilters.paymentsLoading) {
             ultimoPagamentoStr = `<div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 8px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; color: #64748b; font-size: 0.7rem; font-weight: 600;" title="Buscando pagamentos recentes no Sienge...">
@@ -20044,6 +20095,7 @@ let currentReprocessCompanyId = null;
 let currentReprocessSource = 'avulso';
 let currentReprocessFinePct = 2;
 let currentReprocessInterestPct = 1;
+let currentReprocessTaxa = 1;
 
 window.normalizeBoletoCostCenterId = function(passed) {
   if (passed == null || passed === "" || passed === "N/D" || passed === "undefined") return null;
@@ -20445,15 +20497,20 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
 
   const taxaEl = document.getElementById("reprocess-taxa");
   const simTaxaEl = document.getElementById("simulador-taxa");
-  if (taxaEl) {
-    const fromSim = simTaxaEl && window.parseBoletoPercent(simTaxaEl.value);
-    taxaEl.value = fromSim != null ? String(fromSim) : "1";
+  const fromSim = simTaxaEl ? window.parseBoletoPercent(simTaxaEl.value) : null;
+  const taxaInicial = fromSim != null ? fromSim : (source === "simulacao" ? 1 : window.readBoletoTaxaMultiplier(true));
+  if (typeof window.setBoletoTaxaSelect === "function") {
+    window.setBoletoTaxaSelect(taxaEl, taxaInicial);
+  } else if (taxaEl) {
+    taxaEl.value = String(taxaInicial);
   }
+  currentReprocessTaxa = Number.isFinite(Number(taxaInicial)) ? Number(taxaInicial) : 1;
   const pct = typeof window.syncReprocessChargePercents === "function"
     ? window.syncReprocessChargePercents()
-    : { fine: 2, interest: 1, taxa: 1 };
+    : window.resolveBoletoChargePercents(true);
   currentReprocessFinePct = pct.fine;
   currentReprocessInterestPct = pct.interest;
+  currentReprocessTaxa = pct.taxa;
 
   // Tenta puxar valores da aba de ocorrências se já estiverem preenchidos
   const mainTextEl = document.getElementById('note-text');
@@ -20564,6 +20621,7 @@ window.closeReprocessModal = function() {
   currentReprocessInstId = null;
   currentReprocessFinePct = 2;
   currentReprocessInterestPct = 1;
+  currentReprocessTaxa = 1;
 };
 
 window.validateReprocessForm = function() {
@@ -20600,11 +20658,23 @@ window.submitReprocessBoleto = async function() {
   const selectedOpt = accountSelectEl && accountSelectEl.selectedOptions && accountSelectEl.selectedOptions[0];
   const account = String((selectedOpt && selectedOpt.dataset.accountNumber) || (accountSelectEl && accountSelectEl.value) || "").trim();
   const dueDate = document.getElementById('reprocess-duedate').value;
+  if (currentReprocessSource === "simulacao") {
+    const simTaxaEl = document.getElementById("simulador-taxa");
+    const taxaEl = document.getElementById("reprocess-taxa");
+    const fromSim = simTaxaEl ? window.parseBoletoPercent(simTaxaEl.value) : null;
+    if (fromSim != null && typeof window.setBoletoTaxaSelect === "function") {
+      window.setBoletoTaxaSelect(taxaEl, fromSim);
+    }
+  }
   const pctNow = typeof window.syncReprocessChargePercents === "function"
     ? window.syncReprocessChargePercents()
-    : window.resolveBoletoChargePercents();
-  let fine = Number(pctNow && pctNow.fine) || 0;
-  let interest = Number(pctNow && pctNow.interest) || 0;
+    : window.resolveBoletoChargePercents(currentReprocessSource === "simulacao");
+  const taxaNow = Number(pctNow && pctNow.taxa);
+  currentReprocessTaxa = Number.isFinite(taxaNow) ? taxaNow : 0;
+  let fine = Number(pctNow && pctNow.fine);
+  let interest = Number(pctNow && pctNow.interest);
+  if (!Number.isFinite(fine)) fine = Number((2 * (Number.isFinite(currentReprocessTaxa) ? currentReprocessTaxa : 1)).toFixed(4));
+  if (!Number.isFinite(interest)) interest = Number((1 * (Number.isFinite(currentReprocessTaxa) ? currentReprocessTaxa : 1)).toFixed(4));
 
   if (!account) {
     alert("Selecione uma conta corrente.");
@@ -20668,11 +20738,11 @@ window.submitReprocessBoleto = async function() {
       companyId: Number(companyId),
       checkingAccountId: account,
       newDueDate: dueDate,
-      interestPercentage: interest,
-      finePercentage: fine,
+      interestPercentage: Number(interest) || 0,
+      finePercentage: Number(fine) || 0,
       insurancepercentage: 0,
       correctAnnualInstallment: false,
-      groupedInstalments: false,
+      groupedInstalments: installmentsArray.length > 1,
       installments: installmentsArray
     };
 
@@ -26972,8 +27042,13 @@ window.nexReguaDays = function() {
 
 window.nexCcConfig = function(costCenterId, unitName) {
   try {
-    const configMap = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
-    const memMap = (window.CentrosCustoState && CentrosCustoState.customFields) || {};
+    const configMap = (typeof window.parseCentrosCustoCustomMap === "function")
+      ? window.parseCentrosCustoCustomMap(localStorage.getItem("crm_centros_custo_custom") || "{}")
+      : (JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {});
+    const memRaw = (window.CentrosCustoState && window.CentrosCustoState.customFields) || {};
+    const memMap = (typeof window.parseCentrosCustoCustomMap === "function")
+      ? window.parseCentrosCustoCustomMap(memRaw)
+      : memRaw;
     const ids = [];
     const pushId = (v) => {
       if (v == null || v === "") return;
@@ -38489,13 +38564,14 @@ window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
   const local = window.parseCentrosCustoCustomMap(localStr);
   const cloud = window.parseCentrosCustoCustomMap(cloudStr);
   const recs = {};
+  const hasDias = (o) => o && Number.isFinite(Number(o.clausula_suspensiva_dias)) && Number(o.clausula_suspensiva_dias) > 0;
   const ingest = (src) => {
     Object.keys(src || {}).forEach((k) => {
-      if (k === "_v2") return;
+      if (k === "_v2" || k === "byId") return;
       const item = src[k];
-      if (!item || typeof item !== "object") return;
+      if (!item || typeof item !== "object" || Array.isArray(item)) return;
       const id = String(item.cc_id != null ? item.cc_id : k);
-      if (!id || id === "undefined") return;
+      if (!id || id === "undefined" || id === "byId") return;
       const prev = recs[id];
       if (!prev) {
         recs[id] = { ...item, cc_id: item.cc_id != null ? item.cc_id : k };
@@ -38505,7 +38581,14 @@ window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
       const nT = Number(item.updatedAt || 0) || 0;
       const newer = nT >= pT ? item : prev;
       const older = newer === item ? prev : item;
-      recs[id] = { ...older, ...newer, cc_id: newer.cc_id != null ? newer.cc_id : id, updatedAt: Math.max(pT, nT) };
+      const merged = { ...older, ...newer, cc_id: newer.cc_id != null ? newer.cc_id : id, updatedAt: Math.max(pT, nT) };
+      if (!("clausula_suspensiva_dias" in newer) && hasDias(older)) {
+        merged.clausula_suspensiva_dias = Number(older.clausula_suspensiva_dias);
+      }
+      if (!("clausula_suspensiva_ativa" in newer) && ("clausula_suspensiva_ativa" in older)) {
+        merged.clausula_suspensiva_ativa = older.clausula_suspensiva_ativa;
+      }
+      recs[id] = merged;
     });
   };
   ingest(cloud);
@@ -38516,12 +38599,102 @@ window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
 };
 
 window.applyCentrosCustoCustomPayload = function(jsonOrObj) {
-  let obj = jsonOrObj;
-  if (typeof jsonOrObj === "string") {
-    try { obj = JSON.parse(jsonOrObj || "{}") || {}; } catch (e) { return; }
+  const parsed = typeof window.parseCentrosCustoCustomMap === "function"
+    ? window.parseCentrosCustoCustomMap(jsonOrObj)
+    : (function() {
+        if (!jsonOrObj) return {};
+        if (typeof jsonOrObj === "object" && !Array.isArray(jsonOrObj)) return jsonOrObj;
+        try { return JSON.parse(String(jsonOrObj || "{}") || "{}") || {}; } catch (e) { return {}; }
+      })();
+  if (!parsed || typeof parsed !== "object") return;
+  if (window.CentrosCustoState) window.CentrosCustoState.customFields = parsed;
+};
+
+window.persistCentrosCustoCustomToFirebase = async function() {
+  if (window._ccCustomWritingCloud) {
+    window._ccCustomPersistAgain = true;
+    return;
   }
-  if (!obj || typeof obj !== "object") return;
-  if (window.CentrosCustoState) CentrosCustoState.customFields = obj;
+  if (!window.firebaseDb || !window.firebaseCollections) return;
+  const { doc, getDoc, setDoc } = window.firebaseCollections;
+  window._ccCustomWritingCloud = true;
+  try {
+    const origSet = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    const localRaw = localStorage.getItem("crm_centros_custo_custom") || "{}";
+    let dedicatedRaw = "";
+    let globalRaw = "";
+    try {
+      const dSnap = await getDoc(doc(window.firebaseDb, "config", "centros_custo"));
+      const dExists = dSnap && (typeof dSnap.exists === "function" ? dSnap.exists() : dSnap.exists);
+      if (dExists) {
+        const d = dSnap.data() || {};
+        dedicatedRaw = d.byId ? JSON.stringify(d.byId) : (d.crm_centros_custo_custom || "");
+      }
+    } catch (e) {}
+    try {
+      const gSnap = await getDoc(doc(window.firebaseDb, "config", "global"));
+      const gExists = gSnap && (typeof gSnap.exists === "function" ? gSnap.exists() : gSnap.exists);
+      if (gExists) {
+        const g = gSnap.data() || {};
+        globalRaw = g.crm_centros_custo_custom || "";
+      }
+    } catch (e) {}
+    const cloudMerged = typeof window.mergeCentrosCustoCustom === "function"
+      ? window.mergeCentrosCustoCustom(dedicatedRaw || "{}", globalRaw || "{}")
+      : (dedicatedRaw || globalRaw || "{}");
+    let merged = typeof window.mergeCentrosCustoCustom === "function"
+      ? window.mergeCentrosCustoCustom(localRaw, cloudMerged)
+      : (localRaw || cloudMerged || "{}");
+    const map = window.parseCentrosCustoCustomMap(merged);
+    const mem = (window.CentrosCustoState && window.CentrosCustoState.customFields) || {};
+    Object.keys(mem).forEach((id) => {
+      if (id === "_v2" || id === "byId") return;
+      const mine = mem[id];
+      if (!mine || typeof mine !== "object") return;
+      const key = String(mine.cc_id != null ? mine.cc_id : id);
+      if (!key || key === "undefined") return;
+      const theirs = map[key];
+      const mineAt = Number(mine.updatedAt || 0) || 0;
+      const theirsAt = Number((theirs && theirs.updatedAt) || 0) || 0;
+      const justSaved = mineAt > (Date.now() - 120000);
+      if (!theirs || mineAt >= theirsAt || justSaved) {
+        map[key] = Object.assign({}, theirs || {}, mine, {
+          cc_id: mine.cc_id != null ? mine.cc_id : key,
+          updatedAt: Math.max(Number(mine.updatedAt || 0), Number((theirs && theirs.updatedAt) || 0), 0)
+        });
+        if ("clausula_suspensiva_dias" in mine) {
+          map[key].clausula_suspensiva_dias = mine.clausula_suspensiva_dias;
+        }
+        if ("clausula_suspensiva_ativa" in mine) {
+          map[key].clausula_suspensiva_ativa = mine.clausula_suspensiva_ativa;
+        }
+      }
+    });
+    const json = JSON.stringify(map);
+    try { origSet.call(localStorage, "crm_centros_custo_custom", json); } catch (e) {}
+    if (typeof window.applyCentrosCustoCustomPayload === "function") {
+      window.applyCentrosCustoCustomPayload(json);
+    }
+    const payload = { byId: map, updatedAt: Date.now(), crm_centros_custo_custom: json };
+    await setDoc(doc(window.firebaseDb, "config", "centros_custo"), payload, { merge: false });
+    try {
+      await setDoc(doc(window.firebaseDb, "config", "global"), { crm_centros_custo_custom: json }, { merge: true });
+    } catch (e) {
+      console.warn("[CC custom] global setDoc falhou; documento dedicado permanece", e);
+    }
+  } catch (e) {
+    console.error("[CC custom] persist:", e);
+  } finally {
+    window._ccCustomWritingCloud = false;
+    if (window._ccCustomPersistAgain) {
+      window._ccCustomPersistAgain = false;
+      setTimeout(() => {
+        if (typeof window.persistCentrosCustoCustomToFirebase === "function") {
+          window.persistCentrosCustoCustomToFirebase().catch(() => {});
+        }
+      }, 50);
+    }
+  }
 };
 
 window.mergeEmpresasCustom = function(localStr, cloudStr) {
@@ -38666,9 +38839,11 @@ window.syncGlobalConfigFromFirebase = async function() {
         const snap = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, "config"));
         let globalData = null;
         let backOfficeCloud = null;
+        let centrosCustoCloud = null;
         snap.forEach(d => {
             if (d.id === "global") globalData = d.data();
             if (d.id === "back_office_perms") backOfficeCloud = d.data();
+            if (d.id === "centros_custo") centrosCustoCloud = d.data();
         });
         
         if (globalData) {
@@ -38717,15 +38892,18 @@ window.syncGlobalConfigFromFirebase = async function() {
                 if (k === "crm_centros_custo_custom") {
                     if (window._ccCustomWritingCloud) return;
                     if (typeof window.mergeCentrosCustoCustom === "function") {
-                        let dedicatedRaw = "";
-                        try {
-                          if (window.firebaseCollections && window.firebaseCollections.getDoc && window.firebaseDb) {
-                            /* filled in persist; snapshot of global still merges */
-                          }
-                        } catch (e) {}
+                        const dedicatedRaw = centrosCustoCloud
+                          ? (centrosCustoCloud.byId
+                              ? JSON.stringify(centrosCustoCloud.byId)
+                              : (centrosCustoCloud.crm_centros_custo_custom || ""))
+                          : "";
+                        const cloudMerged = window.mergeCentrosCustoCustom(
+                          dedicatedRaw || "{}",
+                          globalData[k] || "{}"
+                        );
                         const merged = window.mergeCentrosCustoCustom(
                           localStorage.getItem(k),
-                          dedicatedRaw || globalData[k] || "{}"
+                          cloudMerged || "{}"
                         );
                         const cur = localStorage.getItem(k) || "";
                         if (merged && merged !== cur) {
@@ -38958,6 +39136,9 @@ window.forceUploadLocalConfig = async function(silent = true) {
         }
         
         if (!window.firebaseDb || !window.firebaseCollections) throw new Error("Firebase não inicializado.");
+        if (typeof window.persistCentrosCustoCustomToFirebase === "function") {
+          await window.persistCentrosCustoCustomToFirebase();
+        }
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
         try {
           const snap = await window.firebaseCollections.getDoc(docRef);
@@ -38970,20 +39151,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
           if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
             payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
           }
-          if (payload.crm_centros_custo_custom || cloud.crm_centros_custo_custom) {
-            if (typeof window.mergeCentrosCustoCustom === "function") {
-              payload.crm_centros_custo_custom = window.mergeCentrosCustoCustom(
-                payload.crm_centros_custo_custom || "{}",
-                cloud.crm_centros_custo_custom || "{}"
-              );
-              try { _originalSetItem.call(localStorage, "crm_centros_custo_custom", payload.crm_centros_custo_custom); } catch (e) {}
-              if (typeof window.applyCentrosCustoCustomPayload === "function") {
-                window.applyCentrosCustoCustomPayload(payload.crm_centros_custo_custom);
-              }
-            } else if (!payload.crm_centros_custo_custom && cloud.crm_centros_custo_custom) {
-              payload.crm_centros_custo_custom = cloud.crm_centros_custo_custom;
-            }
-          }
+          delete payload.crm_centros_custo_custom;
           if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
             if (typeof window.mergeCompromissarioConfigs === "function") {
               payload.crm_compromissario_configs = window.mergeCompromissarioConfigs(
@@ -39202,6 +39370,16 @@ localStorage.setItem = function(key, value) {
     if (key === "crm_moura_condicoes_pagamento") {
         return;
     }
+    if (key === "crm_centros_custo_custom") {
+        if (window._ccCustomWritingCloud) return;
+        if (window._ccPersistTimeout) clearTimeout(window._ccPersistTimeout);
+        window._ccPersistTimeout = setTimeout(() => {
+            if (typeof window.persistCentrosCustoCustomToFirebase === "function") {
+                window.persistCentrosCustoCustomToFirebase().catch(() => {});
+            }
+        }, 400);
+        return;
+    }
     if ((window.SYNC_KEYS && window.SYNC_KEYS.includes(key)) || key.startsWith("crm_perms_")) {
         if (window._fbConfigTimeout) clearTimeout(window._fbConfigTimeout);
         window._fbConfigTimeout = setTimeout(async () => {
@@ -39230,18 +39408,7 @@ localStorage.setItem = function(key, value) {
                       if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
                         payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
                       }
-                      if (payload.crm_centros_custo_custom || cloud.crm_centros_custo_custom) {
-                        if (typeof window.mergeCentrosCustoCustom === "function") {
-                          payload.crm_centros_custo_custom = window.mergeCentrosCustoCustom(
-                            payload.crm_centros_custo_custom || "{}",
-                            cloud.crm_centros_custo_custom || "{}"
-                          );
-                          try { _originalSetItem.call(localStorage, "crm_centros_custo_custom", payload.crm_centros_custo_custom); } catch (e) {}
-                          if (typeof window.applyCentrosCustoCustomPayload === "function") {
-                            window.applyCentrosCustoCustomPayload(payload.crm_centros_custo_custom);
-                          }
-                        }
-                      }
+                      delete payload.crm_centros_custo_custom;
                       if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
                         if (typeof window.mergeCompromissarioConfigs === "function") {
                           payload.crm_compromissario_configs = window.mergeCompromissarioConfigs(

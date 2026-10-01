@@ -166,8 +166,9 @@ const HomeDashboard = {
       : 6;
     const G = window.FILA_QUEUE_GROUPS || {};
     const zeroPago = G.ZERO_PAGO != null ? G.ZERO_PAGO : 1;
-    const semCategoria = G.SEM_CATEGORIA != null ? G.SEM_CATEGORIA : 6;
-    if (group !== zeroPago && group !== semCategoria) return false;
+    const semGroups = new Set([G.SEM_CATEGORIA, G.SEM_CATEGORIA_SEM_PAGTO, G.SEM_CATEGORIA_COM_PAGTO].filter(function(v) { return v != null; }));
+    if (!semGroups.size) semGroups.add(6);
+    if (group !== zeroPago && !semGroups.has(group)) return false;
     const rule = String(c.appliedRule || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (/JURIDICO|ADVOGADO|APOIO_JURIDICO/.test(rule)) return false;
     const info = typeof window.getClientJudicialPhaseInfo === 'function'

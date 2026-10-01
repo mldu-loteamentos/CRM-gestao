@@ -365,6 +365,150 @@
     }
   }
 
+  function ticketTime(v) {
+    if (!v) return 0;
+    try {
+      const d = v.toDate ? v.toDate() : new Date(v);
+      const n = d.getTime();
+      return Number.isFinite(n) ? n : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function seenStorageKey() {
+    return "crm_suporte_seen_" + (userKey() || "anon");
+  }
+
+  function loadSeenMap() {
+    try {
+      return JSON.parse(localStorage.getItem(seenStorageKey()) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveSeenMap(map) {
+    try { localStorage.setItem(seenStorageKey(), JSON.stringify(map || {})); } catch (e) {}
+  }
+
+  function lastAdminActivityAt(t) {
+    if (!t) return 0;
+    const msgs = Array.isArray(t.mensagens) ? t.mensagens : [];
+    let max = 0;
+    msgs.forEach((m) => {
+      if (!m || m.papel !== "admin") return;
+      const at = ticketTime(m.at);
+      if (at > max) max = at;
+    });
+    if (t.status === "aguardando_usuario" || t.status === "em_atendimento") {
+      const last = msgs.length ? msgs[msgs.length - 1] : null;
+      if (!last || last.papel === "admin") {
+        const upd = ticketTime(t.updatedAt);
+        if (upd > max) max = upd;
+      }
+    }
+    return max;
+  }
+
+  function ticketHasUnread(t) {
+    if (!t || t.status === "atendido") return false;
+    const adminAt = lastAdminActivityAt(t);
+    if (!adminAt) return false;
+    const seenAt = ticketTime(loadSeenMap()[t.id]);
+    return adminAt > seenAt;
+  }
+
+  function markTicketSeen(t) {
+    if (!t || !t.id) return;
+    const map = loadSeenMap();
+    const at = Math.max(ticketTime(t.updatedAt), lastAdminActivityAt(t), Date.now());
+    map[t.id] = new Date(at).toISOString();
+    saveSeenMap(map);
+    refreshUnreadBadge();
+  }
+
+  function applyUnreadUi(count) {
+    const n = Number(count) || 0;
+    const btn = document.getElementById("suporte-btn");
+    const badge = document.getElementById("suporte-fab-badge");
+    const meus = document.querySelector('#suporte-menu button[data-action="meus"]');
+    if (btn) {
+      btn.classList.toggle("has-unread", n > 0);
+      btn.setAttribute("title", n > 0
+        ? `Suporte — ${n} chamado${n === 1 ? "" : "s"} com nova mensagem`
+        : "Suporte");
+      btn.setAttribute("aria-label", btn.getAttribute("title"));
+    }
+    if (badge) {
+      badge.hidden = n <= 0;
+      badge.textContent = n > 9 ? "9+" : String(n);
+    }
+    if (meus) {
+      meus.classList.toggle("has-unread", n > 0);
+      const label = "Acompanhar meus chamados";
+      meus.innerHTML = n > 0
+        ? `${label}<span class="suporte-menu-unread">${n > 9 ? "9+" : n}</span>`
+        : label;
+    }
+  }
+
+  let unreadRefreshSeq = 0;
+  async function refreshUnreadBadge() {
+    const seq = ++unreadRefreshSeq;
+    if (!userKey() || !window.firebaseDb) {
+      applyUnreadUi(0);
+      return;
+    }
+    try {
+      const mine = await listMine();
+      if (seq !== unreadRefreshSeq) return;
+      applyUnreadUi(mine.filter(ticketHasUnread).length);
+    } catch (e) {
+      if (seq !== unreadRefreshSeq) return;
+    }
+  }
+
+  function scheduleUnreadPoll() {
+    if (window._suporteUnreadTimer) return;
+    window._suporteUnreadTimer = setInterval(() => {
+      if (document.hidden) return;
+      refreshUnreadBadge();
+    }, 30000);
+  }
+
+  function startUnreadWatch() {
+    if (window._suporteUnreadWatchStarted) return;
+    window._suporteUnreadWatchStarted = true;
+    refreshUnreadBadge();
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshUnreadBadge();
+    });
+    try {
+      const { db, c } = fb();
+      if (c.onSnapshot) {
+        window._suporteUnreadUnsub = c.onSnapshot(
+          c.collection(db, COLLECTION),
+          () => { refreshUnreadBadge(); },
+          () => { scheduleUnreadPoll(); }
+        );
+        return;
+      }
+    } catch (e) {}
+    scheduleUnreadPoll();
+  }
+
+  function startUnreadWatchWhenReady() {
+    const tryStart = () => {
+      if (!userKey() || !window.firebaseDb || !window.firebaseCollections) {
+        setTimeout(tryStart, 1200);
+        return;
+      }
+      startUnreadWatch();
+    };
+    tryStart();
+  }
+
   function ensureShell() {
     if (document.getElementById("suporte-overlay")) return;
     const wrap = document.createElement("div");
@@ -739,17 +883,24 @@
     return all.filter(t => String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key);
   }
 
-  function listHtml(tickets, emptyMsg) {
+  function listHtml(tickets, emptyMsg, opts) {
     if (!tickets.length) return `<p class="suporte-empty">${esc(emptyMsg)}</p>`;
-    return `<div class="suporte-list">${tickets.map(t => `
-      <button type="button" class="suporte-card" data-id="${esc(t.id)}">
+    const markUnread = !!(opts && opts.unread);
+    return `<div class="suporte-list">${tickets.map(t => {
+      const unread = markUnread && ticketHasUnread(t);
+      return `
+      <button type="button" class="suporte-card${unread ? " has-unread" : ""}" data-id="${esc(t.id)}">
         <div class="suporte-card-top">
           <strong>${esc(TIPO_LABEL[t.tipo] || t.tipo)} · ${esc(localPathOf(t))}</strong>
-          ${statusBadge(t.status)}
+          <span style="display:inline-flex;align-items:center;gap:6px;">
+            ${unread ? `<span class="suporte-badge new">Nova mensagem</span>` : ""}
+            ${statusBadge(t.status)}
+          </span>
         </div>
         <p>${esc((t.descricao || "").slice(0, 160))}${(t.descricao || "").length > 160 ? "…" : ""}</p>
         <small>${esc(t.userName || t.userEmail || "")} · ${esc(fmtDate(t.updatedAt || t.createdAt))}</small>
-      </button>`).join("")}</div>`;
+      </button>`;
+    }).join("")}</div>`;
   }
 
   async function openMine() {
@@ -770,10 +921,11 @@
     try {
       const tickets = await listMine();
       const body = document.getElementById("suporte-mine-body");
-      body.innerHTML = listHtml(tickets, "Você ainda não abriu chamados.");
+      body.innerHTML = listHtml(tickets, "Você ainda não abriu chamados.", { unread: true });
       body.querySelectorAll(".suporte-card").forEach(el => {
         el.addEventListener("click", () => openDetail(el.getAttribute("data-id"), { mine: true }));
       });
+      applyUnreadUi(tickets.filter(ticketHasUnread).length);
     } catch (err) {
       document.getElementById("suporte-mine-body").innerHTML = `<p class="suporte-empty">${esc(err.message)}</p>`;
     }
@@ -834,6 +986,7 @@
       const mine = !!(ctx && ctx.mine);
       const adminView = !!(ctx && ctx.admin) || (isAdmin() && !mine);
       const canReplyUser = mine || userKey() === String(t.userId || "").toLowerCase() || userKey() === String(t.userEmail || "").toLowerCase();
+      if (canReplyUser && !adminView) markTicketSeen(t);
       const canAttach = adminView || (canReplyUser && t.status !== "atendido");
       box.innerHTML = `
         <div class="suporte-modal-head">
@@ -955,6 +1108,7 @@
         alert("Atualizado.");
       } else {
         await openDetail(id, { mine: true });
+        refreshUnreadBadge();
       }
     } catch (err) {
       alert("Não foi possível responder: " + (err.message || err));
@@ -1041,6 +1195,7 @@
     });
     document.addEventListener("click", () => toggleMenu(false));
     if (window.lucide) lucide.createIcons();
+    startUnreadWatchWhenReady();
   }
 
   document.addEventListener("tabChanged", (e) => {
@@ -1052,5 +1207,5 @@
   } else {
     initWidget();
   }
-  window.SuporteApp = { renderAdmin, openForm, isAdmin, openMine };
+  window.SuporteApp = { renderAdmin, openForm, isAdmin, openMine, refreshUnreadBadge };
 })();

@@ -9,6 +9,7 @@ const CentrosCustoState = {
     'Corporativo', 'Diretoria', 'Sócios', 'Contrapartida'
   ]
 };
+window.CentrosCustoState = CentrosCustoState;
 
 const CentrosCustoApp = {
   async loadData(forceRefresh = false) {
@@ -22,7 +23,9 @@ const CentrosCustoApp = {
       const localCustom = localStorage.getItem('crm_centros_custo_custom');
       if (localCustom) {
         try {
-          CentrosCustoState.customFields = JSON.parse(localCustom);
+          CentrosCustoState.customFields = (typeof window.parseCentrosCustoCustomMap === "function")
+            ? window.parseCentrosCustoCustomMap(localCustom)
+            : (JSON.parse(localCustom) || {});
         } catch(e) { console.error("Erro ao ler customFields", e); }
       }
 
@@ -115,8 +118,11 @@ const CentrosCustoApp = {
 
     const suspensivaDiasEl = document.getElementById(`edit-suspensiva-dias-${id}`);
     if (suspensivaDiasEl) {
+      const wasDisabled = !!suspensivaDiasEl.disabled;
+      if (wasDisabled) suspensivaDiasEl.disabled = false;
       const n = parseInt(String(suspensivaDiasEl.value || "").trim(), 10);
       custom.clausula_suspensiva_dias = (Number.isFinite(n) && n > 0) ? n : 30;
+      if (wasDisabled) suspensivaDiasEl.disabled = true;
     }
     custom.updatedAt = Date.now();
     custom.cc_id = key;
@@ -140,10 +146,39 @@ const CentrosCustoApp = {
 
     CentrosCustoState.customFields[key] = custom;
     CentrosCustoState.customFields[id] = custom;
-    localStorage.setItem('crm_centros_custo_custom', JSON.stringify(CentrosCustoState.customFields));
-    
+    const json = JSON.stringify(CentrosCustoState.customFields);
+    try {
+      const orig = window._originalSetItem;
+      if (typeof orig === "function") orig.call(localStorage, "crm_centros_custo_custom", json);
+      else localStorage.setItem("crm_centros_custo_custom", json);
+    } catch (e) {
+      try { localStorage.setItem("crm_centros_custo_custom", json); } catch (err) {}
+    }
+
     this.closeModal();
     this.render();
+    this.refreshCobrancaViews();
+    if (typeof window.persistCentrosCustoCustomToFirebase === "function") {
+      window.persistCentrosCustoCustomToFirebase().catch((e) => {
+        console.warn("[CentrosCusto] persist nuvem:", e);
+      });
+    } else if (window.forceUploadLocalConfig) {
+      window.forceUploadLocalConfig(true).catch(() => {});
+    }
+  },
+
+  refreshCobrancaViews() {
+    try {
+      if (window.AppState) window.AppState.dashboardRendered = false;
+      const zeroPane = document.getElementById("tab-zeropaid");
+      const zeroVisible = zeroPane && (zeroPane.classList.contains("active") || (zeroPane.style && String(zeroPane.style.display).indexOf("block") >= 0));
+      if (zeroVisible && typeof loadZeroPaidTab === "function") loadZeroPaidTab();
+      if (typeof loadDashboardData === "function" && document.getElementById("tab-dashboard")) {
+        const dash = document.getElementById("tab-dashboard");
+        const dashVisible = dash && (dash.classList.contains("active") || (dash.style && String(dash.style.display).indexOf("block") >= 0));
+        if (dashVisible) loadDashboardData();
+      }
+    } catch (e) {}
   },
 
   syncIncorporacaoUi(id) {
@@ -254,16 +289,19 @@ const CentrosCustoApp = {
     const cc = CentrosCustoState.costCenters.find(c => c.id === id);
     if (!cc) return;
     
-    const custom = CentrosCustoState.customFields[id] || {};
+    const custom = CentrosCustoState.customFields[id]
+      || CentrosCustoState.customFields[String(id)]
+      || {};
     const vgv = custom.valor_vgv || 0;
     const perc_ml = custom.perc_ml || 0;
     const perc_terrenista = custom.perc_terrenista || 0;
     const tipo_cc = custom.tipo_cc || '';
     const imposto_pago = custom.imposto_pago_empresa === true;
     const suspensiva_ativa = custom.clausula_suspensiva_ativa === true;
-    const suspensiva_dias = (typeof window.clausulaSuspensivaDias === "function")
-      ? window.clausulaSuspensivaDias(custom)
-      : (Number(custom.clausula_suspensiva_dias) > 0 ? Number(custom.clausula_suspensiva_dias) : 30);
+    const storedDias = Number(custom.clausula_suspensiva_dias);
+    const suspensiva_dias = (Number.isFinite(storedDias) && storedDias > 0)
+      ? storedDias
+      : ((typeof window.clausulaSuspensivaDias === "function") ? window.clausulaSuspensivaDias(custom) : 30);
     const incorpLotesProprios = custom.incorporacao_lotes_proprios === true;
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
@@ -620,3 +658,5 @@ document.addEventListener('tabChanged', (e) => {
     initCentrosCustoModule();
   }
 });
+
+window.CentrosCustoApp = CentrosCustoApp;
