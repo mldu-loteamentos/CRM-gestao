@@ -4467,7 +4467,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato"].forEach(id => {
+  ["regua", "judiciais", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -4476,6 +4476,7 @@ window.applyRulesModulePermissions = function() {
 
   window.setRulesSectionMode(document.getElementById("content-regra-regua"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-judiciais"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-financiamento"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
@@ -4548,6 +4549,9 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-negociacao" && typeof window.paintRenegotiationBlockSummary === "function") {
     window.paintRenegotiationBlockSummary();
+  }
+  if (tabId === "regra-financiamento" && typeof window.renderEtapasFinanciamento === "function") {
+    window.renderEtapasFinanciamento();
   }
   window.applyRulesModulePermissions();
   if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
@@ -5267,6 +5271,9 @@ async function initializeApplication() {
       localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
       localStorage.setItem("crm_moura_judiciais_v2", "true");
   }
+  const finStr = localStorage.getItem("crm_moura_financiamento");
+  window.EtapasFinanciamentoState = finStr ? JSON.parse(finStr) : [];
+  if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
   // --- FIM ESTADOS GLOBAIS ---
 
   AppState.weSendStatus = JSON.parse(localStorage.getItem("crm_moura_wesend_status")) || {};
@@ -28188,6 +28195,7 @@ function renderRulesSettingsTable() {
   
   window.renderTimeline();
   window.renderEtapasJudiciais();
+  if (typeof window.renderEtapasFinanciamento === "function") window.renderEtapasFinanciamento();
   if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
   
   // Computar estatísticas por cidade a partir de AppState.defaultersBills
@@ -29756,6 +29764,9 @@ window.saveRulesConfig = function(scope) {
       });
       localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
     }
+    if (window.EtapasFinanciamentoState) {
+      localStorage.setItem("crm_moura_financiamento", JSON.stringify(window.EtapasFinanciamentoState));
+    }
     if (typeof window.invalidateDailyQueueCache === "function") {
       window.invalidateDailyQueueCache("regras de cidades/operadores salvas");
     }
@@ -31077,6 +31088,323 @@ window.removerEtapaJudicial = function(id) {
           window.renderEtapasJudiciais();
       }
   }
+};
+
+window.persistEtapasFinanciamento = function() {
+  if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
+  localStorage.setItem("crm_moura_financiamento", JSON.stringify(window.EtapasFinanciamentoState));
+  if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+};
+
+window.buildFinanciamentoStageCatalog = function() {
+  const etapas = [...(window.EtapasFinanciamentoState || [])];
+  etapas.forEach((e, i) => { if (typeof e.order === "undefined") e.order = i * 10; });
+  const sorted = etapas.sort((a, b) => (a.order || 0) - (b.order || 0));
+  const pid = (v) => (v == null || v === "") ? null : String(v);
+  const childrenOf = (parentId) => sorted.filter(e => pid(e.parentId) === pid(parentId));
+  const items = [];
+  const walk = (parentId, parentNum) => {
+    childrenOf(parentId).forEach((e, idx) => {
+      const prefix = parentNum ? `${parentNum}.${idx + 1}` : String(idx + 1);
+      const nome = String(e.nome || e.name || "").trim();
+      const kids = childrenOf(e.id);
+      items.push({
+        id: e.id,
+        nome,
+        prefix,
+        label: prefix.includes(".") ? `${prefix} ${nome}` : `${prefix}. ${nome}`,
+        hasChildren: kids.length > 0,
+        selectable: kids.length === 0,
+        dias: parseInt(e.dias, 10) || 0,
+        parentId: e.parentId || null
+      });
+      walk(e.id, prefix);
+    });
+  };
+  walk(null, "");
+  return items;
+};
+
+window.draggedFinId = null;
+
+window.onDragStartFin = function(e, id) {
+  window.draggedFinId = id;
+  e.dataTransfer.effectAllowed = "move";
+};
+
+window.onDragOverFin = function(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".fin-node-target").forEach(el => {
+    el.style.borderTop = "";
+    el.style.borderBottom = "";
+    el.style.background = "";
+  });
+  const target = e.target.closest(".fin-node-target");
+  if (target && target.dataset.id !== window.draggedFinId) {
+    const rect = target.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    if (y < rect.height * 0.15) {
+      target.style.borderTop = "2px solid var(--color-primary)";
+    } else if (y > rect.height * 0.85) {
+      target.style.borderBottom = "2px solid var(--color-primary)";
+    } else {
+      target.style.background = "#e0f2fe";
+    }
+  }
+};
+
+window.onDropFinRoot = function(e) {
+  e.preventDefault();
+  document.querySelectorAll(".fin-node-target").forEach(el => {
+    el.style.borderTop = "";
+    el.style.borderBottom = "";
+    el.style.background = "";
+  });
+  if (!window.draggedFinId) return;
+  const target = e.target.closest(".fin-node-target");
+  if (!target) {
+    const dragged = window.EtapasFinanciamentoState.find(x => x.id === window.draggedFinId);
+    if (dragged) {
+      dragged.parentId = null;
+      const maxOrder = Math.max(...window.EtapasFinanciamentoState.filter(x => !x.parentId).map(x => x.order || 0), 0);
+      dragged.order = maxOrder + 1;
+      window.persistEtapasFinanciamento();
+      window.renderEtapasFinanciamento();
+    }
+  }
+};
+
+window.onDropFinNode = function(e, targetId) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.querySelectorAll(".fin-node-target").forEach(el => {
+    el.style.borderTop = "";
+    el.style.borderBottom = "";
+    el.style.background = "";
+  });
+  if (!window.draggedFinId || window.draggedFinId === targetId) return;
+  let isChild = false;
+  let curr = window.EtapasFinanciamentoState.find(x => x.id === targetId);
+  while (curr && curr.parentId) {
+    if (curr.parentId === window.draggedFinId) {
+      isChild = true;
+      break;
+    }
+    curr = window.EtapasFinanciamentoState.find(x => x.id === curr.parentId);
+  }
+  if (isChild) {
+    alert("Ação inválida. Você não pode mover uma etapa para dentro de uma de suas próprias subetapas.");
+    return;
+  }
+  const dragged = window.EtapasFinanciamentoState.find(x => x.id === window.draggedFinId);
+  const targetNode = window.EtapasFinanciamentoState.find(x => x.id === targetId);
+  if (dragged && targetNode) {
+    const targetEl = e.target.closest(".fin-node-target");
+    const rect = targetEl.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    let siblings = window.EtapasFinanciamentoState.filter(x => x.parentId === targetNode.parentId);
+    siblings.sort((a, b) => (a.order || 0) - (b.order || 0));
+    siblings.forEach((s, i) => s.order = i * 10);
+    if (y < rect.height * 0.15) {
+      dragged.parentId = targetNode.parentId;
+      dragged.order = targetNode.order - 5;
+    } else if (y > rect.height * 0.85) {
+      dragged.parentId = targetNode.parentId;
+      dragged.order = targetNode.order + 5;
+    } else {
+      dragged.parentId = targetNode.id;
+      const childMaxOrder = Math.max(...window.EtapasFinanciamentoState.filter(x => x.parentId === targetNode.id).map(x => x.order || 0), 0);
+      dragged.order = childMaxOrder + 10;
+    }
+    window.persistEtapasFinanciamento();
+    window.renderEtapasFinanciamento();
+  }
+};
+
+window.renderEtapasFinanciamento = function() {
+  const container = document.getElementById("financiamento-tree-container");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!window.EtapasFinanciamentoState || window.EtapasFinanciamentoState.length === 0) {
+    container.innerHTML = `<div style="text-align: center; color: #94a3b8; font-size: 0.9rem; padding: 20px;">Nenhuma etapa configurada.</div>`;
+    return;
+  }
+  window.EtapasFinanciamentoState.forEach((e, i) => {
+    if (typeof e.order === "undefined") e.order = i * 10;
+  });
+  const sorted = [...window.EtapasFinanciamentoState].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const rootItems = sorted.filter(e => !e.parentId);
+  const catalog = window.buildFinanciamentoStageCatalog();
+  const prefixById = {};
+  catalog.forEach(s => { prefixById[String(s.id)] = s.prefix.includes(".") ? s.prefix : s.prefix + "."; });
+
+  const renderNode = (node, level) => {
+    const children = sorted.filter(e => e.parentId === node.id);
+    const numLabel = prefixById[String(node.id)] || "";
+    let bgColor = "#ffffff";
+    if (level === 0) bgColor = "#f8fafc";
+    else if (level === 1) bgColor = "#f0fdf4";
+    else if (level === 2) bgColor = "#eff6ff";
+    else if (level === 3) bgColor = "#fefce8";
+    return `
+      <div class="fin-node" style="margin-left: ${level > 0 ? 25 : 0}px; position: relative;">
+        ${level > 0 ? '<div style="position: absolute; left: -15px; top: 18px; width: 12px; height: 1px; background: #cbd5e1;"></div>' : ""}
+        ${level > 0 ? '<div style="position: absolute; left: -15px; top: 0; width: 1px; height: 100%; background: #cbd5e1;"></div>' : ""}
+        <div class="fin-node-target" data-id="${node.id}" draggable="true" ondragstart="window.onDragStartFin(event, '${node.id}')" ondrop="window.onDropFinNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${bgColor}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: grab; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i data-lucide="grip-vertical" style="width: 16px; height: 16px; color: #94a3b8; cursor: grab;"></i>
+            <div>
+              <div style="font-size: 0.9rem; font-weight: 600; color: #334155;">
+                <span style="color: #64748b; font-size: 0.8rem; margin-right: 4px;">${numLabel}</span>
+                ${node.nome}
+              </div>
+              <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} • <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
+            <button onclick="window.openEtapaFinanciamentoModal('new', '${node.id}')" style="background: transparent; color: #128143; border: 1px solid transparent; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='transparent'" title="Adicionar Subetapa">
+              <i data-lucide="plus-circle" style="width: 15px; height: 15px;"></i>
+            </button>
+            <button onclick="editarEtapaFinanciamento('${node.id}')" style="background: transparent; color: #64748b; border: 1px solid transparent; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'" title="Editar">
+              <i data-lucide="edit" style="width: 15px; height: 15px;"></i>
+            </button>
+            <button onclick="removerEtapaFinanciamento('${node.id}')" style="background: transparent; border: 1px solid transparent; color: #ef4444; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='transparent'" title="Excluir">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+            </button>
+          </div>
+        </div>
+        <div class="fin-children">
+          ${children.map(c => renderNode(c, level + 1)).join("")}
+        </div>
+      </div>
+    `;
+  };
+
+  container.innerHTML = rootItems.map(n => renderNode(n, 0)).join("");
+  if (typeof lucide !== "undefined") lucide.createIcons();
+};
+
+window.openEtapaFinanciamentoModal = function(id = "new", parentId = null) {
+  let modal = document.getElementById("etapa-financiamento-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "etapa-financiamento-modal";
+    modal.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px);";
+    modal.innerHTML = `
+      <div style="background: #fff; width: 450px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column;">
+        <div style="padding: 15px 20px; background: #004E33; color: white; display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px;"><i data-lucide="landmark" style="width: 18px; color: #fff;"></i> <span id="etapa-fin-modal-title">Editar Etapa</span></h3>
+          <button onclick="document.getElementById('etapa-financiamento-modal').style.display='none'" style="background: transparent; border: none; color: white; cursor: pointer;">
+            <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+          </button>
+        </div>
+        <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
+          <input type="hidden" id="etapa-fin-modal-id">
+          <input type="hidden" id="etapa-fin-modal-parent-id">
+          <div>
+            <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Nome da Etapa</label>
+            <input type="text" id="etapa-fin-modal-nome" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: Análise de crédito">
+          </div>
+          <div>
+            <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Tempo Médio (dias)</label>
+            <input type="number" id="etapa-fin-modal-dias" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;" placeholder="Ex: 15" min="0">
+          </div>
+          <div>
+            <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Breve Explicação</label>
+            <textarea id="etapa-fin-modal-descricao" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; min-height: 80px;" placeholder="Detalhes sobre a etapa..."></textarea>
+          </div>
+        </div>
+        <div style="padding: 15px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn btn-cancel" onclick="document.getElementById('etapa-financiamento-modal').style.display='none'" style="padding: 8px 16px;">Cancelar</button>
+          <button type="button" class="btn btn-primary" onclick="window.salvarEtapaFinanciamentoModal()" style="padding: 8px 16px; background: #128143; border: none; color: white;">Salvar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    if (typeof lucide !== "undefined") lucide.createIcons();
+  }
+
+  if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
+  let e = window.EtapasFinanciamentoState.find(x => x.id === id);
+  if (id === "new") {
+    document.getElementById("etapa-fin-modal-title").innerText = parentId ? "Nova Subetapa" : "Nova Etapa";
+    document.getElementById("etapa-fin-modal-id").value = "new";
+    document.getElementById("etapa-fin-modal-parent-id").value = parentId || "";
+    document.getElementById("etapa-fin-modal-nome").value = "";
+    document.getElementById("etapa-fin-modal-dias").value = "";
+    document.getElementById("etapa-fin-modal-descricao").value = "";
+  } else if (e) {
+    document.getElementById("etapa-fin-modal-title").innerText = "Editar Etapa";
+    document.getElementById("etapa-fin-modal-id").value = id;
+    document.getElementById("etapa-fin-modal-parent-id").value = e.parentId || "";
+    document.getElementById("etapa-fin-modal-nome").value = e.nome;
+    document.getElementById("etapa-fin-modal-dias").value = e.dias || 0;
+    document.getElementById("etapa-fin-modal-descricao").value = e.descricao || "";
+  }
+  modal.style.display = "flex";
+};
+
+window.salvarEtapaFinanciamentoModal = function() {
+  const id = document.getElementById("etapa-fin-modal-id").value;
+  const parentId = document.getElementById("etapa-fin-modal-parent-id").value || null;
+  const nome = document.getElementById("etapa-fin-modal-nome").value;
+  const dias = parseInt(document.getElementById("etapa-fin-modal-dias").value) || 0;
+  const desc = document.getElementById("etapa-fin-modal-descricao").value;
+  if (!nome.trim()) {
+    alert("O nome da etapa é obrigatório.");
+    return;
+  }
+  if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
+  if (id === "new") {
+    const maxOrder = Math.max(...window.EtapasFinanciamentoState.filter(x => x.parentId === parentId).map(x => x.order || 0), 0);
+    window.EtapasFinanciamentoState.push({
+      id: "f" + Date.now(),
+      nome: nome.trim(),
+      dias: dias,
+      descricao: desc,
+      parentId: parentId,
+      order: maxOrder + 10
+    });
+  } else {
+    const e = window.EtapasFinanciamentoState.find(x => x.id === id);
+    if (e) {
+      e.nome = nome.trim();
+      e.dias = dias;
+      e.descricao = desc;
+    }
+  }
+  document.getElementById("etapa-financiamento-modal").style.display = "none";
+  window.persistEtapasFinanciamento();
+  window.renderEtapasFinanciamento();
+};
+
+window.editarEtapaFinanciamento = function(id) {
+  window.openEtapaFinanciamentoModal(id);
+};
+
+window.adicionarEtapaFinanciamento = function() {
+  window.openEtapaFinanciamentoModal("new");
+};
+
+window.removerEtapaFinanciamento = function(id) {
+  const etapa = (window.EtapasFinanciamentoState || []).find(e => e.id === id);
+  if (!etapa) return;
+  if (!confirm(`Deseja realmente excluir a etapa "${etapa.nome}"?`)) return;
+  const dropIds = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    window.EtapasFinanciamentoState.forEach(e => {
+      if (e.parentId && dropIds.has(e.parentId) && !dropIds.has(e.id)) {
+        dropIds.add(e.id);
+        grew = true;
+      }
+    });
+  }
+  window.EtapasFinanciamentoState = window.EtapasFinanciamentoState.filter(e => !dropIds.has(e.id));
+  window.persistEtapasFinanciamento();
+  window.renderEtapasFinanciamento();
 };
 
 window.saveAzureConfig = function() {
@@ -38204,6 +38532,7 @@ window.getDynamicOperators = function(type = 'all') {
 window.SYNC_KEYS = [
     "crm_users",
     "crm_moura_judiciais",
+    "crm_moura_financiamento",
     "crm_moura_profiles",
     "crm_moura_rules",
     "crm_moura_rules_params",
@@ -39009,12 +39338,12 @@ window.syncGlobalConfigFromFirebase = async function() {
                         }
                         return;
                     }
-                    if (k === "crm_moura_judiciais") {
+                    if (k === "crm_moura_judiciais" || k === "crm_moura_financiamento") {
                         try {
                             const localArr = JSON.parse(localStorage.getItem(k) || "[]");
                             const cloudArr = JSON.parse(globalData[k] || "[]");
                             if (localArr.length > cloudArr.length) {
-                                console.log("[Firebase] Local judiciais tem mais itens que a nuvem. Forçando upload da versão local...");
+                                console.log("[Firebase] Local", k, "tem mais itens que a nuvem. Forçando upload da versão local...");
                                 if (window.forceUploadLocalConfig) {
                                     setTimeout(() => window.forceUploadLocalConfig(true), 2000);
                                 }
@@ -39026,6 +39355,14 @@ window.syncGlobalConfigFromFirebase = async function() {
                     changed = true;
                 }
             });
+            try {
+                const jud = JSON.parse(localStorage.getItem("crm_moura_judiciais") || "[]");
+                if (Array.isArray(jud)) window.EtapasJudiciaisState = jud;
+            } catch (e) {}
+            try {
+                const fin = JSON.parse(localStorage.getItem("crm_moura_financiamento") || "[]");
+                if (Array.isArray(fin)) window.EtapasFinanciamentoState = fin;
+            } catch (e) {}
             if (typeof window.ensureTimelineReguaDefaults === "function") {
                 try {
                     const stored = JSON.parse(localStorage.getItem("crm_moura_timeline_nodes") || "null");

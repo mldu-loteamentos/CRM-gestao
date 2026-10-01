@@ -53,6 +53,7 @@
       { id: "config_cr", label: "Configurações (CR)", abas: [
         { id: "regra-regua", label: "Régua de Cobrança" },
         { id: "regra-judiciais", label: "Etapas Judiciais" },
+        { id: "regra-financiamento", label: "Etapas Financiamento" },
         { id: "regra-atribuicao", label: "Atribuição de Operadores" },
         { id: "regra-negociacao", label: "Regras de Negociação" },
         { id: "regra-fila", label: "Fila de Cobrança" },
