@@ -2686,6 +2686,12 @@ function switchTab(tabId, titleOverride, showLoader = false) {
         if (titleInput) titleInput.focus();
       }, 50);
     }
+    if (tabId === 'financiamento') {
+      setTimeout(() => {
+        const titleInput = document.getElementById('fin-filter-titulo');
+        if (titleInput) titleInput.focus();
+      }, 80);
+    }
   }
   
   const sidebarItem = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
@@ -2729,6 +2735,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "fluxo-caixa-diario": "Fluxo de caixa diário",
     "resultado-caixa": "Resultado de caixa",
     "investimento": "Aplicações e Investimentos",
+    "financiamento": "Financiamento",
     "repactuacao-lote": "Repactuação",
     "parametrizacao-parceiro": "Parametrização de Parceiro",
     "estrutura-societaria": "Organograma Societário",
@@ -2779,6 +2786,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "fluxo-caixa-diario": "calendar-clock",
     "resultado-caixa": "scale",
     "investimento": "trending-up",
+    "financiamento": "landmark",
     "repactuacao-lote": "refresh-cw",
     "parametrizacao-parceiro": "handshake",
     "estrutura-societaria": "git-fork",
@@ -2913,6 +2921,18 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof ResultadoCaixaApp !== "undefined") ResultadoCaixaApp.init();
   } else if (tabId === "investimento") {
     if (typeof InvestimentoApp !== "undefined") InvestimentoApp.init();
+  } else if (tabId === "financiamento") {
+    const bootFin = () => {
+      try {
+        if (window.FinanciamentoApp && typeof window.FinanciamentoApp.init === "function") {
+          window.FinanciamentoApp.init();
+        }
+      } catch (err) {
+        console.error("[Financiamento]", err);
+      }
+    };
+    bootFin();
+    setTimeout(bootFin, 0);
   } else if (tabId === "repactuacao-lote") {
     const bootRepac = () => {
       try {
@@ -4217,6 +4237,7 @@ window.applyPermissions = function(profileName) {
           || modKey === 'sub_fin_cb_resultado_caixa_acessar'
         ) && perms.sub_fin_cb === true;
         const repacAlias = modKey === 'sub_fin_repac_repactuacao_acessar' && (perms.mod_fin === true || perms.sub_fin_repac === true);
+        const finanAlias = modKey === 'sub_fin_finan_financiamento_acessar' && (perms.mod_fin === true || perms.sub_fin_finan === true);
         const relLegacy = perms.mod_rel === true
           || perms.sub_rel_geral === true
           || perms.sub_rel_geral_relacionamento_acessar === true;
@@ -4240,7 +4261,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_suporte_geral_chamados_visualizar === true
           || perms.sub_suporte_geral_chamados_editar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || repacAlias || relAlias || suporteAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -38533,6 +38554,7 @@ window.SYNC_KEYS = [
     "crm_users",
     "crm_moura_judiciais",
     "crm_moura_financiamento",
+    "crm_moura_financiamentos_proc",
     "crm_moura_profiles",
     "crm_moura_rules",
     "crm_moura_rules_params",

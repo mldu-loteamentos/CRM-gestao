@@ -73,6 +73,7 @@
       { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
       { id: "fluxo_diario", label: "Fluxo de caixa diário" },
       { id: "resultado_caixa", label: "Resultado de caixa" },
+      { id: "financiamento", label: "Financiamento" },
       { id: "repactuacao", label: "Repactuação" }
     ]},
     { id: "fiscal", label: "Fiscal / Contábil", subs: [

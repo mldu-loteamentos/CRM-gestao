@@ -188,6 +188,10 @@ const ConfigUsersApp = {
           ]
         },
         {
+          name: "Financiamento", key: "sub_fin_finan",
+          actions: [{ id: "financiamento", label: "Financiamento" }]
+        },
+        {
           name: "Repactuação", key: "sub_fin_repac",
           actions: [{ id: "repactuacao", label: "Repactuação" }]
         }
