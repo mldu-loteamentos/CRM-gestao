@@ -3487,6 +3487,13 @@ async function processSuccessfulLogin(loggedUser) {
     }
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
+    try {
+      if (typeof window.downloadBackOfficePermsFromFirebase === "function") {
+        await window.downloadBackOfficePermsFromFirebase();
+      }
+    } catch (e) {
+      console.warn("[perms] download back-office no login:", e);
+    }
     if (window.MouraAuth && typeof MouraAuth.persistSession === "function") {
       MouraAuth.persistSession({
         name: validatedUser.name || loggedUser.name,
@@ -3890,7 +3897,50 @@ window.persistBackOfficePermsObject = function(obj) {
     }
     localStorage.setItem("crm_moura_profiles", JSON.stringify(profiles));
   } catch (e) {}
+  if (!window._crmBackOfficePermsHydrating && window.crmPermsHasAnyTrue(copy) && typeof window.uploadBackOfficePermsToFirebase === "function") {
+    window.uploadBackOfficePermsToFirebase(copy).catch((e) => console.warn("[perms] upload back-office:", e));
+  }
   return ok;
+};
+
+window.uploadBackOfficePermsToFirebase = async function(obj) {
+  if (!obj || typeof window.crmPermsHasAnyTrue !== "function" || !window.crmPermsHasAnyTrue(obj)) return;
+  if (!window.firebaseDb || !window.firebaseCollections) return;
+  const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "back_office_perms");
+  await window.firebaseCollections.setDoc(docRef, {
+    payload: JSON.stringify(obj),
+    savedAt: Number(obj._savedAt) || Date.now(),
+    profileId: window.CRM_BACK_OFFICE_PROFILE_ID
+  }, { merge: true });
+};
+
+window.applyBackOfficePermsFromCloudPayload = function(cloudRaw) {
+  if (!cloudRaw) return false;
+  const localRaw = JSON.stringify(window.pickBestCrmPermsObject(window.collectBackOfficePermPayloads()) || {});
+  const chosen = typeof window.pickPreferredCrmPerms === "function"
+    ? window.pickPreferredCrmPerms(localRaw, typeof cloudRaw === "string" ? cloudRaw : JSON.stringify(cloudRaw))
+    : (window.crmPermsPayloadHasTrue(cloudRaw) ? cloudRaw : localRaw);
+  const obj = window.parseCrmPermsPayload(chosen);
+  if (!obj || !window.crmPermsHasAnyTrue(obj)) return false;
+  window._crmBackOfficePermsHydrating = true;
+  try {
+    window.persistBackOfficePermsObject(obj);
+  } finally {
+    window._crmBackOfficePermsHydrating = false;
+  }
+  return true;
+};
+
+window.downloadBackOfficePermsFromFirebase = async function() {
+  if (!window.firebaseDb || !window.firebaseCollections) return null;
+  const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "back_office_perms");
+  const snap = await window.firebaseCollections.getDoc(docRef);
+  const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+  if (!exists) return null;
+  const data = snap.data() || {};
+  window.applyBackOfficePermsFromCloudPayload(data.payload);
+  if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
+  return data.payload || null;
 };
 
 window.readBackOfficePerms = function() {
@@ -38033,7 +38083,11 @@ window.syncGlobalConfigFromFirebase = async function() {
         if (!window.firebaseDb || !window.firebaseCollections) return;
         const snap = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, "config"));
         let globalData = null;
-        snap.forEach(d => { if (d.id === "global") globalData = d.data(); });
+        let backOfficeCloud = null;
+        snap.forEach(d => {
+            if (d.id === "global") globalData = d.data();
+            if (d.id === "back_office_perms") backOfficeCloud = d.data();
+        });
         
         if (globalData) {
             let changed = false;
@@ -38251,6 +38305,20 @@ window.syncGlobalConfigFromFirebase = async function() {
                 }
             });
             try {
+              const fromDedicated = backOfficeCloud && backOfficeCloud.payload;
+              const fromGlobal = globalData && (
+                globalData["crm_perms_operador_cobranca_back_office"]
+                || globalData["crm_perms_operador_cobrança_back_office"]
+              );
+              if (fromDedicated && typeof window.applyBackOfficePermsFromCloudPayload === "function") {
+                window.applyBackOfficePermsFromCloudPayload(fromDedicated);
+              } else if (fromGlobal && typeof window.applyBackOfficePermsFromCloudPayload === "function") {
+                window.applyBackOfficePermsFromCloudPayload(fromGlobal);
+                const localObj = window.pickBestCrmPermsObject(window.collectBackOfficePermPayloads());
+                if (window.crmPermsHasAnyTrue(localObj) && typeof window.uploadBackOfficePermsToFirebase === "function") {
+                  window.uploadBackOfficePermsToFirebase(localObj).catch(() => {});
+                }
+              }
               if (typeof window.readBackOfficePerms === "function") window.readBackOfficePerms();
             } catch (e) {}
             
