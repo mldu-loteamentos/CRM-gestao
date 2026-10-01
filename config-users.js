@@ -323,31 +323,19 @@ const ConfigUsersApp = {
 
   prunePermissionStorage(keepKey) {
     try {
-      const protectedKeys = new Set([
-        "crm_perms_operador_cobranca",
-        "crm_perms_operador_cobrança",
-        "crm_perms_admin",
-        "crm_perms_operador_cobranca_back_office",
-        "crm_perms_operador_cobranca_terceirizado"
-      ]);
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (!k || !k.startsWith("crm_perms_")) continue;
-        if (k === keepKey || protectedKeys.has(k)) continue;
+        if (k === keepKey) continue;
         const raw = localStorage.getItem(k);
         try {
           const obj = raw ? JSON.parse(raw) : null;
-          // mantém apenas o espelho leve e remove os espelhos redundantes;
-          // nunca apaga o perfil-base da cobrança, porque ele alimenta o espelho.
           if (obj && obj.__mirror_of__) keysToRemove.push(k);
-          else keysToRemove.push(k);
-        } catch (e) {
-          keysToRemove.push(k);
-        }
+        } catch (e) {}
       }
       if (!keysToRemove.length) return;
-      keysToRemove.forEach(k => {
+      keysToRemove.forEach((k) => {
         try { localStorage.removeItem(k); } catch (e) { console.warn("[ConfigUsers] falha ao limpar permissão antiga", k, e); }
       });
       console.info("[ConfigUsers] liberou cota do localStorage removendo espelhos antigos de permissões.");
@@ -377,6 +365,16 @@ const ConfigUsersApp = {
   },
 
   writePermissionPayload(profileId, perms) {
+    const existing = this.getProfilePermsObject(profileId) || {};
+    const incomingHas = typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(perms)
+      : Object.keys(perms || {}).some((k) => perms[k] === true);
+    const existingHas = typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(existing)
+      : Object.keys(existing).some((k) => existing[k] === true);
+    if (!incomingHas && existingHas) {
+      return true;
+    }
     const toSave = Object.assign({}, perms || {}, { _savedAt: Date.now() });
     delete toSave.__mirror_of__;
     const payload = JSON.stringify(toSave);
@@ -384,11 +382,12 @@ const ConfigUsersApp = {
     const kind = typeof window.crmProfileKind === "function"
       ? window.crmProfileKind((profile && profile.name) || profileId)
       : "";
-    const keys = new Set();
-    if (kind === "back_office") {
-      keys.add(window.CRM_BACK_OFFICE_PROFILE_ID || "operador_cobranca_back_office");
+    if (kind === "back_office" && typeof window.persistBackOfficePermsObject === "function") {
       window._crmBackOfficePermsSavedAt = Date.now();
-    } else if (kind === "terceirizado") {
+      return window.persistBackOfficePermsObject(toSave);
+    }
+    const keys = new Set();
+    if (kind === "terceirizado") {
       keys.add("operador_cobranca_terceirizado");
     } else if (kind === "cobranca") {
       keys.add("operador_cobranca");
@@ -432,34 +431,18 @@ const ConfigUsersApp = {
     const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
     const label = (profile && profile.name) || profileId;
     if (typeof window.crmProfileKind === "function" && window.crmProfileKind(label) === "back_office") {
+      if (typeof window.readBackOfficePerms === "function") return window.readBackOfficePerms();
       if (typeof window.readCrmProfilePerms === "function") {
         return window.readCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_NAME || label);
       }
     }
-    if (typeof window.readCrmProfilePerms === "function" && profile) {
-      return window.readCrmProfilePerms(profile.name || profileId);
+    if (typeof window.readCrmProfilePerms === "function") {
+      return window.readCrmProfilePerms((profile && profile.name) || profileId);
     }
+    if (profile && profile.perms && typeof profile.perms === "object") return Object.assign({}, profile.perms);
     if (typeof window.materializeCrmProfilePerms === "function") {
       return window.materializeCrmProfilePerms(profileId) || {};
     }
-    const read = (id) => {
-      try {
-        const raw = localStorage.getItem(`crm_perms_${id}`);
-        if (!raw) return null;
-        return JSON.parse(raw);
-      } catch (e) {
-        return null;
-      }
-    };
-    let obj = read(profileId);
-    if (obj && obj.__mirror_of__) {
-      const mirrored = read(obj.__mirror_of__);
-      const copy = mirrored && typeof mirrored === "object" && !mirrored.__mirror_of__ ? { ...mirrored } : {};
-      delete copy.__mirror_of__;
-      try { this.safeLocalSet(`crm_perms_${profileId}`, JSON.stringify(copy)); } catch (e) {}
-      return copy;
-    }
-    if (obj && typeof obj === "object") return obj;
     return {};
   },
 
@@ -527,6 +510,12 @@ const ConfigUsersApp = {
     const keep = backs[0] || { id: backId, name: backName };
     keep.id = backId;
     keep.name = backName;
+    const permCandidates = backs.map((p) => p && p.perms).filter(Boolean);
+    if (permCandidates.length) {
+      keep.perms = typeof window.pickBestCrmPermsObject === "function"
+        ? window.pickBestCrmPermsObject(permCandidates.map((p) => (typeof p === "string" ? p : JSON.stringify(p))))
+        : (keep.perms || permCandidates[0]);
+    }
     this.profiles = (this.profiles || []).filter((p) => kindOf(p) !== "back_office");
     this.profiles.push(keep);
     this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
@@ -1572,6 +1561,18 @@ const ConfigUsersApp = {
        perms[key] = cb.checked;
     });
     window.syncConfiguracoesPermAliases(perms);
+
+    const incomingHas = typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(perms)
+      : Object.keys(perms).some((k) => perms[k] === true);
+    const existing = this.getProfilePermsObject(this.selectedProfile) || {};
+    const existingHas = typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(existing)
+      : Object.keys(existing).some((k) => existing[k] === true);
+    if (!incomingHas && existingHas) {
+      alert("As marcações da tela vieram vazias, então as permissões já salvas deste perfil foram mantidas. Abra o perfil de novo, marque os módulos e clique em Salvar Permissões.");
+      return;
+    }
 
     if (this.selectedProfile !== 'admin' && totalEdit > 0 && checkedEdit === totalEdit) {
        alert("Acesso Negado: Não é permitido criar um perfil com permissão de edição em todas as funcionalidades. Perfil com edição irrestrita é um privilégio exclusivo do Administrador.");

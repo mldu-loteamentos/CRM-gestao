@@ -3748,9 +3748,16 @@ window.materializeCrmProfilePerms = function(profileId) {
   return {};
 };
 
+window.CRM_BACK_OFFICE_BACKUP_KEY = "crm_back_office_perms_backup";
+
 window.crmPermsHasAnyTrue = function(obj) {
   if (!obj || typeof obj !== "object") return false;
   return Object.keys(obj).some((k) => k !== "__mirror_of__" && k !== "_savedAt" && obj[k] === true);
+};
+
+window.crmPermsTrueCount = function(obj) {
+  if (!obj || typeof obj !== "object") return 0;
+  return Object.keys(obj).filter((k) => k !== "__mirror_of__" && k !== "_savedAt" && obj[k] === true).length;
 };
 
 window.crmPermsPayloadHasTrue = function(raw) {
@@ -3773,6 +3780,19 @@ window.crmPermsSavedAt = function(raw) {
   }
 };
 
+window.parseCrmPermsPayload = function(raw) {
+  if (!raw) return null;
+  try {
+    const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!obj || typeof obj !== "object" || obj.__mirror_of__) return null;
+    const copy = Object.assign({}, obj);
+    delete copy.__mirror_of__;
+    return copy;
+  } catch (e) {
+    return null;
+  }
+};
+
 window.pickPreferredCrmPerms = function(localStr, cloudStr) {
   const localHas = window.crmPermsPayloadHasTrue(localStr);
   const cloudHas = window.crmPermsPayloadHasTrue(cloudStr);
@@ -3784,7 +3804,133 @@ window.pickPreferredCrmPerms = function(localStr, cloudStr) {
     if (cloudAt > localAt) return cloudStr;
     return localStr;
   }
-  return localStr || cloudStr || "{}";
+  if (localStr && String(localStr) !== "{}" && String(localStr) !== "null") return localStr;
+  return cloudStr || localStr || "{}";
+};
+
+window.pickBestCrmPermsObject = function(payloads) {
+  let best = {};
+  let bestTrue = -1;
+  let bestAt = -1;
+  (payloads || []).forEach((raw) => {
+    const obj = window.parseCrmPermsPayload(raw);
+    if (!obj) return;
+    const nTrue = window.crmPermsTrueCount(obj);
+    const at = window.crmPermsSavedAt(obj);
+    if (nTrue > bestTrue || (nTrue === bestTrue && at >= bestAt)) {
+      best = obj;
+      bestTrue = nTrue;
+      bestAt = at;
+    }
+  });
+  return best;
+};
+
+window.collectBackOfficePermPayloads = function() {
+  const payloads = [];
+  const ids = typeof window.crmProfileStorageIds === "function"
+    ? window.crmProfileStorageIds(window.CRM_BACK_OFFICE_PROFILE_ID, window.CRM_BACK_OFFICE_PROFILE_NAME)
+    : [window.CRM_BACK_OFFICE_PROFILE_ID];
+  ids.forEach((id) => {
+    try {
+      const raw = localStorage.getItem("crm_perms_" + id);
+      if (raw) payloads.push(raw);
+    } catch (e) {}
+  });
+  try {
+    const backup = localStorage.getItem(window.CRM_BACK_OFFICE_BACKUP_KEY);
+    if (backup) payloads.push(backup);
+  } catch (e) {}
+  try {
+    const sess = sessionStorage.getItem(window.CRM_BACK_OFFICE_BACKUP_KEY);
+    if (sess) payloads.push(sess);
+  } catch (e) {}
+  try {
+    const profiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
+    profiles.forEach((p) => {
+      if (!p) return;
+      if (window.crmProfileKind(p.name || p.id) !== "back_office") return;
+      if (p.perms) payloads.push(typeof p.perms === "string" ? p.perms : JSON.stringify(p.perms));
+    });
+  } catch (e) {}
+  return payloads;
+};
+
+window.persistBackOfficePermsObject = function(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  const copy = Object.assign({}, obj, { _savedAt: obj._savedAt || Date.now() });
+  delete copy.__mirror_of__;
+  const payload = JSON.stringify(copy);
+  const ids = typeof window.crmProfileStorageIds === "function"
+    ? window.crmProfileStorageIds(window.CRM_BACK_OFFICE_PROFILE_ID, window.CRM_BACK_OFFICE_PROFILE_NAME)
+    : [window.CRM_BACK_OFFICE_PROFILE_ID];
+  let ok = true;
+  ids.forEach((id) => {
+    try { localStorage.setItem("crm_perms_" + id, payload); } catch (e) { ok = false; }
+  });
+  try { localStorage.setItem(window.CRM_BACK_OFFICE_BACKUP_KEY, payload); } catch (e) { ok = false; }
+  try { sessionStorage.setItem(window.CRM_BACK_OFFICE_BACKUP_KEY, payload); } catch (e) {}
+  try {
+    const profiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]") || [];
+    let found = false;
+    profiles.forEach((p) => {
+      if (window.crmProfileKind((p && p.name) || (p && p.id)) === "back_office") {
+        p.id = window.CRM_BACK_OFFICE_PROFILE_ID;
+        p.name = window.CRM_BACK_OFFICE_PROFILE_NAME;
+        p.perms = copy;
+        found = true;
+      }
+    });
+    if (!found) {
+      profiles.push({
+        id: window.CRM_BACK_OFFICE_PROFILE_ID,
+        name: window.CRM_BACK_OFFICE_PROFILE_NAME,
+        perms: copy
+      });
+    }
+    localStorage.setItem("crm_moura_profiles", JSON.stringify(profiles));
+  } catch (e) {}
+  return ok;
+};
+
+window.readBackOfficePerms = function() {
+  const best = window.pickBestCrmPermsObject(window.collectBackOfficePermPayloads());
+  let canonical = "";
+  try { canonical = localStorage.getItem("crm_perms_" + window.CRM_BACK_OFFICE_PROFILE_ID); } catch (e) {}
+  if (window.crmPermsHasAnyTrue(best) && !window.crmPermsPayloadHasTrue(canonical)) {
+    window.persistBackOfficePermsObject(best);
+  }
+  return best || {};
+};
+
+window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
+  let local = [];
+  let cloud = [];
+  try { local = JSON.parse(localStr || "[]") || []; } catch (e) { local = []; }
+  try { cloud = JSON.parse(cloudStr || "[]") || []; } catch (e) { cloud = []; }
+  if (!Array.isArray(local)) local = [];
+  if (!Array.isArray(cloud)) cloud = [];
+  const byId = new Map();
+  const put = (p) => {
+    if (!p || !p.id) return;
+    const prev = byId.get(String(p.id));
+    if (!prev) {
+      byId.set(String(p.id), Object.assign({}, p));
+      return;
+    }
+    const merged = Object.assign({}, prev, p);
+    if (prev.perms || p.perms) {
+      const chosen = window.pickPreferredCrmPerms(
+        JSON.stringify(prev.perms || {}),
+        JSON.stringify(p.perms || {})
+      );
+      try { merged.perms = JSON.parse(chosen || "{}"); } catch (e) { merged.perms = prev.perms || p.perms; }
+    }
+    byId.set(String(p.id), merged);
+  };
+  cloud.forEach(put);
+  local.forEach(put);
+  return JSON.stringify(Array.from(byId.values()));
 };
 
 window.readCrmProfilePerms = function(profileNameOrId) {
@@ -3794,15 +3940,15 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     ? window.crmProfileStorageIds(id, profileNameOrId)
     : [id];
   if (kind === "back_office") {
-    return window.materializeCrmProfilePerms(window.CRM_BACK_OFFICE_PROFILE_ID) || {};
+    return window.readBackOfficePerms();
   }
+  const payloads = ids.map((pid) => {
+    try { return localStorage.getItem("crm_perms_" + pid); } catch (e) { return null; }
+  });
+  const best = window.pickBestCrmPermsObject(payloads);
+  if (window.crmPermsHasAnyTrue(best)) return best;
   let obj = window.materializeCrmProfilePerms(id);
   if (obj && Object.keys(obj).length) return obj;
-  for (let i = 0; i < ids.length; i++) {
-    if (ids[i] === id) continue;
-    obj = window.materializeCrmProfilePerms(ids[i]);
-    if (obj && Object.keys(obj).length) return obj;
-  }
   return {};
 };
 
@@ -37994,6 +38140,19 @@ window.syncGlobalConfigFromFirebase = async function() {
                     } catch (e) {}
                     return;
                 }
+                if (k === "crm_moura_profiles") {
+                    const merged = typeof window.mergeCrmMouraProfiles === "function"
+                      ? window.mergeCrmMouraProfiles(localStorage.getItem(k), globalData[k] || "[]")
+                      : (localStorage.getItem(k) || globalData[k] || "[]");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -38091,6 +38250,9 @@ window.syncGlobalConfigFromFirebase = async function() {
                     setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                 }
             });
+            try {
+              if (typeof window.readBackOfficePerms === "function") window.readBackOfficePerms();
+            } catch (e) {}
             
             if (changed && !window._crmLoginSync) {
                 if (sessionStorage.getItem("crm_config_reloaded") === "1") {
