@@ -297,6 +297,74 @@ function _vcCollectOverdueCostCenters() {
     return [...map.values()].sort((a, b) => a.id - b.id || a.label.localeCompare(b.label));
 }
 
+function _vcNormUnitName(name) {
+    return String(name || '')
+        .replace(/^Quadra-Lote:\s*/i, '')
+        .trim()
+        .replace(/[\s-]+/g, '')
+        .toUpperCase();
+}
+
+function _vcMissingClientRef(r) {
+    if (!r) return false;
+    const name = String(r.clienteName || '').trim();
+    const titulo = String(r.titulo || r.tituloKey || '').trim();
+    return !name || name === '-' || !titulo || titulo === '-';
+}
+
+function _vcExtractContractCustomerId(sc) {
+    if (!sc) return '';
+    if (sc.customerId) return String(sc.customerId);
+    if (sc.customer && sc.customer.id) return String(sc.customer.id);
+    if (sc.client && sc.client.id) return String(sc.client.id);
+    const people = sc.salesContractCustomers || sc.customers || [];
+    if (people.length) {
+        const main = people.find(p => p.main === true || p.main === 'S') || people[0];
+        return String((main && (main.id || main.customerId)) || '');
+    }
+    return '';
+}
+
+function _vcNameFromCustomerCache(customerId) {
+    if (!customerId) return '';
+    const cache = (window.GlobalCustomerCache && window.GlobalCustomerCache.data) || [];
+    const hit = cache.find(c => String(c.id) === String(customerId));
+    return (hit && (hit.name || hit.customerName)) || '';
+}
+
+function _vcSaleMatchesUnit(sale, costCenterId, unidade) {
+    if (!sale) return false;
+    const emp = String(costCenterId || '');
+    if (emp && String(sale.enterpriseId || sale.costCenterId || '') !== emp) return false;
+    const want = _vcNormUnitName(unidade);
+    if (!want) return true;
+    const fromName = _vcNormUnitName(sale.unitName || sale.unityName || sale.unit || '');
+    const fromMapped = _vcNormUnitName(String(sale.unitId || '').replace(/^U-\d+-/, ''));
+    return fromName === want || fromMapped === want;
+}
+
+function _vcCountOverdueInstallments(installments) {
+    let count = 0;
+    let valor = 0;
+    (installments || []).forEach(inst => {
+        const delay = Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0;
+        const paid = !!(inst.paymentDate || inst.payOffDate || inst.situation === 'Paid');
+        if (paid || delay <= 0) return;
+        count += 1;
+        valor += Number(inst.balanceAmount || inst.amount || inst.value || 0) || 0;
+    });
+    return { count, valor };
+}
+
+async function _vcSiengeGet(path) {
+    const fn = (window.siengeFetchWithRetry)
+        || (typeof siengeFetchWithRetry === 'function' ? siengeFetchWithRetry : null);
+    if (fn) return fn(path);
+    const res = await fetch(`/api/sienge-proxy${path.startsWith('/') ? path : '/' + path}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+}
+
 // ─── App ────────────────────────────────────────────────────────────────────
 
 window.VerificarConstrucaoApp = {
@@ -817,6 +885,14 @@ window.VerificarConstrucaoApp = {
             this.allRows = rows;
             this.renderedRows = [];
 
+            const missingRefs = rows.filter(_vcMissingClientRef);
+            if (missingRefs.length) {
+                loading.innerHTML = `Recuperando cliente e título pela unidade (${missingRefs.length})...`;
+                await this.enrichMissingContractData(rows);
+                rows.forEach((r, i) => r.originalIdx = i);
+                this.allRows = rows;
+            }
+
             this.renderTable();
 
             loading.style.display = 'none';
@@ -826,6 +902,207 @@ window.VerificarConstrucaoApp = {
             console.error('[Vistoria] Erro ao carregar dados:', e);
             loading.innerHTML = '<span style="color:red">Erro ao carregar os dados: ' + e.message + '</span>';
         }
+    },
+
+    async enrichMissingContractData(rows) {
+        const targets = (rows || []).filter(_vcMissingClientRef);
+        if (!targets.length) return;
+        this._unitsByEmp = this._unitsByEmp || {};
+        this._contractByEmpUnit = this._contractByEmpUnit || {};
+
+        for (const row of targets) {
+            try {
+                await this._fillRowFromSienge(row);
+                this._persistRecoveredRow(row);
+            } catch (err) {
+                console.warn('[Vistoria] Falha ao recuperar contrato da unidade', row.unidade, err);
+            }
+        }
+    },
+
+    async _fillRowFromSienge(row) {
+        if (row.customerId && (_vcMissingClientRef(row))) {
+            await this._fillRowFromCustomerId(row);
+            if (!_vcMissingClientRef(row)) return;
+        }
+
+        const empId = row.costCenterId;
+        const unidade = row.unidade;
+        if (!empId || !unidade || unidade === '-') return;
+
+        const lookup = await this._lookupContractByEmpUnit(empId, unidade);
+        if (!lookup) return;
+
+        if (lookup.customerId) row.customerId = lookup.customerId;
+        if (lookup.customerName && (!row.clienteName || row.clienteName === '-')) {
+            row.clienteName = lookup.customerName;
+        }
+        if (lookup.titulo && (!row.titulo || row.titulo === '-')) {
+            row.titulo = lookup.titulo;
+            row.tituloKey = lookup.titulo;
+        }
+        if (lookup.contractId) row.contractId = lookup.contractId;
+        if (lookup.contractNumber) row.contractNumberStr = String(lookup.contractNumber);
+        if (lookup.parcelasVencidas != null) row.parcelasVencidas = lookup.parcelasVencidas;
+        if (lookup.valorVencido != null) row.valorVencido = lookup.valorVencido;
+
+        const extraKeys = [lookup.customerId, lookup.titulo, lookup.contractId, lookup.contractNumber]
+            .filter(Boolean).map(String);
+        row.contractKeys = [...new Set([...(row.contractKeys || []), ...extraKeys])];
+    },
+
+    async _fillRowFromCustomerId(row) {
+        const customerId = row.customerId;
+        if (!customerId) return;
+
+        if (!row.clienteName || row.clienteName === '-') {
+            let name = _vcNameFromCustomerCache(customerId);
+            if (!name && window.SiengeApiService && typeof window.SiengeApiService.getCustomer === 'function') {
+                try {
+                    const cust = await window.SiengeApiService.getCustomer(customerId);
+                    name = (cust && cust.name) || '';
+                } catch (e) {}
+            }
+            if (name) row.clienteName = name;
+        }
+
+        if ((!row.titulo || row.titulo === '-') && window.SiengeApiService && typeof window.SiengeApiService.getSales === 'function') {
+            try {
+                const sales = await window.SiengeApiService.getSales(customerId);
+                const match = (sales || []).find(s => _vcSaleMatchesUnit(s, row.costCenterId, row.unidade)) || (sales || [])[0];
+                if (match) {
+                    if (match.receivableBillId) {
+                        row.titulo = match.receivableBillId;
+                        row.tituloKey = match.receivableBillId;
+                    }
+                    if (match.id) row.contractId = match.id;
+                    if (match.contractNumber || match.number) {
+                        row.contractNumberStr = String(match.contractNumber || match.number);
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (row.titulo && row.titulo !== '-') {
+            await this._fillOverdueFromTitulo(row);
+        }
+    },
+
+    async _lookupContractByEmpUnit(costCenterId, unidade) {
+        const cacheKey = String(costCenterId) + ':' + _vcNormUnitName(unidade);
+        if (this._contractByEmpUnit[cacheKey]) return this._contractByEmpUnit[cacheKey];
+
+        const units = await this._loadUnitsForEmp(costCenterId);
+        const want = _vcNormUnitName(unidade);
+        const match = (units || []).find(u =>
+            _vcNormUnitName(u.name) === want || String(u.id) === String(unidade)
+        );
+        if (!match) return null;
+
+        let contract = null;
+        if (match.contractId) {
+            try {
+                contract = await _vcSiengeGet(`/sales-contracts/${encodeURIComponent(match.contractId)}`);
+            } catch (e) {}
+        }
+        if (!contract) {
+            try {
+                const data = await _vcSiengeGet(
+                    `/sales-contracts?enterpriseId=${encodeURIComponent(costCenterId)}&unitId=${encodeURIComponent(match.id)}`
+                );
+                const list = (data && data.results) || [];
+                const matching = list.filter(c =>
+                    String(c.unitId) === String(match.id) || _vcNormUnitName(c.unitName || c.unityName) === want
+                );
+                const pool = matching.length ? matching : list;
+                contract = pool.find(c => String(c.status).toUpperCase() === 'ACTIVE')
+                    || pool.find(c => String(c.status).toUpperCase() !== 'CANCELED')
+                    || pool[0]
+                    || null;
+            } catch (e) {}
+        }
+        if (!contract) return null;
+
+        const customerId = _vcExtractContractCustomerId(contract);
+        let customerName = _vcNameFromCustomerCache(customerId);
+        if (!customerName && customerId && window.SiengeApiService && typeof window.SiengeApiService.getCustomer === 'function') {
+            try {
+                const cust = await window.SiengeApiService.getCustomer(customerId);
+                customerName = (cust && cust.name) || '';
+            } catch (e) {}
+        }
+
+        const titulo = contract.receivableBillId || contract.billReceivableId || '';
+        let parcelasVencidas = 0;
+        let valorVencido = 0;
+        if (titulo && window.SiengeApiService && typeof window.SiengeApiService.getBillInstallments === 'function') {
+            try {
+                const inst = await window.SiengeApiService.getBillInstallments(titulo);
+                const overdue = _vcCountOverdueInstallments(inst);
+                parcelasVencidas = overdue.count;
+                valorVencido = overdue.valor;
+            } catch (e) {}
+        }
+
+        const result = {
+            customerId,
+            customerName,
+            titulo,
+            contractId: contract.id || match.contractId || '',
+            contractNumber: contract.number || contract.contractNumber || '',
+            unitId: match.id,
+            parcelasVencidas,
+            valorVencido
+        };
+        this._contractByEmpUnit[cacheKey] = result;
+        return result;
+    },
+
+    async _loadUnitsForEmp(costCenterId) {
+        const key = String(costCenterId);
+        if (this._unitsByEmp[key]) return this._unitsByEmp[key];
+        const allUnits = [];
+        let offset = 0;
+        const limit = 200;
+        while (true) {
+            const data = await _vcSiengeGet(
+                `/units?limit=${limit}&offset=${offset}&enterpriseId=${encodeURIComponent(costCenterId)}&additionalData=NONE`
+            );
+            const results = (data && data.results) || [];
+            allUnits.push(...results);
+            if (!results.length || results.length < limit) break;
+            offset += results.length;
+        }
+        this._unitsByEmp[key] = allUnits;
+        return allUnits;
+    },
+
+    async _fillOverdueFromTitulo(row) {
+        if (!row.titulo || row.titulo === '-') return;
+        if (!(window.SiengeApiService && typeof window.SiengeApiService.getBillInstallments === 'function')) return;
+        try {
+            const inst = await window.SiengeApiService.getBillInstallments(row.titulo);
+            const overdue = _vcCountOverdueInstallments(inst);
+            row.parcelasVencidas = overdue.count;
+            row.valorVencido = overdue.valor;
+        } catch (e) {}
+    },
+
+    _persistRecoveredRow(row) {
+        if (!row || !row.vistoriaAtiva || !row.vistoriaAtiva.id) return;
+        if (_vcMissingClientRef(row)) return;
+        if (!window.firebaseDb || !window.firebaseCollections) return;
+        try {
+            const { doc, updateDoc } = window.firebaseCollections;
+            updateDoc(doc(window.firebaseDb, 'vistorias', row.vistoriaAtiva.id), {
+                clienteName: row.clienteName || '',
+                customerId: row.customerId || '',
+                titulo: row.titulo || '',
+                tituloKey: row.tituloKey || row.titulo || '',
+                contractId: row.contractId || '',
+                contractKeys: row.contractKeys || []
+            }).catch(err => console.warn('[Vistoria] Falha ao gravar dados recuperados:', err));
+        } catch (e) {}
     },
 
     renderTable() {
@@ -1186,6 +1463,7 @@ window.VerificarConstrucaoApp = {
                         contractKeys: [...new Set(contractKeys.map(String))],
                         tituloKey: r.tituloKey || r.titulo || '',
                         titulo: r.titulo || '',
+                        clienteName: r.clienteName || '',
                         cidade: r.cidade,
                         empreendimento: r.empreendimento,
                         costCenterId: r.costCenterId,

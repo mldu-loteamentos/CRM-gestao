@@ -3197,3 +3197,4 @@ window.SiengeApiService = SiengeApiService;
 window.setSiengeApiMode = setApiMode;
 window.getSiengeApiMode = getApiMode;
 window.SIENGE_CONFIG = SIENGE_CONFIG;
+window.siengeFetchWithRetry = siengeFetchWithRetry;
