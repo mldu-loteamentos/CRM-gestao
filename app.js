@@ -1808,13 +1808,35 @@ window.clientHasOverdueSinalSI = function(client) {
   return client.hasUnpaidSinal === true;
 };
 
+window.clientPaidPercent = function(client) {
+  if (!client) return null;
+  const n = client.percPaid == null || client.percPaid === "" ? null : Number(client.percPaid);
+  if (n == null || !Number.isFinite(n)) return null;
+  return n > 1.5 ? n : n * 100;
+};
+
+window.clientSinalOverdueDays = function(client) {
+  let days = Number(client && client.sinalDaysDelay) || 0;
+  const insts = typeof window.listInstallmentsForSiCheck === "function"
+    ? window.listInstallmentsForSiCheck(client)
+    : [];
+  insts.forEach((inst) => {
+    if (typeof window.installmentIsSinalSI === "function" && !window.installmentIsSinalSI(inst)) return;
+    const d = typeof window.sinalInstallmentOverdueDays === "function"
+      ? window.sinalInstallmentOverdueDays(inst)
+      : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || 0);
+    if (Number(d) > days) days = Number(d) || 0;
+  });
+  return days;
+};
+
 window.clientIsZeroPercentPaid = function(client) {
   if (!client) return false;
+  const pct = typeof window.clientPaidPercent === "function" ? window.clientPaidPercent(client) : null;
+  if (pct != null && pct >= 1) return false;
   const last = String(client.lastPaymentDate || client.lastPay || "").trim();
   const lastLooksPaid = last && last !== "-" && last.toLowerCase().indexOf("sem") < 0 && /\d{2}/.test(last);
   if (lastLooksPaid) return false;
-  const n = client.percPaid == null || client.percPaid === "" ? null : Number(client.percPaid);
-  const pct = (n != null && Number.isFinite(n)) ? (n > 1.5 ? n : n * 100) : null;
   if (pct != null && pct < 1) return true;
   if (client.isZeroPaid) return true;
   if (typeof window.nexClientIsZeroPaid === "function"
@@ -1838,8 +1860,20 @@ window.clientAppliesClausulaSuspensiva = function(client) {
   const minDays = (typeof window.clausulaSuspensivaDias === "function")
     ? window.clausulaSuspensivaDias(cc)
     : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30);
-  const days = Math.max(Number(client.sinalDaysDelay) || 0, Number(client.maxDaysDelay) || 0);
+  const days = typeof window.clientSinalOverdueDays === "function"
+    ? window.clientSinalOverdueDays(client)
+    : (Number(client.sinalDaysDelay) || 0);
   return days >= minDays;
+};
+
+window.clientShowsSuspenderAction = function(client) {
+  if (!client) return false;
+  if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
+  if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) return false;
+  if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) return false;
+  if (client.hasOverdueAgreement) return false;
+  if (typeof window.clientIsRecenteJuridico === "function" && window.clientIsRecenteJuridico(client)) return false;
+  return !!(typeof window.clientAppliesClausulaSuspensiva === "function" && window.clientAppliesClausulaSuspensiva(client));
 };
 
 window.PARCELA_TIPO_CACHE_KEY = "crm_parcela_tipos_titulo";
@@ -3434,36 +3468,48 @@ window.showMockLoginModal = function(resolve, reject) {
   };
 };
 
+function persistCrmUsersList(crmUsers) {
+  try { localStorage.setItem("crm_users", JSON.stringify(crmUsers)); } catch (e) {}
+  try {
+    if (window.ConfigUsersApp) window.ConfigUsersApp.users = crmUsers;
+  } catch (e) {}
+  if (typeof window.forceUploadLocalConfig === "function") {
+    window.forceUploadLocalConfig(true).catch(() => {});
+  }
+}
+
 function validateAndLoadCrmUser(user) {
   let crmUsers = [];
   try {
     crmUsers = JSON.parse(localStorage.getItem('crm_users')) || [];
   } catch(e) {}
+  if (!Array.isArray(crmUsers)) crmUsers = [];
   
   let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
   
   if (!matchedUser) {
-      matchedUser = {
-        id: "usr_" + Date.now(),
-        name: user.name,
+    matchedUser = {
+      id: "usr_" + Date.now(),
+      name: user.name || String(user.email || "").split("@")[0].toUpperCase(),
       email: String(user.email || "").toLowerCase(),
+      sienge_user: "",
+      phone: "",
       profile_name: "OPERADOR",
-        role: "OPERADOR",
-        status: "ATIVO",
-        createdAt: new Date().toISOString()
-      };
+      role: "OPERADOR",
+      status: "PENDENTE",
+      createdAt: new Date().toISOString()
+    };
     crmUsers.push(matchedUser);
-    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+    persistCrmUsersList(crmUsers);
+    throw new Error("Seu e-mail não está cadastrado em Usuários e Perfis. Peça ao administrador para incluir e ativar seu acesso.");
   }
   
-  if (matchedUser.status === "INATIVO") {
+  const st = String(matchedUser.status || "").toUpperCase();
+  if (st === "INATIVO") {
     throw new Error("Seu acesso foi desativado pelo Administrador.");
   }
-  
-  if (matchedUser.status === "PENDENTE") {
-    // Se eles ficaram pendentes no passado, nós vamos auto-aprovar agora!
-    matchedUser.status = "ATIVO";
-    localStorage.setItem('crm_users', JSON.stringify(crmUsers));
+  if (st === "PENDENTE") {
+    throw new Error("Seu acesso está pendente de aprovação. Peça ao administrador para ativar você em Usuários e Perfis.");
   }
 
   const luceliaBlob = String(matchedUser.name || "") + " " + String(matchedUser.sienge_user || "") + " " + String(matchedUser.email || "") + " " + String(user.name || "") + " " + String(user.email || "");
@@ -3556,12 +3602,15 @@ async function processSuccessfulLogin(loggedUser) {
     }, 2500);
   } catch (err) {
     console.error("Erro no login:", err);
-    if (AppState.currentUser) {
+    if (AppState.currentUser && AppState.currentUser.email) {
       const overlay = document.getElementById("login-modal-overlay");
       if (overlay) overlay.classList.remove("active");
       try { renderUserSession(); } catch (e) {}
       return;
     }
+    AppState.currentUser = null;
+    const overlay = document.getElementById("login-modal-overlay");
+    if (overlay) overlay.classList.add("active");
     const errorMsg = document.getElementById("login-error-msg");
     if (errorMsg) {
       errorMsg.textContent = err.message;
@@ -3951,6 +4000,48 @@ window.readBackOfficePerms = function() {
     window.persistBackOfficePermsObject(best);
   }
   return best || {};
+};
+
+window.mergeCrmUsers = function(localStr, cloudStr) {
+  let local = [];
+  let cloud = [];
+  try { local = JSON.parse(localStr || "[]") || []; } catch (e) { local = []; }
+  try { cloud = JSON.parse(cloudStr || "[]") || []; } catch (e) { cloud = []; }
+  if (!Array.isArray(local)) local = [];
+  if (!Array.isArray(cloud)) cloud = [];
+  const rankStatus = (s) => {
+    const n = String(s || "").toUpperCase();
+    if (n === "ATIVO") return 3;
+    if (n === "INATIVO") return 2;
+    if (n === "PENDENTE") return 1;
+    return 0;
+  };
+  const byKey = new Map();
+  const put = (u) => {
+    if (!u) return;
+    const email = String(u.email || "").toLowerCase().trim();
+    const key = email || ("id:" + String(u.id || ""));
+    if (!key || key === "id:") return;
+    const next = Object.assign({}, u, { email: email || u.email });
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, next);
+      return;
+    }
+    const merged = Object.assign({}, prev, next);
+    if (rankStatus(prev.status) >= rankStatus(next.status)) merged.status = prev.status;
+    const prevProf = String(prev.profile_name || "").trim();
+    const nextProf = String(next.profile_name || "").trim();
+    if (prevProf && (!nextProf || nextProf.toUpperCase() === "OPERADOR") && prevProf.toUpperCase() !== "OPERADOR") {
+      merged.profile_name = prevProf;
+    }
+    if (prev.sienge_user && !next.sienge_user) merged.sienge_user = prev.sienge_user;
+    if (prev.phone && !next.phone) merged.phone = prev.phone;
+    byKey.set(key, merged);
+  };
+  cloud.forEach(put);
+  local.forEach(put);
+  return JSON.stringify(Array.from(byKey.values()));
 };
 
 window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
@@ -5888,12 +5979,14 @@ window.nexAgingSpecialHtml = function(client) {
       window.nexHasLetter(client.customerId, client.saleId) ||
       (titleHint && window.nexHasLetter(client.customerId, titleHint))
     ));
-  const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
-    ? window.clientAppliesClausulaSuspensiva(client)
-    : false;
+  const aplicaSuspensiva = typeof window.clientShowsSuspenderAction === "function"
+    ? window.clientShowsSuspenderAction(client)
+    : (typeof window.clientAppliesClausulaSuspensiva === "function" && window.clientAppliesClausulaSuspensiva(client));
 
   if (aplicaSuspensiva) {
-    const tagDays = Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : days) || days;
+    const tagDays = (typeof window.clientSinalOverdueDays === "function")
+      ? window.clientSinalOverdueDays(client)
+      : (Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : days) || days);
     return `
       <button class="btn btn-sm" onclick="event.stopPropagation(); openSuspenderContratoModal(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Suspender contrato — anexar print da baixa Webro e gerar carta">
         <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${tagDays} dias - Suspender
@@ -6673,9 +6766,9 @@ window.renderFichaCompradores = async function(sale, currentCustomerId) {
     const badgeColor = isMain ? "#105436" : "#c2410c";
     const badgeBg = isMain ? "#ecfdf5" : "#fff7ed";
     const cursor = clickable ? "pointer" : "default";
-    const onclick = clickable ? `onclick="openSecondaryBuyerPopup('${String(p.id).replace(/'/g, "")}')"` : "";
+    const buyerId = String(p.id == null ? "" : p.id).replace(/"/g, "");
     const hint = clickable ? `<div style="font-size:0.7rem;color:#64748b;margin-top:4px;">Clique para ver os dados cadastrais</div>` : "";
-    return `<div class="ficha-buyer-card" ${onclick} style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fff;cursor:${cursor};transition:box-shadow 0.15s,border-color 0.15s;" ${clickable ? `onmouseover="this.style.borderColor='#f37021';this.style.boxShadow='0 4px 12px rgba(243,112,33,0.12)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'"` : ""}>
+    return `<div class="ficha-buyer-card" ${clickable ? `data-buyer-id="${buyerId}" role="button" tabindex="0"` : ""} style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fff;cursor:${cursor};transition:box-shadow 0.15s,border-color 0.15s;" ${clickable ? `onmouseover="this.style.borderColor='#f37021';this.style.boxShadow='0 4px 12px rgba(243,112,33,0.12)'" onmouseout="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'"` : ""}>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
         <div>
           <div style="font-weight:800;color:#0f172a;font-size:0.95rem;text-transform:uppercase;">${name}</div>
@@ -6690,11 +6783,23 @@ window.renderFichaCompradores = async function(sale, currentCustomerId) {
     </div>`;
   }).join("");
   el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;">${rows}</div>`;
+  el.querySelectorAll(".ficha-buyer-card[data-buyer-id]").forEach((card) => {
+    const open = () => window.openSecondaryBuyerPopup(card.getAttribute("data-buyer-id"));
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open();
+      }
+    });
+  });
 };
 
 window.closeSecondaryBuyerModal = function() {
   const overlay = document.getElementById("secondary-buyer-modal");
-  if (overlay) overlay.style.display = "none";
+  if (!overlay) return;
+  overlay.classList.remove("active");
+  overlay.style.display = "none";
 };
 
 window.formatBuyerPhoneList = function(customer) {
@@ -6725,11 +6830,19 @@ window.openSecondaryBuyerPopup = async function(customerId) {
   const overlay = document.getElementById("secondary-buyer-modal");
   const body = document.getElementById("secondary-buyer-modal-body");
   const title = document.getElementById("secondary-buyer-modal-title");
-  if (!overlay || !body) return;
+  if (!overlay || !body) {
+    alert("Não foi possível abrir os dados deste comprador.");
+    return;
+  }
   overlay.style.display = "flex";
+  overlay.style.zIndex = "10050";
+  overlay.classList.add("active");
   if (title) title.textContent = "Dados do comprador secundário";
   body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:#64748b;"><div class="loading-spinner" style="width:18px;height:18px;border:2px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div> Carregando cadastro...</div>`;
-  let customer = (typeof AppState !== "undefined" && AppState.customers && AppState.customers[customerId]) || null;
+  let customer = (typeof AppState !== "undefined" && AppState.customers && (AppState.customers[customerId] || AppState.customers[String(customerId)])) || null;
+  if (!customer && window.GlobalCustomerCache && Array.isArray(window.GlobalCustomerCache.data)) {
+    customer = window.GlobalCustomerCache.data.find((c) => String(c.id || c.customerId) === String(customerId)) || null;
+  }
   if (!customer && window.SiengeApiService && typeof SiengeApiService.getCustomer === "function") {
     try { customer = await SiengeApiService.getCustomer(customerId); } catch (e) { customer = null; }
   }
@@ -38663,6 +38776,19 @@ window.syncGlobalConfigFromFirebase = async function() {
                     } catch (e) {}
                     return;
                 }
+                if (k === "crm_users") {
+                    const merged = typeof window.mergeCrmUsers === "function"
+                      ? window.mergeCrmUsers(localStorage.getItem(k), globalData[k] || "[]")
+                      : (localStorage.getItem(k) || globalData[k] || "[]");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_moura_profiles") {
                     const merged = typeof window.mergeCrmMouraProfiles === "function"
                       ? window.mergeCrmMouraProfiles(localStorage.getItem(k), globalData[k] || "[]")
@@ -38878,6 +39004,14 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_compromissario_cessao_v1", payload.crm_compromissario_cessao_v1); } catch (e) {}
             } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
               payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
+            }
+          }
+          if (payload.crm_users || cloud.crm_users) {
+            if (typeof window.mergeCrmUsers === "function") {
+              payload.crm_users = window.mergeCrmUsers(payload.crm_users || "[]", cloud.crm_users || "[]");
+              try { _originalSetItem.call(localStorage, "crm_users", payload.crm_users); } catch (e) {}
+            } else if (!payload.crm_users && cloud.crm_users) {
+              payload.crm_users = cloud.crm_users;
             }
           }
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {

@@ -202,27 +202,23 @@ const HomeDashboard = {
   },
 
   isSuspenderZero(c) {
-    if (!this.isZeroPaidClient(c)) return false;
-    if (typeof window.clientAppliesClausulaSuspensiva === 'function') {
-      return window.clientAppliesClausulaSuspensiva(c);
+    if (!this.isInFilaCobrancaInsight(c)) return false;
+    if (typeof window.clientShowsSuspenderAction === 'function') {
+      return window.clientShowsSuspenderAction(c);
     }
-    const cc = typeof window.nexCcConfig === 'function' ? window.nexCcConfig(c.costCenterId, c.unitName) : {};
-    if (!cc.clausula_suspensiva_ativa) return false;
-    if (typeof window.clientHasOverdueSinalSI === 'function') {
-      if (!window.clientHasOverdueSinalSI(c)) return false;
-    } else if (!c.hasUnpaidSinal) return false;
-    const days = Number(c.sinalDaysDelay) || Number(c.maxDaysDelay) || 0;
-    return days >= ((typeof window.clausulaSuspensivaDias === "function")
-      ? window.clausulaSuspensivaDias(cc)
-      : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30));
+    if (!this.isZeroPaidClient(c)) return false;
+    return !!(typeof window.clientAppliesClausulaSuspensiva === 'function' && window.clientAppliesClausulaSuspensiva(c));
   },
 
   isEnviarNexZero(c) {
+    if (!this.isInFilaCobrancaInsight(c)) return false;
     if (!this.isZeroPaidClient(c)) return false;
+    if (typeof window.clientShowsSuspenderAction === 'function' && window.clientShowsSuspenderAction(c)) return false;
     if (typeof window.clientAppliesClausulaSuspensiva === 'function' && window.clientAppliesClausulaSuspensiva(c)) return false;
     const days = Number(c.maxDaysDelay) || 0;
     const zeroDays = (typeof window.nexReguaDays === 'function' ? window.nexReguaDays().zero : 31) || 31;
     if (days < zeroDays) return false;
+    if (typeof window.nexCrossedZeroAfterCutoff === 'function' && !window.nexCrossedZeroAfterCutoff(days, zeroDays)) return false;
     if (typeof window.nexHasLetterForClient === 'function') return !window.nexHasLetterForClient(c);
     return !(typeof window.nexHasLetter === 'function' && window.nexHasLetter(c.customerId, c.saleId));
   },
