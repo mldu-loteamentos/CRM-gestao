@@ -171,14 +171,192 @@ window.closePendingLinkVistorias = async function(contractKeys, reason) {
     return closed;
 };
 
+window.VISTORIA_SEND_CONFIG_KEY = "crm_moura_vistoria_send_days_config";
+window.VISTORIA_SEND_SNOOZE_KEY = "crm_vistoria_send_alert_snooze_until";
+window.VISTORIA_SEND_ACK_KEY = "crm_vistoria_send_alert_ack_cycles";
+
+window.defaultVistoriaSendConfig = function() {
+    return { enabled: true, dueDays: [], openOffset: 0, maxOffset: 3 };
+};
+
+window.readVistoriaSendConfig = function() {
+    const def = window.defaultVistoriaSendConfig();
+    let raw = {};
+    try { raw = JSON.parse(localStorage.getItem(window.VISTORIA_SEND_CONFIG_KEY) || "{}") || {}; } catch (e) { raw = {}; }
+    const days = Array.isArray(raw.dueDays) ? raw.dueDays.map(Number).filter(n => n >= 1 && n <= 31) : [];
+    const openOffset = Math.max(0, Math.min(10, Number(raw.openOffset != null ? raw.openOffset : def.openOffset)));
+    let maxOffset = Math.max(1, Math.min(15, Number(raw.maxOffset) || def.maxOffset));
+    if (maxOffset < openOffset) maxOffset = openOffset || 1;
+    return {
+        enabled: raw.enabled !== false,
+        dueDays: [...new Set(days)].sort((a, b) => a - b),
+        openOffset,
+        maxOffset
+    };
+};
+
+window.writeVistoriaSendConfig = function(cfg) {
+    const payload = {
+        enabled: !!(cfg && cfg.enabled),
+        dueDays: (cfg && Array.isArray(cfg.dueDays) ? cfg.dueDays : []).map(Number).filter(n => n >= 1 && n <= 31),
+        openOffset: Math.max(0, Number(cfg && cfg.openOffset) || 0),
+        maxOffset: Math.max(1, Number(cfg && cfg.maxOffset) || 3),
+        updatedAt: Date.now()
+    };
+    payload.dueDays = [...new Set(payload.dueDays)].sort((a, b) => a - b);
+    if (payload.maxOffset < payload.openOffset) payload.maxOffset = payload.openOffset || 1;
+    localStorage.setItem(window.VISTORIA_SEND_CONFIG_KEY, JSON.stringify(payload));
+    return payload;
+};
+
+window.collectVistoriaSendConfigFromForm = function() {
+    const enabledEl = document.getElementById("vc-send-alert-enabled");
+    const openEl = document.getElementById("vc-send-open-offset");
+    const maxEl = document.getElementById("vc-send-max-offset");
+    const selected = [];
+    document.querySelectorAll("#vc-send-days-grid [data-day].vc-send-day-on").forEach(btn => {
+        selected.push(Number(btn.getAttribute("data-day")));
+    });
+    return {
+        enabled: !!(enabledEl && enabledEl.checked),
+        dueDays: selected,
+        openOffset: Number(openEl && openEl.value) || 0,
+        maxOffset: Number(maxEl && maxEl.value) || 3
+    };
+};
+
+window.vistoriaSendCyclesForConfig = function(cfg, todayIso) {
+    const config = cfg || window.readVistoriaSendConfig();
+    const today = String(todayIso || (window.nexTodayIso ? window.nexTodayIso() : "")).slice(0, 10);
+    if (!today || !config.dueDays.length) return [];
+    const dateFn = window.nexDueDateForMonth || function(y, m, d) {
+        const last = new Date(y, m, 0).getDate();
+        const day = Math.min(Math.max(1, Number(d) || 1), last);
+        return y + "-" + String(m).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    };
+    const parts = today.split("-").map(Number);
+    const year = parts[0];
+    const month = parts[1];
+    const months = [];
+    months.push({ y: year, m: month });
+    if (month === 1) months.push({ y: year - 1, m: 12 });
+    else months.push({ y: year, m: month - 1 });
+    if (month === 12) months.push({ y: year + 1, m: 1 });
+    else months.push({ y: year, m: month + 1 });
+    const seen = new Set();
+    const out = [];
+    months.forEach(mm => {
+        config.dueDays.forEach(day => {
+            const dueIso = dateFn(mm.y, mm.m, day);
+            if (seen.has(dueIso)) return;
+            seen.add(dueIso);
+            const openIso = window.addBusinessDaysIso ? window.addBusinessDaysIso(dueIso, config.openOffset) : dueIso;
+            const maxIso = window.addBusinessDaysIso ? window.addBusinessDaysIso(dueIso, config.maxOffset) : dueIso;
+            out.push({ dueDay: day, dueIso, openIso, maxIso, openOffset: config.openOffset, maxOffset: config.maxOffset });
+        });
+    });
+    return out.sort((a, b) => String(a.dueIso).localeCompare(String(b.dueIso)));
+};
+
+window.vistoriaSendActiveCycles = function(todayIso) {
+    const today = String(todayIso || (window.nexTodayIso ? window.nexTodayIso() : "")).slice(0, 10);
+    const cfg = window.readVistoriaSendConfig();
+    if (!cfg.enabled) return [];
+    const ack = new Set(window.getVistoriaSendAckCycles());
+    return window.vistoriaSendCyclesForConfig(cfg, today).filter(c => {
+        if (ack.has(c.dueIso)) return false;
+        return today >= c.openIso && today <= c.maxIso;
+    });
+};
+
+window.getVistoriaSendAckCycles = function() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(window.VISTORIA_SEND_ACK_KEY) || "[]");
+        return Array.isArray(raw) ? raw.map(String) : [];
+    } catch (e) { return []; }
+};
+
+window.setVistoriaSendAckCycles = function(ids) {
+    try { localStorage.setItem(window.VISTORIA_SEND_ACK_KEY, JSON.stringify((ids || []).map(String))); } catch (e) {}
+};
+
+window.getVistoriaSendSnoozeUntil = function() {
+    const n = Number(localStorage.getItem(window.VISTORIA_SEND_SNOOZE_KEY) || 0);
+    return Number.isFinite(n) ? n : 0;
+};
+
+window.previewVistoriaSendConfig = function() {
+    const box = document.getElementById("vc-send-config-preview");
+    const selectedLabel = document.getElementById("vc-send-selected-label");
+    const cfg = window.collectVistoriaSendConfigFromForm();
+    if (cfg.maxOffset < cfg.openOffset) cfg.maxOffset = cfg.openOffset || 1;
+    if (selectedLabel) {
+        selectedLabel.textContent = cfg.dueDays.length
+            ? cfg.dueDays.length + " dia" + (cfg.dueDays.length === 1 ? "" : "s") + " · " + cfg.dueDays.join(", ")
+            : "Nenhum dia marcado";
+    }
+    if (!box) return;
+    const today = window.nexTodayIso ? window.nexTodayIso() : "";
+    const fmt = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
+    if (!cfg.dueDays.length) {
+        box.innerHTML = "<div style=\"font-size:0.84rem;color:#94a3b8;padding-top:6px;\">Marque os dias do mês para ver o prazo de envio dos links.</div>";
+        return;
+    }
+    const cycles = window.vistoriaSendCyclesForConfig(cfg, today).filter(c => c.maxIso >= today).slice(0, 8);
+    if (!cycles.length) {
+        box.innerHTML = "<div style=\"font-size:0.84rem;color:#94a3b8;padding-top:6px;\">Nenhum ciclo futuro com esses dias.</div>";
+        return;
+    }
+    const offNote = cfg.enabled ? "" : "<div style=\"color:#b45309;font-weight:700;font-size:0.82rem;margin-bottom:8px;\">Pop-up desativado — as datas abaixo não disparam alerta.</div>";
+    box.innerHTML = offNote + cycles.map(c => {
+        return "<div style=\"display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:0.84rem;\">"
+            + "<div><strong>Dia " + c.dueDay + "</strong> · " + fmt(c.dueIso) + "</div>"
+            + "<div style=\"color:#64748b;\">Abre <strong style=\"color:#105436;\">" + fmt(c.openIso) + "</strong> · enviar até " + fmt(c.maxIso) + "</div>"
+            + "</div>";
+    }).join("");
+};
+
+window.renderVistoriaSendDaysGrid = function() {
+    const cfg = window.readVistoriaSendConfig();
+    const enabledEl = document.getElementById("vc-send-alert-enabled");
+    const openEl = document.getElementById("vc-send-open-offset");
+    const maxEl = document.getElementById("vc-send-max-offset");
+    const grid = document.getElementById("vc-send-days-grid");
+    if (enabledEl) enabledEl.checked = cfg.enabled;
+    if (openEl) openEl.value = cfg.openOffset;
+    if (maxEl) maxEl.value = cfg.maxOffset;
+    if (grid) {
+        const selected = new Set(cfg.dueDays);
+        grid.innerHTML = "";
+        for (let d = 1; d <= 31; d++) {
+            const on = selected.has(d);
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.setAttribute("data-day", String(d));
+            btn.className = "vc-send-day-btn" + (on ? " vc-send-day-on" : "");
+            btn.textContent = String(d);
+            btn.onclick = function() {
+                btn.classList.toggle("vc-send-day-on");
+                window.previewVistoriaSendConfig();
+            };
+            grid.appendChild(btn);
+        }
+    }
+    if (enabledEl) enabledEl.onchange = window.previewVistoriaSendConfig;
+    if (openEl) openEl.oninput = window.previewVistoriaSendConfig;
+    if (maxEl) maxEl.oninput = window.previewVistoriaSendConfig;
+    window.previewVistoriaSendConfig();
+};
+
 window.openVistoriaRecurrenceModal = function() {
     const modal = document.getElementById('vistoria-recurrence-modal');
     const input = document.getElementById('vistoria-recurrence-days');
-    if (!modal || !input) {
+    if (!modal) {
         console.error('[Vistoria] Modal de recorrência não encontrado no HTML.');
         return;
     }
-    input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+    if (input) input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+    window.renderVistoriaSendDaysGrid();
     modal.style.display = 'flex';
     modal.classList.add('active');
 };
@@ -187,18 +365,24 @@ window.saveVistoriaRecurrence = function() {
     const input = document.getElementById('vistoria-recurrence-days');
     const days = parseInt(input?.value || '', 10);
     if (!Number.isFinite(days) || days < 1) {
-        alert('Informe um intervalo válido maior que zero.');
+        alert('Informe um intervalo da fila válido maior que zero.');
         return;
     }
     localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
+    const sendCfg = window.collectVistoriaSendConfigFromForm();
+    if (sendCfg.maxOffset < sendCfg.openOffset) sendCfg.maxOffset = sendCfg.openOffset || 1;
+    window.writeVistoriaSendConfig(sendCfg);
+    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
     const modal = document.getElementById('vistoria-recurrence-modal');
     if (modal) {
         modal.style.display = 'none';
         modal.classList.remove('active');
     }
-    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
     if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.loadData === 'function') {
         window.VerificarConstrucaoApp.loadData();
+    }
+    if (typeof window.checkVistoriaSendAlerts === 'function') {
+        window.checkVistoriaSendAlerts();
     }
 };
 
@@ -499,18 +683,18 @@ window.VerificarConstrucaoApp = {
 
                 <div id="vc-results" style="display: none;">
                     <div style="max-height: 75vh; overflow-y: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;" id="vc-table">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; table-layout: fixed;" id="vc-table">
                             <thead style="position: sticky; top: 0; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); z-index: 10;">
                                 <tr>
-                                    <th style="padding: 12px 10px; width: 40px; text-align: center; color: rgba(255,255,255,0.8);">
+                                    <th style="padding: 12px 10px; width: 42px; text-align: center; color: rgba(255,255,255,0.8);">
                                         <input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)">
                                     </th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: right;">ÚLTIMA VISTORIA</th>
-                                    <th style="padding: 12px 10px; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
+                                    <th style="padding: 12px 10px; width: 12%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
+                                    <th style="padding: 12px 10px; width: 22%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
+                                    <th style="padding: 12px 10px; width: 10%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
+                                    <th style="padding: 12px 10px; width: 14%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
+                                    <th style="padding: 12px 10px; width: 16%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: left;">ÚLTIMA VISTORIA</th>
+                                    <th style="padding: 12px 10px; width: 18%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
                                 </tr>
                             </thead>
                             <tbody id="vc-tbody"></tbody>
@@ -895,6 +1079,10 @@ window.VerificarConstrucaoApp = {
 
             this.renderTable();
 
+            const enviarN = rows.filter(r => r.statusLabel === 'Pendente de Vistoria').length;
+            const validarN = rows.filter(r => r.statusLabel === 'Aguardando Validação').length;
+            window._vistoriaSprintCounts = { enviar: enviarN, validar: validarN, at: Date.now() };
+
             loading.style.display = 'none';
             results.style.display = 'block';
 
@@ -1195,20 +1383,24 @@ window.VerificarConstrucaoApp = {
                             : '-';
                         const parcelasDisplay = u.parcelasVencidas > 0
                             ? `<span style="background:#fef2f2; color:#dc2626; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.78rem;">${u.parcelasVencidas}</span>`
-                            : '<span style="color:#94a3b8;">-</span>';
+                            : '<span style="background:#ecfdf5; color:#166534; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.72rem;">Adimplente</span>';
+                        const lastVistoriaHtml = u.lastCheckDateStr !== '-'
+                            ? `<div style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; line-height:1.25;">
+                                    <span style="font-size:0.8rem; font-weight:600; color:#334155;">${u.lastCheckDateStr}</span>
+                                    <span style="color:#ea580c; font-size:0.7rem; font-weight:600;">Há ${u.lastCheckDays}</span>
+                               </div>`
+                            : '<span style="color:#94a3b8; font-weight:400; font-size:0.8rem;">Nunca</span>';
 
                         html += `
                             <tr style="border-bottom: 1px solid #f1f5f9; background:${rowBg}; transition: background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${rowBg}'">
-                                <td style="padding: 10px 12px; text-align: center; width: 40px;">
+                                <td style="padding: 10px 12px; text-align: center; width: 42px;">
                                     <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''} style="accent-color: #16a34a;">
                                 </td>
                                 <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
-                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
+                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
                                 <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
                                 <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
-                                <td style="padding: 10px 12px; text-align: right; font-weight: 600; color: #475569; font-size: 0.83rem;">
-                                    ${u.lastCheckDateStr !== '-' ? `<span style="font-size: 0.75rem;">${u.lastCheckDateStr}</span><br><span style="color: #ea580c; font-size: 0.7rem;">Há ${u.lastCheckDays}</span>` : '<span style="color: #94a3b8; font-weight: 400;">Nunca</span>'}
-                                </td>
+                                <td style="padding: 10px 12px; text-align: left; vertical-align: middle;">${lastVistoriaHtml}</td>
                                 <td style="padding: 10px 12px;">${validAction}</td>
                             </tr>
                         `;
@@ -2113,6 +2305,216 @@ window.startVistoriaValidationAlertListener = function() {
     }
 };
 
+window._vcUpdateSprintCountsFromRows = function(rows) {
+    const list = rows || (window.VerificarConstrucaoApp && window.VerificarConstrucaoApp.allRows) || [];
+    const enviar = list.filter(r => r.statusLabel === 'Pendente de Vistoria').length;
+    const validar = list.filter(r => r.statusLabel === 'Aguardando Validação').length;
+    window._vistoriaSprintCounts = { enviar, validar, at: Date.now() };
+    return window._vistoriaSprintCounts;
+};
+
+window.refreshVistoriaSprintCounts = async function() {
+    if (window.VerificarConstrucaoApp && Array.isArray(window.VerificarConstrucaoApp.allRows) && window.VerificarConstrucaoApp.allRows.length) {
+        return window._vcUpdateSprintCountsFromRows(window.VerificarConstrucaoApp.allRows);
+    }
+    let validar = 0;
+    let enviar = 0;
+    try {
+        const waiting = typeof window.fetchVistoriasAguardandoValidacao === 'function'
+            ? await window.fetchVistoriasAguardandoValidacao()
+            : [];
+        validar = (waiting || []).length;
+    } catch (e) {}
+    try {
+        enviar = await window._vcCountPendentesEnvio();
+    } catch (e) {}
+    window._vistoriaSprintCounts = { enviar, validar, at: Date.now() };
+    return window._vistoriaSprintCounts;
+};
+
+window._vcCountPendentesEnvio = async function() {
+    const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
+    const thresholdDays = _vcGetThreshold();
+    const recurrenceDays = _vcGetRecurrenceDays();
+    const checksByContract = {};
+    const latestCheckDateByContract = {};
+    if (window.firebaseDb && window.firebaseCollections) {
+        try {
+            const { collection, getDocs, query, where } = window.firebaseCollections;
+            const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
+            const snap = await getDocs(q);
+            snap.forEach(docSnap => {
+                const data = { id: docSnap.id, ...docSnap.data() };
+                _vcDocIdentityKeys(data).forEach(k => {
+                    checksByContract[String(k)] = data;
+                });
+            });
+        } catch (e) {}
+    }
+    let enviar = 0;
+    clients.forEach(c => {
+        const keys = _vcClientLookupKeys(c);
+        const pendingRaw = keys.map(k => checksByContract[String(k)]).find(Boolean) || null;
+        if (_vcIsFollowupPending(pendingRaw)) return;
+        const maxDelay = parseInt(c.maxDaysDelay) || 0;
+        if (maxDelay < thresholdDays) return;
+        const latestCheckDate = _vcLatestDateAmong(keys, latestCheckDateByContract);
+        const daysSinceCheck = _vcDaysSince(latestCheckDate);
+        if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) return;
+        enviar += 1;
+    });
+    return enviar;
+};
+
+window.ensureVistoriaSendAlertModal = function() {
+    let modal = document.getElementById("modal-vistoria-send-alerts");
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.id = "modal-vistoria-send-alerts";
+    modal.style.cssText = "display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;";
+    modal.innerHTML = `
+        <div style="background:white; width:620px; max-width:90vw; border-radius:12px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2); max-height:85vh; display:flex; flex-direction:column;">
+            <h2 style="margin:0 0 10px 0; color:#0f172a; font-size:1.25rem;">Enviar links de vistoria</h2>
+            <p id="vc-send-alert-intro" style="color:#64748b; font-size:0.9rem; margin:0 0 16px; line-height:1.45;"></p>
+            <div id="vc-send-alerts-list" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:20px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:12px; align-items:center; flex-wrap:wrap;">
+                <button type="button" id="btn-vc-send-snooze" class="btn btn-outline" style="border:1px solid #cbd5e1; background:#f8fafc; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.snoozeVistoriaSendAlertNextBusinessDay()">Adiar para o próximo dia útil</button>
+                <button type="button" class="btn btn-outline" style="border:1px solid #cbd5e1; background:#fff; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.markVistoriaSendAlertsSeen()">Ciente</button>
+                <button type="button" class="btn btn-primary" style="background:#105436; color:white; border:none; cursor:pointer; padding:8px 16px; border-radius:6px;" onclick="window.goToVistoriaSendFromAlert()">Ir para Verificar Construção</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    return modal;
+};
+
+window.scheduleVistoriaSendAlertWake = function() {
+    if (window._vcSendAlertSnoozeTimer) {
+        clearTimeout(window._vcSendAlertSnoozeTimer);
+        window._vcSendAlertSnoozeTimer = null;
+    }
+    const until = window.getVistoriaSendSnoozeUntil();
+    const delay = until - Date.now();
+    if (delay <= 0) return;
+    window._vcSendAlertSnoozeTimer = setTimeout(function() {
+        window._vcSendAlertSnoozeTimer = null;
+        if (typeof window.checkVistoriaSendAlerts === "function") window.checkVistoriaSendAlerts();
+    }, Math.min(delay, 2147483647));
+};
+
+window.snoozeVistoriaSendAlertNextBusinessDay = function() {
+    const today = window.nexTodayIso ? window.nexTodayIso() : "";
+    const cycles = window.vistoriaSendActiveCycles(today);
+    if (!cycles.length) return;
+    const nextIso = window.addBusinessDaysIso(today, 1);
+    const maxIso = cycles.reduce((m, c) => (!m || c.maxIso > m ? c.maxIso : m), "");
+    if (!nextIso || nextIso > maxIso) {
+        alert("Não é possível adiar: o prazo máximo (D+" + (cycles[0].maxOffset || 3) + " dias úteis) já foi atingido. Envie os links hoje.");
+        return;
+    }
+    const until = new Date(nextIso + "T06:00:00");
+    try { localStorage.setItem(window.VISTORIA_SEND_SNOOZE_KEY, String(until.getTime())); } catch (e) {}
+    const modal = document.getElementById("modal-vistoria-send-alerts");
+    if (modal) modal.style.display = "none";
+    window.scheduleVistoriaSendAlertWake();
+    const label = typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(nextIso) : nextIso;
+    if (typeof window.showToast === "function") window.showToast("Alerta de vistoria adiado para " + label + ".", "info");
+};
+
+window.markVistoriaSendAlertsSeen = function() {
+    const today = window.nexTodayIso ? window.nexTodayIso() : "";
+    const pending = window.vistoriaSendActiveCycles(today);
+    const ack = new Set(window.getVistoriaSendAckCycles());
+    pending.forEach(c => ack.add(c.dueIso));
+    const cutoff = window.addDaysIso ? window.addDaysIso(today, -90) : "";
+    window.setVistoriaSendAckCycles([...ack].filter(iso => !cutoff || iso >= cutoff));
+    try { localStorage.removeItem(window.VISTORIA_SEND_SNOOZE_KEY); } catch (e) {}
+    if (window._vcSendAlertSnoozeTimer) {
+        clearTimeout(window._vcSendAlertSnoozeTimer);
+        window._vcSendAlertSnoozeTimer = null;
+    }
+    const modal = document.getElementById("modal-vistoria-send-alerts");
+    if (modal) modal.style.display = "none";
+};
+
+window.goToVistoriaSendFromAlert = function() {
+    const modal = document.getElementById("modal-vistoria-send-alerts");
+    if (modal) modal.style.display = "none";
+    if (typeof window.goToVistoriaValidationFromAlert === "function") {
+        window.goToVistoriaValidationFromAlert();
+        return;
+    }
+    if (typeof window.switchTab === "function") window.switchTab("vistoria", "Verificar Construção");
+};
+
+window.checkVistoriaSendAlerts = async function(isTest) {
+    const gate = typeof window.userIsCobrancaBackOffice === "function"
+        ? window.userIsCobrancaBackOffice()
+        : { ok: false, isAdmin: true };
+    if (!isTest && (!gate.ok || gate.isAdmin)) {
+        const existing = document.getElementById("modal-vistoria-send-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
+    const cfg = window.readVistoriaSendConfig();
+    if (!cfg.enabled || !cfg.dueDays.length) {
+        const existing = document.getElementById("modal-vistoria-send-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
+    const today = window.nexTodayIso ? window.nexTodayIso() : "";
+    if (typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today) && !isTest) {
+        return;
+    }
+    if (!isTest) {
+        const snoozeUntil = window.getVistoriaSendSnoozeUntil();
+        if (snoozeUntil && Date.now() < snoozeUntil) {
+            window.scheduleVistoriaSendAlertWake();
+            return;
+        }
+        if (snoozeUntil && Date.now() >= snoozeUntil) {
+            try { localStorage.removeItem(window.VISTORIA_SEND_SNOOZE_KEY); } catch (e) {}
+        }
+    }
+    const pendingCycles = window.vistoriaSendActiveCycles(today);
+    if (!pendingCycles.length) {
+        const existing = document.getElementById("modal-vistoria-send-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
+    const counts = await window.refreshVistoriaSprintCounts();
+    const enviar = Number(counts && counts.enviar) || 0;
+    if (!enviar) {
+        const existing = document.getElementById("modal-vistoria-send-alerts");
+        if (existing) existing.style.display = "none";
+        return;
+    }
+    const modal = window.ensureVistoriaSendAlertModal();
+    const listEl = document.getElementById("vc-send-alerts-list");
+    const intro = document.getElementById("vc-send-alert-intro");
+    const snoozeBtn = document.getElementById("btn-vc-send-snooze");
+    const fmt = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
+    const nextIso = window.addBusinessDaysIso(today, 1);
+    const maxIso = pendingCycles.reduce((m, c) => (!m || c.maxIso > m ? c.maxIso : m), "");
+    const canSnooze = nextIso && nextIso <= maxIso;
+    if (intro) {
+        intro.textContent = "Há " + enviar + " vistoria" + (enviar === 1 ? "" : "s") + " para enviar o link. Confira o prazo e abra Verificar Construção.";
+    }
+    if (listEl) {
+        listEl.innerHTML = pendingCycles.map(c => {
+            return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;">
+                <div style="font-weight:700;color:#0f172a;font-size:0.92rem;">Solicitar no dia ${c.dueDay} · ${fmt(c.dueIso)}</div>
+                <div style="font-size:0.8rem;color:#64748b;margin-top:4px;">Pop-up a partir de ${fmt(c.openIso)} (D+${c.openOffset} dia útil)</div>
+                <div style="margin-top:6px;font-size:0.75rem;font-weight:700;color:#105436;">Enviar no máximo até ${fmt(c.maxIso)} (D+${c.maxOffset} dias úteis)</div>
+            </div>`;
+        }).join("");
+    }
+    if (snoozeBtn) {
+        snoozeBtn.style.display = canSnooze ? "inline-flex" : "none";
+        snoozeBtn.disabled = !canSnooze;
+    }
+    modal.style.display = "flex";
+};
+
 document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => {
         if (typeof window.startVistoriaValidationAlertListener === "function") {
@@ -2120,6 +2522,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (typeof window.checkVistoriasValidationAlerts === "function") {
             window.checkVistoriasValidationAlerts();
+        }
+        if (typeof window.checkVistoriaSendAlerts === "function") {
+            window.checkVistoriaSendAlerts();
         }
         if (typeof window.checkNexDueAlerts === "function") {
             window.checkNexDueAlerts();

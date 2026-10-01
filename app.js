@@ -29816,23 +29816,34 @@ window.openVistoriaRecurrenceModal = function() {
   const input = document.getElementById('vistoria-recurrence-days');
   if (!modal || !input) return;
   input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+  if (typeof window.renderVistoriaSendDaysGrid === 'function') window.renderVistoriaSendDaysGrid();
   modal.style.display = 'flex';
+  modal.classList.add('active');
 };
 
 window.saveVistoriaRecurrence = function() {
   const input = document.getElementById('vistoria-recurrence-days');
   const days = parseInt(input?.value || '', 10);
   if (!Number.isFinite(days) || days < 1) {
-    alert('Informe um intervalo válido maior que zero.');
+    alert('Informe um intervalo da fila válido maior que zero.');
     return;
   }
   localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
+  if (typeof window.collectVistoriaSendConfigFromForm === 'function' && typeof window.writeVistoriaSendConfig === 'function') {
+    const sendCfg = window.collectVistoriaSendConfigFromForm();
+    if (sendCfg.maxOffset < sendCfg.openOffset) sendCfg.maxOffset = sendCfg.openOffset || 1;
+    window.writeVistoriaSendConfig(sendCfg);
+  }
   if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
   const modal = document.getElementById('vistoria-recurrence-modal');
-  if (modal) modal.style.display = 'none';
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('active');
+  }
   if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.loadData === 'function') {
     window.VerificarConstrucaoApp.loadData();
   }
+  if (typeof window.checkVistoriaSendAlerts === 'function') window.checkVistoriaSendAlerts();
 };
 
 window.renderTimeline = function() {
@@ -38568,6 +38579,7 @@ window.SYNC_KEYS = [
     "crm_moura_timeline_acoes",
     "crm_moura_timeline_gatilhos",
     "crm_moura_vistoria_recurrence_days",
+    "crm_moura_vistoria_send_days_config",
     "crm_nex_due_days_config",
     "crm_centros_custo_custom",
     "crm_centros_custo_tipos",

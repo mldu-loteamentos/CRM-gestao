@@ -1903,6 +1903,24 @@ window.buildSprintOperatorSummaries = function() {
     lines.push('*' + hd.sprintOperatorLabel(u) + '*');
     groups.forEach(g => lines.push('• ' + g.label));
   });
+  const boUsers = users.filter(u => hd.isBackOfficeUser(u));
+  const seenBo = new Set();
+  boUsers.forEach(u => {
+    const id = String(u.id || u.email || u.sienge_user || u.name);
+    if (seenBo.has(id)) return;
+    seenBo.add(id);
+    const counts = window._vistoriaSprintCounts || {};
+    const enviar = Number(counts.enviar) || 0;
+    const validar = Number(counts.validar) || 0;
+    if (!enviar && !validar) return;
+    lines.push('*' + hd.sprintOperatorLabel(u) + '*');
+    if (enviar > 0) {
+      lines.push('• Há ' + enviar + ' vistoria' + (enviar === 1 ? '' : 's') + ' para enviar');
+    }
+    if (validar > 0) {
+      lines.push('• Há ' + validar + ' vistoria' + (validar === 1 ? '' : 's') + ' para validar');
+    }
+  });
   return lines.join('\n');
 };
 

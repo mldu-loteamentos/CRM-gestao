@@ -1664,10 +1664,13 @@ const DashboardInadimplencia = (function() {
     }
   }
 
-  function gerarRelatorioDiarioPdf() {
+  async function gerarRelatorioDiarioPdf() {
     if (!window.rawClientList || window.rawClientList.length === 0) {
       alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
       return;
+    }
+    if (typeof window.refreshVistoriaSprintCounts === "function") {
+      try { await window.refreshVistoriaSprintCounts(); } catch (e) {}
     }
 
     const bills = window.rawClientList;

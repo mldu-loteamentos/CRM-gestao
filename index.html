@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=883">
+  <link rel="stylesheet" href="style.css?v=884">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=883" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=884" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1288,7 +1288,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.883 &nbsp;&middot;&nbsp; 01/10/2026
+            v1.0.884 &nbsp;&middot;&nbsp; 01/10/2026
           </span>
         </div>
       </div>
@@ -2512,7 +2512,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=883" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=884" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -2761,7 +2761,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=883" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=884" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2770,7 +2770,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=883" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=884" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2988,7 +2988,7 @@ Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).</textarea>
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=883" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=884" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -6793,11 +6793,65 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   </div>
 
   <div id="vistoria-recurrence-modal" class="modal-overlay" style="display: none; z-index: 999999 !important;">
-    <div class="modal-box" style="max-width: 480px; text-align: left;">
+    <div class="modal-box" style="max-width: 720px; width: 94vw; text-align: left; max-height: 90vh; overflow-y: auto;">
       <h3 style="margin-top: 0; color: #0f172a;">Recorrência de Vistoria</h3>
-      <p style="color: #64748b; font-size: 0.9rem; line-height: 1.5;">Defina após quantos dias uma vistoria sem construção volta para a fila, desde que o atraso esteja no ponto configurado da régua.</p>
-      <label for="vistoria-recurrence-days" style="display: block; color: #475569; font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Intervalo em dias</label>
-      <input type="number" id="vistoria-recurrence-days" class="form-control" min="1" step="1">
+      <p style="color: #64748b; font-size: 0.9rem; line-height: 1.5; margin-bottom: 16px;">Defina o intervalo da fila e os dias do mês em que os links serão solicitados. Depois do dia marcado, o back office tem até o D+ informado (dias úteis) para enviar.</p>
+
+      <label for="vistoria-recurrence-days" style="display: block; color: #475569; font-weight: 600; font-size: 0.85rem; margin-bottom: 6px;">Intervalo da fila (dias sem construção)</label>
+      <input type="number" id="vistoria-recurrence-days" class="form-control" min="1" step="1" style="max-width: 160px; margin-bottom: 18px;">
+
+      <div class="nex-due-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h4 style="margin:0 0 4px; font-size:0.78rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#64748b;">Dias do mês para solicitar vistoria</h4>
+            <p style="margin:0; font-size:0.82rem; color:#64748b;">Marque os dias. O pop-up de envio abre nesses ciclos e pode ser adiado até o D+ limite.</p>
+          </div>
+          <label class="moura-switch">
+            <input type="checkbox" id="vc-send-alert-enabled">
+            <span class="moura-switch-track" aria-hidden="true"></span>
+            <span class="moura-switch-text">Ativar pop-up</span>
+          </label>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin:14px 0 8px;">
+          <span id="vc-send-selected-label" style="font-size:0.8rem; color:#64748b; font-weight:600;"></span>
+        </div>
+        <style>
+          .vc-send-day-btn {
+            border: 1px solid #e2e8f0; background: #fff; color: #334155; border-radius: 10px;
+            padding: 10px 0; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
+          }
+          .vc-send-day-btn:hover { border-color: #105436; color: #105436; background: #f0fdf4; }
+          .vc-send-day-btn.vc-send-day-on { border-color: #105436; background: #105436; color: #fff; }
+          .vc-send-day-btn.vc-send-day-on:hover { background: #0d462c; }
+        </style>
+        <div id="vc-send-days-grid" style="display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:8px;"></div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px;">
+          <h4 style="margin:0 0 6px; font-size:0.78rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#64748b;">Abrir pop-up</h4>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px;">
+            <span style="font-size:0.95rem; font-weight:800; color:#105436;">D+</span>
+            <input type="number" class="form-control" id="vc-send-open-offset" min="0" max="10" value="0" style="max-width:88px; font-size:1.05rem; font-weight:700;">
+            <span style="font-size:0.82rem; color:#64748b;">dias úteis após o dia marcado</span>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px;">
+          <h4 style="margin:0 0 6px; font-size:0.78rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#64748b;">Prazo para enviar os links</h4>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:8px;">
+            <span style="font-size:0.95rem; font-weight:800; color:#105436;">D+</span>
+            <input type="number" class="form-control" id="vc-send-max-offset" min="1" max="15" value="3" style="max-width:88px; font-size:1.05rem; font-weight:700;">
+            <span style="font-size:0.82rem; color:#64748b;">dias úteis depois do dia marcado</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; margin-bottom:8px;">
+        <h4 style="margin:0 0 6px; font-size:0.78rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#64748b;">Próximos ciclos</h4>
+        <div id="vc-send-config-preview"></div>
+      </div>
+
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
         <button type="button" class="btn btn-cancel" onclick="document.getElementById('vistoria-recurrence-modal').style.display='none'">Cancelar</button>
         <button type="button" class="btn btn-primary" onclick="window.saveVistoriaRecurrence()">Salvar</button>
@@ -7161,56 +7215,56 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=883"></script>
+  <script type="module" src="firebase-config.js?v=884"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=883"></script>
-  <script defer src="sienge-api.js?v=883"></script>
-  <script defer src="consumo-api.js?v=883"></script>
-  <script defer src="azure-auth.js?v=883"></script>
-  <script defer src="app.js?v=883"></script>
-  <script defer src="empresa-filter.js?v=883"></script>
-  <script defer src="cartao-taxas.js?v=883"></script>
-  <script defer src="alcada-desconto.js?v=883"></script>
-  <script defer src="alcada-distrato.js?v=883"></script>
-  <script defer src="home-dashboard.js?v=883"></script>
-  <script defer src="anexos.js?v=883"></script>
-  <script defer src="contas-pagar.js?v=883"></script>
-  <script defer src="config-tags.js?v=883"></script>
-  <script defer src="config-users.js?v=883"></script>
-  <script defer src="suporte.js?v=883"></script>
-  <script defer src="construcao.js?v=883"></script>
-  <script defer src="empresas.js?v=883"></script>
-  <script defer src="relacionamento.js?v=883"></script>
-  <script defer src="cessao-direitos.js?v=883"></script>
-  <script defer src="compromissario.js?v=883"></script>
-  <script defer src="comercial.js?v=883"></script>
-  <script defer src="estoque-comercial.js?v=883"></script>
-  <script defer src="condicoes-pagamento.js?v=883"></script>
-  <script defer src="centros-custo.js?v=883"></script>
-  <script defer src="marketing.js?v=883"></script>
-  <script defer src="plano-financeiro.js?v=883"></script>
-  <script defer src="prestacao-contas.js?v=883"></script>
+  <script defer src="data.js?v=884"></script>
+  <script defer src="sienge-api.js?v=884"></script>
+  <script defer src="consumo-api.js?v=884"></script>
+  <script defer src="azure-auth.js?v=884"></script>
+  <script defer src="app.js?v=884"></script>
+  <script defer src="empresa-filter.js?v=884"></script>
+  <script defer src="cartao-taxas.js?v=884"></script>
+  <script defer src="alcada-desconto.js?v=884"></script>
+  <script defer src="alcada-distrato.js?v=884"></script>
+  <script defer src="home-dashboard.js?v=884"></script>
+  <script defer src="anexos.js?v=884"></script>
+  <script defer src="contas-pagar.js?v=884"></script>
+  <script defer src="config-tags.js?v=884"></script>
+  <script defer src="config-users.js?v=884"></script>
+  <script defer src="suporte.js?v=884"></script>
+  <script defer src="construcao.js?v=884"></script>
+  <script defer src="empresas.js?v=884"></script>
+  <script defer src="relacionamento.js?v=884"></script>
+  <script defer src="cessao-direitos.js?v=884"></script>
+  <script defer src="compromissario.js?v=884"></script>
+  <script defer src="comercial.js?v=884"></script>
+  <script defer src="estoque-comercial.js?v=884"></script>
+  <script defer src="condicoes-pagamento.js?v=884"></script>
+  <script defer src="centros-custo.js?v=884"></script>
+  <script defer src="marketing.js?v=884"></script>
+  <script defer src="plano-financeiro.js?v=884"></script>
+  <script defer src="prestacao-contas.js?v=884"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=883"></script>
-  <script defer src="caixa-diario.js?v=883"></script>
-  <script defer src="investimento.js?v=883"></script>
-  <script defer src="parametrizacao-parceiro.js?v=883"></script>
-  <script defer src="societario.js?v=883"></script>
-  <script defer src="participacoes.js?v=883"></script>
-  <script defer src="fiscal.js?v=883"></script>
-  <script defer src="indexadores.js?v=883"></script>
-  <script defer src="verificar-construcao.js?v=883"></script>
-  <script defer src="financiamento.js?v=883"></script>
-  <script src="repactuacoes.js?v=883"></script>
-  <script defer src="repactuacao-lote.js?v=883"></script>
+  <script defer src="fluxo-caixa.js?v=884"></script>
+  <script defer src="caixa-diario.js?v=884"></script>
+  <script defer src="investimento.js?v=884"></script>
+  <script defer src="parametrizacao-parceiro.js?v=884"></script>
+  <script defer src="societario.js?v=884"></script>
+  <script defer src="participacoes.js?v=884"></script>
+  <script defer src="fiscal.js?v=884"></script>
+  <script defer src="indexadores.js?v=884"></script>
+  <script defer src="verificar-construcao.js?v=884"></script>
+  <script defer src="financiamento.js?v=884"></script>
+  <script src="repactuacoes.js?v=884"></script>
+  <script defer src="repactuacao-lote.js?v=884"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=883"></script>
+  <script defer src="dashboard-inadimplencia.js?v=884"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
