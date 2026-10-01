@@ -780,7 +780,11 @@ window.handleAgendaAutocomplete = function(query) {
     }, 200);
 };
 
-window.handleDynamicCustomerSearch = function(query, type) {
+window.handleDynamicCustomerSearch = function(query, type, source) {
+    const src = source === "fin" ? "fin" : "relacionamento";
+    const inputId = src === "fin" ? `fin-filter-${type}` : `relacionamento-filter-${type}`;
+    const dropdownId = src === "fin" ? `custom-dropdown-fin-${type}` : `custom-dropdown-${type}`;
+
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
     window.SelectedDynamicCustomerDoc = null;
@@ -789,7 +793,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
     
     // Máscara para Telefone
     if (type === 'telefone') {
-        const inputEl = document.getElementById('relacionamento-filter-telefone');
+        const inputEl = document.getElementById(inputId);
         if (inputEl && query && !window._maskingPhone) {
             window._maskingPhone = true;
             let v = query.replace(/\D/g, "");
@@ -817,7 +821,7 @@ window.handleDynamicCustomerSearch = function(query, type) {
         const qNorm = normalizeStr(query);
         
         if (!qNorm) {
-            const dropdown = document.getElementById(`custom-dropdown-${type}`);
+            const dropdown = document.getElementById(dropdownId);
             if (dropdown) dropdown.style.display = 'none';
             return;
         }
@@ -842,17 +846,17 @@ window.handleDynamicCustomerSearch = function(query, type) {
         } else if (type === 'email') {
             matches = window.GlobalCustomerCache.data.filter(c => normalizeStr(c.email).includes(qNorm));
         }
-        if (typeof window.filterCustomersToAssignedPortfolio === "function") {
+        if (src !== "fin" && typeof window.filterCustomersToAssignedPortfolio === "function") {
             matches = window.filterCustomersToAssignedPortfolio(matches);
         }
         
-        const inputEl = document.getElementById(`relacionamento-filter-${type}`);
+        const inputEl = document.getElementById(inputId);
         if (!inputEl) return;
         
-        let dropdown = document.getElementById(`custom-dropdown-${type}`);
+        let dropdown = document.getElementById(dropdownId);
         if (!dropdown) {
             dropdown = document.createElement('div');
-            dropdown.id = `custom-dropdown-${type}`;
+            dropdown.id = dropdownId;
             dropdown.style.position = 'absolute';
             dropdown.style.background = 'white';
             dropdown.style.border = '1px solid #ccc';
@@ -932,7 +936,15 @@ window.handleDynamicCustomerSearch = function(query, type) {
                 // Grava na memoria o ID do cliente em vez do CPF
                 window.SelectedDynamicCustomerId = c.id;
                 window.SelectedDynamicCustomerName = c.name;
-                window.searchRelacionamento();
+                window.SelectedDynamicCustomerDoc = c.cpf || c.cnpj || c.cpfCnpj || "";
+                if (src === "fin") {
+                    window.FinanciamentoSelectedCustomerId = c.id;
+                    if (window.FinanciamentoApp && typeof window.FinanciamentoApp.buscar === "function") {
+                        window.FinanciamentoApp.buscar();
+                    }
+                } else if (typeof window.searchRelacionamento === "function") {
+                    window.searchRelacionamento();
+                }
             };
             dropdown.appendChild(item);
         });
@@ -5253,24 +5265,17 @@ async function initializeApplication() {
 
   // --- INICIALIZAÇÃO DE ESTADOS GLOBAIS (Timeline e Judiciais) ---
   const timelineStr = localStorage.getItem("crm_moura_timeline_nodes");
-  window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [
-    { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
-    { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
-    { id: 'n_analise', dias: 121, acao: 'analise_interna_juridico', label: 'Análise Interna Jurídico' },
-    { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
-  ];
-  if (!timelineStr) {
-      window.TimelineState = [
-        { id: 'n1', dias: 15, acao: 'cob_interna', label: 'Início Cobrança Interna' },
-        { id: 'n2', dias: 31, acao: 'cob_terceirizada', label: 'Início Terceirizada' },
-        { id: 'n_analise', dias: 121, acao: 'analise_interna_juridico', label: 'Análise Interna Jurídico' },
-        { id: 'n3', dias: 151, acao: 'juridico', label: 'Envio Jurídico' }
-      ];
-      localStorage.setItem("crm_moura_timeline_nodes", JSON.stringify(window.TimelineState));
-      localStorage.setItem("crm_moura_timeline_v2", "true");
+  try {
+    window.TimelineState = timelineStr ? JSON.parse(timelineStr) : [];
+  } catch (e) {
+    window.TimelineState = [];
   }
+  if (!Array.isArray(window.TimelineState)) window.TimelineState = [];
   if (typeof window.ensureTimelineReguaDefaults === "function") {
     window.ensureTimelineReguaDefaults();
+  }
+  if (!timelineStr) {
+    try { localStorage.setItem("crm_moura_timeline_v2", "true"); } catch (e) {}
   }
 
   if (!localStorage.getItem('crm_moura_vistoria_recurrence_days')) {
@@ -7041,7 +7046,7 @@ const defaultAdvFilterState = {
     lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
     cidade: [], empresa: [], ccusto: [], operador: [],
     contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
-    faseProcessual: [], dataFase: [], dataFaseNDias: ''
+    faseProcessual: [], dataFase: [], dataFaseNDias: '', queueGroups: []
 };
 window.advFiltersFila = JSON.parse(JSON.stringify(defaultAdvFilterState));
 window.advFiltersFila.paidMap = new Map();
@@ -7056,6 +7061,19 @@ window.advFilters = window.advFiltersFila;
 window.applyAdvFiltersTo = (sourceList) => {
     let filteredList = sourceList;
     if (window.advFilters) {
+        if (window.advFilters.queueGroups && window.advFilters.queueGroups.length > 0 && typeof window.getFilaQueueGroup === "function") {
+            const G = window.FILA_QUEUE_GROUPS || {};
+            const wanted = new Set();
+            window.advFilters.queueGroups.forEach((key) => {
+                if (G[key] != null) wanted.add(G[key]);
+            });
+            if (wanted.size) {
+                const thresholdJuridico = typeof window.getEnvioJuridicoThreshold === "function"
+                  ? window.getEnvioJuridicoThreshold()
+                  : 151;
+                filteredList = filteredList.filter((c) => wanted.has(window.getFilaQueueGroup(c, thresholdJuridico)));
+            }
+        }
         if (window.advFilters.lotes && window.advFilters.lotes.length > 0) {
             filteredList = filteredList.filter(c => {
                 return window.advFilters.lotes.some(val => {
@@ -27112,17 +27130,20 @@ window.nexFindReguaNode = function(kind) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   if (kind === "zero") {
-    return (nodes || []).find(n => {
-      const t = norm(n);
-      return t.indexOf("nex") !== -1 && (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t));
-    }) || (nodes || []).find(n => /0%\s*pago/.test(norm(n)));
+    return (nodes || []).find(n => n && (n.acao === "nex_zero" || n.id === "n_nex_zero"))
+      || (nodes || []).find(n => {
+        const t = norm(n);
+        return t.indexOf("nex") !== -1 && (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t));
+      }) || (nodes || []).find(n => /0%\s*pago/.test(norm(n)));
   }
-  return (nodes || []).find(n => {
-    const t = norm(n);
-    if (t.indexOf("nex") === -1) return false;
-    if (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t)) return false;
-    return true;
-  });
+  return (nodes || []).find(n => n && (n.acao === "nex" || n.id === "n_nex"))
+    || (nodes || []).find(n => {
+      const t = norm(n);
+      if (!n || n.acao === "nex_zero" || n.id === "n_nex_zero") return false;
+      if (t.indexOf("nex") === -1) return false;
+      if (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t)) return false;
+      return true;
+    });
 };
 
 window.nexReguaDays = function() {
@@ -30135,7 +30156,9 @@ window.openTimelineListModal = function() {
           </div>
           <div style="display: flex; gap: 8px;">
             <button type="button" class="btn btn-outline btn-sm" onclick="window.openTimelineNodeModal('${node.id}')" style="padding: 6px 12px; border-color: #cbd5e1; color: #475569;">Editar</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="window.excluirTimelineNodeFromList('${node.id}')" style="padding: 6px 12px; color: #ef4444; border-color: #fca5a5; background: #fef2f2;">Excluir</button>
+            ${typeof window.isProtectedNexTimelineNode === "function" && window.isProtectedNexTimelineNode(node)
+              ? '<span style="font-size:0.72rem;color:#64748b;align-self:center;">NEX oficial</span>'
+              : `<button type="button" class="btn btn-outline btn-sm" onclick="window.excluirTimelineNodeFromList('${node.id}')" style="padding: 6px 12px; color: #ef4444; border-color: #fca5a5; background: #fef2f2;">Excluir</button>`}
           </div>
         </div>
       `;
@@ -30160,6 +30183,11 @@ window.openTimelineListModal = function() {
 };
 
 window.excluirTimelineNodeFromList = function(id) {
+  const node = (window.TimelineState || []).find(n => n && n.id === id);
+  if (typeof window.isProtectedNexTimelineNode === "function" && window.isProtectedNexTimelineNode(node)) {
+    alert("Os pontos de NEX fazem parte da régua e não podem ser excluídos.");
+    return;
+  }
   if (!confirm("Tem certeza que deseja excluir este ponto?")) return;
   window.TimelineState = window.TimelineState.filter(n => n.id !== id);
   window.renderTimeline();
@@ -30177,9 +30205,88 @@ window.timelineModalAcaoChanged = function() {
 window.TIMELINE_ACOES_OFICIAIS = [
   { id: 'cob_interna', label: 'Início Cobrança Interna', color: '#3b82f6' },
   { id: 'cob_terceirizada', label: 'Início Terceirizada', color: '#eab308' },
+  { id: 'nex_zero', label: 'NEX 0% pago', color: '#0d9488' },
+  { id: 'nex', label: 'NEX', color: '#f97316' },
   { id: 'analise_interna_juridico', label: 'Análise Interna Jurídico', color: '#a855f7' },
   { id: 'juridico', label: 'Envio Jurídico', color: '#ef4444' }
 ];
+
+window.isProtectedNexTimelineNode = function(node) {
+  if (!node) return false;
+  const acao = String(node.acao || "");
+  const id = String(node.id || "");
+  return acao === "nex" || acao === "nex_zero" || id === "n_nex" || id === "n_nex_zero";
+};
+
+window.getDefaultTimelineNodes = function() {
+  return [
+    { id: "n1", dias: 15, acao: "cob_interna", label: "Início Cobrança Interna" },
+    { id: "n_nex_zero", dias: 30, acao: "nex_zero", label: "NEX 0% pago", gatilhos: [], explicacao: "Notificação Extrajudicial para clientes com 0% pago. A lista Elegíveis 0% pago segue este ponto da régua." },
+    { id: "n2", dias: 31, acao: "cob_terceirizada", label: "Início Terceirizada" },
+    { id: "n_nex", dias: 61, acao: "nex", label: "NEX", gatilhos: [], explicacao: "Notificação Extrajudicial para demais clientes (já houve algum pagamento). A lista Demais clientes elegíveis segue este ponto da régua." },
+    { id: "n_analise", dias: 121, acao: "analise_interna_juridico", label: "Análise Interna Jurídico" },
+    { id: "n3", dias: 151, acao: "juridico", label: "Envio Jurídico" }
+  ];
+};
+
+window.parseTimelineJsonArray = function(str) {
+  try {
+    const a = JSON.parse(str || "[]");
+    return Array.isArray(a) ? a.filter((n) => n && typeof n === "object") : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+window.mergeTimelineNodes = function(localStr, cloudStr) {
+  const local = window.parseTimelineJsonArray(localStr);
+  const cloud = window.parseTimelineJsonArray(cloudStr);
+  const keyOf = (n) => {
+    if (!n) return "";
+    if (n.id) return "id:" + String(n.id);
+    return "acao:" + String(n.acao || "") + ":" + String(n.dias);
+  };
+  const map = new Map();
+  const add = (n) => {
+    const k = keyOf(n);
+    if (!k) return;
+    const cur = map.get(k);
+    map.set(k, cur ? Object.assign({}, cur, n) : Object.assign({}, n));
+  };
+  cloud.forEach(add);
+  local.forEach(add);
+  return JSON.stringify(Array.from(map.values()));
+};
+
+window.mergeTimelineAcoes = function(localStr, cloudStr) {
+  const local = window.parseTimelineJsonArray(localStr);
+  const cloud = window.parseTimelineJsonArray(cloudStr);
+  const map = new Map();
+  [...cloud, ...local].forEach((a) => {
+    if (!a || !a.id) return;
+    const cur = map.get(a.id);
+    map.set(a.id, cur ? Object.assign({}, cur, a) : Object.assign({}, a));
+  });
+  return JSON.stringify(Array.from(map.values()));
+};
+
+window.mergeTimelineConfigIntoPayload = function(payload, cloud) {
+  if (!payload) payload = {};
+  cloud = cloud || {};
+  if (typeof window.mergeTimelineNodes === "function" && (payload.crm_moura_timeline_nodes || cloud.crm_moura_timeline_nodes)) {
+    payload.crm_moura_timeline_nodes = window.mergeTimelineNodes(
+      payload.crm_moura_timeline_nodes || "[]",
+      cloud.crm_moura_timeline_nodes || "[]"
+    );
+  }
+  if (typeof window.mergeTimelineAcoes === "function" && (payload.crm_moura_timeline_acoes || cloud.crm_moura_timeline_acoes)) {
+    payload.crm_moura_timeline_acoes = window.mergeTimelineAcoes(
+      payload.crm_moura_timeline_acoes || "[]",
+      cloud.crm_moura_timeline_acoes || "[]"
+    );
+  }
+  return payload;
+};
 
 try {
   window.TimelineAcoesList = JSON.parse(localStorage.getItem('crm_moura_timeline_acoes') || 'null');
@@ -30229,12 +30336,16 @@ window.ensureTimelineReguaDefaults = function() {
   }
   let changed = false;
   if (!Array.isArray(window.TimelineState) || !window.TimelineState.length) {
-    window.TimelineState = [
-      { id: "n1", dias: 15, acao: "cob_interna", label: "Início Cobrança Interna" },
-      { id: "n2", dias: 31, acao: "cob_terceirizada", label: "Início Terceirizada" },
-      { id: "n_analise", dias: 121, acao: "analise_interna_juridico", label: "Análise Interna Jurídico" },
-      { id: "n3", dias: 151, acao: "juridico", label: "Envio Jurídico" }
-    ];
+    window.TimelineState = (typeof window.getDefaultTimelineNodes === "function")
+      ? window.getDefaultTimelineNodes()
+      : [
+          { id: "n1", dias: 15, acao: "cob_interna", label: "Início Cobrança Interna" },
+          { id: "n_nex_zero", dias: 30, acao: "nex_zero", label: "NEX 0% pago" },
+          { id: "n2", dias: 31, acao: "cob_terceirizada", label: "Início Terceirizada" },
+          { id: "n_nex", dias: 61, acao: "nex", label: "NEX" },
+          { id: "n_analise", dias: 121, acao: "analise_interna_juridico", label: "Análise Interna Jurídico" },
+          { id: "n3", dias: 151, acao: "juridico", label: "Envio Jurídico" }
+        ];
     changed = true;
   }
   const nodes = window.TimelineState;
@@ -30294,6 +30405,65 @@ window.ensureTimelineReguaDefaults = function() {
     changed = true;
   }
 
+  let zeroHit = nodes.find(n => n && (n.acao === "nex_zero" || n.id === "n_nex_zero"));
+  if (!zeroHit && typeof window.nexFindReguaNode === "function") {
+    zeroHit = window.nexFindReguaNode("zero");
+  }
+  if (zeroHit) {
+    if (zeroHit.acao !== "nex_zero") {
+      zeroHit.acao = "nex_zero";
+      changed = true;
+    }
+    if (!zeroHit.label) {
+      zeroHit.label = "NEX 0% pago";
+      changed = true;
+    }
+    if (!Number.isFinite(Number(zeroHit.dias))) {
+      zeroHit.dias = 30;
+      changed = true;
+    }
+  } else {
+    nodes.push({
+      id: "n_nex_zero",
+      dias: 30,
+      acao: "nex_zero",
+      label: "NEX 0% pago",
+      gatilhos: [],
+      explicacao: "Notificação Extrajudicial para clientes com 0% pago. A lista Elegíveis 0% pago segue este ponto da régua."
+    });
+    changed = true;
+  }
+
+  let stdHit = nodes.find(n => n && n !== zeroHit && (n.acao === "nex" || n.id === "n_nex"));
+  if (!stdHit && typeof window.nexFindReguaNode === "function") {
+    stdHit = window.nexFindReguaNode("standard");
+    if (stdHit && zeroHit && stdHit === zeroHit) stdHit = null;
+  }
+  if (stdHit) {
+    if (stdHit.acao !== "nex") {
+      stdHit.acao = "nex";
+      changed = true;
+    }
+    if (!stdHit.label) {
+      stdHit.label = "NEX";
+      changed = true;
+    }
+    if (!Number.isFinite(Number(stdHit.dias))) {
+      stdHit.dias = 61;
+      changed = true;
+    }
+  } else {
+    nodes.push({
+      id: "n_nex",
+      dias: 61,
+      acao: "nex",
+      label: "NEX",
+      gatilhos: [],
+      explicacao: "Notificação Extrajudicial para demais clientes (já houve algum pagamento). A lista Demais clientes elegíveis segue este ponto da régua."
+    });
+    changed = true;
+  }
+
   if (changed) {
     if (typeof window.safeSetLocalJson === "function") {
       window.safeSetLocalJson("crm_moura_timeline_nodes", window.TimelineState);
@@ -30334,13 +30504,14 @@ window.renderTimelineAcoesListModal = function() {
   
   let html = '';
   window.TimelineAcoesList.forEach(a => {
+    const official = (window.TIMELINE_ACOES_OFICIAIS || []).some(o => o && o.id === a.id);
     html += `
       <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <div style="width: 14px; height: 14px; border-radius: 50%; background: ${a.color || '#94a3b8'};"></div>
           <span style="font-size: 0.9rem; color: #1e293b; font-weight: 500;">${a.label}</span>
         </div>
-        <button type="button" class="btn btn-outline btn-sm" onclick="window.removeTimelineAcao('${a.id}')" style="padding: 4px 8px; font-size: 0.75rem; color: #ef4444; border-color: #fca5a5; background: #fef2f2;">Remover</button>
+        ${official ? '<span style="font-size:0.72rem;color:#64748b;">Oficial</span>' : `<button type="button" class="btn btn-outline btn-sm" onclick="window.removeTimelineAcao('${a.id}')" style="padding: 4px 8px; font-size: 0.75rem; color: #ef4444; border-color: #fca5a5; background: #fef2f2;">Remover</button>`}
       </div>
     `;
   });
@@ -30369,6 +30540,11 @@ window.addTimelineAcao = function() {
 };
 
 window.removeTimelineAcao = function(id) {
+  const official = (window.TIMELINE_ACOES_OFICIAIS || []).some(a => a && a.id === id);
+  if (official) {
+    alert("Esta ação faz parte da régua oficial e não pode ser removida.");
+    return;
+  }
   if (!confirm('Deseja realmente remover esta ação? Os pontos que usam ela ficarão sem ação definida.')) return;
   window.TimelineAcoesList = window.TimelineAcoesList.filter(a => a.id !== id);
   localStorage.setItem('crm_moura_timeline_acoes', JSON.stringify(window.TimelineAcoesList));
@@ -30589,6 +30765,11 @@ window.adicionarTimelineNode = function() {
 window.excluirTimelineNode = function() {
   const id = document.getElementById('timeline-modal-node-id').value;
   if (!id) return;
+  const node = (window.TimelineState || []).find(n => n && n.id === id);
+  if (typeof window.isProtectedNexTimelineNode === "function" && window.isProtectedNexTimelineNode(node)) {
+    alert("Os pontos de NEX fazem parte da régua e não podem ser excluídos.");
+    return;
+  }
   if (!confirm("Tem certeza que deseja excluir este ponto?")) return;
   
   window.TimelineState = window.TimelineState.filter(n => n.id !== id);
@@ -37690,7 +37871,7 @@ window.initAdvFiltersUI = function() {
             const pill = e.target.closest('.adv-pill');
             if (!pill) return;
             
-            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente', 'adv-pills-fase-processual', 'adv-pills-data-fase'].includes(group.id);
+            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente', 'adv-pills-fase-processual', 'adv-pills-data-fase', 'adv-pills-queue-groups'].includes(group.id);
             const val = pill.dataset.value;
 
             if (isMulti) {
@@ -37957,13 +38138,17 @@ window.openAdvFiltersModal = function(context = 'fila') {
 
         const isSubjudiceCtx = context === 'subjudice';
         const isZeropaidCtx = context === 'zeropaid';
+        const isFilaCtx = context === 'fila' || !context;
         const faseGroup = document.getElementById('adv-filter-fase-processual-group');
         const dataFaseGroup = document.getElementById('adv-filter-data-fase-group');
         const webroGroup = document.getElementById('adv-filter-webro-group');
+        const queueGroupsWrap = document.getElementById('adv-filter-queue-groups-wrap');
         if (faseGroup) faseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
         if (dataFaseGroup) dataFaseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
         if (webroGroup) webroGroup.style.display = isZeropaidCtx ? 'block' : 'none';
+        if (queueGroupsWrap) queueGroupsWrap.style.display = isFilaCtx ? 'block' : 'none';
         if (!isZeropaidCtx && window.advFilters) window.advFilters.webro = 'TODOS';
+        if (!isFilaCtx && window.advFilters) window.advFilters.queueGroups = [];
 
         const syncSinglePillGroup = (groupId, value, fallback) => {
             const group = document.getElementById(groupId);
@@ -37978,6 +38163,16 @@ window.openAdvFiltersModal = function(context = 'fila') {
         syncSinglePillGroup('adv-pills-zeropaid', window.advFilters.zeropaid, 'TODOS');
         syncSinglePillGroup('adv-pills-webro', window.advFilters.webro, 'TODOS');
         syncSinglePillGroup('adv-pills-contato', window.advFilters.contato, '');
+
+        const qgContainer = document.getElementById('adv-pills-queue-groups');
+        const selectedGroups = window.advFilters.queueGroups || [];
+        if (qgContainer) {
+            qgContainer.querySelectorAll('.adv-pill').forEach((p) => {
+                const val = p.dataset.value || '';
+                if (!val) p.classList.toggle('active', selectedGroups.length === 0);
+                else p.classList.toggle('active', selectedGroups.includes(val));
+            });
+        }
 
         if (isSubjudiceCtx) {
             const faseContainer = document.getElementById('adv-pills-fase-processual');
@@ -38102,6 +38297,11 @@ window.applyAdvFilters = async function(keepOpen = false) {
     window.advFilters.pagamentoRecente = getPills('adv-pills-pagamento-recente');
     window.advFilters.faseProcessual = getPills('adv-pills-fase-processual');
     window.advFilters.dataFase = getPills('adv-pills-data-fase');
+    if (window.currentAdvFilterContext === 'fila') {
+        window.advFilters.queueGroups = getPills('adv-pills-queue-groups');
+    } else {
+        window.advFilters.queueGroups = [];
+    }
     const nDiasEl = document.getElementById('adv-input-data-fase-ndias');
     window.advFilters.dataFaseNDias = nDiasEl ? String(nDiasEl.value || '').trim() : '';
     if ((window.advFilters.dataFase || []).includes('N_DIAS') && !window.advFilters.dataFaseNDias) {
@@ -38160,6 +38360,7 @@ window.applyAdvFilters = async function(keepOpen = false) {
     if (window.advFilters.pagamentoRecente && window.advFilters.pagamentoRecente.length > 0) count++;
     if (window.advFilters.faseProcessual && window.advFilters.faseProcessual.length > 0) count++;
     if (window.advFilters.dataFase && window.advFilters.dataFase.length > 0) count++;
+    if (window.advFilters.queueGroups && window.advFilters.queueGroups.length > 0) count += window.advFilters.queueGroups.length;
 
     let badgeId = 'adv-filters-badge';
     if (window.currentAdvFilterContext === 'subjudice') badgeId = 'subjudice-adv-filters-badge';
@@ -38254,7 +38455,7 @@ window.clearAdvFilters = function() {
         lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
         cidade: [], empresa: [], ccusto: [], operador: [],
         contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
-        faseProcessual: [], dataFase: [], dataFaseNDias: ''
+        faseProcessual: [], dataFase: [], dataFaseNDias: '', queueGroups: []
     };
     if (window.currentAdvFilterContext === 'fila') window.advFiltersFila = defaultState;
     else if (window.currentAdvFilterContext === 'subjudice') window.advFiltersSubjudice = defaultState;
@@ -39311,6 +39512,20 @@ window.syncGlobalConfigFromFirebase = async function() {
             window.SYNC_KEYS.forEach(k => {
                 if (k === "crm_moura_preambles_list") return;
                 if (k === "crm_moura_cartorios_list") return;
+                if (k === "crm_moura_timeline_nodes" || k === "crm_moura_timeline_acoes") {
+                    const merger = k === "crm_moura_timeline_nodes" ? window.mergeTimelineNodes : window.mergeTimelineAcoes;
+                    const merged = typeof merger === "function"
+                      ? merger(localStorage.getItem(k), globalData[k] || "[]")
+                      : (localStorage.getItem(k) || globalData[k] || "[]");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1800);
+                    }
+                    return;
+                }
                 if (k === "crm_empresas_custom") {
                     const merged = window.mergeEmpresasCustom(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -39626,6 +39841,21 @@ window.forceUploadLocalConfig = async function(silent = true) {
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
             payload.crm_moura_cartorios_list = window.mergeCartoriosList(payload.crm_moura_cartorios_list || "[]", cloud.crm_moura_cartorios_list || "[]");
           }
+          if (typeof window.mergeTimelineConfigIntoPayload === "function") {
+            window.mergeTimelineConfigIntoPayload(payload, cloud);
+            try {
+              if (payload.crm_moura_timeline_nodes) {
+                _originalSetItem.call(localStorage, "crm_moura_timeline_nodes", payload.crm_moura_timeline_nodes);
+                const parsedNodes = JSON.parse(payload.crm_moura_timeline_nodes);
+                if (Array.isArray(parsedNodes) && parsedNodes.length) window.TimelineState = parsedNodes;
+              }
+              if (payload.crm_moura_timeline_acoes) {
+                _originalSetItem.call(localStorage, "crm_moura_timeline_acoes", payload.crm_moura_timeline_acoes);
+                const parsedAcoes = JSON.parse(payload.crm_moura_timeline_acoes);
+                if (Array.isArray(parsedAcoes) && parsedAcoes.length) window.TimelineAcoesList = parsedAcoes;
+              }
+            } catch (e) {}
+          }
           if (payload.crm_moura_rules || cloud.crm_moura_rules) {
             payload.crm_moura_rules = window.mergeCityAssignmentRules(
               payload.crm_moura_rules || "{}",
@@ -39848,6 +40078,9 @@ localStorage.setItem = function(key, value) {
                       }
                       if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
                         payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+                      }
+                      if (typeof window.mergeTimelineConfigIntoPayload === "function") {
+                        window.mergeTimelineConfigIntoPayload(payload, cloud);
                       }
                       delete payload.crm_centros_custo_custom;
                       if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {

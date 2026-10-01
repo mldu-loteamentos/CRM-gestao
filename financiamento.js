@@ -31,6 +31,14 @@ const FinanciamentoApp = {
     return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   },
 
+  formatUnidade(raw) {
+    let s = String(raw == null ? "" : raw).trim();
+    if (!s || s === "—" || s === "N/D") return s || "—";
+    s = s.replace(/^quadra-lote:\s*/i, "").trim();
+    s = s.replace(/^u[\.\s\-]+/i, "").trim();
+    return s || "—";
+  },
+
   init() {
     this.render();
     this.populateEmpreendimentos();
@@ -91,20 +99,43 @@ const FinanciamentoApp = {
                 <i data-lucide="eraser" style="width:14px;margin-right:6px;"></i> Limpar
               </button>
             </div>
-            <div class="form-group" style="grid-column:1 / 2;margin:0;">
+            <div class="form-group" style="grid-column:1 / 2;margin:0;position:relative;">
               <label>Nome do Cliente</label>
-              <input type="text" class="form-control" id="fin-filter-nome" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="FinanciamentoApp.sugerirCliente(this.value,'nome'); FinanciamentoApp.toggleFilters()" autocomplete="off">
+              <input type="text" class="form-control" id="fin-filter-nome" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="handleDynamicCustomerSearch(this.value,'nome','fin'); FinanciamentoApp.toggleFilters()" autocomplete="off">
             </div>
-            <div class="form-group" style="grid-column:2 / 3;margin:0;">
+            <div class="form-group" style="grid-column:2 / 3;margin:0;position:relative;">
               <label>Telefone</label>
-              <input type="text" class="form-control" id="fin-filter-telefone" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="this.value=this.value.replace(/[^0-9]/g,'');FinanciamentoApp.sugerirCliente(this.value,'telefone'); FinanciamentoApp.toggleFilters()" autocomplete="off">
+              <input type="text" class="form-control" id="fin-filter-telefone" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="handleDynamicCustomerSearch(this.value,'telefone','fin'); FinanciamentoApp.toggleFilters()" autocomplete="off">
             </div>
-            <div class="form-group" style="grid-column:3 / 4;margin:0;">
+            <div class="form-group" style="grid-column:3 / 4;margin:0;position:relative;">
               <label>E-mail</label>
-              <input type="text" class="form-control" id="fin-filter-email" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="FinanciamentoApp.sugerirCliente(this.value,'email'); FinanciamentoApp.toggleFilters()" autocomplete="off">
+              <input type="text" class="form-control" id="fin-filter-email" placeholder="Digite para buscar..." onkeydown="if((event.key==='Enter'||event.key==='Tab')&&this.value){event.preventDefault();FinanciamentoApp.buscar();}" oninput="handleDynamicCustomerSearch(this.value,'email','fin'); FinanciamentoApp.toggleFilters()" autocomplete="off">
             </div>
           </div>
-          <div id="fin-sugestoes" style="display:none;margin:0 0 16px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:220px;overflow:auto;"></div>
+        </div>
+      </div>
+
+      <div class="crm-card" id="fin-abertos-card" style="margin-bottom:24px;">
+        <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;margin-bottom:0;display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Financiamentos em aberto</h3>
+          <span id="fin-abertos-count" style="font-size:0.75rem;color:#64748b;font-weight:700;"></span>
+        </div>
+        <div class="crm-card-content" style="padding:0;">
+          <div style="overflow:auto;max-height:280px;border-bottom-left-radius:8px;border-bottom-right-radius:8px;">
+            <table class="crm-table" style="width:100%;border-collapse:separate;border-spacing:0;">
+              <thead style="position:sticky;top:0;background:#f3f4f6;z-index:10;">
+                <tr>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Cliente</th>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Contrato</th>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Título</th>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Unidade</th>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Etapa</th>
+                  <th style="text-align:left;padding:10px;font-size:0.6rem;color:#64748b;text-transform:uppercase;">Atualizado</th>
+                </tr>
+              </thead>
+              <tbody id="fin-abertos-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -153,6 +184,7 @@ const FinanciamentoApp = {
       this.renderContractsTable(FinanciamentoState.contracts);
     }
     this.populateEmpreendimentos();
+    this.renderAbertos();
   },
 
   limparBusca() {
@@ -170,13 +202,16 @@ const FinanciamentoApp = {
     window.FinanciamentoSelectedCustomerId = null;
     FinanciamentoState.customer = null;
     FinanciamentoState.contracts = [];
-    const sug = document.getElementById("fin-sugestoes");
-    if (sug) sug.style.display = "none";
+    ["nome", "telefone", "email"].forEach((t) => {
+      const dd = document.getElementById("custom-dropdown-fin-" + t);
+      if (dd) dd.style.display = "none";
+    });
     const cc = document.getElementById("fin-customer-card");
     const rc = document.getElementById("fin-results-card");
     if (cc) cc.style.display = "none";
     if (rc) rc.style.display = "none";
     this.toggleFilters();
+    this.renderAbertos();
   },
 
   toggleFilters() {
@@ -253,7 +288,7 @@ const FinanciamentoApp = {
       allUnits = allUnits.filter((u) => u.commercialStock !== "T");
       allUnits.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR", { numeric: true }));
       selectUnidade.innerHTML = '<option value="">Selecione...</option>' + allUnits.map((u) => {
-        const label = `${cc} - ${u.name || u.id}`;
+        const label = this.formatUnidade(u.name || u.id);
         return `<option value="${u.id}" data-contract="${this.esc(u.contractId || "")}">${this.esc(label)}</option>`;
       }).join("");
       selectUnidade.disabled = false;
@@ -267,42 +302,9 @@ const FinanciamentoApp = {
   },
 
   sugerirCliente(val, tipo) {
-    const box = document.getElementById("fin-sugestoes");
-    if (!box) return;
-    const cache = (window.GlobalCustomerCache && window.GlobalCustomerCache.data) || [];
-    const term = String(val || "").trim();
-    if (!term || term.length < 2 || !cache.length) {
-      box.style.display = "none";
-      box.innerHTML = "";
-      return;
+    if (typeof window.handleDynamicCustomerSearch === "function") {
+      window.handleDynamicCustomerSearch(val, tipo, "fin");
     }
-    let hits = [];
-    if (tipo === "nome") {
-      const terms = this.norm(term).split(/\s+/).filter(Boolean);
-      hits = cache.filter((c) => {
-        const n = this.norm(c.name);
-        return terms.every((t) => n.includes(t));
-      }).slice(0, 12);
-    } else if (tipo === "telefone") {
-      const digits = term.replace(/\D/g, "");
-      if (digits.length < 4) { box.style.display = "none"; return; }
-      hits = cache.filter((c) => (c.phones || []).some((p) => {
-        const full = String(p.areaCode || "") + String(p.number || p.phoneNumber || "");
-        return full.replace(/\D/g, "").includes(digits);
-      })).slice(0, 12);
-    } else if (tipo === "email") {
-      const t = this.norm(term);
-      hits = cache.filter((c) => this.norm(c.email).includes(t)).slice(0, 12);
-    }
-    if (!hits.length) { box.style.display = "none"; return; }
-    box.style.display = "block";
-    box.innerHTML = hits.map((c) => {
-      const doc = c.cpf || c.cnpj || c.cpfCnpj || "";
-      return `<button type="button" style="display:flex;justify-content:space-between;width:100%;border:none;background:#fff;padding:10px 14px;cursor:pointer;text-align:left;border-bottom:1px solid #f1f5f9;" onclick="FinanciamentoApp.escolherSugestao('${String(c.id).replace(/'/g, "")}')">
-        <strong>${this.esc(c.name)}</strong>
-        <span style="color:#64748b;font-size:0.8rem;">${this.esc(doc || ("ID " + c.id))}</span>
-      </button>`;
-    }).join("");
   },
 
   escolherSugestao(id) {
@@ -531,7 +533,7 @@ const FinanciamentoApp = {
       const titulo = c.receivableBillId || c.billReceivableId || "—";
       const empId = c.enterpriseId || c.costCenterId || "";
       const empName = ccMap[String(empId)] || c.enterpriseName || empId || "—";
-      const unitLabel = c.unitName || c.unityName || c.unitId || "—";
+      const unitLabel = this.formatUnidade(c.unitName || c.unityName || c.unitId || "—");
       const dataVenda = this.fmtDate(c.saleDate || c.contractDate || c.issueDate);
       const proc = this.getProcess(customer.id, cid);
       const btnLabel = proc ? "Continuar financiamento" : "Iniciar financiamento";
@@ -563,6 +565,85 @@ const FinanciamentoApp = {
     }
   },
 
+  isProcessoAberto(proc) {
+    if (!proc) return false;
+    const st = String(proc.status || "").toLowerCase();
+    if (st === "concluido" || st === "encerrado" || st === "cancelado" || st === "closed") return false;
+    if (proc.closedAt || proc.finishedAt) return false;
+    return true;
+  },
+
+  listOpenProcesses() {
+    const all = this.loadAllProcesses();
+    return Object.keys(all).map((key) => {
+      const proc = all[key];
+      if (!proc || typeof proc !== "object") return null;
+      if (!this.isProcessoAberto(proc)) return null;
+      return { key, proc };
+    }).filter(Boolean).sort((a, b) => String(b.proc.updatedAt || b.proc.startedAt || "").localeCompare(String(a.proc.updatedAt || a.proc.startedAt || "")));
+  },
+
+  etapaLabel(proc) {
+    const catalog = typeof window.buildFinanciamentoStageCatalog === "function"
+      ? window.buildFinanciamentoStageCatalog()
+      : (window.EtapasFinanciamentoState || []);
+    const id = proc && proc.currentStageId;
+    if (!id) return "Aguardando primeira etapa";
+    const hit = (catalog || []).find((s) => s && String(s.id) === String(id));
+    return (hit && (hit.label || hit.nome)) || String(id);
+  },
+
+  renderAbertos() {
+    const tbody = document.getElementById("fin-abertos-tbody");
+    const countEl = document.getElementById("fin-abertos-count");
+    if (!tbody) return;
+    const rows = this.listOpenProcesses();
+    if (countEl) countEl.textContent = rows.length ? (rows.length + (rows.length === 1 ? " em andamento" : " em andamento")) : "";
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:22px;color:#94a3b8;">Nenhum financiamento em aberto. Pesquise um cliente e clique em Iniciar financiamento.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(({ key, proc }) => {
+      const safeKey = String(key).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      return `<tr tabindex="0" role="button" onclick="FinanciamentoApp.abrirAberto('${safeKey}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();FinanciamentoApp.abrirAberto('${safeKey}')}" style="cursor:pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background=''">
+        <td style="padding:10px;font-weight:700;font-size:0.75rem;color:#0f172a;">${this.esc(proc.customerName || proc.customerId || "—")}</td>
+        <td style="padding:10px;font-size:0.75rem;">${this.esc(proc.contractNumber || proc.contractId || "—")}</td>
+        <td style="padding:10px;font-size:0.75rem;font-weight:800;">${this.esc(proc.titulo || "—")}</td>
+        <td style="padding:10px;font-size:0.75rem;">${this.esc(this.formatUnidade(proc.unit || "—"))}</td>
+        <td style="padding:10px;font-size:0.75rem;color:#105436;font-weight:600;">${this.esc(this.etapaLabel(proc))}</td>
+        <td style="padding:10px;font-size:0.75rem;color:#64748b;">${this.esc(this.fmtDate(proc.updatedAt || proc.startedAt))}</td>
+      </tr>`;
+    }).join("");
+  },
+
+  async abrirAberto(key) {
+    const all = this.loadAllProcesses();
+    const proc = all[String(key)];
+    if (!proc) return;
+    FinanciamentoState.process = proc;
+    let customer = FinanciamentoState.customer;
+    if (!customer || String(customer.id) !== String(proc.customerId)) {
+      try {
+        if (window.SiengeApiService && typeof SiengeApiService.getCustomer === "function") {
+          customer = await SiengeApiService.getCustomer(proc.customerId);
+        }
+      } catch (e) {
+        customer = { id: proc.customerId, name: proc.customerName };
+      }
+    }
+    FinanciamentoState.customer = customer || { id: proc.customerId, name: proc.customerName };
+    FinanciamentoState.selected = {
+      customerId: proc.customerId,
+      contractId: proc.contractId,
+      titulo: proc.titulo,
+      contractNumber: proc.contractNumber,
+      contract: { unitName: proc.unit, enterpriseId: proc.empId },
+      customer: FinanciamentoState.customer
+    };
+    FinanciamentoState.view = "fluxo";
+    this.render();
+  },
+
   procKey(customerId, contractId) {
     return String(customerId) + ":" + String(contractId);
   },
@@ -577,6 +658,7 @@ const FinanciamentoApp = {
     all[this.procKey(proc.customerId, proc.contractId)] = proc;
     localStorage.setItem(FIN_PROC_KEY, JSON.stringify(all));
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+    if (FinanciamentoState.view === "busca") this.renderAbertos();
   },
 
   iniciar(customerId, contractId, titulo, contractNumber) {
@@ -591,7 +673,7 @@ const FinanciamentoApp = {
         titulo: titulo || "",
         contractNumber: contractNumber || "",
         customerName: customer.name || "",
-        unit: contract.unitName || contract.unityName || "",
+        unit: this.formatUnidade(contract.unitName || contract.unityName || contract.unitId || ""),
         empId: contract.enterpriseId || "",
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -649,7 +731,7 @@ const FinanciamentoApp = {
           <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Cliente</div><div style="font-weight:700;color:#0f172a;">${this.esc(proc.customerName || customer.name || "—")}</div></div>
           <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Contrato</div><div style="font-weight:700;color:#0f172a;">${this.esc(proc.contractNumber || "—")}</div></div>
           <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Título</div><div style="font-weight:700;color:#0f172a;">${this.esc(proc.titulo || "—")}</div></div>
-          <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Unidade</div><div style="font-weight:700;color:#0f172a;">${this.esc(proc.unit || "—")}</div></div>
+          <div><div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Unidade</div><div style="font-weight:700;color:#0f172a;">${this.esc(this.formatUnidade(proc.unit || "—"))}</div></div>
         </div>
       </div>
       <div class="crm-card">
