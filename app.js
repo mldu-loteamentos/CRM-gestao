@@ -5104,7 +5104,11 @@ async function initializeApplication() {
                          delete personalNotes[change.doc.id];
                          changed = true;
                      } else {
-                         personalNotes[change.doc.id] = change.doc.data().notes || [];
+                         const incoming = change.doc.data().notes || [];
+                         const local = personalNotes[change.doc.id] || [];
+                         personalNotes[change.doc.id] = (typeof window.mergeAgendaNoteAlarmState === 'function')
+                             ? window.mergeAgendaNoteAlarmState(incoming, local)
+                             : incoming;
                          changed = true;
                      }
                  });
@@ -23348,6 +23352,60 @@ window.saveAgendaAlarm = function(dateStr, index, datetimeValue, sourceKey = '',
     if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
 };
 
+window.mergeAgendaNoteAlarmState = function(incomingArr, localArr) {
+    const incoming = Array.isArray(incomingArr) ? incomingArr : [];
+    const local = Array.isArray(localArr) ? localArr : [];
+    return incoming.map((n, i) => {
+        if (!n || typeof n !== "object") return n;
+        const loc = local[i];
+        if (!loc || typeof loc !== "object") return n;
+        return {
+            ...n,
+            triggered: !!(n.triggered || loc.triggered),
+            triggeredDates: [...new Set([].concat(n.triggeredDates || [], loc.triggeredDates || []))],
+            checkedDates: [...new Set([].concat(n.checkedDates || [], loc.checkedDates || []))]
+        };
+    });
+};
+
+window.agendaLocalTodayStr = function() {
+    const now = new Date();
+    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+};
+
+window.agendaAlarmToastId = function(key, idx) {
+    return "agenda-alarm-toast-" + String(key || "").replace(/[^a-zA-Z0-9_-]/g, "_") + "-" + String(idx);
+};
+
+window.agendaAlarmShownKey = function(key, idx, todayStr) {
+    return String(key) + "|" + String(idx) + "|" + String(todayStr);
+};
+
+window.closeAgendaAlarmToast = function(el) {
+    if (!el) {
+        return;
+    }
+    const toast = (el.closest && el.closest("[data-agenda-alarm]")) || null;
+    if (toast) {
+        toast.remove();
+        return;
+    }
+    if (el.parentElement && el.parentElement.parentElement) {
+        el.parentElement.parentElement.remove();
+    }
+};
+
+window.markAgendaAlarmResolved = function(note, todayStr) {
+    if (!note || typeof note !== "object") return note;
+    const day = todayStr || window.agendaLocalTodayStr();
+    note.triggered = true;
+    if (!Array.isArray(note.triggeredDates)) note.triggeredDates = [];
+    if (!note.triggeredDates.includes(day)) note.triggeredDates.push(day);
+    if (!Array.isArray(note.checkedDates)) note.checkedDates = [];
+    if (!note.checkedDates.includes(day)) note.checkedDates.push(day);
+    return note;
+};
+
 window.checkAgendaAlarms = function() {
     let allNotes = {};
     try {
@@ -23356,7 +23414,8 @@ window.checkAgendaAlarms = function() {
     
     let needsSave = false;
     const now = new Date();
-    const todayStr = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,'0') + "-" + String(now.getDate()).padStart(2,'0');
+    const todayStr = window.agendaLocalTodayStr();
+    window._agendaAlarmShownKeys = window._agendaAlarmShownKeys || new Set();
     
     let currentUser = "TODOS";
     let currentUserEmail = "";
@@ -23384,8 +23443,12 @@ window.checkAgendaAlarms = function() {
             const isLegacyTodos = (owner === "TODOS" || owner === "Todos");
             const isShared = (noteObj.sharedWith && noteObj.sharedWith.includes(currentUserEmail));
             
-            // Só dispara o alerta se o usuário atual for o criador, se for um alerta público legado, ou se foi compartilhado com ele.
             if (!isOwner && !isShared && !isLegacyTodos) return;
+            if (Array.isArray(noteObj.checkedDates) && noteObj.checkedDates.includes(todayStr)) return;
+
+            const shownKey = window.agendaAlarmShownKey(key, idx, todayStr);
+            const toastId = window.agendaAlarmToastId(key, idx);
+            if (window._agendaAlarmShownKeys.has(shownKey) || document.getElementById(toastId)) return;
             
             let shouldTrigger = false;
             
@@ -23416,10 +23479,17 @@ window.checkAgendaAlarms = function() {
             }
             
             if (shouldTrigger) {
+                window._agendaAlarmShownKeys.add(shownKey);
+                const existingToast = document.getElementById(toastId);
+                if (existingToast) existingToast.remove();
+
                 const alertDiv = document.createElement('div');
+                alertDiv.id = toastId;
+                alertDiv.setAttribute('data-agenda-alarm', '1');
                 alertDiv.style.cssText = "position:fixed; bottom:20px; right:20px; background:#fff; border-left: 4px solid #10b981; padding:15px 20px; box-shadow:0 10px 25px rgba(0,0,0,0.2); border-radius:8px; z-index:9999999; min-width: 300px; max-width: 400px; animation: fade-in 0.3s ease-out;";
                 
                 const ownerInfo = (!isOwner && owner !== "TODOS") ? `<span style="font-size: 0.75rem; color: #64748b; font-weight: normal; margin-left: auto;">(De: ${owner})</span>` : '';
+                const safeKey = String(key).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 
                 alertDiv.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
@@ -23427,7 +23497,7 @@ window.checkAgendaAlarms = function() {
                             <i data-lucide="bell-ringing" style="width: 18px;"></i> Lembrete
                             ${ownerInfo}
                         </h5>
-                        <button style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0; margin-left: 10px;" onclick="this.parentElement.parentElement.remove()">
+                        <button type="button" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0; margin-left: 10px;" onclick="window.closeAgendaAlarmToast(this)">
                             <i data-lucide="x" style="width: 16px;"></i>
                         </button>
                     </div>
@@ -23435,10 +23505,10 @@ window.checkAgendaAlarms = function() {
                         ${noteObj.text}
                     </p>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <button onclick="window.resolveAgendaAlarm(this, '${key}', ${idx})" style="flex:1; padding: 6px; font-size: 0.8rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 600;">
+                        <button type="button" onclick="window.resolveAgendaAlarm(this, '${safeKey}', ${idx})" style="flex:1; padding: 6px; font-size: 0.8rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 600;">
                             <i data-lucide="check" style="width:14px;"></i> Resolvido
                         </button>
-                        <select onchange="window.snoozeAgendaAlarm(this, '${key}', ${idx})" style="flex:1; padding: 6px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; background: white; color: #475569; font-weight: 500; outline: none;">
+                        <select onchange="window.snoozeAgendaAlarm(this, '${safeKey}', ${idx})" style="flex:1; padding: 6px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; background: white; color: #475569; font-weight: 500; outline: none;">
                             <option value="">Adiar para...</option>
                             <option value="5">Daqui a 5 min</option>
                             <option value="15">Daqui a 15 min</option>
@@ -23509,8 +23579,7 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
         note.triggered = false;
         
         if (note.triggeredDates && note.triggeredDates.length > 0) {
-            const nowLocal = new Date();
-            const todayStr = nowLocal.getFullYear() + "-" + String(nowLocal.getMonth()+1).padStart(2,'0') + "-" + String(nowLocal.getDate()).padStart(2,'0');
+            const todayStr = window.agendaLocalTodayStr();
             const tIdx = note.triggeredDates.indexOf(todayStr);
             if (tIdx > -1) note.triggeredDates.splice(tIdx, 1);
             
@@ -23518,6 +23587,8 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
             const tIdx2 = note.triggeredDates.indexOf(alarmTodayStr);
             if (tIdx2 > -1) note.triggeredDates.splice(tIdx2, 1);
         }
+        window._agendaAlarmShownKeys = window._agendaAlarmShownKeys || new Set();
+        window._agendaAlarmShownKeys.delete(window.agendaAlarmShownKey(key, idx, window.agendaLocalTodayStr()));
         
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
@@ -23527,9 +23598,7 @@ window.snoozeAgendaAlarm = function(selectEl, key, idx) {
         }
     }
     
-    if (selectEl.parentElement && selectEl.parentElement.parentElement) {
-        selectEl.parentElement.parentElement.remove();
-    }
+    window.closeAgendaAlarmToast(selectEl);
 };
 
 window.snoozeAgendaAlarmCustom = function(btnEl, key, idx) {
@@ -23556,14 +23625,15 @@ window.snoozeAgendaAlarmCustom = function(btnEl, key, idx) {
         note.triggered = false;
         
         if (note.triggeredDates && note.triggeredDates.length > 0) {
-            const nowLocal = new Date();
-            const todayStr = nowLocal.getFullYear() + "-" + String(nowLocal.getMonth()+1).padStart(2,'0') + "-" + String(nowLocal.getDate()).padStart(2,'0');
+            const todayStr = window.agendaLocalTodayStr();
             const tIdx = note.triggeredDates.indexOf(todayStr);
             if (tIdx > -1) note.triggeredDates.splice(tIdx, 1);
             
             const tIdx2 = note.triggeredDates.indexOf(customDate);
             if (tIdx2 > -1) note.triggeredDates.splice(tIdx2, 1);
         }
+        window._agendaAlarmShownKeys = window._agendaAlarmShownKeys || new Set();
+        window._agendaAlarmShownKeys.delete(window.agendaAlarmShownKey(key, idx, window.agendaLocalTodayStr()));
         
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
@@ -23573,26 +23643,26 @@ window.snoozeAgendaAlarmCustom = function(btnEl, key, idx) {
         }
     }
     
-    if (btnEl.parentElement && btnEl.parentElement.parentElement) {
-        btnEl.parentElement.parentElement.remove();
-    }
+    window.closeAgendaAlarmToast(btnEl);
 };
 
 window.resolveAgendaAlarm = function(btnEl, key, idx) {
+    const todayStr = window.agendaLocalTodayStr();
+    window._agendaAlarmShownKeys = window._agendaAlarmShownKeys || new Set();
+    window._agendaAlarmShownKeys.add(window.agendaAlarmShownKey(key, idx, todayStr));
+    window.closeAgendaAlarmToast(btnEl);
+
     let allNotes = {};
     try { allNotes = JSON.parse(localStorage.getItem('crm_agenda_personal_notes') || '{}'); } catch(e){}
     
     if (allNotes[key] && allNotes[key][idx]) {
-        const note = allNotes[key][idx];
-        const dateStr = window.currentSelectedAgendaDate || new Date().toISOString().split("T")[0];
-        if (!note.checkedDates) note.checkedDates = [];
-        if (!note.checkedDates.includes(dateStr)) note.checkedDates.push(dateStr);
-        
+        window.markAgendaAlarmResolved(allNotes[key][idx], todayStr);
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
-        if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
-    }
-    if (btnEl.parentElement && btnEl.parentElement.parentElement) {
-        btnEl.parentElement.parentElement.remove();
+        try {
+            if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+        } catch (e) {
+            console.warn('[Agenda] Falha ao redesenhar notas após resolver alarme:', e);
+        }
     }
 };
 
