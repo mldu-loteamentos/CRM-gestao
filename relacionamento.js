@@ -128,6 +128,7 @@ const RelacionamentoApp = {
   },
 
   _installmentSettled(inst) {
+    if (typeof installmentIsSettled === "function") return installmentIsSettled(inst);
     if (!inst) return true;
     const sit = String(inst.installmentSituation || inst.situation || inst.status || "").toLowerCase();
     if (sit === "2" || sit === "paid" || /quitad|paga/.test(sit)) return true;
@@ -145,11 +146,29 @@ const RelacionamentoApp = {
 
   _dueKey(raw) {
     if (!raw) return "";
+    if (typeof window.installmentDueIsoDate === "function") {
+      const iso = window.installmentDueIsoDate(raw);
+      if (iso) return iso;
+    }
     if (typeof window.promiseDateKey === "function") {
       const k = window.promiseDateKey(raw);
       if (k) return k;
     }
     return String(raw).slice(0, 10);
+  },
+
+  _countParcelasVencidas(list) {
+    const today = this._todayKey();
+    return (Array.isArray(list) ? list : []).filter((p) => {
+      if (this._installmentSettled(p)) return false;
+      const bal = p.currentBalance;
+      if (bal !== undefined && bal !== null && Number(bal) <= 0.009) return false;
+      const delay = Number(p.daysOfDelay != null ? p.daysOfDelay : p.daysDelay);
+      if (Number.isFinite(delay) && delay !== 0) return delay > 0;
+      const dueRaw = p.originalDueDate || p.installmentDueDate || p.dataVencto || p.dueDate;
+      const due = this._dueKey(dueRaw);
+      return due && due < today;
+    }).length;
   },
 
   _unitNumericId(ctx) {
@@ -180,36 +199,137 @@ const RelacionamentoApp = {
 
   async _avaliarAdimplencia(sale, bill) {
     const billId = (sale && sale.receivableBillId) || (bill && (bill.id || bill.receivableBillId));
+    const customerId = (sale && sale.customerId) || (bill && bill.customerId);
+    const labelVencidas = (n) => (n === 1 ? "1 parcela vencida" : n + " parcelas vencidas");
+
+    if (customerId && window.SiengeApiService && typeof SiengeApiService.getCustomerFinancialStatements === "function") {
+      try {
+        const balRes = await SiengeApiService.getCustomerFinancialStatements(customerId);
+        const bills = (balRes && balRes.results)
+          ? balRes.results.flatMap((item) => item.billsReceivable || item.bills || [])
+          : [];
+        const dbContract = bills.find((db) =>
+          String(db.billReceivableId) === String(billId)
+          || String(db.receivableBillId) === String(billId)
+          || String(db.id) === String(billId)
+        ) || (bills.length === 1 ? bills[0] : null);
+        const instList = dbContract && Array.isArray(dbContract.installments) ? dbContract.installments : [];
+        if (instList.length) {
+          const n = this._countParcelasVencidas(instList);
+          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n) };
+          return { adimplente: true, vencidas: 0, label: "Adimplente" };
+        }
+      } catch (e) {
+        console.warn("[Relacionamento] falha ao avaliar adimplência pelo extrato", e);
+      }
+    }
+
     if (billId && window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
       try {
         const inst = await SiengeApiService.getBillInstallments(billId);
         const list = Array.isArray(inst) ? inst : [];
-        const today = this._todayKey();
-        const vencidas = list.filter((p) => {
-          if (this._installmentSettled(p)) return false;
-          const due = this._dueKey(p.dueDate || p.dueDateTime || p.installmentDueDate);
-          return due && due < today;
-        });
-        if (vencidas.length) {
-          return {
-            adimplente: false,
-            vencidas: vencidas.length,
-            label: vencidas.length === 1 ? "1 parcela vencida" : vencidas.length + " parcelas vencidas"
-          };
+        if (list.length) {
+          const n = this._countParcelasVencidas(list);
+          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n) };
+          return { adimplente: true, vencidas: 0, label: "Adimplente" };
         }
-        if (list.length) return { adimplente: true, vencidas: 0, label: "Adimplente" };
       } catch (e) {
-        console.warn("[Relacionamento] falha ao avaliar adimplência", e);
+        console.warn("[Relacionamento] falha ao avaliar adimplência pelas parcelas", e);
       }
     }
-    if (bill && (bill.defaulting === true || bill.defaulting === "S")) {
-      return { adimplente: false, vencidas: null, label: "Com parcelas vencidas" };
-    }
+
     const status = String((sale && sale.status) || "").toLowerCase();
     if (status === "quitado" || (bill && bill.payOffDate)) {
       return { adimplente: true, vencidas: 0, label: "Adimplente" };
     }
     return { adimplente: true, vencidas: 0, label: "Adimplente" };
+  },
+
+  _formatContratoDoc(sale, bill) {
+    let s = "";
+    const docId = String((bill && bill.documentId) || "").trim();
+    const docNum = String((bill && (bill.documentNumber || bill.number)) || "").trim();
+    if (docId && docNum) s = docId + docNum;
+    else if (docNum) s = docNum;
+    else s = String((sale && (sale.contractNumber || sale.number || sale.documentNumber)) || "").trim();
+    s = s.replace(/^CT[\.\s-]*/i, "").trim();
+    if (!s || /^\d+$/.test(s)) {
+      const alt = String((sale && sale.contractNumber) || "").replace(/^CT[\.\s-]*/i, "").trim();
+      if (alt && !/^\d+$/.test(alt)) s = alt;
+    }
+    return s || "—";
+  },
+
+  _escDoc(s) {
+    if (typeof window.escapeHtmlText === "function") return window.escapeHtmlText(String(s == null ? "" : s));
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  },
+
+  _docPessoasExtraHtml(customer, sale) {
+    const esc = (v) => this._escDoc(v);
+    const civil = (customer && (customer.civilStatus || customer.maritalStatus)) || "—";
+    const regime = customer && customer.matrimonialRegime ? " — " + customer.matrimonialRegime : "";
+    const sp = (customer && customer.spouse) || {};
+    let spName = sp.name || (customer && customer.spouseName) || "";
+    let spCpf = sp.cpf || sp.cpfCnpj || (customer && customer.spouseCpf) || "";
+    const people = (typeof window.salesContractPeople === "function") ? window.salesContractPeople(sale) : [];
+    const cid = String((customer && customer.id) || (sale && sale.customerId) || "");
+    const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (!spName) {
+      const fromPeople = people.find((p) => p.spouse);
+      if (fromPeople) {
+        spName = fromPeople.name || "";
+        spCpf = spCpf || fromPeople.cpfCnpj || "";
+      }
+    }
+    if (spCpf && typeof formatCpfCnpj === "function") spCpf = formatCpfCnpj(spCpf);
+    const secondary = people.filter((p) => {
+      if (p.main) return false;
+      if (String(p.id) === cid) return false;
+      if (p.spouse) return false;
+      if (spName && norm(p.name) === norm(spName)) return false;
+      return true;
+    });
+    let html = `<div><span style="color:#64748b;">Estado civil</span><br><strong>${esc(civil)}${esc(regime)}</strong></div>`;
+    if (spName) {
+      html += `<div><span style="color:#64748b;">Cônjuge</span><br><strong>${esc(spName)}</strong>${spCpf ? `<div style="font-size:0.75rem;color:#64748b;margin-top:2px;">CPF ${esc(spCpf)}</div>` : ""}</div>`;
+    }
+    if (secondary.length) {
+      const lines = secondary.map((p) => {
+        const pct = p.participationPercentage != null ? " (" + p.participationPercentage + "%)" : "";
+        return esc(p.name) + pct;
+      }).join("<br>");
+      html += `<div><span style="color:#64748b;">Clientes secundários</span><br><strong>${lines}</strong></div>`;
+    }
+    return html;
+  },
+
+  _setVencimentoBloqueado(blocked, motivo) {
+    const dia = document.getElementById("ven-dia");
+    const orig = document.getElementById("ven-data-original");
+    const gen = document.querySelector('#ven-doc-card [onclick*="gerarDocSimplesPdf"]');
+    if (dia) {
+      dia.disabled = !!blocked;
+      if (blocked) dia.value = "";
+    }
+    if (orig) {
+      orig.disabled = !!blocked;
+      if (blocked) orig.value = "";
+    }
+    if (gen) {
+      gen.disabled = !!blocked;
+      gen.style.opacity = blocked ? "0.55" : "";
+      gen.style.cursor = blocked ? "not-allowed" : "";
+    }
+    const preview = document.getElementById("ven-preview");
+    if (preview) {
+      if (blocked) {
+        preview.innerHTML = `<span style="color:#b91c1c;font-weight:700;">Não é possível alterar o vencimento: ${this._escDoc(motivo || "o cliente possui parcelas vencidas")}.</span>`;
+      } else if (!dia || !dia.value) {
+        preview.textContent = "";
+      }
+    }
   },
 
   onDocSearchKey(event, kind) {
@@ -886,6 +1006,7 @@ const RelacionamentoApp = {
       const quadraLote = (block && lot) ? (block + " - " + lot) : (unitName || "____");
       const unitNumericId = unitDetails?.id || (unit.id && !String(unit.id).startsWith("U-") ? unit.id : "");
       const titulo = sale.receivableBillId || bill?.id || "____";
+      const contratoLabel = (ctx.contratoLabel || this._formatContratoDoc(sale, bill));
       const matriculaRaw = unitDetails?.legalRegistrationNumber || unitDetails?.legalregistrationnumber || "";
       const matriculaNum = String(matriculaRaw || "").replace(/\D/g, "");
       const matricula = matriculaNum
@@ -1071,6 +1192,7 @@ const RelacionamentoApp = {
     if (preview) preview.textContent = "";
     const dd = this._docEl(kind, "-nome-dropdown");
     if (dd) dd.style.display = "none";
+    if (kind === "vencimento") this._setVencimentoBloqueado(false);
     const terDd = document.getElementById("ter-terceiro-dropdown");
     if (kind === "terceiros" && terDd) {
       terDd.style.display = "none";
@@ -1079,6 +1201,8 @@ const RelacionamentoApp = {
   },
 
   atualizarPreviewVencimento() {
+    const adimpl = RelacionamentoState.vencimento && RelacionamentoState.vencimento.adimplencia;
+    if (adimpl && adimpl.adimplente === false) return;
     const computed = this._calcularNovoVencimento();
     const el = document.getElementById("ven-preview");
     if (!el) return;
@@ -1225,7 +1349,7 @@ const RelacionamentoApp = {
   },
 
   async selecionarDocSimples(kind, idx) {
-    const sale = (RelacionamentoState[kind + "Matches"] || [])[idx];
+    let sale = (RelacionamentoState[kind + "Matches"] || [])[idx];
     if (!sale) return;
     this._docSetResults(kind, `<div style="padding:16px;text-align:center;color:var(--color-text-muted);">Carregando dados do lote e do contrato...</div>`);
     try {
@@ -1256,42 +1380,57 @@ const RelacionamentoApp = {
           bill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(sale.receivableBillId));
         } catch (e) { bill = null; }
       }
-      if (!(unitDetails && unitDetails.id) && sale.id) {
+      if (sale.id) {
         try {
           const sc = await this._siengeGet("/sales-contracts/" + encodeURIComponent(sale.id));
-          const su = (sc.salesContractUnits || []).find((u) => u.main === true) || (sc.salesContractUnits || [])[0] || {};
-          if (su.id) unitDetails = Object.assign({}, unitDetails || {}, { id: su.id, name: su.name });
+          if (sc) {
+            sale = Object.assign({}, sale, {
+              contractNumber: sale.contractNumber || sc.contractNumber || sc.number,
+              number: sale.number || sc.number || sc.contractNumber,
+              salesContractCustomers: sale.salesContractCustomers || sc.salesContractCustomers,
+              customers: sale.customers || sc.salesContractCustomers || sale.customers,
+              receivableBillId: sale.receivableBillId || sc.receivableBillId
+            });
+            const su = (sc.salesContractUnits || []).find((u) => u.main === true) || (sc.salesContractUnits || [])[0] || {};
+            if (su.id && !(unitDetails && unitDetails.id)) {
+              unitDetails = Object.assign({}, unitDetails || {}, { id: su.id, name: su.name });
+            }
+          }
         } catch (e) {}
       }
       const block = unit.block && unit.block !== "N/D" ? unit.block : (unitName.split("-")[0] || "");
       const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
       const empName = window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
+      if (typeof window.rememberContractBuyers === "function") window.rememberContractBuyers(sale);
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
       const adimplencia = await this._avaliarAdimplencia(sale, bill);
       RelacionamentoState[kind].adimplencia = adimplencia;
       const titulo = sale.receivableBillId || bill?.id || "—";
-      const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
-      const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const contratoLabel = this._formatContratoDoc(sale, bill);
+      RelacionamentoState[kind].contratoLabel = contratoLabel;
       const unidadeLabel = this._formatUnidadeDoc(RelacionamentoState[kind]);
       const sitColor = adimplencia.adimplente ? "#15803d" : "#b91c1c";
       const resumo = this._docEl(kind, "-contrato-resumo");
       if (resumo) {
         resumo.innerHTML = `
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:0.9rem;">
-            <div><span style="color:#64748b;">Cliente</span><br><strong>${customer.name || "—"}</strong></div>
-            <div><span style="color:#64748b;">Título</span><br><strong>${titulo}</strong></div>
-            <div><span style="color:#64748b;">Contrato</span><br><strong>${sale.id || "—"}</strong></div>
-            <div><span style="color:#64748b;">Unidade</span><br><strong>${unidadeLabel}</strong></div>
-            <div><span style="color:#64748b;">Empreendimento</span><br><strong>${empName || "—"}</strong></div>
-            <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
-            <div><span style="color:#64748b;">Situação</span><br><strong style="color:${sitColor};">${adimplencia.label}</strong></div>
+            <div><span style="color:#64748b;">Cliente</span><br><strong>${this._escDoc(customer.name || "—")}</strong></div>
+            <div><span style="color:#64748b;">Título</span><br><strong>${this._escDoc(titulo)}</strong></div>
+            <div><span style="color:#64748b;">Contrato</span><br><strong>${this._escDoc(contratoLabel)}</strong></div>
+            <div><span style="color:#64748b;">Unidade</span><br><strong>${this._escDoc(unidadeLabel)}</strong></div>
+            <div><span style="color:#64748b;">Empreendimento</span><br><strong>${this._escDoc(empName || "—")}</strong></div>
+            <div><span style="color:#64748b;">Situação</span><br><strong style="color:${sitColor};">${this._escDoc(adimplencia.label)}</strong></div>
+            ${this._docPessoasExtraHtml(customer, sale)}
           </div>`;
       }
       const card = this._docEl(kind, "-doc-card");
       if (card) card.style.display = "block";
       this._docSetResults(kind, "");
-      if (kind === "vencimento") this.atualizarPreviewVencimento();
+      if (kind === "vencimento") {
+        this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
+        if (adimplencia.adimplente) this.atualizarPreviewVencimento();
+      }
     } catch (err) {
       console.error(err);
       this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Não foi possível carregar o contrato."}</div>`);
@@ -1313,6 +1452,11 @@ const RelacionamentoApp = {
       }
     }
     if (kind === "vencimento") {
+      const adimpl = RelacionamentoState.vencimento && RelacionamentoState.vencimento.adimplencia;
+      if (adimpl && adimpl.adimplente === false) {
+        alert("Não é possível alterar o vencimento: " + (adimpl.label || "o cliente possui parcelas vencidas") + ".");
+        return;
+      }
       const computed = this._calcularNovoVencimento();
       if (!computed) {
         alert("Informe o novo dia de vencimento e a data original do mês da alteração.");
@@ -1336,6 +1480,7 @@ const RelacionamentoApp = {
       const quadra = block || unit.block || unitName.split("-")[0] || "____";
       const lote = lot || unit.lot || unitName.split("-").slice(1).join("-") || unitName || "____";
       const titulo = sale.receivableBillId || bill?.id || sale.id || "____";
+      const contratoLabel = (ctx.contratoLabel || this._formatContratoDoc(sale, bill));
       const saleDateRaw = sale.saleDate || sale.contractDate || bill?.issueDate;
       let saleDateStr = "____";
       if (saleDateRaw) {
@@ -1353,8 +1498,8 @@ const RelacionamentoApp = {
         LOTE: lote,
         TITULO: titulo,
         UNIDADE: this._formatUnidadeDoc(ctx),
-        NUM_CONTRATO: sale.id || "____",
-        NUMERO_CONTRATO: sale.id || "____",
+        NUM_CONTRATO: (contratoLabel && contratoLabel !== "—") ? contratoLabel : (sale.contractNumber || sale.number || "____"),
+        NUMERO_CONTRATO: (contratoLabel && contratoLabel !== "—") ? contratoLabel : (sale.contractNumber || sale.number || "____"),
         CIDADE_ATUAL: cidadeLote || "Botucatu",
         DATA_HOJE: new Date().toLocaleDateString("pt-BR"),
         NOME_TERCEIRO: String(document.getElementById("ter-nome")?.value || "").trim().toUpperCase() || "________________",
