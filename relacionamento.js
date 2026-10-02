@@ -300,13 +300,34 @@ const RelacionamentoApp = {
     return `<button type="button" onclick="copyToClipboard('${raw}', this)" style="background:none;border:none;padding:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;opacity:0.7;" title="Copiar"><i data-lucide="copy" style="width:14px;height:14px;color:var(--color-primary);"></i></button>`;
   },
 
+  _docFmtCpfCnpj(val) {
+    const clean = String(val || "").replace(/\D/g, "");
+    if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+    if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+    if (typeof formatCpfCnpj === "function") {
+      const alt = formatCpfCnpj(val);
+      if (alt && alt !== "N/D") return alt;
+    }
+    return clean || "";
+  },
+
+  _docNormPhoneDigits(raw) {
+    let d = String(raw || "").replace(/\D/g, "");
+    if (!d) return "";
+    if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+    d = d.replace(/^0+/, "");
+    if (d.length > 11 && d.charAt(2) === "9") d = d.slice(0, 11);
+    if (d.length > 11) d = d.slice(-11);
+    return d;
+  },
+
   _docFmtPhoneDigits(digits) {
-    const d = String(digits || "").replace(/\D/g, "");
+    const d = this._docNormPhoneDigits(digits);
     if (d.length === 11) return "(" + d.slice(0, 2) + ") " + d.slice(2, 7) + "-" + d.slice(7);
     if (d.length === 10) return "(" + d.slice(0, 2) + ") " + d.slice(2, 6) + "-" + d.slice(6);
     if (d.length === 9) return d.slice(0, 5) + "-" + d.slice(5);
     if (d.length === 8) return d.slice(0, 4) + "-" + d.slice(4);
-    return "";
+    return d || "";
   },
 
   _docPhonesHtml(customer) {
@@ -318,17 +339,18 @@ const RelacionamentoApp = {
       list.push({ formatted, raw: raw || formatted.replace(/\D/g, ""), isMain: !!isMain });
     };
     (customer && customer.phones ? customer.phones : []).forEach((p) => {
-      const ddd = String(p.areaCode || "").replace(/\D/g, "");
-      const num = String(p.number || p.phoneNumber || "").replace(/\D/g, "");
+      const ddd = String(p.areaCode || "").replace(/\D/g, "").replace(/^0+/, "");
+      let num = String(p.number || p.phoneNumber || "").replace(/\D/g, "");
+      if (!ddd && num.startsWith("0") && num.length >= 11) num = num.replace(/^0+/, "");
       const full = ddd + num;
       const formatted = this._docFmtPhoneDigits(full)
-        || (p.areaCode ? "(" + p.areaCode + ") " + (p.number || p.phoneNumber || "") : (p.number || p.phoneNumber || ""));
+        || (ddd ? "(" + ddd + ") " + (p.number || p.phoneNumber || "") : (p.number || p.phoneNumber || ""));
       const main = p.main === true || String(p.type || "").toUpperCase() === "MAIN" || String(p.type || "").toUpperCase() === "CELULAR";
-      push(formatted, full || num, main);
+      push(formatted, this._docNormPhoneDigits(full) || full || num, main);
     });
     if (!list.length && customer && customer.phone && customer.phone !== "N/D" && customer.phone !== "undefined") {
       const raw = String(customer.phone).replace(/\D/g, "");
-      push(this._docFmtPhoneDigits(raw) || customer.phone, raw, true);
+      push(this._docFmtPhoneDigits(raw) || customer.phone, this._docNormPhoneDigits(raw) || raw, true);
     }
     if (list.length && !list.some((p) => p.isMain)) list[0].isMain = true;
     let foundMain = false;
@@ -421,7 +443,7 @@ const RelacionamentoApp = {
         spCpf = spCpf || fromPeople.cpfCnpj || "";
       }
     }
-    if (spCpf && typeof formatCpfCnpj === "function") spCpf = formatCpfCnpj(spCpf);
+    if (spCpf) spCpf = this._docFmtCpfCnpj(spCpf) || spCpf;
     const secondary = people.filter((p) => {
       if (p.main) return false;
       if (String(p.id) === cid) return false;
@@ -447,7 +469,7 @@ const RelacionamentoApp = {
     const c = customer || {};
     const docRaw = String(c.cpfCnpj || c.cpf || c.cnpj || "").replace(/\D/g, "");
     const docLabel = docRaw.length > 11 ? "CNPJ" : "CPF";
-    const docFmt = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(docRaw || c.cpfCnpj || "") : (c.cpfCnpj || "—");
+    const docFmt = this._docFmtCpfCnpj(docRaw || c.cpfCnpj || "") || "—";
     const age = this._docAgeLabel(c);
     const prof = c.profession || c.occupation || "N/D";
     const profIcon = this._docProfIcon(prof);
@@ -639,7 +661,36 @@ const RelacionamentoApp = {
     orig.max = w.max;
     const padrao = this._dataOriginalPadraoVencimento(installments);
     if (!this._isoInJanelaVencimento(orig.value)) orig.value = padrao;
+    this._popularOpcoesDiaVencimento();
     return w;
+  },
+
+  _diasVencimentoPermitidos() {
+    return [10, 15, 20];
+  },
+
+  _diaOriginalVencimento() {
+    const orig = document.getElementById("ven-data-original")?.value || "";
+    const key = typeof window.promiseDateKey === "function" ? window.promiseDateKey(orig) : String(orig).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return 0;
+    return Number(key.slice(8, 10)) || 0;
+  },
+
+  _popularOpcoesDiaVencimento() {
+    const sel = document.getElementById("ven-dia");
+    if (!sel) return;
+    const blocked = this._diaOriginalVencimento();
+    const prev = String(sel.value || "");
+    const days = this._diasVencimentoPermitidos().filter((d) => d !== blocked);
+    sel.innerHTML = '<option value="">Selecione</option>' +
+      days.map((d) => '<option value="' + d + '">' + d + "</option>").join("");
+    sel.value = (prev && days.some((d) => String(d) === prev)) ? prev : "";
+  },
+
+  onDataOriginalVencimentoChange() {
+    this._garantirDataOriginalNaJanela();
+    this._popularOpcoesDiaVencimento();
+    this.atualizarPreviewVencimento();
   },
 
   _garantirDataOriginalNaJanela() {
@@ -671,8 +722,14 @@ const RelacionamentoApp = {
       el.value = maskCpfCnpjTyping(el.value);
       return;
     }
-    let v = String(el.value || "").replace(/\D/g, "").slice(0, 11);
-    if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
+    const formatted = this._docFmtCpfCnpj(el.value);
+    if (formatted) {
+      el.value = formatted;
+      return;
+    }
+    let v = String(el.value || "").replace(/\D/g, "").slice(0, 14);
+    if (v.length > 12) v = v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, "$1.$2.$3/$4-$5");
+    else if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
     else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
     else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, "$1.$2");
     el.value = v;
@@ -680,17 +737,15 @@ const RelacionamentoApp = {
 
   maskDocFone(el) {
     if (!el) return;
-    let v = String(el.value || "").replace(/\D/g, "").slice(0, 11);
+    const v = this._docNormPhoneDigits(el.value);
     if (!v) {
       el.value = "";
       return;
     }
-    if (v.length <= 10) {
-      v = v.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{4})(\d)/, "$1-$2");
-    } else {
-      v = v.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2");
-    }
-    el.value = v.substring(0, 15);
+    if (v.length <= 2) el.value = "(" + v;
+    else if (v.length <= 6) el.value = "(" + v.slice(0, 2) + ") " + v.slice(2);
+    else if (v.length <= 10) el.value = "(" + v.slice(0, 2) + ") " + v.slice(2, 6) + "-" + v.slice(6);
+    else el.value = "(" + v.slice(0, 2) + ") " + v.slice(2, 7) + "-" + v.slice(7);
   },
 
   _foneFromCustomer(c) {
@@ -699,14 +754,12 @@ const RelacionamentoApp = {
     const main = phones.find((p) => p && (p.main === true || String(p.type || "").toUpperCase() === "MAIN")) || phones[0];
     let digits = "";
     if (main) {
-      digits = String(main.areaCode || "") + String(main.number || main.phoneNumber || "");
+      const ddd = String(main.areaCode || "").replace(/\D/g, "").replace(/^0+/, "");
+      const num = String(main.number || main.phoneNumber || "").replace(/\D/g, "");
+      digits = ddd + num;
     }
     if (!digits) digits = String(c.phone || c.mobilePhone || "").replace(/\D/g, "");
-    digits = digits.replace(/\D/g, "");
-    if (!digits) return "";
-    const fake = { value: digits };
-    this.maskDocFone(fake);
-    return fake.value;
+    return this._docFmtPhoneDigits(digits);
   },
 
   _lockTerceiroDocs(lock) {
@@ -791,7 +844,7 @@ const RelacionamentoApp = {
     matches.forEach((c) => {
       const item = document.createElement("div");
       item.style.cssText = "padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f3f4f6;";
-      const doc = c.cpf || c.cnpj || c.cpfCnpj || "";
+      const doc = this._docFmtCpfCnpj(c.cpf || c.cnpj || c.cpfCnpj || "") || "";
       item.textContent = (c.id ? c.id + " - " : "") + (c.name || "") + (doc ? " - " + doc : "");
       item.onmouseover = () => { item.style.background = "#f0fdf4"; };
       item.onmouseout = () => { item.style.background = "#fff"; };
@@ -1709,6 +1762,7 @@ const RelacionamentoApp = {
         orig.removeAttribute("min");
         orig.removeAttribute("max");
       }
+      this._popularOpcoesDiaVencimento();
     }
     const terDd = document.getElementById("ter-terceiro-dropdown");
     if (kind === "terceiros" && terDd) {
@@ -1734,7 +1788,8 @@ const RelacionamentoApp = {
   _calcularNovoVencimento() {
     const dia = parseInt(document.getElementById("ven-dia")?.value, 10);
     const orig = document.getElementById("ven-data-original")?.value || "";
-    if (![10, 15, 20].includes(dia) || !orig) return null;
+    if (!this._diasVencimentoPermitidos().includes(dia) || !orig) return null;
+    if (dia === this._diaOriginalVencimento()) return null;
     const key = typeof window.promiseDateKey === "function" ? window.promiseDateKey(orig) : orig.slice(0, 10);
     if (!this._isoInJanelaVencimento(key)) return null;
     const parts = key.split("-");
@@ -2087,7 +2142,7 @@ const RelacionamentoApp = {
       }
       const computed = this._calcularNovoVencimento();
       if (!computed) {
-        alert("Informe o novo dia de vencimento (10, 15 ou 20) e a data original do mês da alteração.");
+        alert("Informe um novo dia de vencimento diferente do dia original (10, 15 ou 20).");
         return;
       }
     }
@@ -2118,9 +2173,7 @@ const RelacionamentoApp = {
           : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
       }
       const dateExt = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
-      const maskCpf = (typeof formatCpfCnpj === "function")
-        ? formatCpfCnpj
-        : function (val) { return val || ""; };
+      const maskCpf = (val) => this._docFmtCpfCnpj(val) || "";
       const extraMap = {
         QUADRA: quadra,
         LOTE: lote,
@@ -2135,7 +2188,7 @@ const RelacionamentoApp = {
         NOME_TERCEIRO: String(document.getElementById("ter-nome")?.value || "").trim().toUpperCase() || "________________",
         RG_TERCEIRO: (document.getElementById("ter-rg")?.value || "").trim() || "________________",
         CPF_TERCEIRO: maskCpf((document.getElementById("ter-cpf")?.value || "").trim()) || "________________",
-        TELEFONE_TERCEIRO: (document.getElementById("ter-fone")?.value || "").trim() || "________________"
+        TELEFONE_TERCEIRO: this._docFmtPhoneDigits((document.getElementById("ter-fone")?.value || "").trim()) || "________________"
       };
       if (kind === "vencimento") {
         const computed = this._calcularNovoVencimento();
@@ -2157,6 +2210,11 @@ const RelacionamentoApp = {
         dateExt,
         map: extraMap
       });
+      const docCliente = this._docFmtCpfCnpj(legalBase.CPF_CNPJ || customer.cpfCnpj || customer.cpf || customer.cnpj);
+      if (docCliente) {
+        legalBase.CPF_CNPJ = docCliente;
+        legalBase.CPF_CLIENTE = docCliente;
+      }
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
       const fillVars = typeof window.applyDistratoTemplateVars === "function"
         ? window.applyDistratoTemplateVars

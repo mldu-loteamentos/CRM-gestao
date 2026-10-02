@@ -16709,6 +16709,14 @@ function fillDistratoBeneficiaryLocked(customer) {
   }
 }
 
+function formatCpfCnpj(val) {
+  const clean = String(val || "").replace(/\D/g, "");
+  if (clean.length === 11) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (clean.length === 14) return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return val || "";
+}
+window.formatCpfCnpj = formatCpfCnpj;
+
 function maskCpfCnpjTyping(value) {
   const d = String(value || "").replace(/\D/g, "").slice(0, 14);
   if (!d) return "";
