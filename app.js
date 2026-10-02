@@ -19306,6 +19306,8 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     LOTE: unitObj.lot || unitObj.lote || saleObj.lot || "____",
     TITULO: titulo,
     UNIDADE: unidade,
+    UNIDADE_NOME: unitName || blockLot || "____",
+    CODIGO_EMPREENDIMENTO: ccId || "____",
     NOME_CLIENTE: cust.name || "",
     CPF_CNPJ: mask(cust.cpfCnpj),
     CPF_CLIENTE: mask(cust.cpfCnpj),
@@ -19488,6 +19490,54 @@ ${partyHtml}
 ${witnessesHtml}
 </div>
 </div>`;
+};
+
+window.centerSimpleDocSignature = function(html) {
+  const s = String(html || "");
+  const lines = s.split(/\r?\n/);
+  const visible = (line) => String(line || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+  let signIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = visible(lines[i]);
+    if (/_{10,}/.test(t) && !/[A-Za-zÀ-ú0-9]/.test(t.replace(/_/g, ""))) {
+      signIdx = i;
+      break;
+    }
+  }
+  if (signIdx < 0) return s;
+  let nameIdx = signIdx + 1;
+  while (nameIdx < lines.length && !visible(lines[nameIdx])) nameIdx++;
+  const nameLine = nameIdx < lines.length ? lines[nameIdx] : "";
+  const afterRest = lines.slice(nameIdx + 1).join("\n").replace(/^\s+/, "");
+  const looksDateLine = (t) => /S[aã]o Paulo/i.test(t)
+    || /\{\{\s*CIDADE_LOTEAMENTO\s*\}\}/.test(t)
+    || /\{\{\s*CIDADE_ATUAL\s*\}\}/.test(t)
+    || /\{\{\s*DATA_HOJE/.test(t)
+    || /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(t)
+    || /,\s*\d{1,2}\s+de\s+/i.test(t);
+  const dateLines = [];
+  let dateStart = signIdx;
+  for (let j = signIdx - 1; j >= 0; j--) {
+    const t = visible(lines[j]);
+    if (!t) continue;
+    if (!looksDateLine(t) || dateLines.length >= 2) {
+      dateStart = j + 1;
+      while (dateStart < signIdx && !visible(lines[dateStart])) dateStart++;
+      break;
+    }
+    dateLines.unshift(lines[j]);
+    dateStart = j;
+  }
+  if (!dateLines.length) dateStart = signIdx;
+  const before = lines.slice(0, dateStart).join("\n").replace(/\s+$/, "");
+  const dateHtml = dateLines.map((ln) => `<div>${ln}</div>`).join("");
+  const centered = `<div class="pdf-sign-keep" style="page-break-inside:avoid;break-inside:avoid;text-align:center;margin-top:2.6em;white-space:normal;">
+  ${dateHtml}
+  <div style="margin:${dateHtml ? "2.1em" : "1.2em"} auto 0;max-width:340px;">
+    <div style="border-top:1px solid #111;padding-top:10px;font-weight:700;">${nameLine}</div>
+  </div>
+</div>`;
+  return (before ? before + "\n" : "") + centered + (afterRest ? "\n" + afterRest : "");
 };
 
 function upgradeDistratoClauses(text) {
@@ -32437,8 +32487,8 @@ async function saveDocPadrao(tipo) {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
-    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
-    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-header', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-header', 'doc-vencimento-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -32566,14 +32616,20 @@ async function previewDocPadrao(tipo) {
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'terceiros') {
     const title = document.getElementById('doc-terceiros-title')?.value || '';
+    const header = document.getElementById('doc-terceiros-header')?.value || '';
     const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
-    const filled = await fillLegalPreview(corpo);
-    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+    const filledHeader = header ? await fillLegalPreview(header) : '';
+    let filled = await fillLegalPreview(corpo);
+    if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
+    content = `${filledHeader ? `<div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.45;margin-bottom:1.2em;">${filledHeader}</div>` : ''}<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'vencimento') {
     const title = document.getElementById('doc-vencimento-title')?.value || '';
+    const header = document.getElementById('doc-vencimento-header')?.value || '';
     const corpo = document.getElementById('doc-vencimento-corpo')?.value || '';
-    const filled = await fillLegalPreview(corpo);
-    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+    const filledHeader = header ? await fillLegalPreview(header) : '';
+    let filled = await fillLegalPreview(corpo);
+    if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
+    content = `${filledHeader ? `<div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.45;margin-bottom:1.2em;">${filledHeader}</div>` : ''}<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.85;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -32613,8 +32669,8 @@ async function loadDocPadraoTemplates() {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
-    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
-    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-header', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-header', 'doc-vencimento-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {

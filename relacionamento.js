@@ -191,6 +191,21 @@ const RelacionamentoApp = {
     return String(unitName || "").replace(/\s+/g, "") || "";
   },
 
+  _codigoEmpreendimentoDoc(ctx) {
+    if (!ctx) return "";
+    const sale = ctx.sale || {};
+    const bill = ctx.bill || {};
+    const unit = ctx.unit || {};
+    const details = ctx.unitDetails || {};
+    return String(
+      sale.enterpriseId || sale.costCenterId
+      || bill.enterpriseId || bill.costCenterId || bill.enterpriseCode
+      || unit.enterpriseId || unit.costCenterId
+      || details.enterpriseId || details.costCenterId
+      || ""
+    ).trim();
+  },
+
   _formatUnidadeDoc(ctx) {
     if (!ctx) return "—";
     const sale = ctx.sale || {};
@@ -268,6 +283,15 @@ const RelacionamentoApp = {
     if (typeof window.escapeHtmlText === "function") return window.escapeHtmlText(String(s == null ? "" : s));
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  },
+
+  _docLoadingHtml(msg) {
+    return `<div style="padding:32px 16px;text-align:center;color:var(--color-text-muted);">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:12px;margin:0 auto;">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <span style="font-weight:500;">${this._escDoc(msg || "Carregando...")}</span>
+      </div>
+    </div>`;
   },
 
   _docCopyBtn(value) {
@@ -1178,10 +1202,7 @@ const RelacionamentoApp = {
       alert("Informe o título, o contrato ou o nome do cliente.");
       return;
     }
-    this._escSetResultsHtml(`<div style="padding:24px;text-align:center;color:var(--color-text-muted);">
-      <div class="loading-spinner" style="width:28px;height:28px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 10px;"></div>
-      Consultando contrato na Sienge...
-    </div>`);
+    this._escSetResultsHtml(this._docLoadingHtml("Consultando contrato na Sienge..."));
     document.getElementById("esc-doc-card").style.display = "none";
     RelacionamentoState.escritura = null;
 
@@ -1284,7 +1305,7 @@ const RelacionamentoApp = {
   async selecionarEscritura(idx) {
     const sale = (RelacionamentoState.escrituraMatches || [])[idx];
     if (!sale) return;
-    this._escSetResultsHtml(`<div style="padding:16px;text-align:center;color:var(--color-text-muted);">Carregando dados do lote e do contrato...</div>`);
+    this._escSetResultsHtml(this._docLoadingHtml("Carregando dados do lote e do contrato..."));
     try {
       const customerId = sale.customerId;
       let customer = {};
@@ -1499,8 +1520,8 @@ const RelacionamentoApp = {
 
   _docCfg(kind) {
     const map = {
-      terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS" },
-      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" }
+      terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", headerId: "doc-terceiros-header", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS", defaultHeader: "Loteamento: {{CODIGO_EMPREENDIMENTO}} - {{EMPREENDIMENTO}}\nUnidade: {{UNIDADE_NOME}}\nTítulo: {{TITULO}}" },
+      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", headerId: "doc-vencimento-header", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO", defaultHeader: "Loteamento: {{CODIGO_EMPREENDIMENTO}} - {{EMPREENDIMENTO}}\nUnidade: {{UNIDADE_NOME}}\nTítulo: {{TITULO}}" }
     };
     return map[kind] || map.terceiros;
   },
@@ -1749,10 +1770,7 @@ const RelacionamentoApp = {
       else if (nome) this._travarFiltrosDoc(kind, "nome");
     }
     this._docSearchBusy = kind;
-    this._docSetResults(kind, `<div style="padding:24px;text-align:center;color:var(--color-text-muted);">
-      <div class="loading-spinner" style="width:28px;height:28px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 10px;"></div>
-      Consultando contrato na Sienge...
-    </div>`);
+    this._docSetResults(kind, this._docLoadingHtml("Consultando contrato na Sienge..."));
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
     RelacionamentoState[kind] = null;
@@ -1951,7 +1969,7 @@ const RelacionamentoApp = {
   async selecionarDocSimples(kind, idx) {
     let sale = (RelacionamentoState[kind + "Matches"] || [])[idx];
     if (!sale) return;
-    this._docSetResults(kind, `<div style="padding:16px;text-align:center;color:var(--color-text-muted);">Carregando dados do lote e do contrato...</div>`);
+    this._docSetResults(kind, this._docLoadingHtml("Carregando dados do lote e do contrato..."));
     try {
       const customerId = sale.customerId;
       let customer = { id: customerId, name: sale.customerName || sale.name || "" };
@@ -2029,6 +2047,8 @@ const RelacionamentoApp = {
         RelacionamentoState[kind].installments = adimplencia.installments || [];
         this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
         if (adimplencia.adimplente) {
+          const diaEl = document.getElementById("ven-dia");
+          if (diaEl) diaEl.value = "";
           this._aplicarJanelaCalendarioVencimento(RelacionamentoState[kind].installments);
           this.atualizarPreviewVencimento();
         }
@@ -2106,6 +2126,8 @@ const RelacionamentoApp = {
         LOTE: lote,
         TITULO: titulo,
         UNIDADE: this._formatUnidadeDoc(ctx),
+        UNIDADE_NOME: this._quadraLoteLabel(ctx) || unitName || "____",
+        CODIGO_EMPREENDIMENTO: this._codigoEmpreendimentoDoc(ctx) || "____",
         NUM_CONTRATO: (contratoLabel && contratoLabel !== "—") ? contratoLabel : (sale.contractNumber || sale.number || "____"),
         NUMERO_CONTRATO: (contratoLabel && contratoLabel !== "—") ? contratoLabel : (sale.contractNumber || sale.number || "____"),
         CIDADE_ATUAL: cidadeLote || "Botucatu",
@@ -2145,17 +2167,26 @@ const RelacionamentoApp = {
             });
             return s;
           };
-      const filled = fillVars(markup, legalBase);
-      const headerEmp = empName || "________________";
-      const unidadeHeader = extraMap.UNIDADE || this._formatUnidadeDoc(ctx);
+      let filled = fillVars(markup, legalBase);
+      if (typeof window.centerSimpleDocSignature === "function") {
+        filled = window.centerSimpleDocSignature(filled);
+      }
+      const headerEl = cfg.headerId ? document.getElementById(cfg.headerId) : null;
+      const headerTpl = headerEl
+        ? headerEl.value
+        : (t[cfg.headerId] != null ? t[cfg.headerId] : (cfg.defaultHeader || ""));
+      const headerMarkup = typeof window.formatDocPadraoMarkup === "function"
+        ? window.formatDocPadraoMarkup(headerTpl)
+        : headerTpl;
+      const filledHeader = String(headerTpl || "").trim() ? fillVars(headerMarkup, legalBase) : "";
+      const lineHeight = kind === "vencimento" ? "1.85" : "1.55";
+      const headerHtml = filledHeader
+        ? `<div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;text-align:left;white-space:pre-wrap;">${filledHeader}</div>`
+        : "";
       const docHtml = `
-        <div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;">
-          <div>Lot. ${headerEmp}</div>
-          <div>Unidade: ${unidadeHeader}</div>
-          <div>Título: ${titulo}</div>
-        </div>
+        ${headerHtml}
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 1.4rem;">${docTitle}</h2>
-        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.55;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
+        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:${lineHeight};text-align:justify;white-space:pre-wrap;">${filled}</div>`;
       document.getElementById("pdf-modal-title").textContent = cfg.title;
       document.getElementById("pdf-document-content").innerHTML = docHtml;
       document.getElementById("pdf-view-overlay").classList.add("active");
