@@ -1583,6 +1583,11 @@ const RelacionamentoApp = {
     return document.getElementById(this._docCfg(kind).p + suffix);
   },
 
+  _setDocExtraCard(kind, show) {
+    const extra = this._docEl(kind, "-terceiro-card");
+    if (extra) extra.style.display = show ? "block" : "none";
+  },
+
   _docFilterEl(kind, campo) {
     if (kind === "escritura") return document.getElementById("esc-filter-" + campo);
     return this._docEl(kind, "-filter-" + campo);
@@ -1741,6 +1746,7 @@ const RelacionamentoApp = {
     window.SelectedDynamicCustomerDoc = null;
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
+    this._setDocExtraCard(kind, false);
     const custCard = this._docEl(kind, "-customer-card");
     if (custCard) custCard.style.display = "none";
     const custInfo = this._docEl(kind, "-customer-info");
@@ -1828,6 +1834,7 @@ const RelacionamentoApp = {
     this._docSetResults(kind, this._docLoadingHtml("Consultando contrato na Sienge..."));
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
+    this._setDocExtraCard(kind, false);
     RelacionamentoState[kind] = null;
 
     try {
@@ -2096,6 +2103,7 @@ const RelacionamentoApp = {
       if (resumo) resumo.innerHTML = this._docContratoHtml(RelacionamentoState[kind]);
       const card = this._docEl(kind, "-doc-card");
       if (card) card.style.display = "block";
+      this._setDocExtraCard(kind, true);
       if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
       if (kind === "vencimento") {
