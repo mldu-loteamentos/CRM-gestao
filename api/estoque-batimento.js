@@ -9,7 +9,10 @@ const {
   isSettledUnit,
   extractRows,
   flattenStatements,
-  classifyCustomerUnits
+  classifyCustomerUnits,
+  planBatimentoWork,
+  stampInadimplenteFromFila,
+  filaOverdueForUnit
 } = require("../lib/estoque-batimento-core");
 
 const SIENGE_DOMAIN = "mouraleite";
@@ -35,8 +38,9 @@ const STATE_ID = "_batimento_state";
 const FB_CHUNK = 400;
 const BUDGET_MS = 42000;
 
-/** Pausado até nova régua de APIs Sienge (pacote diário estourando). force=1 ignora. */
-const BATIMENTO_PAUSED = process.env.BATIMENTO_PAUSED !== "0";
+/** Só pausa se BATIMENTO_PAUSED=1. O censo/diário já evita varredura cega. */
+const BATIMENTO_PAUSED = process.env.BATIMENTO_PAUSED === "1";
+const DELTA_DAYS = 5;
 
 function authorized(req) {
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET;
@@ -76,6 +80,28 @@ async function loadUnits() {
     if (Array.isArray(data.units)) units.push(...data.units);
   });
   return units;
+}
+
+async function loadFilaAndPaidMap(today) {
+  const metaSnap = await getDoc(doc(db, "sienge_defaulters_history", today));
+  if (!metaSnap.exists()) return { bills: [], paidMap: new Map() };
+  const meta = metaSnap.data() || {};
+  const bills = [];
+  const chunks = Number(meta.chunks) || 0;
+  for (let i = 0; i < chunks; i++) {
+    try {
+      const snap = await getDoc(doc(db, "sienge_defaulters_history", `${today}_chunk_${i}`));
+      if (!snap.exists()) continue;
+      const raw = snap.data().data;
+      const arr = typeof raw === "string" ? JSON.parse(raw || "[]") : (raw || []);
+      if (Array.isArray(arr)) bills.push(...arr);
+    } catch (e) {}
+  }
+  let paidMap = new Map();
+  if (meta.paidMap) {
+    try { paidMap = new Map(JSON.parse(meta.paidMap)); } catch (e) { paidMap = new Map(); }
+  }
+  return { bills, paidMap };
 }
 
 async function saveCc(ccId, allUnits) {
@@ -134,7 +160,7 @@ module.exports = async function handler(req, res) {
       paused: true,
       reason: "batimento_pausado_cota_api",
       date: todayIsoSP(),
-      message: "Batimento automático pausado temporariamente (consumo de API Sienge acima do pacote). Use force=1 só se necessário, ou classifique um empreendimento por vez na tela."
+      message: "Batimento automático pausado (BATIMENTO_PAUSED=1)."
     });
   }
   if (!force && !day.ok) {
@@ -168,80 +194,122 @@ module.exports = async function handler(req, res) {
 
     const units = await loadUnits();
     if (!units.length) {
-      await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: true, message: "sem unidades" });
+      await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: true, mode: "empty", message: "sem unidades" });
       return res.status(200).json({ done: true, date: today, message: "Sem estoque no Firebase." });
     }
 
-    const pending = units.filter((u) => isFinanceUnit(u) && !isSettledUnit(u) && u.customerId);
-    const settledN = units.filter((u) => isFinanceUnit(u) && isSettledUnit(u)).length;
-    const custIds = [...new Set(pending.map((u) => String(u.customerId)))].sort((a, b) => Number(a) - Number(b));
-    state.skippedSettled = settledN;
+    const { bills: filaBills, paidMap } = await loadFilaAndPaidMap(today);
+    const plan = planBatimentoWork(units, paidMap, filaBills, { deltaDays: DELTA_DAYS });
+    const mode = plan.censusIds.length ? "census" : "daily";
+    const queue = (mode === "census" ? plan.censusIds : plan.fichaIds)
+      .map(String)
+      .sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
 
-    if (state.cursor >= custIds.length) {
-      state.done = true;
-      await setDoc(doc(db, FB_COL, STATE_ID), state);
-      await setDoc(doc(db, FB_COL, "_meta"), {
-        batimentoAt: new Date().toISOString(),
-        batimentoDate: today,
-        batimentoDone: true
-      }, { merge: true });
-      const n = await saveCaixaPosicao(units, today);
-      return res.status(200).json({
-        done: true,
-        date: today,
-        processed: state.processed,
-        skippedSettled: settledN,
-        pendingCustomers: 0,
-        caixaPosicao: n
-      });
+    if (!state.mode || state.mode !== mode) {
+      state.mode = mode;
+      state.cursor = 0;
     }
 
     const byId = new Map(units.map((u) => [String(u.id), u]));
     const dirtyCc = new Set();
-    let i = state.cursor;
-    while (i < custIds.length && Date.now() - started < BUDGET_MS) {
-      const customerId = custIds[i];
-      const mine = pending.filter((u) => String(u.customerId) === customerId);
+    let stamped = 0;
+    plan.stampUnitIds.forEach((id) => {
+      const u = byId.get(String(id));
+      if (!u) return;
+      const ov = filaOverdueForUnit(u, plan.filaIdx);
+      const next = stampInadimplenteFromFila(u, ov);
+      byId.set(String(u.id), next);
+      stamped += 1;
+      if (u.enterpriseId) dirtyCc.add(String(u.enterpriseId));
+    });
+
+    const settledN = units.filter((u) => isFinanceUnit(u) && isSettledUnit(u)).length;
+    const censusLeft = plan.censusIds.length;
+    state.skippedSettled = settledN;
+    state.censusLeft = censusLeft;
+    state.fichaLeft = plan.fichaIds.length;
+    state.stamped = stamped;
+
+    const persistSnapshot = async (nextUnits, done) => {
+      for (const cc of dirtyCc) await saveCc(cc, nextUnits);
+      await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: !!done });
+      await setDoc(doc(db, FB_COL, "_meta"), {
+        batimentoAt: new Date().toISOString(),
+        batimentoDate: today,
+        batimentoDone: !!done,
+        batimentoMode: mode,
+        censusLeft,
+        snapshotAt: new Date().toISOString()
+      }, { merge: true });
+      const n = await saveCaixaPosicao(nextUnits, today);
+      return n;
+    };
+
+    if (state.cursor >= queue.length) {
+      state.done = true;
+      const nextUnits = [...byId.values()];
+      const n = await persistSnapshot(nextUnits, true);
+      return res.status(200).json({
+        done: true,
+        date: today,
+        mode,
+        processed: state.processed || 0,
+        skippedSettled: settledN,
+        stamped,
+        pendingCustomers: 0,
+        censusLeft: 0,
+        caixaPosicao: n,
+        message: mode === "census"
+          ? "Censo concluído. Base do dia gravada."
+          : "Batimento diário concluído. Base gravada (quitados pulados, inadimplentes pela fila, pagamentos recentes na ficha)."
+      });
+    }
+
+    const pendingByCust = new Map();
+    units.forEach((u) => {
+      if (!isFinanceUnit(u) || isSettledUnit(u) || !u.customerId) return;
+      const cid = String(u.customerId);
+      if (!pendingByCust.has(cid)) pendingByCust.set(cid, []);
+      pendingByCust.get(cid).push(u);
+    });
+
+    let i = Number(state.cursor) || 0;
+    let processed = Number(state.processed) || 0;
+    while (i < queue.length && Date.now() - started < BUDGET_MS) {
+      const customerId = queue[i];
+      const mine = pendingByCust.get(String(customerId)) || [];
       try {
-        const billsRes = await siengeFetch(`${SIENGE_API_BASE}/accounts-receivable/receivable-bills?customerId=${customerId}&limit=100&offset=0`);
-        const stmtRes = await siengeFetch(`${SIENGE_API_BASE}/customer-financial-statements?customerId=${customerId}&includeSubJudice=true&includeRemadeInstallments=N&includeRenegotiation=N`);
+        const billsRes = await siengeFetch(`${SIENGE_API_BASE}/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(customerId)}&limit=100&offset=0`);
+        const stmtRes = await siengeFetch(`${SIENGE_API_BASE}/customer-financial-statements?customerId=${encodeURIComponent(customerId)}&includeSubJudice=true&includeRemadeInstallments=N&includeRenegotiation=N`);
         const classified = classifyCustomerUnits(mine, extractRows(billsRes), flattenStatements(stmtRes));
         classified.forEach((u) => {
           byId.set(String(u.id), u);
           if (u.enterpriseId) dirtyCc.add(String(u.enterpriseId));
         });
-        state.processed += 1;
+        processed += 1;
       } catch (e) {
         log.push(`cliente ${customerId}: ${e.message}`);
       }
       i += 1;
     }
     state.cursor = i;
-    if (state.cursor >= custIds.length) state.done = true;
-
+    state.processed = processed;
+    state.done = state.cursor >= queue.length;
     const nextUnits = [...byId.values()];
-    for (const cc of dirtyCc) {
-      await saveCc(cc, nextUnits);
-    }
-    await setDoc(doc(db, FB_COL, STATE_ID), state);
-    if (state.done) {
-      await setDoc(doc(db, FB_COL, "_meta"), {
-        batimentoAt: new Date().toISOString(),
-        batimentoDate: today,
-        batimentoDone: true
-      }, { merge: true });
-      const n = await saveCaixaPosicao(nextUnits, today);
-      log.push(`caixa_posicao ${today}: ${n} contratos`);
-    }
+    const n = await persistSnapshot(nextUnits, state.done);
 
     return res.status(200).json({
       done: !!state.done,
       date: today,
+      mode,
       cursor: state.cursor,
-      totalCustomers: custIds.length,
-      processed: state.processed,
+      totalCustomers: queue.length,
+      processed,
       skippedSettled: settledN,
+      stamped,
+      censusLeft: mode === "census" ? Math.max(0, queue.length - state.cursor) : 0,
       dirtyCc: dirtyCc.size,
+      caixaPosicao: n,
       log
     });
   } catch (error) {

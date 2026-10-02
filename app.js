@@ -32487,8 +32487,8 @@ async function saveDocPadrao(tipo) {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
-    terceiros: ['doc-terceiros-title', 'doc-terceiros-header', 'doc-terceiros-corpo'],
-    vencimento: ['doc-vencimento-title', 'doc-vencimento-header', 'doc-vencimento-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -32616,20 +32616,16 @@ async function previewDocPadrao(tipo) {
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'terceiros') {
     const title = document.getElementById('doc-terceiros-title')?.value || '';
-    const header = document.getElementById('doc-terceiros-header')?.value || '';
     const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
-    const filledHeader = header ? await fillLegalPreview(header) : '';
     let filled = await fillLegalPreview(corpo);
     if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
-    content = `${filledHeader ? `<div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.45;margin-bottom:1.2em;">${filledHeader}</div>` : ''}<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'vencimento') {
     const title = document.getElementById('doc-vencimento-title')?.value || '';
-    const header = document.getElementById('doc-vencimento-header')?.value || '';
     const corpo = document.getElementById('doc-vencimento-corpo')?.value || '';
-    const filledHeader = header ? await fillLegalPreview(header) : '';
     let filled = await fillLegalPreview(corpo);
     if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
-    content = `${filledHeader ? `<div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.45;margin-bottom:1.2em;">${filledHeader}</div>` : ''}<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.85;">${filled}</div>`;
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.85;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -32669,8 +32665,8 @@ async function loadDocPadraoTemplates() {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
-    terceiros: ['doc-terceiros-title', 'doc-terceiros-header', 'doc-terceiros-corpo'],
-    vencimento: ['doc-vencimento-title', 'doc-vencimento-header', 'doc-vencimento-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {

@@ -1520,8 +1520,8 @@ const RelacionamentoApp = {
 
   _docCfg(kind) {
     const map = {
-      terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", headerId: "doc-terceiros-header", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS", defaultHeader: "Loteamento: {{CODIGO_EMPREENDIMENTO}} - {{EMPREENDIMENTO}}\nUnidade: {{UNIDADE_NOME}}\nTítulo: {{TITULO}}" },
-      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", headerId: "doc-vencimento-header", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO", defaultHeader: "Loteamento: {{CODIGO_EMPREENDIMENTO}} - {{EMPREENDIMENTO}}\nUnidade: {{UNIDADE_NOME}}\nTítulo: {{TITULO}}" }
+      terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS" },
+      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" }
     };
     return map[kind] || map.terceiros;
   },
@@ -2171,20 +2171,8 @@ const RelacionamentoApp = {
       if (typeof window.centerSimpleDocSignature === "function") {
         filled = window.centerSimpleDocSignature(filled);
       }
-      const headerEl = cfg.headerId ? document.getElementById(cfg.headerId) : null;
-      const headerTpl = headerEl
-        ? headerEl.value
-        : (t[cfg.headerId] != null ? t[cfg.headerId] : (cfg.defaultHeader || ""));
-      const headerMarkup = typeof window.formatDocPadraoMarkup === "function"
-        ? window.formatDocPadraoMarkup(headerTpl)
-        : headerTpl;
-      const filledHeader = String(headerTpl || "").trim() ? fillVars(headerMarkup, legalBase) : "";
       const lineHeight = kind === "vencimento" ? "1.85" : "1.75";
-      const headerHtml = filledHeader
-        ? `<div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;text-align:left;white-space:pre-wrap;">${filledHeader}</div>`
-        : "";
       const docHtml = `
-        ${headerHtml}
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 1.4rem;">${docTitle}</h2>
         <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:${lineHeight};text-align:justify;white-space:pre-wrap;">${filled}</div>`;
       document.getElementById("pdf-modal-title").textContent = cfg.title;

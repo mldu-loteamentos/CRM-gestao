@@ -5,9 +5,8 @@ const EstoqueComercialApp = {
   CC_EMPTY_KEY: "crm_cc_ids_sem_unidade",
   LIMIT: 200,
   FB_CHUNK: 400,
-  /** Varredura completa (todos os clientes) continua pausada. O automático diário usa só o modo delta. */
-  BATIMENTO_AUTO_PAUSED: true,
-  /** Roda sozinho 1x ao dia: só clientes com pagamento recente (paidMap). */
+  /** Censo pesado fica no cron. No browser o automático é diário (delta + fila). */
+  BATIMENTO_AUTO_PAUSED: false,
   BATIMENTO_AUTO_DELTA: true,
   /**
    * Modo "delta" para reduzir consumo de API no batimento diário:
@@ -441,11 +440,12 @@ const EstoqueComercialApp = {
     this.state.batimentoDate = today;
     // Com pausa + 1 empreendimento, não marca o dia inteiro como concluído (evita pular cron ao reativar).
     const markDone = opts.markDone === true
-      || (opts.markDone !== false && (!this.BATIMENTO_AUTO_PAUSED || this._autoDeltaRun));
+      || (opts.markDone !== false && !this._censusStillOpen);
     if (markDone) this.state.batimentoDone = true;
     this.saveCache();
     if (this.fbReady()) {
       try {
+        await this.saveFirebase();
         const { doc, setDoc } = window.firebaseCollections;
         const meta = {
           date: today,
@@ -667,31 +667,15 @@ const EstoqueComercialApp = {
   paintBatimentoPauseBanner() {
     const el = document.getElementById("est-batimento-pause");
     if (!el) return;
-    const deltaOk = this.BATIMENTO_AUTO_DELTA && this.BATIMENTO_DELTA_ENABLED && this.hasPaidMapReady();
     el.style.display = "block";
-    if (deltaOk) {
-      el.innerHTML = "<strong>Batimento automático diário ligado</strong> (modo delta). " +
-        "Recalcula só quem teve <em>pagamento recente</em> — cabe no consumo atual (~10 mil/dia). " +
-        "A varredura completa de todos os clientes continua pausada. " +
-        "Para um empreendimento inteiro: filtre e use <em>Classificar situação</em>.";
-      return;
-    }
-    el.innerHTML = "<strong>Batimento automático em espera</strong> — falta o mapa de pagamentos recentes (<code>paidMap</code>). " +
-      "Abra a Fila / Pagamento recente e volte aqui, ou classifique <em>um empreendimento</em>. " +
-      "Varredura completa continua pausada para não estourar a cota Sienge.";
+    el.innerHTML = "<strong>Batimento diário</strong> — todos os empreendimentos na mesma atualização. " +
+      "Quitados não voltam a ser consultados. Ativos e inadimplentes entram no censo uma vez. " +
+      "Depois: quem pagou nos últimos 5 dias atualiza recebido/a receber; inadimplente sem pagamento usa a fila. " +
+      "A base (estoque + caixa) é gravada todo dia.";
   },
 
   requireEmpForApiHeavy() {
-    const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
-    if (this.BATIMENTO_AUTO_PAUSED && !empSel) {
-      const hasPaidMap = this.hasPaidMapReady();
-      if (!(this.BATIMENTO_DELTA_ENABLED && hasPaidMap)) {
-        alert("Batimento pausado por cota de API. Selecione um empreendimento (não “Todos”) e tente de novo. " +
-          "Dica: abra o módulo de Fila/“Pagamento recente” para popular o paidMap e rodar em modo delta.");
-        return null;
-      }
-    }
-    return empSel;
+    return ((document.getElementById("est-filter-emp") || {}).value || "").trim();
   },
 
   paidDaysForBillId(billId) {
@@ -713,16 +697,72 @@ const EstoqueComercialApp = {
     return null;
   },
 
+  unitNeedsCensus(u) {
+    if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return false;
+    if (u.quitado === true || u.relFin === "quitado") return false;
+    return !(u.statementDone && u.relFin);
+  },
+
+  stampFilaOnUnits(scopeEmp) {
+    this.buildDefaulterIndex();
+    let n = 0;
+    this.state.units = this.state.units.map((u) => {
+      if (scopeEmp && String(u.enterpriseId) !== String(scopeEmp)) return u;
+      if (!this.isFinanceUnit(u) || this.isSettledUnit(u)) return u;
+      const ov = this.overdueValue(u);
+      if (ov <= 0.009) return u;
+      const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
+      if (paid != null && paid <= (this.BATIMENTO_DELTA_DAYS || 5)) return u;
+      n += 1;
+      const aReceber = Math.max(Number(u.outstandingBalance) || 0, ov);
+      return {
+        ...u,
+        relFin: "inadimplente",
+        quitado: false,
+        kpiVencidas: ov,
+        outstandingBalance: aReceber,
+        presentDebitBalance: aReceber,
+        filaAt: new Date().toISOString(),
+        finAt: new Date().toISOString()
+      };
+    });
+    return n;
+  },
+
+  collectBatimentoCustomers(empSel, includeCensus) {
+    const deltaDays = Number(this.BATIMENTO_DELTA_DAYS) || 5;
+    const byCc = new Map();
+    const census = new Set();
+    this.state.units.forEach((u) => {
+      if (!u || (empSel && String(u.enterpriseId) !== String(empSel))) return;
+      if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return;
+      const ccKey = String(u.enterpriseId);
+      const cid = String(u.customerId);
+      if (includeCensus && this.unitNeedsCensus(u)) {
+        census.add(cid);
+        if (!byCc.has(ccKey)) byCc.set(ccKey, new Set());
+        byCc.get(ccKey).add(cid);
+        return;
+      }
+      const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
+      const inFila = this.overdueValue(u) > 0.009;
+      const leftFila = u.relFin === "inadimplente" && !inFila;
+      if ((paid != null && paid <= deltaDays) || leftFila) {
+        if (!byCc.has(ccKey)) byCc.set(ccKey, new Set());
+        byCc.get(ccKey).add(cid);
+      }
+    });
+    return { byCc, censusCount: census.size };
+  },
+
   async autoStartDailyBatimento() {
     this.paintBatimentoPauseBanner();
     const today = this.todayStr();
     if (this.state._autoFinanceRunning) return;
-    if (!this.BATIMENTO_AUTO_DELTA || !this.BATIMENTO_DELTA_ENABLED) return;
-    if (!this.hasPaidMapReady()) return;
 
     const meta = await this.tryLoadBatimentoMetaOnly();
-    if (meta && meta.batimentoDone && meta.batimentoDate === today) return;
-    if (this.state.batimentoDone && this.state.batimentoDate === today) return;
+    if (meta && meta.batimentoDate === today) return;
+    if (this.state.batimentoDate === today) return;
 
     if (!this.state.units.length) {
       await this.consultar(true);
@@ -732,7 +772,7 @@ const EstoqueComercialApp = {
     this._firebasePendingData = null;
     this._autoDeltaRun = true;
     try {
-      await this.batimentoFinanceiro();
+      await this.batimentoFinanceiro({ auto: true });
     } finally {
       this._autoDeltaRun = false;
       if (this._firebasePendingData) {
@@ -2090,23 +2130,27 @@ const EstoqueComercialApp = {
       }
       await this.sleep(this.BATIMENTO_AUTO_PAUSED ? 220 : 90);
     }
-    this.state.units = this.state.units.map(u => {
-      if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u) || u.relFin || this.isSettledUnit(u)) return u;
-      marked += 1;
-      return this.applyRelFin(u, this.defaultFinanceStatus(u), null);
-    });
+    if (!refreshSet) {
+      this.state.units = this.state.units.map(u => {
+        if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u) || u.relFin || this.isSettledUnit(u)) return u;
+        marked += 1;
+        return this.applyRelFin(u, this.defaultFinanceStatus(u), null);
+      });
+    }
     this.saveCache();
     await this.saveFirebaseCc(ccId);
     this.renderTable();
     return marked;
   },
 
-  async batimentoFinanceiro() {
+  async batimentoFinanceiro(opts) {
+    opts = opts || {};
+    const isAuto = !!opts.auto;
     try {
       if (this.state.loading) return;
       const today = this.todayStr();
       if (this.state._autoFinanceRunning) return;
-      if (this.state.batimentoDone && this.state.batimentoDate === today && !this.BATIMENTO_AUTO_PAUSED) return;
+      if (this.state.batimentoDone && this.state.batimentoDate === today && isAuto) return;
       if (!this.state.units.length) await this.init();
       if (!this.state.units.length) {
         alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
@@ -2129,60 +2173,17 @@ const EstoqueComercialApp = {
         return;
       }
 
-      // -----------------------------
-      // Batimento DELTA (pagamento recente)
-      // -----------------------------
-      let custIdsToRefreshByCc = null;
-      const deltaEnabled = this.BATIMENTO_DELTA_ENABLED
-        && window.advFilters
-        && window.advFilters.paidMap
-        && window.paidMapHasBillDays
-        && window.paidMapHasBillDays(window.advFilters.paidMap);
-      if (deltaEnabled) {
-        const deltaDays = Number(this.BATIMENTO_DELTA_DAYS) || 5;
-        custIdsToRefreshByCc = new Map();
-        const customerMinDays = new Map(); // customerId -> minDays
+      const stamped = this.stampFilaOnUnits(empSel);
+      const includeCensus = !isAuto;
+      const planned = this.collectBatimentoCustomers(empSel, includeCensus);
+      this._censusStillOpen = this.state.units.some(u =>
+        (!empSel || String(u.enterpriseId) === String(empSel)) && this.unitNeedsCensus(u)
+      );
 
-        this.state.units.forEach(u => {
-          if (!u) return;
-          if (empSel && String(u.enterpriseId) !== String(empSel)) return;
-          if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return;
-          const bid = u.receivableBillId || u.contractId || u.contractNumber || "";
-          const d = this.paidDaysForBillId(bid);
-          if (d == null || !Number.isFinite(d)) return;
-          if (d > deltaDays) return;
-
-          const ccKey = String(u.enterpriseId);
-          if (!custIdsToRefreshByCc.has(ccKey)) custIdsToRefreshByCc.set(ccKey, new Set());
-          custIdsToRefreshByCc.get(ccKey).add(String(u.customerId));
-
-          const cur = customerMinDays.get(String(u.customerId));
-          if (cur == null || d < cur) customerMinDays.set(String(u.customerId), d);
-        });
-
-        if (custIdsToRefreshByCc.size) {
-          // Cap de segurança para não extrapolar API mesmo em delta.
-          const totalCustomers = customerMinDays.size;
-          if (totalCustomers > this.BATIMENTO_DELTA_MAX_CUSTOMERS) {
-            const sorted = [...customerMinDays.entries()].sort((a, b) => a[1] - b[1]); // menor dias primeiro
-            const allowed = new Set(sorted.slice(0, this.BATIMENTO_DELTA_MAX_CUSTOMERS).map(x => String(x[0])));
-            custIdsToRefreshByCc.forEach((set, k) => {
-              const next = new Set([...set].filter(id => allowed.has(String(id))));
-              if (!next.size) custIdsToRefreshByCc.delete(k);
-              else custIdsToRefreshByCc.set(k, next);
-            });
-          }
-
-          const impactedCcIds = new Set([...custIdsToRefreshByCc.keys()].map(String));
-          ccIds = ccIds.filter(id => impactedCcIds.has(String(id)));
-        }
-      }
-
-      if (custIdsToRefreshByCc && !ccIds.length) {
-        // Sem impacto recente: inadimplência do dia continua via defaulters/fila.
-        // Quitados podem ficar 1-janela dia atrasados (corrigimos no próximo impacto ou no full).
-        this.setProgress("Batimento delta: sem clientes com pagamento recente na janela configurada.");
-        return 0;
+      let custIdsToRefreshByCc = planned.byCc;
+      if (custIdsToRefreshByCc.size) {
+        const impacted = new Set([...custIdsToRefreshByCc.keys()].map(String));
+        ccIds = ccIds.filter(id => impacted.has(String(id)));
       }
 
       this.state._autoFinanceRunning = true;
@@ -2191,26 +2192,29 @@ const EstoqueComercialApp = {
       await this.enrichContracts({ quiet: true, keepBusy: true });
       if (this.state.stopSync) return;
       let marked = 0;
-      for (let i = 0; i < ccIds.length; i++) {
-        if (this.state.stopSync) break;
-        const ccId = ccIds[i];
-        const soldN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isSoldUnit(u)).length;
-        this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${soldN} vendidas)…`, ((i + 1) / ccIds.length) * 100);
-        const refreshSet = custIdsToRefreshByCc ? custIdsToRefreshByCc.get(String(ccId)) : null;
-        marked += await this.applyRelacionamentoBatimento(ccId, { custIdsToRefresh: refreshSet });
+      if (ccIds.length && custIdsToRefreshByCc.size) {
+        for (let i = 0; i < ccIds.length; i++) {
+          if (this.state.stopSync) break;
+          const ccId = ccIds[i];
+          const soldN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isSoldUnit(u)).length;
+          this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${soldN} vendidas)…`, ((i + 1) / ccIds.length) * 100);
+          const refreshSet = custIdsToRefreshByCc.get(String(ccId)) || null;
+          marked += await this.applyRelacionamentoBatimento(ccId, { custIdsToRefresh: refreshSet });
+        }
       }
+      this._censusStillOpen = this.state.units.some(u =>
+        (!empSel || String(u.enterpriseId) === String(empSel)) && this.unitNeedsCensus(u)
+      );
       const inScope = u => !empSel || String(u.enterpriseId) === empSel;
       const qtdQ = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Quitado").length;
       const qtdI = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo inadimplente").length;
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
-      const day = await this.persistTodayResult();
-      const autoHint = this._autoDeltaRun
-        ? " Batimento delta do dia gravado. Amanhã o automático roda de novo só para quem pagar."
-        : (this.BATIMENTO_AUTO_PAUSED
-          ? " Automático full pausado (cota API) — delta diário ligado se o paidMap estiver pronto."
-          : " Amanhã o batimento automático começa às 6:30.");
-      this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado.${autoHint}`);
+      const day = await this.persistTodayResult({ markDone: !this._censusStillOpen });
+      const extra = this._censusStillOpen
+        ? " Censo ainda tem contratos ativos sem classificação — o cron das 6:30 continua e a base de hoje já foi gravada."
+        : " Base do dia gravada (estoque + caixa).";
+      this.setProgress(`Batimento (${ccIds.length || 0} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} ficha(s) · ${stamped} pela fila.${extra} ${day.split("-").reverse().join("/")}.`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
