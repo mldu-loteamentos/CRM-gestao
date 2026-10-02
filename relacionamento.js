@@ -927,16 +927,82 @@ const RelacionamentoApp = {
   },
 
   _siengeProxyBase() {
-    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
-    const host = (window.location.hostname === "" || window.location.hostname === "127.0.0.1") ? "localhost" : window.location.hostname;
-    return `http://${host}:${port}/sienge-proxy`;
+    return "/api/sienge-proxy";
+  },
+
+  _siengeBusy(err) {
+    if (!err) return false;
+    const st = Number(err.status);
+    if (st === 429 || st === 421) return true;
+    return /429|421|Too Many Requests|temporariamente ocupada/i.test(String(err.message || ""));
+  },
+
+  _docSaleFromBill(bill, titulo, customerId) {
+    if (!bill) return null;
+    const t = String(titulo || bill.id || bill.receivableBillId || "").replace(/\D/g, "") || String(bill.id || "");
+    const emp = bill.enterpriseCode || bill.enterpriseId || bill.costCenterId || "0";
+    const unitName = String(bill.unityName || bill.unitName || bill.units || "ND").replace(/\s+/g, "");
+    return {
+      id: bill.salesContractId || bill.contractId || bill.documentNumber || bill.id,
+      customerId: customerId || bill.customerId,
+      customerName: bill.clientName || bill.customerName,
+      receivableBillId: bill.id || bill.receivableBillId || t,
+      enterpriseId: emp,
+      unitId: bill.unitId || ("U-" + emp + "-" + unitName),
+      unitName: bill.unityName || bill.unitName || bill.units,
+      saleDate: bill.issueDate || bill.emissionDate || bill.contractDate,
+      contractDate: bill.contractDate || bill.issueDate || bill.emissionDate,
+      contractNumber: bill.documentNumber || bill.contractNumber,
+      documentNumber: bill.documentNumber,
+      contractValue: bill.receivableBillValue || bill.value || bill.contractValue,
+      status: bill.status || "Ativo",
+      customers: bill.customers || []
+    };
+  },
+
+  _docFindLocalSale(titulo) {
+    const t = String(titulo || "").replace(/\D/g, "");
+    if (!t) return null;
+    const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+    const sale = sales.find((s) => String(s.receivableBillId) === t || String(s.id) === t);
+    if (sale && sale.customerId) return sale;
+    if (typeof window.relFindTituloLocal === "function") {
+      const bill = window.relFindTituloLocal(t);
+      if (bill && bill.customerId) return this._docSaleFromBill(bill, t, bill.customerId);
+    }
+    const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+    const bill = bills.find((b) => String(b.id) === t || String(b.saleId) === t);
+    if (bill && bill.customerId) return this._docSaleFromBill(bill, t, bill.customerId);
+    return null;
   },
 
   async _siengeGet(path) {
-    const authHeader = window.getBasicAuthHeader ? getBasicAuthHeader() : "";
-    const res = await fetch(this._siengeProxyBase() + path, { headers: { Authorization: authHeader } });
-    if (!res.ok) throw new Error("Falha na consulta Sienge (HTTP " + res.status + ").");
-    return res.json();
+    const p = path.startsWith("/") ? path : "/" + path;
+    const fetchFn = (typeof window.siengeFetchWithRetry === "function")
+      ? window.siengeFetchWithRetry
+      : ((typeof siengeFetchWithRetry === "function") ? siengeFetchWithRetry : null);
+    if (fetchFn) return fetchFn(p);
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const res = await fetch(this._siengeProxyBase() + p, {
+        headers: {
+          Authorization: window.getBasicAuthHeader ? getBasicAuthHeader() : "",
+          Accept: "application/json"
+        }
+      });
+      if (res.ok) return res.json();
+      lastStatus = res.status;
+      if (res.status === 429 || res.status === 421 || res.status >= 500) {
+        await new Promise((r) => setTimeout(r, Math.min(4000 * Math.pow(2, attempt), 20000)));
+        continue;
+      }
+      const err = new Error("Falha na consulta Sienge (HTTP " + res.status + ").");
+      err.status = res.status;
+      throw err;
+    }
+    const busy = new Error("A Sienge está temporariamente ocupada (HTTP " + lastStatus + "). Aguarde alguns segundos e tente de novo.");
+    busy.status = lastStatus;
+    throw busy;
   },
 
   _escSetResultsHtml(html) {
@@ -1490,7 +1556,23 @@ const RelacionamentoApp = {
       let hintContract = null;
 
       if (titulo) {
-        hintBill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo));
+        const local = this._docFindLocalSale(titulo);
+        if (local && local.customerId) {
+          RelacionamentoState[kind + "Matches"] = [local];
+          await this.selecionarDocSimples(kind, 0);
+          return;
+        }
+        try {
+          hintBill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo));
+        } catch (e) {
+          const fallback = this._docFindLocalSale(titulo);
+          if (fallback && fallback.customerId) {
+            RelacionamentoState[kind + "Matches"] = [fallback];
+            await this.selecionarDocSimples(kind, 0);
+            return;
+          }
+          throw e;
+        }
         const bType = String(hintBill.documentId || "").trim().toUpperCase();
         if (bType && bType !== "CT" && bType !== "CTCV") {
           throw new Error("O título " + titulo + " não é do tipo CT.");
@@ -1524,11 +1606,21 @@ const RelacionamentoApp = {
         if (!customerId) throw new Error("Cliente não encontrado. Selecione um nome da lista ou use título/contrato.");
       }
 
-      const sales = (window.SiengeApiService && typeof SiengeApiService.getSales === "function")
-        ? await SiengeApiService.getSales(customerId)
-        : [];
-      let matches = Array.isArray(sales) ? sales.slice() : [];
-      if (titulo) {
+      let matches = [];
+      if (hintBill && customerId) {
+        matches = [this._docSaleFromBill(hintBill, titulo, customerId)].filter(Boolean);
+      }
+      if (!matches.length) {
+        try {
+          const sales = (window.SiengeApiService && typeof SiengeApiService.getSales === "function")
+            ? await SiengeApiService.getSales(customerId)
+            : [];
+          matches = Array.isArray(sales) ? sales.slice() : [];
+        } catch (e) {
+          if (!matches.length) throw e;
+        }
+      }
+      if (titulo && matches.length > 1) {
         const filtered = matches.filter((s) => String(s.receivableBillId) === String(titulo) || String(s.id) === String(titulo));
         if (filtered.length) matches = filtered;
       }
@@ -1537,17 +1629,7 @@ const RelacionamentoApp = {
         if (filtered.length) matches = filtered;
       }
       if (!matches.length && hintBill) {
-        matches = [{
-          id: hintBill.documentNumber || hintBill.id,
-          customerId,
-          receivableBillId: hintBill.id || titulo,
-          enterpriseId: hintBill.enterpriseCode || hintBill.enterpriseId,
-          unitId: "U-" + (hintBill.enterpriseCode || hintBill.enterpriseId || "0") + "-" + String(hintBill.unityName || hintBill.unitName || "ND").replace(/\s+/g, ""),
-          saleDate: hintBill.issueDate || hintBill.emissionDate,
-          contractValue: hintBill.receivableBillValue || hintBill.value,
-          status: "Ativo",
-          customers: []
-        }];
+        matches = [this._docSaleFromBill(hintBill, titulo, customerId)].filter(Boolean);
       }
       if (!matches.length) throw new Error("Nenhum contrato encontrado para este cliente.");
 
@@ -1576,7 +1658,16 @@ const RelacionamentoApp = {
         </table></div>`);
     } catch (err) {
       console.error(err);
-      this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Erro ao buscar."}</div>`);
+      const busy = this._siengeBusy(err);
+      if (busy && titulo && !opts.retried) {
+        this._docSetResults(kind, `<div style="padding:12px;color:#92400e;">A Sienge está ocupada no momento. Nova tentativa em alguns segundos...</div>`);
+        await new Promise((r) => setTimeout(r, 4000));
+        return this.buscarDocSimples(kind, { quiet: true, retried: true });
+      }
+      const friendly = busy
+        ? "A Sienge está ocupada no momento (muitas consultas). Aguarde uns segundos e busque de novo."
+        : (err.message || "Erro ao buscar.");
+      this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${friendly}</div>`);
     } finally {
       this._docSearchBusy = null;
       if (this._docSearchAgain === kind) {
@@ -1619,13 +1710,20 @@ const RelacionamentoApp = {
     this._docSetResults(kind, `<div style="padding:16px;text-align:center;color:var(--color-text-muted);">Carregando dados do lote e do contrato...</div>`);
     try {
       const customerId = sale.customerId;
-      let customer = {};
-      if (window.SiengeApiService && SiengeApiService.getCustomer) {
-        customer = await SiengeApiService.getCustomer(customerId);
+      let customer = { id: customerId, name: sale.customerName || sale.name || "" };
+      try {
+        if (window.SiengeApiService && SiengeApiService.getCustomer) {
+          const full = await SiengeApiService.getCustomer(customerId);
+          if (full) customer = full;
+        }
+      } catch (e) {
+        console.warn("[Relacionamento] cliente indisponível, seguindo com dados locais", e);
       }
-      if (typeof window.enrichCustomerForLegalDocs === "function") {
-        customer = await window.enrichCustomerForLegalDocs(customer);
-      }
+      try {
+        if (typeof window.enrichCustomerForLegalDocs === "function") {
+          customer = await window.enrichCustomerForLegalDocs(customer);
+        }
+      } catch (e) {}
       const unitParts = String(sale.unitId || "").split("-");
       const unitName = unitParts.slice(2).join("-");
       const enterpriseId = sale.enterpriseId || sale.costCenterId || unitParts[1];

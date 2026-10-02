@@ -34,8 +34,9 @@
     var args = Array.prototype.slice.call(arguments);
     if (typeof args[0] === 'string') {
       if (args[0].includes('/sienge-proxy')) {
-        args[0] = args[0].replace(/http:\/\/[^:\/]+(:\d+)?\/sienge-proxy/g, '/api/sienge-proxy');
+        args[0] = args[0].replace(/https?:\/\/[^\/]+\/sienge-proxy/gi, '/api/sienge-proxy');
         args[0] = args[0].replace(window.location.origin + '/sienge-proxy', '/api/sienge-proxy');
+        if (args[0].startsWith('/sienge-proxy')) args[0] = '/api' + args[0];
       }
     }
     return _origFetch.apply(this, args);
@@ -2915,7 +2916,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     loadZeroPaidTab();
     if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
   } else if (tabId === "wesend") {
-    loadWeSendTab();
+    const restore = sessionStorage.getItem("wesendActivePanel") || "followup";
+    window.wesendActivePanel = restore;
+    if (typeof window.switchWesendPanel === "function") window.switchWesendPanel(restore);
+    else loadWeSendTab();
   } else if (tabId === "preambles") {
     loadPreamblesConfigTab();
   } else if (tabId === "anexos") {
@@ -24799,7 +24803,24 @@ window.toggleSimulateAll = function(checked) {
 // 10. WE SEND - MÓDULO EXTRAJUDICIAL >= 61 DIAS
 // ----------------------------------------------------
 async function loadWeSendTab() {
+  window._loadWeSendGen = (Number(window._loadWeSendGen) || 0) + 1;
+  const gen = window._loadWeSendGen;
+  const panel = window.wesendActivePanel || sessionStorage.getItem("wesendActivePanel") || "followup";
+  if (panel === "followup" || !panel) {
+    if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+    if (typeof window.hydrateNexHistoryBag === "function") await window.hydrateNexHistoryBag();
+    if (gen !== window._loadWeSendGen) return;
+    if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+  if (panel === "config") {
+    if (typeof window.renderNexDueConfigPanel === "function") window.renderNexDueConfigPanel();
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
   if (typeof window.hydrateNexHistoryBag === "function") await window.hydrateNexHistoryBag();
+  if (gen !== window._loadWeSendGen) return;
   const bills = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS
     : (AppState.defaultersLoaded
@@ -24810,6 +24831,7 @@ async function loadWeSendTab() {
             AppState.defaultersLoaded = true;
             return b;
           })());
+  if (gen !== window._loadWeSendGen) return;
   const sales = getSiengeApiMode() === "simulado"
     ? window.MOCK_DATA.SALES
     : (AppState.sales && AppState.sales.length > 0 ? AppState.sales : []);
@@ -24819,10 +24841,11 @@ async function loadWeSendTab() {
     await preloadCustomers(customerIds);
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
-  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function" && !window._nexQuitacaoEnriched) {
     try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
       console.warn("[SI] Falha ao vincular tipo da quitação (NEX):", e);
     }
+    window._nexQuitacaoEnriched = true;
   }
   const costCenters = AppState.cachedCostCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
   const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 31, standard: 61 };
@@ -25040,11 +25063,34 @@ async function loadWeSendTab() {
   fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
   if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
-  const restorePanel = sessionStorage.getItem("wesendActivePanel") || sessionStorage.getItem("wesendReturnPanel");
-  if (restorePanel && typeof window.switchWesendPanel === "function") window.switchWesendPanel(restorePanel);
   if (window.lucide) lucide.createIcons();
 }
 window.loadWeSendTab = loadWeSendTab;
+
+window.nexIsFollowupPanel = function() {
+  const p = window.wesendActivePanel || sessionStorage.getItem("wesendActivePanel") || "followup";
+  return p === "followup" || !p;
+};
+
+window.scheduleWeSendFilter = function() {
+  if (window.nexIsFollowupPanel()) {
+    if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+    return;
+  }
+  clearTimeout(window._weSendFilterTimer);
+  window._weSendFilterTimer = setTimeout(function() {
+    if (typeof loadWeSendTab === "function") loadWeSendTab();
+  }, 400);
+};
+
+window.flushWeSendFilter = function() {
+  clearTimeout(window._weSendFilterTimer);
+  if (window.nexIsFollowupPanel()) {
+    if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+    return;
+  }
+  if (typeof loadWeSendTab === "function") loadWeSendTab();
+};
 
 window.toggleWeSendSelectAll = function(checked, selector) {
   const sel = selector || ".chk-wesend-zero, .chk-wesend-61";
@@ -26924,29 +26970,102 @@ window.viewNexPdf = async function(id) {
 
 window.hydrateNexHistoryBag = async function() {
   if (window._nexBagHydrated) return;
+  if (window._nexBagHydratePromise) return window._nexBagHydratePromise;
   if (!(window.firebaseDb && window.firebaseCollections)) return;
-  try {
-    const { collection, getDocs } = window.firebaseCollections;
-    const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
-    let bag = {};
-    try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
-    window._nexHistory = window._nexHistory || {};
-    snap.forEach(d => {
-      const data = d.data() || {};
-      const items = Array.isArray(data.items) ? data.items : [];
-      if (!items.length) return;
-      const key = d.id;
-      const local = Array.isArray(bag[key]) ? bag[key] : [];
-      const byId = {};
-      local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
-      bag[key] = Object.values(byId);
-      window._nexHistory[key] = bag[key];
-    });
-    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
-    window._nexBagHydrated = true;
-  } catch (e) {
-    console.warn("[NEX] Falha ao sincronizar follow-up", e);
-  }
+  window._nexBagHydratePromise = (async () => {
+    try {
+      const { collection, getDocs } = window.firebaseCollections;
+      const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
+      let bag = {};
+      try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+      window._nexHistory = window._nexHistory || {};
+      snap.forEach(d => {
+        const data = d.data() || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) return;
+        const key = d.id;
+        const local = Array.isArray(bag[key]) ? bag[key] : [];
+        const byId = {};
+        local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+        bag[key] = Object.values(byId);
+        window._nexHistory[key] = bag[key];
+      });
+      localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+      window._nexBagHydrated = true;
+    } catch (e) {
+      console.warn("[NEX] Falha ao sincronizar follow-up", e);
+      window._nexBagHydratePromise = null;
+    }
+  })();
+  return window._nexBagHydratePromise;
+};
+
+window.nexItemSignature = function(it) {
+  if (!it) return "";
+  const cid = String(it.customerId || "").trim();
+  const titulo = String(it.titulo || "").replace(/\D/g, "") || String(it.titulo || "").trim();
+  const date = window.nexParseIso(it.date || it.createdAt);
+  const track = String(it.tracking || "").replace(/\s+/g, "").toUpperCase();
+  const author = String(it.author || "").trim().toLowerCase();
+  if (track && track !== "AA123456789BR") return ["trk", cid, track].join("|");
+  if (!cid || !date) return "";
+  return ["snd", cid, titulo, date, author].join("|");
+};
+
+window.nexPreferItem = function(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    ...a,
+    ...b,
+    tracking: (b && String(b.tracking || "").trim()) || (a && a.tracking) || "",
+    status: (b && b.status) || (a && a.status) || "",
+    arDigital: (b && b.arDigital) || (a && a.arDigital),
+    html: (b && b.html) || (a && a.html),
+    author: (b && b.author) || (a && a.author),
+    customerName: (b && b.customerName) || (a && a.customerName),
+    unitLabel: (b && b.unitLabel) || (a && a.unitLabel)
+  };
+};
+
+window.nexDedupeItems = function(items) {
+  const byId = new Map();
+  const bySig = new Map();
+  const order = [];
+  const remember = (it) => {
+    const id = it && it.id ? String(it.id) : "";
+    const sig = window.nexItemSignature(it);
+    if (id && byId.has(id)) {
+      const merged = window.nexPreferItem(byId.get(id), it);
+      byId.set(id, merged);
+      if (sig) bySig.set(sig, merged);
+      return;
+    }
+    if (sig && bySig.has(sig)) {
+      const prev = bySig.get(sig);
+      const merged = window.nexPreferItem(prev, it);
+      bySig.set(sig, merged);
+      if (prev && prev.id) byId.set(String(prev.id), merged);
+      if (id) byId.set(id, merged);
+      return;
+    }
+    order.push(it);
+    if (id) byId.set(id, it);
+    if (sig) bySig.set(sig, it);
+  };
+  (items || []).forEach(remember);
+  const seen = new Set();
+  const out = [];
+  order.forEach((it) => {
+    const id = it && it.id ? String(it.id) : "";
+    const sig = window.nexItemSignature(it);
+    const chosen = (id && byId.get(id)) || (sig && bySig.get(sig)) || it;
+    const key = (chosen && chosen.id ? "id:" + chosen.id : "") || ("sig:" + sig);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(chosen);
+  });
+  return out;
 };
 
 window.nexCollectAll = function() {
@@ -26976,7 +27095,7 @@ window.nexCollectAll = function() {
       });
     });
   });
-  return items;
+  return window.nexDedupeItems(items);
 };
 
 window.nexResolveItem = async function(id) {
@@ -27376,6 +27495,7 @@ window.switchWesendPanel = function(panel) {
   if (b4) b4.classList.toggle("active", panel === "config");
   if (panel === "config" && typeof window.renderNexDueConfigPanel === "function") window.renderNexDueConfigPanel();
   if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
+  if (panel !== "config" && typeof loadWeSendTab === "function") loadWeSendTab();
 };
 
 window.NEX_DUE_CONFIG_KEY = "crm_nex_due_days_config";
@@ -27947,7 +28067,7 @@ window.renderNexFollowup = function() {
   const zeroOnly = window.getNexFollowupZeroOnly();
   if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;
   const fTitulo = document.getElementById("wesend-filter-titulo")?.value || "";
-  const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase();
+  const fNome = (document.getElementById("wesend-filter-nome")?.value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const fNexDe = document.getElementById("wesend-filter-nex-de")?.value || "";
   const fNexAte = document.getElementById("wesend-filter-nex-ate")?.value || "";
   const fObjeto = (document.getElementById("wesend-filter-objeto")?.value || "").trim().toUpperCase();
@@ -27957,7 +28077,8 @@ window.renderNexFollowup = function() {
     if (zeroOnly && !(it.zeroPaid || window.nexClientIsZeroPaid(it.customerId, it.titulo))) return false;
     if (fTitulo && !String(it.titulo || "").includes(fTitulo)) return false;
     const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
-    if (fNome && !String(name).toLowerCase().includes(fNome)) return false;
+    const nameNorm = String(name).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (fNome && !nameNorm.includes(fNome)) return false;
     const sent = window.nexParseIso(it.date || it.createdAt);
     if (fNexDe && (!sent || sent < fNexDe)) return false;
     if (fNexAte && (!sent || sent > fNexAte)) return false;
@@ -35307,6 +35428,47 @@ window.clearRelacionamentoSearch = function() {
     toggleRelacionamentoFilters();
 };
 
+window.relSiengeGet = async function(path) {
+  const p = String(path || "").startsWith("/") ? String(path) : "/" + String(path || "");
+  if (typeof siengeFetchWithRetry === "function") return siengeFetchWithRetry(p);
+  const res = await fetch("/api/sienge-proxy" + p, {
+    headers: {
+      Authorization: window.getBasicAuthHeader ? getBasicAuthHeader() : "",
+      Accept: "application/json"
+    }
+  });
+  if (!res.ok) {
+    const err = new Error("HTTP " + res.status);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+};
+
+window.relFindTituloLocal = function(titulo) {
+  const t = String(titulo || "").replace(/\D/g, "");
+  if (!t) return null;
+  const pack = (src, extra) => {
+    if (!src || !src.customerId) return null;
+    return Object.assign({
+      id: src.id || src.receivableBillId || t,
+      customerId: src.customerId,
+      documentId: src.documentId || "CT",
+      documentNumber: src.documentNumber || src.contractNumber || src.number,
+      enterpriseId: src.enterpriseId || src.costCenterId || src.enterpriseCode,
+      enterpriseCode: src.enterpriseCode || src.enterpriseId,
+      unityName: src.unityName || src.unitName || src.units,
+      enterpriseName: src.enterpriseName
+    }, extra || {});
+  };
+  const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+  const sale = sales.find((s) => String(s.receivableBillId) === t || String(s.id) === t);
+  if (sale) return pack(sale, { id: sale.receivableBillId || t, documentId: "CT" });
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  const bill = bills.find((b) => String(b.id) === t || String(b.saleId) === t);
+  return bill ? pack(bill) : null;
+};
+
 window.searchRelacionamento = async function() {
   const docEl = document.getElementById('relacionamento-filter-doc');
   let doc = (!docEl.disabled ? docEl.value : '').replace(/\D/g,'');
@@ -35401,35 +35563,30 @@ window.searchRelacionamento = async function() {
 
   try {
     if (titulo) {
-      // 1. Busca pelo titulo (receivableBillId) -> pega customerId
-      const urlId = `http://${host}:${port}/sienge-proxy/accounts-receivable/receivable-bills/${encodeURIComponent(titulo)}`;
-      
       let bill = null;
+      let lookupErr = null;
       try {
-          const resId = await fetch(urlId, { headers: { 'Authorization': authHeader } });
-          if (resId.ok) {
-              bill = await resId.json();
-              
-              const bType = String(bill.documentId || '').trim().toUpperCase();
-              if (bType !== 'CT' && bType !== 'CTCV') {
-                  throw new Error(`Título ${titulo} encontrado, mas é do tipo '${bill.documentId || 'Desconhecido'}'. Apenas títulos tipo CT são suportados.`);
-              }
-          } else {
-              throw new Error(`Título não encontrado. Nenhum resultado correspondeu ao número '${titulo}'.`);
-          }
-      } catch(e) { 
-          throw e; // Lança o erro para ser capturado pelo bloco catch principal
+        bill = await window.relSiengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo));
+      } catch (e) {
+        lookupErr = e;
+        bill = window.relFindTituloLocal(titulo);
       }
-
-      if (bill) {
-         customerId = bill.customerId;
-         targetContractNumber = bill.documentNumber || bill.id;
-         targetEnterpriseId = bill.enterpriseCode || bill.enterpriseId;
-         targetUnityName = bill.unityName || bill.unitName;
-         targetEnterpriseName = bill.enterpriseName;
-      } else {
-         throw new Error("Título não encontrado.");
+      if (!bill) {
+        const st = lookupErr && lookupErr.status;
+        if (st && st !== 404) {
+          throw new Error("Não foi possível consultar o título " + titulo + " (HTTP " + st + "). Tente novamente.");
+        }
+        throw new Error("Título não encontrado. Nenhum resultado correspondeu ao número '" + titulo + "'.");
       }
+      const bType = String(bill.documentId || "").trim().toUpperCase();
+      if (bType && bType !== "CT" && bType !== "CTCV") {
+        throw new Error("Título " + titulo + " encontrado, mas é do tipo '" + (bill.documentId || "Desconhecido") + "'. Apenas títulos tipo CT são suportados.");
+      }
+      customerId = bill.customerId;
+      targetContractNumber = bill.documentNumber || bill.id;
+      targetEnterpriseId = bill.enterpriseCode || bill.enterpriseId;
+      targetUnityName = bill.unityName || bill.unitName;
+      targetEnterpriseName = bill.enterpriseName;
     } else if (contrato) {
       // 2. Busca pelo contrato -> pega customerId
       let myContract = null;
@@ -35437,13 +35594,9 @@ window.searchRelacionamento = async function() {
 
       // Buscar por number (parâmetro correto da Sienge)
       try {
-          const urlId = `http://${host}:${port}/sienge-proxy/sales-contracts?number=${encodeURIComponent(contrato)}`;
-          const resId = await fetch(urlId, { headers: { 'Authorization': authHeader } });
-          if (resId.ok) {
-              const data = await resId.json();
-              if (data.results && data.results.length > 0) {
-                  myContract = data.results[0];
-              }
+          const data = await window.relSiengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
+          if (data && data.results && data.results.length > 0) {
+              myContract = data.results[0];
           }
       } catch(e) {}
       
@@ -35460,12 +35613,8 @@ window.searchRelacionamento = async function() {
          // Se ainda não tiver customerId, mas tiver receivableBillId, buscar o título para pegar o customerId
          if (!customerId && myContract.receivableBillId) {
              try {
-                 const billUrl = `http://${host}:${port}/sienge-proxy/accounts-receivable/receivable-bills/${myContract.receivableBillId}`;
-                 const billRes = await fetch(billUrl, { headers: { 'Authorization': authHeader } });
-                 if (billRes.ok) {
-                     bill = await billRes.json();
-                     customerId = bill.customerId;
-                 }
+                 bill = await window.relSiengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(myContract.receivableBillId));
+                 customerId = bill && bill.customerId;
              } catch(e) {}
          }
 
@@ -35486,20 +35635,14 @@ window.searchRelacionamento = async function() {
           customerNameCache = window.SelectedDynamicCustomerName;
       } else {
           const docParam = doc.length === 14 ? `cnpj=${doc}` : `cpf=${doc}`;
-          const url = `http://${host}:${port}/sienge-proxy/customers?${docParam}`;
-          const res = await fetch(url, { headers: { 'Authorization': authHeader } });
-          if (res.ok) {
-             const cData = await res.json();
-             const cList = cData.results || [];
-             if (cList.length > 0) {
-               customerId = cList[0].id;
-               customerNameCache = cList[0].name;
-               customerDocCache = cList[0].cpf || cList[0].cnpj || cList[0].cpfCnpj || doc;
-             } else {
-               throw new Error("CPF/CNPJ não encontrado.");
-             }
+          const cData = await window.relSiengeGet("/customers?" + docParam);
+          const cList = (cData && cData.results) || [];
+          if (cList.length > 0) {
+            customerId = cList[0].id;
+            customerNameCache = cList[0].name;
+            customerDocCache = cList[0].cpf || cList[0].cnpj || cList[0].cpfCnpj || doc;
           } else {
-             throw new Error(`A API da Sienge recusou o CPF/CNPJ (Status: ${res.status}). O documento pode ser inválido.`);
+            throw new Error("CPF/CNPJ não encontrado.");
           }
       }
     } else if (unidadeId && emp) {
@@ -35511,46 +35654,29 @@ window.searchRelacionamento = async function() {
       
       // ESTRATÉGIA 1: Buscar a unidade específica e pegar o currentSalesContract
       try {
-          const unitUrl = `http://${host}:${port}/sienge-proxy/units?enterpriseId=${emp}&name=${encodeURIComponent(unidadeName)}`;
-          const unitRes = await fetch(unitUrl, { headers: { 'Authorization': authHeader } });
-          if (unitRes.ok) {
-              const uData = await unitRes.json();
-              const uObj = (uData.results || []).find(u => String(u.id) === String(unidadeId));
-              if (uObj && uObj.contractId) {
-                  const scId = uObj.contractId;
-                  const scUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${scId}`;
-                  const scRes = await fetch(scUrl, { headers: { 'Authorization': authHeader } });
-                  if (scRes.ok) {
-                      myContract = await scRes.json();
-                  }
-              }
+          const uData = await window.relSiengeGet("/units?enterpriseId=" + emp + "&name=" + encodeURIComponent(unidadeName));
+          const uObj = ((uData && uData.results) || []).find(u => String(u.id) === String(unidadeId));
+          if (uObj && uObj.contractId) {
+              myContract = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(uObj.contractId));
           }
       } catch(e) { console.error("Erro na ESTRATÉGIA 1", e); }
       
       if (!myContract) {
           try {
-              const directUrl = `http://${host}:${port}/sienge-proxy/sales-contracts?enterpriseId=${emp}&unitId=${unidadeId}`;
-              const directRes = await fetch(directUrl, { headers: { 'Authorization': authHeader } });
-              if (directRes.ok) {
-                  const directData = await directRes.json();
-                  const matchingContracts = (directData.results || []).filter(c => String(c.unitId) === String(unidadeId) || String(c.unitName) === String(unidadeName));
-                  if (matchingContracts.length > 0) {
-                      myContract = matchingContracts.find(c => String(c.status).toUpperCase() === 'ACTIVE') || 
-                                   matchingContracts.find(c => String(c.status).toUpperCase() !== 'CANCELED') || 
-                                   matchingContracts[0];
-                  }
+              const directData = await window.relSiengeGet("/sales-contracts?enterpriseId=" + emp + "&unitId=" + encodeURIComponent(unidadeId));
+              const matchingContracts = ((directData && directData.results) || []).filter(c => String(c.unitId) === String(unidadeId) || String(c.unitName) === String(unidadeName));
+              if (matchingContracts.length > 0) {
+                  myContract = matchingContracts.find(c => String(c.status).toUpperCase() === 'ACTIVE') ||
+                               matchingContracts.find(c => String(c.status).toUpperCase() !== 'CANCELED') ||
+                               matchingContracts[0];
               }
           } catch(e) { console.error("Erro na ESTRATÉGIA 2", e); }
       }
 
       if (!myContract) {
           while (true) {
-              const url = `http://${host}:${port}/sienge-proxy/sales-contracts?enterpriseId=${emp}&limit=${limit}&offset=${offset}`;
-              const res = await fetch(url, { headers: { 'Authorization': authHeader } });
-              if (!res.ok) break;
-              
-              const scData = await res.json();
-              const contratos = scData.results || [];
+              const scData = await window.relSiengeGet("/sales-contracts?enterpriseId=" + emp + "&limit=" + limit + "&offset=" + offset);
+              const contratos = (scData && scData.results) || [];
               if (contratos.length === 0) break;
               
               const matchingContracts = contratos.filter(c => String(c.unitId) === String(unidadeId) || String(c.unitName) === String(unidadeName));
@@ -35578,12 +35704,8 @@ window.searchRelacionamento = async function() {
          
          if (!customerId && myContract.receivableBillId) {
              try {
-                 const billUrl = `http://${host}:${port}/sienge-proxy/accounts-receivable/receivable-bills/${myContract.receivableBillId}`;
-                 const billRes = await fetch(billUrl, { headers: { 'Authorization': authHeader } });
-                 if (billRes.ok) {
-                     const bill = await billRes.json();
-                     customerId = bill.customerId;
-                 }
+                 const bill = await window.relSiengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(myContract.receivableBillId));
+                 customerId = bill && bill.customerId;
              } catch(e) {}
          }
          
@@ -35593,10 +35715,7 @@ window.searchRelacionamento = async function() {
          targetUnityName = optText.includes(' - ') ? optText.split(' - ').slice(1).join(' - ') : optText;
       } else {
          try {
-             const dumpUrl = `http://${host}:${port}/sienge-proxy/units/${unidadeId}`;
-             const dumpRes = await fetch(dumpUrl, { headers: { 'Authorization': authHeader } });
-             if (dumpRes.ok) {
-                const dumpData = await dumpRes.json();
+             const dumpData = await window.relSiengeGet("/units/" + encodeURIComponent(unidadeId));
                 if (dumpData.contractId) {
                     targetContractNumber = dumpData.contractId;
                 }
@@ -35608,33 +35727,28 @@ window.searchRelacionamento = async function() {
                 // Se a unidade tem contrato mas não retornou o customerId, buscar o contrato para pegar o customerId
                 if (!customerId && targetContractNumber) {
                     try {
-                        const contractUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${targetContractNumber}`;
-                        const contractRes = await fetch(contractUrl, { headers: { 'Authorization': authHeader } });
-                        if (contractRes.ok) {
-                            const contractData = await contractRes.json();
-                            if (contractData.customerId) {
-                                customerId = contractData.customerId;
-                            } else if (contractData.clientId) {
-                                customerId = contractData.clientId;
-                            } else if (contractData.customer && contractData.customer.id) {
-                                customerId = contractData.customer.id;
-                            } else if (contractData.client && contractData.client.id) {
-                                customerId = contractData.client.id;
-                            } else if (contractData.customers && contractData.customers.length > 0) {
-                                const mainCust = contractData.customers.find(c => c.main === true) || contractData.customers[0];
-                                if (mainCust && mainCust.id) {
-                                    customerId = mainCust.id;
-                                }
-                            } else if (contractData.salesContractCustomers && contractData.salesContractCustomers.length > 0) {
-                                const mainCust = contractData.salesContractCustomers.find(c => c.main === true) || contractData.salesContractCustomers[0];
-                                if (mainCust && mainCust.id) {
-                                    customerId = mainCust.id;
-                                }
+                        const contractData = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(targetContractNumber));
+                        if (contractData.customerId) {
+                            customerId = contractData.customerId;
+                        } else if (contractData.clientId) {
+                            customerId = contractData.clientId;
+                        } else if (contractData.customer && contractData.customer.id) {
+                            customerId = contractData.customer.id;
+                        } else if (contractData.client && contractData.client.id) {
+                            customerId = contractData.client.id;
+                        } else if (contractData.customers && contractData.customers.length > 0) {
+                            const mainCust = contractData.customers.find(c => c.main === true) || contractData.customers[0];
+                            if (mainCust && mainCust.id) {
+                                customerId = mainCust.id;
+                            }
+                        } else if (contractData.salesContractCustomers && contractData.salesContractCustomers.length > 0) {
+                            const mainCust = contractData.salesContractCustomers.find(c => c.main === true) || contractData.salesContractCustomers[0];
+                            if (mainCust && mainCust.id) {
+                                customerId = mainCust.id;
                             }
                         }
                     } catch(e) { console.error("Erro ao buscar detalhes do contrato da unidade", e); }
                 }
-             }
          } catch(e) {
              throw new Error(`Contrato ativo não encontrado. (JSON=${e.message})`);
          }
@@ -35964,12 +36078,8 @@ window.searchRelacionamento = async function() {
              else if (Array.isArray(rbRes)) receivableBills = rbRes;
         } else {
              // Fallback direto via fetch se o SiengeApiService tiver nome diferente
-             const rbUrl = `http://${host}:${port}/sienge-proxy/accounts-receivable/receivable-bills?customerId=${customerId}&limit=200`;
-             const rbRes = await fetch(rbUrl, { headers: { 'Authorization': authHeader } });
-             if (rbRes.ok) {
-                 const data = await rbRes.json();
-                 receivableBills = data.results || [];
-             }
+             const rbRes = await window.relSiengeGet("/accounts-receivable/receivable-bills?customerId=" + encodeURIComponent(customerId) + "&limit=200");
+             receivableBills = (rbRes && rbRes.results) || [];
         }
     } catch (e) {
         console.error("Erro ao buscar receivable-bills", e);
@@ -36215,13 +36325,9 @@ window.searchRelacionamento = async function() {
        // Se o contrato ainda for puramente numérico (como 11667), vamos tentar buscar do próprio Sienge
        if (/^\d+$/.test(String(realContractStr)) && c.id) {
            try {
-               const contractUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${c.id}`;
-               const contractRes = await fetch(contractUrl, { headers: { 'Authorization': authHeader } });
-               if (contractRes.ok) {
-                   const contractData = await contractRes.json();
-                   if (contractData.contractNumber) {
-                       realContractStr = contractData.contractNumber;
-                   }
+               const contractData = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(c.id));
+               if (contractData.contractNumber) {
+                   realContractStr = contractData.contractNumber;
                }
            } catch(e) {}
        }

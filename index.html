@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=891">
+  <link rel="stylesheet" href="style.css?v=892">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=891" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=892" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1294,7 +1294,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.891 &nbsp;&middot;&nbsp; 02/10/2026
+            v1.0.892 &nbsp;&middot;&nbsp; 02/10/2026
           </span>
         </div>
       </div>
@@ -2603,7 +2603,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=891" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=892" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -2852,7 +2852,7 @@ ____________________________________________
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=891" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=892" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2861,7 +2861,7 @@ ____________________________________________
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=891" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=892" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -3215,7 +3215,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=891" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=892" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -3842,27 +3842,27 @@ ____________________________________________
                 <!-- Linha 1 -->
                 <div class="form-group" style="grid-column: 1 / 2;">
                   <label>Título (Contas a Receber)</label>
-                  <input type="text" class="form-control" id="wesend-filter-titulo" placeholder="" onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="this.value = this.value.replace(/[^0-9]/g, ''); loadWeSendTab()">
+                  <input type="text" class="form-control" id="wesend-filter-titulo" placeholder="" onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="this.value = this.value.replace(/[^0-9]/g, ''); window.scheduleWeSendFilter()">
                 </div>
                 <div class="form-group" style="grid-column: 2 / 3;">
                   <label>Contrato</label>
-                  <input type="text" class="form-control" id="wesend-filter-contrato" placeholder="" onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="loadWeSendTab()">
+                  <input type="text" class="form-control" id="wesend-filter-contrato" placeholder="" onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="window.scheduleWeSendFilter()">
                 </div>
                 <div class="form-group" style="grid-column: 3 / 4;">
                   <label>CPF/CNPJ</label>
-                  <input type="text" class="form-control" id="wesend-filter-doc" placeholder="000.000.000-00" onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="maskCpfCnpj(this); loadWeSendTab()">
+                  <input type="text" class="form-control" id="wesend-filter-doc" placeholder="000.000.000-00" onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="maskCpfCnpj(this); window.scheduleWeSendFilter()">
                 </div>
 
                 <!-- Linha 2 -->
                 <div class="form-group" style="grid-column: 1 / 3;">
                   <label>Empreendimento</label>
-                  <select class="form-control" id="wesend-filter-emp" onchange="loadWeSendUnidades(this.value); loadWeSendTab();">
+                  <select class="form-control" id="wesend-filter-emp" onchange="loadWeSendUnidades(this.value); window.scheduleWeSendFilter();">
                     <option value="">Selecione...</option>
                   </select>
                 </div>
                 <div class="form-group" style="grid-column: 3 / 4;">
                   <label>Unidade</label>
-                  <select class="form-control" id="wesend-filter-unidade" onchange="loadWeSendTab();" disabled>
+                  <select class="form-control" id="wesend-filter-unidade" onchange="window.scheduleWeSendFilter();" disabled>
                     <option value="">Selecione o emp...</option>
                   </select>
                 </div>
@@ -3875,15 +3875,15 @@ ____________________________________________
                 <!-- Linha 3 -->
                 <div class="form-group" style="grid-column: 1 / 2;">
                   <label>Nome do Cliente</label>
-                  <input type="text" class="form-control" id="wesend-filter-nome" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="loadWeSendTab()" autocomplete="off">
+                  <input type="text" class="form-control" id="wesend-filter-nome" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="window.scheduleWeSendFilter()" autocomplete="off">
                 </div>
                 <div class="form-group" style="grid-column: 2 / 3;">
                   <label>Telefone</label>
-                  <input type="text" class="form-control" id="wesend-filter-telefone" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="this.value = this.value.replace(/[^0-9]/g, ''); loadWeSendTab()" autocomplete="off">
+                  <input type="text" class="form-control" id="wesend-filter-telefone" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="this.value = this.value.replace(/[^0-9]/g, ''); window.scheduleWeSendFilter()" autocomplete="off">
                 </div>
                 <div class="form-group" style="grid-column: 3 / 4;">
                   <label>E-mail</label>
-                  <input type="text" class="form-control" id="wesend-filter-email" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') loadWeSendTab()" oninput="loadWeSendTab()" autocomplete="off">
+                  <input type="text" class="form-control" id="wesend-filter-email" placeholder="Digite para buscar..." onkeydown="if(event.key==='Enter' || event.key==='Tab') window.flushWeSendFilter()" oninput="window.scheduleWeSendFilter()" autocomplete="off">
                 </div>
 
                 <!-- Linha 4: Follow-up NEX -->
@@ -7463,56 +7463,56 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=891"></script>
+  <script type="module" src="firebase-config.js?v=892"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=891"></script>
-  <script defer src="sienge-api.js?v=891"></script>
-  <script defer src="consumo-api.js?v=891"></script>
-  <script defer src="azure-auth.js?v=891"></script>
-  <script defer src="app.js?v=891"></script>
-  <script defer src="empresa-filter.js?v=891"></script>
-  <script defer src="cartao-taxas.js?v=891"></script>
-  <script defer src="alcada-desconto.js?v=891"></script>
-  <script defer src="alcada-distrato.js?v=891"></script>
-  <script defer src="home-dashboard.js?v=891"></script>
-  <script defer src="anexos.js?v=891"></script>
-  <script defer src="contas-pagar.js?v=891"></script>
-  <script defer src="config-tags.js?v=891"></script>
-  <script defer src="config-users.js?v=891"></script>
-  <script defer src="suporte.js?v=891"></script>
-  <script defer src="construcao.js?v=891"></script>
-  <script defer src="empresas.js?v=891"></script>
-  <script defer src="relacionamento.js?v=891"></script>
-  <script defer src="cessao-direitos.js?v=891"></script>
-  <script defer src="compromissario.js?v=891"></script>
-  <script defer src="comercial.js?v=891"></script>
-  <script defer src="estoque-comercial.js?v=891"></script>
-  <script defer src="condicoes-pagamento.js?v=891"></script>
-  <script defer src="centros-custo.js?v=891"></script>
-  <script defer src="marketing.js?v=891"></script>
-  <script defer src="plano-financeiro.js?v=891"></script>
-  <script defer src="prestacao-contas.js?v=891"></script>
+  <script defer src="data.js?v=892"></script>
+  <script defer src="sienge-api.js?v=892"></script>
+  <script defer src="consumo-api.js?v=892"></script>
+  <script defer src="azure-auth.js?v=892"></script>
+  <script defer src="app.js?v=892"></script>
+  <script defer src="empresa-filter.js?v=892"></script>
+  <script defer src="cartao-taxas.js?v=892"></script>
+  <script defer src="alcada-desconto.js?v=892"></script>
+  <script defer src="alcada-distrato.js?v=892"></script>
+  <script defer src="home-dashboard.js?v=892"></script>
+  <script defer src="anexos.js?v=892"></script>
+  <script defer src="contas-pagar.js?v=892"></script>
+  <script defer src="config-tags.js?v=892"></script>
+  <script defer src="config-users.js?v=892"></script>
+  <script defer src="suporte.js?v=892"></script>
+  <script defer src="construcao.js?v=892"></script>
+  <script defer src="empresas.js?v=892"></script>
+  <script defer src="relacionamento.js?v=892"></script>
+  <script defer src="cessao-direitos.js?v=892"></script>
+  <script defer src="compromissario.js?v=892"></script>
+  <script defer src="comercial.js?v=892"></script>
+  <script defer src="estoque-comercial.js?v=892"></script>
+  <script defer src="condicoes-pagamento.js?v=892"></script>
+  <script defer src="centros-custo.js?v=892"></script>
+  <script defer src="marketing.js?v=892"></script>
+  <script defer src="plano-financeiro.js?v=892"></script>
+  <script defer src="prestacao-contas.js?v=892"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=891"></script>
-  <script defer src="caixa-diario.js?v=891"></script>
-  <script defer src="investimento.js?v=891"></script>
-  <script defer src="parametrizacao-parceiro.js?v=891"></script>
-  <script defer src="societario.js?v=891"></script>
-  <script defer src="participacoes.js?v=891"></script>
-  <script defer src="fiscal.js?v=891"></script>
-  <script defer src="indexadores.js?v=891"></script>
-  <script defer src="verificar-construcao.js?v=891"></script>
-  <script defer src="financiamento.js?v=891"></script>
-  <script src="repactuacoes.js?v=891"></script>
-  <script defer src="repactuacao-lote.js?v=891"></script>
+  <script defer src="fluxo-caixa.js?v=892"></script>
+  <script defer src="caixa-diario.js?v=892"></script>
+  <script defer src="investimento.js?v=892"></script>
+  <script defer src="parametrizacao-parceiro.js?v=892"></script>
+  <script defer src="societario.js?v=892"></script>
+  <script defer src="participacoes.js?v=892"></script>
+  <script defer src="fiscal.js?v=892"></script>
+  <script defer src="indexadores.js?v=892"></script>
+  <script defer src="verificar-construcao.js?v=892"></script>
+  <script defer src="financiamento.js?v=892"></script>
+  <script src="repactuacoes.js?v=892"></script>
+  <script defer src="repactuacao-lote.js?v=892"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=891"></script>
+  <script defer src="dashboard-inadimplencia.js?v=892"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

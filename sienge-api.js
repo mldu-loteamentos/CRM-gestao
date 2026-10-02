@@ -903,7 +903,8 @@ async function siengeFetchWithRetry(endpoint, retries = 6) {
       lastError = err;
       const invalidJson = /Resposta inválida/i.test(String(err.message || ""));
       const serverFail = Number(err.status) >= 500;
-      if ((isSiengeRateLimitError(err) || invalidJson || serverFail) && attempt < retries - 1) {
+      const misdirected = Number(err.status) === 421;
+      if ((isSiengeRateLimitError(err) || invalidJson || serverFail || misdirected) && attempt < retries - 1) {
         const waitMs = siengeRateLimitWaitMs(attempt, err.retryAfter);
         console.warn(`[Sienge] ${invalidJson ? "JSON inválido" : (err.status || "erro")} — aguardando ${waitMs / 1000}s (tentativa ${attempt + 2}/${retries})...`);
         await new Promise(r => setTimeout(r, waitMs));
