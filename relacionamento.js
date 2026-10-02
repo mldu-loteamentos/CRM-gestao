@@ -1734,7 +1734,7 @@ const RelacionamentoApp = {
   _calcularNovoVencimento() {
     const dia = parseInt(document.getElementById("ven-dia")?.value, 10);
     const orig = document.getElementById("ven-data-original")?.value || "";
-    if (!(dia >= 1 && dia <= 31) || !orig) return null;
+    if (![10, 15, 20].includes(dia) || !orig) return null;
     const key = typeof window.promiseDateKey === "function" ? window.promiseDateKey(orig) : orig.slice(0, 10);
     if (!this._isoInJanelaVencimento(key)) return null;
     const parts = key.split("-");
@@ -2087,7 +2087,7 @@ const RelacionamentoApp = {
       }
       const computed = this._calcularNovoVencimento();
       if (!computed) {
-        alert("Informe o novo dia de vencimento e a data original do mês da alteração.");
+        alert("Informe o novo dia de vencimento (10, 15 ou 20) e a data original do mês da alteração.");
         return;
       }
     }
