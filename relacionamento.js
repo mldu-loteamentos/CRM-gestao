@@ -1585,7 +1585,7 @@ const RelacionamentoApp = {
 
   _setDocExtraCard(kind, show) {
     const extra = this._docEl(kind, "-terceiro-card");
-    if (extra) extra.style.display = show ? "block" : "none";
+    if (extra) extra.style.display = show ? "block" : "";
   },
 
   _docFilterEl(kind, campo) {
