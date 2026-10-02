@@ -206,6 +206,33 @@ const RelacionamentoApp = {
     ).trim();
   },
 
+  _docHasTopoVars(text) {
+    const first = String(text || "").split(/\r?\n/).find((ln) => String(ln).replace(/<[^>]+>/g, "").trim()) || "";
+    const plain = first.replace(/<[^>]+>/g, "").trim();
+    return /^t[ií]tulo\s*:/i.test(plain) || /\{\{\s*TITULO\s*\}\}/i.test(plain);
+  },
+
+  _ensureDocHeaderTopo(text, map) {
+    let s = String(text || "").replace(/^\uFEFF/, "");
+    const titulo = (map && map.TITULO) || "____";
+    const unidade = (map && map.UNIDADE) || "____";
+    s = s.replace(/\{\{\s*TITULO\s*\}\}/g, titulo).replace(/\{\{\s*UNIDADE\s*\}\}/g, unidade);
+    if (this._docHasTopoVars(s)) return s;
+    return "Título: " + titulo + " | Unidade: " + unidade + "\n\n" + s;
+  },
+
+  _resolveDocCorpo(cfg, corpoEl) {
+    let saved = "";
+    try {
+      const t = JSON.parse(localStorage.getItem(cfg.storage) || "{}");
+      saved = (t && t[cfg.corpoId]) || "";
+    } catch (e) {}
+    const live = (corpoEl && corpoEl.value) || "";
+    const fallback = (corpoEl && corpoEl.defaultValue) || "";
+    if (saved && this._docHasTopoVars(saved) && !this._docHasTopoVars(live)) return saved;
+    return live || saved || fallback;
+  },
+
   _formatUnidadeDoc(ctx) {
     if (!ctx) return "—";
     const sale = ctx.sale || {};
@@ -2160,8 +2187,7 @@ const RelacionamentoApp = {
       const titleEl = document.getElementById(cfg.titleId);
       const corpoEl = document.getElementById(cfg.corpoId);
       const docTitle = (titleEl && titleEl.value) || t[cfg.titleId] || cfg.defaultTitle;
-      let corpo = (corpoEl && corpoEl.value) || t[cfg.corpoId] || "";
-      if (!corpo && corpoEl) corpo = corpoEl.defaultValue || "";
+      let corpo = this._resolveDocCorpo(cfg, corpoEl);
       if (!corpo) {
         alert("O modelo não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
@@ -2237,6 +2263,7 @@ const RelacionamentoApp = {
       if (typeof window.centerSimpleDocSignature === "function") {
         filled = window.centerSimpleDocSignature(filled);
       }
+      filled = this._ensureDocHeaderTopo(filled, legalBase);
       const lineHeight = kind === "vencimento" ? "1.85" : "1.75";
       const docHtml = `
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 1.4rem;">${docTitle}</h2>
