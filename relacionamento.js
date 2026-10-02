@@ -192,9 +192,13 @@ const RelacionamentoApp = {
   },
 
   _formatUnidadeDoc(ctx) {
-    const unitId = this._unitNumericId(ctx);
+    if (!ctx) return "—";
+    const sale = ctx.sale || {};
+    const bill = ctx.bill || {};
+    const empId = String(sale.enterpriseId || sale.costCenterId || bill.enterpriseId || bill.costCenterId || "").trim();
     const ql = this._quadraLoteLabel(ctx);
-    return [unitId, ql].filter(Boolean).join(" ") || "—";
+    if (empId && ql) return empId + " - " + ql;
+    return empId || ql || "—";
   },
 
   async _avaliarAdimplencia(sale, bill) {
@@ -266,7 +270,117 @@ const RelacionamentoApp = {
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   },
 
-  _docPessoasExtraHtml(customer, sale) {
+  _docCopyBtn(value) {
+    const raw = String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    if (!raw) return "";
+    return `<button type="button" onclick="copyToClipboard('${raw}', this)" style="background:none;border:none;padding:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;opacity:0.7;" title="Copiar"><i data-lucide="copy" style="width:14px;height:14px;color:var(--color-primary);"></i></button>`;
+  },
+
+  _docFmtPhoneDigits(digits) {
+    const d = String(digits || "").replace(/\D/g, "");
+    if (d.length === 11) return "(" + d.slice(0, 2) + ") " + d.slice(2, 7) + "-" + d.slice(7);
+    if (d.length === 10) return "(" + d.slice(0, 2) + ") " + d.slice(2, 6) + "-" + d.slice(6);
+    if (d.length === 9) return d.slice(0, 5) + "-" + d.slice(5);
+    if (d.length === 8) return d.slice(0, 4) + "-" + d.slice(4);
+    return "";
+  },
+
+  _docPhonesHtml(customer) {
+    const list = [];
+    const seen = new Set();
+    const push = (formatted, raw, isMain) => {
+      if (!formatted || seen.has(formatted)) return;
+      seen.add(formatted);
+      list.push({ formatted, raw: raw || formatted.replace(/\D/g, ""), isMain: !!isMain });
+    };
+    (customer && customer.phones ? customer.phones : []).forEach((p) => {
+      const ddd = String(p.areaCode || "").replace(/\D/g, "");
+      const num = String(p.number || p.phoneNumber || "").replace(/\D/g, "");
+      const full = ddd + num;
+      const formatted = this._docFmtPhoneDigits(full)
+        || (p.areaCode ? "(" + p.areaCode + ") " + (p.number || p.phoneNumber || "") : (p.number || p.phoneNumber || ""));
+      const main = p.main === true || String(p.type || "").toUpperCase() === "MAIN" || String(p.type || "").toUpperCase() === "CELULAR";
+      push(formatted, full || num, main);
+    });
+    if (!list.length && customer && customer.phone && customer.phone !== "N/D" && customer.phone !== "undefined") {
+      const raw = String(customer.phone).replace(/\D/g, "");
+      push(this._docFmtPhoneDigits(raw) || customer.phone, raw, true);
+    }
+    if (list.length && !list.some((p) => p.isMain)) list[0].isMain = true;
+    let foundMain = false;
+    list.forEach((p) => {
+      if (p.isMain && !foundMain) foundMain = true;
+      else p.isMain = false;
+    });
+    if (!list.length) {
+      return `<span class="cessao-val" style="display:flex;align-items:center;gap:8px;"><i data-lucide="phone" style="width:15px;height:15px;color:var(--color-primary);flex-shrink:0;"></i> <span>Não informado</span></span>`;
+    }
+    return `<div style="display:flex;flex-direction:column;gap:4px;">` + list.map((p) => `
+      <div style="display:flex;align-items:center;gap:8px;">
+        <i data-lucide="phone" style="width:15px;height:15px;color:var(--color-primary);"></i>
+        <span class="cessao-val" style="margin:0;">${this._escDoc(p.formatted)}</span>
+        ${p.isMain ? '<span class="badge badge-success" style="font-size:0.6rem;padding:2px 6px;text-transform:none;">Principal</span>' : ""}
+        ${this._docCopyBtn(p.raw)}
+      </div>`).join("") + `</div>`;
+  },
+
+  _docAgeLabel(customer) {
+    const c = customer || {};
+    const doc = String(c.cpfCnpj || c.cpf || c.cnpj || "").replace(/\D/g, "");
+    if (doc.length > 11) return "Não se aplica";
+    if (!c.birthDate || c.birthDate === "1980-01-01") return "Não informado";
+    const birth = new Date(String(c.birthDate).indexOf("T") >= 0 ? c.birthDate : c.birthDate + "T12:00:00");
+    if (isNaN(birth.getTime())) return "Não informado";
+    const today = new Date();
+    let diff = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) diff--;
+    return diff + " anos";
+  },
+
+  _docProfIcon(prof) {
+    const lower = String(prof || "").toLowerCase();
+    if (lower.includes("engenh") || lower.includes("arquit")) return "hammer";
+    if (lower.includes("médic") || lower.includes("medic") || lower.includes("enferm") || lower.includes("dentis")) return "stethoscope";
+    if (lower.includes("advogad") || lower.includes("juiz") || lower.includes("promotor")) return "scale";
+    if (lower.includes("estudant")) return "graduation-cap";
+    if (lower.includes("aposent")) return "sunset";
+    return "briefcase";
+  },
+
+  _docAddressInfo(customer) {
+    const c = customer || {};
+    if (c.addresses && c.addresses.length) {
+      const a = c.addresses[0];
+      const isCommercial = a.type === 2 || String(a.typeDescription || a.type || "").toUpperCase().includes("COM");
+      const street = a.street || a.streetName || "";
+      const num = a.number ? ", " + a.number : "";
+      const compl = a.complement ? " - " + a.complement : "";
+      const neigh = a.neighborhood ? ", " + a.neighborhood : "";
+      const city = a.cityName || a.city || "";
+      const state = a.stateName || a.state || "";
+      const zip = (a.postalCode || a.zipCode) ? " - CEP: " + (a.postalCode || a.zipCode) : "";
+      return {
+        label: isCommercial ? "Endereço Comercial" : "Endereço Residencial",
+        icon: isCommercial ? "building" : "home",
+        str: (street + num + compl + neigh + (city || state ? ", " + city + "/" + state : "") + zip).trim() || "Não informado"
+      };
+    }
+    if (c.address && c.address !== "N/D") {
+      return { label: "Endereço", icon: "home", str: String(c.address) };
+    }
+    return { label: "Endereço", icon: "home", str: "Não informado" };
+  },
+
+  _docDataVenda(sale, bill) {
+    const raw = (sale && (sale.contractDate || sale.saleDate || sale.date)) || (bill && bill.issueDate);
+    if (!raw) return "—";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return "—";
+    return new Date(d.getTime() + d.getTimezoneOffset() * 60000).toLocaleDateString("pt-BR");
+  },
+
+  _docPessoasExtraFields(customer, sale) {
     const esc = (v) => this._escDoc(v);
     const civil = (customer && (customer.civilStatus || customer.maritalStatus)) || "—";
     const regime = customer && customer.matrimonialRegime ? " — " + customer.matrimonialRegime : "";
@@ -291,18 +405,128 @@ const RelacionamentoApp = {
       if (spName && norm(p.name) === norm(spName)) return false;
       return true;
     });
-    let html = `<div><span style="color:#64748b;">Estado civil</span><br><strong>${esc(civil)}${esc(regime)}</strong></div>`;
+    let html = `<div class="cessao-customer-field"><span class="cessao-lbl">Estado civil</span><span class="cessao-val">${esc(civil)}${esc(regime)}</span></div>`;
     if (spName) {
-      html += `<div><span style="color:#64748b;">Cônjuge</span><br><strong>${esc(spName)}</strong>${spCpf ? `<div style="font-size:0.75rem;color:#64748b;margin-top:2px;">CPF ${esc(spCpf)}</div>` : ""}</div>`;
+      html += `<div class="cessao-customer-field"><span class="cessao-lbl">Cônjuge</span><span class="cessao-val">${esc(spName)}${spCpf ? `<div style="font-size:0.75rem;color:#64748b;margin-top:2px;font-weight:500;">CPF ${esc(spCpf)}</div>` : ""}</span></div>`;
     }
     if (secondary.length) {
       const lines = secondary.map((p) => {
         const pct = p.participationPercentage != null ? " (" + p.participationPercentage + "%)" : "";
         return esc(p.name) + pct;
       }).join("<br>");
-      html += `<div><span style="color:#64748b;">Clientes secundários</span><br><strong>${lines}</strong></div>`;
+      html += `<div class="cessao-customer-field cessao-customer-field--wide"><span class="cessao-lbl">Clientes secundários</span><span class="cessao-val">${lines}</span></div>`;
     }
     return html;
+  },
+
+  _docDadosClienteHtml(customer, sale) {
+    const c = customer || {};
+    const docRaw = String(c.cpfCnpj || c.cpf || c.cnpj || "").replace(/\D/g, "");
+    const docLabel = docRaw.length > 11 ? "CNPJ" : "CPF";
+    const docFmt = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(docRaw || c.cpfCnpj || "") : (c.cpfCnpj || "—");
+    const age = this._docAgeLabel(c);
+    const prof = c.profession || c.occupation || "N/D";
+    const profIcon = this._docProfIcon(prof);
+    const hasEmail = c.email && c.email !== "N/D" && c.email !== "undefined";
+    const addr = this._docAddressInfo(c);
+    const people = (typeof window.salesContractPeople === "function") ? window.salesContractPeople(sale) : [];
+    const cid = String(c.id || (sale && sale.customerId) || "");
+    const mainP = people.find((p) => p.main) || people[0];
+    const me = people.find((p) => String(p.id) === cid);
+    const secondaryBanner = (me && mainP && !me.main && String(me.id) !== String(mainP.id) && mainP.name)
+      ? `<div style="margin:0 18px 10px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.85rem;font-weight:700;">Este cliente é <strong>comprador secundário</strong> no contrato. Cliente principal: ${this._escDoc(mainP.name)}.</div>`
+      : "";
+    return `
+      ${secondaryBanner}
+      <div class="cessao-customer-grid" style="padding:16px 18px;">
+        <div class="cessao-customer-field cessao-customer-field--wide">
+          <span class="cessao-lbl">Nome</span>
+          <span class="cessao-val">${this._escDoc(c.name || "—")}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">${docLabel}</span>
+          <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
+            ${this._escDoc(docFmt || "—")}
+            ${docRaw ? this._docCopyBtn(docRaw) : ""}
+          </span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Idade</span>
+          <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);flex-shrink:0;"></i>
+            <span>${this._escDoc(age)}</span>
+          </span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Profissão</span>
+          <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="${profIcon}" style="width:15px;height:15px;color:var(--color-primary);flex-shrink:0;"></i>
+            <span>${this._escDoc(prof)}</span>
+          </span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Telefones</span>
+          ${this._docPhonesHtml(c)}
+        </div>
+        <div class="cessao-customer-field cessao-customer-field--wide">
+          <span class="cessao-lbl">E-mail</span>
+          <span class="cessao-val" style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="mail" style="width:15px;height:15px;color:var(--color-primary);flex-shrink:0;"></i>
+            <span style="word-break:break-all;">${this._escDoc(hasEmail ? c.email : "Não informado")}</span>
+            ${hasEmail ? this._docCopyBtn(c.email) : ""}
+          </span>
+        </div>
+        <div class="cessao-customer-field cessao-customer-field--full">
+          <span class="cessao-lbl">${this._escDoc(addr.label)}</span>
+          <span class="cessao-val" style="display:flex;align-items:flex-start;gap:8px;">
+            <i data-lucide="${addr.icon}" style="width:15px;height:15px;color:var(--color-primary);flex-shrink:0;margin-top:2px;"></i>
+            <span>${this._escDoc(addr.str)}</span>
+          </span>
+        </div>
+      </div>`;
+  },
+
+  _docContratoHtml(ctx) {
+    const sale = (ctx && ctx.sale) || {};
+    const bill = (ctx && ctx.bill) || {};
+    const customer = (ctx && ctx.customer) || {};
+    const adimplencia = (ctx && ctx.adimplencia) || { adimplente: true, label: "Adimplente" };
+    const sitColor = adimplencia.adimplente ? "#15803d" : "#b91c1c";
+    const sitBg = adimplencia.adimplente ? "#ecfdf5" : "#fef2f2";
+    const sitBd = adimplencia.adimplente ? "#86efac" : "#fecaca";
+    const titulo = sale.receivableBillId || bill.id || "—";
+    const contratoLabel = ctx.contratoLabel || this._formatContratoDoc(sale, bill);
+    const unidadeLabel = this._formatUnidadeDoc(ctx);
+    const empName = ctx.empName || "—";
+    const dataVenda = this._docDataVenda(sale, bill);
+    return `
+      <div class="cessao-customer-grid" style="padding:0 0 4px;">
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Contrato</span>
+          <span class="cessao-val">${this._escDoc(contratoLabel)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Título</span>
+          <span class="cessao-val">${this._escDoc(titulo)}</span>
+        </div>
+        <div class="cessao-customer-field cessao-customer-field--wide">
+          <span class="cessao-lbl">Empreendimento</span>
+          <span class="cessao-val">${this._escDoc(empName)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Unidade</span>
+          <span class="cessao-val">${this._escDoc(unidadeLabel)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Data venda</span>
+          <span class="cessao-val">${this._escDoc(dataVenda)}</span>
+        </div>
+        <div class="cessao-customer-field">
+          <span class="cessao-lbl">Status</span>
+          <span class="cessao-val"><span style="background:${sitBg};border:1px solid ${sitBd};color:${sitColor};padding:4px 10px;border-radius:12px;font-size:0.75rem;font-weight:700;">${this._escDoc(adimplencia.label)}</span></span>
+        </div>
+        ${this._docPessoasExtraFields(customer, sale)}
+      </div>`;
   },
 
   _setVencimentoBloqueado(blocked, motivo) {
@@ -1178,11 +1402,17 @@ const RelacionamentoApp = {
       RelacionamentoState.terceiroClienteName = null;
       this._lockTerceiroDocs(false);
     }
+    this._docSearchBusy = null;
+    this._docSearchAgain = null;
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
     window.SelectedDynamicCustomerDoc = null;
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
+    const custCard = this._docEl(kind, "-customer-card");
+    if (custCard) custCard.style.display = "none";
+    const custInfo = this._docEl(kind, "-customer-info");
+    if (custInfo) custInfo.innerHTML = "";
     this._docSetResults(kind, "");
     ["-filter-titulo", "-filter-contrato", "-filter-nome", "-nome", "-rg", "-cpf", "-fone", "-dia", "-data-original"].forEach((suf) => {
       const el = this._docEl(kind, suf);
@@ -1232,13 +1462,17 @@ const RelacionamentoApp = {
     return { originalBr, novoBr, novoExt, dia, diaExt: String(diaExt || "").toUpperCase() };
   },
 
-  async buscarDocSimples(kind) {
-    if (this._docSearchBusy === kind) return;
+  async buscarDocSimples(kind, opts) {
+    opts = opts || {};
+    if (this._docSearchBusy === kind) {
+      this._docSearchAgain = kind;
+      return;
+    }
     const titulo = (this._docEl(kind, "-filter-titulo")?.value || "").replace(/\D/g, "");
     const contrato = (this._docEl(kind, "-filter-contrato")?.value || "").trim();
     const nome = (this._docEl(kind, "-filter-nome")?.value || "").trim();
     if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) {
-      alert("Informe o título, o contrato ou o nome do cliente.");
+      if (!opts.quiet) alert("Informe o título, o contrato ou o nome do cliente.");
       return;
     }
     this._docSearchBusy = kind;
@@ -1345,7 +1579,38 @@ const RelacionamentoApp = {
       this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Erro ao buscar."}</div>`);
     } finally {
       this._docSearchBusy = null;
+      if (this._docSearchAgain === kind) {
+        this._docSearchAgain = null;
+        setTimeout(() => this.buscarDocSimples(kind, { quiet: true }), 50);
+      }
     }
+  },
+
+  buscarSeCamposPreenchidos(kind) {
+    const titulo = (this._docEl(kind, "-filter-titulo")?.value || "").replace(/\D/g, "");
+    const contrato = (this._docEl(kind, "-filter-contrato")?.value || "").trim();
+    const nome = (this._docEl(kind, "-filter-nome")?.value || "").trim();
+    if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) return;
+    this.buscarDocSimples(kind, { quiet: true });
+  },
+
+  preencherEBuscarDocSimples(kind, dados) {
+    dados = dados || {};
+    const tEl = this._docEl(kind, "-filter-titulo");
+    const cEl = this._docEl(kind, "-filter-contrato");
+    const nEl = this._docEl(kind, "-filter-nome");
+    const titulo = dados.titulo && String(dados.titulo) !== "—" ? String(dados.titulo).replace(/\D/g, "") || String(dados.titulo) : "";
+    const contrato = dados.contrato ? String(dados.contrato).trim() : "";
+    const nome = dados.nome ? String(dados.nome).trim() : "";
+    if (tEl && titulo) tEl.value = titulo;
+    if (cEl && contrato) cEl.value = contrato;
+    if (nEl && nome) nEl.value = nome;
+    if (dados.customerId) {
+      window.SelectedDynamicCustomerId = dados.customerId;
+      window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
+    }
+    this._docSearchBusy = null;
+    this.buscarDocSimples(kind, { quiet: true });
   },
 
   async selecionarDocSimples(kind, idx) {
@@ -1406,26 +1671,17 @@ const RelacionamentoApp = {
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
       const adimplencia = await this._avaliarAdimplencia(sale, bill);
       RelacionamentoState[kind].adimplencia = adimplencia;
-      const titulo = sale.receivableBillId || bill?.id || "—";
       const contratoLabel = this._formatContratoDoc(sale, bill);
       RelacionamentoState[kind].contratoLabel = contratoLabel;
-      const unidadeLabel = this._formatUnidadeDoc(RelacionamentoState[kind]);
-      const sitColor = adimplencia.adimplente ? "#15803d" : "#b91c1c";
+      const custInfo = this._docEl(kind, "-customer-info");
+      if (custInfo) custInfo.innerHTML = this._docDadosClienteHtml(customer, sale);
+      const custCard = this._docEl(kind, "-customer-card");
+      if (custCard) custCard.style.display = "block";
       const resumo = this._docEl(kind, "-contrato-resumo");
-      if (resumo) {
-        resumo.innerHTML = `
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:0.9rem;">
-            <div><span style="color:#64748b;">Cliente</span><br><strong>${this._escDoc(customer.name || "—")}</strong></div>
-            <div><span style="color:#64748b;">Título</span><br><strong>${this._escDoc(titulo)}</strong></div>
-            <div><span style="color:#64748b;">Contrato</span><br><strong>${this._escDoc(contratoLabel)}</strong></div>
-            <div><span style="color:#64748b;">Unidade</span><br><strong>${this._escDoc(unidadeLabel)}</strong></div>
-            <div><span style="color:#64748b;">Empreendimento</span><br><strong>${this._escDoc(empName || "—")}</strong></div>
-            <div><span style="color:#64748b;">Situação</span><br><strong style="color:${sitColor};">${this._escDoc(adimplencia.label)}</strong></div>
-            ${this._docPessoasExtraHtml(customer, sale)}
-          </div>`;
-      }
+      if (resumo) resumo.innerHTML = this._docContratoHtml(RelacionamentoState[kind]);
       const card = this._docEl(kind, "-doc-card");
       if (card) card.style.display = "block";
+      if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
       if (kind === "vencimento") {
         this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);

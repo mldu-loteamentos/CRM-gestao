@@ -2724,6 +2724,14 @@ function switchTab(tabId, titleOverride, showLoader = false) {
         if (titleInput) titleInput.focus();
       }, 80);
     }
+    if (tabId === 'relacionamento_vencimento' || tabId === 'relacionamento_terceiros') {
+      const kind = tabId === 'relacionamento_vencimento' ? 'vencimento' : 'terceiros';
+      setTimeout(() => {
+        if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarSeCamposPreenchidos === "function") {
+          RelacionamentoApp.buscarSeCamposPreenchidos(kind);
+        }
+      }, 200);
+    }
   }
   
   const sidebarItem = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
@@ -36590,19 +36598,20 @@ window.escolherGestaoDocumento = function(tipo) {
   if (tipo === "terceiros" || tipo === "vencimento") {
     const tab = tipo === "vencimento" ? "relacionamento_vencimento" : "relacionamento_terceiros";
     const label = tipo === "vencimento" ? "Alteração de vencimento" : "Autorização de terceiros";
-    const prefix = tipo === "vencimento" ? "ven" : "ter";
     if (typeof switchTab === "function") switchTab(tab, label);
-    setTimeout(() => {
-      const tEl = document.getElementById(prefix + "-filter-titulo");
-      const cEl = document.getElementById(prefix + "-filter-contrato");
-      const nEl = document.getElementById(prefix + "-filter-nome");
-      if (tEl && titulo && String(titulo) !== "—") tEl.value = String(titulo).replace(/\D/g, "") || String(titulo);
-      if (cEl && contractNumber) cEl.value = String(contractNumber);
-      if (nEl && customerName) nEl.value = customerName;
-      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarDocSimples === "function" && (titulo || contractNumber || customerName)) {
-        RelacionamentoApp.buscarDocSimples(tipo);
+    const dados = {
+      titulo: titulo,
+      contrato: contractNumber,
+      nome: customerName,
+      customerId: customerId
+    };
+    const run = () => {
+      if (window.RelacionamentoApp && typeof RelacionamentoApp.preencherEBuscarDocSimples === "function") {
+        RelacionamentoApp.preencherEBuscarDocSimples(tipo, dados);
       }
-    }, 120);
+    };
+    setTimeout(run, 80);
+    setTimeout(run, 280);
     return;
   }
 
