@@ -384,12 +384,14 @@ const ConfigUsersApp = {
     const toSave = Object.assign({}, perms || {}, { _savedAt: Date.now() });
     delete toSave.__mirror_of__;
     const payload = JSON.stringify(toSave);
+    if (typeof window.markCrmPermsLocalSave === "function") window.markCrmPermsLocalSave();
     const profile = (this.profiles || []).find((p) => String(p.id) === String(profileId));
     const kind = typeof window.crmProfileKind === "function"
       ? window.crmProfileKind((profile && profile.name) || profileId)
       : "";
     if (kind === "back_office" && typeof window.persistBackOfficePermsObject === "function") {
       window._crmBackOfficePermsSavedAt = Date.now();
+      if (typeof window.markCrmPermsLocalSave === "function") window.markCrmPermsLocalSave();
       return window.persistBackOfficePermsObject(toSave);
     }
     const keys = new Set();
@@ -406,7 +408,12 @@ const ConfigUsersApp = {
       if (!k) return;
       const permKey = `crm_perms_${k}`;
       if (!this.safeLocalSet(permKey, payload)) ok = false;
+      if (typeof window.backupCrmProfilePerms === "function") window.backupCrmProfilePerms(k, payload);
     });
+    if (profile) {
+      profile.perms = toSave;
+      try { this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles)); } catch (e) {}
+    }
     return ok;
   },
 
@@ -1503,10 +1510,6 @@ const ConfigUsersApp = {
     }
 
     window.syncConfiguracoesPermAliases(perms);
-    const permSaved = this.writePermissionPayload(this.selectedProfile, perms);
-    if (permSaved) {
-      this.syncPermsToCloud();
-    }
     
     const isAdmin = this.selectedProfile === 'admin';
     if (isAdmin) return; // Se for admin, ignora a lógica de cascata no click pois já é bloqueado

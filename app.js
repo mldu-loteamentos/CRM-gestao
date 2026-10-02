@@ -3966,16 +3966,30 @@ window.parseCrmPermsPayload = function(raw) {
 window.pickPreferredCrmPerms = function(localStr, cloudStr) {
   const localHas = window.crmPermsPayloadHasTrue(localStr);
   const cloudHas = window.crmPermsPayloadHasTrue(cloudStr);
+  const lockUntil = Number(window._crmPermsLocalLockUntil || 0);
+  if (lockUntil && Date.now() < lockUntil && localHas) return localStr || "{}";
   if (localHas && !cloudHas) return localStr || "{}";
   if (!localHas && cloudHas) return cloudStr || "{}";
   if (localHas && cloudHas) {
     const localAt = window.crmPermsSavedAt(localStr);
     const cloudAt = window.crmPermsSavedAt(cloudStr);
+    if (localAt && Date.now() - localAt < 30000) return localStr;
     if (cloudAt > localAt) return cloudStr;
     return localStr;
   }
   if (localStr && String(localStr) !== "{}" && String(localStr) !== "null") return localStr;
   return cloudStr || localStr || "{}";
+};
+
+window.markCrmPermsLocalSave = function() {
+  window._crmPermsLocalLockUntil = Date.now() + 20000;
+};
+
+window.backupCrmProfilePerms = function(profileId, payload) {
+  if (!profileId || !payload) return;
+  const key = "crm_perms_bak_" + profileId;
+  try { localStorage.setItem(key, payload); } catch (e) {}
+  try { sessionStorage.setItem(key, payload); } catch (e) {}
 };
 
 window.pickBestCrmPermsObject = function(payloads) {
@@ -4185,7 +4199,30 @@ window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
   };
   cloud.forEach(put);
   local.forEach(put);
-  return JSON.stringify(Array.from(byId.values()));
+  const normName = (s) => (typeof window.normalizeCrmProfileName === "function"
+    ? window.normalizeCrmProfileName(s)
+    : String(s || "").toUpperCase());
+  const byName = new Map();
+  Array.from(byId.values()).forEach((p) => {
+    const n = normName(p.name || p.id);
+    if (!n) return;
+    const prev = byName.get(n);
+    if (!prev) {
+      byName.set(n, p);
+      return;
+    }
+    const chosen = window.pickPreferredCrmPerms(
+      JSON.stringify(prev.perms || {}),
+      JSON.stringify(p.perms || {})
+    );
+    let perms = prev.perms || p.perms;
+    try { perms = JSON.parse(chosen || "{}"); } catch (e) {}
+    const preferKnown = String(prev.id).length <= String(p.id).length ? prev : p;
+    preferKnown.perms = perms;
+    if (!preferKnown.name && p.name) preferKnown.name = p.name;
+    byName.set(n, preferKnown);
+  });
+  return JSON.stringify(Array.from(byName.values()));
 };
 
 window.readCrmProfilePerms = function(profileNameOrId) {
@@ -4199,6 +4236,10 @@ window.readCrmProfilePerms = function(profileNameOrId) {
   }
   const payloads = ids.map((pid) => {
     try { return localStorage.getItem("crm_perms_" + pid); } catch (e) { return null; }
+  });
+  ids.forEach((pid) => {
+    try { payloads.push(localStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
+    try { payloads.push(sessionStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
   });
   const best = window.pickBestCrmPermsObject(payloads);
   if (window.crmPermsHasAnyTrue(best)) return best;
@@ -36657,16 +36698,20 @@ window.closeGestaoDocumentoMenu = function() {
 
 window._fillGestaoDocCampos = function(tipo, dados) {
   dados = dados || {};
-  const prefix = tipo === "vencimento" ? "ven" : "ter";
-  const tEl = document.getElementById(prefix + "-filter-titulo");
-  const cEl = document.getElementById(prefix + "-filter-contrato");
-  const nEl = document.getElementById(prefix + "-filter-nome");
   const titulo = dados.titulo ? String(dados.titulo) : "";
   const contrato = dados.contrato ? String(dados.contrato) : "";
   const nome = dados.nome ? String(dados.nome) : "";
-  if (tEl && titulo) tEl.value = titulo;
-  if (cEl && contrato) cEl.value = contrato;
-  if (nEl && nome) nEl.value = nome;
+  if (window.RelacionamentoApp && typeof RelacionamentoApp._travarFiltrosDocOrigem === "function") {
+    RelacionamentoApp._travarFiltrosDocOrigem(tipo, { titulo, contrato, nome });
+  } else {
+    const prefix = tipo === "vencimento" ? "ven" : (tipo === "escritura" ? "esc" : "ter");
+    const tEl = document.getElementById(prefix + "-filter-titulo");
+    const cEl = document.getElementById(prefix + "-filter-contrato");
+    const nEl = document.getElementById(prefix + "-filter-nome");
+    if (tEl) { tEl.value = titulo; tEl.disabled = true; tEl.readOnly = true; }
+    if (cEl) { cEl.value = contrato; cEl.disabled = true; cEl.readOnly = true; }
+    if (nEl) { nEl.value = nome; nEl.disabled = true; nEl.readOnly = true; }
+  }
   if (dados.customerId) {
     window.SelectedDynamicCustomerId = dados.customerId;
     window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
@@ -36696,16 +36741,30 @@ window.escolherGestaoDocumento = function(tipo) {
   if (tipo === "autorizacao") {
     if (typeof switchTab === "function") switchTab("relacionamento_autorizacao", "Autorização de escritura");
     setTimeout(() => {
-      const tEl = document.getElementById("esc-filter-titulo");
-      const cEl = document.getElementById("esc-filter-contrato");
-      const nEl = document.getElementById("esc-filter-nome");
-      if (tEl && titulo && String(titulo) !== "—") tEl.value = String(titulo).replace(/\D/g, "") || String(titulo);
-      if (cEl && contractNumber) cEl.value = String(contractNumber);
-      if (nEl && customerName) nEl.value = customerName;
+      const tituloVal = titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "";
+      const contratoVal = contractNumber ? String(contractNumber).trim() : "";
+      const nomeVal = customerName ? String(customerName).trim() : "";
+      if (window.RelacionamentoApp && typeof RelacionamentoApp._travarFiltrosDocOrigem === "function") {
+        RelacionamentoApp._travarFiltrosDocOrigem("escritura", { titulo: tituloVal, contrato: contratoVal, nome: nomeVal });
+      } else {
+        const tEl = document.getElementById("esc-filter-titulo");
+        const cEl = document.getElementById("esc-filter-contrato");
+        const nEl = document.getElementById("esc-filter-nome");
+        if (tEl && tituloVal) tEl.value = tituloVal;
+        if (cEl && contratoVal) cEl.value = contratoVal;
+        if (nEl && nomeVal) nEl.value = nomeVal;
+        if (tEl) { tEl.disabled = true; tEl.readOnly = true; }
+        if (cEl) { cEl.disabled = true; cEl.readOnly = true; }
+        if (nEl) { nEl.disabled = true; nEl.readOnly = true; }
+      }
+      if (customerId) {
+        window.SelectedDynamicCustomerId = customerId;
+        window.SelectedDynamicCustomerName = nomeVal;
+      }
       if (window.RelacionamentoApp && typeof RelacionamentoApp.fillCartorioSelect === "function") {
         RelacionamentoApp.fillCartorioSelect();
       }
-      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarEscritura === "function" && (titulo || contractNumber || customerName)) {
+      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarEscritura === "function" && (tituloVal || contratoVal || nomeVal)) {
         RelacionamentoApp.buscarEscritura();
       }
     }, 120);
@@ -40070,12 +40129,17 @@ window.syncGlobalConfigFromFirebase = async function() {
             permKeys.forEach((k) => {
                 const localPerms = localStorage.getItem(k);
                 const cloudPerms = globalData[k];
+                if (window._crmPermsLocalLockUntil && Date.now() < window._crmPermsLocalLockUntil && window.crmPermsPayloadHasTrue(localPerms)) {
+                    if (localPerms && cloudPerms && localPerms !== cloudPerms && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 const chosen = typeof window.pickPreferredCrmPerms === "function"
                     ? window.pickPreferredCrmPerms(localPerms, cloudPerms)
                     : (localPerms || cloudPerms);
                 if (chosen && chosen !== localPerms) {
                     _originalSetItem.call(localStorage, k, chosen);
-                    changed = true;
                 }
                 if (chosen && cloudPerms && chosen !== cloudPerms && window.forceUploadLocalConfig) {
                     setTimeout(() => window.forceUploadLocalConfig(true), 1500);
@@ -40247,9 +40311,6 @@ window.forceUploadLocalConfig = async function(silent = true) {
               ? window.pickPreferredCrmPerms(payload[k], cloud[k])
               : (payload[k] || cloud[k]);
             if (chosen) payload[k] = chosen;
-            if (chosen && chosen !== localStorage.getItem(k)) {
-              try { _originalSetItem.call(localStorage, k, chosen); } catch (err) {}
-            }
           });
         } catch (e) {}
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });

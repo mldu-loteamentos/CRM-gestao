@@ -695,6 +695,16 @@ const RelacionamentoApp = {
     });
   },
 
+  _limparCamposTerceiro() {
+    RelacionamentoState.terceiroClienteId = null;
+    RelacionamentoState.terceiroClienteName = null;
+    ["ter-rg", "ter-cpf", "ter-fone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    this._lockTerceiroDocs(false);
+  },
+
   _aplicarDadosTerceiro(c) {
     if (!c) return;
     const rgEl = document.getElementById("ter-rg");
@@ -721,6 +731,11 @@ const RelacionamentoApp = {
     const selectedId = RelacionamentoState.terceiroClienteId;
     const selectedName = RelacionamentoState.terceiroClienteName || "";
     const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (!String(el.value || "").trim()) {
+      this._limparCamposTerceiro();
+      this.sugerirTerceiroNome("");
+      return;
+    }
     if (selectedId && norm(el.value) !== norm(selectedName)) {
       RelacionamentoState.terceiroClienteId = null;
       RelacionamentoState.terceiroClienteName = null;
@@ -764,6 +779,9 @@ const RelacionamentoApp = {
       dd.appendChild(item);
     });
     dd.style.display = "block";
+    dd.style.top = "calc(100% + 4px)";
+    dd.style.left = "0";
+    dd.style.zIndex = "80";
   },
 
   async selecionarTerceiroCliente(c) {
@@ -1091,6 +1109,7 @@ const RelacionamentoApp = {
     const card = document.getElementById("esc-doc-card");
     if (card) card.style.display = "none";
     this._escSetResultsHtml("");
+    this._liberarFiltrosDoc("escritura");
     ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
@@ -1101,6 +1120,7 @@ const RelacionamentoApp = {
   },
 
   sugerirNomeEscritura(query) {
+    if (RelacionamentoState.escrituraFromGestao || RelacionamentoState.escrituraFiltroLock === "gestao") return;
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
     const dd = document.getElementById("esc-nome-dropdown");
@@ -1138,6 +1158,7 @@ const RelacionamentoApp = {
         window.SelectedDynamicCustomerId = c.id;
         window.SelectedDynamicCustomerName = c.name;
         dd.style.display = "none";
+        this._travarFiltrosDoc("escritura", "nome");
       };
       dd.appendChild(item);
     });
@@ -1148,6 +1169,11 @@ const RelacionamentoApp = {
     const titulo = (document.getElementById("esc-filter-titulo")?.value || "").replace(/\D/g, "");
     const contrato = (document.getElementById("esc-filter-contrato")?.value || "").trim();
     const nome = (document.getElementById("esc-filter-nome")?.value || "").trim();
+    if (!RelacionamentoState.escrituraFiltroLock) {
+      if (titulo) this._travarFiltrosDoc("escritura", "titulo");
+      else if (contrato) this._travarFiltrosDoc("escritura", "contrato");
+      else if (nome) this._travarFiltrosDoc("escritura", "nome");
+    }
     if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) {
       alert("Informe o título, o contrato ou o nome do cliente.");
       return;
@@ -1483,6 +1509,96 @@ const RelacionamentoApp = {
     return document.getElementById(this._docCfg(kind).p + suffix);
   },
 
+  _docFilterEl(kind, campo) {
+    if (kind === "escritura") return document.getElementById("esc-filter-" + campo);
+    return this._docEl(kind, "-filter-" + campo);
+  },
+
+  _travarFiltrosDoc(kind, campo) {
+    if (RelacionamentoState[kind + "FromGestao"] || RelacionamentoState[kind + "FiltroLock"] === "gestao") {
+      this._travarFiltrosDocOrigem(kind);
+      return;
+    }
+    RelacionamentoState[kind + "FiltroLock"] = campo;
+    ["titulo", "contrato", "nome"].forEach((k) => {
+      const el = this._docFilterEl(kind, k);
+      if (!el) return;
+      if (k === campo) {
+        el.disabled = false;
+        el.readOnly = false;
+      } else {
+        el.disabled = true;
+        el.readOnly = true;
+        el.value = "";
+      }
+    });
+    if (campo !== "nome") {
+      const dd = kind === "escritura"
+        ? document.getElementById("esc-nome-dropdown")
+        : this._docEl(kind, "-nome-dropdown");
+      if (dd) {
+        dd.style.display = "none";
+        dd.innerHTML = "";
+      }
+    }
+  },
+
+  _travarFiltrosDocOrigem(kind, valores) {
+    valores = valores || {};
+    RelacionamentoState[kind + "FiltroLock"] = "gestao";
+    RelacionamentoState[kind + "FromGestao"] = true;
+    const map = {
+      titulo: valores.titulo != null ? String(valores.titulo) : null,
+      contrato: valores.contrato != null ? String(valores.contrato) : null,
+      nome: valores.nome != null ? String(valores.nome) : null
+    };
+    ["titulo", "contrato", "nome"].forEach((k) => {
+      const el = this._docFilterEl(kind, k);
+      if (!el) return;
+      if (map[k] != null && map[k] !== "") el.value = map[k];
+      el.disabled = true;
+      el.readOnly = true;
+    });
+    const dd = kind === "escritura"
+      ? document.getElementById("esc-nome-dropdown")
+      : this._docEl(kind, "-nome-dropdown");
+    if (dd) {
+      dd.style.display = "none";
+      dd.innerHTML = "";
+    }
+  },
+
+  _liberarFiltrosDoc(kind) {
+    RelacionamentoState[kind + "FiltroLock"] = null;
+    RelacionamentoState[kind + "FromGestao"] = null;
+    ["titulo", "contrato", "nome"].forEach((k) => {
+      const el = this._docFilterEl(kind, k);
+      if (!el) return;
+      el.disabled = false;
+      el.readOnly = false;
+    });
+  },
+
+  onDocFilterInput(kind, campo) {
+    const el = this._docFilterEl(kind, campo);
+    if (!el) return;
+    if (RelacionamentoState[kind + "FromGestao"] || RelacionamentoState[kind + "FiltroLock"] === "gestao") {
+      this._travarFiltrosDocOrigem(kind);
+      return;
+    }
+    if (campo === "titulo") el.value = String(el.value || "").replace(/[^0-9]/g, "");
+    const lock = RelacionamentoState[kind + "FiltroLock"];
+    if (lock && lock !== campo) {
+      el.value = "";
+      return;
+    }
+    if (String(el.value || "").trim()) this._travarFiltrosDoc(kind, campo);
+    if (campo === "nome") {
+      if (kind === "escritura") this.sugerirNomeEscritura(el.value);
+      else this.sugerirNomeDoc(kind, el.value);
+    }
+  },
+
   _docSetResults(kind, html) {
     const el = this._docEl(kind, "-search-results");
     if (el) el.innerHTML = html;
@@ -1490,6 +1606,7 @@ const RelacionamentoApp = {
   },
 
   sugerirNomeDoc(kind, query) {
+    if (RelacionamentoState[kind + "FromGestao"] || RelacionamentoState[kind + "FiltroLock"] === "gestao") return;
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
     const dd = this._docEl(kind, "-nome-dropdown");
@@ -1527,6 +1644,7 @@ const RelacionamentoApp = {
         window.SelectedDynamicCustomerId = c.id;
         window.SelectedDynamicCustomerName = c.name;
         dd.style.display = "none";
+        this._travarFiltrosDoc(kind, "nome");
         this.buscarDocSimples(kind);
       };
       dd.appendChild(item);
@@ -1554,6 +1672,7 @@ const RelacionamentoApp = {
     const custInfo = this._docEl(kind, "-customer-info");
     if (custInfo) custInfo.innerHTML = "";
     this._docSetResults(kind, "");
+    this._liberarFiltrosDoc(kind);
     ["-filter-titulo", "-filter-contrato", "-filter-nome", "-nome", "-rg", "-cpf", "-fone", "-dia", "-data-original"].forEach((suf) => {
       const el = this._docEl(kind, suf);
       if (el) el.value = "";
@@ -1623,6 +1742,11 @@ const RelacionamentoApp = {
     if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) {
       if (!opts.quiet) alert("Informe o título, o contrato ou o nome do cliente.");
       return;
+    }
+    if (!RelacionamentoState[kind + "FiltroLock"]) {
+      if (titulo) this._travarFiltrosDoc(kind, "titulo");
+      else if (contrato) this._travarFiltrosDoc(kind, "contrato");
+      else if (nome) this._travarFiltrosDoc(kind, "nome");
     }
     this._docSearchBusy = kind;
     this._docSetResults(kind, `<div style="padding:24px;text-align:center;color:var(--color-text-muted);">
@@ -1770,15 +1894,10 @@ const RelacionamentoApp = {
 
   preencherEBuscarDocSimples(kind, dados) {
     dados = dados || {};
-    const tEl = this._docEl(kind, "-filter-titulo");
-    const cEl = this._docEl(kind, "-filter-contrato");
-    const nEl = this._docEl(kind, "-filter-nome");
     const titulo = dados.titulo && String(dados.titulo) !== "—" ? String(dados.titulo).replace(/\D/g, "") || String(dados.titulo) : "";
     const contrato = dados.contrato ? String(dados.contrato).trim() : "";
     const nome = dados.nome ? String(dados.nome).trim() : "";
-    if (tEl && titulo) tEl.value = titulo;
-    if (cEl && contrato) cEl.value = contrato;
-    if (nEl && nome) nEl.value = nome;
+    this._travarFiltrosDocOrigem(kind, { titulo, contrato, nome });
     if (dados.customerId) {
       window.SelectedDynamicCustomerId = dados.customerId;
       window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
@@ -1914,9 +2033,11 @@ const RelacionamentoApp = {
           this.atualizarPreviewVencimento();
         }
       }
+      if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     } catch (err) {
       console.error(err);
       this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Não foi possível carregar o contrato."}</div>`);
+      if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     }
   },
 
