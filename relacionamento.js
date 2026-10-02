@@ -220,8 +220,8 @@ const RelacionamentoApp = {
         const instList = dbContract && Array.isArray(dbContract.installments) ? dbContract.installments : [];
         if (instList.length) {
           const n = this._countParcelasVencidas(instList);
-          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n) };
-          return { adimplente: true, vencidas: 0, label: "Adimplente" };
+          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n), installments: instList };
+          return { adimplente: true, vencidas: 0, label: "Adimplente", installments: instList };
         }
       } catch (e) {
         console.warn("[Relacionamento] falha ao avaliar adimplência pelo extrato", e);
@@ -234,8 +234,8 @@ const RelacionamentoApp = {
         const list = Array.isArray(inst) ? inst : [];
         if (list.length) {
           const n = this._countParcelasVencidas(list);
-          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n) };
-          return { adimplente: true, vencidas: 0, label: "Adimplente" };
+          if (n) return { adimplente: false, vencidas: n, label: labelVencidas(n), installments: list };
+          return { adimplente: true, vencidas: 0, label: "Adimplente", installments: list };
         }
       } catch (e) {
         console.warn("[Relacionamento] falha ao avaliar adimplência pelas parcelas", e);
@@ -244,9 +244,9 @@ const RelacionamentoApp = {
 
     const status = String((sale && sale.status) || "").toLowerCase();
     if (status === "quitado" || (bill && bill.payOffDate)) {
-      return { adimplente: true, vencidas: 0, label: "Adimplente" };
+      return { adimplente: true, vencidas: 0, label: "Adimplente", installments: [] };
     }
-    return { adimplente: true, vencidas: 0, label: "Adimplente" };
+    return { adimplente: true, vencidas: 0, label: "Adimplente", installments: [] };
   },
 
   _formatContratoDoc(sale, bill) {
@@ -539,7 +539,11 @@ const RelacionamentoApp = {
     }
     if (orig) {
       orig.disabled = !!blocked;
-      if (blocked) orig.value = "";
+      if (blocked) {
+        orig.value = "";
+        orig.removeAttribute("min");
+        orig.removeAttribute("max");
+      }
     }
     if (gen) {
       gen.disabled = !!blocked;
@@ -554,6 +558,76 @@ const RelacionamentoApp = {
         preview.textContent = "";
       }
     }
+  },
+
+  _janelaMesAlteracaoVencimento() {
+    const n = new Date();
+    const next = new Date(n.getFullYear(), n.getMonth() + 1, 1);
+    const y = next.getFullYear();
+    const m = next.getMonth() + 1;
+    const lastDay = new Date(y, m, 0).getDate();
+    const mm = String(m).padStart(2, "0");
+    return {
+      year: y,
+      month: m,
+      lastDay,
+      prefix: y + "-" + mm,
+      min: y + "-" + mm + "-01",
+      max: y + "-" + mm + "-" + String(lastDay).padStart(2, "0")
+    };
+  },
+
+  _isoInJanelaVencimento(iso) {
+    const w = this._janelaMesAlteracaoVencimento();
+    const key = String(iso || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(key) && key >= w.min && key <= w.max;
+  },
+
+  _dataOriginalPadraoVencimento(installments) {
+    const w = this._janelaMesAlteracaoVencimento();
+    const list = Array.isArray(installments) ? installments : [];
+    const inMonth = [];
+    let typicalDay = 0;
+    const today = new Date();
+    const curPrefix = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0");
+    list.forEach((p) => {
+      const due = this._dueKey(p.originalDueDate || p.installmentDueDate || p.dataVencto || p.dueDate);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return;
+      const day = Number(due.slice(8, 10));
+      if (due.slice(0, 7) === w.prefix) {
+        inMonth.push({ due, settled: this._installmentSettled(p) });
+      }
+      if (due.slice(0, 7) === curPrefix && day >= 1 && day <= 31) typicalDay = day;
+      else if (!typicalDay && day >= 1 && day <= 31) typicalDay = day;
+    });
+    const open = inMonth.find((x) => !x.settled);
+    if (open) return open.due;
+    if (inMonth.length) return inMonth[0].due;
+    const day = Math.min(typicalDay || 1, w.lastDay);
+    return w.prefix + "-" + String(day).padStart(2, "0");
+  },
+
+  _aplicarJanelaCalendarioVencimento(installments) {
+    const orig = document.getElementById("ven-data-original");
+    if (!orig || orig.disabled) return this._janelaMesAlteracaoVencimento();
+    const w = this._janelaMesAlteracaoVencimento();
+    orig.min = w.min;
+    orig.max = w.max;
+    const padrao = this._dataOriginalPadraoVencimento(installments);
+    if (!this._isoInJanelaVencimento(orig.value)) orig.value = padrao;
+    return w;
+  },
+
+  _garantirDataOriginalNaJanela() {
+    const orig = document.getElementById("ven-data-original");
+    if (!orig || orig.disabled) return true;
+    const ctx = RelacionamentoState.vencimento || {};
+    const inst = ctx.installments || (ctx.adimplencia && ctx.adimplencia.installments) || [];
+    this._aplicarJanelaCalendarioVencimento(inst);
+    if (orig.value && !this._isoInJanelaVencimento(orig.value)) {
+      orig.value = this._dataOriginalPadraoVencimento(inst);
+    }
+    return this._isoInJanelaVencimento(orig.value);
   },
 
   onDocSearchKey(event, kind) {
@@ -1488,7 +1562,14 @@ const RelacionamentoApp = {
     if (preview) preview.textContent = "";
     const dd = this._docEl(kind, "-nome-dropdown");
     if (dd) dd.style.display = "none";
-    if (kind === "vencimento") this._setVencimentoBloqueado(false);
+    if (kind === "vencimento") {
+      this._setVencimentoBloqueado(false);
+      const orig = document.getElementById("ven-data-original");
+      if (orig) {
+        orig.removeAttribute("min");
+        orig.removeAttribute("max");
+      }
+    }
     const terDd = document.getElementById("ter-terceiro-dropdown");
     if (kind === "terceiros" && terDd) {
       terDd.style.display = "none";
@@ -1499,6 +1580,7 @@ const RelacionamentoApp = {
   atualizarPreviewVencimento() {
     const adimpl = RelacionamentoState.vencimento && RelacionamentoState.vencimento.adimplencia;
     if (adimpl && adimpl.adimplente === false) return;
+    this._garantirDataOriginalNaJanela();
     const computed = this._calcularNovoVencimento();
     const el = document.getElementById("ven-preview");
     if (!el) return;
@@ -1506,7 +1588,7 @@ const RelacionamentoApp = {
       el.textContent = "";
       return;
     }
-    el.textContent = "O vencimento passará de " + computed.originalBr + " para " + computed.novoBr + " (" + computed.novoExt + ").";
+    el.textContent = "O vencimento passará de " + computed.originalBr + " para " + computed.novoBr + " (" + computed.novoExt + "). A parcela do mês atual não é alterada.";
   },
 
   _calcularNovoVencimento() {
@@ -1514,6 +1596,7 @@ const RelacionamentoApp = {
     const orig = document.getElementById("ven-data-original")?.value || "";
     if (!(dia >= 1 && dia <= 31) || !orig) return null;
     const key = typeof window.promiseDateKey === "function" ? window.promiseDateKey(orig) : orig.slice(0, 10);
+    if (!this._isoInJanelaVencimento(key)) return null;
     const parts = key.split("-");
     if (parts.length !== 3) return null;
     const y = Number(parts[0]);
@@ -1701,7 +1784,49 @@ const RelacionamentoApp = {
       window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
     }
     this._docSearchBusy = null;
+    this._docSearchAgain = null;
+    if (dados.customerId && (titulo || contrato || dados.contractId)) {
+      const seeded = this._docSaleFromGestao(dados, titulo, contrato, nome);
+      RelacionamentoState[kind + "Matches"] = [seeded];
+      this.selecionarDocSimples(kind, 0);
+      return;
+    }
     this.buscarDocSimples(kind, { quiet: true });
+  },
+
+  _docSaleFromGestao(dados, titulo, contrato, nome) {
+    const t = String(titulo || "").replace(/\D/g, "");
+    const local = t ? this._docFindLocalSale(t) : null;
+    if (local && String(local.customerId) === String(dados.customerId)) {
+      return Object.assign({}, local, {
+        contractNumber: local.contractNumber || contrato,
+        customerName: local.customerName || nome
+      });
+    }
+    const unitLabel = String(dados.unidade || "").trim();
+    let empId = "";
+    let ql = "";
+    const m = unitLabel.match(/^(\d+)\s*[-–]?\s*(.+)$/);
+    if (m) {
+      empId = m[1];
+      ql = String(m[2] || "").replace(/\s+/g, "");
+    } else if (unitLabel) {
+      ql = unitLabel.replace(/\s+/g, "");
+    }
+    return {
+      id: dados.contractId || contrato || t,
+      customerId: dados.customerId,
+      customerName: nome,
+      receivableBillId: t || dados.titulo,
+      enterpriseId: empId || undefined,
+      unitId: ql ? ("U-" + (empId || "0") + "-" + ql.replace(/\s+/g, "")) : undefined,
+      unitName: ql || unitLabel,
+      empName: dados.empreendimento || "",
+      contractNumber: contrato,
+      number: contrato,
+      status: "Ativo",
+      customers: []
+    };
   },
 
   async selecionarDocSimples(kind, idx) {
@@ -1763,7 +1888,7 @@ const RelacionamentoApp = {
       }
       const block = unit.block && unit.block !== "N/D" ? unit.block : (unitName.split("-")[0] || "");
       const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
-      const empName = window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "";
+      const empName = (window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "") || sale.empName || "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
       if (typeof window.rememberContractBuyers === "function") window.rememberContractBuyers(sale);
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
@@ -1782,8 +1907,12 @@ const RelacionamentoApp = {
       if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
       if (kind === "vencimento") {
+        RelacionamentoState[kind].installments = adimplencia.installments || [];
         this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
-        if (adimplencia.adimplente) this.atualizarPreviewVencimento();
+        if (adimplencia.adimplente) {
+          this._aplicarJanelaCalendarioVencimento(RelacionamentoState[kind].installments);
+          this.atualizarPreviewVencimento();
+        }
       }
     } catch (err) {
       console.error(err);
@@ -1809,6 +1938,10 @@ const RelacionamentoApp = {
       const adimpl = RelacionamentoState.vencimento && RelacionamentoState.vencimento.adimplencia;
       if (adimpl && adimpl.adimplente === false) {
         alert("Não é possível alterar o vencimento: " + (adimpl.label || "o cliente possui parcelas vencidas") + ".");
+        return;
+      }
+      if (!this._garantirDataOriginalNaJanela()) {
+        alert("A alteração só vale a partir da parcela do mês seguinte. Não é permitida data no mês atual nem carência em meses posteriores.");
         return;
       }
       const computed = this._calcularNovoVencimento();
