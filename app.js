@@ -2689,9 +2689,11 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   const leavingTab = window.activeAppTab;
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
-  if (leavingTab && leavingTab !== tabId && window.RelacionamentoApp && typeof RelacionamentoApp.limparDocSimples === "function") {
-    if (leavingTab === "relacionamento_vencimento") RelacionamentoApp.limparDocSimples("vencimento");
-    if (leavingTab === "relacionamento_terceiros") RelacionamentoApp.limparDocSimples("terceiros");
+  const relApp = window.RelacionamentoApp || null;
+  const keepKind = window._gestaoDocPending && window._gestaoDocPending.kind;
+  if (leavingTab && leavingTab !== tabId && relApp && typeof relApp.limparDocSimples === "function") {
+    if (leavingTab === "relacionamento_vencimento" && keepKind !== "vencimento") relApp.limparDocSimples("vencimento");
+    if (leavingTab === "relacionamento_terceiros" && keepKind !== "terceiros") relApp.limparDocSimples("terceiros");
   }
 
   if (!String(tabId).startsWith('relacionamento_') && typeof window.clearRelacionamento === 'function') {
@@ -2728,9 +2730,12 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (tabId === 'relacionamento_vencimento' || tabId === 'relacionamento_terceiros') {
       const kind = tabId === 'relacionamento_vencimento' ? 'vencimento' : 'terceiros';
       const pending = window._gestaoDocPending;
-      if (pending && pending.kind === kind && window.RelacionamentoApp && typeof RelacionamentoApp.preencherEBuscarDocSimples === "function") {
-        window._gestaoDocPending = null;
-        RelacionamentoApp.preencherEBuscarDocSimples(kind, pending.dados);
+      if (pending && pending.kind === kind) {
+        if (typeof window._fillGestaoDocCampos === "function") window._fillGestaoDocCampos(kind, pending.dados);
+        if (relApp && typeof relApp.preencherEBuscarDocSimples === "function") {
+          window._gestaoDocPending = null;
+          relApp.preencherEBuscarDocSimples(kind, pending.dados);
+        }
       }
     }
   }
@@ -36650,6 +36655,24 @@ window.closeGestaoDocumentoMenu = function() {
   if (overlay) overlay.style.display = "none";
 };
 
+window._fillGestaoDocCampos = function(tipo, dados) {
+  dados = dados || {};
+  const prefix = tipo === "vencimento" ? "ven" : "ter";
+  const tEl = document.getElementById(prefix + "-filter-titulo");
+  const cEl = document.getElementById(prefix + "-filter-contrato");
+  const nEl = document.getElementById(prefix + "-filter-nome");
+  const titulo = dados.titulo ? String(dados.titulo) : "";
+  const contrato = dados.contrato ? String(dados.contrato) : "";
+  const nome = dados.nome ? String(dados.nome) : "";
+  if (tEl && titulo) tEl.value = titulo;
+  if (cEl && contrato) cEl.value = contrato;
+  if (nEl && nome) nEl.value = nome;
+  if (dados.customerId) {
+    window.SelectedDynamicCustomerId = dados.customerId;
+    window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
+  }
+};
+
 window.escolherGestaoDocumento = function(tipo) {
   const overlay = document.getElementById("moura-gestao-docs-modal");
   const ctx = (overlay && overlay._ctx) || {};
@@ -36704,10 +36727,13 @@ window.escolherGestaoDocumento = function(tipo) {
   if (tipo === "terceiros" || tipo === "vencimento") {
     const tab = tipo === "vencimento" ? "relacionamento_vencimento" : "relacionamento_terceiros";
     const label = tipo === "vencimento" ? "Alteração de vencimento" : "Autorização de terceiros";
+    const tituloVal = titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "";
+    const contratoVal = contractNumber ? String(contractNumber).trim() : "";
+    const nomeVal = customerName ? String(customerName).trim() : "";
     const dados = {
-      titulo: titulo,
-      contrato: contractNumber,
-      nome: customerName,
+      titulo: tituloVal,
+      contrato: contratoVal,
+      nome: nomeVal,
       customerId: customerId,
       contractId: contractId,
       unidade: ctx.unidade || "",
@@ -36715,10 +36741,23 @@ window.escolherGestaoDocumento = function(tipo) {
     };
     window._gestaoDocPending = { kind: tipo, dados: dados };
     if (typeof switchTab === "function") switchTab(tab, label);
-    if (window._gestaoDocPending && window.RelacionamentoApp && typeof RelacionamentoApp.preencherEBuscarDocSimples === "function") {
-      window._gestaoDocPending = null;
-      RelacionamentoApp.preencherEBuscarDocSimples(tipo, dados);
-    }
+    window._fillGestaoDocCampos(tipo, dados);
+    const carregar = function() {
+      window._fillGestaoDocCampos(tipo, dados);
+      const app = window.RelacionamentoApp;
+      if (app && typeof app.preencherEBuscarDocSimples === "function") {
+        window._gestaoDocPending = null;
+        app.preencherEBuscarDocSimples(tipo, dados);
+      } else if (app && typeof app.buscarDocSimples === "function" && (tituloVal || contratoVal || nomeVal || customerId)) {
+        window._gestaoDocPending = null;
+        app.buscarDocSimples(tipo, { quiet: true });
+      }
+    };
+    if (window._gestaoDocPending) carregar();
+    setTimeout(function() {
+      window._fillGestaoDocCampos(tipo, dados);
+      if (window._gestaoDocPending) carregar();
+    }, 120);
     return;
   }
 

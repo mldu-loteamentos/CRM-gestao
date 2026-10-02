@@ -2046,6 +2046,9 @@ const RelacionamentoApp = {
   }
 };
 
+window.RelacionamentoApp = RelacionamentoApp;
+window.RelacionamentoState = RelacionamentoState;
+
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
