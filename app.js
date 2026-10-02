@@ -2685,8 +2685,13 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       return;
     }
   }
+  const leavingTab = window.activeAppTab;
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
+  if (leavingTab && leavingTab !== tabId && window.RelacionamentoApp && typeof RelacionamentoApp.limparDocSimples === "function") {
+    if (leavingTab === "relacionamento_vencimento") RelacionamentoApp.limparDocSimples("vencimento");
+    if (leavingTab === "relacionamento_terceiros") RelacionamentoApp.limparDocSimples("terceiros");
+  }
 
   if (!String(tabId).startsWith('relacionamento_') && typeof window.clearRelacionamento === 'function') {
       window.clearRelacionamento();
@@ -35631,17 +35636,71 @@ window.searchRelacionamento = async function() {
       return;
     }
 
-    if (!customerId) {
+    customerId = String(customerId == null ? "" : customerId).trim();
+    if (!/^\d+$/.test(customerId)) {
       if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px;">Nenhum cliente ou contrato encontrado com os dados informados.</td></tr>';
       return;
     }
 
-    // Buscar contratos do cliente
-    const urlContracts = `http://${host}:${port}/sienge-proxy/sales-contracts?customerId=${customerId}&limit=200`;
-    const resContracts = await fetch(urlContracts, { headers: { 'Authorization': authHeader } });
-    if (!resContracts.ok) throw new Error("Erro ao buscar contratos do cliente.");
-    const scData = await resContracts.json();
-    let contratos = scData.results || [];
+    // Lista de contratos: proxy relativo + retry (Vercel/429). Lista vazia não é erro.
+    let contratos = [];
+    let contractsErr = null;
+    const fetchContractsByCustomer = async () => {
+      if (typeof siengeFetchWithRetry === "function") {
+        const scData = await siengeFetchWithRetry(`/sales-contracts?customerId=${encodeURIComponent(customerId)}&limit=200`);
+        return (scData && scData.results) || [];
+      }
+      const proxyBase = (typeof SIENGE_CONFIG !== "undefined" && SIENGE_CONFIG.baseUrl)
+        ? SIENGE_CONFIG.baseUrl
+        : "/api/sienge-proxy";
+      const resContracts = await fetch(`${proxyBase}/sales-contracts?customerId=${encodeURIComponent(customerId)}&limit=200`, {
+        headers: { Authorization: authHeader, Accept: "application/json" }
+      });
+      if (!resContracts.ok) {
+        const err = new Error(`Erro ao buscar contratos do cliente (HTTP ${resContracts.status}).`);
+        err.status = resContracts.status;
+        throw err;
+      }
+      const scData = await resContracts.json();
+      return (scData && scData.results) || [];
+    };
+
+    try {
+      contratos = await fetchContractsByCustomer();
+    } catch (e1) {
+      contractsErr = e1;
+      console.warn("[Relacionamento] sales-contracts por customerId falhou, tentando getSales", e1);
+      try {
+        if (typeof SiengeApiService !== "undefined" && typeof SiengeApiService.getSales === "function") {
+          const sales = await SiengeApiService.getSales(customerId);
+          if (Array.isArray(sales) && sales.length) contratos = sales;
+        }
+      } catch (e2) {
+        console.warn("[Relacionamento] getSales falhou", e2);
+      }
+    }
+
+    if (!contratos.length) {
+      try {
+        const rbRes = (typeof SiengeApiService !== "undefined" && typeof SiengeApiService.getReceivableBills === "function")
+          ? await SiengeApiService.getReceivableBills(customerId)
+          : null;
+        const bills = (rbRes && rbRes.results) || (Array.isArray(rbRes) ? rbRes : []);
+        const ids = new Set();
+        bills.forEach((b) => {
+          const cid = b.salesContractId || b.contractId || b.saleContractId;
+          if (cid) ids.add(String(cid));
+        });
+        if (ids.size) contratos = Array.from(ids).map((id) => ({ id }));
+      } catch (e3) {
+        console.warn("[Relacionamento] fallback receivable-bills falhou", e3);
+      }
+    }
+
+    if (!contratos.length && contractsErr) {
+      const status = contractsErr.status ? ` (HTTP ${contractsErr.status})` : "";
+      throw new Error(`Erro ao buscar contratos do cliente.${status} Tente novamente em instantes.`);
+    }
 
     // ENRIQUECIMENTO DE DADOS: A API de listagem omite campos cruciais como contractNumber, receivableBillId, e unityName.
     // Vamos buscar os detalhes de cada contrato paralelamente antes do loop principal.
@@ -35658,12 +35717,15 @@ window.searchRelacionamento = async function() {
     contratos = await Promise.all(contratos.map(async (c) => {
          if (!c.id) return c;
          try {
-             const detailUrl = `http://${host}:${port}/sienge-proxy/sales-contracts/${c.id}`;
-             const detailRes = await fetch(detailUrl, { headers: { 'Authorization': authHeader } });
-             if (detailRes.ok) {
-                 const detailData = await detailRes.json();
-                 
-                 // Associar o DebitBalance correspondente
+             let detailData = null;
+             if (typeof siengeFetchWithRetry === "function") {
+                 detailData = await siengeFetchWithRetry(`/sales-contracts/${encodeURIComponent(c.id)}`);
+             } else {
+                 const detailUrl = `/api/sienge-proxy/sales-contracts/${encodeURIComponent(c.id)}`;
+                 const detailRes = await fetch(detailUrl, { headers: { 'Authorization': authHeader, Accept: 'application/json' } });
+                 if (detailRes.ok) detailData = await detailRes.json();
+             }
+             if (detailData && (detailData.id || detailData.contractNumber || detailData.receivableBillId)) {
                  const dbContract = customerDebitBalance.find(db => 
                     String(db.billReceivableId) === String(detailData.receivableBillId) || 
                     String(db.receivableBillId) === String(detailData.receivableBillId) ||
@@ -36417,8 +36479,14 @@ window.openGestaoDocumentoMenu = function(ctx) {
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('aditamento')">
             <i data-lucide="file-plus"></i> Aditamento
           </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('vencimento')">
+            <i data-lucide="calendar-clock"></i> Alteração de vencimento
+          </button>
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('autorizacao')">
             <i data-lucide="scroll-text"></i> Autorização de Escritura
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('terceiros')">
+            <i data-lucide="user-plus"></i> Autorização de terceiros
           </button>
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('cessao')">
             <i data-lucide="handshake"></i> Cessão de direitos
@@ -36437,6 +36505,28 @@ window.openGestaoDocumentoMenu = function(ctx) {
     document.body.appendChild(overlay);
   }
   overlay._ctx = ctx || {};
+  const list = overlay.querySelector(".moura-gestao-docs-list");
+  if (list && !list.querySelector("[onclick*=\"escolherGestaoDocumento('vencimento')\"]")) {
+    list.innerHTML = `
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('aditamento')">
+            <i data-lucide="file-plus"></i> Aditamento
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('vencimento')">
+            <i data-lucide="calendar-clock"></i> Alteração de vencimento
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('autorizacao')">
+            <i data-lucide="scroll-text"></i> Autorização de Escritura
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('terceiros')">
+            <i data-lucide="user-plus"></i> Autorização de terceiros
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('cessao')">
+            <i data-lucide="handshake"></i> Cessão de direitos
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('quitacao')">
+            <i data-lucide="badge-check"></i> Termo de quitação
+          </button>`;
+  }
   overlay.style.display = "flex";
   if (window.lucide) window.lucide.createIcons();
 };
@@ -36494,6 +36584,25 @@ window.escolherGestaoDocumento = function(tipo) {
         CessaoApp.init();
       }
     }, 180);
+    return;
+  }
+
+  if (tipo === "terceiros" || tipo === "vencimento") {
+    const tab = tipo === "vencimento" ? "relacionamento_vencimento" : "relacionamento_terceiros";
+    const label = tipo === "vencimento" ? "Alteração de vencimento" : "Autorização de terceiros";
+    const prefix = tipo === "vencimento" ? "ven" : "ter";
+    if (typeof switchTab === "function") switchTab(tab, label);
+    setTimeout(() => {
+      const tEl = document.getElementById(prefix + "-filter-titulo");
+      const cEl = document.getElementById(prefix + "-filter-contrato");
+      const nEl = document.getElementById(prefix + "-filter-nome");
+      if (tEl && titulo && String(titulo) !== "—") tEl.value = String(titulo).replace(/\D/g, "") || String(titulo);
+      if (cEl && contractNumber) cEl.value = String(contractNumber);
+      if (nEl && customerName) nEl.value = customerName;
+      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarDocSimples === "function" && (titulo || contractNumber || customerName)) {
+        RelacionamentoApp.buscarDocSimples(tipo);
+      }
+    }, 120);
     return;
   }
 

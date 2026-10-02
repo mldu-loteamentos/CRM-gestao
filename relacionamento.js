@@ -137,6 +137,260 @@ const RelacionamentoApp = {
     return false;
   },
 
+  _todayKey() {
+    if (typeof window.localDateStr === "function") return window.localDateStr(new Date());
+    const n = new Date();
+    return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+  },
+
+  _dueKey(raw) {
+    if (!raw) return "";
+    if (typeof window.promiseDateKey === "function") {
+      const k = window.promiseDateKey(raw);
+      if (k) return k;
+    }
+    return String(raw).slice(0, 10);
+  },
+
+  _unitNumericId(ctx) {
+    if (!ctx) return "";
+    const details = ctx.unitDetails || {};
+    const unit = ctx.unit || {};
+    const bill = ctx.bill || {};
+    const raw = details.id || details.unitId || bill.unitId || bill.unityId
+      || (unit.id && !String(unit.id).startsWith("U-") ? unit.id : "");
+    const digits = String(raw || "").replace(/\D/g, "");
+    return digits || "";
+  },
+
+  _quadraLoteLabel(ctx) {
+    if (!ctx) return "";
+    const block = String(ctx.block || "").trim();
+    const lot = String(ctx.lot || "").trim();
+    if (block && lot) return block + "-" + lot;
+    const unitName = String((ctx.sale && ctx.sale.unitId) || "").split("-").slice(2).join("-");
+    return String(unitName || "").replace(/\s+/g, "") || "";
+  },
+
+  _formatUnidadeDoc(ctx) {
+    const unitId = this._unitNumericId(ctx);
+    const ql = this._quadraLoteLabel(ctx);
+    return [unitId, ql].filter(Boolean).join(" ") || "—";
+  },
+
+  async _avaliarAdimplencia(sale, bill) {
+    const billId = (sale && sale.receivableBillId) || (bill && (bill.id || bill.receivableBillId));
+    if (billId && window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
+      try {
+        const inst = await SiengeApiService.getBillInstallments(billId);
+        const list = Array.isArray(inst) ? inst : [];
+        const today = this._todayKey();
+        const vencidas = list.filter((p) => {
+          if (this._installmentSettled(p)) return false;
+          const due = this._dueKey(p.dueDate || p.dueDateTime || p.installmentDueDate);
+          return due && due < today;
+        });
+        if (vencidas.length) {
+          return {
+            adimplente: false,
+            vencidas: vencidas.length,
+            label: vencidas.length === 1 ? "1 parcela vencida" : vencidas.length + " parcelas vencidas"
+          };
+        }
+        if (list.length) return { adimplente: true, vencidas: 0, label: "Adimplente" };
+      } catch (e) {
+        console.warn("[Relacionamento] falha ao avaliar adimplência", e);
+      }
+    }
+    if (bill && (bill.defaulting === true || bill.defaulting === "S")) {
+      return { adimplente: false, vencidas: null, label: "Com parcelas vencidas" };
+    }
+    const status = String((sale && sale.status) || "").toLowerCase();
+    if (status === "quitado" || (bill && bill.payOffDate)) {
+      return { adimplente: true, vencidas: 0, label: "Adimplente" };
+    }
+    return { adimplente: true, vencidas: 0, label: "Adimplente" };
+  },
+
+  onDocSearchKey(event, kind) {
+    if (!event || (event.key !== "Enter" && event.key !== "Tab")) return;
+    const titulo = (this._docEl(kind, "-filter-titulo")?.value || "").replace(/\D/g, "");
+    const contrato = (this._docEl(kind, "-filter-contrato")?.value || "").trim();
+    const nome = (this._docEl(kind, "-filter-nome")?.value || "").trim();
+    if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) return;
+    if (event.key === "Enter") event.preventDefault();
+    if (this._docSearchTimer) clearTimeout(this._docSearchTimer);
+    this._docSearchTimer = setTimeout(() => this.buscarDocSimples(kind), event.key === "Tab" ? 40 : 0);
+  },
+
+  maskDocCpf(el) {
+    if (!el) return;
+    if (typeof maskCpfCnpjTyping === "function") {
+      el.value = maskCpfCnpjTyping(el.value);
+      return;
+    }
+    let v = String(el.value || "").replace(/\D/g, "").slice(0, 11);
+    if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
+    else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
+    else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, "$1.$2");
+    el.value = v;
+  },
+
+  maskDocFone(el) {
+    if (!el) return;
+    let v = String(el.value || "").replace(/\D/g, "").slice(0, 11);
+    if (!v) {
+      el.value = "";
+      return;
+    }
+    if (v.length <= 10) {
+      v = v.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{4})(\d)/, "$1-$2");
+    } else {
+      v = v.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2");
+    }
+    el.value = v.substring(0, 15);
+  },
+
+  _foneFromCustomer(c) {
+    if (!c) return "";
+    const phones = Array.isArray(c.phones) ? c.phones : [];
+    const main = phones.find((p) => p && (p.main === true || String(p.type || "").toUpperCase() === "MAIN")) || phones[0];
+    let digits = "";
+    if (main) {
+      digits = String(main.areaCode || "") + String(main.number || main.phoneNumber || "");
+    }
+    if (!digits) digits = String(c.phone || c.mobilePhone || "").replace(/\D/g, "");
+    digits = digits.replace(/\D/g, "");
+    if (!digits) return "";
+    const fake = { value: digits };
+    this.maskDocFone(fake);
+    return fake.value;
+  },
+
+  _lockTerceiroDocs(lock) {
+    ["ter-rg", "ter-cpf", "ter-fone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.readOnly = !!lock;
+      el.style.background = lock ? "#f1f5f9" : "";
+      el.style.cursor = lock ? "not-allowed" : "";
+    });
+  },
+
+  _aplicarDadosTerceiro(c) {
+    if (!c) return;
+    const rgEl = document.getElementById("ter-rg");
+    const cpfEl = document.getElementById("ter-cpf");
+    const foneEl = document.getElementById("ter-fone");
+    const rg = (typeof window.pickCustomerRg === "function")
+      ? window.pickCustomerRg(c)
+      : (c.rg || c.numberIdentityCard || c.identityCard || "");
+    if (rgEl) rgEl.value = rg || "";
+    const doc = c.cpfCnpj || c.cpf || c.cnpj || "";
+    if (cpfEl) {
+      cpfEl.value = doc;
+      this.maskDocCpf(cpfEl);
+    }
+    if (foneEl) foneEl.value = this._foneFromCustomer(c);
+  },
+
+  onTerceiroNomeInput(el) {
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    el.value = String(el.value || "").toUpperCase();
+    try { el.setSelectionRange(start, end); } catch (e) {}
+    const selectedId = RelacionamentoState.terceiroClienteId;
+    const selectedName = RelacionamentoState.terceiroClienteName || "";
+    const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (selectedId && norm(el.value) !== norm(selectedName)) {
+      RelacionamentoState.terceiroClienteId = null;
+      RelacionamentoState.terceiroClienteName = null;
+      this._lockTerceiroDocs(false);
+    }
+    this.sugerirTerceiroNome(el.value);
+  },
+
+  sugerirTerceiroNome(query) {
+    const dd = document.getElementById("ter-terceiro-dropdown");
+    if (!dd) return;
+    const normalizeStr = (str) => str ? String(str).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+    const qNorm = normalizeStr(query);
+    if (!qNorm || !window.GlobalCustomerCache || !window.GlobalCustomerCache.data) {
+      dd.style.display = "none";
+      dd.innerHTML = "";
+      return;
+    }
+    const terms = qNorm.split(" ").filter((t) => t);
+    const matches = window.GlobalCustomerCache.data.filter((c) => {
+      const cName = normalizeStr(c.name);
+      return terms.every((term) => cName.includes(term));
+    }).slice(0, 12);
+    if (!matches.length) {
+      dd.style.display = "none";
+      return;
+    }
+    dd.innerHTML = "";
+    matches.forEach((c) => {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f3f4f6;";
+      const doc = c.cpf || c.cnpj || c.cpfCnpj || "";
+      item.textContent = (c.id ? c.id + " - " : "") + (c.name || "") + (doc ? " - " + doc : "");
+      item.onmouseover = () => { item.style.background = "#f0fdf4"; };
+      item.onmouseout = () => { item.style.background = "#fff"; };
+      item.onmousedown = (ev) => {
+        ev.preventDefault();
+        dd.style.display = "none";
+        this.selecionarTerceiroCliente(c);
+      };
+      dd.appendChild(item);
+    });
+    dd.style.display = "block";
+  },
+
+  async selecionarTerceiroCliente(c) {
+    if (!c) return;
+    RelacionamentoState.terceiroClienteId = c.id;
+    RelacionamentoState.terceiroClienteName = c.name || "";
+    const nomeEl = document.getElementById("ter-nome");
+    if (nomeEl) nomeEl.value = String(c.name || "").toUpperCase();
+    this._aplicarDadosTerceiro(c);
+    this._lockTerceiroDocs(true);
+    if (c.id && window.SiengeApiService && typeof SiengeApiService.getCustomer === "function") {
+      try {
+        let full = await SiengeApiService.getCustomer(c.id);
+        if (typeof window.enrichCustomerForLegalDocs === "function") {
+          full = await window.enrichCustomerForLegalDocs(full);
+        }
+        if (String(RelacionamentoState.terceiroClienteId) === String(c.id)) {
+          this._aplicarDadosTerceiro(full || c);
+          this._lockTerceiroDocs(true);
+        }
+      } catch (e) {
+        console.warn("[Relacionamento] não foi possível carregar o cadastro do terceiro", e);
+      }
+    }
+  },
+
+  abrirExtratoDoc(kind) {
+    const ctx = RelacionamentoState[kind];
+    if (!ctx || !ctx.sale) {
+      alert("Busque o contrato antes de abrir o extrato.");
+      return;
+    }
+    const btn = this._docEl(kind, "-btn-extrato");
+    if (!btn || typeof window.visualizarExtratoDireto !== "function") {
+      alert("Não foi possível abrir o extrato.");
+      return;
+    }
+    btn.dataset.customerId = ctx.sale.customerId || (ctx.customer && ctx.customer.id) || "";
+    btn.dataset.title = ctx.sale.receivableBillId || (ctx.bill && ctx.bill.id) || "";
+    btn.dataset.name = (ctx.customer && ctx.customer.name) || "";
+    btn.dataset.unit = this._formatUnidadeDoc(ctx);
+    btn.dataset.cc = ctx.sale.enterpriseId || "";
+    window.visualizarExtratoDireto(btn);
+  },
+
   async _avaliarContratoQuitado(sale, bill) {
     const status = String((sale && sale.status) || "").toLowerCase();
     if (status === "quitado") return { quitado: true, motivo: "Status do contrato: Quitado" };
@@ -788,6 +1042,7 @@ const RelacionamentoApp = {
         window.SelectedDynamicCustomerId = c.id;
         window.SelectedDynamicCustomerName = c.name;
         dd.style.display = "none";
+        this.buscarDocSimples(kind);
       };
       dd.appendChild(item);
     });
@@ -797,6 +1052,14 @@ const RelacionamentoApp = {
   limparDocSimples(kind) {
     RelacionamentoState[kind] = null;
     RelacionamentoState[kind + "Matches"] = [];
+    if (kind === "terceiros") {
+      RelacionamentoState.terceiroClienteId = null;
+      RelacionamentoState.terceiroClienteName = null;
+      this._lockTerceiroDocs(false);
+    }
+    window.SelectedDynamicCustomerId = null;
+    window.SelectedDynamicCustomerName = null;
+    window.SelectedDynamicCustomerDoc = null;
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
     this._docSetResults(kind, "");
@@ -808,6 +1071,11 @@ const RelacionamentoApp = {
     if (preview) preview.textContent = "";
     const dd = this._docEl(kind, "-nome-dropdown");
     if (dd) dd.style.display = "none";
+    const terDd = document.getElementById("ter-terceiro-dropdown");
+    if (kind === "terceiros" && terDd) {
+      terDd.style.display = "none";
+      terDd.innerHTML = "";
+    }
   },
 
   atualizarPreviewVencimento() {
@@ -841,6 +1109,7 @@ const RelacionamentoApp = {
   },
 
   async buscarDocSimples(kind) {
+    if (this._docSearchBusy === kind) return;
     const titulo = (this._docEl(kind, "-filter-titulo")?.value || "").replace(/\D/g, "");
     const contrato = (this._docEl(kind, "-filter-contrato")?.value || "").trim();
     const nome = (this._docEl(kind, "-filter-nome")?.value || "").trim();
@@ -848,6 +1117,7 @@ const RelacionamentoApp = {
       alert("Informe o título, o contrato ou o nome do cliente.");
       return;
     }
+    this._docSearchBusy = kind;
     this._docSetResults(kind, `<div style="padding:24px;text-align:center;color:var(--color-text-muted);">
       <div class="loading-spinner" style="width:28px;height:28px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 10px;"></div>
       Consultando contrato na Sienge...
@@ -949,6 +1219,8 @@ const RelacionamentoApp = {
     } catch (err) {
       console.error(err);
       this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Erro ao buscar."}</div>`);
+    } finally {
+      this._docSearchBusy = null;
     }
   },
 
@@ -984,14 +1256,25 @@ const RelacionamentoApp = {
           bill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(sale.receivableBillId));
         } catch (e) { bill = null; }
       }
+      if (!(unitDetails && unitDetails.id) && sale.id) {
+        try {
+          const sc = await this._siengeGet("/sales-contracts/" + encodeURIComponent(sale.id));
+          const su = (sc.salesContractUnits || []).find((u) => u.main === true) || (sc.salesContractUnits || [])[0] || {};
+          if (su.id) unitDetails = Object.assign({}, unitDetails || {}, { id: su.id, name: su.name });
+        } catch (e) {}
+      }
       const block = unit.block && unit.block !== "N/D" ? unit.block : (unitName.split("-")[0] || "");
       const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
       const empName = window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
+      const adimplencia = await this._avaliarAdimplencia(sale, bill);
+      RelacionamentoState[kind].adimplencia = adimplencia;
       const titulo = sale.receivableBillId || bill?.id || "—";
       const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
       const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const unidadeLabel = this._formatUnidadeDoc(RelacionamentoState[kind]);
+      const sitColor = adimplencia.adimplente ? "#15803d" : "#b91c1c";
       const resumo = this._docEl(kind, "-contrato-resumo");
       if (resumo) {
         resumo.innerHTML = `
@@ -999,9 +1282,10 @@ const RelacionamentoApp = {
             <div><span style="color:#64748b;">Cliente</span><br><strong>${customer.name || "—"}</strong></div>
             <div><span style="color:#64748b;">Título</span><br><strong>${titulo}</strong></div>
             <div><span style="color:#64748b;">Contrato</span><br><strong>${sale.id || "—"}</strong></div>
-            <div><span style="color:#64748b;">Unidade</span><br><strong>${block && lot ? (block + " - " + lot) : (unitName || "—")}</strong></div>
+            <div><span style="color:#64748b;">Unidade</span><br><strong>${unidadeLabel}</strong></div>
             <div><span style="color:#64748b;">Empreendimento</span><br><strong>${empName || "—"}</strong></div>
             <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
+            <div><span style="color:#64748b;">Situação</span><br><strong style="color:${sitColor};">${adimplencia.label}</strong></div>
           </div>`;
       }
       const card = this._docEl(kind, "-doc-card");
@@ -1068,11 +1352,12 @@ const RelacionamentoApp = {
         QUADRA: quadra,
         LOTE: lote,
         TITULO: titulo,
+        UNIDADE: this._formatUnidadeDoc(ctx),
         NUM_CONTRATO: sale.id || "____",
         NUMERO_CONTRATO: sale.id || "____",
         CIDADE_ATUAL: cidadeLote || "Botucatu",
         DATA_HOJE: new Date().toLocaleDateString("pt-BR"),
-        NOME_TERCEIRO: (document.getElementById("ter-nome")?.value || "").trim() || "________________",
+        NOME_TERCEIRO: String(document.getElementById("ter-nome")?.value || "").trim().toUpperCase() || "________________",
         RG_TERCEIRO: (document.getElementById("ter-rg")?.value || "").trim() || "________________",
         CPF_TERCEIRO: maskCpf((document.getElementById("ter-cpf")?.value || "").trim()) || "________________",
         TELEFONE_TERCEIRO: (document.getElementById("ter-fone")?.value || "").trim() || "________________"
@@ -1109,11 +1394,12 @@ const RelacionamentoApp = {
           };
       const filled = fillVars(markup, legalBase);
       const headerEmp = empName || "________________";
+      const unidadeHeader = extraMap.UNIDADE || this._formatUnidadeDoc(ctx);
       const docHtml = `
         <div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;">
           <div>Lot. ${headerEmp}</div>
-          <div>Quadra: ${quadra} – Lote: ${lote}</div>
-          <div>Título/Contrato: ${titulo}</div>
+          <div>Unidade: ${unidadeHeader}</div>
+          <div>Título: ${titulo}</div>
         </div>
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 1.4rem;">${docTitle}</h2>
         <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.55;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
