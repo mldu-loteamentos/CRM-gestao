@@ -233,6 +233,8 @@ const ConfigUsersApp = {
         { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] },
         { name: "Gerar documentos", key: "sub_rel_docs", actions: [
           { id: "autorizacao_escritura", label: "Autorização de escritura", permBase: "sub_rel_docs_autorizacao_escritura" },
+          { id: "autorizacao_terceiros", label: "Autorização de terceiros", permBase: "sub_rel_docs_autorizacao_terceiros" },
+          { id: "alteracao_vencimento", label: "Alteração de vencimento", permBase: "sub_rel_docs_alteracao_vencimento" },
           { id: "cessao_direitos", label: "Cessão de Direitos", permBase: "sub_rel_docs_cessao_direitos" }
         ] }
       ]

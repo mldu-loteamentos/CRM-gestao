@@ -730,6 +730,401 @@ const RelacionamentoApp = {
       console.error("Erro ao gerar autorização de escritura", err);
       alert("Não foi possível gerar a autorização. Verifique o modelo em Documentos padrões e tente de novo.");
     }
+  },
+
+  _docCfg(kind) {
+    const map = {
+      terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS" },
+      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" }
+    };
+    return map[kind] || map.terceiros;
+  },
+
+  _docEl(kind, suffix) {
+    return document.getElementById(this._docCfg(kind).p + suffix);
+  },
+
+  _docSetResults(kind, html) {
+    const el = this._docEl(kind, "-search-results");
+    if (el) el.innerHTML = html;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  sugerirNomeDoc(kind, query) {
+    window.SelectedDynamicCustomerId = null;
+    window.SelectedDynamicCustomerName = null;
+    const dd = this._docEl(kind, "-nome-dropdown");
+    if (!dd) return;
+    const normalizeStr = (str) => str ? String(str).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+    const qNorm = normalizeStr(query);
+    if (!qNorm || !window.GlobalCustomerCache || !window.GlobalCustomerCache.data) {
+      dd.style.display = "none";
+      dd.innerHTML = "";
+      return;
+    }
+    const terms = qNorm.split(" ").filter((t) => t);
+    const matches = window.GlobalCustomerCache.data.filter((c) => {
+      const cName = normalizeStr(c.name);
+      return terms.every((term) => cName.includes(term));
+    });
+    const scoped = (typeof window.filterCustomersToAssignedPortfolio === "function"
+      ? window.filterCustomersToAssignedPortfolio(matches)
+      : matches).slice(0, 12);
+    if (!scoped.length) {
+      dd.style.display = "none";
+      return;
+    }
+    dd.innerHTML = "";
+    scoped.forEach((c) => {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 12px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid #f3f4f6;";
+      item.textContent = (c.id ? c.id + " - " : "") + (c.name || "");
+      item.onmouseover = () => { item.style.background = "#f0fdf4"; };
+      item.onmouseout = () => { item.style.background = "#fff"; };
+      item.onmousedown = (ev) => {
+        ev.preventDefault();
+        const input = this._docEl(kind, "-filter-nome");
+        if (input) input.value = c.name || "";
+        window.SelectedDynamicCustomerId = c.id;
+        window.SelectedDynamicCustomerName = c.name;
+        dd.style.display = "none";
+      };
+      dd.appendChild(item);
+    });
+    dd.style.display = "block";
+  },
+
+  limparDocSimples(kind) {
+    RelacionamentoState[kind] = null;
+    RelacionamentoState[kind + "Matches"] = [];
+    const card = this._docEl(kind, "-doc-card");
+    if (card) card.style.display = "none";
+    this._docSetResults(kind, "");
+    ["-filter-titulo", "-filter-contrato", "-filter-nome", "-nome", "-rg", "-cpf", "-fone", "-dia", "-data-original"].forEach((suf) => {
+      const el = this._docEl(kind, suf);
+      if (el) el.value = "";
+    });
+    const preview = this._docEl(kind, "-preview");
+    if (preview) preview.textContent = "";
+    const dd = this._docEl(kind, "-nome-dropdown");
+    if (dd) dd.style.display = "none";
+  },
+
+  atualizarPreviewVencimento() {
+    const computed = this._calcularNovoVencimento();
+    const el = document.getElementById("ven-preview");
+    if (!el) return;
+    if (!computed) {
+      el.textContent = "";
+      return;
+    }
+    el.textContent = "O vencimento passará de " + computed.originalBr + " para " + computed.novoBr + " (" + computed.novoExt + ").";
+  },
+
+  _calcularNovoVencimento() {
+    const dia = parseInt(document.getElementById("ven-dia")?.value, 10);
+    const orig = document.getElementById("ven-data-original")?.value || "";
+    if (!(dia >= 1 && dia <= 31) || !orig) return null;
+    const key = typeof window.promiseDateKey === "function" ? window.promiseDateKey(orig) : orig.slice(0, 10);
+    const parts = key.split("-");
+    if (parts.length !== 3) return null;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    const last = new Date(y, m, 0).getDate();
+    const day = Math.min(dia, last);
+    const iso = y + "-" + String(m).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    const originalBr = parts[2] + "/" + parts[1] + "/" + parts[0];
+    const novoBr = String(day).padStart(2, "0") + "/" + String(m).padStart(2, "0") + "/" + y;
+    const novoExt = typeof window.dataPorExtenso === "function" ? window.dataPorExtenso(iso) : novoBr;
+    const diaExt = typeof numeroPorExtenso === "function" ? numeroPorExtenso(dia) : String(dia);
+    return { originalBr, novoBr, novoExt, dia, diaExt: String(diaExt || "").toUpperCase() };
+  },
+
+  async buscarDocSimples(kind) {
+    const titulo = (this._docEl(kind, "-filter-titulo")?.value || "").replace(/\D/g, "");
+    const contrato = (this._docEl(kind, "-filter-contrato")?.value || "").trim();
+    const nome = (this._docEl(kind, "-filter-nome")?.value || "").trim();
+    if (!titulo && !contrato && !nome && !window.SelectedDynamicCustomerId) {
+      alert("Informe o título, o contrato ou o nome do cliente.");
+      return;
+    }
+    this._docSetResults(kind, `<div style="padding:24px;text-align:center;color:var(--color-text-muted);">
+      <div class="loading-spinner" style="width:28px;height:28px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 10px;"></div>
+      Consultando contrato na Sienge...
+    </div>`);
+    const card = this._docEl(kind, "-doc-card");
+    if (card) card.style.display = "none";
+    RelacionamentoState[kind] = null;
+
+    try {
+      let customerId = null;
+      let hintBill = null;
+      let hintContract = null;
+
+      if (titulo) {
+        hintBill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo));
+        const bType = String(hintBill.documentId || "").trim().toUpperCase();
+        if (bType && bType !== "CT" && bType !== "CTCV") {
+          throw new Error("O título " + titulo + " não é do tipo CT.");
+        }
+        customerId = hintBill.customerId;
+      } else if (contrato) {
+        const data = await this._siengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
+        const list = data.results || [];
+        if (!list.length) throw new Error("Contrato não encontrado: " + contrato);
+        hintContract = list[0];
+        customerId = hintContract.customerId
+          || hintContract.customer?.id
+          || hintContract.salesContractCustomers?.[0]?.id
+          || hintContract.salesContractCustomers?.[0]?.customerId;
+        if (!customerId && hintContract.receivableBillId) {
+          hintBill = await this._siengeGet("/accounts-receivable/receivable-bills/" + hintContract.receivableBillId);
+          customerId = hintBill.customerId;
+        }
+        if (!customerId) throw new Error("Não foi possível identificar o cliente deste contrato.");
+      } else {
+        customerId = window.SelectedDynamicCustomerId;
+        if (!customerId && window.GlobalCustomerCache && window.GlobalCustomerCache.data) {
+          const normalizeStr = (str) => str ? String(str).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+          const terms = normalizeStr(nome).split(" ").filter((t) => t);
+          const match = window.GlobalCustomerCache.data.find((c) => {
+            const cName = normalizeStr(c.name);
+            return terms.every((term) => cName.includes(term));
+          });
+          if (match) customerId = match.id;
+        }
+        if (!customerId) throw new Error("Cliente não encontrado. Selecione um nome da lista ou use título/contrato.");
+      }
+
+      const sales = (window.SiengeApiService && typeof SiengeApiService.getSales === "function")
+        ? await SiengeApiService.getSales(customerId)
+        : [];
+      let matches = Array.isArray(sales) ? sales.slice() : [];
+      if (titulo) {
+        const filtered = matches.filter((s) => String(s.receivableBillId) === String(titulo) || String(s.id) === String(titulo));
+        if (filtered.length) matches = filtered;
+      }
+      if (contrato) {
+        const filtered = matches.filter((s) => String(s.id) === String(contrato) || String(s.contractNumber) === String(contrato) || String(s.number) === String(contrato));
+        if (filtered.length) matches = filtered;
+      }
+      if (!matches.length && hintBill) {
+        matches = [{
+          id: hintBill.documentNumber || hintBill.id,
+          customerId,
+          receivableBillId: hintBill.id || titulo,
+          enterpriseId: hintBill.enterpriseCode || hintBill.enterpriseId,
+          unitId: "U-" + (hintBill.enterpriseCode || hintBill.enterpriseId || "0") + "-" + String(hintBill.unityName || hintBill.unitName || "ND").replace(/\s+/g, ""),
+          saleDate: hintBill.issueDate || hintBill.emissionDate,
+          contractValue: hintBill.receivableBillValue || hintBill.value,
+          status: "Ativo",
+          customers: []
+        }];
+      }
+      if (!matches.length) throw new Error("Nenhum contrato encontrado para este cliente.");
+
+      RelacionamentoState[kind + "Matches"] = matches;
+      if (matches.length === 1) {
+        await this.selecionarDocSimples(kind, 0);
+        return;
+      }
+      const rows = matches.map((s, idx) => {
+        const quadraLote = String(s.unitId || "").split("-").slice(2).join("-") || "—";
+        const valor = Number(s.contractValue || s.updatedContractValue || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+        return `<tr>
+          <td>${s.receivableBillId || "—"}</td>
+          <td>${s.id || "—"}</td>
+          <td>${quadraLote}</td>
+          <td>${s.status || "—"}</td>
+          <td>${valor}</td>
+          <td><button type="button" class="btn btn-outline" onclick="RelacionamentoApp.selecionarDocSimples('${kind}', ${idx})">Selecionar</button></td>
+        </tr>`;
+      }).join("");
+      this._docSetResults(kind, `
+        <p style="font-size:0.9rem;color:#475569;margin:0 0 8px;">Vários contratos encontrados. Escolha um:</p>
+        <div class="table-responsive"><table class="data-table">
+          <thead><tr><th>Título</th><th>Contrato</th><th>Unidade</th><th>Status</th><th>Valor</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`);
+    } catch (err) {
+      console.error(err);
+      this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Erro ao buscar."}</div>`);
+    }
+  },
+
+  async selecionarDocSimples(kind, idx) {
+    const sale = (RelacionamentoState[kind + "Matches"] || [])[idx];
+    if (!sale) return;
+    this._docSetResults(kind, `<div style="padding:16px;text-align:center;color:var(--color-text-muted);">Carregando dados do lote e do contrato...</div>`);
+    try {
+      const customerId = sale.customerId;
+      let customer = {};
+      if (window.SiengeApiService && SiengeApiService.getCustomer) {
+        customer = await SiengeApiService.getCustomer(customerId);
+      }
+      if (typeof window.enrichCustomerForLegalDocs === "function") {
+        customer = await window.enrichCustomerForLegalDocs(customer);
+      }
+      const unitParts = String(sale.unitId || "").split("-");
+      const unitName = unitParts.slice(2).join("-");
+      const enterpriseId = sale.enterpriseId || sale.costCenterId || unitParts[1];
+      let unit = (typeof AppState !== "undefined" && AppState.units && AppState.units[sale.unitId]) || null;
+      if (!unit && window.SiengeApiService && SiengeApiService.getUnit) {
+        unit = await SiengeApiService.getUnit(sale.unitId).catch(() => null);
+      }
+      unit = unit || { id: sale.unitId, block: "N/D", lot: "N/D", area: 0 };
+      let unitDetails = null;
+      if (window.SiengeApiService && SiengeApiService.getUnitDetails && enterpriseId && unitName) {
+        const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName).catch(() => null);
+        if (det && det.results && det.results.length) unitDetails = det.results[0];
+      }
+      let bill = null;
+      if (sale.receivableBillId) {
+        try {
+          bill = await this._siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(sale.receivableBillId));
+        } catch (e) { bill = null; }
+      }
+      const block = unit.block && unit.block !== "N/D" ? unit.block : (unitName.split("-")[0] || "");
+      const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
+      const empName = window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "";
+      const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
+      RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
+      const titulo = sale.receivableBillId || bill?.id || "—";
+      const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
+      const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const resumo = this._docEl(kind, "-contrato-resumo");
+      if (resumo) {
+        resumo.innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:0.9rem;">
+            <div><span style="color:#64748b;">Cliente</span><br><strong>${customer.name || "—"}</strong></div>
+            <div><span style="color:#64748b;">Título</span><br><strong>${titulo}</strong></div>
+            <div><span style="color:#64748b;">Contrato</span><br><strong>${sale.id || "—"}</strong></div>
+            <div><span style="color:#64748b;">Unidade</span><br><strong>${block && lot ? (block + " - " + lot) : (unitName || "—")}</strong></div>
+            <div><span style="color:#64748b;">Empreendimento</span><br><strong>${empName || "—"}</strong></div>
+            <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
+          </div>`;
+      }
+      const card = this._docEl(kind, "-doc-card");
+      if (card) card.style.display = "block";
+      this._docSetResults(kind, "");
+      if (kind === "vencimento") this.atualizarPreviewVencimento();
+    } catch (err) {
+      console.error(err);
+      this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Não foi possível carregar o contrato."}</div>`);
+    }
+  },
+
+  async gerarDocSimplesPdf(kind) {
+    const cfg = this._docCfg(kind);
+    const ctx = RelacionamentoState[kind];
+    if (!ctx || !ctx.sale) {
+      alert("Busque e selecione um contrato antes de gerar o documento.");
+      return;
+    }
+    if (kind === "terceiros") {
+      const nomeTer = (document.getElementById("ter-nome")?.value || "").trim();
+      if (!nomeTer) {
+        alert("Informe o nome do terceiro autorizado.");
+        return;
+      }
+    }
+    if (kind === "vencimento") {
+      const computed = this._calcularNovoVencimento();
+      if (!computed) {
+        alert("Informe o novo dia de vencimento e a data original do mês da alteração.");
+        return;
+      }
+    }
+    try {
+      let t = {};
+      try { t = JSON.parse(localStorage.getItem(cfg.storage) || "{}"); } catch (e) {}
+      const titleEl = document.getElementById(cfg.titleId);
+      const corpoEl = document.getElementById(cfg.corpoId);
+      const docTitle = (titleEl && titleEl.value) || t[cfg.titleId] || cfg.defaultTitle;
+      let corpo = (corpoEl && corpoEl.value) || t[cfg.corpoId] || "";
+      if (!corpo && corpoEl) corpo = corpoEl.defaultValue || "";
+      if (!corpo) {
+        alert("O modelo não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        return;
+      }
+      const { customer, sale, unit, bill, empName, cidadeLote, block, lot } = ctx;
+      const unitName = String(sale.unitId || "").split("-").slice(2).join("-");
+      const quadra = block || unit.block || unitName.split("-")[0] || "____";
+      const lote = lot || unit.lot || unitName.split("-").slice(1).join("-") || unitName || "____";
+      const titulo = sale.receivableBillId || bill?.id || sale.id || "____";
+      const saleDateRaw = sale.saleDate || sale.contractDate || bill?.issueDate;
+      let saleDateStr = "____";
+      if (saleDateRaw) {
+        const iso = String(saleDateRaw).slice(0, 10);
+        saleDateStr = /^\d{4}-\d{2}-\d{2}/.test(iso)
+          ? iso.split("-").reverse().join("/")
+          : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
+      }
+      const dateExt = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+      const maskCpf = (typeof formatCpfCnpj === "function")
+        ? formatCpfCnpj
+        : function (val) { return val || ""; };
+      const extraMap = {
+        QUADRA: quadra,
+        LOTE: lote,
+        TITULO: titulo,
+        NUM_CONTRATO: sale.id || "____",
+        NUMERO_CONTRATO: sale.id || "____",
+        CIDADE_ATUAL: cidadeLote || "Botucatu",
+        DATA_HOJE: new Date().toLocaleDateString("pt-BR"),
+        NOME_TERCEIRO: (document.getElementById("ter-nome")?.value || "").trim() || "________________",
+        RG_TERCEIRO: (document.getElementById("ter-rg")?.value || "").trim() || "________________",
+        CPF_TERCEIRO: maskCpf((document.getElementById("ter-cpf")?.value || "").trim()) || "________________",
+        TELEFONE_TERCEIRO: (document.getElementById("ter-fone")?.value || "").trim() || "________________"
+      };
+      if (kind === "vencimento") {
+        const computed = this._calcularNovoVencimento();
+        extraMap.DIA_NOVO_VENCIMENTO = String(computed.dia).padStart(2, "0");
+        extraMap.DIA_NOVO_VENCIMENTO_EXTENSO = computed.diaExt;
+        extraMap.DATA_VENCIMENTO_ORIGINAL = computed.originalBr;
+        extraMap.DATA_NOVO_VENCIMENTO = computed.novoBr;
+        extraMap.DATA_NOVO_VENCIMENTO_EXTENSO = String(computed.novoExt || "").toUpperCase();
+      }
+      let preambleText = "";
+      if (typeof window.getPreambleForContract === "function") {
+        preambleText = window.getPreambleForContract(unit, sale) || "";
+      }
+      const legalBase = window.buildLegalDocVarMap(customer, sale, unit, {
+        preambleText,
+        empName,
+        cidadeLote,
+        saleDateStr,
+        dateExt,
+        map: extraMap
+      });
+      const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
+      const fillVars = typeof window.applyDistratoTemplateVars === "function"
+        ? window.applyDistratoTemplateVars
+        : function (text, map) {
+            let s = String(text || "");
+            Object.keys(map || {}).forEach((key) => {
+              s = s.replace(new RegExp("\\{\\{" + key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\}\\}", "g"), map[key] == null ? "" : String(map[key]));
+            });
+            return s;
+          };
+      const filled = fillVars(markup, legalBase);
+      const headerEmp = empName || "________________";
+      const docHtml = `
+        <div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;">
+          <div>Lot. ${headerEmp}</div>
+          <div>Quadra: ${quadra} – Lote: ${lote}</div>
+          <div>Título/Contrato: ${titulo}</div>
+        </div>
+        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 1.4rem;">${docTitle}</h2>
+        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.55;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
+      document.getElementById("pdf-modal-title").textContent = cfg.title;
+      document.getElementById("pdf-document-content").innerHTML = docHtml;
+      document.getElementById("pdf-view-overlay").classList.add("active");
+      if (window.lucide) lucide.createIcons();
+    } catch (err) {
+      console.error("Erro ao gerar " + cfg.title, err);
+      alert("Não foi possível gerar o documento. Verifique o modelo em Documentos padrões e tente de novo.");
+    }
   }
 };
 

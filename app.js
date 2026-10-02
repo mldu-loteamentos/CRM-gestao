@@ -1814,9 +1814,21 @@ window.listInstallmentsForSiCheck = function(client) {
   return out;
 };
 
+window.clientHasConfirmedOverdueSinalSI = function(client) {
+  if (!client) return false;
+  const insts = typeof window.listInstallmentsForSiCheck === "function"
+    ? window.listInstallmentsForSiCheck(client)
+    : [];
+  return insts.some((inst) => typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst));
+};
+
 window.clientHasOverdueSinalSI = function(client) {
   if (!client) return false;
-  if (window.listInstallmentsForSiCheck(client).some((inst) => window.installmentIsSinalSI(inst))) return true;
+  if (typeof window.clientHasConfirmedOverdueSinalSI === "function" && window.clientHasConfirmedOverdueSinalSI(client)) return true;
+  const insts = typeof window.listInstallmentsForSiCheck === "function"
+    ? window.listInstallmentsForSiCheck(client)
+    : [];
+  if (insts.length) return false;
   return client.hasUnpaidSinal === true;
 };
 
@@ -1867,7 +1879,10 @@ window.clientAppliesClausulaSuspensiva = function(client) {
     ? window.nexCcConfig(ccId || client.costCenterId, client.unitName)
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
-  if (!window.clientHasOverdueSinalSI(client)) return false;
+  const hasSi = typeof window.clientHasConfirmedOverdueSinalSI === "function"
+    ? window.clientHasConfirmedOverdueSinalSI(client)
+    : (typeof window.clientHasOverdueSinalSI === "function" && window.clientHasOverdueSinalSI(client));
+  if (!hasSi) return false;
   if (!window.clientIsZeroPercentPaid(client)) return false;
   const minDays = (typeof window.clausulaSuspensivaDias === "function")
     ? window.clausulaSuspensivaDias(cc)
@@ -2764,6 +2779,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "Compromissário (Associações)",
     "relacionamento_gestao": "Buscar Cliente",
     "relacionamento_autorizacao": "Autorização de escritura",
+    "relacionamento_terceiros": "Autorização de terceiros",
+    "relacionamento_vencimento": "Alteração de vencimento",
     "relacionamento_cessao": "Cessão de Direitos",
     "condicoes-pagamento": "Condições de Pagamento",
     "construcao-marketing": "Eventos",
@@ -2809,6 +2826,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compromissario_associacoes": "users-round",
     "relacionamento_gestao": "users",
     "relacionamento_autorizacao": "scroll-text",
+    "relacionamento_terceiros": "user-plus",
+    "relacionamento_vencimento": "calendar-clock",
     "relacionamento_cessao": "handshake",
     "condicoes-pagamento": "file-text",
     "construcao-marketing": "calendar",
@@ -4255,12 +4274,18 @@ window.applyPermissions = function(profileName) {
           || perms.sub_rel_geral_relacionamento_acessar === true;
         const relAlias = (
           (modKey === "sub_rel_geral_buscar_cliente_acessar" && relLegacy)
-          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar") && (
+          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar") && (
             relLegacy
             || perms.sub_rel_docs === true
             || perms.sub_rel_docs_autorizacao_escritura_acessar === true
             || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
             || perms.sub_rel_docs_autorizacao_escritura_editar === true
+            || perms.sub_rel_docs_autorizacao_terceiros_acessar === true
+            || perms.sub_rel_docs_autorizacao_terceiros_visualizar === true
+            || perms.sub_rel_docs_autorizacao_terceiros_editar === true
+            || perms.sub_rel_docs_alteracao_vencimento_acessar === true
+            || perms.sub_rel_docs_alteracao_vencimento_visualizar === true
+            || perms.sub_rel_docs_alteracao_vencimento_editar === true
             || perms.sub_rel_docs_cessao_direitos_acessar === true
             || perms.sub_rel_docs_cessao_direitos_visualizar === true
             || perms.sub_rel_docs_cessao_direitos_editar === true
@@ -4424,7 +4449,7 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
   }
-  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar") {
+  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar") {
     return perms.mod_rel === true
       || perms.sub_rel_geral === true
       || perms.sub_rel_geral_relacionamento_acessar === true
@@ -4434,6 +4459,12 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_docs_autorizacao_escritura_acessar === true
       || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
       || perms.sub_rel_docs_autorizacao_escritura_editar === true
+      || perms.sub_rel_docs_autorizacao_terceiros_acessar === true
+      || perms.sub_rel_docs_autorizacao_terceiros_visualizar === true
+      || perms.sub_rel_docs_autorizacao_terceiros_editar === true
+      || perms.sub_rel_docs_alteracao_vencimento_acessar === true
+      || perms.sub_rel_docs_alteracao_vencimento_visualizar === true
+      || perms.sub_rel_docs_alteracao_vencimento_editar === true
       || perms.sub_rel_docs_cessao_direitos_acessar === true
       || perms.sub_rel_docs_cessao_direitos_visualizar === true
       || perms.sub_rel_docs_cessao_direitos_editar === true;
@@ -4874,6 +4905,11 @@ async function initializeApplication() {
                  
                  if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
                  if (typeof updateDashboardHeader === 'function') updateDashboardHeader();
+                 window.agendaItemsCache = {};
+                 if (typeof renderAgendaCalendar === 'function') renderAgendaCalendar();
+                 if (typeof loadAgendaDayTasks === 'function' && window.lastSelectedAgendaDate) {
+                   loadAgendaDayTasks(window.lastSelectedAgendaDate);
+                 }
              } catch(e) {
                  console.error("[Firebase RT] Erro ao sincronizar shards iniciais:", e);
              } finally {
@@ -18755,6 +18791,18 @@ function numeroPorExtenso(n) {
   return milStr + (rest < 100 ? ' e ' : ' ') + ate999(rest);
 }
 
+window.dataPorExtenso = function(value) {
+  const key = typeof window.promiseDateKey === "function"
+    ? window.promiseDateKey(value)
+    : String(value || "").slice(0, 10);
+  const m = String(key || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const dia = typeof numeroPorExtenso === "function" ? numeroPorExtenso(Number(m[3])) : String(Number(m[3]));
+  const ano = typeof numeroPorExtenso === "function" ? numeroPorExtenso(Number(m[1])) : m[1];
+  return dia + " de " + meses[Number(m[2]) - 1] + " de " + ano;
+};
+
 function valorPorExtensoBRL(valor) {
   const v = Math.round((Number(valor) || 0) * 100) / 100;
   const reais = Math.floor(v);
@@ -19219,6 +19267,7 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
       : "",
     CIDADE_LOTEAMENTO: cidadeLote,
     CIDADE_ATUAL: "Botucatu",
+    DATA_HOJE: new Date().toLocaleDateString("pt-BR"),
     DATA_HOJE_EXTENSO: dateExt,
     DATA_ATUAL_EXTENSO: dateExt,
     PREAMBULO: preamble,
@@ -21078,8 +21127,12 @@ async function loadAgendaTab(showLoader = false) {
 
   if (selectedOperator !== "Todos") {
       agendaCustomerIds = agendaCustomerIds.filter(id => {
-          const occList = AppState.notes[id] || [];
-          return occList.some(occ => normalizeStr(occ.author || "OUTROS") === selOp);
+          const occList = window.getCustomerNotesList
+            ? window.getCustomerNotesList(AppState.notes, id)
+            : (AppState.notes[id] || []);
+          return occList.some(occ => window.occurrenceAuthorMatchesOperator
+            ? window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)
+            : normalizeStr(occ.author || "OUTROS") === selOp);
       });
   }
 
@@ -21171,10 +21224,12 @@ async function loadAgendaTab(showLoader = false) {
   
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
   
-  Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
+  Object.entries(AppState.notes).forEach(([custIdStr, occListRaw]) => {
+    const occList = Array.isArray(occListRaw)
+      ? occListRaw
+      : (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, custIdStr) : []);
     const custId = Number(custIdStr);
-    const customer = customers[custId];
-    if (!customer) return;
+    const customer = customers[custId] || customers[custIdStr] || { name: 'Cliente ' + custIdStr };
     
     occList.forEach(occ => {
       if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
@@ -21311,7 +21366,7 @@ async function loadAgendaTab(showLoader = false) {
   }
   
   renderAgendaCalendar();
-  const selectTodayStr = selectedAgendaDate.toISOString().split("T")[0];
+  const selectTodayStr = window.localDateStr(selectedAgendaDate);
   loadAgendaDayTasks(selectTodayStr);
   } finally {
     const loader = document.getElementById("agenda-loader-overlay");
@@ -21356,8 +21411,6 @@ async function renderAgendaCalendar() {
   const globalSearch = document.getElementById("dashboard-search-input")?.value || "";
   const searchFilter = (agendaSearch || globalSearch).toLowerCase().trim();
   const typeFilter = window.agendaFilterType || "todas";
-  
-  const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
 
   for (let day = 1; day <= totalDays; day++) {
     const cellDate = new Date(year, month, day);
@@ -21386,40 +21439,10 @@ async function renderAgendaCalendar() {
       cell.classList.add("selected");
     }
     
-    let hasPendingTask = false;
-    Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
-      const custId = Number(custIdStr);
-      const customer = customers[custId];
-      occList.forEach(occ => {
-        if (window.promiseDateKey(occ.promiseDate) === cellDateStr && occ.promiseStatus === "Pendente" && occ.status !== "Cancelada") {
-           // Apply Filters
-           if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
-           if (typeFilter !== "todas") {
-             if (typeFilter === "promessa" && (!occ.promiseDate)) return;
-             if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
-           }
-           let salesList = customer ? (customer.sales || []) : [];
-           let occSaleId = occ.saleId || occ.contractId || '';
-           let finalSale = salesList.find(s => String(s.id) === String(occSaleId)) || salesList[0];
-           let cleanUnit = occ.unitId || (finalSale ? finalSale.unitId : '') || 'N/D';
-           
-           if (searchFilter) {
-             const custName = customer ? customer.name.toLowerCase() : "";
-             const titleInfo = occSaleId.toString().toLowerCase();
-             const recBillInfo = (finalSale && finalSale.receivableBillId ? finalSale.receivableBillId.toString().toLowerCase() : "");
-             const unitInfo = cleanUnit.toString().toLowerCase();
-             
-             if (!custName.includes(searchFilter) && 
-                 !titleInfo.includes(searchFilter) && 
-                 !recBillInfo.includes(searchFilter) && 
-                 !unitInfo.includes(searchFilter)) {
-               return;
-             }
-           }
-           hasPendingTask = true;
-        }
-      });
-    });
+    const dueItems = typeof window.collectAgendaDueItems === "function"
+      ? window.collectAgendaDueItems(cellDateStr, { selectedOperator, searchFilter, typeFilter, pendingOnly: true })
+      : [];
+    const hasPendingTask = dueItems.length > 0;
     
     if (hasPendingTask) {
       const badge = document.createElement("span");
@@ -21496,7 +21519,148 @@ window.localDateStr = function(dateObj) {
 };
 
 window.promiseDateKey = function(value) {
-    return String(value || '').slice(0, 10);
+    if (!value) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return window.localDateStr(value);
+    }
+    const raw = String(value).trim();
+    if (!raw) return '';
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+    const br = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (br) return br[3] + '-' + String(br[2]).padStart(2, '0') + '-' + String(br[1]).padStart(2, '0');
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return window.localDateStr(parsed);
+    return raw.slice(0, 10);
+};
+
+window.occurrenceDueDateKey = function(occ) {
+    if (!occ) return '';
+    return window.promiseDateKey(occ.promiseDate || occ.checkPaymentDate || occ.prazo);
+};
+
+window.agendaNotesSignature = function() {
+    const store = (window.AppState && AppState.notes) || {};
+    let notes = 0;
+    let due = 0;
+    Object.keys(store).forEach(k => {
+      const list = Array.isArray(store[k]) ? store[k] : [];
+      notes += list.length;
+      list.forEach(o => { if (o && window.occurrenceDueDateKey(o)) due += 1; });
+    });
+    return notes + ':' + due;
+};
+
+window.collectAgendaDueItems = function(dateStr, opts) {
+    opts = opts || {};
+    const dateKey = window.promiseDateKey(dateStr);
+    if (!dateKey) return [];
+    const selectedOperator = opts.selectedOperator || 'Todos';
+    const searchFilter = String(opts.searchFilter || '').toLowerCase().trim();
+    const typeFilter = opts.typeFilter || 'todas';
+    const pendingOnly = !!opts.pendingOnly;
+    const customers = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === 'simulado')
+      ? ((window.MOCK_DATA && window.MOCK_DATA.CUSTOMERS) || {})
+      : ((window.AppState && AppState.customers) || {});
+    const salesList = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === 'simulado')
+      ? ((window.MOCK_DATA && window.MOCK_DATA.SALES) || [])
+      : ((window.AppState && AppState.sales) || []);
+    const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) || [];
+    const store = (window.AppState && AppState.notes) || {};
+    const visited = new Set();
+    const seenOcc = new Set();
+    const items = [];
+
+    Object.keys(store).forEach(custIdStr => {
+      const norm = window.normalizeCustomerNotesKey ? window.normalizeCustomerNotesKey(custIdStr) : String(custIdStr);
+      if (visited.has(norm)) return;
+      visited.add(norm);
+      const occList = window.getCustomerNotesList
+        ? window.getCustomerNotesList(store, custIdStr)
+        : (Array.isArray(store[custIdStr]) ? store[custIdStr] : []);
+      const customer = customers[custIdStr] || customers[Number(custIdStr)] || customers[norm] || null;
+
+      occList.forEach((occ, index) => {
+        if (!occ || occ.status === 'Cancelada') return;
+        const due = window.occurrenceDueDateKey(occ);
+        if (due !== dateKey) return;
+        if (pendingOnly && occ.promiseStatus !== 'Pendente') return;
+        if (selectedOperator !== 'Todos' && typeof window.occurrenceAuthorMatchesOperator === 'function'
+            && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
+        if (typeFilter !== 'todas') {
+          if (typeFilter === 'promessa' && !occ.promiseDate && !occ.checkPaymentDate) return;
+          if (typeFilter !== 'promessa' && String(occ.canal || '').toLowerCase() !== typeFilter) return;
+        }
+
+        let occSaleId = occ.saleId || occ.contractId || '';
+        let sale = salesList.find(s => String(s.id) === String(occSaleId) || String(s.receivableBillId) === String(occSaleId));
+        if (!sale) sale = salesList.find(s => String(s.customerId) === String(custIdStr) || String(s.customerId) === String(norm));
+        if (!sale) sale = mockSales.find(s => String(s.id) === String(occSaleId) || String(s.customerId) === String(custIdStr)) || { id: null, unitId: '' };
+        if (!occSaleId) occSaleId = sale.id || 'N/D';
+
+        let rawUnitId = occ.unitId || sale.unitId || 'N/D';
+        let cleanUnit = rawUnitId;
+        let displayUnit = cleanUnit;
+        if (rawUnitId && AppState.units && AppState.units[rawUnitId]) {
+          const uObj = AppState.units[rawUnitId];
+          if (uObj.costCenterId) {
+            let uName = '';
+            if (cleanUnit && (String(cleanUnit).startsWith('U-') || String(cleanUnit).startsWith('u-'))) {
+              const parts = String(cleanUnit).substring(2).split('-');
+              uName = parts.length >= 2 ? parts.slice(1).join('-') : parts[0];
+            } else {
+              uName = cleanUnit;
+            }
+            displayUnit = uObj.costCenterId + ' - ' + uName;
+          }
+        }
+        if (displayUnit === cleanUnit && cleanUnit && (String(cleanUnit).startsWith('U-') || String(cleanUnit).startsWith('u-'))) {
+          cleanUnit = String(cleanUnit).substring(2);
+          const parts = cleanUnit.split('-');
+          displayUnit = parts.length >= 2 ? parts.slice(1).join('-') : cleanUnit;
+        }
+
+        if (searchFilter) {
+          const custName = String((customer && customer.name) || occ.customerName || '').toLowerCase();
+          const titleInfo = String(occSaleId).toLowerCase();
+          const recBillInfo = String(sale.receivableBillId || '').toLowerCase();
+          const unitInfo = String(cleanUnit).toLowerCase();
+          if (!custName.includes(searchFilter) && !titleInfo.includes(searchFilter)
+              && !recBillInfo.includes(searchFilter) && !unitInfo.includes(searchFilter)) return;
+        }
+
+        const ident = (typeof window.occurrenceIdentity === 'function')
+          ? window.occurrenceIdentity(occ)
+          : String(occ.id || (occ.date + '|' + occ.author + '|' + due));
+        const seenKey = norm + '|' + ident;
+        if (seenOcc.has(seenKey)) return;
+        seenOcc.add(seenKey);
+
+        const occDate = occ.date ? new Date(occ.date) : new Date();
+        const diffTime = Math.abs(new Date() - occDate);
+        const daysAgo = Number.isNaN(diffTime) ? 0 : Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const cpfRaw = (customer && (customer.cpf || customer.cnpj)) || '';
+        const cpfMasked = cpfRaw ? String(cpfRaw).replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
+
+        items.push({
+          customerId: customer && customer.id != null ? customer.id : (Number(norm) || norm),
+          customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + norm),
+          cpf: cpfMasked,
+          saleId: (sale && sale.receivableBillId) ? sale.receivableBillId : occSaleId,
+          unitId: displayUnit,
+          promiseDate: occ.promiseDate || occ.checkPaymentDate || occ.prazo,
+          promiseStatus: occ.promiseStatus || 'Pendente',
+          reminder: occ.reminder || (occ.checkPayment ? 'Checar pagamento' : 'Retorno de Cobrança'),
+          text: occ.text || '',
+          date: occ.date,
+          daysAgo: daysAgo,
+          occIndex: index,
+          agendaAlert: occ.agendaAlert,
+          isFila: false
+        });
+      });
+    });
+    return items;
 };
 
 window.recordBarrigaSeal = function(operator, dateStr) {
@@ -22043,10 +22207,7 @@ async function loadAgendaDayTasks(dateStr) {
   }
   
   window.lastSelectedAgendaDate = dateStr;
-  
-  const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
-  const salesList = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.SALES : (AppState.sales || []);
-  
+
   let dayItems = [];
   
   // Use window.AgendaSelectedOperator as source of truth (DOM select may be hidden for operators)
@@ -22081,10 +22242,13 @@ window.fireConfetti = function() {
 };
 
   window.agendaItemsCache = window.agendaItemsCache || {};
-  const cacheKey = "v3|" + dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter;
+  const notesSig = typeof window.agendaNotesSignature === "function" ? window.agendaNotesSignature() : "";
+  const cacheKey = "v4|" + dateStr + "|" + selectedOperator + "|" + searchFilter + "|" + typeFilter + "|" + notesSig;
+  const cachedDay = window.agendaItemsCache[cacheKey];
+  const canUseAgendaCache = Array.isArray(cachedDay) && cachedDay.length > 0 && !window._isNotesHydrating;
 
-  if (window.agendaItemsCache[cacheKey]) {
-      dayItems = [...window.agendaItemsCache[cacheKey]];
+  if (canUseAgendaCache) {
+      dayItems = [...cachedDay];
   } else {
       body.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:50px; color:var(--color-text-muted);">
     <style>
@@ -22135,117 +22299,23 @@ window.fireConfetti = function() {
     </div>
   </td></tr>`;
 
-      Object.entries(AppState.notes).forEach(([custIdStr, occList]) => {
-        const custId = Number(custIdStr);
-        const customer = customers[custId];
-        
-        const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) ? window.MOCK_DATA.SALES : [];
-        let sale = salesList.find(s => String(s.customerId) === String(custId));
-        if (!sale) {
-          sale = mockSales.find(s => String(s.customerId) === String(custId)) || { id: null, unitId: "" };
-        }
-        const unit = AppState.units[sale.unitId] || { block: "N/D", lot: "N/D" };
-        
-        occList.forEach((occ, index) => {
-          if (window.promiseDateKey(occ.promiseDate) === dateStr && occ.status !== "Cancelada") {
-            
-            // Aplicação dos Filtros
-            if (selectedOperator !== "Todos" && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
-            if (typeFilter !== "todas") {
-               if (typeFilter === "promessa" && (!occ.promiseDate)) return;
-               if (typeFilter !== "promessa" && (occ.canal || "").toLowerCase() !== typeFilter) return;
-            }
-            let occSaleId = occ.saleId || occ.contractId || sale.id;
-            if (!occSaleId) occSaleId = 'N/D';
-            let finalSale = salesList.find(s => String(s.id) === String(occSaleId));
-            if (!finalSale) finalSale = mockSales.find(s => String(s.id) === String(occSaleId)) || sale;
-            let rawUnitId = occ.unitId || finalSale.unitId || 'N/D';
-            let cleanUnit = rawUnitId;
-            
-            let displayUnit = cleanUnit;
-            if (rawUnitId && AppState.units && AppState.units[rawUnitId]) {
-                const uObj = AppState.units[rawUnitId];
-                if (uObj.costCenterId) {
-                    let uName = "";
-                    if (cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
-                        const parts = cleanUnit.substring(2).split('-');
-                        if (parts.length >= 2) {
-                            uName = parts.slice(1).join('-'); 
-                        } else {
-                            uName = parts[0];
-                        }
-                    } else {
-                        uName = cleanUnit;
-                    }
-                    displayUnit = uObj.costCenterId + " - " + uName;
-                }
-            }
-            
-            if (displayUnit === cleanUnit && cleanUnit && (cleanUnit.startsWith('U-') || cleanUnit.startsWith('u-'))) {
-              cleanUnit = cleanUnit.substring(2);
-              const parts = cleanUnit.split('-');
-              if (parts.length >= 2) displayUnit = parts.slice(1).join('-');
-              else displayUnit = cleanUnit;
-            }
-            
-            if (searchFilter) {
-               const custName = (customer && customer.name ? customer.name : '').toLowerCase();
-               const titleInfo = occSaleId.toString().toLowerCase();
-               const recBillInfo = (finalSale.receivableBillId || "").toString().toLowerCase();
-               const unitInfo = cleanUnit.toString().toLowerCase();
-               
-               if (!custName.includes(searchFilter) && 
-                   !titleInfo.includes(searchFilter) && 
-                   !recBillInfo.includes(searchFilter) && 
-                   !unitInfo.includes(searchFilter)) {
-                 return;
-               }
-            }
+      dayItems = typeof window.collectAgendaDueItems === "function"
+        ? window.collectAgendaDueItems(dateStr, { selectedOperator, searchFilter, typeFilter, pendingOnly: false })
+        : [];
 
-            const occDate = new Date(occ.date);
-            const diffTime = Math.abs(new Date() - occDate);
-            const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-            const cpfRaw = (customer && (customer.cpf || customer.cnpj)) || '';
-            const cpfMasked = cpfRaw ? cpfRaw.replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
-
-            const bulkTxt = String(occ.text || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            const isBulkMsg = bulkTxt.includes('ENCAMINHADA UMA MENSAGEM DE COBRANCA');
-            if (isBulkMsg) return;
-
-            dayItems.push({
-              customerId: custId,
-              customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + custId),
-              cpf: cpfMasked,
-              saleId: (finalSale && finalSale.receivableBillId) ? finalSale.receivableBillId : occSaleId,
-              unitId: displayUnit,
-              promiseDate: occ.promiseDate,
-              promiseStatus: occ.promiseStatus,
-              reminder: occ.reminder || "Retorno de Cobrança",
-              text: occ.text || "",
-              date: occ.date,
-              daysAgo: daysAgo,
-              occIndex: index,
-              agendaAlert: occ.agendaAlert
-            });
-          }
-        });
-      });
-      
-      if (window.generateDailyQueue) {
-        if (dateStr === window.getActiveQueueDate() && selectedOperator !== "Todos") {
+      if (window.generateDailyQueue && dateStr === window.getActiveQueueDate() && selectedOperator !== "Todos") {
             const queueItems = await window.generateDailyQueue(selectedOperator, dateStr);
             const inQueue = new Set((queueItems || []).map(q => String(q.customerId) + '|' + String(q.saleId)));
-            dayItems = dayItems.filter(n => {
+            const leftovers = dayItems.filter(n => {
               const k = String(n.customerId) + '|' + String(n.saleId);
-              if (inQueue.has(k) || inQueue.has(String(n.customerId) + '|' + String(n.saleId))) return false;
-              return n.promiseStatus === "Pendente";
+              return !inQueue.has(k);
             });
-            dayItems = [...(queueItems || []), ...dayItems];
-        }
+            dayItems = [...(queueItems || []), ...leftovers];
       }
-      
-      window.agendaItemsCache[cacheKey] = [...dayItems];
+
+      if (!window._isNotesHydrating) {
+        window.agendaItemsCache[cacheKey] = [...dayItems];
+      }
   }
 
   const hideResolvedEl = document.getElementById("agenda-hide-resolved");
@@ -32187,6 +32257,8 @@ async function saveDocPadrao(tipo) {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -32242,6 +32314,8 @@ async function previewDocPadrao(tipo) {
     suspensao: 'Suspensão de Contrato',
     distrato: 'Distrato / Rescisão',
     escritura: 'Autorização de Escritura',
+    terceiros: 'Autorização de Terceiros',
+    vencimento: 'Alteração de Vencimento',
   };
   const label = labelMap[tipo] || tipo;
   const fillLegalPreview = async (rawText) => {
@@ -32310,6 +32384,16 @@ async function previewDocPadrao(tipo) {
     const corpo = document.getElementById('doc-escritura-corpo')?.value || '';
     const filled = await fillLegalPreview(corpo);
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+  } else if (tipo === 'terceiros') {
+    const title = document.getElementById('doc-terceiros-title')?.value || '';
+    const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
+    const filled = await fillLegalPreview(corpo);
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+  } else if (tipo === 'vencimento') {
+    const title = document.getElementById('doc-vencimento-title')?.value || '';
+    const corpo = document.getElementById('doc-vencimento-corpo')?.value || '';
+    const filled = await fillLegalPreview(corpo);
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -32340,7 +32424,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'terceiros', 'vencimento'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -32349,6 +32433,8 @@ async function loadDocPadraoTemplates() {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
+    terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
+    vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {

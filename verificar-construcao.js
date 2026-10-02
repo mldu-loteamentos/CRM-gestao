@@ -465,6 +465,25 @@ function _vcResolveObraEntry(state, costCenterId, empName) {
     return { isOn: false, previsao: '' };
 }
 
+function _vcClientIsSubjudice(c) {
+    if (!c) return false;
+    if (typeof window.clientIsSubjudice === 'function') return !!window.clientIsSubjudice(c);
+    return c.subjudice === 'S' || c.subjudice === true;
+}
+
+function _vcRowIsSubjudice(r) {
+    if (!r) return false;
+    if (r.subjudice === true || r.subjudice === 'S') return true;
+    if (r.vistoriaAtiva && (r.vistoriaAtiva.subjudice === true || r.vistoriaAtiva.subjudice === 'S')) return true;
+    return false;
+}
+
+function _vcRowIsObraDispensed(r, obras) {
+    if (!r) return false;
+    const state = obras || _vcReadObrasState();
+    return !!_vcResolveObraEntry(state, r.costCenterId, r.empreendimento).isOn;
+}
+
 function _vcCollectOverdueCostCenters() {
     const clients = window.rawClientList || [];
     const map = new Map();
@@ -597,6 +616,9 @@ window.VerificarConstrucaoApp = {
                 if (cloud !== local) {
                     localStorage.setItem('crm_obras_andamento', cloud);
                     if (document.getElementById('vc-tbody')) this.renderTable();
+                    if (typeof window._vcUpdateSprintCountsFromRows === 'function') {
+                        window._vcUpdateSprintCountsFromRows(this.allRows);
+                    }
                     if (typeof window.renderAlcadaDistratoTab === 'function' && document.getElementById('content-regra-alcada-distrato')) {
                         const pane = document.getElementById('content-regra-alcada-distrato');
                         if (pane && pane.style.display !== 'none') window.renderAlcadaDistratoTab();
@@ -656,19 +678,11 @@ window.VerificarConstrucaoApp = {
                         <button class="btn btn-outline" style="border-color: #0f766e; color: #0f766e;" onclick="window.openVistoriaRecurrenceModal()">
                             <i data-lucide="refresh-cw" style="width: 16px;"></i> Recorrência de Vistoria
                         </button>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 5px;">
-                            <div style="position: relative; width: 34px; height: 20px;">
-                                <input type="checkbox" id="vc-include-subjudice" onchange="window.VerificarConstrucaoApp.loadData()" style="opacity: 0; width: 0; height: 0; position: absolute;">
-                                <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
-                                    <span class="vc-toggle-knob" style="position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.3);"></span>
-                                </span>
-                            </div>
-                            <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">Incluir Sub Judice</span>
+                        <label class="moura-switch">
+                            <input type="checkbox" id="vc-include-subjudice" onchange="window.VerificarConstrucaoApp.renderTable()">
+                            <span class="moura-switch-track" aria-hidden="true"></span>
+                            <span class="moura-switch-text">Incluir Sub Judice</span>
                         </label>
-                        <style>
-                            #vc-include-subjudice:checked + span { background-color: #0f766e !important; }
-                            #vc-include-subjudice:checked + span .vc-toggle-knob { transform: translateX(14px); }
-                        </style>
                     </div>
                     <div>
                         <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:10px 24px; border:none; background:linear-gradient(135deg, #16a34a 0%, #15803d 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(22,163,74,0.4); opacity:0.5; transition:all 0.2s;" onmouseover="if(!this.disabled) { this.style.opacity='1'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(22,163,74,0.5)'; }" onmouseout="if(!this.disabled) { this.style.opacity='1'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; } else { this.style.opacity='0.5'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; }">
@@ -862,7 +876,6 @@ window.VerificarConstrucaoApp = {
                 }
             }
 
-            const includeSubjudice = document.getElementById('vc-include-subjudice') ? document.getElementById('vc-include-subjudice').checked : false;
             const supersededLinkKeys = [];
 
             const elegiveis = clients.filter(c => {
@@ -872,8 +885,6 @@ window.VerificarConstrucaoApp = {
 
                 const maxDelay = parseInt(c.maxDaysDelay) || 0;
                 if (maxDelay < thresholdDays) return false;
-                
-                if (!includeSubjudice && (c.subjudice === 'S' || c.subjudice === true)) return false;
 
                 const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
                 const daysSinceCheck = _vcDaysSince(latestCheckDate);
@@ -980,7 +991,8 @@ window.VerificarConstrucaoApp = {
                     empreendimento, empLabel, unidade,
                     clienteName, titulo, tituloKey, contractNumberStr, realSaleIdStr,
                     parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
-                    statusLabel, statusColor, solicitadoHa, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys
+                    statusLabel, statusColor, solicitadoHa, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys,
+                    subjudice: _vcClientIsSubjudice(c)
                 });
             });
 
@@ -1007,6 +1019,7 @@ window.VerificarConstrucaoApp = {
                 if (existing) {
                     existing.vistoriaAtiva = v;
                     existing.hasConstruction = false;
+                    if (v.subjudice === true || v.subjudice === 'S') existing.subjudice = true;
                     if (v.status === 'aguardando_validacao') {
                         existing.statusLabel = 'Aguardando Validação';
                         existing.statusColor = 'color: #7c3aed; font-weight: 600;';
@@ -1060,7 +1073,8 @@ window.VerificarConstrucaoApp = {
                     vistoriaAtiva: v,
                     originalIdx: rows.length,
                     hasConstruction: false,
-                    contractKeys: vKeys
+                    contractKeys: vKeys,
+                    subjudice: _vcClientIsSubjudice(client) || v.subjudice === true || v.subjudice === 'S'
                 });
                 seenPendingIds.add(v.id);
             });
@@ -1078,10 +1092,9 @@ window.VerificarConstrucaoApp = {
             }
 
             this.renderTable();
-
-            const enviarN = rows.filter(r => r.statusLabel === 'Pendente de Vistoria').length;
-            const validarN = rows.filter(r => r.statusLabel === 'Aguardando Validação').length;
-            window._vistoriaSprintCounts = { enviar: enviarN, validar: validarN, at: Date.now() };
+            if (typeof window._vcUpdateSprintCountsFromRows === 'function') {
+                window._vcUpdateSprintCountsFromRows(rows);
+            }
 
             loading.style.display = 'none';
             results.style.display = 'block';
@@ -1297,7 +1310,9 @@ window.VerificarConstrucaoApp = {
         const tbody = document.getElementById('vc-tbody');
         if (!tbody || !this.allRows) return;
 
+        const includeSubjudice = !!(document.getElementById('vc-include-subjudice') && document.getElementById('vc-include-subjudice').checked);
         let filtered = this.allRows.filter(r => {
+            if (!includeSubjudice && _vcRowIsSubjudice(r)) return false;
             if (this.activeFilters.cidade !== 'Todos' && r.cidade !== this.activeFilters.cidade) return false;
             if (this.activeFilters.empreendimento !== 'Todos' && r.empreendimento !== this.activeFilters.empreendimento) return false;
             if (this.activeFilters.status !== 'Todos' && r.statusLabel !== this.activeFilters.status) return false;
@@ -1397,7 +1412,7 @@ window.VerificarConstrucaoApp = {
                                     <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''} style="accent-color: #16a34a;">
                                 </td>
                                 <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
-                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}</td>
+                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}${_vcRowIsSubjudice(u) ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:0.68rem;font-weight:700;margin-left:4px;">Sub Judice</span>' : ''}</td>
                                 <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
                                 <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
                                 <td style="padding: 10px 12px; text-align: left; vertical-align: middle;">${lastVistoriaHtml}</td>
@@ -1486,11 +1501,9 @@ window.VerificarConstrucaoApp = {
                         <div>
                             <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label} ${badgeNew}</div>
                         </div>
-                        <label id="${toggleId}-label" style="position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; cursor: pointer;">
-                            <input type="checkbox" id="${toggleId}" style="opacity: 0; width: 0; height: 0;" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
-                            <span id="${toggleId}-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${isOn ? '#16a34a' : '#cbd5e1'}; border-radius: 26px; transition: .3s;">
-                                <span style="position: absolute; height: 20px; width: 20px; left: ${isOn ? '24px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 4px rgba(0,0,0,0.2);" id="${toggleId}-thumb"></span>
-                            </span>
+                        <label class="moura-switch" id="${toggleId}-label" title="Ligar/desligar vistoria do empreendimento">
+                            <input type="checkbox" id="${toggleId}" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
+                            <span class="moura-switch-track" aria-hidden="true"></span>
                         </label>
                     </div>
                     <div id="${toggleId}-date-container" style="display: ${isOn ? 'flex' : 'none'}; align-items: center; gap: 8px; margin-top: 4px;">
@@ -1508,18 +1521,13 @@ window.VerificarConstrucaoApp = {
     _onToggleObraChange(input) {
         const emp = input.dataset.emp;
         const checked = input.checked;
-        const id = input.id;
-        const track = document.getElementById(id + '-track');
-        const thumb = document.getElementById(id + '-thumb');
-        const dateContainer = document.getElementById(id + '-date-container');
-        if (track) track.style.backgroundColor = checked ? '#16a34a' : '#cbd5e1';
-        if (thumb) thumb.style.left = checked ? '24px' : '3px';
+        const dateContainer = document.getElementById(input.id + '-date-container');
         if (dateContainer) dateContainer.style.display = checked ? 'flex' : 'none';
-        
+
         if (!this._tempObrasState) this._tempObrasState = {};
         if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
         this._tempObrasState[emp].isOn = checked;
-        this._tempObrasState[emp].isNew = false; // remove the NEW badge state once interacted
+        this._tempObrasState[emp].isNew = false;
     },
 
     _onPrevisaoChange(emp, val) {
@@ -1546,6 +1554,9 @@ window.VerificarConstrucaoApp = {
         }
         document.getElementById('modal-obras-andamento').style.display = 'none';
         this.renderTable();
+        if (typeof window._vcUpdateSprintCountsFromRows === 'function') {
+            window._vcUpdateSprintCountsFromRows(this.allRows);
+        }
         if (typeof window.renderAlcadaDistratoTab === 'function' && document.getElementById('content-regra-alcada-distrato')) {
             window.renderAlcadaDistratoTab();
         }
@@ -2247,11 +2258,13 @@ window.checkVistoriasValidationAlerts = async function(isTest = false) {
     }
 
     const all = await window.fetchVistoriasAguardandoValidacao();
-    const pendingIds = all.map(v => String(v.id));
+    const obras = _vcReadObrasState();
+    const visible = (all || []).filter(v => !_vcResolveObraEntry(obras, v.costCenterId, v.empreendimento).isOn);
+    const pendingIds = visible.map(v => String(v.id));
     const ack = window.getVistoriaAlertAckIds().filter(id => pendingIds.includes(String(id)));
     window.setVistoriaAlertAckIds(ack);
     const ackSet = new Set(ack);
-    const pending = all.filter(v => !ackSet.has(String(v.id)));
+    const pending = visible.filter(v => !ackSet.has(String(v.id)));
 
     if (!pending.length) {
         if (isTest) alert("Nenhuma vistoria aguardando validação no momento.");
@@ -2305,39 +2318,53 @@ window.startVistoriaValidationAlertListener = function() {
     }
 };
 
+window._vcEmptySprintCounts = function() {
+    return { enviar: 0, validar: 0, enviarSubjudice: 0, validarSubjudice: 0, at: Date.now() };
+};
+
 window._vcUpdateSprintCountsFromRows = function(rows) {
     const list = rows || (window.VerificarConstrucaoApp && window.VerificarConstrucaoApp.allRows) || [];
-    const enviar = list.filter(r => r.statusLabel === 'Pendente de Vistoria').length;
-    const validar = list.filter(r => r.statusLabel === 'Aguardando Validação').length;
-    window._vistoriaSprintCounts = { enviar, validar, at: Date.now() };
-    return window._vistoriaSprintCounts;
+    const obras = _vcReadObrasState();
+    const counts = window._vcEmptySprintCounts();
+    list.forEach(r => {
+        if (_vcRowIsObraDispensed(r, obras)) return;
+        const sj = _vcRowIsSubjudice(r);
+        if (r.statusLabel === 'Pendente de Vistoria') {
+            if (sj) counts.enviarSubjudice += 1;
+            else counts.enviar += 1;
+        } else if (r.statusLabel === 'Aguardando Validação') {
+            if (sj) counts.validarSubjudice += 1;
+            else counts.validar += 1;
+        }
+    });
+    window._vistoriaSprintCounts = counts;
+    return counts;
 };
 
 window.refreshVistoriaSprintCounts = async function() {
     if (window.VerificarConstrucaoApp && Array.isArray(window.VerificarConstrucaoApp.allRows) && window.VerificarConstrucaoApp.allRows.length) {
         return window._vcUpdateSprintCountsFromRows(window.VerificarConstrucaoApp.allRows);
     }
-    let validar = 0;
-    let enviar = 0;
     try {
-        const waiting = typeof window.fetchVistoriasAguardandoValidacao === 'function'
-            ? await window.fetchVistoriasAguardandoValidacao()
-            : [];
-        validar = (waiting || []).length;
-    } catch (e) {}
-    try {
-        enviar = await window._vcCountPendentesEnvio();
-    } catch (e) {}
-    window._vistoriaSprintCounts = { enviar, validar, at: Date.now() };
-    return window._vistoriaSprintCounts;
+        const counts = await window._vcComputeSprintCountsFallback();
+        window._vistoriaSprintCounts = counts;
+        return counts;
+    } catch (e) {
+        window._vistoriaSprintCounts = window._vcEmptySprintCounts();
+        return window._vistoriaSprintCounts;
+    }
 };
 
-window._vcCountPendentesEnvio = async function() {
+window._vcComputeSprintCountsFallback = async function() {
     const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
     const thresholdDays = _vcGetThreshold();
     const recurrenceDays = _vcGetRecurrenceDays();
+    const obras = _vcReadObrasState();
     const checksByContract = {};
+    const completedChecksByContract = {};
     const latestCheckDateByContract = {};
+    const pendingDocs = [];
+
     if (window.firebaseDb && window.firebaseCollections) {
         try {
             const { collection, getDocs, query, where } = window.firebaseCollections;
@@ -2345,25 +2372,84 @@ window._vcCountPendentesEnvio = async function() {
             const snap = await getDocs(q);
             snap.forEach(docSnap => {
                 const data = { id: docSnap.id, ...docSnap.data() };
+                if (data.isTest) return;
+                pendingDocs.push(data);
                 _vcDocIdentityKeys(data).forEach(k => {
-                    checksByContract[String(k)] = data;
+                    if (!checksByContract[String(k)]) checksByContract[String(k)] = data;
+                });
+            });
+            const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
+            snapChecks.forEach(docSnap => {
+                const data = docSnap.data();
+                if (!data.stage || !String(data.stage).trim()) return;
+                const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
+                const keysToSet = _vcDocIdentityKeys(data);
+                if (!keysToSet.length && data.contractId) keysToSet.push(String(data.contractId));
+                keysToSet.forEach(key => {
+                    const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
+                    if (!prevDate || cDate >= prevDate) {
+                        latestCheckDateByContract[key] = cDate;
+                        const stageUpper = String(data.stage).trim().toUpperCase();
+                        completedChecksByContract[key] = !(stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO');
+                    }
                 });
             });
         } catch (e) {}
     }
-    let enviar = 0;
+
+    const counts = window._vcEmptySprintCounts();
+    const bump = (kind, sj) => {
+        if (kind === 'enviar') {
+            if (sj) counts.enviarSubjudice += 1;
+            else counts.enviar += 1;
+        } else if (kind === 'validar') {
+            if (sj) counts.validarSubjudice += 1;
+            else counts.validar += 1;
+        }
+    };
+    const seenValidar = new Set();
+
     clients.forEach(c => {
         const keys = _vcClientLookupKeys(c);
+        const ccId = _vcExtractCostCenterId(c);
+        const empName = _vcEmpNameFromCc(ccId);
+        if (_vcResolveObraEntry(obras, ccId, empName).isOn) return;
+        const sj = _vcClientIsSubjudice(c);
         const pendingRaw = keys.map(k => checksByContract[String(k)]).find(Boolean) || null;
-        if (_vcIsFollowupPending(pendingRaw)) return;
+        if (_vcIsFollowupPending(pendingRaw)) {
+            if (pendingRaw.status === 'aguardando_validacao' && pendingRaw.id && !seenValidar.has(pendingRaw.id)) {
+                seenValidar.add(pendingRaw.id);
+                bump('validar', sj);
+            }
+            return;
+        }
         const maxDelay = parseInt(c.maxDaysDelay) || 0;
         if (maxDelay < thresholdDays) return;
         const latestCheckDate = _vcLatestDateAmong(keys, latestCheckDateByContract);
         const daysSinceCheck = _vcDaysSince(latestCheckDate);
         if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) return;
-        enviar += 1;
+        if (keys.some(k => completedChecksByContract[k])) return;
+        bump('enviar', sj);
     });
-    return enviar;
+
+    pendingDocs.forEach(v => {
+        if (!_vcIsFollowupPending(v) || v.status !== 'aguardando_validacao') return;
+        if (v.id && seenValidar.has(v.id)) return;
+        const ccId = v.costCenterId || '';
+        const empName = v.empreendimento || '';
+        if (_vcResolveObraEntry(obras, ccId, empName).isOn) return;
+        if (v.id) seenValidar.add(v.id);
+        const vKeys = _vcDocIdentityKeys(v);
+        const client = (clients || []).find(c => _vcClientLookupKeys(c).some(k => vKeys.includes(String(k))));
+        bump('validar', _vcClientIsSubjudice(client) || v.subjudice === true || v.subjudice === 'S');
+    });
+
+    return counts;
+};
+
+window._vcCountPendentesEnvio = async function() {
+    const counts = await window.refreshVistoriaSprintCounts();
+    return (Number(counts && counts.enviar) || 0) + (Number(counts && counts.enviarSubjudice) || 0);
 };
 
 window.ensureVistoriaSendAlertModal = function() {
@@ -2483,6 +2569,7 @@ window.checkVistoriaSendAlerts = async function(isTest) {
     }
     const counts = await window.refreshVistoriaSprintCounts();
     const enviar = Number(counts && counts.enviar) || 0;
+    const enviarSj = Number(counts && counts.enviarSubjudice) || 0;
     if (!enviar) {
         const existing = document.getElementById("modal-vistoria-send-alerts");
         if (existing) existing.style.display = "none";
@@ -2497,7 +2584,9 @@ window.checkVistoriaSendAlerts = async function(isTest) {
     const maxIso = pendingCycles.reduce((m, c) => (!m || c.maxIso > m ? c.maxIso : m), "");
     const canSnooze = nextIso && nextIso <= maxIso;
     if (intro) {
-        intro.textContent = "Há " + enviar + " vistoria" + (enviar === 1 ? "" : "s") + " para enviar o link. Confira o prazo e abra Verificar Construção.";
+        intro.textContent = "Há " + enviar + " vistoria" + (enviar === 1 ? "" : "s") + " para enviar o link"
+            + (enviarSj ? (" e " + enviarSj + " sub judice (ligar Incluir Sub Judice).") : ".")
+            + " Confira o prazo e abra Verificar Construção.";
     }
     if (listEl) {
         listEl.innerHTML = pendingCycles.map(c => {

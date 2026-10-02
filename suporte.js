@@ -96,7 +96,9 @@
     ]},
     { id: "relacionamento", label: "Relacionamento", subs: [
       { id: "buscar", label: "Buscar Cliente" },
-      { id: "autorizacao", label: "Autorização de escritura" }
+      { id: "autorizacao", label: "Autorização de escritura" },
+      { id: "terceiros", label: "Autorização de terceiros" },
+      { id: "vencimento", label: "Alteração de vencimento" }
     ]},
     { id: "compromissario", label: "Compromissário", subs: [
       { id: "prefeitura", label: "Prefeitura" },

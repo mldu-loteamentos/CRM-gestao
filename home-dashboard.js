@@ -203,12 +203,12 @@ const HomeDashboard = {
   },
 
   isSuspenderZero(c) {
+    if (!this.isZeroPaidClient(c)) return false;
     if (!this.isInFilaCobrancaInsight(c)) return false;
     if (typeof window.clientShowsSuspenderAction === 'function') {
       return window.clientShowsSuspenderAction(c);
     }
-    if (!this.isZeroPaidClient(c)) return false;
-    return !!(typeof window.clientAppliesClausulaSuspensiva === 'function' && window.clientAppliesClausulaSuspensiva(c));
+    return false;
   },
 
   isEnviarNexZero(c) {
@@ -1912,13 +1912,21 @@ window.buildSprintOperatorSummaries = function() {
     const counts = window._vistoriaSprintCounts || {};
     const enviar = Number(counts.enviar) || 0;
     const validar = Number(counts.validar) || 0;
-    if (!enviar && !validar) return;
+    const enviarSj = Number(counts.enviarSubjudice) || 0;
+    const validarSj = Number(counts.validarSubjudice) || 0;
+    if (!enviar && !validar && !enviarSj && !validarSj) return;
     lines.push('*' + hd.sprintOperatorLabel(u) + '*');
     if (enviar > 0) {
       lines.push('• Há ' + enviar + ' vistoria' + (enviar === 1 ? '' : 's') + ' para enviar');
     }
+    if (enviarSj > 0) {
+      lines.push('• Há ' + enviarSj + ' vistoria' + (enviarSj === 1 ? '' : 's') + ' sub judice para enviar');
+    }
     if (validar > 0) {
       lines.push('• Há ' + validar + ' vistoria' + (validar === 1 ? '' : 's') + ' para validar');
+    }
+    if (validarSj > 0) {
+      lines.push('• Há ' + validarSj + ' vistoria' + (validarSj === 1 ? '' : 's') + ' sub judice para validar');
     }
   });
   return lines.join('\n');
