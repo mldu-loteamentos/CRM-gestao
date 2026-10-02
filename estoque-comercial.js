@@ -5,8 +5,10 @@ const EstoqueComercialApp = {
   CC_EMPTY_KEY: "crm_cc_ids_sem_unidade",
   LIMIT: 200,
   FB_CHUNK: 400,
-  /** Pausado até nova régua de APIs Sienge (pacote ~75k/dia estourando). */
+  /** Varredura completa (todos os clientes) continua pausada. O automático diário usa só o modo delta. */
   BATIMENTO_AUTO_PAUSED: true,
+  /** Roda sozinho 1x ao dia: só clientes com pagamento recente (paidMap). */
+  BATIMENTO_AUTO_DELTA: true,
   /**
    * Modo "delta" para reduzir consumo de API no batimento diário:
    * recalcula só clientes que tiveram pagamento recente (via paidMap do app).
@@ -438,7 +440,8 @@ const EstoqueComercialApp = {
     this.state.lastSnapshotDate = today;
     this.state.batimentoDate = today;
     // Com pausa + 1 empreendimento, não marca o dia inteiro como concluído (evita pular cron ao reativar).
-    const markDone = opts.markDone !== false && !this.BATIMENTO_AUTO_PAUSED;
+    const markDone = opts.markDone === true
+      || (opts.markDone !== false && (!this.BATIMENTO_AUTO_PAUSED || this._autoDeltaRun));
     if (markDone) this.state.batimentoDone = true;
     this.saveCache();
     if (this.fbReady()) {
@@ -654,30 +657,34 @@ const EstoqueComercialApp = {
     });
   },
 
+  hasPaidMapReady() {
+    return !!(window.paidMapHasBillDays
+      && window.advFilters
+      && window.advFilters.paidMap
+      && window.paidMapHasBillDays(window.advFilters.paidMap));
+  },
+
   paintBatimentoPauseBanner() {
     const el = document.getElementById("est-batimento-pause");
     if (!el) return;
-    if (!this.BATIMENTO_AUTO_PAUSED) {
-      el.style.display = "none";
-      el.innerHTML = "";
+    const deltaOk = this.BATIMENTO_AUTO_DELTA && this.BATIMENTO_DELTA_ENABLED && this.hasPaidMapReady();
+    el.style.display = "block";
+    if (deltaOk) {
+      el.innerHTML = "<strong>Batimento automático diário ligado</strong> (modo delta). " +
+        "Recalcula só quem teve <em>pagamento recente</em> — cabe no consumo atual (~10 mil/dia). " +
+        "A varredura completa de todos os clientes continua pausada. " +
+        "Para um empreendimento inteiro: filtre e use <em>Classificar situação</em>.";
       return;
     }
-    el.style.display = "block";
-    el.innerHTML = "<strong>Batimento automático pausado</strong> — consumo de API Sienge. " +
-      "Para batimento manual diário: use <em>Vincular / Classificar</em>. " +
-      "Se quiser rodar em <em>Todos</em>, o sistema recalcula só quem teve <em>pagamento recente</em> (modo delta via <code>paidMap</code>). " +
-      "Se o <code>paidMap</code> não estiver pronto, filtre <em>um empreendimento</em>.";
+    el.innerHTML = "<strong>Batimento automático em espera</strong> — falta o mapa de pagamentos recentes (<code>paidMap</code>). " +
+      "Abra a Fila / Pagamento recente e volte aqui, ou classifique <em>um empreendimento</em>. " +
+      "Varredura completa continua pausada para não estourar a cota Sienge.";
   },
 
   requireEmpForApiHeavy() {
     const empSel = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
     if (this.BATIMENTO_AUTO_PAUSED && !empSel) {
-      // Para permitir "Todos" sem estourar API, liberamos apenas quando:
-      // o modo delta está ativo e o paidMap (pagamento recente) já existe.
-      const hasPaidMap = !!(window.paidMapHasBillDays
-        && window.advFilters
-        && window.advFilters.paidMap
-        && window.paidMapHasBillDays(window.advFilters.paidMap));
+      const hasPaidMap = this.hasPaidMapReady();
       if (!(this.BATIMENTO_DELTA_ENABLED && hasPaidMap)) {
         alert("Batimento pausado por cota de API. Selecione um empreendimento (não “Todos”) e tente de novo. " +
           "Dica: abra o módulo de Fila/“Pagamento recente” para popular o paidMap e rodar em modo delta.");
@@ -708,32 +715,26 @@ const EstoqueComercialApp = {
 
   async autoStartDailyBatimento() {
     this.paintBatimentoPauseBanner();
-    if (this.BATIMENTO_AUTO_PAUSED) return;
-
     const today = this.todayStr();
     if (this.state._autoFinanceRunning) return;
-
-    this.hideManualFinanceButtons();
+    if (!this.BATIMENTO_AUTO_DELTA || !this.BATIMENTO_DELTA_ENABLED) return;
+    if (!this.hasPaidMapReady()) return;
 
     const meta = await this.tryLoadBatimentoMetaOnly();
     if (meta && meta.batimentoDone && meta.batimentoDate === today) return;
     if (this.state.batimentoDone && this.state.batimentoDate === today) return;
 
-    // Garante unidades para poder classificar/bater.
     if (!this.state.units.length) {
       await this.consultar(true);
     }
     if (!this.state.units.length) return;
 
-    const likelyReady = this.hasFinanceFields();
-    // Se não tem meta marcada e os campos financeiros parecem prontos, pode ser só “atualização do dia”.
-    // Mantemos o batimento se a meta não estiver marcada; evita ficar travado em hipótese.
-    if (likelyReady && this.state.batimentoDone && this.state.batimentoDate === today) return;
-
     this._firebasePendingData = null;
+    this._autoDeltaRun = true;
     try {
       await this.batimentoFinanceiro();
     } finally {
+      this._autoDeltaRun = false;
       if (this._firebasePendingData) {
         const fb = this._firebasePendingData;
         this._firebasePendingData = null;
@@ -2204,9 +2205,11 @@ const EstoqueComercialApp = {
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
       const day = await this.persistTodayResult();
-      const autoHint = this.BATIMENTO_AUTO_PAUSED
-        ? " Automático pausado (cota API) — rode um empreendimento por vez."
-        : " Amanhã o batimento automático começa às 6:30.";
+      const autoHint = this._autoDeltaRun
+        ? " Batimento delta do dia gravado. Amanhã o automático roda de novo só para quem pagar."
+        : (this.BATIMENTO_AUTO_PAUSED
+          ? " Automático full pausado (cota API) — delta diário ligado se o paidMap estiver pronto."
+          : " Amanhã o batimento automático começa às 6:30.");
       this.setProgress(`Batimento (${ccIds.length} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} unidade(s). Resultado de ${day.split("-").reverse().join("/")} gravado.${autoHint}`);
     } catch (e) {
       console.error("[Estoque] batimento", e);

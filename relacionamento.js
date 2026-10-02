@@ -2179,7 +2179,7 @@ const RelacionamentoApp = {
         ? window.formatDocPadraoMarkup(headerTpl)
         : headerTpl;
       const filledHeader = String(headerTpl || "").trim() ? fillVars(headerMarkup, legalBase) : "";
-      const lineHeight = kind === "vencimento" ? "1.85" : "1.55";
+      const lineHeight = kind === "vencimento" ? "1.85" : "1.75";
       const headerHtml = filledHeader
         ? `<div style="margin-bottom:1.4rem;font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;color:#111;text-align:left;white-space:pre-wrap;">${filledHeader}</div>`
         : "";

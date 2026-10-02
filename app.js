@@ -19499,7 +19499,7 @@ window.centerSimpleDocSignature = function(html) {
   let signIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const t = visible(lines[i]);
-    if (/_{10,}/.test(t) && !/[A-Za-zÀ-ú0-9]/.test(t.replace(/_/g, ""))) {
+    if (/_{5,}/.test(t) && !/[A-Za-zÀ-ú0-9]/.test(t.replace(/_/g, ""))) {
       signIdx = i;
       break;
     }

@@ -167,7 +167,7 @@ const ConsumoApiApp = {
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.bulk)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.user)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.system)}</td>
-                </tr>`).join("") : `<tr><td colspan="6" style="padding:16px;color:#94a3b8;text-align:center;">Nenhuma chamada neste dia.</td></tr>`}</tbody>
+                </tr>`).join("") : `<tr><td colspan="6" style="padding:16px;color:#94a3b8;text-align:center;">${total ? "Detalhamento antigo sem caminho da API. Novas chamadas passam a aparecer aqui." : "Nenhuma chamada neste dia."}</td></tr>`}</tbody>
               </table>
             </div>
 

@@ -659,25 +659,35 @@ const ApiUsage = {
         date: date,
         rest: increment(pend.rest || 0),
         bulk: increment(pend.bulk || 0),
-        "actors.user": increment(pend.actors.user || 0),
-        "actors.system": increment(pend.actors.system || 0),
-        updatedAt: Date.now()
+        actors: {
+          user: increment(pend.actors.user || 0),
+          system: increment(pend.actors.system || 0)
+        },
+        updatedAt: Date.now(),
+        apis: {},
+        users: {}
       };
       Object.keys(pend.apis || {}).forEach((k) => {
         const a = pend.apis[k];
-        payload["apis." + k + ".path"] = a.path;
-        payload["apis." + k + ".rest"] = increment(a.rest || 0);
-        payload["apis." + k + ".bulk"] = increment(a.bulk || 0);
-        payload["apis." + k + ".user"] = increment(a.user || 0);
-        payload["apis." + k + ".system"] = increment(a.system || 0);
+        payload.apis[k] = {
+          path: a.path,
+          rest: increment(a.rest || 0),
+          bulk: increment(a.bulk || 0),
+          user: increment(a.user || 0),
+          system: increment(a.system || 0)
+        };
       });
       Object.keys(pend.users || {}).forEach((k) => {
         const u = pend.users[k];
-        payload["users." + k + ".label"] = u.label;
-        payload["users." + k + ".kind"] = u.kind;
-        payload["users." + k + ".rest"] = increment(u.rest || 0);
-        payload["users." + k + ".bulk"] = increment(u.bulk || 0);
+        payload.users[k] = {
+          label: u.label,
+          kind: u.kind,
+          rest: increment(u.rest || 0),
+          bulk: increment(u.bulk || 0)
+        };
       });
+      if (!Object.keys(payload.apis).length) delete payload.apis;
+      if (!Object.keys(payload.users).length) delete payload.users;
       try {
         await setDoc(doc(window.firebaseDb, this.COLLECTION, date), payload, { merge: true });
       } catch (e) {
@@ -696,11 +706,42 @@ const ApiUsage = {
     }
   },
 
+  nestDottedFields: function(data) {
+    const src = data && typeof data === "object" ? data : {};
+    const out = {};
+    Object.keys(src).forEach((k) => {
+      if (k.indexOf(".") < 0) {
+        out[k] = src[k];
+        return;
+      }
+      const parts = k.split(".");
+      let cur = out;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (!cur[p] || typeof cur[p] !== "object") cur[p] = {};
+        cur = cur[p];
+      }
+      cur[parts[parts.length - 1]] = src[k];
+    });
+    return out;
+  },
+
+  mergeDay: function(a, b) {
+    const left = this.nestDottedFields(a || {});
+    const right = this.nestDottedFields(b || {});
+    const out = Object.assign(this.emptyDay(right.date || left.date || ""), left, right);
+    if (!Object.keys(out.apis || {}).length && Object.keys(left.apis || {}).length) out.apis = left.apis;
+    if (!Object.keys(out.users || {}).length && Object.keys(left.users || {}).length) out.users = left.users;
+    const actorsEmpty = !((out.actors && (Number(out.actors.user) || Number(out.actors.system))));
+    if (actorsEmpty && left.actors) out.actors = left.actors;
+    return out;
+  },
+
   loadDays: async function(n) {
     const limitN = Math.max(1, Number(n) || 7);
     const local = this.loadLocalDays();
     const byDate = {};
-    local.forEach((d) => { if (d && d.date) byDate[d.date] = d; });
+    local.forEach((d) => { if (d && d.date) byDate[d.date] = this.nestDottedFields(d); });
     if (window.firebaseDb && window.firebaseCollections) {
       const { doc, getDoc } = window.firebaseCollections;
       const today = this.todayIso();
@@ -711,7 +752,7 @@ const ApiUsage = {
         try {
           const snap = await getDoc(doc(window.firebaseDb, this.COLLECTION, iso));
           const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
-          if (exists) byDate[iso] = Object.assign(this.emptyDay(iso), snap.data() || {}, { date: iso });
+          if (exists) byDate[iso] = this.mergeDay(byDate[iso] || this.emptyDay(iso), Object.assign({}, snap.data() || {}, { date: iso }));
           else if (!byDate[iso]) byDate[iso] = this.emptyDay(iso);
         } catch (e) {
           if (!byDate[iso]) byDate[iso] = this.emptyDay(iso);
