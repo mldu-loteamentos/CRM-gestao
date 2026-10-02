@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=906">
+  <link rel="stylesheet" href="style.css?v=907">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=906" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=907" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1294,7 +1294,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.906 &nbsp;&middot;&nbsp; 02/10/2026
+            v1.0.907 &nbsp;&middot;&nbsp; 02/10/2026
           </span>
         </div>
       </div>
@@ -2610,7 +2610,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=906" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=907" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -2859,7 +2859,7 @@ ____________________________________________
 
       <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=906" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=907" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -2868,7 +2868,7 @@ ____________________________________________
       <section id="tab-construcao-compras" class="tab-pane" style="display: none;">
         <div
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=906" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+          <img src="i.ntegr.a/arvore.png?v=907" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
           <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
         </div>
       </section>
@@ -3003,23 +3003,23 @@ ____________________________________________
             <div style="padding: 16px 20px;">
               <div style="display: grid; grid-template-columns: 3fr 2fr 2fr 2fr; gap: 12px; align-items: end;">
                 <div class="form-group" style="margin: 0; min-width: 0;">
-                  <label>Nome do terceiro autorizado</label>
+                  <label>Nome do terceiro autorizado *</label>
                   <div style="position: relative; width: 100%;">
-                    <input type="text" class="form-control" id="ter-nome" placeholder="Nome completo" autocomplete="off" style="text-transform: uppercase; width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.onTerceiroNomeInput(this)" onblur="setTimeout(function(){ var d=document.getElementById('ter-terceiro-dropdown'); if(d) d.style.display='none'; }, 180)">
+                    <input type="text" class="form-control" id="ter-nome" placeholder="Nome completo" autocomplete="off" required style="text-transform: uppercase; width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.onTerceiroNomeInput(this)" onblur="setTimeout(function(){ var d=document.getElementById('ter-terceiro-dropdown'); if(d) d.style.display='none'; }, 180)">
                     <div id="ter-terceiro-dropdown" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:80; background:#fff; border:1px solid #e5e7eb; border-radius:6px; max-height:220px; overflow:auto; width:100%; box-shadow:0 8px 20px rgba(0,0,0,0.12);"></div>
                   </div>
                 </div>
                 <div class="form-group" style="margin: 0; min-width: 0;">
-                  <label>RG do terceiro</label>
-                  <input type="text" class="form-control" id="ter-rg" autocomplete="off" style="width: 100%; box-sizing: border-box;">
+                  <label>RG do terceiro *</label>
+                  <input type="text" class="form-control" id="ter-rg" autocomplete="off" required style="width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp._atualizarBtnGerarTerceiro()">
                 </div>
                 <div class="form-group" style="margin: 0; min-width: 0;">
-                  <label>CPF do terceiro</label>
-                  <input type="text" class="form-control" id="ter-cpf" inputmode="numeric" autocomplete="off" style="width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.maskDocCpf(this)">
+                  <label>CPF do terceiro *</label>
+                  <input type="text" class="form-control" id="ter-cpf" inputmode="numeric" autocomplete="off" required style="width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.maskDocCpf(this)">
                 </div>
                 <div class="form-group" style="margin: 0; min-width: 0;">
-                  <label>Telefone(s) do terceiro</label>
-                  <input type="text" class="form-control" id="ter-fone" inputmode="tel" autocomplete="off" style="width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.maskDocFone(this)">
+                  <label>Telefone(s) do terceiro *</label>
+                  <input type="text" class="form-control" id="ter-fone" inputmode="tel" autocomplete="off" required style="width: 100%; box-sizing: border-box;" oninput="RelacionamentoApp.maskDocFone(this)">
                 </div>
               </div>
               <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
@@ -3027,7 +3027,7 @@ ____________________________________________
                   <i data-lucide="file-text" style="width:16px;"></i> Extrato
                 </button>
                 <button type="button" class="btn btn-cancel" onclick="RelacionamentoApp.limparDocSimples('terceiros')">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.gerarDocSimplesPdf('terceiros')">
+                <button type="button" class="btn btn-primary" id="ter-btn-gerar" onclick="RelacionamentoApp.gerarDocSimplesPdf('terceiros')">
                   <i data-lucide="file-text" style="width:16px;"></i> Gerar autorização
                 </button>
               </div>
@@ -3070,37 +3070,48 @@ ____________________________________________
           </div>
           <div id="ven-customer-info" class="crm-card-content"></div>
         </div>
-        <div class="crm-card" id="ven-doc-card" style="display: none;">
-          <div class="crm-card-header" style="background-color: #f3f4f6; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0;">
-            <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Contrato do cliente</h3>
-          </div>
-          <div style="padding: 16px 20px;">
-            <div id="ven-contrato-resumo" style="margin-bottom: 16px;"></div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-              <div class="form-group" style="margin: 0;">
-                <label>Novo dia de vencimento</label>
-                <select class="form-control" id="ven-dia" onchange="RelacionamentoApp.atualizarPreviewVencimento()">
-                  <option value="">Selecione</option>
-                  <option value="10">10</option>
-                  <option value="15">15</option>
-                  <option value="20">20</option>
-                </select>
-              </div>
-              <div class="form-group" style="margin: 0;">
-                <label>Vencimento original no mês da alteração</label>
-                <input type="date" class="form-control" id="ven-data-original" onchange="RelacionamentoApp.onDataOriginalVencimentoChange()" oninput="RelacionamentoApp.onDataOriginalVencimentoChange()">
-              </div>
+        <div id="ven-doc-card" style="display: none;">
+          <div class="crm-card" style="margin-bottom: 24px;">
+            <div class="crm-card-header" style="background-color: #f3f4f6; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0;">
+              <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Contrato do cliente</h3>
             </div>
-            <p style="font-size: 0.75rem; color: #64748b; margin: 8px 0 0;">A alteração vale só a partir da parcela do mês seguinte ao pedido. O mês atual não muda e não é permitida carência em meses posteriores.</p>
-            <p id="ven-preview" style="font-size: 0.85rem; color: #334155; margin: 12px 0 0;"></p>
-            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
-              <button type="button" class="btn btn-secondary" id="ven-btn-extrato" onclick="RelacionamentoApp.abrirExtratoDoc('vencimento')">
-                <i data-lucide="file-text" style="width:16px;"></i> Extrato
-              </button>
-              <button type="button" class="btn btn-cancel" onclick="RelacionamentoApp.limparDocSimples('vencimento')">Cancelar</button>
-              <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.gerarDocSimplesPdf('vencimento')">
-                <i data-lucide="file-text" style="width:16px;"></i> Gerar documento
-              </button>
+            <div style="padding: 16px 20px;">
+              <div id="ven-contrato-resumo"></div>
+            </div>
+          </div>
+          <div class="crm-card" id="ven-novo-card">
+            <div class="crm-card-header" style="background-color: #f3f4f6; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0;">
+              <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Novo vencimento</h3>
+            </div>
+            <div style="padding: 16px 20px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group" style="margin: 0;">
+                  <label>Novo dia de vencimento</label>
+                  <select class="form-control" id="ven-dia" onchange="RelacionamentoApp.atualizarPreviewVencimento()">
+                    <option value="">Selecione</option>
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                  <label>Vencimento original no mês da alteração</label>
+                  <input type="date" class="form-control" id="ven-data-original" onchange="RelacionamentoApp.onDataOriginalVencimentoChange()" oninput="RelacionamentoApp.onDataOriginalVencimentoChange()">
+                </div>
+              </div>
+              <p style="font-size: 0.75rem; color: #64748b; margin: 8px 0 0;">A alteração vale só a partir da parcela do mês seguinte ao pedido. O mês atual não muda e não é permitida carência em meses posteriores.</p>
+              <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 16px;">
+                <p id="ven-preview" style="flex: 1; min-width: 0; margin: 0; font-size: 0.85rem; color: #334155; line-height: 1.4;"></p>
+                <div style="display: flex; gap: 10px; flex-shrink: 0; margin-left: auto;">
+                  <button type="button" class="btn btn-secondary" id="ven-btn-extrato" onclick="RelacionamentoApp.abrirExtratoDoc('vencimento')">
+                    <i data-lucide="file-text" style="width:16px;"></i> Extrato
+                  </button>
+                  <button type="button" class="btn btn-cancel" onclick="RelacionamentoApp.limparDocSimples('vencimento')">Cancelar</button>
+                  <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.gerarDocSimplesPdf('vencimento')">
+                    <i data-lucide="file-text" style="width:16px;"></i> Gerar documento
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3239,7 +3250,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=906" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=907" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -7487,56 +7498,56 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=906"></script>
+  <script type="module" src="firebase-config.js?v=907"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=906"></script>
-  <script defer src="sienge-api.js?v=906"></script>
-  <script defer src="consumo-api.js?v=906"></script>
-  <script defer src="azure-auth.js?v=906"></script>
-  <script defer src="app.js?v=906"></script>
-  <script defer src="empresa-filter.js?v=906"></script>
-  <script defer src="cartao-taxas.js?v=906"></script>
-  <script defer src="alcada-desconto.js?v=906"></script>
-  <script defer src="alcada-distrato.js?v=906"></script>
-  <script defer src="home-dashboard.js?v=906"></script>
-  <script defer src="anexos.js?v=906"></script>
-  <script defer src="contas-pagar.js?v=906"></script>
-  <script defer src="config-tags.js?v=906"></script>
-  <script defer src="config-users.js?v=906"></script>
-  <script defer src="suporte.js?v=906"></script>
-  <script defer src="construcao.js?v=906"></script>
-  <script defer src="empresas.js?v=906"></script>
-  <script defer src="relacionamento.js?v=906"></script>
-  <script defer src="cessao-direitos.js?v=906"></script>
-  <script defer src="compromissario.js?v=906"></script>
-  <script defer src="comercial.js?v=906"></script>
-  <script defer src="estoque-comercial.js?v=906"></script>
-  <script defer src="condicoes-pagamento.js?v=906"></script>
-  <script defer src="centros-custo.js?v=906"></script>
-  <script defer src="marketing.js?v=906"></script>
-  <script defer src="plano-financeiro.js?v=906"></script>
-  <script defer src="prestacao-contas.js?v=906"></script>
+  <script defer src="data.js?v=907"></script>
+  <script defer src="sienge-api.js?v=907"></script>
+  <script defer src="consumo-api.js?v=907"></script>
+  <script defer src="azure-auth.js?v=907"></script>
+  <script defer src="app.js?v=907"></script>
+  <script defer src="empresa-filter.js?v=907"></script>
+  <script defer src="cartao-taxas.js?v=907"></script>
+  <script defer src="alcada-desconto.js?v=907"></script>
+  <script defer src="alcada-distrato.js?v=907"></script>
+  <script defer src="home-dashboard.js?v=907"></script>
+  <script defer src="anexos.js?v=907"></script>
+  <script defer src="contas-pagar.js?v=907"></script>
+  <script defer src="config-tags.js?v=907"></script>
+  <script defer src="config-users.js?v=907"></script>
+  <script defer src="suporte.js?v=907"></script>
+  <script defer src="construcao.js?v=907"></script>
+  <script defer src="empresas.js?v=907"></script>
+  <script defer src="relacionamento.js?v=907"></script>
+  <script defer src="cessao-direitos.js?v=907"></script>
+  <script defer src="compromissario.js?v=907"></script>
+  <script defer src="comercial.js?v=907"></script>
+  <script defer src="estoque-comercial.js?v=907"></script>
+  <script defer src="condicoes-pagamento.js?v=907"></script>
+  <script defer src="centros-custo.js?v=907"></script>
+  <script defer src="marketing.js?v=907"></script>
+  <script defer src="plano-financeiro.js?v=907"></script>
+  <script defer src="prestacao-contas.js?v=907"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=906"></script>
-  <script defer src="caixa-diario.js?v=906"></script>
-  <script defer src="investimento.js?v=906"></script>
-  <script defer src="parametrizacao-parceiro.js?v=906"></script>
-  <script defer src="societario.js?v=906"></script>
-  <script defer src="participacoes.js?v=906"></script>
-  <script defer src="fiscal.js?v=906"></script>
-  <script defer src="indexadores.js?v=906"></script>
-  <script defer src="verificar-construcao.js?v=906"></script>
-  <script defer src="financiamento.js?v=906"></script>
-  <script src="repactuacoes.js?v=906"></script>
-  <script defer src="repactuacao-lote.js?v=906"></script>
+  <script defer src="fluxo-caixa.js?v=907"></script>
+  <script defer src="caixa-diario.js?v=907"></script>
+  <script defer src="investimento.js?v=907"></script>
+  <script defer src="parametrizacao-parceiro.js?v=907"></script>
+  <script defer src="societario.js?v=907"></script>
+  <script defer src="participacoes.js?v=907"></script>
+  <script defer src="fiscal.js?v=907"></script>
+  <script defer src="indexadores.js?v=907"></script>
+  <script defer src="verificar-construcao.js?v=907"></script>
+  <script defer src="financiamento.js?v=907"></script>
+  <script src="repactuacoes.js?v=907"></script>
+  <script defer src="repactuacao-lote.js?v=907"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=906"></script>
+  <script defer src="dashboard-inadimplencia.js?v=907"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

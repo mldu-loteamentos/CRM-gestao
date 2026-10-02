@@ -747,32 +747,31 @@ const RelacionamentoApp = {
     if (!el) return;
     if (typeof maskCpfCnpjTyping === "function") {
       el.value = maskCpfCnpjTyping(el.value);
+      this._atualizarBtnGerarTerceiro();
       return;
     }
     const formatted = this._docFmtCpfCnpj(el.value);
-    if (formatted) {
-      el.value = formatted;
-      return;
+    if (formatted) el.value = formatted;
+    else {
+      let v = String(el.value || "").replace(/\D/g, "").slice(0, 14);
+      if (v.length > 12) v = v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, "$1.$2.$3/$4-$5");
+      else if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
+      else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
+      else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, "$1.$2");
+      el.value = v;
     }
-    let v = String(el.value || "").replace(/\D/g, "").slice(0, 14);
-    if (v.length > 12) v = v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, "$1.$2.$3/$4-$5");
-    else if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
-    else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
-    else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, "$1.$2");
-    el.value = v;
+    this._atualizarBtnGerarTerceiro();
   },
 
   maskDocFone(el) {
     if (!el) return;
     const v = this._docNormPhoneDigits(el.value);
-    if (!v) {
-      el.value = "";
-      return;
-    }
-    if (v.length <= 2) el.value = "(" + v;
+    if (!v) el.value = "";
+    else if (v.length <= 2) el.value = "(" + v;
     else if (v.length <= 6) el.value = "(" + v.slice(0, 2) + ") " + v.slice(2);
     else if (v.length <= 10) el.value = "(" + v.slice(0, 2) + ") " + v.slice(2, 6) + "-" + v.slice(6);
     else el.value = "(" + v.slice(0, 2) + ") " + v.slice(2, 7) + "-" + v.slice(7);
+    this._atualizarBtnGerarTerceiro();
   },
 
   _foneFromCustomer(c) {
@@ -787,6 +786,33 @@ const RelacionamentoApp = {
     }
     if (!digits) digits = String(c.phone || c.mobilePhone || "").replace(/\D/g, "");
     return this._docFmtPhoneDigits(digits);
+  },
+
+  _valorTerceiro(id) {
+    return String(document.getElementById(id)?.value || "").trim();
+  },
+
+  _camposTerceiroFaltando() {
+    const nome = this._valorTerceiro("ter-nome");
+    const rg = this._valorTerceiro("ter-rg");
+    const cpfDigits = this._valorTerceiro("ter-cpf").replace(/\D/g, "");
+    const foneDigits = this._docNormPhoneDigits(this._valorTerceiro("ter-fone"));
+    const missing = [];
+    if (!nome) missing.push("nome");
+    if (!rg) missing.push("RG");
+    if (cpfDigits.length !== 11 && cpfDigits.length !== 14) missing.push("CPF/CNPJ");
+    if (foneDigits.length < 10) missing.push("telefone");
+    return missing;
+  },
+
+  _atualizarBtnGerarTerceiro() {
+    const btn = document.getElementById("ter-btn-gerar");
+    if (!btn) return;
+    const ok = this._camposTerceiroFaltando().length === 0;
+    btn.disabled = !ok;
+    btn.style.opacity = ok ? "" : "0.55";
+    btn.style.cursor = ok ? "" : "not-allowed";
+    btn.title = ok ? "" : "Preencha nome, RG, CPF/CNPJ e telefone do terceiro.";
   },
 
   _lockTerceiroDocs(lock) {
@@ -807,6 +833,7 @@ const RelacionamentoApp = {
       if (el) el.value = "";
     });
     this._lockTerceiroDocs(false);
+    this._atualizarBtnGerarTerceiro();
   },
 
   _aplicarDadosTerceiro(c) {
@@ -824,6 +851,7 @@ const RelacionamentoApp = {
       this.maskDocCpf(cpfEl);
     }
     if (foneEl) foneEl.value = this._foneFromCustomer(c);
+    this._atualizarBtnGerarTerceiro();
   },
 
   onTerceiroNomeInput(el) {
@@ -838,6 +866,7 @@ const RelacionamentoApp = {
     if (!String(el.value || "").trim()) {
       this._limparCamposTerceiro();
       this.sugerirTerceiroNome("");
+      this._atualizarBtnGerarTerceiro();
       return;
     }
     if (selectedId && norm(el.value) !== norm(selectedName)) {
@@ -846,6 +875,7 @@ const RelacionamentoApp = {
       this._lockTerceiroDocs(false);
     }
     this.sugerirTerceiroNome(el.value);
+    this._atualizarBtnGerarTerceiro();
   },
 
   sugerirTerceiroNome(query) {
@@ -896,6 +926,7 @@ const RelacionamentoApp = {
     if (nomeEl) nomeEl.value = String(c.name || "").toUpperCase();
     this._aplicarDadosTerceiro(c);
     this._lockTerceiroDocs(true);
+    this._atualizarBtnGerarTerceiro();
     if (c.id && window.SiengeApiService && typeof SiengeApiService.getCustomer === "function") {
       try {
         let full = await SiengeApiService.getCustomer(c.id);
@@ -905,6 +936,7 @@ const RelacionamentoApp = {
         if (String(RelacionamentoState.terceiroClienteId) === String(c.id)) {
           this._aplicarDadosTerceiro(full || c);
           this._lockTerceiroDocs(true);
+          this._atualizarBtnGerarTerceiro();
         }
       } catch (e) {
         console.warn("[Relacionamento] não foi possível carregar o cadastro do terceiro", e);
@@ -2131,6 +2163,7 @@ const RelacionamentoApp = {
       const card = this._docEl(kind, "-doc-card");
       if (card) card.style.display = "block";
       this._setDocExtraCard(kind, true);
+      if (kind === "terceiros") this._atualizarBtnGerarTerceiro();
       if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
       if (kind === "vencimento") {
@@ -2159,9 +2192,15 @@ const RelacionamentoApp = {
       return;
     }
     if (kind === "terceiros") {
-      const nomeTer = (document.getElementById("ter-nome")?.value || "").trim();
-      if (!nomeTer) {
-        alert("Informe o nome do terceiro autorizado.");
+      const missing = this._camposTerceiroFaltando();
+      if (missing.length) {
+        alert("Preencha todos os campos do terceiro autorizado: " + missing.join(", ") + ".");
+        const firstId = !this._valorTerceiro("ter-nome") ? "ter-nome"
+          : !this._valorTerceiro("ter-rg") ? "ter-rg"
+          : (this._valorTerceiro("ter-cpf").replace(/\D/g, "").length !== 11 && this._valorTerceiro("ter-cpf").replace(/\D/g, "").length !== 14) ? "ter-cpf"
+          : "ter-fone";
+        document.getElementById(firstId)?.focus();
+        this._atualizarBtnGerarTerceiro();
         return;
       }
     }
