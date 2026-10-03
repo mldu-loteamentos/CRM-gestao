@@ -10,8 +10,6 @@ const ComercialApp = {
     rawMonths: [],
     year: 0,
     months: [],
-    monthOpen: false,
-    monthQuery: '',
     selectedProduct: '',
     sortKey: 'var',
     sortDir: 'desc',
@@ -81,79 +79,23 @@ const ComercialApp = {
   monthListHtml() {
     const { year, months } = this.currentPeriod();
     const selected = new Set(months);
-    const q = String(this.state.monthQuery || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-    return this.availableMonths(year).filter((m) => {
-      if (!q) return true;
-      const full = COM_MESES_FULL[m - 1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      const short = COM_MESES[m - 1];
-      return full.indexOf(q) >= 0 || short.indexOf(q) >= 0 || String(m) === q;
-    }).map((m) => `
-      <label class="com-month-filter-item${selected.has(m) ? ' is-on' : ''}">
-        <input type="checkbox" value="${m}" ${selected.has(m) ? 'checked' : ''} onchange="ComercialApp.toggleMonth(${m}, this.checked)">
-        <span>${COM_MESES_FULL[m - 1]} <em>${year}</em></span>
-      </label>`).join('') || '<div class="com-month-filter-empty">Nenhum mês encontrado</div>';
+    const allowed = new Set(this.availableMonths(year));
+    return COM_MESES.map((short, i) => {
+      const m = i + 1;
+      const on = selected.has(m);
+      const ok = allowed.has(m);
+      return `<button type="button" class="com-month-sq${on ? ' is-on' : ''}${ok ? '' : ' is-off'}" ${ok ? '' : 'disabled'} onclick="ComercialApp.toggleMonth(${m}, ${on ? 'false' : 'true'})" title="${COM_MESES_FULL[i]} ${year}">${short}</button>`;
+    }).join('');
   },
 
   renderMonthFilter() {
-    const { months } = this.currentPeriod();
-    const list = document.getElementById('comercial-month-list');
-    const label = document.getElementById('comercial-month-label');
-    const search = document.getElementById('comercial-month-search');
-    if (label) label.textContent = this.periodLabel(months);
-    if (list) list.innerHTML = this.monthListHtml();
-    if (search && search.value !== (this.state.monthQuery || '')) search.value = this.state.monthQuery || '';
-    const wrap = document.getElementById('comercial-month-filter');
-    const panel = document.getElementById('comercial-month-panel');
-    if (wrap) wrap.classList.toggle('is-open', !!this.state.monthOpen);
-    if (panel) panel.hidden = !this.state.monthOpen;
-    this.bindMonthOutside();
-    if (window.lucide) window.lucide.createIcons();
-  },
-
-  setMonthQuery(q) {
-    this.state.monthQuery = q || '';
     const list = document.getElementById('comercial-month-list');
     if (list) list.innerHTML = this.monthListHtml();
   },
 
-  presetMonths(kind) {
-    const { yNow, mNow } = this.todayParts();
-    const { year } = this.currentPeriod();
-    const last = year === yNow ? mNow : 12;
-    if (kind === 'atual') this.applyMonths([year === yNow ? mNow : last], true);
-    else if (kind === 'ytd') {
-      const all = [];
-      for (let m = 1; m <= last; m++) all.push(m);
-      this.applyMonths(all, true);
-    }
-  },
-
-  bindMonthOutside() {
-    if (this._monthOutside) return;
-    this._monthOutside = true;
-    document.addEventListener('mousedown', (e) => {
-      if (!this.state.monthOpen) return;
-      const wrap = document.getElementById('comercial-month-filter');
-      if (wrap && !wrap.contains(e.target)) this.closeMonthFilter();
-    });
-  },
-
-  toggleMonthFilter(ev) {
-    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-    this.state.monthOpen = !this.state.monthOpen;
-    this.renderMonthFilter();
-  },
-
-  closeMonthFilter() {
-    if (!this.state.monthOpen) return;
-    this.state.monthOpen = false;
-    this.renderMonthFilter();
-  },
-
-  applyMonths(months, keepOpen) {
+  applyMonths(months) {
     const { year } = this.currentPeriod();
     this.state.months = this.normalizeMonths(year, months);
-    this.state.monthOpen = !!keepOpen;
     this.renderMonthFilter();
     this.onFilterChange();
   },
@@ -161,18 +103,18 @@ const ComercialApp = {
   toggleMonth(month, on) {
     const { months } = this.currentPeriod();
     const next = on ? [...months, month] : months.filter((m) => m !== month);
-    this.applyMonths(next, true);
+    this.applyMonths(next);
   },
 
   selectAllMonths() {
     const { year } = this.currentPeriod();
-    this.applyMonths(this.availableMonths(year), true);
+    this.applyMonths(this.availableMonths(year));
   },
 
   selectNoneMonths() {
     const { yNow, mNow } = this.todayParts();
     const { year } = this.currentPeriod();
-    this.applyMonths([year === yNow ? mNow : 1], true);
+    this.applyMonths([year === yNow ? mNow : 1]);
   },
 
   onYearChange() {
@@ -369,21 +311,26 @@ const ComercialApp = {
       let vMes = 0;
       let dMes = 0;
       const mesProdutos = {};
-      const bumpMes = (name, field, qty) => {
-        if (!mesProdutos[name]) mesProdutos[name] = { vendas: 0, distratos: 0 };
+      const bumpMes = (name, field, qty, enterpriseId) => {
+        if (!mesProdutos[name]) mesProdutos[name] = { id: enterpriseId || '', vendas: 0, distratos: 0 };
+        if (enterpriseId && !mesProdutos[name].id) mesProdutos[name].id = enterpriseId;
         mesProdutos[name][field] += qty;
+      };
+      const ensureProduto = (name, enterpriseId) => {
+        if (!produtos[name]) produtos[name] = { id: enterpriseId || '', vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
+        if (enterpriseId && !produtos[name].id) produtos[name].id = enterpriseId;
       };
 
       res.vendas.forEach((v) => {
         const qty = this.contractQty(v);
         const area = this.contractArea(v);
-        const { name } = this.resolveEnterprise(v);
+        const { name, enterpriseId } = this.resolveEnterprise(v);
         if (inChart) {
-          bumpMes(name, 'vendas', qty);
+          bumpMes(name, 'vendas', qty, enterpriseId);
           if (!selectedProd || selectedProd === name) vMes += qty;
         }
         if (inPeriod || inYear) {
-          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
+          ensureProduto(name, enterpriseId);
         }
         if (inPeriod) {
           vendasPeriodo += qty;
@@ -404,13 +351,13 @@ const ComercialApp = {
       res.distratos.forEach((d) => {
         const qty = this.contractQty(d);
         const area = this.contractArea(d);
-        const { name } = this.resolveEnterprise(d);
+        const { name, enterpriseId } = this.resolveEnterprise(d);
         if (inChart) {
-          bumpMes(name, 'distratos', qty);
+          bumpMes(name, 'distratos', qty, enterpriseId);
           if (!selectedProd || selectedProd === name) dMes += qty;
         }
         if (inPeriod || inYear) {
-          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
+          ensureProduto(name, enterpriseId);
         }
         if (inPeriod) {
           distratosPeriodo += qty;
@@ -449,13 +396,39 @@ const ComercialApp = {
     };
   },
 
+  fmtInt(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return '0';
+    return Math.round(num).toLocaleString('pt-BR');
+  },
+
   fmtPct(val, prev, invert) {
     const diff = val - prev;
-    const percent = prev > 0 ? ((diff / prev) * 100).toFixed(1) : (diff > 0 ? '100.0' : '0.0');
+    const percent = prev > 0 ? ((diff / prev) * 100).toFixed(1).replace('.', ',') : (diff > 0 ? '100,0' : '0,0');
     const better = invert ? diff < 0 : diff > 0;
-    const color = diff === 0 ? '#64748b' : (better ? 'var(--color-success)' : 'var(--color-danger)');
+    const color = diff === 0 ? '#f37021' : (better ? 'var(--color-success)' : 'var(--color-danger)');
     const sign = diff > 0 ? '+' : '';
-    return `<span style="color:${color};font-weight:700;">${sign}${percent}%</span> vs ano ant. (${prev})`;
+    return `<span style="color:${color};font-weight:700;">${sign}${percent}%</span> vs ano ant. (${this.fmtInt(prev)})`;
+  },
+
+  prodLabel(id, name) {
+    const code = String(id || '').trim();
+    const label = String(name || '').trim();
+    if (code && label && this.foldCode(code) !== this.foldCode(label)) return code + ' | ' + label;
+    return label || code || '—';
+  },
+
+  foldCode(s) {
+    return String(s || '').replace(/\s+/g, '').toUpperCase();
+  },
+
+  prodLabelHtml(id, name) {
+    const code = String(id || '').trim();
+    const label = String(name || '').trim();
+    if (code && label && this.foldCode(code) !== this.foldCode(label)) {
+      return `<span class="com-prod-id">${this.esc(code)}</span><span class="com-prod-sep"> | </span>${this.esc(label)}`;
+    }
+    return this.esc(label || code || '—');
   },
 
   fmtM2(n) {
@@ -487,7 +460,10 @@ const ComercialApp = {
             ctx.fillStyle = color;
             ctx.textAlign = 'center';
             ctx.textBaseline = val >= 0 ? 'bottom' : 'top';
-            ctx.fillText(String(val), bar.x, val >= 0 ? bar.y - 4 : bar.y + 12);
+            const text = Number.isFinite(Number(val))
+              ? Math.round(Number(val)).toLocaleString('pt-BR')
+              : String(val);
+            ctx.fillText(text, bar.x, val >= 0 ? bar.y - 4 : bar.y + 12);
             ctx.restore();
           });
         });
@@ -655,44 +631,44 @@ const ComercialApp = {
     if (!point) { tip.hidden = true; return; }
     const rows = Object.keys(point.produtos || {}).map((name) => {
       const d = point.produtos[name];
-      return { name, v: d.vendas || 0, d: d.distratos || 0, var: (d.vendas || 0) - (d.distratos || 0) };
+      return { name, id: d.id || '', v: d.vendas || 0, d: d.distratos || 0, var: (d.vendas || 0) - (d.distratos || 0) };
     }).filter((r) => r.v || r.d).sort((a, b) => (b.v - b.d) - (a.v - a.d));
     const top = rows.slice(0, 8);
     const extra = rows.length - top.length;
     const mesNome = COM_MESES_FULL[point.month - 1] + ' ' + point.year;
-    const varCls = point.variacao > 0 ? 'com-tip-pos' : (point.variacao < 0 ? 'com-tip-neg' : '');
+    const varCls = point.variacao > 0 ? 'com-tip-pos' : (point.variacao < 0 ? 'com-tip-neg' : 'com-tip-zero');
     tip.innerHTML = isVar ? `
       <div class="com-chart-tip-head">
         <strong>${this.esc(mesNome)}</strong>
-        <span>variação <em class="${varCls}">${point.variacao}</em></span>
+        <span>variação <em class="${varCls}">${this.fmtInt(point.variacao)}</em></span>
       </div>
       ${top.length ? `<table>
         <thead><tr><th>Empreendimento</th><th>Variação</th></tr></thead>
         <tbody>
           ${top.map((r) => `<tr>
-            <td>${this.esc(r.name)}</td>
-            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : '')}">${r.var}</td>
+            <td>${this.esc(this.prodLabel(r.id, r.name))}</td>
+            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : 'com-tip-zero')}">${this.fmtInt(r.var)}</td>
           </tr>`).join('')}
         </tbody>
       </table>` : '<div class="com-chart-tip-empty">Sem movimento neste mês</div>'}
-      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${extra} empreendimento(s)</div>` : ''}
+      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${this.fmtInt(extra)} empreendimento(s)</div>` : ''}
     ` : `
       <div class="com-chart-tip-head">
         <strong>${this.esc(mesNome)}</strong>
-        <span><em class="com-tip-v">${point.vendas}</em> vendas · <em class="com-tip-d">${point.distratos}</em> distratos · saldo ${point.variacao}</span>
+        <span><em class="com-tip-v">${this.fmtInt(point.vendas)}</em> vendas · <em class="com-tip-d">${this.fmtInt(point.distratos)}</em> distratos · saldo ${this.fmtInt(point.variacao)}</span>
       </div>
       ${top.length ? `<table>
         <thead><tr><th>Empreendimento</th><th>Vendas</th><th>Distratos</th><th>Saldo</th></tr></thead>
         <tbody>
           ${top.map((r) => `<tr>
-            <td>${this.esc(r.name)}</td>
-            <td class="com-tip-v">${r.v}</td>
-            <td class="com-tip-d">${r.d}</td>
-            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : '')}">${r.var}</td>
+            <td>${this.esc(this.prodLabel(r.id, r.name))}</td>
+            <td class="com-tip-v">${this.fmtInt(r.v)}</td>
+            <td class="com-tip-d">${this.fmtInt(r.d)}</td>
+            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : 'com-tip-zero')}">${this.fmtInt(r.var)}</td>
           </tr>`).join('')}
         </tbody>
       </table>` : '<div class="com-chart-tip-empty">Sem movimento neste mês</div>'}
-      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${extra} empreendimento(s)</div>` : ''}
+      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${this.fmtInt(extra)} empreendimento(s)</div>` : ''}
     `;
     const box = tip.parentElement;
     const caretX = tooltip.caretX || 0;
@@ -731,19 +707,19 @@ const ComercialApp = {
     ['kpi-vendas-ytd-lbl', 'kpi-distratos-ytd-lbl', 'kpi-variacao-ytd-lbl']
       .forEach((id) => set(id, `Acum. ${ytdLbl}`));
 
-    set('kpi-vendas', String(agg.vendasPeriodo));
+    set('kpi-vendas', this.fmtInt(agg.vendasPeriodo));
     set('kpi-vendas-comp', this.fmtPct(agg.vendasPeriodo, agg.vendasPeriodoAnt, false));
-    set('kpi-vendas-ytd', String(agg.vendasAno));
+    set('kpi-vendas-ytd', this.fmtInt(agg.vendasAno));
     set('kpi-vendas-ytd-comp', this.fmtPct(agg.vendasAno, agg.vendasAnoAnt, false));
-    set('kpi-vendas-avg', `média mensal ${agg.year}: ${Math.round(agg.vendasAno / monthsCount)}`);
-    set('kpi-distratos', String(agg.distratosPeriodo));
+    set('kpi-vendas-avg', `média mensal ${agg.year}: ${this.fmtInt(Math.round(agg.vendasAno / monthsCount))}`);
+    set('kpi-distratos', this.fmtInt(agg.distratosPeriodo));
     set('kpi-distratos-comp', this.fmtPct(agg.distratosPeriodo, agg.distratosPeriodoAnt, true));
-    set('kpi-distratos-ytd', String(agg.distratosAno));
+    set('kpi-distratos-ytd', this.fmtInt(agg.distratosAno));
     set('kpi-distratos-ytd-comp', this.fmtPct(agg.distratosAno, agg.distratosAnoAnt, true));
-    set('kpi-distratos-avg', `média mensal ${agg.year}: ${Math.round(agg.distratosAno / monthsCount)}`);
-    set('kpi-variacao', String(saldo));
+    set('kpi-distratos-avg', `média mensal ${agg.year}: ${this.fmtInt(Math.round(agg.distratosAno / monthsCount))}`);
+    set('kpi-variacao', this.fmtInt(saldo));
     set('kpi-variacao-comp', this.fmtPct(saldo, saldoAnt, false));
-    set('kpi-variacao-ytd', String(saldoYtd));
+    set('kpi-variacao-ytd', this.fmtInt(saldoYtd));
     set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
 
     set('comercial-produto-period', periodLbl + ' · ' + agg.year + '  ·  acum. ' + ytdLbl);
@@ -761,7 +737,11 @@ const ComercialApp = {
   },
 
   sortValue(row, key) {
-    if (key === 'name') return row.name;
+    if (key === 'name') {
+      const id = Number(String(row.id || '').replace(/\D/g, ''));
+      if (Number.isFinite(id) && id > 0) return id;
+      return row.name;
+    }
     if (key === 'vendas') return row.v;
     if (key === 'distratos') return row.d;
     if (key === 'var') return row.v - row.d;
@@ -789,8 +769,8 @@ const ComercialApp = {
 
   thSort(key, label, cls, rowspan) {
     const on = this.state.sortKey === key;
-    const arrow = on ? (this.state.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-    return `<th ${rowspan ? 'rowspan="2"' : ''} class="${cls} com-th-sort${on ? ' is-sorted' : ''}" onclick="ComercialApp.sortProdutos('${key}')">${label}${arrow}</th>`;
+    const dir = on ? (this.state.sortDir === 'asc' ? ' is-asc' : ' is-desc') : '';
+    return `<th ${rowspan ? 'rowspan="2"' : ''} class="${cls} com-th-sort${on ? ' is-sorted' : ''}${dir}" onclick="ComercialApp.sortProdutos('${key}')" title="Ordenar por ${label}"><span class="com-th-label">${label}</span><span class="com-sort-mark" aria-hidden="true"></span></th>`;
   },
 
   renderProdutoTable(agg) {
@@ -817,6 +797,7 @@ const ComercialApp = {
       const d = agg.produtos[name];
       return {
         name,
+        id: d.id || '',
         v: d.vendas || 0,
         d: d.distratos || 0,
         vy: d.vendasYtd || 0,
@@ -836,9 +817,8 @@ const ComercialApp = {
     const num = (n, kind) => {
       const cls = kind === 'venda' ? 'com-num com-num--venda'
         : kind === 'distrato' ? 'com-num com-num--distrato'
-        : (n > 0 ? 'com-num com-num--var' : (n < 0 ? 'com-num com-num--var-neg' : 'com-num'));
-      const sign = kind === 'var' && n > 0 ? '+' : '';
-      return `<td class="${cls}">${sign}${n}</td>`;
+        : (n > 0 ? 'com-num com-num--var' : (n < 0 ? 'com-num com-num--var-neg' : 'com-num com-num--var-zero'));
+      return `<td class="${cls}">${this.fmtInt(n)}</td>`;
     };
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
@@ -853,7 +833,7 @@ const ComercialApp = {
       totDY += r.dy;
       const on = selected === r.name;
       return `<tr class="com-prod-row${i % 2 ? ' is-alt' : ''}${on ? ' is-selected' : ''}" onclick="ComercialApp.selectProduct(${JSON.stringify(r.name)})">
-        <td class="com-prod-name">${this.esc(r.name)}</td>
+        <td class="com-prod-name" title="${this.esc(this.prodLabel(r.id, r.name))}">${this.prodLabelHtml(r.id, r.name)}</td>
         ${num(r.v, 'venda')}${num(r.d, 'distrato')}${num(r.v - r.d, 'var')}
         ${num(r.vy, 'venda')}${num(r.dy, 'distrato')}${num(r.vy - r.dy, 'var')}
       </tr>`;

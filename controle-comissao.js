@@ -123,9 +123,9 @@ const ControleComissaoApp = {
         <div class="search-filter-panel tvig-params ccom-params">
           <h3 class="tvig-section-title">Parâmetros da consulta</h3>
           <div class="ccom-filters">
-            <div class="form-group">
-              <label>Competência</label>
-              <input type="month" class="form-control ccom-month" value="${this.esc(s.competencia)}"
+            <div class="tvig-filter-slot tvig-comp-slot">
+              <label class="tvig-comp-label" for="ccom-comp">Mês de referência</label>
+              <input type="month" id="ccom-comp" class="tvig-comp-input" value="${this.esc(s.competencia)}"
                 onchange="ControleComissaoApp.onField('competencia', this.value)">
             </div>
             <div class="tvig-filter-actions">

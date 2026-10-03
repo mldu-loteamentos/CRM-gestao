@@ -44,6 +44,7 @@ const ComprasPrevisoesApp = {
     PRCOMC: 1, PRDIST: 1, PFATDIR: 1, PFINBAN: 1,
     PRV: 1, PRVC: 1, PRVR: 1, PCT: 1, PPC: 1, PFPCC: 1, PFPC: 1
   },
+  DOC_SUBSTITUICAO: { PRV: 1, PRVR: 1, PRVC: 1 },
   DOC_NAO_PREVISAO: {
     NF: 1, NFE: 1, NFS: 1, NFSE: 1, NFF: 1,
     REP: 1, REPF: 1, REPASSE: 1,
@@ -63,6 +64,7 @@ const ComprasPrevisoesApp = {
     VENCIDOS: "vencidos",
     PRAZO: "prazo",
     AVENCER: "avencer",
+    SUBSTITUIDOS: "substituidos",
     PAGOS: "pagos"
   },
 
@@ -157,8 +159,7 @@ const ComprasPrevisoesApp = {
 
   paymentDateOf(bill, pay, bm) {
     return this.isoDate(bm && bm.bankMovementDate)
-      || this.isoDate(pay && (pay.paymentDate || pay.date || pay.payOffDate || pay.bankMovementDate))
-      || this.isoDate(bill && (bill.paymentDate || bill.payOffDate || bill.payoffDate || bill.liquidationDate || bill.settlementDate));
+      || this.isoDate(pay && (pay.paymentDate || pay.date || pay.payOffDate || pay.bankMovementDate));
   },
 
   billBalance(bill) {
@@ -180,14 +181,58 @@ const ComprasPrevisoesApp = {
     );
   },
 
-  isPago(bill, pay, bm) {
+  baixaBlob(bill, pay, bm) {
+    const parts = [
+      pay && pay.operationTypeName,
+      pay && pay.operationName,
+      pay && pay.operationType,
+      pay && pay.paymentTypeName,
+      pay && (pay.notes || pay.note || pay.observation || pay.observations || pay.historic || pay.history || pay.description || pay.complement),
+      bm && (bm.operationName || bm.operationTypeName || bm.notes || bm.observation || bm.historic),
+      bill && (bill.operationTypeName || bill.dischargeType || bill.writeOffType || bill.paymentTypeName),
+      bill && (bill.notes || bill.observation || bill.historic || bill.history || bill.complement)
+    ];
+    return this.fold(parts.filter(Boolean).join(" "));
+  },
+
+  isDocSubstituivel(docId, docName) {
+    const id = this.docCode(docId);
+    const token = this.docCode(this.firstWord(docId || docName));
+    return !!(this.DOC_SUBSTITUICAO[id] || this.DOC_SUBSTITUICAO[token]);
+  },
+
+  isSubstituicao(bill, pay, bm, docId, docName) {
+    if (!/SUBSTITU/.test(this.baixaBlob(bill, pay, bm))) return false;
+    if (!docId && !docName) return true;
+    return this.isDocSubstituivel(docId, docName);
+  },
+
+  tituloSubstituto(bill, pay, bm) {
+    const raw = [
+      pay && (pay.relatedBillId || pay.substituteBillId || pay.replacedByBillId || pay.destinationBillId),
+      pay && (pay.notes || pay.note || pay.observation || pay.observations || pay.historic || pay.history || pay.description || pay.complement),
+      bm && (bm.notes || bm.observation || bm.historic),
+      bill && (bill.notes || bill.observation || bill.historic || bill.complement)
+    ].filter(Boolean).join(" ");
+    const m = String(raw).match(/SUBSTITU[^\d]{0,24}(\d{3,})/i);
+    if (m) return m[1];
+    const n = Number(pay && (pay.relatedBillId || pay.substituteBillId || pay.replacedByBillId || pay.destinationBillId));
+    return Number.isFinite(n) && n > 0 ? String(n) : "";
+  },
+
+  isSituacaoAberta(bill, pay) {
+    const sit = this.billSituation(bill, pay);
+    return sit === "NP" || /\b(NP|NAO PAGO|NAO PAGA|EM ABERTO|OPEN|PENDING|UNPAID)\b/.test(sit);
+  },
+
+  isPago(bill, pay, bm, docId, docName) {
+    if (this.isSubstituicao(bill, pay, bm, docId, docName)) return false;
+    if (this.isSituacaoAberta(bill, pay)) return false;
     if (this.paymentDateOf(bill, pay, bm)) return true;
     const sit = this.billSituation(bill, pay);
-    if (sit === "PG" || /\b(PG|PAGO|PAGA|LIQUIDADO|BAIXADO|QUITADO|PAID|SETTLED)\b/.test(sit)) return true;
-    const bal = this.billBalance(bill);
-    if (bal != null && Math.abs(bal) <= 0.009) return true;
+    if (sit === "PG" || /\b(PG|PAGO|PAGA|LIQUIDADO|QUITADO|PAID|SETTLED)\b/.test(sit)) return true;
     const tipo = this.fold((pay && (pay.operationTypeName || pay.operationName)) || (bm && bm.operationName) || "");
-    if (tipo && /BAIXA|LIQUID|QUITAC/.test(tipo) && !/ESTORNO|CANCEL/.test(tipo)) return true;
+    if (tipo && /BAIXA|LIQUID|QUITAC/.test(tipo) && !/ESTORNO|CANCEL|SUBSTITU/.test(tipo)) return true;
     return false;
   },
 
@@ -307,6 +352,7 @@ const ComprasPrevisoesApp = {
                 if (this.SKIP_TITULO_PARCELA[titulo + "-" + parcela]) return;
                 const rateio = cat && cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) : 100;
                 const valor = Number(bill.originalAmount) || 0;
+                const substituido = this.isSubstituicao(bill, pay, bm, docId, bill.documentIdentificationName);
                 rows.push({
                   companyId: String(bill.companyId || ""),
                   credor: String(bill.creditorName || "").trim(),
@@ -324,8 +370,10 @@ const ComprasPrevisoesApp = {
                   ccNome: (cat && cat.costCenterName) || "",
                   rateio,
                   tipoBaixa: (pay && pay.operationTypeName) || "",
-                  dataPagamento: this.paymentDateOf(bill, pay, bm),
-                  pago: this.isPago(bill, pay, bm),
+                  dataPagamento: substituido ? "" : this.paymentDateOf(bill, pay, bm),
+                  pago: this.isPago(bill, pay, bm, docId, bill.documentIdentificationName),
+                  substituido,
+                  tituloSubstituto: substituido ? this.tituloSubstituto(bill, pay, bm) : "",
                   saldo: this.billBalance(bill),
                   situacao: this.billSituation(bill, pay),
                   operacao,
@@ -340,13 +388,36 @@ const ComprasPrevisoesApp = {
         });
       });
     });
-    const seen = new Set();
-    return rows.filter((r) => {
+    const map = new Map();
+    rows.forEach((r) => {
       const k = [r.titulo, r.emissao, r.parcela, r.departamento].join("|");
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
+      const prev = map.get(k);
+      if (!prev) {
+        map.set(k, r);
+        return;
+      }
+      map.set(k, this.preferParcela(prev, r));
     });
+    return [...map.values()];
+  },
+
+  preferParcela(a, b) {
+    const next = Object.assign({}, a);
+    if (b.substituido) {
+      next.substituido = true;
+      next.pago = false;
+      next.dataPagamento = "";
+      if (b.tituloSubstituto) next.tituloSubstituto = b.tituloSubstituto;
+      if (b.tipoBaixa) next.tipoBaixa = b.tipoBaixa;
+    } else if (!next.substituido && b.pago) {
+      next.pago = true;
+      if (b.dataPagamento && !next.dataPagamento) next.dataPagamento = b.dataPagamento;
+    }
+    if (b.situacao && !next.situacao) next.situacao = b.situacao;
+    if (b.virouNota) next.virouNota = true;
+    if (b.tituloSubstituto && !next.tituloSubstituto) next.tituloSubstituto = b.tituloSubstituto;
+    if (this.isSituacaoAberta({ situation: b.situacao }, null) && !next.substituido) next.pago = false;
+    return next;
   },
 
   uniqueItems(rows, idFn, labelFn) {
@@ -381,6 +452,7 @@ const ComprasPrevisoesApp = {
   },
 
   rowGroup(r) {
+    if (r.substituido) return this.GROUPS.SUBSTITUIDOS;
     if (r.pago) return this.GROUPS.PAGOS;
     const today = this.isoToday();
     if (r.vencimento && r.vencimento < today) return this.GROUPS.VENCIDOS;
@@ -394,7 +466,8 @@ const ComprasPrevisoesApp = {
       vencidos: { label: "Vencidos", bg: "#fee2e2", color: "#991b1b", order: 1 },
       prazo: { label: "Prazo insuficiente para lançar", bg: "#ffedd5", color: "#9a3412", order: 2 },
       avencer: { label: "A vencer", bg: "#ecfdf5", color: "#047857", order: 3 },
-      pagos: { label: "Pagos", bg: "#f1f5f9", color: "#475569", order: 4 }
+      substituidos: { label: "Substituídos (PRV / PRVR / PRVC)", bg: "#e0e7ff", color: "#3730a3", order: 4 },
+      pagos: { label: "Pagos", bg: "#f1f5f9", color: "#475569", order: 5 }
     };
     return map[group] || map.avencer;
   },
@@ -419,8 +492,9 @@ const ComprasPrevisoesApp = {
       }
       if (start && r.vencimento && r.vencimento < start) return false;
       if (end && r.vencimento && r.vencimento > end) return false;
-      if (status === "aberto" && r.pago) return false;
+      if (status === "aberto" && (r.pago || r.substituido)) return false;
       if (status === "pago" && !r.pago) return false;
+      if (status === "substituido" && !r.substituido) return false;
       if (qTitulo) {
         const blob = this.fold([r.titulo, r.documento, r.parcela].join("")).replace(/\s+/g, "");
         if (blob.indexOf(qTitulo) < 0) return false;
@@ -445,14 +519,16 @@ const ComprasPrevisoesApp = {
     let vencido = 0;
     let prazo = 0;
     let aVencer = 0;
+    let substituido = 0;
     rows.forEach((r) => {
       const v = Number(r.valorAjustado) || 0;
       total += v;
       if (r.grupo === this.GROUPS.VENCIDOS) vencido += v;
       else if (r.grupo === this.GROUPS.PRAZO) prazo += v;
       else if (r.grupo === this.GROUPS.AVENCER) aVencer += v;
+      else if (r.grupo === this.GROUPS.SUBSTITUIDOS) substituido += v;
     });
-    return { qtd: rows.length, total, vencido, prazo, aVencer };
+    return { qtd: rows.length, total, vencido, prazo, aVencer, substituido };
   },
 
   bindFilters() {
@@ -679,7 +755,8 @@ const ComprasPrevisoesApp = {
         <div class="ccom-kpi"><span>Total</span><strong>${this.esc(this.money(k.total))}</strong></div>
         <div class="ccom-kpi"><span>Vencidos</span><strong>${this.esc(this.money(k.vencido))}</strong></div>
         <div class="ccom-kpi"><span>Prazo insuficiente</span><strong>${this.esc(this.money(k.prazo))}</strong></div>
-        <div class="ccom-kpi"><span>A vencer</span><strong>${this.esc(this.money(k.aVencer))}</strong></div>`;
+        <div class="ccom-kpi"><span>A vencer</span><strong>${this.esc(this.money(k.aVencer))}</strong></div>
+        <div class="ccom-kpi"><span>Substituídos</span><strong>${this.esc(this.money(k.substituido))}</strong></div>`;
     }
     if (!rows.length) {
       box.innerHTML = `<div class="tvig-empty">Nenhum título neste filtro.</div>`;
@@ -704,7 +781,10 @@ const ComprasPrevisoesApp = {
       const nota = r.virouNota
         ? `<span class="cprev-tag cprev-tag-nota">Virou nota</span>`
         : "";
-      const pago = r.pago
+      const subst = r.substituido
+        ? `<span class="cprev-tag cprev-tag-subst">Substituído${r.tituloSubstituto ? " · " + this.esc(r.tituloSubstituto) : ""}</span>`
+        : "";
+      const pago = r.pago && !r.substituido
         ? `<span class="cprev-tag cprev-tag-pago">Pago</span>`
         : "";
       const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
@@ -713,7 +793,7 @@ const ComprasPrevisoesApp = {
         <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
         <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
         <td class="cprev-col-cred" title="${this.esc(r.credor || "—")}">${this.esc(r.credor || "—")}</td>
-        <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${pago}</td>
+        <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${subst}${pago}</td>
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="${this.esc(r.docId || "—")}">${this.esc(r.docId || "—")}</td>
         <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
@@ -758,10 +838,13 @@ const ComprasPrevisoesApp = {
 
   installmentToParcela(titulo, inst) {
     const pay = inst && (inst.payments || inst.payment) || null;
-    const firstPay = Array.isArray(pay) ? pay[0] : pay;
+    const pays = Array.isArray(pay) ? pay : (pay ? [pay] : [null]);
+    const substPay = pays.find((p) => this.isSubstituicao(inst, p, null, inst.documentIdentificationId, inst.documentIdentificationName)) || null;
+    const firstPay = substPay || pays[0] || null;
     const docId = this.docCode(inst.documentIdentificationId || inst.documentId || (inst.document && inst.document.id));
     const docName = inst.documentIdentificationName || inst.documentName || (inst.document && inst.document.name) || "";
-    const pago = this.isPago(inst, firstPay, null);
+    const substituido = this.isSubstituicao(inst, firstPay, null, docId, docName);
+    const pago = this.isPago(inst, firstPay, null, docId, docName);
     return {
       titulo: String(titulo),
       parcela: inst.installmentId != null ? String(inst.installmentId) : (inst.installmentNumber != null ? String(inst.installmentNumber) : ""),
@@ -771,7 +854,9 @@ const ComprasPrevisoesApp = {
       docId,
       docNome: this.firstWord(docName),
       pago,
-      dataPagamento: this.paymentDateOf(inst, firstPay, null),
+      substituido,
+      tituloSubstituto: substituido ? this.tituloSubstituto(inst, firstPay, null) : "",
+      dataPagamento: substituido ? "" : this.paymentDateOf(inst, firstPay, null),
       saldo: this.billBalance(inst),
       situacao: this.billSituation(inst, firstPay),
       virouNota: this.isNotaDoc(docId, docName, inst)
@@ -786,11 +871,7 @@ const ComprasPrevisoesApp = {
       const key = p.parcela || p.vencimento || String(map.size);
       const prev = map.get(key);
       if (!prev) map.set(key, p);
-      else {
-        if (p.pago) prev.pago = true;
-        if (p.virouNota) prev.virouNota = true;
-        if (p.dataPagamento && !prev.dataPagamento) prev.dataPagamento = p.dataPagamento;
-      }
+      else map.set(key, this.preferParcela(prev, p));
     });
     (this.state.allRows || []).filter((r) => String(r.titulo) === String(titulo)).forEach((r) => {
       const key = r.parcela || r.vencimento;
@@ -804,16 +885,15 @@ const ComprasPrevisoesApp = {
         docId: r.docId,
         docNome: r.docNome,
         pago: !!r.pago,
+        substituido: !!r.substituido,
+        tituloSubstituto: r.tituloSubstituto || "",
         dataPagamento: r.dataPagamento || "",
         saldo: r.saldo,
         situacao: r.situacao,
         virouNota: !!r.virouNota || this.isNotaDoc(r.docId, r.docNome, null)
       };
       if (!prev) map.set(key, next);
-      else {
-        if (next.pago) prev.pago = true;
-        if (next.virouNota) prev.virouNota = true;
-      }
+      else map.set(key, this.preferParcela(prev, next));
     });
     return [...map.values()].sort((a, b) =>
       String(a.parcela).localeCompare(String(b.parcela), undefined, { numeric: true })
@@ -850,11 +930,14 @@ const ComprasPrevisoesApp = {
           const prev = map.get(key);
           if (!prev) map.set(key, p);
           else {
-            if (p.pago) prev.pago = true;
-            if (p.virouNota) prev.virouNota = true;
-            if (p.dataPagamento && !prev.dataPagamento) prev.dataPagamento = p.dataPagamento;
-            if (p.docId && !prev.docId) prev.docId = p.docId;
-            if (p.documento && !prev.documento) prev.documento = p.documento;
+            const merged = this.preferParcela(prev, p);
+            if (p.virouNota) merged.virouNota = true;
+            if (p.docId && !merged.docId) merged.docId = p.docId;
+            if (p.documento && !merged.documento) merged.documento = p.documento;
+            if (this.isSituacaoAberta({ situation: p.situacao }, null) && !merged.substituido) {
+              merged.pago = false;
+            }
+            map.set(key, merged);
           }
         });
         const merged = [...map.values()].sort((a, b) =>
@@ -902,9 +985,11 @@ const ComprasPrevisoesApp = {
           <td>${this.esc(p.documento || "—")}</td>
           <td>${this.esc(this.fmtDate(p.vencimento))}</td>
           <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(p.valor))}</td>
-          <td>${p.pago
+          <td>${p.substituido
+            ? `<span class="cprev-tag cprev-tag-subst">Substituída${p.tituloSubstituto ? " · tít. " + this.esc(p.tituloSubstituto) : ""}</span>`
+            : (p.pago
             ? `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`
-            : `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`}</td>
+            : `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`)}</td>
           <td>${p.virouNota
             ? `<span class="cprev-tag cprev-tag-nota">Sim</span>`
             : `<span class="cprev-tag">Não</span>`}</td>
@@ -965,7 +1050,8 @@ const ComprasPrevisoesApp = {
       "Nº documento": r.documento || "",
       Vencimento: this.fmtDate(r.vencimento),
       "Valor (R$)": Number(r.valorAjustado) || 0,
-      Situação: r.pago ? "Pago" : "Em aberto",
+      Situação: r.substituido ? "Substituído" : (r.pago ? "Pago" : "Em aberto"),
+      "Título substituto": r.tituloSubstituto || "",
       "Virou nota": r.virouNota ? "Sim" : "Não"
     }));
     const ws = XLSX.utils.json_to_sheet(rowsData);
@@ -973,7 +1059,7 @@ const ComprasPrevisoesApp = {
     ws["!cols"] = [
       { wch: 32 }, { wch: 12 }, { wch: 36 }, { wch: 22 }, { wch: 40 },
       { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 14 },
-      { wch: 16 }, { wch: 12 }, { wch: 12 }
+      { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }
     ];
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -1061,6 +1147,7 @@ const ComprasPrevisoesApp = {
               <select class="form-control" onchange="ComprasPrevisoesApp.onField('status', this.value)">
                 <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
                 <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
+                <option value="substituido" ${s.status === "substituido" ? "selected" : ""}>Substituídos</option>
                 <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
               </select>
             </div>

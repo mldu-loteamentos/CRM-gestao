@@ -139,8 +139,21 @@ const FluxoCaixaApp = {
   },
 
   /**
+   * Sienge manda financialCategoryRate em % de 0–100 (pode ser < 1%,
+   * ex. 0,653847605144% de pró-labore na guia INSS 109504).
+   * Só trata como fração 0–1 quando nenhuma linha passa de 1 e a soma fecha ~100%.
+   */
+  categoryRatesAreFractions(rates) {
+    const raw = (rates || []).map((r) => Number(r)).filter((r) => Number.isFinite(r) && r > 0);
+    if (!raw.length) return false;
+    const max = Math.max.apply(null, raw);
+    const sum = raw.reduce((s, r) => s + r, 0);
+    return max <= 1 && sum <= 1.0001;
+  },
+
+  /**
    * Rateio das categorias do movimento.
-   * Sienge manda % (0–100). Se houver linhas duplicadas ou soma > 100,
+   * Percentual Sienge 0–100. Se houver linhas duplicadas ou soma > 100,
    * normaliza — senão o DFC infla (caso visto em 2.11.03 Adiantamento a Parceiros).
    * @param {object} [opts]
    * @param {boolean} [opts.renormalize] quando true, o % restante vira 100% do título
@@ -149,6 +162,8 @@ const FluxoCaixaApp = {
   categoryShareEntries(cats, opts) {
     const renormalize = !!(opts && opts.renormalize);
     const list = Array.isArray(cats) ? cats : [];
+    const rawRates = list.map((fc) => Number(fc && fc.financialCategoryRate));
+    const asFraction = this.categoryRatesAreFractions(rawRates);
     const merged = new Map();
     list.forEach((fc) => {
       if (!fc) return;
@@ -159,7 +174,7 @@ const FluxoCaixaApp = {
       const rateRaw = Number(fc.financialCategoryRate);
       let points = 0;
       if (Number.isFinite(rateRaw) && rateRaw > 0) {
-        points = rateRaw > 1 ? rateRaw : rateRaw * 100;
+        points = asFraction ? rateRaw * 100 : rateRaw;
       }
       const prev = merged.get(key);
       if (!prev) {
@@ -1196,6 +1211,10 @@ const FluxoCaixaApp = {
                 const amt = Number(it.amount) || 0;
                 const raw = Number(it.rawBankAmount);
                 const sharePct = (Number(it.share) || 0) * 100;
+                const shareTxt = sharePct.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: sharePct > 0 && sharePct < 1 ? 6 : 2
+                });
                 const factorPct = (Number(it.factor) || 0) * 100;
                 const rateado = Number.isFinite(Number(it.rateadoBruto))
                   ? Number(it.rateadoBruto)
@@ -1233,7 +1252,7 @@ const FluxoCaixaApp = {
                     <span>${this.esc(this.movHistoric(mov))}</span>${roleBadge}
                   </td>
                   <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:600;color:${rawColor};" title="Valor integral do título/movimento na API">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${sharePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%${it.rateRaw != null ? `<div style="color:#94a3b8;font-size:0.7rem;">API ${this.esc(String(it.rateRaw))}</div>` : ""}</td>
+                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${shareTxt}%${it.rateRaw != null ? `<div style="color:#94a3b8;font-size:0.7rem;">API ${this.esc(String(it.rateRaw))}</div>` : ""}</td>
                   <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:700;color:${rateadoColor};" title="Total título × % rateio do C.C.">${Number.isFinite(rateado) ? this.fmt(rateado) : "—"}</td>
                   <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
                   <td style="padding:10px 12px;text-align:right;font-weight:800;color:${color};font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${this.fmt(amt)}</td>

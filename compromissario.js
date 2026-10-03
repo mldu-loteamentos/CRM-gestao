@@ -82,7 +82,7 @@ const CompromissarioApp = {
   CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
   CESSAO_WORKING_MONTH_KEY: 'crm_compromissario_cessao_working_month',
   CESSAO_FILE_DB: 'crm_compromissario_cessao_files_v1',
-  CESSAO_PARSE_VERSION: 7,
+  CESSAO_PARSE_VERSION: 8,
   FOLLOW_LS_KEY: 'crm_compromissario_followup_v1',
 
   state: {
@@ -423,7 +423,7 @@ const CompromissarioApp = {
           <strong>Movimentos</strong>
           <span id="comp-pref-count" style="font-size:0.78rem;color:#64748b;">0 encontrados</span>
         </div>
-        <div id="comp-pref-tbody" style="padding:16px;">
+        <div id="comp-pref-tbody" class="comp-pref-mov-body">
           <div style="text-align:center;padding:32px;color:#94a3b8;">Clique em Carregar movimentos.</div>
         </div>
       </div>
@@ -758,24 +758,23 @@ const CompromissarioApp = {
     const docsHtml = this.movementDocs(c).map((doc) => this.renderDocDropzone(doc.contract && doc.contract.id, doc.label)).join('');
     const cityCfg = configs[this.normalizeCityKey(cityName)] || {};
     return `
-      <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.1s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
-        <td style="padding: 12px 15px; font-weight: 600; color: #1e293b;">
+      <tr class="comp-mov-row">
+        <td class="comp-mov-ct">
           ${idHtml}
-          <div style="margin-top: 4px;">
-            <span style="font-size: 0.7rem; font-weight: 700; background: ${badge.bg}; color: ${badge.color}; padding: 2px 6px; border-radius: 4px; border: 1px solid ${badge.color}33; display: inline-block;">${opType}</span>
+          <div class="comp-mov-badge-wrap">
+            <span class="comp-mov-badge" style="background:${badge.bg};color:${badge.color};border-color:${badge.color}33;">${opType}</span>
           </div>
           ${this.cessaoBadgeHtml(c)}
         </td>
-        <td style="padding: 12px 15px; color: #334155;">${buyerHtml}</td>
-        <td style="padding: 12px 15px; color: #0f172a; font-size: 0.9rem; font-weight: 700;">
-          ${this.escHtml(unitInfo)}
-        </td>
-        <td style="padding: 12px 15px;">${docsHtml}</td>
-        <td style="padding: 12px 15px; text-align: center; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: center; height: 100%;">
+        <td class="comp-mov-buy"><div class="comp-mov-buyers">${buyerHtml}</div></td>
+        <td class="comp-mov-unit">${this.escHtml(unitInfo)}</td>
+        <td class="comp-mov-doc">${docsHtml}</td>
+        <td class="comp-mov-act">
+          <div class="comp-mov-actions">
           ${cityCfg.agrupar ? `
-            <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;"><i data-lucide="layers" style="width: 12px;"></i> Agrupado</span>
+            <span class="comp-mov-grouped"><i data-lucide="layers" style="width: 12px;"></i> Agrupado</span>
           ` : `
-            <button onclick="CompromissarioApp.sendEmail('${id}')" style="background: ${this.state.notifiedContracts[id] ? '#f1f5f9' : '#e0f2fe'}; color: ${this.state.notifiedContracts[id] ? '#64748b' : '#0284c7'}; border: 1px solid ${this.state.notifiedContracts[id] ? '#cbd5e1' : '#bae6fd'}; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="${this.state.notifiedContracts[id] ? 'Comunicação já realizada' : 'Iniciar Comunicação'}">
+            <button type="button" class="comp-mov-btn ${this.state.notifiedContracts[id] ? 'is-done' : 'is-notify'}" onclick="CompromissarioApp.sendEmail('${id}')" title="${this.state.notifiedContracts[id] ? 'Comunicação já realizada' : 'Iniciar Comunicação'}">
               <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : (cityCfg.hasPortal ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : (cityCfg.hasPortal ? 'Portal' : 'Notificar')}
             </button>
           `}
@@ -783,13 +782,14 @@ const CompromissarioApp = {
             <input type="text" id="comp-proto-${id}" class="form-control" placeholder="Nº protocolo"
               value="${this.escHtml(this.protocolOf(id))}"
               onchange="CompromissarioApp.setMovementProtocol('${id}', this.value)"
-              style="width:120px;padding:5px 8px;font-size:0.75rem;" title="Protocolo do portal da prefeitura">
+              title="Protocolo do portal da prefeitura">
           ` : ''}
           ${cityCfg.reqEspecial ? `
-            <button onclick="CompromissarioApp.generateRequirement('${id}')" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="Gerar Documento de Requerimento Especial">
+            <button type="button" class="comp-mov-btn is-req" onclick="CompromissarioApp.generateRequirement('${id}')" title="Gerar Documento de Requerimento Especial">
               <i data-lucide="file-text" style="width: 14px;"></i> Requerimento
             </button>
           ` : ''}
+          </div>
         </td>
       </tr>`;
   },
@@ -1010,10 +1010,9 @@ const CompromissarioApp = {
         this.persistCessaoMonth();
         this.renderCessaoPanel();
         this.syncCessaoGateUi();
-        this.hydrateCessaoUnits().then(() => {
-          this.renderCessaoPanel();
-        }).catch(() => {});
       }
+      await this.hydrateCessaoUnits();
+      this.renderCessaoPanel();
     } finally {
       this._reparseCessaoBusy = false;
     }
@@ -1104,11 +1103,73 @@ const CompromissarioApp = {
     return n ? `${n} cessão(ões) na competência` : text;
   },
 
-  cityLabelFromCessao(rec) {
+  sameCessaoCity(a, b) {
+    const x = this.foldHeader(a);
+    const y = this.foldHeader(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    const short = x.length < y.length ? x : y;
+    const long = x.length < y.length ? y : x;
+    return short.length >= 8 && long.indexOf(short) >= 0;
+  },
+
+  cityHintFromCessao(rec) {
+    const cidade = String((rec && rec.cidade) || '').trim();
+    if (cidade && !/^\d+$/.test(cidade)) return cidade.toUpperCase();
     const emp = String((rec && rec.empresa) || '');
     const parts = emp.split(/\s*-\s*/).map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2 && /^\d+$/.test(parts[0])) return parts[1];
-    return (rec && rec.enterpriseName) || emp || '';
+    if (parts.length >= 2 && /^\d+$/.test(parts[0])) return String(parts[1] || '').toUpperCase();
+    const folded = this.foldHeader(emp);
+    if (parts.length === 1 && !/^\d+$/.test(parts[0]) && !/EMPREENDIMENTO|IMOBILIAR|SPE|LTDA|DESENVOLV/.test(folded)) {
+      return parts[0].toUpperCase();
+    }
+    return '';
+  },
+
+  cityLabelFromCessao(rec) {
+    const hint = this.cityHintFromCessao(rec);
+    if (hint) return hint;
+    const fromEmp = this.cityFromEnterprise((rec && rec.empresa) || '');
+    if (fromEmp && !/^\d+$/.test(fromEmp)) return fromEmp;
+    return '';
+  },
+
+  resolveCessaoEnterprise(rec, companyId) {
+    const city = this.cityLabelFromCessao(rec);
+    const empRaw = String((rec && rec.empresa) || '');
+    const empId = (empRaw.match(/^(\d+)/) || [])[1] || '';
+    let id = empId || String((rec && rec.enterpriseId) || '');
+    let name = '';
+    if (empId || (empRaw && empRaw !== city)) {
+      name = this.enterpriseNameFromCessao({ empresa: empRaw, enterpriseName: '' });
+    }
+    const hydratedName = String((rec && rec.enterpriseName) || '');
+    const hydratedId = String((rec && rec.enterpriseId) || '');
+    const hydCity = this.cityFromEnterprise(hydratedName);
+    if (hydratedName && (!city || this.sameCessaoCity(city, hydCity))) {
+      name = hydratedName;
+      if (hydratedId) id = hydratedId;
+    } else if (city && hydCity && !this.sameCessaoCity(city, hydCity)) {
+      if (!empId) id = '';
+      if (this.sameCessaoCity(this.cityFromEnterprise(name), hydCity)) name = '';
+    }
+    if ((!id || !name) && city && window.AppState && Array.isArray(window.AppState.cachedCostCenters)) {
+      const matches = window.AppState.cachedCostCenters.filter((c) =>
+        this.sameCessaoCity(city, this.cityFromEnterprise(c.name || c.nome || ''))
+      );
+      if (id) {
+        const hit = matches.find((c) => String(c.id) === String(id));
+        if (hit) name = hit.name || name;
+      } else if (matches.length === 1) {
+        id = String(matches[0].id);
+        name = matches[0].name || name;
+      }
+    }
+    return {
+      enterpriseId: id,
+      enterpriseName: name,
+      city: city || this.cityFromEnterprise(name) || ''
+    };
   },
 
   cessaoCitySummary() {
@@ -1244,27 +1305,16 @@ const CompromissarioApp = {
       let extra = '';
       if (status === 'has' && hasFile) {
         extra = `<div class="comp-cessao-file">${this.escHtml(row.fileName)}${recs.length ? ' · ' + recs.length + ' cessão(ões) no mês' : ''}</div>`;
-        if (recs.length) {
-          extra += '<table class="comp-cessao-mini"><tbody>' + recs.map((r) => {
-            const atuais = (r.atuais || []).map((x) => (x.principal ? '(P)* ' : '') + (x.name || x.id)).join(', ');
-            const ant = (r.anteriores || []).map((x) => x.name || x.id).join(', ');
-            const city = this.cityLabelFromCessao(r);
-            return `<tr>
-              <td>${this.escHtml(r.data || this.formatCessaoDate(r.dataIso) || '—')}</td>
-              <td>${this.escHtml(city || '—')}</td>
-              <td>${this.escHtml(r.titulo || '—')}</td>
-              <td>${this.escHtml(atuais || '—')}</td>
-              <td>${this.escHtml(ant || '—')}</td>
-            </tr>`;
-          }).join('') + '</tbody></table>';
-        }
       } else if (status === 'has' && !hasFile) {
         extra = '<div class="comp-cessao-file is-warn">Anexe o XLS do Sienge</div>';
       }
       return `
         <tr class="comp-cessao-row ${tone}">
-          <td class="comp-cessao-emp">${c.id} — ${this.escHtml(c.name)}</td>
-          <td>
+          <td class="comp-cessao-emp">
+            <span class="comp-cessao-emp-id">${c.id}</span>
+            <span class="comp-cessao-emp-name">${this.escHtml(c.name)}</span>
+          </td>
+          <td class="comp-cessao-mes">
             <div class="comp-cessao-choice">
               <label><input type="radio" name="comp-cessao-${c.id}" value="none" ${noneChecked}
                 onchange="CompromissarioApp.setCessaoStatus('${c.id}','none')"> Não teve</label>
@@ -1272,7 +1322,7 @@ const CompromissarioApp = {
                 onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')"> Teve</label>
             </div>
           </td>
-          <td>
+          <td class="comp-cessao-rel">
             <div class="comp-cessao-upload">
               <input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
                 onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">
@@ -1297,11 +1347,16 @@ const CompromissarioApp = {
       <div class="crm-card" style="padding:0;overflow:hidden;" id="comp-cessao-list">
         ${companies.length ? `
           <table class="custom-table tvig-list-table comp-cessao-table">
+            <colgroup>
+              <col class="comp-cessao-col-emp">
+              <col class="comp-cessao-col-mes">
+              <col class="comp-cessao-col-rel">
+            </colgroup>
             <thead>
               <tr>
                 <th>Empresa</th>
-                <th style="width:210px;">Neste mês</th>
-                <th>Relatório / cessões</th>
+                <th>Neste mês</th>
+                <th>Relatório</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -1700,6 +1755,7 @@ const CompromissarioApp = {
       dataIso: iso,
       competencia: (iso || '').slice(0, 7) || this.competenciaValue(),
       empresa: (list.find((r) => r.empresa) || {}).empresa || first.empresa || '',
+      cidade: (list.find((r) => r.cidade) || {}).cidade || first.cidade || '',
       titulo: String(first.titulo || '').replace(/\.0$/, ''),
       documento,
       contratoNumero: this.extractContratoNumero(documento),
@@ -1772,26 +1828,29 @@ const CompromissarioApp = {
 
   parseCessaoMatrix(matrix) {
     const rows = Array.isArray(matrix) ? matrix : [];
-    let col = { data: -1, empresa: -1, titulo: -1, documento: -1, cliente: -1 };
+    let col = { data: -1, empresa: -1, cidade: -1, titulo: -1, documento: -1, cliente: -1 };
     let foundHeader = false;
 
     const detectCols = (cells) => {
       const folded = (cells || []).map((c) => this.foldHeader(c));
       const find = (...needles) => folded.findIndex((h) => needles.some((n) => h.includes(n)));
       const data = find('DATA CESSAO', 'DATA');
-      const empresa = find('EMPRESA-LOTEAMENTO', 'EMPRESA LOTEAMENTO', 'EMPREENDIMENTO', 'EMPRESA');
+      let empresa = find('EMPRESA-LOTEAMENTO', 'EMPRESA LOTEAMENTO', 'LOTEAMENTO');
+      if (empresa < 0) empresa = find('EMPREENDIMENTO');
+      if (empresa < 0) empresa = find('EMPRESA');
+      const cidade = find('CIDADE', 'MUNICIPIO');
       const titulo = find('TITULO');
       const documento = find('DOCUMENTO');
       const cliente = find('CLIENTE');
       if (data >= 0 && titulo >= 0 && cliente >= 0) {
-        col = { data, empresa, titulo, documento, cliente };
+        col = { data, empresa, cidade, titulo, documento, cliente };
         return true;
       }
       return false;
     };
 
     const raw = [];
-    let carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+    let carry = { data: '', dataIso: '', empresa: '', cidade: '', titulo: '', documento: '' };
     let pending = [];
     const flushPending = () => {
       if (!carry.titulo || !pending.length) return;
@@ -1800,6 +1859,7 @@ const CompromissarioApp = {
           data: p.data || carry.data,
           dataIso: p.dataIso || carry.dataIso || this.cessaoDateIso(p.data || carry.data),
           empresa: p.empresa || carry.empresa,
+          cidade: p.cidade || carry.cidade,
           titulo: carry.titulo,
           documento: p.documento || carry.documento,
           clients: p.clients
@@ -1814,7 +1874,7 @@ const CompromissarioApp = {
         pending = [];
         detectCols(r);
         foundHeader = true;
-        carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+        carry = { data: '', dataIso: '', empresa: '', cidade: '', titulo: '', documento: '' };
         continue;
       }
       if (!foundHeader && detectCols(r)) {
@@ -1826,6 +1886,7 @@ const CompromissarioApp = {
       const data = picked.data;
       const dataIso = picked.dataIso;
       const empresa = col.empresa >= 0 ? this.cellToText(r[col.empresa]) : '';
+      const cidade = col.cidade >= 0 ? this.cellToText(r[col.cidade]) : '';
       const titulo = this.cellToText(r[col.titulo]);
       const documento = col.documento >= 0 ? this.cellToText(r[col.documento]) : '';
       const clienteRaw = this.cellToText(r[col.cliente]);
@@ -1834,6 +1895,7 @@ const CompromissarioApp = {
       if (data) carry.data = data;
       if (dataIso) carry.dataIso = dataIso;
       if (empresa) carry.empresa = empresa;
+      if (cidade) carry.cidade = cidade;
       if (titulo && this.foldHeader(titulo) !== 'TITULO') {
         carry.titulo = String(titulo).replace(/\.0$/, '');
         flushPending();
@@ -1846,6 +1908,7 @@ const CompromissarioApp = {
           data: data || carry.data,
           dataIso: dataIso || carry.dataIso,
           empresa: empresa || carry.empresa,
+          cidade: cidade || carry.cidade,
           documento: documento || carry.documento,
           clients
         });
@@ -1855,6 +1918,7 @@ const CompromissarioApp = {
         data: carry.data,
         dataIso: carry.dataIso || this.cessaoDateIso(carry.data),
         empresa: carry.empresa,
+        cidade: carry.cidade,
         titulo: carry.titulo,
         documento: carry.documento,
         clients
@@ -1879,7 +1943,7 @@ const CompromissarioApp = {
   parseCessaoMatrixLoose(matrix) {
     const rows = Array.isArray(matrix) ? matrix : [];
     const raw = [];
-    let carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+    let carry = { data: '', dataIso: '', empresa: '', cidade: '', titulo: '', documento: '' };
     let pending = [];
     const flushPending = () => {
       if (!carry.titulo || !pending.length) return;
@@ -1888,6 +1952,7 @@ const CompromissarioApp = {
           data: p.data || carry.data,
           dataIso: p.dataIso || carry.dataIso || this.cessaoDateIso(p.data || carry.data),
           empresa: p.empresa || carry.empresa,
+          cidade: p.cidade || carry.cidade,
           titulo: carry.titulo,
           documento: p.documento || carry.documento,
           clients: p.clients
@@ -1900,7 +1965,7 @@ const CompromissarioApp = {
       if (this.isCessaoHeaderRow(cells)) {
         flushPending();
         pending = [];
-        carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+        carry = { data: '', dataIso: '', empresa: '', cidade: '', titulo: '', documento: '' };
         return;
       }
       const picked = this.findCessaoBitsInRow(cells);
@@ -1911,6 +1976,7 @@ const CompromissarioApp = {
         carry.dataIso = picked.dataIso;
       }
       if (picked.empresa) carry.empresa = picked.empresa;
+      if (picked.cidade) carry.cidade = picked.cidade;
       if (picked.titulo) {
         carry.titulo = picked.titulo;
         flushPending();
@@ -1923,6 +1989,7 @@ const CompromissarioApp = {
           data: picked.data || carry.data,
           dataIso: picked.dataIso || carry.dataIso,
           empresa: picked.empresa || carry.empresa,
+          cidade: picked.cidade || carry.cidade,
           documento: picked.documento || carry.documento,
           clients
         });
@@ -1932,6 +1999,7 @@ const CompromissarioApp = {
         data: carry.data,
         dataIso: carry.dataIso || this.cessaoDateIso(carry.data),
         empresa: carry.empresa,
+        cidade: carry.cidade,
         titulo: carry.titulo,
         documento: carry.documento,
         clients
@@ -1949,7 +2017,7 @@ const CompromissarioApp = {
   },
 
   findCessaoBitsInRow(cells) {
-    const out = { data: '', dataIso: '', empresa: '', titulo: '', documento: '', clienteRaw: '' };
+    const out = { data: '', dataIso: '', empresa: '', cidade: '', titulo: '', documento: '', clienteRaw: '' };
     (cells || []).forEach((raw) => {
       const text = this.cellToText(raw);
       if (!text) return;
@@ -1966,6 +2034,11 @@ const CompromissarioApp = {
         || /EMPREENDIMENTO|LOTEAMENTO|RESERVA DO|SPE LTDA/.test(folded);
       if (!out.empresa && looksEmpresa) {
         out.empresa = text;
+        return;
+      }
+      if (!out.cidade && /^[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][A-ZÁÀÂÃÉÊÍÓÔÕÚÇ\s]{3,28}$/.test(text)
+        && !/EMPREEND|CLIENTE|TITULO|DOCUMENTO|CESSAO|RELATORIO/.test(folded)) {
+        out.cidade = text;
         return;
       }
       if (!out.clienteRaw && (/\*|(\(P\))/i.test(text)
@@ -2092,40 +2165,94 @@ const CompromissarioApp = {
     return all;
   },
 
-  async lookupCessaoUnit(rec, cache) {
+  pickCessaoSale(results, rec, companyId) {
+    const list = Array.isArray(results) ? results : [];
+    if (!list.length) return null;
+    const city = this.cityLabelFromCessao(rec);
+    const wantedCo = companyId != null && companyId !== ''
+      ? String(companyId)
+      : (rec && rec.companyId != null ? String(rec.companyId) : '');
+    const byCo = wantedCo
+      ? list.filter((s) => s.companyId == null || String(s.companyId) === wantedCo)
+      : list.slice();
+    const pool = byCo.length ? byCo : [];
+    const citySrc = pool.length ? pool : list;
+    const cityPool = city
+      ? citySrc.filter((s) => this.sameCessaoCity(city, this.cityFromEnterprise(s.enterpriseName)))
+      : [];
+    if (cityPool.length) return cityPool[0];
+    if (pool.length === 1) {
+      const only = pool[0];
+      if (city && only.enterpriseName && !this.sameCessaoCity(city, this.cityFromEnterprise(only.enterpriseName))) {
+        return null;
+      }
+      return only;
+    }
+    return null;
+  },
+
+  saleFitsCessao(sale, rec, companyId) {
+    if (!sale) return false;
+    const wantedCo = companyId != null && companyId !== '' ? String(companyId) : '';
+    if (wantedCo && sale.companyId != null && String(sale.companyId) !== wantedCo) return false;
+    const city = this.cityLabelFromCessao(rec);
+    if (city && sale.enterpriseName && !this.sameCessaoCity(city, this.cityFromEnterprise(sale.enterpriseName))) {
+      return false;
+    }
+    return true;
+  },
+
+  async lookupCessaoUnit(rec, cache, companyId) {
     const memo = cache || {};
     const titulo = this.digitsOnly(rec && rec.titulo);
     const contrato = (rec && rec.contratoNumero) || this.extractContratoNumero(rec && rec.documento);
-    const cacheKey = (titulo || '') + '|' + (contrato || '');
+    const cid = companyId != null && companyId !== '' ? String(companyId) : String((rec && rec.companyId) || '');
+    const cacheKey = [titulo || '', contrato || '', cid].join('|');
     if (cacheKey && memo[cacheKey]) return Object.assign(rec, memo[cacheKey]);
     const fetchFn = window.siengeFetchWithRetry;
     if (typeof fetchFn !== 'function') return rec;
+    const saleUrl = (number, extra) => {
+      let url = '/sales-contracts?number=' + encodeURIComponent(number);
+      if (cid) url += '&companyId=' + encodeURIComponent(cid);
+      if (extra) url += extra;
+      return url;
+    };
     try {
       let sale = null;
       let bill = null;
       if (contrato) {
-        const data = await fetchFn('/sales-contracts?number=' + encodeURIComponent(contrato)).catch(() => null);
-        sale = data && Array.isArray(data.results) ? data.results[0] : null;
+        const data = await fetchFn(saleUrl(contrato)).catch(() => null);
+        sale = this.pickCessaoSale(data && data.results, rec, cid);
       }
       if (!sale && titulo) {
         bill = await fetchFn('/accounts-receivable/receivable-bills/' + encodeURIComponent(titulo)).catch(() => null);
+        const billEnt = bill && (bill.enterpriseName || bill.costCenterName || '');
+        const billCity = this.cityFromEnterprise(billEnt);
+        const recCity = this.cityLabelFromCessao(rec);
+        const billFits = !recCity || !billCity || this.sameCessaoCity(recCity, billCity);
         const docNum = bill && (bill.documentNumber || bill.number || bill.contractNumber);
-        if (docNum) {
-          const data = await fetchFn('/sales-contracts?number=' + encodeURIComponent(docNum)).catch(() => null);
-          sale = data && Array.isArray(data.results) ? data.results[0] : null;
+        if (docNum && billFits) {
+          const data = await fetchFn(saleUrl(docNum)).catch(() => null);
+          sale = this.pickCessaoSale(data && data.results, rec, cid);
         }
-        if (!sale && bill && bill.id) {
+        if (!sale && bill && bill.id && billFits) {
           const byBill = await fetchFn('/sales-contracts?receivableBillId=' + encodeURIComponent(bill.id)).catch(() => null);
-          sale = byBill && Array.isArray(byBill.results) ? byBill.results[0] : null;
+          sale = this.pickCessaoSale(byBill && byBill.results, rec, cid);
         }
+        if (sale && !this.saleFitsCessao(sale, rec, cid)) sale = null;
       }
+      if (sale && !this.saleFitsCessao(sale, rec, cid)) sale = null;
       const unit = (sale && sale.salesContractUnits && sale.salesContractUnits[0]) || {};
+      const resolved = this.resolveCessaoEnterprise(Object.assign({}, rec, {
+        enterpriseId: (sale && sale.enterpriseId) || rec.enterpriseId || '',
+        enterpriseName: (sale && sale.enterpriseName) || rec.enterpriseName || ''
+      }), cid);
       const patch = {
-        unitName: unit.name || (bill && (bill.unityName || bill.unitName)) || rec.unitName || '',
-        enterpriseId: (sale && sale.enterpriseId) || (bill && (bill.enterpriseCode || bill.enterpriseId)) || rec.enterpriseId || '',
-        enterpriseName: (sale && sale.enterpriseName) || rec.enterpriseName || '',
+        unitName: unit.name || rec.unitName || '',
+        enterpriseId: resolved.enterpriseId || '',
+        enterpriseName: resolved.enterpriseName || '',
         companyName: (sale && sale.companyName) || rec.companyName || '',
-        companyId: (sale && sale.companyId) || rec.companyId,
+        companyId: cid || rec.companyId,
         contractId: (sale && sale.id) || rec.contractId,
         receivableBillId: (sale && sale.receivableBillId) || titulo || rec.receivableBillId,
         salesContractUnits: (sale && sale.salesContractUnits) || rec.salesContractUnits,
@@ -2142,12 +2269,22 @@ const CompromissarioApp = {
   async hydrateCessaoUnits() {
     const cache = {};
     const jobs = [];
-    Object.values(this.state.cessaoByCompany || {}).forEach((row) => {
-      if (row.status !== 'has' || !Array.isArray(row.records)) return;
+    Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
+      if (!row || row.status !== 'has' || !Array.isArray(row.records)) return;
       row.records = this.normalizeCessaoRecords(row.records);
       row.records.forEach((rec) => {
-        if (rec.unitName && rec.enterpriseName) return;
-        jobs.push(this.lookupCessaoUnit(rec, cache));
+        const hint = this.cityLabelFromCessao(rec);
+        const hydCity = this.cityFromEnterprise(rec.enterpriseName);
+        const wrongCity = !!(hint && rec.enterpriseName && hydCity && !this.sameCessaoCity(hint, hydCity));
+        const wrongCo = !!(cid && rec.companyId != null && rec.companyId !== '' && String(rec.companyId) !== String(cid) && rec.enterpriseName);
+        if (wrongCity || wrongCo) {
+          rec.enterpriseName = '';
+          rec.enterpriseId = '';
+          rec.unitName = '';
+        }
+        rec.companyId = cid;
+        if (rec.unitName && rec.enterpriseName && !wrongCity && !wrongCo) return;
+        jobs.push(this.lookupCessaoUnit(rec, cache, cid));
       });
     });
     if (jobs.length) await Promise.all(jobs);
@@ -2210,9 +2347,10 @@ const CompromissarioApp = {
         if (seen.has(key)) return;
         seen.add(key);
         const atuais = rec.atuais || [];
-        const enterpriseName = rec.enterpriseName || this.enterpriseNameFromCessao(rec) || String(rec.empresa || '').replace(/^\d+\s*-\s*/, '');
-        const enterpriseId = rec.enterpriseId || ((String(rec.empresa || '').match(/^(\d+)/) || [])[1] || '');
-        const city = this.cityLabelFromCessao(rec) || this.cityFromEnterprise(enterpriseName || rec.empresa);
+        const resolved = this.resolveCessaoEnterprise(rec, cid);
+        const enterpriseName = resolved.enterpriseName || '';
+        const enterpriseId = resolved.enterpriseId || '';
+        const city = resolved.city || this.cityLabelFromCessao(rec);
         movements.push({
           id: 'cessao-' + cid + '-' + (this.digitsOnly(rec.titulo) || rec.contratoNumero || idx) + '-' + (this.resolveCessaoIso(rec) || idx),
           _movementType: 'Cessão',
@@ -2472,14 +2610,21 @@ const CompromissarioApp = {
             </div>
             <span style="font-size: 0.72rem; color: #475569; font-weight: 600;">${empRows.length} movimento(s)${trocaN ? ` · ${trocaN} troca(s)` : ''}</span>
           </div>
-          <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+          <table class="comp-mov-table">
+            <colgroup>
+              <col class="comp-mov-col-ct">
+              <col class="comp-mov-col-buy">
+              <col class="comp-mov-col-unit">
+              <col class="comp-mov-col-doc">
+              <col class="comp-mov-col-act">
+            </colgroup>
             <thead>
-              <tr style="background: #fff; border-bottom: 1px solid #e2e8f0;">
-                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Contrato</th>
-                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Comprador</th>
-                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Unidade</th>
-                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600; width: 250px;">Documento / Termo</th>
-                <th style="padding: 10px 15px; text-align: center; color: #64748b; font-weight: 600; width: 120px;">Ação</th>
+              <tr>
+                <th>Contrato</th>
+                <th>Comprador</th>
+                <th>Unidade</th>
+                <th>Documento / Termo</th>
+                <th>Ação</th>
               </tr>
             </thead>
             <tbody>

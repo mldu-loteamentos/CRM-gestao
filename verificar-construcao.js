@@ -1498,14 +1498,14 @@ window.VerificarConstrucaoApp = {
             html += `
                 <tr class="dist-obra-row">
                     <td><strong>${label}</strong> ${badgeNew}</td>
-                    <td>
-                        <input type="date" class="dist-obra-previsao" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${String(costCenterId).replace(/'/g, "\\'")}', this.value)">
-                    </td>
                     <td class="dist-obra-switch">
-                        <label class="moura-switch" id="${toggleId}-label" title="Ligar/desligar vistoria do empreendimento">
+                        <label class="moura-switch" id="${toggleId}-label" title="Obra em andamento">
                             <input type="checkbox" id="${toggleId}" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
                             <span class="moura-switch-track" aria-hidden="true"></span>
                         </label>
+                    </td>
+                    <td>
+                        <input type="date" class="dist-obra-previsao" value="${previsao}" id="${toggleId}-date" ${isOn ? '' : 'disabled'} onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${String(costCenterId).replace(/'/g, "\\'")}', this.value)">
                     </td>
                 </tr>
             `;
@@ -1513,7 +1513,7 @@ window.VerificarConstrucaoApp = {
 
         listDiv.innerHTML =
             '<table class="dist-obra-table">' +
-              '<thead><tr><th>Empreendimento</th><th>Término de obra</th><th></th></tr></thead>' +
+              '<thead><tr><th>Empreendimento</th><th class="dist-obra-switch">Obra em andamento</th><th>Término de obra</th></tr></thead>' +
               '<tbody>' + html + '</tbody>' +
             '</table>';
         modal.style.display = 'flex';
@@ -1526,6 +1526,8 @@ window.VerificarConstrucaoApp = {
         if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
         this._tempObrasState[emp].isOn = checked;
         this._tempObrasState[emp].isNew = false;
+        const date = document.getElementById(input.id + "-date");
+        if (date) date.disabled = !checked;
     },
 
     _onPrevisaoChange(emp, val) {

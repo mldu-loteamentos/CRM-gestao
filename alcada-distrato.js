@@ -331,21 +331,30 @@
     );
   }
 
+  function syncObraDateEnabled(row) {
+    if (!row) return;
+    const toggle = row.querySelector(".dist-obra-toggle");
+    const date = row.querySelector(".dist-obra-previsao");
+    if (!date) return;
+    date.disabled = !canEdit() || !(toggle && toggle.checked);
+  }
+
   function obraRowHtml(emp, state) {
     const isOn = !!(state && state.isOn);
     const previsao = (state && state.previsao) || "";
-    const disabled = canEdit() ? "" : " disabled";
+    const editOff = canEdit() ? "" : " disabled";
+    const dateOff = canEdit() && isOn ? "" : " disabled";
     return (
       '<tr class="dist-obra-row" data-id="' + escapeHtml(emp.id) + '">' +
         '<td><strong>' + escapeHtml(emp.label) + '</strong></td>' +
-        '<td>' +
-          '<input type="date" class="dist-obra-previsao" value="' + escapeHtml(previsao) + '"' + disabled + '>' +
-        '</td>' +
         '<td class="dist-obra-switch">' +
-          '<label class="moura-switch" title="Marcar obra em andamento">' +
-            '<input type="checkbox" class="dist-obra-toggle"' + (isOn ? " checked" : "") + disabled + '>' +
+          '<label class="moura-switch" title="Obra em andamento">' +
+            '<input type="checkbox" class="dist-obra-toggle"' + (isOn ? " checked" : "") + editOff + '>' +
             '<span class="moura-switch-track" aria-hidden="true"></span>' +
           '</label>' +
+        '</td>' +
+        '<td>' +
+          '<input type="date" class="dist-obra-previsao" value="' + escapeHtml(previsao) + '"' + dateOff + '>' +
         '</td>' +
       '</tr>'
     );
@@ -367,7 +376,7 @@
       '</div>' +
       '<div class="dist-obra-scroll">' +
         '<table class="dist-obra-table">' +
-          '<thead><tr><th>Empreendimento</th><th>Término de obra</th><th></th></tr></thead>' +
+          '<thead><tr><th>Empreendimento</th><th class="dist-obra-switch">Obra em andamento</th><th>Término de obra</th></tr></thead>' +
           '<tbody>' + list.map((emp) => obraRowHtml(emp, state[emp.id])).join("") + '</tbody>' +
         '</table>' +
       '</div>';
@@ -381,6 +390,7 @@
       const t = ev.target;
       if (!t) return;
       if (t.classList && (t.classList.contains("dist-obra-toggle") || t.classList.contains("dist-obra-previsao"))) {
+        if (t.classList.contains("dist-obra-toggle")) syncObraDateEnabled(t.closest(".dist-obra-row"));
         scheduleObrasSave();
         return;
       }
@@ -390,6 +400,7 @@
       const t = ev.target;
       if (!t) return;
       if (t.classList && (t.classList.contains("dist-obra-toggle") || t.classList.contains("dist-obra-previsao"))) {
+        if (t.classList.contains("dist-obra-toggle")) syncObraDateEnabled(t.closest(".dist-obra-row"));
         scheduleObrasSave();
         return;
       }

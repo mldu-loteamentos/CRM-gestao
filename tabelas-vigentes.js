@@ -534,25 +534,51 @@ const TabelasVigentesApp = {
     );
   },
 
+  editorContextLabel(d) {
+    const emp = (this.state.enterprises || []).find((e) => String(e.id) === String(d.enterpriseId));
+    const empLabel = emp
+      ? (emp.label || ((emp.id ? emp.id + " - " : "") + (emp.name || "")))
+      : ((d.enterpriseId ? d.enterpriseId + " - " : "") + (d.enterpriseName || ""));
+    const parts = [
+      this.competenciaLabel(d.competencia),
+      d.cityId || d.city || "",
+      empLabel
+    ].map((x) => String(x || "").trim()).filter(Boolean);
+    return parts.join(" · ");
+  },
+
   editorKeyError() {
     const ed = this.state.editor;
     const d = ed && ed.draft;
-    if (!d) return "";
+    if (!d) return null;
     if (ed.mode === "copy" && ed.sourceCompetencia && String(d.competencia || "") === String(ed.sourceCompetencia)) {
-      return "A cópia precisa de uma competência diferente da tabela de origem (" + this.competenciaLabel(ed.sourceCompetencia) + ").";
+      return {
+        title: "Competência igual à origem",
+        text: "A cópia precisa de outro mês. A tabela de origem é " + this.competenciaLabel(ed.sourceCompetencia) + "."
+      };
     }
     if (this.isDuplicate(d)) {
-      return "Já existe tabela nesta competência, cidade e empreendimento.";
+      return {
+        title: "Tabela já cadastrada",
+        text: "Já existe uma tabela vigente para " + this.editorContextLabel(d) + ". Troque a competência, a cidade ou o empreendimento para continuar."
+      };
     }
-    return "";
+    return null;
   },
 
   paintKeyHint() {
     const el = document.getElementById("tvig-key-error");
     const msg = this.editorKeyError();
     if (el) {
-      el.textContent = msg;
-      el.hidden = !msg;
+      if (!msg) {
+        el.hidden = true;
+        el.innerHTML = "";
+      } else {
+        el.hidden = false;
+        el.innerHTML = '<span class="tvig-key-ico" aria-hidden="true"><i data-lucide="info"></i></span>'
+          + '<div><strong>' + this.esc(msg.title) + '</strong><p>' + this.esc(msg.text) + '</p></div>';
+        if (window.lucide) lucide.createIcons({ attrs: { width: 18, height: 18 } });
+      }
     }
     const saveBtn = document.querySelector("#tvig-editor-overlay .tvig-editor-foot .btn-primary");
     if (saveBtn) saveBtn.disabled = !!msg;
@@ -660,7 +686,7 @@ const TabelasVigentesApp = {
             <div id="tvig-city-slot" class="tvig-filter-slot"></div>
             <div id="tvig-emp-slot" class="tvig-filter-slot"></div>
             <div class="tvig-filter-slot tvig-comp-slot">
-              <label class="tvig-comp-label" for="tvig-filter-comp">Mês Referência (Competência)</label>
+              <label class="tvig-comp-label" for="tvig-filter-comp">Mês de referência</label>
               <input type="month" id="tvig-filter-comp" class="tvig-comp-input" value="${this.esc(this.state.competencia || this.currentCompetencia())}"
                 onchange="TabelasVigentesApp.setCompetencia(this.value)">
             </div>
@@ -1073,15 +1099,15 @@ const TabelasVigentesApp = {
         <div class="tvig-editor-body">
           <div class="tvig-editor-grid">
             <div class="form-group">
-              <label>Competência</label>
-              <input type="month" class="form-control" value="${this.esc(d.competencia || "")}"
+              <label class="tvig-comp-label" for="tvig-ed-comp">Competência</label>
+              <input type="month" id="tvig-ed-comp" class="tvig-comp-input" value="${this.esc(d.competencia || "")}"
                 ${ro ? "disabled" : ""} onchange="TabelasVigentesApp.onEditorField('competencia', this.value)">
               ${ed.mode === "copy" && ed.sourceCompetencia ? `<p class="tvig-copy-hint">Origem: ${this.esc(this.competenciaLabel(ed.sourceCompetencia))}. Escolha outro mês.</p>` : ""}
-              <p id="tvig-key-error" class="tvig-key-error" hidden></p>
             </div>
             <div id="tvig-ed-city-slot" class="tvig-ed-filter-slot"></div>
             <div id="tvig-ed-emp-slot" class="tvig-ed-filter-slot"></div>
           </div>
+          <div id="tvig-key-error" class="tvig-key-error" hidden></div>
           <h4 class="tvig-plan-title">Planos de pagamento</h4>
           <p id="tvig-editor-lock-hint" class="tvig-lock-hint" ${ro || this.isEditorContextReady(d) ? "hidden" : ""}>
             Selecione competência, cidade e empreendimento para habilitar os campos da tabela.
@@ -1722,7 +1748,6 @@ const TabelasVigentesApp = {
     }
     const keyErr = this.editorKeyError();
     if (keyErr) {
-      alert(keyErr);
       this.paintKeyHint();
       return;
     }

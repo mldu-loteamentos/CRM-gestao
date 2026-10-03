@@ -4821,8 +4821,6 @@ window.applyRulesModulePermissions = function() {
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
   if (btnSaveCob) btnSaveCob.disabled = !canEditCob;
-  const btnFila = document.querySelector("#content-regra-fila button[onclick*='saveFilaConfig']");
-  if (btnFila) btnFila.disabled = !canEditCob;
 
   let hint = document.getElementById("regras-perm-hint");
   if (!hint) {
@@ -8734,7 +8732,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
 
         const rawTitleNumber = String(client.billIds[0] || "").replace(/^B-/, '').split('-')[0];
 
-        let ultimoPagamentoStr = `<span style="color: #94a3b8; font-size: 0.75rem;">-</span>`;
+        let ultimoPagamentoStr = `<span style="color: #94a3b8; font-size: 0.7rem;">-</span>`;
         const minDiff = typeof window.clientLastPaymentDays === "function"
           ? window.clientLastPaymentDays(client)
           : Infinity;
@@ -8749,11 +8747,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               Sem Pagto <i data-lucide="info" style="width: 12px; height: 12px; margin-left: 2px; vertical-align: middle;"></i>
             </button>`;
         } else if (minDiff === 0) {
-            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">Hoje</span>`;
+            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.7rem;">Hoje</span>`;
         } else if (minDiff === 1) {
-            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">Ontem</span>`;
+            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.7rem;">Ontem</span>`;
         } else {
-            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.8rem;">Há ${minDiff} dias</span>`;
+            ultimoPagamentoStr = `<span style="color: #10b981; font-weight: 600; font-size: 0.7rem;">Há ${minDiff} dias</span>`;
         }
 
         const row = document.createElement("tr");
@@ -29863,6 +29861,7 @@ window.populateFilaOperators = function() {
 
 window.loadFilaConfigForOperator = function() {
   const op = document.getElementById("fila-config-operator")?.value || "Todos";
+  window._filaConfigHydrating = true;
   
   if (!AppState.rules) AppState.rules = {};
   if (!AppState.rules.filaConfig) AppState.rules.filaConfig = {};
@@ -29903,10 +29902,26 @@ window.loadFilaConfigForOperator = function() {
   
   window.updateFilaTotalPercentage();
   if (window.sortFilaCircles) window.sortFilaCircles();
+  window._filaConfigCurrentOp = op;
+  window._filaConfigHydrating = false;
+};
+
+window.onFilaConfigOperatorChange = function() {
+  const next = document.getElementById("fila-config-operator")?.value || "Todos";
+  const prev = window._filaConfigCurrentOp;
+  if (window._filaConfigSaveTimer) {
+    clearTimeout(window._filaConfigSaveTimer);
+    window._filaConfigSaveTimer = null;
+  }
+  if (prev && prev !== next) {
+    window.persistFilaConfig({ silent: true, operator: prev });
+  }
+  window.loadFilaConfigForOperator();
 };
 
 window.toggleFilaCapacityMode = function() {
   if (window.applyFilaCapacityModeUi) window.applyFilaCapacityModeUi();
+  if (window.persistFilaConfig) window.persistFilaConfig({ silent: true });
 };
 
 window.applyFilaCapacityModeUi = function() {
@@ -30052,6 +30067,7 @@ window.updateFilaTotalPercentage = function(triggeredInput) {
         }
     }
   }
+  if (triggeredInput && window.scheduleFilaConfigSave) window.scheduleFilaConfigSave();
 };
 
 window.sortFilaCircles = function() {
@@ -30076,71 +30092,88 @@ window.sortFilaCircles = function() {
   });
 };
 
-window.saveFilaConfig = function() {
+window.scheduleFilaConfigSave = function() {
+  if (window._filaConfigHydrating) return;
+  if (window._filaConfigSaveTimer) clearTimeout(window._filaConfigSaveTimer);
+  window._filaConfigSaveTimer = setTimeout(function() {
+    window._filaConfigSaveTimer = null;
+    window.persistFilaConfig({ silent: true });
+  }, 350);
+};
+
+window.persistFilaConfig = function(opts) {
+  opts = opts || {};
+  if (window._filaConfigHydrating) return false;
   if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
-    alert("Sem permissão para editar Regras de Cobrança.");
-    return;
+    return false;
   }
-  const op = document.getElementById("fila-config-operator")?.value || "Todos";
-  
-  // Validar campos vazios (null)
-  for(let i=1; i<=7; i++) {
-    const el = document.getElementById("fila-rule-"+i);
-    if(el && el.value === "") {
-      alert("Erro: Nenhum campo de peso deve ficar vazio (null). Preencha com 0 se não for usar.");
-      return;
-    }
-  }
-  
-  const r1 = parseInt(document.getElementById("fila-rule-1")?.value || 0);
-  const r2 = parseInt(document.getElementById("fila-rule-2")?.value || 0);
-  const r3 = parseInt(document.getElementById("fila-rule-3")?.value || 0);
-  const r4 = parseInt(document.getElementById("fila-rule-4")?.value || 0);
-  const r5 = parseInt(document.getElementById("fila-rule-5")?.value || 0);
-  const r6 = parseInt(document.getElementById("fila-rule-6")?.value || 0);
-  const r7 = parseInt(document.getElementById("fila-rule-7")?.value || 0);
-  const paymentDays = parseInt(document.getElementById("fila-rule-payment-days")?.value || 15);
-  
-  const total = r1 + r2 + r3 + r4 + r5 + r6 + r7;
-  if (total !== 100) {
-    alert("Erro: A soma das porcentagens deve ser exatamente 100%.");
-    return;
-  }
-  
-  const capacity = parseInt(document.getElementById("fila-capacity")?.value || 25);
-  const capacityMode = document.getElementById("fila-capacity-dynamic")?.checked ? "dynamic" : "linear";
-  
+  const op = opts.operator || document.getElementById("fila-config-operator")?.value || window._filaConfigCurrentOp || "Todos";
+  const readRule = function(id) {
+    const raw = document.getElementById(id)?.value;
+    if (raw === "" || raw == null) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+  const next = {
+    capacity: readRule("fila-capacity") || 25,
+    capacityMode: document.getElementById("fila-capacity-dynamic")?.checked ? "dynamic" : "linear",
+    r1: readRule("fila-rule-1"),
+    r2: readRule("fila-rule-2"),
+    r3: readRule("fila-rule-3"),
+    r4: readRule("fila-rule-4"),
+    r5: readRule("fila-rule-5"),
+    r6: readRule("fila-rule-6"),
+    r7: readRule("fila-rule-7"),
+    paymentDays: document.getElementById("fila-rule-payment-days")?.value === ""
+      ? 0
+      : readRule("fila-rule-payment-days")
+  };
   if (!AppState.rules) AppState.rules = {};
   if (!AppState.rules.filaConfig) AppState.rules.filaConfig = {};
-  
-  AppState.rules.filaConfig[op] = {
-    capacity: capacity,
-    capacityMode: capacityMode,
-    r1: r1,
-    r2: r2,
-    r3: r3,
-    r4: r4,
-    r5: r5,
-    r6: r6,
-    r7: r7,
-    paymentDays: paymentDays
-  };
-  
-  localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules));
+  const prev = AppState.rules.filaConfig[op] || {};
+  const same = prev.capacity === next.capacity
+    && prev.capacityMode === next.capacityMode
+    && prev.r1 === next.r1 && prev.r2 === next.r2 && prev.r3 === next.r3
+    && prev.r4 === next.r4 && prev.r5 === next.r5 && prev.r6 === next.r6
+    && prev.r7 === next.r7 && prev.paymentDays === next.paymentDays;
+  if (same) return true;
+  AppState.rules.filaConfig[op] = next;
+  try { localStorage.setItem("crm_moura_rules", JSON.stringify(AppState.rules)); } catch (e) {}
   try {
     if (typeof window.invalidateDailyQueueCache === "function") {
       window.invalidateDailyQueueCache("configuração da fila alterada");
     } else {
       window._dailyQueueCache = {};
-      localStorage.removeItem('crm_daily_queue_cache_v5');
-      localStorage.removeItem('crm_daily_queue_cache_v4');
-      localStorage.removeItem('crm_daily_queue_cache_v3');
+      localStorage.removeItem("crm_daily_queue_cache_v5");
+      localStorage.removeItem("crm_daily_queue_cache_v4");
+      localStorage.removeItem("crm_daily_queue_cache_v3");
       window.agendaItemsCache = {};
     }
   } catch (e) {}
-  const modeLabel = capacityMode === "dynamic" ? "agenda dinâmica" : "capacidade linear";
-  alert(`Configuração da Fila de Cobrança para o operador '${op}' salva com sucesso! (${modeLabel})`);
+  if (typeof window.forceUploadLocalConfig === "function") {
+    window.forceUploadLocalConfig(true).catch(function() {});
+  }
+  return true;
 };
+
+window.saveFilaConfig = function() {
+  window.persistFilaConfig({ silent: true });
+};
+
+window.flushFilaConfigSave = function() {
+  if (window._filaConfigSaveTimer) {
+    clearTimeout(window._filaConfigSaveTimer);
+    window._filaConfigSaveTimer = null;
+  }
+  window.persistFilaConfig({ silent: true });
+};
+
+document.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden" && window.flushFilaConfigSave) window.flushFilaConfigSave();
+});
+window.addEventListener("pagehide", function() {
+  if (window.flushFilaConfigSave) window.flushFilaConfigSave();
+});
 
 window.DEFAULT_RENEG_BLOCK_MONTHS = 24;
 

@@ -287,7 +287,6 @@ window.EngenhariaCaucaoApp = {
   applyFilters() {
     const emp = new Set((this.state.companyIds || []).map(String));
     const cred = new Set((this.state.creditorIds || []).map(String));
-    const dept = new Set((this.state.deptIds || []).map(String));
     const qTitulo = this.fold(this.state.qTitulo).replace(/\s+/g, "");
     const qCredor = this.fold(this.state.qCredor);
     const status = this.state.status;
@@ -296,12 +295,6 @@ window.EngenhariaCaucaoApp = {
     this.state.shown = (this.state.allRows || []).filter((r) => {
       if (emp.size && !emp.has(String(r.companyId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
-      if (dept.size) {
-        const depFold = this.fold(r.departamento);
-        const ccFold = this.fold(r.ccNome);
-        const okDept = [...dept].some((id) => depFold === id || (id && ccFold.indexOf(id) >= 0));
-        if (!okDept) return false;
-      }
       if (start && r.vencimento && r.vencimento < start) return false;
       if (end && r.vencimento && r.vencimento > end) return false;
       const lib = this.isLiberated(r);
@@ -420,7 +413,6 @@ window.EngenhariaCaucaoApp = {
     };
     bind("ecau-filter-emp", "companyIds", "openEmp", "qEmp", () => this.empItems(), { singular: "empresa", plural: "empresas" });
     bind("ecau-filter-cred", "creditorIds", "openCred", "qCred", () => this.credItems(), { singular: "credor", plural: "credores" });
-    bind("ecau-filter-dept", "deptIds", "openDept", "qDept", () => this.deptItems(), { singular: "departamento", plural: "departamentos" });
   },
 
   paintFilters() {
@@ -449,16 +441,6 @@ window.EngenhariaCaucaoApp = {
       query: this.state.qCred,
       emptyMeansAll: true,
       nouns: { singular: "credor", plural: "credores" }
-    }));
-    set("ecau-dept-slot", MlEmpresaFilter.html({
-      id: "ecau-filter-dept",
-      label: "Departamento",
-      items: this.deptItems(),
-      selectedIds: this.state.deptIds,
-      open: !!this.state.openDept,
-      query: this.state.qDept,
-      emptyMeansAll: true,
-      nouns: { singular: "departamento", plural: "departamentos" }
     }));
     if (window.lucide) lucide.createIcons();
   },
@@ -549,8 +531,8 @@ window.EngenhariaCaucaoApp = {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
-    const cell = "background:#ecfdf5;color:#047857;font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;";
-    return `<tr class="fila-group-header cprev-group-header">
+    const cell = "background:#f1f5f9;color:#475569;font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;";
+    return `<tr class="fila-group-header cprev-group-header is-neutral">
       <td colspan="6" style="${cell}">
         <div class="cprev-group-label">
           <span>${this.esc(credor || "Sem credor")}</span>
@@ -949,15 +931,10 @@ window.EngenhariaCaucaoApp = {
       <div class="cprev-page">
         <div class="search-filter-panel cprev-toolbar">
           <div class="cprev-toolbar-head">
-            <h2 class="tvig-page-title">
-              <i data-lucide="shield-check" style="width:22px;height:22px;color:var(--color-primary);"></i>
-              Gestão de caução
-            </h2>
             <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
           </div>
           <div class="cprev-filters">
             <div id="ecau-emp-slot" class="tvig-filter-slot"></div>
-            <div id="ecau-dept-slot" class="tvig-filter-slot"></div>
             <div class="form-group cprev-date-field">
               <label>Vencimento de</label>
               <input type="date" class="form-control" value="${this.esc(s.startDate)}"
@@ -1000,7 +977,6 @@ window.EngenhariaCaucaoApp = {
               </select>
             </div>
           </div>
-          <p class="cprev-hint">Somente documentos <strong>CAU</strong>. Marque os títulos, ajuste o vencimento no Sienge ou libere para o financeiro pagar. A planilha sai agrupada por credor.</p>
         </div>
         <div id="ecau-selection-bar" class="ecau-selection-bar"></div>
         <div class="ccom-kpis cprev-kpis" id="ecau-kpis"></div>
