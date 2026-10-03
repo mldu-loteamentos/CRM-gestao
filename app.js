@@ -3661,6 +3661,7 @@ window.showMockLoginModal = function(resolve, reject) {
   const btn = document.getElementById("btn-submit-login");
   const emailInput = document.getElementById("login-email");
   const errorMsg = document.getElementById("login-error-msg");
+  if (emailInput) emailInput.value = "";
   
   // Limpar onclick antigo se houver
   btn.onclick = null;
@@ -3858,6 +3859,8 @@ async function checkAuthentication() {
     overlay.classList.add("active");
     const loginVideo = document.getElementById("login-bg-video");
     if (loginVideo) loginVideo.play().catch(() => {});
+    const loginEmail = document.getElementById("login-email");
+    if (loginEmail) loginEmail.value = "";
     
     const authConfig = MouraAuth.getAuthConfig();
     const btn = document.getElementById("btn-submit-login");
