@@ -5,17 +5,16 @@
 const TabelasVigentesApp = {
   FB_COL: "tabelas_vigentes",
   STORAGE_KEY: "crm_moura_tabelas_vigentes",
+  SHEET_FIELDS: ["plano", "intermediarias", "entradaMin", "parcelamentoEntrada", "taxaJuros", "reajuste", "desconto"],
   DEFAULT_PLANOS: [
     { plano: "Boleto único", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
-    { plano: "12", intermediarias: false, entradaMin: "10", parcelamentoEntrada: "3", taxaJuros: "0", reajuste: "0", descontoOn: false, descontoPct: "" },
-    { plano: "24", intermediarias: false, entradaMin: "15", parcelamentoEntrada: "3", taxaJuros: "0", reajuste: "0", descontoOn: false, descontoPct: "" },
-    { plano: "36", intermediarias: false, entradaMin: "15", parcelamentoEntrada: "3", taxaJuros: "0,4074", reajuste: "0", descontoOn: false, descontoPct: "" },
-    { plano: "48", intermediarias: false, entradaMin: "15", parcelamentoEntrada: "3", taxaJuros: "0,4074", reajuste: "IPCA", descontoOn: false, descontoPct: "" },
-    { plano: "60", intermediarias: false, entradaMin: "25", parcelamentoEntrada: "3", taxaJuros: "0,4074", reajuste: "IPCA", descontoOn: false, descontoPct: "" },
-    { plano: "60", intermediarias: false, entradaMin: "50", parcelamentoEntrada: "3", taxaJuros: "0,0000", reajuste: "IPCA", descontoOn: false, descontoPct: "" },
-    { plano: "120", intermediarias: false, entradaMin: "7", parcelamentoEntrada: "1", taxaJuros: "0,9489", reajuste: "IPCA", descontoOn: false, descontoPct: "" },
-    { plano: "168", intermediarias: false, entradaMin: "7", parcelamentoEntrada: "1", taxaJuros: "0,9489", reajuste: "IPCA", descontoOn: false, descontoPct: "" },
-    { plano: "168", intermediarias: false, entradaMin: "7", parcelamentoEntrada: "3", taxaJuros: "0,9489", reajuste: "IPCA", descontoOn: false, descontoPct: "" }
+    { plano: "12", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "24", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "36", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "48", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "60", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "120", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" },
+    { plano: "180", intermediarias: false, entradaMin: "", parcelamentoEntrada: "", taxaJuros: "", reajuste: "", descontoOn: false, descontoPct: "" }
   ],
 
   state: {
@@ -267,22 +266,53 @@ const TabelasVigentesApp = {
     return this.stripSuffix(raw).replace(/\D/g, "");
   },
 
-  sanitizePlano(raw) {
-    const s = String(raw == null ? "" : raw);
-    if (/^\d*$/.test(s.trim())) return s.trim();
-    const fold = this.fold(s).replace(/\s+/g, " ");
-    if (!fold) return "";
-    if ("BOLETO UNICO".startsWith(fold) || fold.startsWith("BOLETO")) return s;
-    if (/^\d+$/.test(s.replace(/\s/g, ""))) return s.replace(/\D/g, "");
-    return s.replace(/[^\d]/g, "");
+  isBoletoPlano(raw) {
+    const fold = this.fold(raw).replace(/\s+/g, " ");
+    return fold === "BOLETO UNICO" || fold === "BOLETOUNICO";
   },
 
-  normalizePlano(raw) {
-    const s = String(raw == null ? "" : raw).trim();
-    const fold = this.fold(s).replace(/\s+/g, " ");
-    if (fold === "BOLETO UNICO" || fold === "BOLETOUNICO") return "Boleto único";
-    const n = s.replace(/\D/g, "");
+  sanitizePlano(raw, lockedBoleto) {
+    if (lockedBoleto) return "Boleto único";
+    return String(raw == null ? "" : raw).replace(/\D/g, "");
+  },
+
+  normalizePlano(raw, lockedBoleto) {
+    if (lockedBoleto || this.isBoletoPlano(raw)) return "Boleto único";
+    const n = String(raw == null ? "" : raw).replace(/\D/g, "");
     return n ? String(parseInt(n, 10)) : "";
+  },
+
+  planoSortKey(r) {
+    if (!r || this.isBoletoPlano(r.plano)) return -1;
+    const n = parseInt(String(r.plano || "").replace(/\D/g, ""), 10);
+    return Number.isFinite(n) ? n : 999999;
+  },
+
+  sortDraftRows(keepId) {
+    const d = this.state.editor && this.state.editor.draft;
+    if (!d || !d.rows) return -1;
+    const boleto = d.rows.find((r) => this.isBoletoPlano(r.plano)) || d.rows[0];
+    if (boleto) {
+      boleto.plano = "Boleto único";
+      const rest = d.rows.filter((r) => r !== boleto).sort((a, b) => this.planoSortKey(a) - this.planoSortKey(b));
+      d.rows = [boleto].concat(rest);
+    }
+    if (keepId) return d.rows.findIndex((r) => String(r.id) === String(keepId));
+    return -1;
+  },
+
+  indexadorOptions(current) {
+    let names = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem("crm_indexadores_ativos") || "[]");
+      if (Array.isArray(saved)) names = saved.map((x) => String(x || "").trim()).filter(Boolean);
+    } catch (e) {}
+    if (!names.length && window.IndexadoresState && Array.isArray(IndexadoresState.siengeIndexers)) {
+      names = IndexadoresState.siengeIndexers.map((i) => String((i && i.name) || "").trim()).filter(Boolean);
+    }
+    const cur = String(current || "").trim();
+    if (cur && names.indexOf(cur) < 0) names = [cur].concat(names);
+    return names;
   },
 
   migrateRow(r) {
@@ -337,14 +367,20 @@ const TabelasVigentesApp = {
       if (emp) {
         draft.enterpriseId = emp.id;
         draft.enterpriseName = emp.name;
-        draft.cityId = emp.cityId;
-        draft.city = emp.cityId;
-        return draft;
+        draft.cityId = emp.cityId || draft.cityId;
+        draft.city = draft.cityId;
       }
     }
     if (cities.length === 1) {
       draft.cityId = cities[0];
       draft.city = cities[0];
+    }
+    if ((!draft.cityId || draft.city === "Todos") && draft.enterpriseId) {
+      const emp = this.state.enterprises.find((e) => String(e.id) === String(draft.enterpriseId));
+      if (emp && emp.cityId) {
+        draft.cityId = emp.cityId;
+        draft.city = emp.cityId;
+      }
     }
     return draft;
   },
@@ -580,11 +616,6 @@ const TabelasVigentesApp = {
   },
 
   editorCityOptions() {
-    const empId = this.state.editor && this.state.editor.draft && this.state.editor.draft.enterpriseId;
-    if (empId) {
-      const emp = this.state.enterprises.find((e) => String(e.id) === String(empId));
-      if (emp) return this.state.cities.filter((c) => c.id === emp.cityId);
-    }
     return this.state.cities;
   },
 
@@ -694,6 +725,13 @@ const TabelasVigentesApp = {
       emptyMeansAll: false,
       nouns: { singular: "empreendimento", plural: "empreendimentos" }
     });
+    const cityBtn = citySlot.querySelector(".ml-emp-filter-btn span");
+    if (cityBtn && ed.draft.cityId) cityBtn.textContent = ed.draft.cityId;
+    const empBtn = empSlot.querySelector(".ml-emp-filter-btn span");
+    if (empBtn && ed.draft.enterpriseId) {
+      const emp = this.state.enterprises.find((e) => String(e.id) === String(ed.draft.enterpriseId));
+      empBtn.textContent = emp ? (emp.label || (emp.id + " - " + emp.name)) : ed.draft.enterpriseId;
+    }
     if (window.lucide) lucide.createIcons();
   },
 
@@ -707,7 +745,7 @@ const TabelasVigentesApp = {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
     let v = el.value;
-    if (field === "plano") v = this.sanitizePlano(v);
+    if (field === "plano") v = this.sanitizePlano(v, idx === 0);
     else if (field === "entradaMin" || field === "descontoPct") v = this.sanitizeDec(v, 2);
     else if (field === "taxaJuros") v = this.sanitizeDec(v, 4);
     else if (field === "parcelamentoEntrada") v = this.sanitizeInt(v);
@@ -718,9 +756,24 @@ const TabelasVigentesApp = {
   onPlanoBlur(idx, el) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
-    const n = this.normalizePlano(el.value);
-    el.value = n;
+    if (idx === 0) {
+      el.value = "Boleto único";
+      d.rows[idx].plano = "Boleto único";
+      return;
+    }
+    const n = this.normalizePlano(el.value, false);
     d.rows[idx].plano = n;
+    const keepId = d.rows[idx].id;
+    const next = this.sortDraftRows(keepId);
+    this.paintEditor();
+    const focusAt = next >= 0 ? next : idx;
+    setTimeout(() => this.focusSheetCell(focusAt, "plano"), 0);
+  },
+
+  onReajuste(idx, val) {
+    const d = this.state.editor && this.state.editor.draft;
+    if (!d || !d.rows[idx]) return;
+    d.rows[idx].reajuste = val;
   },
 
   onEditorFlag(idx, field, on) {
@@ -735,17 +788,31 @@ const TabelasVigentesApp = {
     }
   },
 
+  rowNeedsPlano(r, i) {
+    if (i === 0 || this.isBoletoPlano(r && r.plano)) return false;
+    return !this.normalizePlano(r && r.plano, false);
+  },
+
   addEditorRow() {
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
-    d.rows.push(this.migrateRow({ id: this.uid() }));
+    const pending = (d.rows || []).findIndex((r, i) => this.rowNeedsPlano(r, i));
+    if (pending >= 0) {
+      alert("Preencha o número de parcelas da linha nova antes de adicionar outra.");
+      this.focusSheetCell(pending, "plano");
+      return;
+    }
+    d.rows.push(this.migrateRow({ id: this.uid(), plano: "" }));
     this.paintEditor();
+    setTimeout(() => this.focusSheetCell(d.rows.length - 1, "plano"), 0);
   },
 
   removeEditorRow(idx) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
+    if (idx === 0 || this.isBoletoPlano(d.rows[idx] && d.rows[idx].plano)) return;
     d.rows.splice(idx, 1);
+    this.sortDraftRows();
     this.paintEditor();
   },
 
@@ -754,13 +821,26 @@ const TabelasVigentesApp = {
     const affix = o.affix ? `<span class="tvig-affix-mark">${this.esc(o.affix)}</span>` : "";
     const extra = o.affix ? " tvig-affix" : "";
     const off = o.off ? " is-off" : "";
+    const locked = !!(o.locked);
     return `<td class="tvig-sheet-td" data-row="${idx}" data-field="${field}">
-      <div class="tvig-sheet-cell${extra}${off}">
+      <div class="tvig-sheet-cell${extra}${off}${locked ? " is-locked" : ""}">
         <input class="tvig-sheet-input${o.center ? " tvig-cell-center" : ""}" value="${this.esc(value || "")}"
-          ${o.off ? "disabled" : ""}
+          ${o.off || locked ? "disabled" : ""} ${locked ? "readonly" : ""}
           oninput="TabelasVigentesApp.onSheetInput(${idx},'${field}',this)"
-          ${field === "plano" ? `onblur="TabelasVigentesApp.onPlanoBlur(${idx},this)"` : ""}>
+          ${field === "plano" && !locked ? `onblur="TabelasVigentesApp.onPlanoBlur(${idx},this)"` : ""}>
         ${affix}
+      </div>
+    </td>`;
+  },
+
+  sheetSelect(idx, field, value, options) {
+    const opts = options || [];
+    return `<td class="tvig-sheet-td" data-row="${idx}" data-field="${field}">
+      <div class="tvig-sheet-cell">
+        <select class="tvig-sheet-input tvig-sheet-select" onchange="TabelasVigentesApp.onReajuste(${idx}, this.value)">
+          <option value="">—</option>
+          ${opts.map((name) => `<option value="${this.esc(name)}" ${String(name) === String(value) ? "selected" : ""}>${this.esc(name)}</option>`).join("")}
+        </select>
       </div>
     </td>`;
   },
@@ -770,6 +850,7 @@ const TabelasVigentesApp = {
     const ed = this.state.editor;
     if (!ov || !ed) return;
     const d = ed.draft;
+    this.sortDraftRows();
     ov.style.display = "flex";
     ov.classList.add("active");
     ov.innerHTML = `
@@ -816,7 +897,7 @@ const TabelasVigentesApp = {
               <tbody>
                 ${(d.rows || []).map((r, i) => `
                   <tr>
-                    ${this.sheetCell(i, "plano", r.plano)}
+                    ${this.sheetCell(i, "plano", i === 0 ? "Boleto único" : r.plano, { locked: i === 0 })}
                     <td class="tvig-sheet-td tvig-td-flag" data-row="${i}" data-field="intermediarias">
                       <label class="moura-switch" title="Parcelas intermediárias">
                         <input type="checkbox" ${r.intermediarias ? "checked" : ""}
@@ -827,7 +908,7 @@ const TabelasVigentesApp = {
                     ${this.sheetCell(i, "entradaMin", r.entradaMin, { affix: "%", center: true })}
                     ${this.sheetCell(i, "parcelamentoEntrada", r.parcelamentoEntrada, { affix: "x", center: true })}
                     ${this.sheetCell(i, "taxaJuros", r.taxaJuros, { affix: "%", center: true })}
-                    ${this.sheetCell(i, "reajuste", r.reajuste, { center: true })}
+                    ${this.sheetSelect(i, "reajuste", r.reajuste, this.indexadorOptions(r.reajuste))}
                     <td class="tvig-sheet-td" data-row="${i}" data-field="desconto">
                       <div class="tvig-desc-cell">
                         <label class="moura-switch" title="Desconto especial">
@@ -844,7 +925,7 @@ const TabelasVigentesApp = {
                       </div>
                     </td>
                     <td class="tvig-td-del">
-                      <button type="button" class="tvig-ico is-danger" title="Remover linha" onclick="TabelasVigentesApp.removeEditorRow(${i})"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
+                      ${i === 0 ? "" : `<button type="button" class="tvig-ico is-danger" title="Remover linha" onclick="TabelasVigentesApp.removeEditorRow(${i})"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>`}
                     </td>
                   </tr>`).join("")}
               </tbody>
@@ -864,6 +945,50 @@ const TabelasVigentesApp = {
     this.paintEditorFilters();
     this.ensureSheetEvents();
     if (window.lucide) lucide.createIcons();
+  },
+
+  focusSheetCell(row, field) {
+    const d = this.state.editor && this.state.editor.draft;
+    if (!d) return;
+    const max = (d.rows || []).length - 1;
+    if (row < 0 || row > max) return;
+    const td = document.querySelector('.tvig-sheet-td[data-row="' + row + '"][data-field="' + field + '"]');
+    if (!td) return;
+    this.selectSheetTd(td);
+    const focusable = td.querySelector("input.tvig-sheet-input:not([disabled]):not([readonly]), select.tvig-sheet-select, input[type=checkbox]");
+    if (focusable) {
+      focusable.focus();
+      if (focusable.select && focusable.tagName === "INPUT" && focusable.type !== "checkbox") {
+        try { focusable.select(); } catch (e) {}
+      }
+    }
+  },
+
+  moveSheetFocus(fromTd, dir, shift) {
+    const fields = this.SHEET_FIELDS;
+    let row = Number(fromTd.dataset.row);
+    let fi = fields.indexOf(fromTd.dataset.field);
+    if (fi < 0) fi = 0;
+    const maxRow = ((this.state.editor && this.state.editor.draft && this.state.editor.draft.rows) || []).length - 1;
+    if (dir === "tab") {
+      if (shift) {
+        fi -= 1;
+        if (fi < 0) { fi = fields.length - 1; row -= 1; }
+      } else {
+        fi += 1;
+        if (fi >= fields.length) { fi = 0; row += 1; }
+      }
+    } else if (dir === "up") row -= 1;
+    else if (dir === "down" || dir === "enter") row += 1;
+    else if (dir === "left") {
+      fi -= 1;
+      if (fi < 0) { fi = fields.length - 1; row -= 1; }
+    } else if (dir === "right") {
+      fi += 1;
+      if (fi >= fields.length) { fi = 0; row += 1; }
+    }
+    if (row < 0 || row > maxRow) return;
+    this.focusSheetCell(row, fields[fi]);
   },
 
   selectSheetTd(td) {
@@ -886,6 +1011,7 @@ const TabelasVigentesApp = {
     const src = d.rows[from];
     for (let i = a; i <= b; i++) {
       if (!d.rows[i]) continue;
+      if (i === 0 && field === "plano") continue;
       if (field === "intermediarias") {
         d.rows[i].intermediarias = !!src.intermediarias;
       } else if (field === "desconto") {
@@ -912,6 +1038,43 @@ const TabelasVigentesApp = {
         return;
       }
       if (td && td.closest(".tvig-plan-table")) self.selectSheetTd(td);
+    });
+    ov.addEventListener("keydown", (e) => {
+      const td = e.target.closest && e.target.closest(".tvig-sheet-td");
+      if (!td || !td.closest(".tvig-plan-table")) return;
+      const key = e.key;
+      const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT");
+      const caret = isInput && e.target.tagName === "INPUT" && e.target.type !== "checkbox" ? e.target.selectionStart : null;
+      const len = isInput && e.target.value != null ? String(e.target.value).length : 0;
+      if (key === "Tab") {
+        e.preventDefault();
+        self.moveSheetFocus(td, "tab", e.shiftKey);
+        return;
+      }
+      if (key === "Enter") {
+        e.preventDefault();
+        self.moveSheetFocus(td, "enter");
+        return;
+      }
+      if (key === "ArrowDown") {
+        e.preventDefault();
+        self.moveSheetFocus(td, "down");
+        return;
+      }
+      if (key === "ArrowUp") {
+        e.preventDefault();
+        self.moveSheetFocus(td, "up");
+        return;
+      }
+      if (key === "ArrowRight" && (e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === len)) {
+        e.preventDefault();
+        self.moveSheetFocus(td, "right");
+        return;
+      }
+      if (key === "ArrowLeft" && (e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === 0)) {
+        e.preventDefault();
+        self.moveSheetFocus(td, "left");
+      }
     });
     window.addEventListener("mousemove", (e) => {
       if (!self._fill) return;
@@ -966,12 +1129,19 @@ const TabelasVigentesApp = {
       alert("Já existe uma tabela nesta competência para o empreendimento " + (d.enterpriseName || d.enterpriseId) + ".");
       return;
     }
+    const pending = (d.rows || []).findIndex((r, i) => this.rowNeedsPlano(r, i));
+    if (pending >= 0) {
+      alert("Preencha o número de parcelas de todas as linhas adicionadas.");
+      this.focusSheetCell(pending, "plano");
+      return;
+    }
     d.city = d.cityId;
     const emp = this.state.enterprises.find((e) => String(e.id) === String(d.enterpriseId));
     if (emp) d.enterpriseName = emp.name;
-    d.rows = (d.rows || []).map((r) => {
+    this.sortDraftRows();
+    d.rows = (d.rows || []).map((r, i) => {
       const row = this.migrateRow(r);
-      row.plano = this.normalizePlano(row.plano);
+      row.plano = this.normalizePlano(row.plano, i === 0);
       row.entradaMin = this.formatPctSave(row.entradaMin, 2);
       row.parcelamentoEntrada = this.formatXSave(row.parcelamentoEntrada);
       row.taxaJuros = this.formatPctSave(row.taxaJuros, 4);

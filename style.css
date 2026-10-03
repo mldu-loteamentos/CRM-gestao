@@ -5023,6 +5023,16 @@ circle.donut-segment {
   outline: none;
 }
 .tvig-sheet-input:disabled { color: #94a3b8; }
+.tvig-sheet-cell.is-locked .tvig-sheet-input {
+  font-weight: 700;
+  color: #0f172a;
+  cursor: default;
+}
+.tvig-sheet-select {
+  appearance: none;
+  cursor: pointer;
+  background: transparent;
+}
 .tvig-affix { padding-right: 4px; }
 .tvig-affix-mark {
   flex: 0 0 auto;
