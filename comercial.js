@@ -418,20 +418,53 @@ const ComercialApp = {
     this.destroyCharts();
 
     const labels = agg.serie.map((s) => s.label);
+    const vars = agg.serie.map((s) => s.variacao);
+    const chartOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, usePointStyle: true, padding: 16 } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true } },
+        y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,0.25)' } }
+      }
+    };
     const vd = document.getElementById('comercial-chart-vd');
     const vr = document.getElementById('comercial-chart-var');
-    const ct = document.getElementById('comercial-chart-city');
     if (vd) {
       this.state.charts.vd = new Chart(vd, {
         type: 'bar',
         data: {
           labels,
           datasets: [
-            { label: 'Vendas', data: agg.serie.map((s) => s.vendas), backgroundColor: '#2563eb', borderRadius: 3 },
-            { label: 'Distratos', data: agg.serie.map((s) => s.distratos), backgroundColor: '#ef4444', borderRadius: 3 }
+            { label: 'Vendas', data: agg.serie.map((s) => s.vendas), backgroundColor: '#2563eb', borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
+            { label: 'Distratos', data: agg.serie.map((s) => s.distratos), backgroundColor: '#ef4444', borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
+            {
+              type: 'line',
+              label: 'Variação',
+              data: vars,
+              borderColor: '#16a34a',
+              backgroundColor: 'transparent',
+              pointBackgroundColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
+              pointBorderColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              borderWidth: 2,
+              tension: 0.25,
+              segment: {
+                borderColor: (ctx) => {
+                  const cur = ctx.p1 && ctx.p1.parsed ? ctx.p1.parsed.y : 0;
+                  return cur >= 0 ? '#16a34a' : '#ef4444';
+                }
+              }
+            }
           ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+        options: Object.assign({}, chartOpts, {
+          datasets: { bar: { categoryPercentage: 0.62, barPercentage: 0.78 } }
+        })
       });
     }
     if (vr) {
@@ -441,37 +474,28 @@ const ComercialApp = {
           labels,
           datasets: [{
             label: 'Variação',
-            data: agg.serie.map((s) => s.variacao),
-            backgroundColor: agg.serie.map((s) => s.variacao >= 0 ? '#16a34a' : '#ef4444'),
-            borderRadius: 3
+            data: vars,
+            backgroundColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
+            borderRadius: 6,
+            borderSkipped: false,
+            maxBarThickness: 36
           }]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
-      });
-    }
-    if (ct) {
-      const cities = Object.keys(agg.cidades).sort((a, b) => {
-        const va = (agg.cidades[a].vendas - agg.cidades[a].distratos);
-        const vb = (agg.cidades[b].vendas - agg.cidades[b].distratos);
-        return vb - va;
-      }).slice(0, 10);
-      this.state.charts.ct = new Chart(ct, {
-        type: 'bar',
-        data: {
-          labels: cities,
-          datasets: [
-            { label: 'Vendas', data: cities.map((c) => agg.cidades[c].vendas), backgroundColor: '#2563eb' },
-            { label: 'Distratos', data: cities.map((c) => agg.cidades[c].distratos), backgroundColor: '#ef4444' },
-            { label: 'Variação', data: cities.map((c) => agg.cidades[c].vendas - agg.cidades[c].distratos), backgroundColor: '#94a3b8' }
-          ]
-        },
-        options: {
-          indexAxis: 'y',
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom' } },
-          scales: { x: { beginAtZero: true } }
-        }
+        options: Object.assign({}, chartOpts, {
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                generateLabels() {
+                  return [
+                    { text: 'Variação positiva', fillStyle: '#16a34a', strokeStyle: '#16a34a', hidden: false },
+                    { text: 'Variação negativa', fillStyle: '#ef4444', strokeStyle: '#ef4444', hidden: false }
+                  ];
+                }
+              }
+            }
+          }
+        })
       });
     }
   },
@@ -515,6 +539,14 @@ const ComercialApp = {
     set('kpi-variacao-comp', this.fmtPct(saldo, saldoAnt, false));
     set('kpi-variacao-ytd', String(saldoYtd));
     set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
+
+    set('comercial-produto-period', periodLbl + ' · ' + agg.year);
+    set('comercial-ytd-period', 'Acum. ' + ytdLbl + ' · ' + agg.year);
+    set('comercial-ytd-venda', String(agg.vendasAno));
+    set('comercial-ytd-distrato', String(agg.distratosAno));
+    set('comercial-ytd-var', String(saldoYtd));
+    const ytdVarCard = document.getElementById('comercial-ytd-var-card');
+    if (ytdVarCard) ytdVarCard.classList.toggle('is-neg', saldoYtd < 0);
 
     const tbody = document.getElementById('comercial-table-body');
     if (tbody) {
