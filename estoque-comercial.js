@@ -54,6 +54,7 @@ const EstoqueComercialApp = {
     status: "all",
     fetchedAt: null,
     batimentoDate: null,
+    batimentoAt: null,
     batimentoDone: false,
     complete: false,
     contractsEnriched: false,
@@ -304,6 +305,7 @@ const EstoqueComercialApp = {
       contractsCcDone: this.state.contractsCcDone,
       fetchedAt: this.state.fetchedAt || new Date().toISOString(),
       batimentoDate: this.state.batimentoDate || null,
+      batimentoAt: this.state.batimentoAt || null,
       batimentoDone: !!this.state.batimentoDone
     };
     try {
@@ -320,8 +322,9 @@ const EstoqueComercialApp = {
     this.state.complete = !!data.complete;
     this.state.contractsEnriched = !!data.contractsEnriched;
     this.state.contractsCcDone = Array.isArray(data.contractsCcDone) ? data.contractsCcDone.map(String) : [];
-    this.state.fetchedAt = data.fetchedAt || null;
+    this.state.fetchedAt = data.fetchedAt || data.batimentoAt || null;
     this.state.batimentoDate = data.batimentoDate || null;
+    this.state.batimentoAt = data.batimentoAt || data.fetchedAt || null;
     this.state.batimentoDone = !!data.batimentoDone;
   },
 
@@ -361,8 +364,9 @@ const EstoqueComercialApp = {
         complete: meta.complete !== false,
         contractsEnriched: !!meta.contractsEnriched,
         contractsCcDone: Array.isArray(meta.contractsCcDone) ? meta.contractsCcDone.map(String) : [],
-        fetchedAt: meta.fetchedAt || null,
+        fetchedAt: meta.fetchedAt || meta.batimentoAt || meta.snapshotAt || null,
         batimentoDate: meta.batimentoDate || null,
+        batimentoAt: meta.batimentoAt || meta.snapshotAt || meta.fetchedAt || null,
         batimentoDone: meta.batimentoDone === true || meta.batimentoDone === "true"
       };
     } catch (e) {
@@ -407,9 +411,12 @@ const EstoqueComercialApp = {
         contractsEnriched: this.state.contractsEnriched,
         contractsCcDone: this.state.contractsCcDone,
         fetchedAt: this.state.fetchedAt || new Date().toISOString(),
+        batimentoDate: this.state.batimentoDate || null,
+        batimentoAt: this.state.batimentoAt || null,
+        batimentoDone: !!this.state.batimentoDone,
         unitCount: this.state.units.length,
         updatedAt: new Date().toISOString()
-      }));
+      }, { merge: true }));
       await Promise.all(writes);
 
       const existing = await getDocs(collection(window.firebaseDb, this.FB_COL));
@@ -436,6 +443,7 @@ const EstoqueComercialApp = {
     opts = opts || {};
     const today = this.todayStr();
     this.state.fetchedAt = new Date().toISOString();
+    this.state.batimentoAt = this.state.fetchedAt;
     this.state.lastSnapshotDate = today;
     this.state.batimentoDate = today;
     // Com pausa + 1 empreendimento, não marca o dia inteiro como concluído (evita pular cron ao reativar).
@@ -566,8 +574,11 @@ const EstoqueComercialApp = {
     if (hasLocal) {
       this.applyCache(local);
       this.state.firebaseOk = false;
+      if (!(local.units || []).some((u) => u && u.relFin)) {
+        this.setProgress("Carregando a última classificação financeira…");
+      }
     } else {
-      this.setProgress("Carregando estoque do Firebase…");
+      this.setProgress("Carregando a última atualização do Firebase…");
     }
 
     this.fillEnterprisesFromUnits();
@@ -584,8 +595,7 @@ const EstoqueComercialApp = {
       this.renderTable();
     }).catch(() => {});
 
-    // Atualiza do Firebase em background.
-    this.loadFirebaseInBackground().catch(() => {});
+    await this.loadFirebaseInBackground();
   },
 
   async loadFirebaseInBackground() {
@@ -596,13 +606,22 @@ const EstoqueComercialApp = {
         const fb = await this.loadFirebase();
         if (!fb || !fb.units || !fb.units.length) return;
 
-        // Se o batimento automático estiver rodando, adia a aplicação dos dados.
         if (this.state._autoFinanceRunning) {
           this._firebasePendingData = fb;
           return;
         }
 
-        this.applyCache(fb);
+        const fbFinance = (fb.units || []).filter((u) => u && u.relFin).length;
+        const localFinance = (this.state.units || []).filter((u) => u && u.relFin).length;
+        if (fbFinance >= localFinance || !this.state.units.length) {
+          this.applyCache(fb);
+        } else {
+          this.state.units = this.keepQuitado(fb.units, this.state.units);
+          this.state.batimentoDate = this.state.batimentoDate || fb.batimentoDate || null;
+          this.state.batimentoAt = this.state.batimentoAt || fb.batimentoAt || null;
+          this.state.fetchedAt = fb.fetchedAt || this.state.fetchedAt;
+          this.state.batimentoDone = this.state.batimentoDone || !!fb.batimentoDone;
+        }
         this.state.firebaseOk = true;
         this.fillEnterprisesFromUnits();
         this.fillUnitSelect();
@@ -627,10 +646,12 @@ const EstoqueComercialApp = {
       const metaSnap = await getDoc(doc(window.firebaseDb, this.FB_COL, "_meta"));
       const meta = metaSnap.exists() ? metaSnap.data() : {};
       const batimentoDate = meta.batimentoDate || null;
+      const batimentoAt = meta.batimentoAt || meta.snapshotAt || meta.fetchedAt || null;
       const batimentoDone = meta.batimentoDone === true || meta.batimentoDone === "true";
       this.state.batimentoDate = batimentoDate;
+      this.state.batimentoAt = this.state.batimentoAt || batimentoAt;
       this.state.batimentoDone = batimentoDone;
-      return { batimentoDate, batimentoDone };
+      return { batimentoDate, batimentoAt, batimentoDone };
     } catch (e) {
       return null;
     }
@@ -760,6 +781,8 @@ const EstoqueComercialApp = {
     const today = this.todayStr();
     if (this.state._autoFinanceRunning) return;
 
+    await this.loadFirebaseInBackground();
+
     const meta = await this.tryLoadBatimentoMetaOnly();
     if (meta && meta.batimentoDate === today) return;
     if (this.state.batimentoDate === today) return;
@@ -883,10 +906,17 @@ const EstoqueComercialApp = {
       el.textContent = "Ainda sem estoque. Só Atualizar unidades dispara o loop no Sienge.";
       return;
     }
-    const when = this.state.fetchedAt ? new Date(this.state.fetchedAt).toLocaleString("pt-BR") : "hoje";
+    const when = this.state.batimentoAt || this.state.fetchedAt;
+    const whenLabel = when ? new Date(when).toLocaleString("pt-BR") : "";
+    const finN = (this.state.units || []).filter((u) => u && u.relFin).length;
+    const last = this.state.batimentoDate
+      ? ` Última atualização financeira: ${String(this.state.batimentoDate).split("-").reverse().join("/")}${whenLabel ? " · " + whenLabel : ""} (${finN} títulos classificados).`
+      : (finN
+        ? ` Situação financeira de ${finN} título(s) da última base.`
+        : " Sem classificação financeira gravada — aguardando a última atualização.");
     const fb = this.state.firebaseOk ? " Firebase ok." : (this.fbReady() ? " Gravando/lendo Firebase." : " Firebase indisponível.");
     const extra = this.state.complete ? "" : ` Carga incompleta (${this.state.ccDone.length} empreendimentos).`;
-    el.textContent = `${this.state.units.length} unidades · atualizado ${when}.${extra}${fb}`;
+    el.textContent = `${this.state.units.length} unidades.${last}${extra}${fb}`;
   },
 
   normName(name) {
@@ -982,13 +1012,14 @@ const EstoqueComercialApp = {
     if (u.relFin === "quitado" || u.quitado) return "Quitado";
     if (u.relFin === "inadimplente" || this.isInadimplente(u)) return "Ativo inadimplente";
     if (u.relFin === "adimplente") return "Ativo adimplente";
+    if (!u.relFin && !u.statementDone) return "A apurar";
     const bal = this.unitBalance(u);
     if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
     const fallback = this.defaultFinanceStatus(u);
     if (fallback === "quitado") return "Quitado";
     if (fallback === "inadimplente") return "Ativo inadimplente";
     if (fallback === "distratado") return "Distratado";
-    return "Ativo adimplente";
+    return u.relFin ? "Ativo adimplente" : "A apurar";
   },
 
   money(v) {
@@ -1171,6 +1202,8 @@ const EstoqueComercialApp = {
         finAt: u.finAt || keep.finAt,
         situation: u.situation || keep.situation,
         quitado: !!(keep.quitado || u.quitado),
+        relFin: keep.relFin || u.relFin || null,
+        filaAt: keep.filaAt || u.filaAt || null,
         receivableBillId: u.receivableBillId || keep.receivableBillId,
         customerId: u.customerId || keep.customerId,
         customerDoc: u.customerDoc || keep.customerDoc,
@@ -2377,10 +2410,6 @@ const EstoqueComercialApp = {
       this.updateMeta();
       this.renderTable();
       if (window.lucide) window.lucide.createIcons();
-      if (this.state.units.length && this.state.lastSnapshotDate !== this.todayStr()) {
-        await this.persistTodayResult();
-        this.updateMeta();
-      }
       return;
     }
     if (!this.state.enterprises.length) await this.loadEnterprises();
