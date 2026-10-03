@@ -147,6 +147,18 @@ const ConfigUsersApp = {
       savedPerms.sub_compras_geral_previsoes_visualizar = true;
       savedPerms.sub_compras_geral_previsoes_editar = !!savedPerms.sub_compras_geral_compras_editar;
     }
+    if (savedPerms.sub_compras_geral_config_acessar == null && (
+      savedPerms.mod_compras
+      || savedPerms.sub_compras_geral_compras_acessar
+      || savedPerms.sub_compras_geral_previsoes_acessar
+    )) {
+      savedPerms.sub_compras_geral_config_acessar = true;
+      savedPerms.sub_compras_geral_config_visualizar = true;
+      savedPerms.sub_compras_geral_config_editar = !!(
+        savedPerms.sub_compras_geral_compras_editar
+        || savedPerms.sub_compras_geral_previsoes_editar
+      );
+    }
     if (savedPerms.sub_com_geral_controle_comissao_acessar == null && (
       savedPerms.mod_comercial
       || savedPerms.sub_com_geral_dashboard_acessar
@@ -189,7 +201,8 @@ const ConfigUsersApp = {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
       submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [
         { id: "compras", label: "Compras" },
-        { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" }
+        { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" },
+        { id: "config", label: "Configurações", permBase: "sub_compras_geral_config" }
       ] }]
     },
     {

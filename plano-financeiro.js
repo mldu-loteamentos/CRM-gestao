@@ -43,7 +43,7 @@ const PlanoFinanceiroApp = {
     await this.loadCategories();
   },
 
-  DFC_TEMPLATE_VER: 4,
+  DFC_TEMPLATE_VER: 5,
   ACCOUNTS_MAP_VER: 2,
   RECEITA_SWAP_FIX_VER: 1,
   _cloudSaveTimer: null,
@@ -316,6 +316,7 @@ const PlanoFinanceiroApp = {
       ['2.11.03', 'g_04_01'],
       ['2.11.00', 'g_04_01'],
       ['2.11.01', 'g_05_08'],
+      ['2.07.08', 'g_04_01'],
       ['2.07.07', 'g_11_01'],
       ['2.07.06', 'g_11_01'],
       ['2.07.05', 'g_11_01'],

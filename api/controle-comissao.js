@@ -65,9 +65,13 @@ function pctNumber(raw) {
   return n > 0 && n <= 1 ? n * 100 : n;
 }
 
-function isMoura(...parts) {
-  const t = fold(parts.filter(Boolean).join(" ")).replace(/[^A-Z0-9@.]/g, "");
-  return t.indexOf("MOURALEITE") >= 0;
+function isMoura(nome) {
+  const compact = fold(nome).replace(/[^A-Z0-9]/g, "");
+  if (!compact) return false;
+  if (compact === "MOURALEITE") return true;
+  if (compact.indexOf("MOURALEITE") < 0) return false;
+  const rest = compact.replace(/IMOBILIARIA|IMOB|IMO|LTDA|EIRELI|SPE|DESENVOLVIMENTO|URBANIZACAO|INCORPORADORA|EMPREENDIMENTOS|HOLDING/g, "");
+  return rest === "MOURALEITE";
 }
 
 function benText(b) {
@@ -211,8 +215,8 @@ function mapComissao(c) {
       programacao: c.programacao
     }];
   }
-  const mouraBens = bens.filter((b) => isMoura(benText(b)));
-  const mouraTop = isMoura(pick(c, ["beneficiario", "nome_beneficiario", "beneficiario_nome"]), pick(c, ["email", "email_beneficiario"]));
+  const mouraBens = bens.filter((b) => isMoura(benNome(b)));
+  const mouraTop = isMoura(pick(c, ["beneficiario", "nome_beneficiario", "beneficiario_nome"]));
   const hasMoura = mouraBens.length > 0 || mouraTop;
   const use = mouraBens.length ? mouraBens : (mouraTop ? bens : []);
   const prog = use.reduce((acc, b) => acc.concat(programacaoOf(b).filter((p) => p && !p.cancelado && !p.excluido)), []);

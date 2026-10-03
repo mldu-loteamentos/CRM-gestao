@@ -331,11 +331,23 @@ const CompromissarioApp = {
     return name || (id ? ('Emp: ' + id) : 'Sem empreendimento');
   },
 
+  cityFromEnterprise(name) {
+    const raw = String(name || '').trim();
+    if (!raw) return '';
+    const parts = raw.split(/\s+-\s+/).map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) return raw.toUpperCase();
+    if (/^\d+$/.test(parts[0]) && parts[1]) return parts[1].toUpperCase();
+    return parts[0].toUpperCase();
+  },
+
   cityOfContract(c) {
-    const enterpriseName = (c && c.enterpriseName) || '';
-    return enterpriseName.includes(' - ')
-      ? enterpriseName.split(' - ')[0].trim().toUpperCase()
-      : String(enterpriseName || '').toUpperCase();
+    if (c && c._city) return String(c._city).toUpperCase();
+    if (c && c._cessao) {
+      const rec = c._cessao;
+      const fromCessao = this.cityFromEnterprise(c.enterpriseName || rec.enterpriseName || rec.empresa);
+      if (fromCessao && !/^\d+$/.test(fromCessao)) return fromCessao;
+    }
+    return this.cityFromEnterprise((c && c.enterpriseName) || '');
   },
 
   async fetchContractPages(pathBase) {
@@ -1736,13 +1748,11 @@ const CompromissarioApp = {
     const store = this.readCessaoStore();
     const disk = (month && store[month] && typeof store[month] === 'object') ? store[month] : {};
     Object.entries(disk).forEach(([id, row]) => { out[String(id)] = row; });
-    if (this.state.cessaoMonth === month) {
-      Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
-        if (row && (row.status === 'has' || (Array.isArray(row.records) && row.records.length))) {
-          out[String(id)] = row;
-        }
-      });
-    }
+    Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
+      if (row && (row.status === 'has' || (Array.isArray(row.records) && row.records.length))) {
+        out[String(id)] = row;
+      }
+    });
     return out;
   },
 
@@ -1757,14 +1767,17 @@ const CompromissarioApp = {
         if (seen.has(key)) return;
         seen.add(key);
         const atuais = rec.atuais || [];
+        const enterpriseName = rec.enterpriseName || this.enterpriseNameFromCessao(rec) || String(rec.empresa || '').replace(/^\d+\s*-\s*/, '');
+        const enterpriseId = rec.enterpriseId || ((String(rec.empresa || '').match(/^(\d+)/) || [])[1] || '');
         movements.push({
           id: 'cessao-' + cid + '-' + (rec.titulo || rec.contratoNumero || movements.length),
           _movementType: 'Cessão',
           _operationType: 'Cessão',
           _cessao: rec,
+          _city: this.cityFromEnterprise(enterpriseName || rec.empresa),
           _unitName: rec.unitName || '',
-          enterpriseId: rec.enterpriseId,
-          enterpriseName: rec.enterpriseName || this.enterpriseNameFromCessao(rec),
+          enterpriseId,
+          enterpriseName,
           companyName: rec.companyName || '',
           companyId: cid,
           salesContractUnits: rec.salesContractUnits || (rec.unitName ? [{ name: rec.unitName }] : []),

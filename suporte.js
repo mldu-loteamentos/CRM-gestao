@@ -131,6 +131,7 @@
     vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
     "construcao-compras": { modulo: "compras" },
     "compras-previsoes": { modulo: "compras", subitem: "previsoes" },
+    "compras-config": { modulo: "compras", subitem: "config" },
     dashboard: { modulo: "financeiro", subitem: "fila" },
     inadimplencia_dashboard: { modulo: "financeiro", subitem: "dashboard" },
     agenda: { modulo: "financeiro", subitem: "agenda" },

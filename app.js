@@ -2907,6 +2907,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "tabelas-vigentes": "Tabelas vigentes",
     "controle-comissao": "Controle de comissão",
     "compras-previsoes": "Follow-up de previsões",
+    "compras-config": "Configurações · Compras",
     "construcao-compras": "Follow-up de previsões",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
@@ -2958,6 +2959,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "tabelas-vigentes": "table",
     "controle-comissao": "percent",
     "compras-previsoes": "clipboard-list",
+    "compras-config": "sliders",
     "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
@@ -39525,7 +39527,8 @@ window.SYNC_KEYS = [
     "crm_moura_alcada_desconto",
     "crm_moura_alcada_distrato",
     "crm_compromissario_configs",
-    "crm_compromissario_cessao_v1"
+    "crm_compromissario_cessao_v1",
+    "crm_compras_prazo_lancamento_v1"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -40248,6 +40251,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_compras_prazo_lancamento_v1" && typeof window.mergeComprasPrazoLancamento === "function") {
+                    const merged = window.mergeComprasPrazoLancamento(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_moura_condicoes_pagamento" && typeof window.mergeCondicoesPagamento === "function") {
                     const merged = window.mergeCondicoesPagamento(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -40496,6 +40510,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_compromissario_cessao_v1", payload.crm_compromissario_cessao_v1); } catch (e) {}
             } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
               payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
+            }
+          }
+          if (payload.crm_compras_prazo_lancamento_v1 || cloud.crm_compras_prazo_lancamento_v1) {
+            if (typeof window.mergeComprasPrazoLancamento === "function") {
+              payload.crm_compras_prazo_lancamento_v1 = window.mergeComprasPrazoLancamento(
+                payload.crm_compras_prazo_lancamento_v1 || "{}",
+                cloud.crm_compras_prazo_lancamento_v1 || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_compras_prazo_lancamento_v1", payload.crm_compras_prazo_lancamento_v1); } catch (e) {}
+            } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
+              payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
             }
           }
           if (payload.crm_users || cloud.crm_users) {
@@ -40766,6 +40791,16 @@ localStorage.setItem = function(key, value) {
                           );
                         } else if (!payload.crm_compromissario_cessao_v1 && cloud.crm_compromissario_cessao_v1) {
                           payload.crm_compromissario_cessao_v1 = cloud.crm_compromissario_cessao_v1;
+                        }
+                      }
+                      if (payload.crm_compras_prazo_lancamento_v1 || cloud.crm_compras_prazo_lancamento_v1) {
+                        if (typeof window.mergeComprasPrazoLancamento === "function") {
+                          payload.crm_compras_prazo_lancamento_v1 = window.mergeComprasPrazoLancamento(
+                            payload.crm_compras_prazo_lancamento_v1 || "{}",
+                            cloud.crm_compras_prazo_lancamento_v1 || "{}"
+                          );
+                        } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
+                          payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
                         }
                       }
                       if (window.mergeCondicoesPagamento) {

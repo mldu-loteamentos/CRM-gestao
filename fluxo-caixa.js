@@ -245,67 +245,30 @@ const FluxoCaixaApp = {
   },
 
   /**
-   * Adiantamento já “matado” pela reapropriação vira Repasse no demonstrativo
-   * (caixa saiu como adiantamento, mas economicamente é repasse do período).
-   * Ex.: 2.11.03 −173.700 com 155.400 matados → −18.300 em adiant. e −574.778,83 em repasses.
+   * Excel (04.01): 2.11.03 fica na própria linha — não reclassificar para Repasses.
+   * 04.01 = 2.02.04.01 + 2.05.01.10 + 2.07.08 + 2.11.03
+   * ex.: −721.639,74 + 177.800,00 = −543.839,74
    */
-  settleAdvancesInAllocs(allocs, movements) {
-    const pool = this.collectAdvanceSettlementPool(movements || this.movements || []);
-    const REPASSE_ID = "2.02.04.01";
-    const REPASSE_NAME = "Repasses";
-    const eps = 0.02;
-
-    const ranked = (allocs || [])
-      .map((a, idx) => ({ a, idx }))
-      .filter(({ a }) => {
-        const role = this.movAdvanceRole(a.mov);
-        return role === "adiantamento" || this.isAdiantamentoParceirosAccount(a.categoryId, a.categoryName);
-      })
-      .sort((x, y) => {
-        const dx = this.cashDate(x.a.mov || {}) || "";
-        const dy = this.cashDate(y.a.mov || {}) || "";
-        if (dx !== dy) return dx.localeCompare(dy);
-        return x.idx - y.idx;
-      });
-
-    ranked.forEach(({ a }) => {
-      const title = this.movTitleInfo(a.mov || {});
-      const need = Math.abs(Number(a.amount) || 0);
-      if (!(need > 0)) return;
-      let settle = false;
-
-      if (title.titleKey && pool.byTitle.has(String(title.titleKey))) {
-        settle = true;
-        const key = this.creditorSettlementKey(a.mov);
-        if (key && (pool.byCreditor[key] || 0) > 0) {
-          pool.byCreditor[key] = Math.max(0, (pool.byCreditor[key] || 0) - need);
-        }
-      } else {
-        const key = this.creditorSettlementKey(a.mov);
-        if (key && (pool.byCreditor[key] || 0) >= need - eps) {
-          pool.byCreditor[key] -= need;
-          settle = true;
-        }
-      }
-
-      if (!settle) return;
-      a.categoryId = REPASSE_ID;
-      a.categoryName = REPASSE_NAME;
-      a.settledAdvance = true;
-    });
+  settleAdvancesInAllocs(allocs) {
     return allocs;
   },
 
   allocate(mov, factor) {
-    // Reaprop./abatimento de adiantamento: só mata o título no Sienge — não é caixa no DFC
-    if (this.movAdvanceRole(mov) === "abatimento") return [];
     const rawBank = Number(mov.bankMovementAmount) || 0;
     const catsAll = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
     if (!catsAll.length) return [];
 
-    // Linhas de abatimento no mesmo título: fora do rateio; o caixa fica nas contas restantes (100%).
-    const cashCats = catsAll.filter((fc) => !this.isAbatimentoCategory(fc));
+    // Reaprop em 2.11.03 permanece no DFC (Excel: Adiantamento a Parceiros positivo).
+    // Reaprop em outras contas (rateio junto com Repasses) sai do caixa.
+    const role = this.movAdvanceRole(mov);
+    const is21103 = (fc) => this.isAdiantamentoParceirosAccount(
+      fc && fc.financialCategoryId,
+      fc && fc.financialCategoryName
+    );
+    if (role === "abatimento" && !catsAll.some(is21103)) return [];
+
+    const cashCats = catsAll.filter((fc) => !this.isAbatimentoCategory(fc) || is21103(fc));
     const removedAbate = cashCats.length < catsAll.length;
     if (!cashCats.length) return [];
 
@@ -424,18 +387,20 @@ const FluxoCaixaApp = {
    * — redutora em RECEITAS (cancelamento) → negativo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
-   * Adiantamento × abatimento (reapropriação):
-   * — adiantamento = saída de caixa → negativo
-   * — reaprop./abatimento = fora do DFC (só mata o título)
-   * — adiantamento matado no período é reclassificado para 2.02.04.01 Repasses
-   *   (settleAdvancesInAllocs), restando em 2.11.03 só o saldo em aberto
+   * Adiantamento × abatimento (reapropriação) em 04.01:
+   * — 2.02.04.01 Repasses = só a conta de repasse (não misturar 2.11.03)
+   * — 2.11.03 Adiantamento a Parceiros fica na própria linha
+   * — reaprop. nessa conta entra positivo (reduz o custo), como no Excel
+   * — reaprop. em outras contas continua fora do DFC
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
-    // Reapropriação/abatimento: fora do demonstrativo de caixa
-    if (role === "abatimento") return 0;
+    const onAdiantParceiros = this.isAdiantamentoParceirosAccount(categoryId, categoryName);
+    if (role === "abatimento" && !onAdiantParceiros) return 0;
+    // Excel 2.11.03: inverte o sinal da API (crédito/reaprop +, débito/adiant. −)
+    if (onAdiantParceiros) return -raw;
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);
