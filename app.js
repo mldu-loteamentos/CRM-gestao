@@ -1790,7 +1790,7 @@ window.installmentIsEntradaWebro = function(inst) {
 };
 
 window.webroBoletoTagHtml = function() {
-  return `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;white-space:nowrap;">Boleto parcela Webro</span>`;
+  return `<span class="tag-boleto-webro">BOLETO WEBRO</span>`;
 };
 
 window.findContractInstallmentById = function(id) {
@@ -6591,13 +6591,8 @@ window.wrapAgingWithWebro = function(client, innerHtml) {
   return webro;
 };
 
-window.getEntradaWebroAgingHtml = function(client) {
-  const days = Number(client && client.maxDaysDelay) || 0;
-  return `
-    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fdba74; background-color: #fff7ed; color: #c2410c; font-weight: 600;" title="Cliente pagando entrada Webro — permanece na carteira interna">
-      <i data-lucide="banknote" style="width: 14px; height: 14px;"></i> Pagamento de entrada Webro - ${days} dia${days === 1 ? "" : "s"}
-    </span>
-  `;
+window.getEntradaWebroAgingHtml = function() {
+  return `<span class="tag-boleto-webro" title="Cliente pagando entrada Webro — permanece na carteira interna">BOLETO WEBRO</span>`;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
@@ -12926,7 +12921,7 @@ function formatCpfCnpj(val) {
                     if (isWebroParcela) {
                       statusHtml = typeof window.webroBoletoTagHtml === "function"
                         ? window.webroBoletoTagHtml()
-                        : `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Boleto parcela Webro</span>`;
+                        : `<span class="tag-boleto-webro">BOLETO WEBRO</span>`;
                       acoesHtml = "";
                     } else if (!allowsSiengeBol) {
                       statusHtml = `<span style="background:#f8fafc;color:#475569;border:1px solid #cbd5e1;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Sem boleto Sienge</span>`;

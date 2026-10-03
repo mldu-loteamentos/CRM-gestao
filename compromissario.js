@@ -535,7 +535,7 @@ const CompromissarioApp = {
       const ant = (rec.anteriores || []).map((x) => (x.id ? x.id + ' - ' : '') + (x.name || '')).join(', ');
       const pri = rec.principal;
       const sec = (rec.atuais || []).filter((x) => !pri || String(x.id) !== String(pri.id));
-      idHtml = this.escHtml((rec.documento || rec.contratoNumero || rec.titulo || id));
+      idHtml = this.escHtml(this.formatCessaoContrato(rec) || rec.documento || rec.titulo || id);
       buyerHtml = `
         ${ant ? `<div style="font-size:0.78rem;color:#64748b;">Anterior</div><div style="font-weight:600;color:#334155;">${this.escHtml(ant)}</div>` : ''}
         ${pri ? `<div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Atual (P)*</div><div style="font-weight:600;color:#334155;">${this.escHtml((pri.id ? pri.id + ' - ' : '') + (pri.name || ''))}</div>` : ''}
@@ -1114,10 +1114,20 @@ const CompromissarioApp = {
   extractContratoNumero(documento) {
     const s = String(documento || '').replace(/\s+/g, ' ').trim();
     if (!s) return '';
-    let m = s.match(/(?:CT|CV)\s*\/\s*([A-Z0-9]+)/i);
+    let m = s.match(/CVMOURALEIT\d+/i);
+    if (m) return m[0].toUpperCase();
+    m = s.match(/(?:CT|CV)\s*\/\s*([A-Z0-9]+)/i);
     if (m) return m[1];
-    m = s.match(/(\d{4,})/);
-    return m ? m[1] : s.replace(/[^\dA-Z]/gi, '');
+    m = s.match(/\b(\d{4,6})\b/);
+    if (m) return m[1];
+    return s.replace(/[^\dA-Z]/gi, '');
+  },
+
+  formatCessaoContrato(rec) {
+    const num = (rec && rec.contratoNumero) || this.extractContratoNumero(rec && rec.documento);
+    if (!num) return String((rec && rec.titulo) || '').replace(/\.0$/, '');
+    if (/^CV/i.test(num) || /MOURALEIT/i.test(num)) return num;
+    return 'CT / ' + num;
   },
 
   digitsOnly(v) {
@@ -1127,10 +1137,12 @@ const CompromissarioApp = {
   validIsoDate(iso) {
     const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!m) return '';
-    const month = Number(m[2]);
-    const day = Number(m[3]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return '';
-    return m[1] + '-' + m[2] + '-' + m[3];
+    const y = Number(m[1]);
+    const a = Number(m[2]);
+    const b = Number(m[3]);
+    if (a >= 1 && a <= 12 && b >= 1 && b <= 31) return this.dateToIsoParts(y, a, b);
+    if (a > 12 && b >= 1 && b <= 12) return this.dateToIsoParts(y, b, a);
+    return '';
   },
 
   pad2(n) {
@@ -1160,7 +1172,10 @@ const CompromissarioApp = {
     if (!s) return '';
     const valid = this.validIsoDate(s);
     if (valid) return valid;
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return this.validIsoDate(s.slice(0, 10));
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const recovered = this.validIsoDate(s.slice(0, 10));
+      if (recovered) return recovered;
+    }
     if (/^\d+(\.\d+)?$/.test(s)) {
       const n = Number(s);
       if (n > 20000 && n < 80000) {
@@ -1224,10 +1239,10 @@ const CompromissarioApp = {
     const anteriores = clients.filter((c) => !c.atual);
     const starred = list.filter((r) => (r.clients || []).some((c) => c.atual));
     const datePool = (starred.length ? starred : list)
-      .map((r) => this.validIsoDate(r.dataIso) || this.cessaoDateIso(r.data))
+      .map((r) => this.resolveCessaoIso(r))
       .filter(Boolean)
       .sort();
-    const iso = datePool.length ? datePool[datePool.length - 1] : (this.validIsoDate(list[0].dataIso) || this.cessaoDateIso(list[0].data));
+    const iso = datePool.length ? datePool[datePool.length - 1] : this.resolveCessaoIso(list[0]);
     const first = list.find((r) => r.titulo) || list[0];
     const documento = (list.find((r) => r.documento) || {}).documento || '';
     return {
@@ -1415,7 +1430,7 @@ const CompromissarioApp = {
         if (this.cessaoMatchesContract(rec, keys)) all.push(rec);
       });
     });
-    all.sort((a, b) => String(a.dataIso || this.cessaoDateIso(a.data) || '').localeCompare(String(b.dataIso || this.cessaoDateIso(b.data) || '')));
+    all.sort((a, b) => String(this.resolveCessaoIso(a) || '').localeCompare(String(this.resolveCessaoIso(b) || '')));
     return all;
   },
 
@@ -1492,8 +1507,13 @@ const CompromissarioApp = {
     return emp.replace(/^\d+\s*-\s*/, '');
   },
 
+  resolveCessaoIso(rec) {
+    if (!rec) return '';
+    return this.validIsoDate(rec.dataIso) || this.cessaoDateIso(rec.dataIso) || this.cessaoDateIso(rec.data);
+  },
+
   cessaoInSearchMonth(rec, monthVal) {
-    const iso = this.validIsoDate(rec && rec.dataIso) || this.cessaoDateIso(rec && rec.data);
+    const iso = this.resolveCessaoIso(rec);
     return !!(iso && monthVal && iso.slice(0, 7) === monthVal);
   },
 

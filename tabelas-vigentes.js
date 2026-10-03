@@ -266,6 +266,15 @@ const TabelasVigentesApp = {
     return s;
   },
 
+  padDec(raw, dec) {
+    const s = this.sanitizeDec(raw, dec);
+    if (!s) return "";
+    const parts = s.split(",");
+    const intPart = parts[0] === "" ? "0" : parts[0];
+    const frac = String(parts[1] || "").padEnd(dec, "0").slice(0, dec);
+    return intPart + "," + frac;
+  },
+
   sanitizeInt(raw) {
     return this.stripSuffix(raw).replace(/\D/g, "");
   },
@@ -284,7 +293,13 @@ const TabelasVigentesApp = {
     return !!(d && String(d.competencia || "").trim() && d.cityId && d.enterpriseId);
   },
 
+  isEditorReadOnly() {
+    const ed = this.state.editor;
+    return !!(ed && (ed.mode === "view" || ed.readOnly));
+  },
+
   sheetFieldLocked(idx, field, r) {
+    if (this.isEditorReadOnly()) return true;
     if (!this.isEditorContextReady()) return true;
     return this.boletoFieldLocked(idx, field, r);
   },
@@ -394,7 +409,7 @@ const TabelasVigentesApp = {
       intermediarias: src.intermediarias != null ? !!src.intermediarias : interFromText,
       entradaMin: this.stripSuffix(src.entradaMin),
       parcelamentoEntrada: this.sanitizeInt(src.parcelamentoEntrada),
-      taxaJuros: this.stripSuffix(src.taxaJuros),
+      taxaJuros: this.padDec(src.taxaJuros, 4),
       reajuste: this.stripDash(src.reajuste),
       descontoOn,
       descontoPct: src.descontoPct != null && String(src.descontoPct) !== ""
@@ -573,7 +588,7 @@ const TabelasVigentesApp = {
               <th>Competência</th>
               <th>Cidade</th>
               <th>Empreendimento</th>
-              <th style="width:140px;text-align:right;">Ações</th>
+              <th style="width:176px;text-align:right;">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -583,6 +598,9 @@ const TabelasVigentesApp = {
                 <td>${this.esc(t.city || t.cityId || "—")}</td>
                 <td>${this.esc((t.enterpriseId ? t.enterpriseId + " - " : "") + (t.enterpriseName || "—"))}</td>
                 <td style="text-align:right;white-space:nowrap;">
+                  <button type="button" class="tvig-ico" title="Visualizar" onclick="TabelasVigentesApp.openViewer('${this.esc(t.id)}')">
+                    <i data-lucide="eye" style="width:15px;height:15px;"></i>
+                  </button>
                   <button type="button" class="tvig-ico" title="Editar" onclick="TabelasVigentesApp.openEditor('${this.esc(t.id)}')">
                     <i data-lucide="pencil" style="width:15px;height:15px;"></i>
                   </button>
@@ -645,11 +663,20 @@ const TabelasVigentesApp = {
   },
 
   openEditor(id, asCopy) {
+    this.openEditorMode(id, asCopy ? "copy" : (id ? "edit" : "new"));
+  },
+
+  openViewer(id) {
+    this.openEditorMode(id, "view");
+  },
+
+  openEditorMode(id, mode) {
     const src = id ? this.findTable(id) : null;
+    if (mode === "view" && !src) return;
     let draft;
     if (src) {
       draft = JSON.parse(JSON.stringify(src));
-      if (asCopy) {
+      if (mode === "copy") {
         draft.id = this.uid();
         draft.createdAt = new Date().toISOString();
       }
@@ -658,10 +685,17 @@ const TabelasVigentesApp = {
       this.prefillFromFilters(draft);
     }
     draft.rows = ((draft.rows && draft.rows.length) ? draft.rows : this.defaultRows()).map((r) => this.migrateRow(r));
+    const titles = {
+      view: "Visualizar tabela vigente",
+      copy: "Copiar tabela vigente",
+      edit: "Editar tabela vigente",
+      new: "Nova tabela vigente"
+    };
     this.state.editor = {
       draft,
-      mode: src ? (asCopy ? "copy" : "edit") : "new",
-      title: src ? (asCopy ? "Copiar tabela vigente" : "Editar tabela vigente") : "Nova tabela vigente",
+      mode: mode || "new",
+      readOnly: mode === "view",
+      title: titles[mode] || titles.new,
       openCity: false,
       openEmp: false,
       qCity: "",
@@ -791,7 +825,17 @@ const TabelasVigentesApp = {
     const citySlot = document.getElementById("tvig-ed-city-slot");
     const empSlot = document.getElementById("tvig-ed-emp-slot");
     const ed = this.state.editor;
-    if (!citySlot || !empSlot || !ed || !window.MlEmpresaFilter) return;
+    if (!citySlot || !empSlot || !ed) return;
+    if (this.isEditorReadOnly()) {
+      const emp = this.state.enterprises.find((e) => String(e.id) === String(ed.draft.enterpriseId));
+      const empLabel = emp
+        ? (emp.label || (emp.id + " - " + emp.name))
+        : ((ed.draft.enterpriseId ? ed.draft.enterpriseId + " - " : "") + (ed.draft.enterpriseName || ""));
+      citySlot.innerHTML = `<div class="form-group"><label>Cidade</label><input type="text" class="form-control" disabled value="${this.esc(ed.draft.cityId || ed.draft.city || "")}"></div>`;
+      empSlot.innerHTML = `<div class="form-group"><label>Empreendimento</label><input type="text" class="form-control" disabled value="${this.esc(empLabel)}"></div>`;
+      return;
+    }
+    if (!window.MlEmpresaFilter) return;
     this.bindEditorFilters();
     citySlot.innerHTML = MlEmpresaFilter.html({
       id: "tvig-ed-city",
@@ -824,6 +868,7 @@ const TabelasVigentesApp = {
   },
 
   onEditorField(field, val) {
+    if (this.isEditorReadOnly()) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
     d[field] = val;
@@ -831,6 +876,7 @@ const TabelasVigentesApp = {
   },
 
   onSheetInput(idx, field, el) {
+    if (this.isEditorReadOnly()) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
     if (this.sheetFieldLocked(idx, field, d.rows[idx])) {
@@ -863,6 +909,17 @@ const TabelasVigentesApp = {
     d.rows[idx].plano = n;
     if (el.value !== n) el.value = n;
     this.sortDraftRows(d.rows[idx].id);
+  },
+
+  onTaxaJurosBlur(idx, el) {
+    if (this._paintingEditor) return;
+    const d = this.state.editor && this.state.editor.draft;
+    if (!d || !d.rows[idx]) return;
+    if (this.sheetFieldLocked(idx, "taxaJuros", d.rows[idx])) return;
+    this.commitCellEdit();
+    const n = this.padDec(el.value, 4);
+    d.rows[idx].taxaJuros = n;
+    if (el.value !== n) el.value = n;
   },
 
   onReajuste(idx, val) {
@@ -898,8 +955,13 @@ const TabelasVigentesApp = {
   },
 
   addEditorRow() {
+    if (this.isEditorReadOnly()) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
+    if (!this.isEditorContextReady(d)) {
+      alert("Selecione competência, cidade e empreendimento antes de editar os planos.");
+      return;
+    }
     const pending = (d.rows || []).findIndex((r, i) => this.rowNeedsPlano(r, i));
     if (pending >= 0) {
       alert("Preencha o número de parcelas da linha nova antes de adicionar outra.");
@@ -917,8 +979,10 @@ const TabelasVigentesApp = {
   },
 
   removeEditorRow(idx) {
+    if (this.isEditorReadOnly()) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
+    if (!this.isEditorContextReady(d)) return;
     if (idx === 0 || this.isBoletoPlano(d.rows[idx] && d.rows[idx].plano)) return;
     this.pushUndo();
     d.rows.splice(idx, 1);
@@ -938,7 +1002,8 @@ const TabelasVigentesApp = {
         <input class="tvig-sheet-input${o.center ? " tvig-cell-center" : ""}" value="${this.esc(value || "")}"
           ${o.off || locked ? "disabled" : ""} ${locked ? "readonly" : ""}
           oninput="TabelasVigentesApp.onSheetInput(${idx},'${field}',this)"
-          ${field === "plano" && !locked ? `onblur="TabelasVigentesApp.onPlanoBlur(${idx},this)"` : ""}>
+          ${field === "plano" && !locked ? `onblur="TabelasVigentesApp.onPlanoBlur(${idx},this)"` : ""}
+          ${field === "taxaJuros" && !locked ? `onblur="TabelasVigentesApp.onTaxaJurosBlur(${idx},this)"` : ""}>
         ${affix}
       </div>
     </td>`;
@@ -965,11 +1030,12 @@ const TabelasVigentesApp = {
     if (!ov || !ed) return;
     this._paintingEditor = true;
     const d = ed.draft;
+    const ro = this.isEditorReadOnly();
     this.sortDraftRows();
     ov.style.display = "flex";
     ov.classList.add("active");
     ov.innerHTML = `
-      <div class="modal-box tvig-editor-box" onclick="event.stopPropagation()">
+      <div class="modal-box tvig-editor-box${ro ? " is-readonly" : ""}" onclick="event.stopPropagation()">
         <div class="modal-header tvig-editor-head">
           <h3>${this.esc(ed.title)}</h3>
           <button type="button" class="modal-close" onclick="TabelasVigentesApp.closeEditor()"><i data-lucide="x"></i></button>
@@ -979,13 +1045,16 @@ const TabelasVigentesApp = {
             <div class="form-group">
               <label>Competência</label>
               <input type="month" class="form-control" value="${this.esc(d.competencia || "")}"
-                onchange="TabelasVigentesApp.onEditorField('competencia', this.value)">
+                ${ro ? "disabled" : ""} onchange="TabelasVigentesApp.onEditorField('competencia', this.value)">
             </div>
             <div id="tvig-ed-city-slot" class="tvig-ed-filter-slot"></div>
             <div id="tvig-ed-emp-slot" class="tvig-ed-filter-slot"></div>
           </div>
           <h4 class="tvig-plan-title">Planos de pagamento</h4>
-          <div class="tvig-editor-table-wrap">
+          <p id="tvig-editor-lock-hint" class="tvig-lock-hint" ${ro || this.isEditorContextReady(d) ? "hidden" : ""}>
+            Selecione competência, cidade e empreendimento para habilitar os campos da tabela.
+          </p>
+          <div class="tvig-editor-table-wrap${ro || this.isEditorContextReady(d) ? "" : " is-context-locked"}">
             <table class="tvig-plan-table">
               <colgroup>
                 <col class="tvig-col-plano">
@@ -995,7 +1064,7 @@ const TabelasVigentesApp = {
                 <col class="tvig-col-taxa">
                 <col class="tvig-col-reaj">
                 <col class="tvig-col-cond">
-                <col class="tvig-col-acao">
+                ${ro ? "" : '<col class="tvig-col-acao">'}
               </colgroup>
               <thead>
                 <tr>
@@ -1006,55 +1075,57 @@ const TabelasVigentesApp = {
                   <th>Taxa de juros</th>
                   <th style="text-align:center;">Indexador REAL</th>
                   <th>Condição especial (desconto)</th>
-                  <th></th>
+                  ${ro ? "" : "<th></th>"}
                 </tr>
               </thead>
               <tbody>
                 ${(d.rows || []).map((r, i) => `
                   <tr>
-                    ${this.sheetCell(i, "plano", i === 0 ? "Boleto único" : r.plano, { locked: this.boletoFieldLocked(i, "plano", r) })}
+                    ${this.sheetCell(i, "plano", i === 0 ? "Boleto único" : r.plano, { locked: this.sheetFieldLocked(i, "plano", r) })}
                     <td class="tvig-sheet-td tvig-td-flag" data-row="${i}" data-field="intermediarias">
-                      <label class="moura-switch${this.boletoFieldLocked(i, "intermediarias", r) ? " is-locked" : ""}" title="Parcelas intermediárias">
-                        <input type="checkbox" ${r.intermediarias ? "checked" : ""} ${this.boletoFieldLocked(i, "intermediarias", r) ? "disabled" : ""}
+                      <label class="moura-switch${this.sheetFieldLocked(i, "intermediarias", r) ? " is-locked" : ""}" title="Parcelas intermediárias">
+                        <input type="checkbox" ${r.intermediarias ? "checked" : ""} ${this.sheetFieldLocked(i, "intermediarias", r) ? "disabled" : ""}
                           onchange="TabelasVigentesApp.onEditorFlag(${i},'intermediarias',this.checked)">
                         <span class="moura-switch-track" aria-hidden="true"></span>
                       </label>
                     </td>
-                    ${this.sheetCell(i, "entradaMin", r.entradaMin, { affix: "%", center: true, locked: this.boletoFieldLocked(i, "entradaMin", r) })}
-                    ${this.sheetCell(i, "parcelamentoEntrada", r.parcelamentoEntrada, { affix: "x", center: true, locked: this.boletoFieldLocked(i, "parcelamentoEntrada", r) })}
-                    ${this.sheetCell(i, "taxaJuros", r.taxaJuros, { affix: "%", center: true, locked: this.boletoFieldLocked(i, "taxaJuros", r) })}
-                    ${this.sheetSelect(i, "reajuste", this.isBoletoRow(i, r) ? "REAL" : r.reajuste, this.indexadorOptions(this.isBoletoRow(i, r) ? "REAL" : r.reajuste), { locked: this.boletoFieldLocked(i, "reajuste", r), center: true })}
+                    ${this.sheetCell(i, "entradaMin", r.entradaMin, { affix: "%", center: true, locked: this.sheetFieldLocked(i, "entradaMin", r) })}
+                    ${this.sheetCell(i, "parcelamentoEntrada", r.parcelamentoEntrada, { affix: "x", center: true, locked: this.sheetFieldLocked(i, "parcelamentoEntrada", r) })}
+                    ${this.sheetCell(i, "taxaJuros", this.padDec(r.taxaJuros, 4), { affix: "%", center: true, locked: this.sheetFieldLocked(i, "taxaJuros", r) })}
+                    ${this.sheetSelect(i, "reajuste", this.isBoletoRow(i, r) ? "REAL" : r.reajuste, this.indexadorOptions(this.isBoletoRow(i, r) ? "REAL" : r.reajuste), { locked: this.sheetFieldLocked(i, "reajuste", r), center: true })}
                     <td class="tvig-sheet-td" data-row="${i}" data-field="desconto">
                       <div class="tvig-desc-cell">
-                        <label class="moura-switch" title="Desconto especial">
-                          <input type="checkbox" ${r.descontoOn ? "checked" : ""}
+                        <label class="moura-switch${this.sheetFieldLocked(i, "descontoOn", r) ? " is-locked" : ""}" title="Desconto especial">
+                          <input type="checkbox" ${r.descontoOn ? "checked" : ""} ${this.sheetFieldLocked(i, "descontoOn", r) ? "disabled" : ""}
                             onchange="TabelasVigentesApp.onEditorFlag(${i},'descontoOn',this.checked)">
                           <span class="moura-switch-track" aria-hidden="true"></span>
                         </label>
                         <div class="tvig-sheet-cell tvig-affix${r.descontoOn ? "" : " is-off"}">
                           <input class="tvig-sheet-input tvig-cell-center" value="${this.esc(r.descontoPct || "")}"
-                            ${r.descontoOn ? "" : "disabled"}
+                            ${!this.sheetFieldLocked(i, "descontoPct", r) && r.descontoOn ? "" : "disabled"}
                             oninput="TabelasVigentesApp.onSheetInput(${i},'descontoPct',this)">
                           <span class="tvig-affix-mark">%</span>
                         </div>
                       </div>
                     </td>
-                    <td class="tvig-td-del">
-                      ${i === 0 ? "" : `<button type="button" class="tvig-ico is-danger" title="Remover linha" onclick="TabelasVigentesApp.removeEditorRow(${i})"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>`}
-                    </td>
+                    ${ro ? "" : `<td class="tvig-td-del">
+                      ${i === 0 ? "" : `<button type="button" class="tvig-ico is-danger" title="Remover linha" ${this.isEditorContextReady(d) ? "" : "disabled"} onclick="TabelasVigentesApp.removeEditorRow(${i})"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>`}
+                    </td>`}
                   </tr>`).join("")}
               </tbody>
             </table>
           </div>
-          <button type="button" class="btn btn-outline" onclick="TabelasVigentesApp.addEditorRow()">
+          ${ro ? "" : `<button type="button" class="btn btn-outline" id="tvig-add-plano" ${this.isEditorContextReady(d) ? "" : "disabled"} onclick="TabelasVigentesApp.addEditorRow()">
             <i data-lucide="plus" style="width:14px;"></i> Adicionar plano
-          </button>
+          </button>`}
         </div>
         <div class="tvig-editor-foot">
-          <button type="button" class="btn btn-cancel" onclick="TabelasVigentesApp.closeEditor()">Cancelar</button>
+          ${ro
+            ? `<button type="button" class="btn btn-cancel" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>`
+            : `<button type="button" class="btn btn-cancel" onclick="TabelasVigentesApp.closeEditor()">Cancelar</button>
           <button type="button" class="btn btn-primary" onclick="TabelasVigentesApp.saveEditor()">
             <i data-lucide="save" style="width:16px;"></i> Salvar tabela
-          </button>
+          </button>`}
         </div>
       </div>`;
     this.paintEditorFilters();
@@ -1082,6 +1153,7 @@ const TabelasVigentesApp = {
   },
 
   beginCellEdit() {
+    if (this.isEditorReadOnly()) return;
     const ed = this.state.editor;
     const d = ed && ed.draft;
     if (!ed || !d || ed._editSnap) return;
@@ -1116,6 +1188,7 @@ const TabelasVigentesApp = {
   },
 
   undoEditor() {
+    if (this.isEditorReadOnly()) return;
     const ed = this.state.editor;
     const d = ed && ed.draft;
     if (!ed || !d) return;
@@ -1138,6 +1211,7 @@ const TabelasVigentesApp = {
   },
 
   redoEditor() {
+    if (this.isEditorReadOnly()) return;
     const ed = this.state.editor;
     const d = ed && ed.draft;
     if (!ed || !d || !(ed.redo || []).length) return;
@@ -1206,11 +1280,11 @@ const TabelasVigentesApp = {
     const d = this.state.editor && this.state.editor.draft;
     const r = d && d.rows[row];
     if (!r) return;
-    if (this.boletoFieldLocked(row, field, r)) return;
+    if (this.sheetFieldLocked(row, field, r)) return;
     if (field === "plano") r.plano = this.normalizePlano(raw, false);
     else if (field === "entradaMin") r.entradaMin = this.sanitizeDec(raw, 2);
     else if (field === "parcelamentoEntrada") r.parcelamentoEntrada = this.sanitizeInt(raw);
-    else if (field === "taxaJuros") r.taxaJuros = this.sanitizeDec(raw, 4);
+    else if (field === "taxaJuros") r.taxaJuros = this.padDec(raw, 4);
     else if (field === "reajuste") r.reajuste = this.matchIndexador(raw);
     else if (field === "intermediarias") r.intermediarias = this.parseFlagValue(raw);
     else if (field === "desconto") {
@@ -1235,7 +1309,7 @@ const TabelasVigentesApp = {
     const d = this.state.editor && this.state.editor.draft;
     const r = d && d.rows[row];
     if (!r || !clip) return;
-    if (this.boletoFieldLocked(row, field, r)) return;
+    if (this.sheetFieldLocked(row, field, r)) return;
     if (clip.kind === "flag" && field === "intermediarias") {
       r.intermediarias = !!clip.on;
       return;
@@ -1258,7 +1332,8 @@ const TabelasVigentesApp = {
   pasteIntoSheet(startTd, text) {
     const ed = this.state.editor;
     const d = ed && ed.draft;
-    if (!ed || !d || !startTd) return;
+    if (!ed || !d || !startTd || this.isEditorReadOnly()) return;
+    if (!this.isEditorContextReady(d)) return;
     const fields = this.SHEET_FIELDS;
     const startRow = Number(startTd.dataset.row);
     const startFi = fields.indexOf(startTd.dataset.field);
@@ -1306,7 +1381,7 @@ const TabelasVigentesApp = {
     const d = this.state.editor && this.state.editor.draft;
     const r = d && d.rows[row];
     if (!r) return;
-    if (this.boletoFieldLocked(row, field, r)) return;
+    if (this.sheetFieldLocked(row, field, r)) return;
     if (field === "plano") r.plano = "";
     else if (field === "intermediarias") r.intermediarias = false;
     else if (field === "desconto") {
@@ -1317,6 +1392,7 @@ const TabelasVigentesApp = {
   },
 
   cutSheetCell(td) {
+    if (this.isEditorReadOnly()) return this.copySheetCell(td);
     const text = this.copySheetCell(td);
     const row = Number(td.dataset.row);
     const field = td.dataset.field;
@@ -1399,7 +1475,7 @@ const TabelasVigentesApp = {
     const row = Number(td.dataset.row);
     const field = td.dataset.field;
     const draftRow = this.state.editor && this.state.editor.draft && this.state.editor.draft.rows[row];
-    if (!this.boletoFieldLocked(row, field, draftRow)) {
+    if (!this.sheetFieldLocked(row, field, draftRow)) {
       const h = document.createElement("span");
       h.className = "tvig-fill-handle";
       h.title = "Arraste para copiar";
@@ -1419,6 +1495,7 @@ const TabelasVigentesApp = {
   },
 
   applyFill(field, from, to) {
+    if (this.isEditorReadOnly()) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[from]) return;
     this.pushUndo();
@@ -1428,7 +1505,7 @@ const TabelasVigentesApp = {
     const before = this.cloneRows(d.rows);
     for (let i = a; i <= b; i++) {
       if (!d.rows[i]) continue;
-      if (this.boletoFieldLocked(i, field, d.rows[i])) continue;
+      if (this.sheetFieldLocked(i, field, d.rows[i])) continue;
       if (field === "intermediarias") {
         d.rows[i].intermediarias = !!src.intermediarias;
       } else if (field === "desconto") {
@@ -1584,7 +1661,7 @@ const TabelasVigentesApp = {
   },
 
   formatPctSave(raw, maxDec) {
-    const s = this.sanitizeDec(raw, maxDec);
+    const s = maxDec === 4 ? this.padDec(raw, maxDec) : this.sanitizeDec(raw, maxDec);
     if (!s) return "";
     return s + "%";
   },
@@ -1596,7 +1673,7 @@ const TabelasVigentesApp = {
 
   async saveEditor() {
     const ed = this.state.editor;
-    if (!ed || !ed.draft) return;
+    if (!ed || !ed.draft || this.isEditorReadOnly()) return;
     const d = ed.draft;
     if (!d.competencia) {
       alert("Informe a competência.");
@@ -1629,7 +1706,7 @@ const TabelasVigentesApp = {
       row.plano = this.normalizePlano(row.plano, i === 0);
       row.entradaMin = this.formatPctSave(row.entradaMin, 2);
       row.parcelamentoEntrada = this.formatXSave(row.parcelamentoEntrada);
-      row.taxaJuros = this.formatPctSave(row.taxaJuros, 4);
+      row.taxaJuros = this.formatPctSave(this.padDec(row.taxaJuros, 4), 4);
       row.descontoPct = row.descontoOn ? this.formatPctSave(row.descontoPct, 2) : "";
       row.condicaoEspecial = row.descontoOn && row.descontoPct ? ("Até " + row.descontoPct + " de desconto") : "";
       return row;

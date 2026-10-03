@@ -1,6 +1,7 @@
 /**
  * Compras · Follow-up de previsões
- * Mesma base do Power BI Controle de Previsões (Sienge bulk-data/v1/outcome).
+ * Mesma base do Contas a Pagar (por vencimento): bulk-data/v1/outcome
+ * com selectionType=D e títulos de previsão (forecastDocument) + docs PREVISÃO.
  */
 const ComprasPrevisoesApp = {
   SKIP_OPS: {
@@ -25,7 +26,9 @@ const ComprasPrevisoesApp = {
     PRVC: 1,
     PRVR: 1,
     PCT: 1,
-    PPC: 1
+    PPC: 1,
+    PFPCC: 1,
+    PFPC: 1
   },
   /** Documentos que não são previsão (repasse, distrato, NF, devolução…). */
   DOC_NAO_PREVISAO: {
@@ -112,14 +115,33 @@ const ComprasPrevisoesApp = {
     return String(s == null ? "" : s).trim().toUpperCase();
   },
 
-  isDocPrevisao(docId, docName) {
+  forecastFlag(bill) {
+    const raw = bill && (bill.forecastDocument != null ? bill.forecastDocument : bill.documentForecast);
+    if (raw == null || raw === "") return null;
+    if (raw === true || raw === 1) return true;
+    if (raw === false || raw === 0) return false;
+    const s = String(raw).trim().toUpperCase();
+    if (s === "S" || s === "SIM" || s === "Y" || s === "YES" || s === "TRUE" || s === "1") return true;
+    if (s === "N" || s === "NAO" || s === "NÃO" || s === "NO" || s === "FALSE" || s === "0") return false;
+    return null;
+  },
+
+  ccDeptHint(ccNome) {
+    const parts = String(ccNome || "").split(/\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+    return parts.length >= 2 ? parts[parts.length - 1] : "";
+  },
+
+  isDocPrevisao(docId, docName, bill) {
+    const flag = this.forecastFlag(bill);
+    if (flag === true) return true;
     const id = this.docCode(docId);
     const nome = this.fold(docName);
     const token = this.docCode(this.firstWord(docId || docName));
-    if (this.DOC_NAO_PREVISAO[id] || this.DOC_NAO_PREVISAO[token]) return false;
     if (this.DOC_PREVISAO[id] || this.DOC_PREVISAO[token]) return true;
     if (nome.indexOf("PREVISAO") >= 0 || nome.indexOf("PREVIS") >= 0) return true;
-    return false;
+    if (flag === false) return false;
+    if (this.DOC_NAO_PREVISAO[id] || this.DOC_NAO_PREVISAO[token]) return false;
+    return !!id;
   },
 
   transform(payload) {
@@ -138,7 +160,7 @@ const ComprasPrevisoesApp = {
                 if (this.SKIP_ACCOUNTS[conta]) return;
                 const docId = this.docCode(bill.documentIdentificationId);
                 const docNome = this.firstWord(bill.documentIdentificationName);
-                if (!this.isDocPrevisao(docId, bill.documentIdentificationName)) return;
+                if (!this.isDocPrevisao(docId, bill.documentIdentificationName, bill)) return;
                 const titulo = String(bill.billId);
                 const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
                 if (this.SKIP_TITULO_PARCELA[titulo + "-" + parcela]) return;
@@ -164,7 +186,7 @@ const ComprasPrevisoesApp = {
                   dataPagamento: bm && bm.bankMovementDate ? String(bm.bankMovementDate).slice(0, 10) : "",
                   operacao,
                   conta,
-                  departamento: (dep && dep.name) || "",
+                  departamento: (dep && dep.name) || this.ccDeptHint((cat && cat.costCenterName) || "") || "",
                   idObra: bld && bld.buildingId != null ? String(bld.buildingId) : "",
                   valorAjustado: valor * ((Number.isFinite(rateio) ? rateio : 100) / 100)
                 });
@@ -220,10 +242,19 @@ const ComprasPrevisoesApp = {
     const dept = new Set((this.state.deptIds || []).map(String));
     const q = this.fold(this.state.q);
     const status = this.state.status;
+    const start = this.state.startDate || "";
+    const end = this.state.endDate || "";
     this.state.shown = (this.state.allRows || []).filter((r) => {
       if (emp.size && !emp.has(String(r.companyId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
-      if (dept.size && !dept.has(this.fold(r.departamento))) return false;
+      if (dept.size) {
+        const depFold = this.fold(r.departamento);
+        const ccFold = this.fold(r.ccNome);
+        const okDept = [...dept].some((id) => depFold === id || (id && ccFold.indexOf(id) >= 0));
+        if (!okDept) return false;
+      }
+      if (start && r.vencimento && r.vencimento < start) return false;
+      if (end && r.vencimento && r.vencimento > end) return false;
       if (status === "aberto" && r.dataPagamento) return false;
       if (status === "pago" && !r.dataPagamento) return false;
       if (q) {
@@ -374,7 +405,7 @@ const ComprasPrevisoesApp = {
     try {
       let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
         + "&endDate=" + encodeURIComponent(end)
-        + "&selectionType=I&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+        + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
       if ((this.state.companyIds || []).length === 1) {
         endpoint += "&companyId=" + encodeURIComponent(this.state.companyIds[0]);
       }
@@ -414,7 +445,7 @@ const ComprasPrevisoesApp = {
 
   onField(field, val) {
     this.state[field] = val;
-    if (field === "q" || field === "status") {
+    if (field === "q" || field === "status" || field === "startDate" || field === "endDate") {
       this.applyFilters();
       this.renderList();
     }
@@ -527,12 +558,12 @@ const ComprasPrevisoesApp = {
             <div id="cprev-cred-slot" class="tvig-filter-slot"></div>
             <div id="cprev-dept-slot" class="tvig-filter-slot"></div>
             <div class="form-group">
-              <label>Início</label>
+              <label>Vencimento de</label>
               <input type="date" class="form-control" value="${this.esc(s.startDate)}"
                 onchange="ComprasPrevisoesApp.onField('startDate', this.value)">
             </div>
             <div class="form-group">
-              <label>Fim</label>
+              <label>Vencimento até</label>
               <input type="date" class="form-control" value="${this.esc(s.endDate)}"
                 onchange="ComprasPrevisoesApp.onField('endDate', this.value)">
             </div>

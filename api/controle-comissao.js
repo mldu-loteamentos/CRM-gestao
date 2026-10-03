@@ -47,6 +47,24 @@ function isPago(v) {
   return t.indexOf("PAGO") >= 0 || t.indexOf("QUIT") >= 0 || t === "S" || t === "SIM";
 }
 
+function isCancelada(c) {
+  if (!c) return false;
+  if (c.data_cancelamento) return true;
+  const reserva = c.reserva && typeof c.reserva === "object" ? c.reserva : null;
+  const t = fold([
+    c.nome_situacao, c.situacao, c.situacao_reserva, c.nome_situacao_reserva,
+    c.flag_cancelada, c.cancelada,
+    reserva && (reserva.situacao || reserva.nome_situacao || reserva.flag_cancelada)
+  ].filter(Boolean).join(" "));
+  return t.indexOf("CANCEL") >= 0;
+}
+
+function pctNumber(raw) {
+  const n = parseMoney(raw);
+  if (!n) return 0;
+  return n > 0 && n <= 1 ? n * 100 : n;
+}
+
 function isMoura(...parts) {
   const t = fold(parts.filter(Boolean).join(" ")).replace(/[^A-Z0-9@.]/g, "");
   return t.indexOf("MOURALEITE") >= 0;
@@ -77,15 +95,18 @@ function listBeneficiarios(c) {
   return [];
 }
 
-function benValor(b, totalComissao) {
+function benValor(b, totalComissao, allBens) {
   if (!b || typeof b !== "object") return 0;
   const direct = parseMoney(b.valor != null ? b.valor : (b.valor_comissao != null ? b.valor_comissao : b.valor_receber));
-  if (direct) return direct;
-  const pct = parseMoney(b.percentual != null ? b.percentual : b.porcentagem);
-  if (pct && totalComissao) return totalComissao * (pct > 1 ? pct / 100 : pct);
-  const prog = programacaoOf(b);
-  if (prog.length) return prog.reduce((s, p) => s + parseMoney(p && (p.valor != null ? p.valor : p.valor_pagamento)), 0);
-  return 0;
+  const pct = pctNumber(b.percentual != null ? b.percentual : b.porcentagem);
+  let fromShare = 0;
+  if (pct && totalComissao && Array.isArray(allBens) && allBens.length) {
+    const sumPct = allBens.reduce((s, x) => s + pctNumber(x && (x.percentual != null ? x.percentual : x.porcentagem)), 0);
+    if (sumPct > 0) fromShare = totalComissao * (pct / sumPct);
+  }
+  const prog = programacaoOf(b).filter((p) => p && !p.cancelado && !p.excluido);
+  const fromProg = prog.reduce((s, p) => s + parseMoney(p && (p.valor != null ? p.valor : p.valor_pagamento)), 0);
+  return Math.max(direct, fromShare, fromProg);
 }
 
 function namesOf(list) {
@@ -142,7 +163,9 @@ async function fetchComissoes(de, ate) {
       limit,
       offset,
       a_partir_de: de,
-      ate
+      ate,
+      cancelados_excluidos: true,
+      mostrar_identificadores: true
     });
     status = out.status;
     lastJson = out.json;
@@ -192,13 +215,16 @@ function mapComissao(c) {
   const mouraTop = isMoura(pick(c, ["beneficiario", "nome_beneficiario", "beneficiario_nome"]), pick(c, ["email", "email_beneficiario"]));
   const hasMoura = mouraBens.length > 0 || mouraTop;
   const use = mouraBens.length ? mouraBens : (mouraTop ? bens : []);
-  const prog = use.reduce((acc, b) => acc.concat(programacaoOf(b)), []);
-  let split = splitProgramacao(prog);
-  if (!prog.length) {
-    const mouraValor = use.reduce((s, b) => s + benValor(b, totalComissao), 0);
-    const total = mouraValor || (mouraBens.length === 1 && bens.length === 1 ? totalComissao : 0);
-    if (isPago(c && (c.nome_situacao || c.situacao)) || (c && c.data_finalizacao)) split = { aReceber: 0, recebido: total };
-    else split = { aReceber: total, recebido: 0 };
+  const prog = use.reduce((acc, b) => acc.concat(programacaoOf(b).filter((p) => p && !p.cancelado && !p.excluido)), []);
+  const splitProg = splitProgramacao(prog);
+  const mouraValor = use.reduce((s, b) => s + benValor(b, totalComissao, bens), 0)
+    || (mouraBens.length === 1 && bens.length === 1 ? totalComissao : 0);
+  const recebido = Math.min(mouraValor, splitProg.recebido);
+  let split;
+  if (isPago(c && (c.nome_situacao || c.situacao)) || (c && c.data_finalizacao)) {
+    split = { aReceber: 0, recebido: mouraValor };
+  } else {
+    split = { aReceber: Math.max(0, mouraValor - recebido), recebido };
   }
   const pagador = (c && c.pagador && (c.pagador.nome || c.pagador.name)) || pick(c, ["pagador_nome", "cliente"]) || "";
   const reserva = pick(c, ["idreserva_cv", "idreserva", "numero_venda", "idreserva_int"]);
@@ -289,7 +315,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const mapped = (parc.items || []).filter((c) => !c.data_cancelamento).map((p) => mapComissao(p, seriesMap));
+    const mapped = (parc.items || []).filter((c) => !isCancelada(c)).map((p) => mapComissao(p, seriesMap));
     const filtered = mapped.filter((r) => r.moura);
 
     const contratos = aggregate(filtered);

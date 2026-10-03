@@ -537,6 +537,21 @@ body {
   width: 100%;
 }
 
+.tag-boleto-webro {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--color-secondary);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: none;
+}
+
 .zeropaid-toolbar-actions .fila-cache-status {
   min-height: 0;
   display: flex;
@@ -5193,6 +5208,24 @@ circle.donut-segment {
   font-weight: 800;
   color: #14532d;
 }
+.tvig-lock-hint {
+  margin: -4px 0 10px;
+  padding: 8px 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  color: #9a3412;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.tvig-editor-table-wrap.is-context-locked {
+  opacity: 0.55;
+  pointer-events: none;
+}
+#tvig-add-plano:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .tvig-editor-table-wrap {
   overflow-x: auto;
   overflow-y: auto;
@@ -5269,6 +5302,23 @@ circle.donut-segment {
   font-weight: 700;
   color: #0f172a;
   cursor: default;
+}
+.tvig-editor-box.is-readonly .tvig-sheet-input:disabled,
+.tvig-editor-box.is-readonly .tvig-sheet-select:disabled {
+  color: #0f172a;
+  opacity: 1;
+  cursor: default;
+}
+.tvig-editor-box.is-readonly .tvig-td-flag .moura-switch.is-locked,
+.tvig-editor-box.is-readonly .tvig-desc-cell .moura-switch.is-locked {
+  opacity: 1;
+  pointer-events: none;
+}
+.tvig-editor-box.is-readonly .form-control:disabled {
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: default;
+  opacity: 1;
 }
 .tvig-sheet-select {
   appearance: none;
