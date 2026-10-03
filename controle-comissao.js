@@ -111,11 +111,11 @@ const ControleComissaoApp = {
               <strong>${s.totais.contratos || 0}</strong>
             </div>
             <div class="ccom-kpi">
-              <span>A receber</span>
+              <span>Moura Leite a receber</span>
               <strong>${this.esc(this.money(s.totais.aReceber))}</strong>
             </div>
             <div class="ccom-kpi">
-              <span>Recebido</span>
+              <span>Moura Leite recebido</span>
               <strong>${this.esc(this.money(s.totais.recebido))}</strong>
             </div>
           </div>
@@ -128,9 +128,10 @@ const ControleComissaoApp = {
                   <th>Empreendimento</th>
                   <th>Unidade</th>
                   <th>Pagador</th>
-                  <th>Beneficiário</th>
-                  <th style="text-align:right;">A receber</th>
-                  <th style="text-align:right;">Recebido</th>
+                  <th>Beneficiários</th>
+                  <th style="text-align:right;">Comissão</th>
+                  <th style="text-align:right;">Moura Leite a receber</th>
+                  <th style="text-align:right;">Moura Leite recebido</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,9 +141,10 @@ const ControleComissaoApp = {
                     <td>${this.esc(r.empreendimento || "—")}</td>
                     <td>${this.esc(r.unidade || "—")}</td>
                     <td>${this.esc(r.pagador || "—")}</td>
-                    <td>${this.esc(r.beneficiario || "—")}</td>
-                    <td style="text-align:right;font-weight:700;">${this.esc(this.money(r.aReceber))}</td>
-                    <td style="text-align:right;">${this.esc(this.money(r.recebido))}</td>
+                    <td>${this.esc(r.beneficiarios || r.beneficiario || "—")}</td>
+                    <td style="text-align:right;">${this.esc(this.money(r.comissaoTotal))}</td>
+                    <td style="text-align:right;font-weight:800;color:#1e3a8a;">${this.esc(this.money(r.aReceber))}</td>
+                    <td style="text-align:right;font-weight:700;color:#15803d;">${this.esc(this.money(r.recebido))}</td>
                   </tr>`).join("")}
               </tbody>
             </table>

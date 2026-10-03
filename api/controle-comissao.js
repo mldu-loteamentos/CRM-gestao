@@ -47,9 +47,45 @@ function isPago(v) {
   return t.indexOf("PAGO") >= 0 || t.indexOf("QUIT") >= 0 || t === "S" || t === "SIM";
 }
 
-function isMoura(nome, email) {
-  const t = fold(nome) + " " + fold(email);
-  return t.indexOf("MOURA LEITE") >= 0 || t.indexOf("@MOURALEITE.COM") >= 0;
+function isMoura(...parts) {
+  const t = fold(parts.filter(Boolean).join(" ")).replace(/[^A-Z0-9@.]/g, "");
+  return t.indexOf("MOURALEITE") >= 0;
+}
+
+function benText(b) {
+  if (!b) return "";
+  if (typeof b === "string") return b;
+  return [
+    b.nome, b.name, b.nome_pessoa, b.nome_beneficiario, b.pessoa,
+    b.razao_social, b.nome_fantasia, b.email, b.email_pessoa, b.email_beneficiario
+  ].filter(Boolean).join(" ");
+}
+
+function benNome(b) {
+  if (!b) return "";
+  if (typeof b === "string") return b;
+  return String(b.nome || b.name || b.nome_pessoa || b.nome_beneficiario || b.pessoa || b.razao_social || "").trim();
+}
+
+function listBeneficiarios(c) {
+  const raw = c && (c.beneficiarios || c.beneficiario);
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (raw && typeof raw === "object") {
+    if (benNome(raw) || raw.email) return [raw];
+    return Object.values(raw).filter((x) => x && (typeof x === "object" || typeof x === "string"));
+  }
+  return [];
+}
+
+function benValor(b, totalComissao) {
+  if (!b || typeof b !== "object") return 0;
+  const direct = parseMoney(b.valor != null ? b.valor : (b.valor_comissao != null ? b.valor_comissao : b.valor_receber));
+  if (direct) return direct;
+  const pct = parseMoney(b.percentual != null ? b.percentual : b.porcentagem);
+  if (pct && totalComissao) return totalComissao * (pct > 1 ? pct / 100 : pct);
+  const prog = programacaoOf(b);
+  if (prog.length) return prog.reduce((s, p) => s + parseMoney(p && (p.valor != null ? p.valor : p.valor_pagamento)), 0);
+  return 0;
 }
 
 function namesOf(list) {
@@ -141,18 +177,32 @@ function splitProgramacao(rows) {
 }
 
 function mapComissao(c) {
-  const bens = Array.isArray(c && c.beneficiarios) ? c.beneficiarios : [];
-  const mouraBens = bens.filter((b) => isMoura(b && b.nome, b && b.email));
-  const use = mouraBens.length ? mouraBens : bens;
+  const totalComissao = parseMoney(c && (c.valor_comissao != null ? c.valor_comissao : c.valor));
+  let bens = listBeneficiarios(c);
+  if (!bens.length && (c.nome_beneficiario || c.beneficiario_nome || c.email_beneficiario)) {
+    bens = [{
+      nome: c.nome_beneficiario || c.beneficiario_nome,
+      email: c.email_beneficiario,
+      valor: c.valor_beneficiario != null ? c.valor_beneficiario : c.valor,
+      percentual: c.percentual,
+      programacao: c.programacao
+    }];
+  }
+  const mouraBens = bens.filter((b) => isMoura(benText(b)));
+  const mouraTop = isMoura(pick(c, ["beneficiario", "nome_beneficiario", "beneficiario_nome"]), pick(c, ["email", "email_beneficiario"]));
+  const hasMoura = mouraBens.length > 0 || mouraTop;
+  const use = mouraBens.length ? mouraBens : (mouraTop ? bens : []);
   const prog = use.reduce((acc, b) => acc.concat(programacaoOf(b)), []);
   let split = splitProgramacao(prog);
   if (!prog.length) {
-    const total = use.reduce((s, b) => s + parseMoney(b && b.valor), 0) || parseMoney(c && c.valor_comissao);
-    if (isPago(c && (c.nome_situacao || c.situacao)) || c && c.data_finalizacao) split = { aReceber: 0, recebido: total };
+    const mouraValor = use.reduce((s, b) => s + benValor(b, totalComissao), 0);
+    const total = mouraValor || (mouraBens.length === 1 && bens.length === 1 ? totalComissao : 0);
+    if (isPago(c && (c.nome_situacao || c.situacao)) || (c && c.data_finalizacao)) split = { aReceber: 0, recebido: total };
     else split = { aReceber: total, recebido: 0 };
   }
-  const pagador = (c && c.pagador && (c.pagador.nome || c.pagador.name)) || "";
+  const pagador = (c && c.pagador && (c.pagador.nome || c.pagador.name)) || pick(c, ["pagador_nome", "cliente"]) || "";
   const reserva = pick(c, ["idreserva_cv", "idreserva", "numero_venda", "idreserva_int"]);
+  const todosNomes = bens.map(benNome).filter(Boolean);
   return {
     reserva: reserva ? String(reserva) : "",
     empreendimento: pick(c, ["empreendimento"]) || "",
@@ -160,15 +210,16 @@ function mapComissao(c) {
     serie: "",
     idserie: "",
     vencimento: "",
-    valor: split.aReceber + split.recebido,
+    valor: totalComissao || (split.aReceber + split.recebido),
     situacao: pick(c, ["nome_situacao", "situacao"]) || "",
     pago: split.recebido > 0 && split.aReceber === 0,
     pagador: pagador ? String(pagador) : "",
-    beneficiario: use.map((b) => b && b.nome).filter(Boolean).join(", "),
+    beneficiario: "Moura Leite",
+    beneficiarios: todosNomes.join(", "),
     aReceber: split.aReceber,
     recebido: split.recebido,
     commissionSerie: true,
-    moura: !!mouraBens.length
+    moura: hasMoura
   };
 }
 
@@ -182,7 +233,9 @@ function aggregate(rows) {
         empreendimento: r.empreendimento,
         unidade: r.unidade || "",
         pagador: r.pagador,
-        beneficiario: r.beneficiario,
+        beneficiario: "Moura Leite",
+        beneficiarios: r.beneficiarios || r.beneficiario || "",
+        comissaoTotal: 0,
         series: [],
         aReceber: 0,
         recebido: 0,
@@ -193,11 +246,12 @@ function aggregate(rows) {
     if (r.empreendimento && !g.empreendimento) g.empreendimento = r.empreendimento;
     if (r.unidade && !g.unidade) g.unidade = r.unidade;
     if (r.pagador && !g.pagador) g.pagador = r.pagador;
-    if (r.beneficiario && !g.beneficiario) g.beneficiario = r.beneficiario;
+    if (r.beneficiarios && !g.beneficiarios) g.beneficiarios = r.beneficiarios;
     if (r.serie && g.series.indexOf(r.serie) < 0) g.series.push(r.serie);
     g.parcelas += 1;
-    g.aReceber += Number(r.aReceber) || (r.pago ? 0 : r.valor) || 0;
-    g.recebido += Number(r.recebido) || (r.pago ? r.valor : 0) || 0;
+    g.comissaoTotal += Number(r.valor) || 0;
+    g.aReceber += Number(r.aReceber) || 0;
+    g.recebido += Number(r.recebido) || 0;
   });
   return [...by.values()].sort((a, b) => b.aReceber - a.aReceber || String(a.contrato).localeCompare(String(b.contrato), "pt-BR"));
 }
@@ -236,8 +290,7 @@ module.exports = async function handler(req, res) {
     }
 
     const mapped = (parc.items || []).filter((c) => !c.data_cancelamento).map((p) => mapComissao(p, seriesMap));
-    const hasMoura = mapped.some((r) => r.moura);
-    const filtered = hasMoura ? mapped.filter((r) => r.moura) : mapped;
+    const filtered = mapped.filter((r) => r.moura);
 
     const contratos = aggregate(filtered);
     const aReceber = contratos.reduce((s, r) => s + r.aReceber, 0);
@@ -263,7 +316,7 @@ module.exports = async function handler(req, res) {
       contratos,
       aviso: seriesRes.error
         ? "Séries de tabela não puderam ser lidas."
-        : (hasMoura ? "" : "Nenhum beneficiário Moura Leite nesta competência; listando todas as comissões.")
+        : (!filtered.length ? "Nenhuma comissão com beneficiário Moura Leite nesta competência." : "")
     });
   } catch (e) {
     return sendJson(res, 502, { error: "Falha ao consultar comissões no CV CRM", details: e.message });

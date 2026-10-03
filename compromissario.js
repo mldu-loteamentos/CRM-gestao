@@ -315,6 +315,7 @@ const CompromissarioApp = {
   },
 
   unitNameOf(c) {
+    if (c && c._unitName) return c._unitName;
     const unit = this.contractUnit(c);
     return unit.name || (unit.id ? ('Unidade ' + unit.id) : '—');
   },
@@ -410,6 +411,12 @@ const CompromissarioApp = {
 
   movementDocs(m) {
     const docs = [];
+    if (m && m._movementType === 'Cessão') {
+      const rec = m._cessao || {};
+      const cid = rec.contractId || m.contractId;
+      if (cid) docs.push({ kind: 'CONTRATO', contract: { id: cid }, label: 'Contrato' });
+      return docs;
+    }
     if (m && m._distrato) docs.push({ kind: 'DISTRATO', contract: m._distrato, label: 'Distrato' });
     if (m && m._venda) docs.push({ kind: 'CONTRATO', contract: m._venda, label: 'Contrato (venda)' });
     if (!docs.length && m) {
@@ -445,6 +452,7 @@ const CompromissarioApp = {
   },
 
   cessaoBadgeHtml(c) {
+    if (c && (c._movementType === 'Cessão' || c._operationType === 'Cessão')) return '';
     const cessaoHist = this.findCessaoHistoryForContract(c);
     if (!cessaoHist.length) return '';
     const latest = cessaoHist[cessaoHist.length - 1];
@@ -462,7 +470,7 @@ const CompromissarioApp = {
     }).join(' | ');
     return `
       <div style="margin-top:6px;font-size:0.7rem;line-height:1.35;color:#6b21a8;background:#faf5ff;border:1px solid #e9d5ff;border-radius:4px;padding:4px 6px;" title="${this.escHtml(tipLines)}">
-        <strong>Cessão:</strong> ${cessaoHist.length} evento(s)
+        <strong>Cessão:</strong> ${cessaoHist.length} contrato(s) cedido(s)
         ${principal ? `<br>Atual (P*): ${this.escHtml((principal.id ? principal.id + ' - ' : '') + (principal.name || ''))}` : ''}
         ${secundarios.length ? `<br>Secundário: ${this.escHtml(secundarios.map((s) => (s.id ? s.id + ' - ' : '') + s.name).join(', '))}` : ''}
       </div>`;
@@ -504,12 +512,12 @@ const CompromissarioApp = {
     const badgeMap = {
       Troca: { color: '#7c3aed', bg: '#f5f3ff' },
       Venda: { color: '#10b981', bg: '#ecfdf5' },
-      Distrato: { color: '#f43f5e', bg: '#fff1f2' }
+      Distrato: { color: '#f43f5e', bg: '#fff1f2' },
+      Cessão: { color: '#a16207', bg: '#fefce8' }
     };
     const badge = badgeMap[opType] || { color: '#64748b', bg: '#f1f5f9' };
     const dest = c._distrato;
     const venda = c._venda;
-    const companyName = c.companyName || '';
     const unitInfo = this.unitNameOf(c);
     let buyerHtml = this.escHtml(this.customerNameOf(c));
     let idHtml = this.escHtml(String(id));
@@ -522,6 +530,16 @@ const CompromissarioApp = {
         <div style="font-weight:600;color:#334155;">${this.escHtml(oldName)}</div>
         <div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Novo</div>
         <div style="font-weight:600;color:#334155;">${this.escHtml(newName)}</div>`;
+    } else if (opType === 'Cessão') {
+      const rec = c._cessao || {};
+      const ant = (rec.anteriores || []).map((x) => (x.id ? x.id + ' - ' : '') + (x.name || '')).join(', ');
+      const pri = rec.principal;
+      const sec = (rec.atuais || []).filter((x) => !pri || String(x.id) !== String(pri.id));
+      idHtml = this.escHtml((rec.documento || rec.contratoNumero || rec.titulo || id));
+      buyerHtml = `
+        ${ant ? `<div style="font-size:0.78rem;color:#64748b;">Anterior</div><div style="font-weight:600;color:#334155;">${this.escHtml(ant)}</div>` : ''}
+        ${pri ? `<div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Atual (P)*</div><div style="font-weight:600;color:#334155;">${this.escHtml((pri.id ? pri.id + ' - ' : '') + (pri.name || ''))}</div>` : ''}
+        ${sec.length ? `<div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Secundário *</div><div style="font-weight:600;color:#334155;">${this.escHtml(sec.map((s) => (s.id ? s.id + ' - ' : '') + s.name).join(', '))}</div>` : ''}`;
     }
     const docsHtml = this.movementDocs(c).map((doc) => this.renderDocDropzone(doc.contract && doc.contract.id, doc.label)).join('');
     const cityCfg = configs[this.normalizeCityKey(cityName)] || {};
@@ -535,9 +553,8 @@ const CompromissarioApp = {
           ${this.cessaoBadgeHtml(c)}
         </td>
         <td style="padding: 12px 15px; color: #334155;">${buyerHtml}</td>
-        <td style="padding: 12px 15px; color: #475569; font-size: 0.8rem;">
-          <span style="color: #64748b;">${this.escHtml(companyName)}</span><br>
-          <strong style="color: #0f172a;">${this.escHtml(unitInfo)}</strong>
+        <td style="padding: 12px 15px; color: #0f172a; font-size: 0.9rem; font-weight: 700;">
+          ${this.escHtml(unitInfo)}
         </td>
         <td style="padding: 12px 15px;">${docsHtml}</td>
         <td style="padding: 12px 15px; text-align: center; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: center; height: 100%;">
@@ -714,13 +731,14 @@ const CompromissarioApp = {
     const next = {};
     this.getActivePortfolioCompanies().forEach((c) => {
       const prev = pickPrev(c.id);
+      const records = this.normalizeCessaoRecords(Array.isArray(prev.records) ? prev.records : []);
       next[c.id] = {
         status: prev.status === 'none' || prev.status === 'has' ? prev.status : null,
         fileName: prev.fileName || '',
-        records: Array.isArray(prev.records) ? prev.records : [],
+        records,
         uploadedAt: prev.uploadedAt || null,
         declaredAt: prev.declaredAt || null,
-        parseNote: prev.parseNote || ''
+        parseNote: prev.parseNote || (records.length ? `${records.length} cessão(ões)` : '')
       };
     });
     this.state.cessaoByCompany = next;
@@ -738,16 +756,21 @@ const CompromissarioApp = {
       const incomingEmpty = !row.fileName && row.status !== 'none' && !(Array.isArray(row.records) && row.records.length);
       const prevHasFile = !!(prev.fileName || (Array.isArray(prev.records) && prev.records.length));
       if (incomingEmpty && prevHasFile && row.status !== 'none') {
+        const records = this.normalizeCessaoRecords(Array.isArray(prev.records) ? prev.records : []);
         next[id] = {
           ...prev,
           ...row,
           fileName: prev.fileName,
-          records: Array.isArray(prev.records) ? prev.records : [],
+          records,
           uploadedAt: prev.uploadedAt || row.uploadedAt || null,
-          parseNote: row.parseNote || prev.parseNote || ''
+          parseNote: records.length ? `${records.length} cessão(ões)` : (row.parseNote || prev.parseNote || '')
         };
       } else {
-        next[id] = row;
+        const records = this.normalizeCessaoRecords(Array.isArray(row.records) ? row.records : []);
+        next[id] = Object.assign({}, row, {
+          records,
+          parseNote: records.length ? `${records.length} cessão(ões)` : (row.parseNote || '')
+        });
       }
     });
     store[m] = next;
@@ -851,9 +874,10 @@ const CompromissarioApp = {
       let statusLine = '<span style="color:#94a3b8;">Aguardando declaração</span>';
       if (status === 'none') statusLine = '<span style="color:#047857;font-weight:600;">Sem cessão neste período (salvo)</span>';
       if (status === 'has' && hasFile) {
+        const cessaoN = this.normalizeCessaoRecords(row.records).length;
         statusLine = `<span style="color:#0369a1;font-weight:600;">Relatório: ${this.escHtml(row.fileName)}</span>` +
-          (recCount ? ` <span style="color:#64748b;">· ${recCount} evento(s) / título(s)</span>` : '') +
-          (row.parseNote ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
+          (cessaoN ? ` <span style="color:#64748b;">· ${cessaoN} cessão(ões)</span>` : '') +
+          (row.parseNote && !/cessão/i.test(row.parseNote) ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
       } else if (status === 'has' && !hasFile) {
         statusLine = '<span style="color:#b45309;font-weight:600;">Envie o relatório padrão Sienge (XLS/XLSX/CSV)</span>';
       }
@@ -977,6 +1001,9 @@ const CompromissarioApp = {
       this.persistCessaoMonth();
       this.renderCessaoPanel();
       this.syncCessaoGateUi();
+      this.hydrateCessaoUnits().then(() => {
+        this.renderCessaoPanel();
+      }).catch(() => {});
     } catch (e) {
       console.warn('[Compromissario] parse cessão', e);
       // Mesmo sem parse, o anexo vale para liberar o gate
@@ -1034,57 +1061,174 @@ const CompromissarioApp = {
       .trim();
   },
 
+  isCessaoHeaderRow(cells) {
+    const folded = (cells || []).map((c) => this.foldHeader(c));
+    const hasData = folded.some((h) => h.includes('DATA CESSAO') || h === 'DATA');
+    const hasTitulo = folded.some((h) => h === 'TITULO' || h.includes('TITULO'));
+    const hasCliente = folded.some((h) => h.includes('CLIENTE'));
+    return hasData && hasTitulo && hasCliente;
+  },
+
+  isCessaoNoiseText(data, titulo, documento, clienteRaw) {
+    const h = [data, titulo, documento, clienteRaw].map((x) => this.foldHeader(x)).join(' ');
+    if (this.foldHeader(titulo) === 'TITULO') return true;
+    if (this.foldHeader(data) === 'DATA CESSAO' || this.foldHeader(data) === 'DATA') return true;
+    if (/CLIENTE ATUAL|CLIENTE PRINCIPAL|EM APROVACAO|CONJUGE/.test(h)) return true;
+    return false;
+  },
+
+  extractContratoNumero(documento) {
+    const s = String(documento || '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    let m = s.match(/(?:CT|CV)\s*\/\s*([A-Z0-9]+)/i);
+    if (m) return m[1];
+    m = s.match(/(\d{4,})/);
+    return m ? m[1] : s.replace(/[^\dA-Z]/gi, '');
+  },
+
+  digitsOnly(v) {
+    return String(v == null ? '' : v).replace(/\.0$/, '').replace(/\D/g, '');
+  },
+
+  cessaoDateIso(raw) {
+    const s = String(raw || '').trim();
+    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    return '';
+  },
+
+  formatCessaoDate(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+  },
+
+  mergeCessaoClients(list) {
+    const out = [];
+    const seen = new Set();
+    (list || []).forEach((c) => {
+      if (!c) return;
+      const key = String(c.id || '') + '|' + this.foldHeader(c.name);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(c);
+    });
+    return out;
+  },
+
+  buildCessaoGroup(rows) {
+    const list = (rows || []).filter(Boolean);
+    if (!list.length) return null;
+    const clients = this.mergeCessaoClients(list.flatMap((r) => r.clients || []));
+    const atuais = clients.filter((c) => c.atual);
+    const anteriores = clients.filter((c) => !c.atual);
+    const starred = list.filter((r) => (r.clients || []).some((c) => c.atual));
+    const datePool = (starred.length ? starred : list)
+      .map((r) => this.cessaoDateIso(r.data))
+      .filter(Boolean)
+      .sort();
+    const iso = datePool.length ? datePool[datePool.length - 1] : this.cessaoDateIso(list[0].data);
+    const first = list.find((r) => r.titulo) || list[0];
+    const documento = (list.find((r) => r.documento) || {}).documento || '';
+    return {
+      data: this.formatCessaoDate(iso) || first.data || '',
+      dataIso: iso,
+      empresa: (list.find((r) => r.empresa) || {}).empresa || '',
+      titulo: String(first.titulo || '').replace(/\.0$/, ''),
+      documento,
+      contratoNumero: this.extractContratoNumero(documento),
+      clients,
+      principais: atuais.filter((c) => c.principal),
+      principal: atuais.find((c) => c.principal) || atuais[0] || null,
+      atuais,
+      anteriores,
+      unitName: first.unitName || '',
+      enterpriseId: first.enterpriseId || '',
+      enterpriseName: first.enterpriseName || ''
+    };
+  },
+
+  normalizeCessaoRecords(records) {
+    const raw = Array.isArray(records) ? records : [];
+    const groups = new Map();
+    raw.forEach((rec) => {
+      if (!rec || this.isCessaoNoiseText(rec.data, rec.titulo, rec.documento, '')) return;
+      const titulo = String(rec.titulo || '').replace(/\.0$/, '').trim();
+      if (!titulo || this.foldHeader(titulo) === 'TITULO') return;
+      const contrato = rec.contratoNumero || this.extractContratoNumero(rec.documento);
+      const key = this.digitsOnly(titulo) || contrato || titulo;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(rec);
+    });
+    return [...groups.values()].map((rows) => this.buildCessaoGroup(rows)).filter(Boolean);
+  },
+
   parseCessaoMatrix(matrix) {
     const rows = Array.isArray(matrix) ? matrix : [];
-    let headerIdx = -1;
     let col = { data: -1, empresa: -1, titulo: -1, documento: -1, cliente: -1 };
+    let foundHeader = false;
 
-    for (let i = 0; i < Math.min(rows.length, 40); i++) {
-      const cells = (rows[i] || []).map((c) => this.foldHeader(c));
-      const find = (...needles) => cells.findIndex((h) => needles.some((n) => h.includes(n)));
-      const data = find('DATA');
-      const empresa = find('EMPRESA-LOTEAMENTO', 'EMPRESA LOTEAMENTO', 'EMPRESA');
+    const detectCols = (cells) => {
+      const folded = (cells || []).map((c) => this.foldHeader(c));
+      const find = (...needles) => folded.findIndex((h) => needles.some((n) => h.includes(n)));
+      const data = find('DATA CESSAO', 'DATA');
+      const empresa = find('EMPRESA-LOTEAMENTO', 'EMPRESA LOTEAMENTO', 'EMPREENDIMENTO', 'EMPRESA');
       const titulo = find('TITULO');
       const documento = find('DOCUMENTO');
       const cliente = find('CLIENTE');
       if (data >= 0 && titulo >= 0 && cliente >= 0) {
-        headerIdx = i;
         col = { data, empresa, titulo, documento, cliente };
-        break;
+        return true;
       }
-    }
+      return false;
+    };
 
-    if (headerIdx < 0) {
-      return { records: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
-    }
-
-    const records = [];
-    for (let i = headerIdx + 1; i < rows.length; i++) {
+    const raw = [];
+    let carry = { data: '', empresa: '', titulo: '', documento: '' };
+    for (let i = 0; i < rows.length; i++) {
       const r = rows[i] || [];
+      if (this.isCessaoHeaderRow(r)) {
+        detectCols(r);
+        foundHeader = true;
+        carry = { data: '', empresa: '', titulo: '', documento: '' };
+        continue;
+      }
+      if (!foundHeader && detectCols(r)) {
+        foundHeader = true;
+        continue;
+      }
+      if (!foundHeader) continue;
       const data = String(r[col.data] != null ? r[col.data] : '').trim();
       const empresa = col.empresa >= 0 ? String(r[col.empresa] != null ? r[col.empresa] : '').trim() : '';
       const titulo = String(r[col.titulo] != null ? r[col.titulo] : '').trim();
       const documento = col.documento >= 0 ? String(r[col.documento] != null ? r[col.documento] : '').trim() : '';
       const clienteRaw = String(r[col.cliente] != null ? r[col.cliente] : '').trim();
-      if (!titulo && !clienteRaw) continue;
-      if (!titulo) continue;
+      if (this.isCessaoNoiseText(data, titulo, documento, clienteRaw)) continue;
+      if (!titulo && !clienteRaw && !documento) continue;
+      if (data) carry.data = data;
+      if (empresa) carry.empresa = empresa;
+      if (titulo && this.foldHeader(titulo) !== 'TITULO') carry.titulo = String(titulo).replace(/\.0$/, '');
+      if (documento) carry.documento = documento;
+      if (!carry.titulo || !clienteRaw) continue;
       const clients = this.parseCessaoClientCell(clienteRaw);
-      records.push({
-        data,
-        empresa,
-        titulo: String(titulo).replace(/\.0$/, ''),
-        documento,
-        clients,
-        principal: clients.find((c) => c.principal) || clients.find((c) => c.atual) || clients[0] || null,
-        atuais: clients.filter((c) => c.atual)
+      if (!clients.length) continue;
+      raw.push({
+        data: carry.data,
+        empresa: carry.empresa,
+        titulo: carry.titulo,
+        documento: carry.documento,
+        clients
       });
     }
 
+    if (!foundHeader) {
+      return { records: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
+    }
+
+    const records = this.normalizeCessaoRecords(raw);
     return {
       records,
-      note: records.length
-        ? `${new Set(records.map((r) => r.titulo)).size} título(s) no relatório`
-        : 'Nenhuma linha de cessão lida'
+      note: records.length ? `${records.length} cessão(ões)` : 'Nenhuma cessão lida'
     };
   },
 
@@ -1114,35 +1258,170 @@ const CompromissarioApp = {
     }).filter((c) => c.name || c.id);
   },
 
+  contractMatchKeys(contract) {
+    const keys = new Set();
+    const add = (v) => {
+      const raw = String(v == null ? '' : v).trim();
+      if (!raw || raw.startsWith('troca-') || raw.startsWith('cessao-')) return;
+      keys.add(raw);
+      const digits = this.digitsOnly(raw);
+      if (digits) keys.add(digits);
+    };
+    const addContract = (c) => {
+      if (!c) return;
+      add(c.id);
+      add(c.number);
+      add(c.contractNumber);
+      add(c.receivableBillId);
+      add(c._unitName);
+      (c.salesContractUnits || []).forEach((u) => add(u && u.name));
+    };
+    addContract(contract);
+    addContract(contract && contract._venda);
+    addContract(contract && contract._distrato);
+    addContract(contract && contract._cessao);
+    return keys;
+  },
+
+  cessaoMatchesContract(rec, keys) {
+    if (!rec || !keys || !keys.size) return false;
+    const candidates = [
+      rec.titulo,
+      rec.documento,
+      rec.contratoNumero,
+      rec.receivableBillId,
+      rec.contractId,
+      rec.unitName
+    ];
+    return candidates.some((v) => {
+      const raw = String(v == null ? '' : v).trim();
+      if (!raw) return false;
+      if (keys.has(raw)) return true;
+      const digits = this.digitsOnly(raw);
+      return !!(digits && keys.has(digits));
+    });
+  },
+
   findCessaoHistoryForContract(contract) {
     if (!contract) return [];
-    const ids = new Set();
-    const addId = (c) => {
-      const raw = c && c.id != null ? String(c.id).trim() : '';
-      if (raw && !raw.startsWith('troca-')) ids.add(raw);
-    };
-    addId(contract);
-    addId(contract._venda);
-    addId(contract._distrato);
-    if (!ids.size) return [];
+    const keys = this.contractMatchKeys(contract);
+    if (!keys.size) return [];
     const companyId = contract.companyId != null ? String(contract.companyId) : null;
     const all = [];
     Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
       if (row.status !== 'has' || !Array.isArray(row.records)) return;
       if (companyId && cid !== companyId) return;
-      row.records.forEach((rec) => {
-        if (ids.has(String(rec.titulo))) all.push(rec);
+      this.normalizeCessaoRecords(row.records).forEach((rec) => {
+        if (this.cessaoMatchesContract(rec, keys)) all.push(rec);
       });
     });
-    // Ordena por data DD/MM/YYYY se possível
-    all.sort((a, b) => {
-      const pa = String(a.data || '').split('/');
-      const pb = String(b.data || '').split('/');
-      const da = pa.length === 3 ? `${pa[2]}${pa[1]}${pa[0]}` : String(a.data || '');
-      const db = pb.length === 3 ? `${pb[2]}${pb[1]}${pb[0]}` : String(b.data || '');
-      return da.localeCompare(db);
-    });
+    all.sort((a, b) => String(a.dataIso || this.cessaoDateIso(a.data) || '').localeCompare(String(b.dataIso || this.cessaoDateIso(b.data) || '')));
     return all;
+  },
+
+  async lookupCessaoUnit(rec, cache) {
+    const memo = cache || {};
+    const titulo = this.digitsOnly(rec && rec.titulo);
+    const contrato = (rec && rec.contratoNumero) || this.extractContratoNumero(rec && rec.documento);
+    const cacheKey = (titulo || '') + '|' + (contrato || '');
+    if (cacheKey && memo[cacheKey]) return Object.assign(rec, memo[cacheKey]);
+    const fetchFn = window.siengeFetchWithRetry;
+    if (typeof fetchFn !== 'function') return rec;
+    try {
+      let sale = null;
+      let bill = null;
+      if (contrato) {
+        const data = await fetchFn('/sales-contracts?number=' + encodeURIComponent(contrato)).catch(() => null);
+        sale = data && Array.isArray(data.results) ? data.results[0] : null;
+      }
+      if (!sale && titulo) {
+        bill = await fetchFn('/accounts-receivable/receivable-bills/' + encodeURIComponent(titulo)).catch(() => null);
+        const docNum = bill && (bill.documentNumber || bill.number || bill.contractNumber);
+        if (docNum) {
+          const data = await fetchFn('/sales-contracts?number=' + encodeURIComponent(docNum)).catch(() => null);
+          sale = data && Array.isArray(data.results) ? data.results[0] : null;
+        }
+        if (!sale && bill && bill.id) {
+          const byBill = await fetchFn('/sales-contracts?receivableBillId=' + encodeURIComponent(bill.id)).catch(() => null);
+          sale = byBill && Array.isArray(byBill.results) ? byBill.results[0] : null;
+        }
+      }
+      const unit = (sale && sale.salesContractUnits && sale.salesContractUnits[0]) || {};
+      const patch = {
+        unitName: unit.name || (bill && (bill.unityName || bill.unitName)) || rec.unitName || '',
+        enterpriseId: (sale && sale.enterpriseId) || (bill && (bill.enterpriseCode || bill.enterpriseId)) || rec.enterpriseId || '',
+        enterpriseName: (sale && sale.enterpriseName) || rec.enterpriseName || '',
+        companyName: (sale && sale.companyName) || rec.companyName || '',
+        companyId: (sale && sale.companyId) || rec.companyId,
+        contractId: (sale && sale.id) || rec.contractId,
+        receivableBillId: (sale && sale.receivableBillId) || titulo || rec.receivableBillId,
+        salesContractUnits: (sale && sale.salesContractUnits) || rec.salesContractUnits,
+        salesContractCustomers: (sale && sale.salesContractCustomers) || rec.salesContractCustomers
+      };
+      if (cacheKey) memo[cacheKey] = patch;
+      return Object.assign(rec, patch);
+    } catch (e) {
+      console.warn('[Compromissario] unidade da cessão', rec && rec.titulo, e);
+      return rec;
+    }
+  },
+
+  async hydrateCessaoUnits() {
+    const cache = {};
+    const jobs = [];
+    Object.values(this.state.cessaoByCompany || {}).forEach((row) => {
+      if (row.status !== 'has' || !Array.isArray(row.records)) return;
+      row.records = this.normalizeCessaoRecords(row.records);
+      row.records.forEach((rec) => {
+        if (rec.unitName && rec.enterpriseName) return;
+        jobs.push(this.lookupCessaoUnit(rec, cache));
+      });
+    });
+    if (jobs.length) await Promise.all(jobs);
+    this.persistCessaoMonth();
+  },
+
+  enterpriseNameFromCessao(rec) {
+    if (rec && rec.enterpriseName) return rec.enterpriseName;
+    const emp = String((rec && rec.empresa) || '');
+    const id = (emp.match(/^(\d+)/) || [])[1];
+    if (id && window.AppState && window.AppState.cachedCostCenters) {
+      const cc = window.AppState.cachedCostCenters.find((c) => String(c.id) === id);
+      if (cc && cc.name) return cc.name;
+    }
+    return emp.replace(/^\d+\s*-\s*/, '');
+  },
+
+  cessaoInSearchMonth(rec, monthVal) {
+    const iso = rec && (rec.dataIso || this.cessaoDateIso(rec.data));
+    return !!(iso && monthVal && iso.slice(0, 7) === monthVal);
+  },
+
+  buildCessaoMovements(monthVal) {
+    const movements = [];
+    Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
+      if (row.status !== 'has') return;
+      this.normalizeCessaoRecords(row.records).forEach((rec) => {
+        if (!this.cessaoInSearchMonth(rec, monthVal)) return;
+        const atuais = rec.atuais || [];
+        movements.push({
+          id: 'cessao-' + cid + '-' + (rec.titulo || rec.contratoNumero || movements.length),
+          _movementType: 'Cessão',
+          _operationType: 'Cessão',
+          _cessao: rec,
+          _unitName: rec.unitName || '',
+          enterpriseId: rec.enterpriseId,
+          enterpriseName: rec.enterpriseName || this.enterpriseNameFromCessao(rec),
+          companyName: rec.companyName || '',
+          companyId: cid,
+          salesContractUnits: rec.salesContractUnits || (rec.unitName ? [{ name: rec.unitName }] : []),
+          salesContractCustomers: atuais.length
+            ? atuais.map((c) => ({ id: c.id, name: c.name, main: !!c.principal }))
+            : rec.salesContractCustomers
+        });
+      });
+    });
+    return movements;
   },
 
   /**
@@ -1216,8 +1495,10 @@ const CompromissarioApp = {
       const vendaRaw = vendas.filter((v) => !destIds.has(String(v.id)));
       this.state._skippedIncorporacao = destRaw.filter((d) => !this.shouldNotifyContract(d)).length
         + vendaRaw.filter((v) => !this.shouldNotifyContract(v)).length;
+      await this.hydrateCessaoUnits();
       const movements = this.buildMovements(vendas, distratos, monthVal);
-      this.state.contracts = movements;
+      const cessaoMoves = this.buildCessaoMovements(monthVal);
+      this.state.contracts = movements.concat(cessaoMoves);
 
       this.renderTable();
       this.hydrateTermosFromAnexos().catch((e) => console.warn('[Compromissario] hydrate termos', e));
@@ -1392,7 +1673,7 @@ const CompromissarioApp = {
               <tr style="background: #fff; border-bottom: 1px solid #e2e8f0;">
                 <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Contrato</th>
                 <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Comprador</th>
-                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Empresa / Unidade</th>
+                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Unidade</th>
                 <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600; width: 250px;">Documento / Termo</th>
                 <th style="padding: 10px 15px; text-align: center; color: #64748b; font-weight: 600; width: 120px;">Ação</th>
               </tr>
@@ -1611,6 +1892,7 @@ const CompromissarioApp = {
     let operationName = 'Venda Emitida (o lote saiu da empresa para o cliente)';
     if (opType === 'Distrato') operationName = 'Distrato Realizado (o lote saiu do cliente para a empresa)';
     if (opType === 'Troca') operationName = 'Troca de Compromissário (unidade distratada e vendida no mesmo mês)';
+    if (opType === 'Cessão') operationName = 'Cessão de direitos (o contrato mudou de titular)';
 
     const customerName = this.customerNameOf(c);
     const oldName = dest ? this.customerNameOf(dest) : '';
@@ -1637,6 +1919,12 @@ const CompromissarioApp = {
       body += `- Contrato venda: ${venda && venda.id ? venda.id : '—'}%0D%0A`;
       body += `- Cliente anterior: ${oldName}%0D%0A`;
       body += `- Cliente novo: ${newName}%0D%0A%0D%0A`;
+    } else if (opType === 'Cessão' && c._cessao) {
+      const rec = c._cessao;
+      body += `- Título: ${rec.titulo || '—'}%0D%0A`;
+      body += `- Contrato: ${rec.documento || rec.contratoNumero || '—'}%0D%0A`;
+      body += `- Cliente anterior: ${(rec.anteriores || []).map((x) => x.name).join(', ') || '—'}%0D%0A`;
+      body += `- Cliente atual: ${(rec.atuais || []).map((x) => x.name).join(', ') || '—'}%0D%0A%0D%0A`;
     } else {
       body += `- Contrato: ${venda && venda.id ? venda.id : (dest && dest.id ? dest.id : id)}%0D%0A`;
       body += `- Cliente envolvido: ${customerName}%0D%0A%0D%0A`;

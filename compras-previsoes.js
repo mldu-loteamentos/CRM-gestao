@@ -15,6 +15,8 @@ const ComprasPrevisoesApp = {
     "76363-3": 1, "76363-4": 1, "76363-5": 1, "76363-6": 1,
     "76074-3": 1, "76074-4": 1, "76074-5": 1, "76074-6": 1
   },
+  /** Tipos do Controle de Previsões no Sienge — não entram NF, REP, DIST, DEV etc. */
+  DOC_PREVISAO: { PRV: 1, PCT: 1, PPC: 1 },
 
   state: {
     inited: false,
@@ -90,7 +92,13 @@ const ComprasPrevisoesApp = {
   },
 
   docCode(s) {
-    return String(s == null ? "" : s).trim();
+    return String(s == null ? "" : s).trim().toUpperCase();
+  },
+
+  isDocPrevisao(docId, docName) {
+    const id = this.docCode(docId);
+    if (this.DOC_PREVISAO[id]) return true;
+    return this.fold(docName).indexOf("PREVIS") >= 0;
   },
 
   transform(payload) {
@@ -108,7 +116,8 @@ const ComprasPrevisoesApp = {
                 if (this.SKIP_OPS[operacao]) return;
                 if (this.SKIP_ACCOUNTS[conta]) return;
                 const docId = this.docCode(bill.documentIdentificationId);
-                if (docId === "DEV") return;
+                const docNome = this.firstWord(bill.documentIdentificationName);
+                if (!this.isDocPrevisao(docId, bill.documentIdentificationName)) return;
                 const titulo = String(bill.billId);
                 const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
                 if (this.SKIP_TITULO_PARCELA[titulo + "-" + parcela]) return;
@@ -123,7 +132,7 @@ const ComprasPrevisoesApp = {
                   emissao: String(bill.issueDate || "").slice(0, 10),
                   parcela,
                   docId,
-                  docNome: this.firstWord(bill.documentIdentificationName),
+                  docNome,
                   valor,
                   planoId: cat && cat.financialCategoryId != null ? String(cat.financialCategoryId) : "",
                   plano: (cat && cat.financialCategoryName) || "",
