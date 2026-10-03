@@ -947,7 +947,7 @@ function anexosThumbHtml(fileObj) {
   </button>`;
 }
 
-/** Usado pelo Compromissário: baixa CONTRATO/DISTRATO da unidade no Sienge. */
+/** Usado pelo Compromissário: baixa CONTRATO/DISTRATO da unidade ou do contrato no Sienge (Assistente + IntegrA). */
 async function anexosFetchTermoBlobForContract(contract) {
   if (!contract) return null;
   const op = String(contract._operationType || 'Venda').toUpperCase();
@@ -958,7 +958,6 @@ async function anexosFetchTermoBlobForContract(contract) {
   const contractId = String(contract.id || '').trim();
   const auth = typeof getBasicAuthHeader === 'function' ? getBasicAuthHeader() : '';
 
-  // 1) Ledger do assistente (metadados); o arquivo ainda vem do Sienge
   let preferredName = '';
   if (enterpriseId && contractId) {
     const envios = await anexosLoadMapaEnvios(enterpriseId);
@@ -966,14 +965,31 @@ async function anexosFetchTermoBlobForContract(contract) {
     if (rec && rec.fileName) preferredName = String(rec.fileName);
   }
 
-  if (!unitId) return null;
-  const listRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${unitId}/attachments`), {
-    headers: { Authorization: auth, Accept: 'application/json' }
-  });
-  if (!listRes.ok) return null;
-  const listData = await listRes.json();
-  const rows = listData.results || listData || [];
-  if (!Array.isArray(rows) || !rows.length) return null;
+  const listPath = async (path) => {
+    try {
+      const res = await fetch(anexosApiUrl(`/sienge-proxy${path}`), {
+        headers: { Authorization: auth, Accept: 'application/json' }
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const rows = data.results || data || [];
+      return Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const [unitRows, contractRows] = await Promise.all([
+    unitId ? listPath(`/units/${encodeURIComponent(unitId)}/attachments`) : Promise.resolve([]),
+    contractId && !contractId.startsWith('troca-')
+      ? listPath(`/sales-contracts/${encodeURIComponent(contractId)}/attachments`)
+      : Promise.resolve([])
+  ]);
+
+  const tagged = [];
+  unitRows.forEach((a) => tagged.push(Object.assign({}, a, { _dlBase: `/units/${encodeURIComponent(unitId)}/attachments` })));
+  contractRows.forEach((a) => tagged.push(Object.assign({}, a, { _dlBase: `/sales-contracts/${encodeURIComponent(contractId)}/attachments` })));
+  if (!tagged.length) return null;
 
   const tagOf = (a) => {
     const desc = String(a.description || a.name || a.fileName || '').toUpperCase();
@@ -981,21 +997,22 @@ async function anexosFetchTermoBlobForContract(contract) {
     if (desc.includes('CONTRATO')) return 'CONTRATO';
     return '';
   };
-  let candidates = rows.filter((a) => tagOf(a) === wantTag);
+  let candidates = tagged.filter((a) => tagOf(a) === wantTag);
   if (!candidates.length) {
-    candidates = rows.filter((a) => String(a.description || a.name || '').toUpperCase().includes(wantTag));
+    candidates = tagged.filter((a) => String(a.description || a.name || '').toUpperCase().includes(wantTag));
   }
   if (!candidates.length) return null;
 
   if (preferredName) {
-    const hit = candidates.find((a) => String(a.name || a.fileName || '').includes(preferredName.replace(/\.[^.]+$/, '')));
+    const stem = preferredName.replace(/\.[^.]+$/, '');
+    const hit = candidates.find((a) => String(a.name || a.fileName || '').includes(stem));
     if (hit) candidates = [hit, ...candidates.filter((x) => x !== hit)];
   }
   candidates.sort((a, b) => String(b.uploadDate || b.createdAt || b.description || '').localeCompare(String(a.uploadDate || a.createdAt || a.description || '')));
   const att = candidates[0];
-  const attId = att.attachmentid || att.attachmentId || att.id;
+  const attId = anexosAttId(att) || att.attachmentid || att.attachmentId || att.id;
   if (!attId) return null;
-  const fileRes = await fetch(anexosApiUrl(`/sienge-proxy/units/${unitId}/attachments/${attId}/file`), {
+  const fileRes = await fetch(anexosApiUrl(`/sienge-proxy${att._dlBase}/${attId}/file`), {
     headers: { Authorization: auth }
   });
   if (!fileRes.ok) return null;

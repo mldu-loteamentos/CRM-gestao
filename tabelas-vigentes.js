@@ -28,6 +28,7 @@ const TabelasVigentesApp = {
     enterprises: [],
     cityIds: [],
     empIds: [],
+    competencia: "",
     openCity: false,
     openEmp: false,
     qCity: "",
@@ -136,13 +137,7 @@ const TabelasVigentesApp = {
   },
 
   visibleCities() {
-    const empSel = new Set((this.state.empIds || []).map(String));
-    if (!empSel.size) return this.state.cities;
-    const cities = new Set();
-    this.state.catalog.forEach((e) => {
-      if (empSel.has(String(e.id))) cities.add(e.cityId);
-    });
-    return this.state.cities.filter((c) => cities.has(c.id));
+    return this.state.cities || [];
   },
 
   visibleEmps() {
@@ -152,9 +147,7 @@ const TabelasVigentesApp = {
   },
 
   pruneFilters() {
-    const cities = new Set(this.visibleCities().map((c) => String(c.id)));
     const emps = new Set(this.visibleEmps().map((e) => String(e.id)));
-    this.state.cityIds = (this.state.cityIds || []).filter((id) => cities.has(String(id)));
     this.state.empIds = (this.state.empIds || []).filter((id) => emps.has(String(id)));
   },
 
@@ -233,6 +226,12 @@ const TabelasVigentesApp = {
       emptyMeansAll: true,
       nouns: { singular: "empreendimento", plural: "empreendimentos" }
     });
+    const cityBtn = citySlot.querySelector(".ml-emp-filter-btn span");
+    if (cityBtn && this.state.cityIds.length === 1) {
+      const cid = String(this.state.cityIds[0]);
+      const city = (this.state.cities || []).find((c) => String(c.id) === cid);
+      cityBtn.textContent = (city && (city.label || city.name)) || cid;
+    }
     if (window.lucide) lucide.createIcons();
   },
 
@@ -375,7 +374,8 @@ const TabelasVigentesApp = {
       draft.cityId = cities[0];
       draft.city = cities[0];
     }
-    if ((!draft.cityId || draft.city === "Todos") && draft.enterpriseId) {
+    if (this.state.competencia) draft.competencia = this.state.competencia;
+    if ((!draft.cityId || this.fold(draft.city) === "TODOS") && draft.enterpriseId) {
       const emp = this.state.enterprises.find((e) => String(e.id) === String(draft.enterpriseId));
       if (emp && emp.cityId) {
         draft.cityId = emp.cityId;
@@ -448,10 +448,20 @@ const TabelasVigentesApp = {
     );
   },
 
+  setCompetencia(ym) {
+    this.state.competencia = /^\d{4}-\d{2}$/.test(String(ym || "")) ? String(ym) : "";
+    const el = document.getElementById("tvig-filter-comp");
+    if (el && el.value !== this.state.competencia) el.value = this.state.competencia;
+  },
+
   consultar() {
     const cities = new Set((this.state.cityIds || []).map(String));
     const emps = new Set((this.state.empIds || []).map(String));
+    const monthEl = document.getElementById("tvig-filter-comp");
+    if (monthEl) this.setCompetencia(monthEl.value);
+    const comp = String(this.state.competencia || "").trim();
     this.state.shown = (this.state.tables || []).filter((t) => {
+      if (comp && String(t.competencia || "") !== comp) return false;
       if (cities.size && !cities.has(String(t.cityId || t.city))) return false;
       if (emps.size && !emps.has(String(t.enterpriseId))) return false;
       return true;
@@ -465,12 +475,15 @@ const TabelasVigentesApp = {
   limpar() {
     this.state.cityIds = [];
     this.state.empIds = [];
+    this.state.competencia = "";
     this.state.openCity = false;
     this.state.openEmp = false;
     this.state.qCity = "";
     this.state.qEmp = "";
     this.state.shown = [];
     this.state.consulted = false;
+    const monthEl = document.getElementById("tvig-filter-comp");
+    if (monthEl) monthEl.value = "";
     this.paintFilters();
     this.renderList();
   },
@@ -484,7 +497,7 @@ const TabelasVigentesApp = {
     }
     const rows = this.state.shown || [];
     if (!rows.length) {
-      box.innerHTML = `<div class="tvig-empty">Não há tabelas cadastradas${this.state.cityIds.length || this.state.empIds.length ? " para o filtro selecionado" : ""}.</div>`;
+      box.innerHTML = `<div class="tvig-empty">Não há tabelas cadastradas${this.state.cityIds.length || this.state.empIds.length || this.state.competencia ? " para o filtro selecionado" : ""}.</div>`;
       return;
     }
     box.innerHTML = `
@@ -536,6 +549,11 @@ const TabelasVigentesApp = {
           <div class="tvig-filters">
             <div id="tvig-city-slot" class="tvig-filter-slot"></div>
             <div id="tvig-emp-slot" class="tvig-filter-slot"></div>
+            <div class="tvig-filter-slot tvig-comp-slot">
+              <div class="ml-emp-filter-label">Competência</div>
+              <input type="month" id="tvig-filter-comp" class="tvig-comp-input" value="${this.esc(this.state.competencia || "")}"
+                onchange="TabelasVigentesApp.setCompetencia(this.value)" title="Vazio = todas as competências">
+            </div>
             <div class="tvig-filter-actions">
               <button type="button" class="btn btn-primary" onclick="TabelasVigentesApp.consultar()">
                 <i data-lucide="search" style="width:16px;"></i> Consultar
@@ -1247,13 +1265,17 @@ const TabelasVigentesApp = {
     const td = document.querySelector('.tvig-sheet-td[data-row="' + row + '"][data-field="' + field + '"]');
     if (!td) return;
     this.selectSheetTd(td);
+    const wrap = td.closest(".tvig-editor-table-wrap");
+    const keepTop = wrap ? wrap.scrollTop : 0;
     const focusable = td.querySelector("input.tvig-sheet-input:not([disabled]):not([readonly]), select.tvig-sheet-select, input[type=checkbox]");
     if (focusable) {
-      focusable.focus();
+      try { focusable.focus({ preventScroll: true }); } catch (e) { focusable.focus(); }
       if (focusable.select && focusable.tagName === "INPUT" && focusable.type !== "checkbox") {
         try { focusable.select(); } catch (e) {}
       }
     }
+    if (wrap && wrap.scrollHeight <= wrap.clientHeight + 12) wrap.scrollTop = 0;
+    else if (wrap) wrap.scrollTop = keepTop;
   },
 
   moveSheetFocus(fromTd, dir, shift) {
@@ -1289,10 +1311,14 @@ const TabelasVigentesApp = {
     document.querySelectorAll(".tvig-fill-handle").forEach((el) => el.remove());
     if (!td || !td.dataset.field) return;
     td.classList.add("is-selected");
+    const wrap = td.closest(".tvig-editor-table-wrap");
+    const keepTop = wrap ? wrap.scrollTop : 0;
     const h = document.createElement("span");
     h.className = "tvig-fill-handle";
     h.title = "Arraste para copiar";
     td.appendChild(h);
+    if (wrap && wrap.scrollHeight <= wrap.clientHeight + 12) wrap.scrollTop = 0;
+    else if (wrap) wrap.scrollTop = keepTop;
     if (this.state.editor) {
       const row = Number(td.dataset.row);
       const d = this.state.editor.draft;

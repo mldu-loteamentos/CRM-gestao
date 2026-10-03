@@ -4910,11 +4910,25 @@ circle.donut-segment {
 }
 .tvig-filters {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.2fr) auto;
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 1.2fr) minmax(170px, 0.7fr) auto;
   gap: 14px;
   align-items: end;
 }
 .tvig-filter-slot { min-width: 0; width: 100%; }
+.tvig-comp-slot { min-width: 170px; }
+.tvig-comp-input {
+  width: 100%;
+  min-height: 34px;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
 .tvig-filters .ml-emp-filter {
   flex: 1 1 auto;
   width: 100%;
@@ -5025,11 +5039,12 @@ circle.donut-segment {
   color: #14532d;
 }
 .tvig-editor-table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   border: 1px solid #94a3b8;
   border-radius: 4px;
   margin-bottom: 12px;
-  max-height: min(440px, calc(92vh - 320px));
+  max-height: min(520px, calc(92vh - 260px));
 }
 .tvig-plan-table {
   width: 100%;
@@ -5070,6 +5085,7 @@ circle.donut-segment {
   background: #fff;
   vertical-align: middle;
   position: relative;
+  overflow: hidden;
 }
 .tvig-sheet-td.is-selected { z-index: 3; box-shadow: inset 0 0 0 2px #105436; }
 .tvig-sheet-td.is-fill { background: #ecfdf3; }
@@ -5127,8 +5143,8 @@ circle.donut-segment {
 .tvig-desc-cell .tvig-sheet-cell { flex: 1; min-width: 0; }
 .tvig-fill-handle {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
+  right: 1px;
+  bottom: 1px;
   width: 8px;
   height: 8px;
   background: #105436;

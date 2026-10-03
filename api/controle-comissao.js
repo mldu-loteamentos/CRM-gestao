@@ -47,9 +47,9 @@ function isPago(v) {
   return t.indexOf("PAGO") >= 0 || t.indexOf("QUIT") >= 0 || t === "S" || t === "SIM";
 }
 
-function isMoura(nome) {
-  const t = fold(nome);
-  return t.indexOf("MOURA LEITE") >= 0 || t.indexOf("MOURA LEITE") >= 0;
+function isMoura(nome, email) {
+  const t = fold(nome) + " " + fold(email);
+  return t.indexOf("MOURA LEITE") >= 0 || t.indexOf("@MOURALEITE.COM") >= 0;
 }
 
 function namesOf(list) {
@@ -95,60 +95,80 @@ async function fetchSeries() {
   return { items: items || [], rawStatus: first.status };
 }
 
-async function fetchParcelas(de, ate) {
+async function fetchComissoes(de, ate) {
   const all = [];
-  let page = 1;
+  let offset = 0;
   let status = 200;
   let lastJson = null;
-  while (page <= 30) {
-    const out = await cvRequest("/v1/financeiro/parcelas-reservas", {
-      limite: 100,
-      pagina: page,
-      tipoFiltro: "vencimento",
-      de,
+  const limit = 100;
+  while (offset < 5000) {
+    const out = await cvRequest("/v1/financeiro/comissoes", {
+      limit,
+      offset,
+      a_partir_de: de,
       ate
     });
     status = out.status;
     lastJson = out.json;
     if (out.status >= 400) break;
-    const pagamentos = (out.json && (out.json.pagamentos || out.json.dados || out.json.data)) || [];
-    if (!pagamentos.length) break;
-    all.push.apply(all, pagamentos);
+    const rows = (out.json && (out.json.comissoes || out.json.dados || out.json.data)) || [];
+    if (!rows.length) break;
+    all.push.apply(all, rows);
     const total = Number(out.json && (out.json.total || out.json.total_de_registros)) || 0;
     if (total && all.length >= total) break;
-    if (pagamentos.length < 100) break;
-    page += 1;
+    if (rows.length < limit) break;
+    offset += limit;
   }
   return { items: all, status, lastJson };
 }
 
-function mapPagamento(p, seriesMap) {
-  const parcelas = Array.isArray(p.parcelas) ? p.parcelas : [];
-  const valorParcelas = parcelas.reduce((s, x) => s + parseMoney(x && x.valor), 0);
-  const valor = parseMoney(p.valorTotal != null ? p.valorTotal : (p.valor || valorParcelas));
-  const bens = namesOf(p.beneficiario || p.beneficiarios);
-  const pags = namesOf(p.pagador || p.pagadores);
-  const idserie = pick(p, ["idserie", "idSerie", "serie_id", "id_serie"]);
-  const serieNome = pick(p, ["serie", "nome_serie", "serie_nome"]) || (seriesMap[String(idserie)] && seriesMap[String(idserie)].nome) || "";
-  const serie = seriesMap[String(idserie)] || null;
-  const reserva = pick(p, ["idreserva", "idReserva", "reserva", "contrato", "idcontrato", "numero_contrato", "codigo"]);
-  const emp = pick(p, ["empreendimento", "empreendimento_nome", "imovel", "unidade"]);
-  const situacao = pick(p, ["situacao", "status", "situacao_pagamento", "pago"]);
-  const commissionSerie = !!(serie && (isSim(serie.comissao) || isSim(serie.retirar_valor_comissao)));
-  const moura = bens.some(isMoura) || isMoura(pick(p, ["beneficiario_nome"]));
+function programacaoOf(ben) {
+  if (!ben) return [];
+  if (Array.isArray(ben.programacao)) return ben.programacao;
+  if (Array.isArray(ben.programacoes)) return ben.programacoes;
+  return [];
+}
+
+function splitProgramacao(rows) {
+  let aReceber = 0;
+  let recebido = 0;
+  (rows || []).forEach((p) => {
+    const v = parseMoney(p && (p.valor != null ? p.valor : p.valor_pagamento));
+    if (isPago(p && (p.situacao || p.nome_situacao))) recebido += v;
+    else aReceber += v;
+  });
+  return { aReceber, recebido };
+}
+
+function mapComissao(c) {
+  const bens = Array.isArray(c && c.beneficiarios) ? c.beneficiarios : [];
+  const mouraBens = bens.filter((b) => isMoura(b && b.nome, b && b.email));
+  const use = mouraBens.length ? mouraBens : bens;
+  const prog = use.reduce((acc, b) => acc.concat(programacaoOf(b)), []);
+  let split = splitProgramacao(prog);
+  if (!prog.length) {
+    const total = use.reduce((s, b) => s + parseMoney(b && b.valor), 0) || parseMoney(c && c.valor_comissao);
+    if (isPago(c && (c.nome_situacao || c.situacao)) || c && c.data_finalizacao) split = { aReceber: 0, recebido: total };
+    else split = { aReceber: total, recebido: 0 };
+  }
+  const pagador = (c && c.pagador && (c.pagador.nome || c.pagador.name)) || "";
+  const reserva = pick(c, ["idreserva_cv", "idreserva", "numero_venda", "idreserva_int"]);
   return {
     reserva: reserva ? String(reserva) : "",
-    empreendimento: emp ? String(emp) : "",
-    serie: serieNome ? String(serieNome) : (idserie ? String(idserie) : ""),
-    idserie: idserie ? String(idserie) : "",
-    vencimento: pick(p, ["vencimento", "data_vencimento"]) || "",
-    valor,
-    situacao: situacao ? String(situacao) : "",
-    pago: isPago(situacao),
-    pagador: pags.join(", "),
-    beneficiario: bens.join(", "),
-    commissionSerie,
-    moura
+    empreendimento: pick(c, ["empreendimento"]) || "",
+    unidade: pick(c, ["unidade"]) || "",
+    serie: "",
+    idserie: "",
+    vencimento: "",
+    valor: split.aReceber + split.recebido,
+    situacao: pick(c, ["nome_situacao", "situacao"]) || "",
+    pago: split.recebido > 0 && split.aReceber === 0,
+    pagador: pagador ? String(pagador) : "",
+    beneficiario: use.map((b) => b && b.nome).filter(Boolean).join(", "),
+    aReceber: split.aReceber,
+    recebido: split.recebido,
+    commissionSerie: true,
+    moura: !!mouraBens.length
   };
 }
 
@@ -160,6 +180,7 @@ function aggregate(rows) {
       by.set(key, {
         contrato: r.reserva || "—",
         empreendimento: r.empreendimento,
+        unidade: r.unidade || "",
         pagador: r.pagador,
         beneficiario: r.beneficiario,
         series: [],
@@ -170,12 +191,13 @@ function aggregate(rows) {
     }
     const g = by.get(key);
     if (r.empreendimento && !g.empreendimento) g.empreendimento = r.empreendimento;
+    if (r.unidade && !g.unidade) g.unidade = r.unidade;
     if (r.pagador && !g.pagador) g.pagador = r.pagador;
     if (r.beneficiario && !g.beneficiario) g.beneficiario = r.beneficiario;
     if (r.serie && g.series.indexOf(r.serie) < 0) g.series.push(r.serie);
     g.parcelas += 1;
-    if (r.pago) g.recebido += r.valor;
-    else g.aReceber += r.valor;
+    g.aReceber += Number(r.aReceber) || (r.pago ? 0 : r.valor) || 0;
+    g.recebido += Number(r.recebido) || (r.pago ? r.valor : 0) || 0;
   });
   return [...by.values()].sort((a, b) => b.aReceber - a.aReceber || String(a.contrato).localeCompare(String(b.contrato), "pt-BR"));
 }
@@ -204,22 +226,18 @@ module.exports = async function handler(req, res) {
     });
     const commissionSeries = (seriesRes.items || []).filter((s) => isSim(s && s.comissao) || isSim(s && s.retirar_valor_comissao));
 
-    const parc = await fetchParcelas(de, ate);
+    const parc = await fetchComissoes(de, ate);
     if (parc.status >= 400 && !parc.items.length) {
       return sendJson(res, parc.status || 502, {
-        error: (parc.lastJson && (parc.lastJson.mensagem || parc.lastJson.error)) || "Falha ao buscar parcelas no CV.",
+        error: (parc.lastJson && (parc.lastJson.mensagem || parc.lastJson.error)) || "Falha ao buscar comissões no CV.",
         detalhe: parc.lastJson,
         seriesError: seriesRes.error || null
       });
     }
 
-    const mapped = (parc.items || []).map((p) => mapPagamento(p, seriesMap));
-    const hasSerieLink = mapped.some((r) => r.idserie);
-    const filtered = mapped.filter((r) => {
-      if (hasSerieLink) return r.commissionSerie || r.moura;
-      if (mapped.some((x) => x.moura)) return r.moura;
-      return true;
-    });
+    const mapped = (parc.items || []).filter((c) => !c.data_cancelamento).map((p) => mapComissao(p, seriesMap));
+    const hasMoura = mapped.some((r) => r.moura);
+    const filtered = hasMoura ? mapped.filter((r) => r.moura) : mapped;
 
     const contratos = aggregate(filtered);
     const aReceber = contratos.reduce((s, r) => s + r.aReceber, 0);
@@ -244,8 +262,8 @@ module.exports = async function handler(req, res) {
       })),
       contratos,
       aviso: seriesRes.error
-        ? "Séries de tabela não puderam ser lidas; a lista usa beneficiário/parcelas."
-        : (hasSerieLink ? "" : "As parcelas não vieram com série. Filtro por beneficiário Moura Leite quando houver.")
+        ? "Séries de tabela não puderam ser lidas."
+        : (hasMoura ? "" : "Nenhum beneficiário Moura Leite nesta competência; listando todas as comissões.")
     });
   } catch (e) {
     return sendJson(res, 502, { error: "Falha ao consultar comissões no CV CRM", details: e.message });

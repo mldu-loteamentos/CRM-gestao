@@ -126,8 +126,9 @@ const ControleComissaoApp = {
                 <tr>
                   <th>Contrato / Reserva</th>
                   <th>Empreendimento</th>
+                  <th>Unidade</th>
                   <th>Pagador</th>
-                  <th>Série</th>
+                  <th>Beneficiário</th>
                   <th style="text-align:right;">A receber</th>
                   <th style="text-align:right;">Recebido</th>
                 </tr>
@@ -137,8 +138,9 @@ const ControleComissaoApp = {
                   <tr>
                     <td>${this.esc(r.contrato || "—")}</td>
                     <td>${this.esc(r.empreendimento || "—")}</td>
+                    <td>${this.esc(r.unidade || "—")}</td>
                     <td>${this.esc(r.pagador || "—")}</td>
-                    <td>${this.esc((r.series || []).join(", ") || "—")}</td>
+                    <td>${this.esc(r.beneficiario || "—")}</td>
                     <td style="text-align:right;font-weight:700;">${this.esc(this.money(r.aReceber))}</td>
                     <td style="text-align:right;">${this.esc(this.money(r.recebido))}</td>
                   </tr>`).join("")}

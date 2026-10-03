@@ -9,7 +9,7 @@
           window.agendaItemsCache = null;
       }
       try {
-        originalSetItem.apply(this, arguments);
+      originalSetItem.apply(this, arguments);
       } catch (e) {
         console.warn("[storage] setItem falhou", key, e && e.name);
       }
@@ -944,7 +944,7 @@ window.handleDynamicCustomerSearch = function(query, type, source) {
                         window.FinanciamentoApp.buscar();
                     }
                 } else if (typeof window.searchRelacionamento === "function") {
-                    window.searchRelacionamento();
+                window.searchRelacionamento();
                 }
             };
             dropdown.appendChild(item);
@@ -3611,17 +3611,17 @@ function validateAndLoadCrmUser(user) {
   let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
   
   if (!matchedUser) {
-    matchedUser = {
-      id: "usr_" + Date.now(),
+      matchedUser = {
+        id: "usr_" + Date.now(),
       name: user.name || String(user.email || "").split("@")[0].toUpperCase(),
       email: String(user.email || "").toLowerCase(),
       sienge_user: "",
       phone: "",
       profile_name: "OPERADOR",
-      role: "OPERADOR",
+        role: "OPERADOR",
       status: "PENDENTE",
-      createdAt: new Date().toISOString()
-    };
+        createdAt: new Date().toISOString()
+      };
     crmUsers.push(matchedUser);
     persistCrmUsersList(crmUsers);
     throw new Error("Seu e-mail não está cadastrado em Usuários e Perfis. Peça ao administrador para incluir e ativar seu acesso.");
@@ -3705,7 +3705,7 @@ async function processSuccessfulLogin(loggedUser) {
     if (loginVideo) loginVideo.pause();
     renderUserSession();
     try {
-      await initializeApplication();
+    await initializeApplication();
     } catch (initErr) {
       console.error("Erro ao inicializar o sistema após o login:", initErr);
     }
@@ -4028,7 +4028,7 @@ window.collectBackOfficePermPayloads = function() {
     try {
       const raw = localStorage.getItem("crm_perms_" + id);
       if (raw) payloads.push(raw);
-    } catch (e) {}
+  } catch (e) {}
   });
   try {
     const backup = localStorage.getItem(window.CRM_BACK_OFFICE_BACKUP_KEY);
@@ -5109,7 +5109,7 @@ async function initializeApplication() {
                    return;
                }
                if (typeof window.firebaseCollections.runTransaction !== "function") {
-                   await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
+               await window.firebaseCollections.setDoc(docRef, { [customerKey]: notesToSave }, { merge: true });
                }
                console.log("[Firebase RT] Ocorrência salva com SUCESSO no Firebase!", customerKey, notesToSave.length, "registro(s)");
                if (typeof window.renderCustomerOccurrences === "function") window.renderCustomerOccurrences();
@@ -5536,7 +5536,7 @@ async function loadAndApplyPermissions() {
       let permsObj = typeof window.readCrmProfilePerms === "function"
         ? window.readCrmProfilePerms(profileName)
         : {};
-      if (permsObj && permsObj.__mirror_of__) permsObj = {};
+         if (permsObj && permsObj.__mirror_of__) permsObj = {};
       
       if (permsObj && Object.keys(permsObj).length) {
          AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
@@ -8142,8 +8142,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       if (typeof window.isApoioJuridicoOperatorName === "function"
         && window.isApoioJuridicoOperatorName(activeOperatorFilter)) {
         if (typeof window.clientIsAnaliseInternaJuridico === "function"
-          && window.clientIsAnaliseInternaJuridico(c)) {
-          return true;
+        && window.clientIsAnaliseInternaJuridico(c)) {
+        return true;
         }
         const g = typeof window.getFilaQueueGroup === "function" ? window.getFilaQueueGroup(c) : null;
         const G = window.FILA_QUEUE_GROUPS || {};
@@ -13920,10 +13920,10 @@ window.openPromisedInstallmentsModal = function() {
           ? window.siengePaymentSlipIsUsable(slip)
           : !!(slip && slip.results && slip.results.length > 0);
         if (!usable) return;
-        const warn = document.getElementById(`prom-modal-boleto-${idx}`);
-        if (warn) warn.style.display = "block";
-        const row = document.getElementById(`prom-modal-row-${idx}`);
-        if (row) row.style.background = "#fef3c7";
+          const warn = document.getElementById(`prom-modal-boleto-${idx}`);
+          if (warn) warn.style.display = "block";
+          const row = document.getElementById(`prom-modal-row-${idx}`);
+          if (row) row.style.background = "#fef3c7";
       }).catch(e => console.error(e));
     }
   });
@@ -22349,7 +22349,7 @@ async function loadAgendaDayTasks(dateStr) {
   }
   
   window.lastSelectedAgendaDate = dateStr;
-
+  
   let dayItems = [];
   
   // Use window.AgendaSelectedOperator as source of truth (DOM select may be hidden for operators)
@@ -22454,9 +22454,9 @@ window.fireConfetti = function() {
             });
             dayItems = [...(queueItems || []), ...leftovers];
       }
-
+      
       if (!window._isNotesHydrating) {
-        window.agendaItemsCache[cacheKey] = [...dayItems];
+      window.agendaItemsCache[cacheKey] = [...dayItems];
       }
   }
 
@@ -23889,10 +23889,10 @@ window.resolveAgendaAlarm = function(btnEl, key, idx) {
         window.markAgendaAlarmResolved(allNotes[key][idx], todayStr);
         localStorage.setItem('crm_agenda_personal_notes', JSON.stringify(allNotes));
         try {
-            if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
+        if (window.renderAgendaPersonalNotes) window.renderAgendaPersonalNotes();
         } catch (e) {
             console.warn('[Agenda] Falha ao redesenhar notas após resolver alarme:', e);
-        }
+    }
     }
 };
 
@@ -24933,7 +24933,7 @@ async function loadWeSendTab() {
   const panel = window.wesendActivePanel || sessionStorage.getItem("wesendActivePanel") || "followup";
   if (panel === "followup" || !panel) {
     if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
-    if (typeof window.hydrateNexHistoryBag === "function") await window.hydrateNexHistoryBag();
+  if (typeof window.hydrateNexHistoryBag === "function") await window.hydrateNexHistoryBag();
     if (gen !== window._loadWeSendGen) return;
     if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
     if (window.lucide) lucide.createIcons();
@@ -27098,27 +27098,27 @@ window.hydrateNexHistoryBag = async function() {
   if (window._nexBagHydratePromise) return window._nexBagHydratePromise;
   if (!(window.firebaseDb && window.firebaseCollections)) return;
   window._nexBagHydratePromise = (async () => {
-    try {
-      const { collection, getDocs } = window.firebaseCollections;
-      const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
-      let bag = {};
-      try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
-      window._nexHistory = window._nexHistory || {};
-      snap.forEach(d => {
-        const data = d.data() || {};
-        const items = Array.isArray(data.items) ? data.items : [];
-        if (!items.length) return;
-        const key = d.id;
-        const local = Array.isArray(bag[key]) ? bag[key] : [];
-        const byId = {};
-        local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
-        bag[key] = Object.values(byId);
-        window._nexHistory[key] = bag[key];
-      });
-      localStorage.setItem("crm_nex_history", JSON.stringify(bag));
-      window._nexBagHydrated = true;
-    } catch (e) {
-      console.warn("[NEX] Falha ao sincronizar follow-up", e);
+  try {
+    const { collection, getDocs } = window.firebaseCollections;
+    const snap = await getDocs(collection(window.firebaseDb, "nex_letters"));
+    let bag = {};
+    try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+    window._nexHistory = window._nexHistory || {};
+    snap.forEach(d => {
+      const data = d.data() || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) return;
+      const key = d.id;
+      const local = Array.isArray(bag[key]) ? bag[key] : [];
+      const byId = {};
+      local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+      bag[key] = Object.values(byId);
+      window._nexHistory[key] = bag[key];
+    });
+    localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+    window._nexBagHydrated = true;
+  } catch (e) {
+    console.warn("[NEX] Falha ao sincronizar follow-up", e);
       window._nexBagHydratePromise = null;
     }
   })();
@@ -27459,18 +27459,18 @@ window.nexFindReguaNode = function(kind) {
   if (kind === "zero") {
     return (nodes || []).find(n => n && (n.acao === "nex_zero" || n.id === "n_nex_zero"))
       || (nodes || []).find(n => {
-        const t = norm(n);
-        return t.indexOf("nex") !== -1 && (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t));
-      }) || (nodes || []).find(n => /0%\s*pago/.test(norm(n)));
+      const t = norm(n);
+      return t.indexOf("nex") !== -1 && (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t));
+    }) || (nodes || []).find(n => /0%\s*pago/.test(norm(n)));
   }
   return (nodes || []).find(n => n && (n.acao === "nex" || n.id === "n_nex"))
     || (nodes || []).find(n => {
-      const t = norm(n);
+    const t = norm(n);
       if (!n || n.acao === "nex_zero" || n.id === "n_nex_zero") return false;
-      if (t.indexOf("nex") === -1) return false;
-      if (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t)) return false;
-      return true;
-    });
+    if (t.indexOf("nex") === -1) return false;
+    if (t.indexOf("0% pago") !== -1 || t.indexOf("0%pago") !== -1 || /0%\s*pago/.test(t)) return false;
+    return true;
+  });
 };
 
 window.nexReguaDays = function() {
@@ -32290,7 +32290,7 @@ async function loadCustomerBoletos(customerId, saleId) {
                        ? window.decodeFebrabanDueFactor(factor, hintDate)
                        : new Date(new Date('1997-10-07T12:00:00Z').getTime() + (factor * 24 * 60 * 60 * 1000));
                      if (dtFebraban && !isNaN(dtFebraban.getTime())) {
-                       trueDateStr = dtFebraban.toLocaleDateString('pt-BR');
+                     trueDateStr = dtFebraban.toLocaleDateString('pt-BR');
                      }
                   }
                   
@@ -32350,7 +32350,7 @@ async function loadCustomerBoletos(customerId, saleId) {
           } catch(e) {
              const row = document.getElementById(`row-inst-${inst.installmentId}`);
              if (isRecentGen) {
-               const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
+             const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
                if (tdDate) tdDate.textContent = "Aguardando Sienge";
              } else if (row) {
                row.remove();
@@ -35097,7 +35097,7 @@ window.renderVizinhosTab = async function() {
       unitState = await SiengeApiService.getUnit(sale.unitId);
     }
     if (!unitState || !unitState.id) throw new Error("Unidade não localizada.");
-
+    
     const contractObj = { ...(sale || {}), ...(unitState || {}) };
     let enterpriseId = "";
     let unitName = "";
@@ -35144,7 +35144,7 @@ window.renderVizinhosTab = async function() {
       </div>`;
       return;
     }
-
+    
     const centerPts = window.parseKmzCoordPoints(centerPoint.coordinates);
     const center = window.kmzCentroid(centerPts);
     if (!center) {
@@ -35207,7 +35207,7 @@ window.renderVizinhosTab = async function() {
         saleId: null,
         contractNumber: "-"
       };
-
+      
       const nameVariants = [...new Set([
         neighborNameForSearch,
         neighborNameForSearch.replace(/\s+/g, "-"),
@@ -35709,11 +35709,11 @@ window.searchRelacionamento = async function() {
       if (bType && bType !== "CT" && bType !== "CTCV") {
         throw new Error("Título " + titulo + " encontrado, mas é do tipo '" + (bill.documentId || "Desconhecido") + "'. Apenas títulos tipo CT são suportados.");
       }
-      customerId = bill.customerId;
-      targetContractNumber = bill.documentNumber || bill.id;
-      targetEnterpriseId = bill.enterpriseCode || bill.enterpriseId;
-      targetUnityName = bill.unityName || bill.unitName;
-      targetEnterpriseName = bill.enterpriseName;
+         customerId = bill.customerId;
+         targetContractNumber = bill.documentNumber || bill.id;
+         targetEnterpriseId = bill.enterpriseCode || bill.enterpriseId;
+         targetUnityName = bill.unityName || bill.unitName;
+         targetEnterpriseName = bill.enterpriseName;
     } else if (contrato) {
       // 2. Busca pelo contrato -> pega customerId
       let myContract = null;
@@ -35723,7 +35723,7 @@ window.searchRelacionamento = async function() {
       try {
           const data = await window.relSiengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
           if (data && data.results && data.results.length > 0) {
-              myContract = data.results[0];
+                  myContract = data.results[0];
           }
       } catch(e) {}
       
@@ -35764,12 +35764,12 @@ window.searchRelacionamento = async function() {
           const docParam = doc.length === 14 ? `cnpj=${doc}` : `cpf=${doc}`;
           const cData = await window.relSiengeGet("/customers?" + docParam);
           const cList = (cData && cData.results) || [];
-          if (cList.length > 0) {
-            customerId = cList[0].id;
-            customerNameCache = cList[0].name;
-            customerDocCache = cList[0].cpf || cList[0].cnpj || cList[0].cpfCnpj || doc;
-          } else {
-            throw new Error("CPF/CNPJ não encontrado.");
+             if (cList.length > 0) {
+               customerId = cList[0].id;
+               customerNameCache = cList[0].name;
+               customerDocCache = cList[0].cpf || cList[0].cnpj || cList[0].cpfCnpj || doc;
+             } else {
+               throw new Error("CPF/CNPJ não encontrado.");
           }
       }
     } else if (unidadeId && emp) {
@@ -35783,7 +35783,7 @@ window.searchRelacionamento = async function() {
       try {
           const uData = await window.relSiengeGet("/units?enterpriseId=" + emp + "&name=" + encodeURIComponent(unidadeName));
           const uObj = ((uData && uData.results) || []).find(u => String(u.id) === String(unidadeId));
-          if (uObj && uObj.contractId) {
+              if (uObj && uObj.contractId) {
               myContract = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(uObj.contractId));
           }
       } catch(e) { console.error("Erro na ESTRATÉGIA 1", e); }
@@ -35792,10 +35792,10 @@ window.searchRelacionamento = async function() {
           try {
               const directData = await window.relSiengeGet("/sales-contracts?enterpriseId=" + emp + "&unitId=" + encodeURIComponent(unidadeId));
               const matchingContracts = ((directData && directData.results) || []).filter(c => String(c.unitId) === String(unidadeId) || String(c.unitName) === String(unidadeName));
-              if (matchingContracts.length > 0) {
-                  myContract = matchingContracts.find(c => String(c.status).toUpperCase() === 'ACTIVE') ||
-                               matchingContracts.find(c => String(c.status).toUpperCase() !== 'CANCELED') ||
-                               matchingContracts[0];
+                  if (matchingContracts.length > 0) {
+                      myContract = matchingContracts.find(c => String(c.status).toUpperCase() === 'ACTIVE') || 
+                                   matchingContracts.find(c => String(c.status).toUpperCase() !== 'CANCELED') || 
+                                   matchingContracts[0];
               }
           } catch(e) { console.error("Erro na ESTRATÉGIA 2", e); }
       }
@@ -35855,27 +35855,27 @@ window.searchRelacionamento = async function() {
                 if (!customerId && targetContractNumber) {
                     try {
                         const contractData = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(targetContractNumber));
-                        if (contractData.customerId) {
-                            customerId = contractData.customerId;
-                        } else if (contractData.clientId) {
-                            customerId = contractData.clientId;
-                        } else if (contractData.customer && contractData.customer.id) {
-                            customerId = contractData.customer.id;
-                        } else if (contractData.client && contractData.client.id) {
-                            customerId = contractData.client.id;
-                        } else if (contractData.customers && contractData.customers.length > 0) {
-                            const mainCust = contractData.customers.find(c => c.main === true) || contractData.customers[0];
-                            if (mainCust && mainCust.id) {
-                                customerId = mainCust.id;
-                            }
-                        } else if (contractData.salesContractCustomers && contractData.salesContractCustomers.length > 0) {
-                            const mainCust = contractData.salesContractCustomers.find(c => c.main === true) || contractData.salesContractCustomers[0];
-                            if (mainCust && mainCust.id) {
-                                customerId = mainCust.id;
+                            if (contractData.customerId) {
+                                customerId = contractData.customerId;
+                            } else if (contractData.clientId) {
+                                customerId = contractData.clientId;
+                            } else if (contractData.customer && contractData.customer.id) {
+                                customerId = contractData.customer.id;
+                            } else if (contractData.client && contractData.client.id) {
+                                customerId = contractData.client.id;
+                            } else if (contractData.customers && contractData.customers.length > 0) {
+                                const mainCust = contractData.customers.find(c => c.main === true) || contractData.customers[0];
+                                if (mainCust && mainCust.id) {
+                                    customerId = mainCust.id;
+                                }
+                            } else if (contractData.salesContractCustomers && contractData.salesContractCustomers.length > 0) {
+                                const mainCust = contractData.salesContractCustomers.find(c => c.main === true) || contractData.salesContractCustomers[0];
+                                if (mainCust && mainCust.id) {
+                                    customerId = mainCust.id;
                             }
                         }
                     } catch(e) { console.error("Erro ao buscar detalhes do contrato da unidade", e); }
-                }
+             }
          } catch(e) {
              throw new Error(`Contrato ativo não encontrado. (JSON=${e.message})`);
          }
@@ -35910,7 +35910,7 @@ window.searchRelacionamento = async function() {
         err.status = resContracts.status;
         throw err;
       }
-      const scData = await resContracts.json();
+    const scData = await resContracts.json();
       return (scData && scData.results) || [];
     };
 
@@ -36453,8 +36453,8 @@ window.searchRelacionamento = async function() {
        if (/^\d+$/.test(String(realContractStr)) && c.id) {
            try {
                const contractData = await window.relSiengeGet("/sales-contracts/" + encodeURIComponent(c.id));
-               if (contractData.contractNumber) {
-                   realContractStr = contractData.contractNumber;
+                   if (contractData.contractNumber) {
+                       realContractStr = contractData.contractNumber;
                }
            } catch(e) {}
        }
@@ -36828,9 +36828,9 @@ window.escolherGestaoDocumento = function(tipo) {
       if (window.RelacionamentoApp && typeof RelacionamentoApp._travarFiltrosDocOrigem === "function") {
         RelacionamentoApp._travarFiltrosDocOrigem("escritura", { titulo: tituloVal, contrato: contratoVal, nome: nomeVal });
       } else {
-        const tEl = document.getElementById("esc-filter-titulo");
-        const cEl = document.getElementById("esc-filter-contrato");
-        const nEl = document.getElementById("esc-filter-nome");
+      const tEl = document.getElementById("esc-filter-titulo");
+      const cEl = document.getElementById("esc-filter-contrato");
+      const nEl = document.getElementById("esc-filter-nome");
         if (tEl && tituloVal) tEl.value = tituloVal;
         if (cEl && contratoVal) cEl.value = contratoVal;
         if (nEl && nomeVal) nEl.value = nomeVal;
@@ -37975,15 +37975,15 @@ window.openAnexosClienteModal = async function(customerId) {
      return;
   }
 
-  window.anexosTargetId = 'anexos-cliente-root';
-  AnexosApp.resetAndRender();
-  AnexosState.contexto = 'Cliente';
-  AnexosState.idCliente = customerId;
+    window.anexosTargetId = 'anexos-cliente-root';
+    AnexosApp.resetAndRender();
+    AnexosState.contexto = 'Cliente';
+    AnexosState.idCliente = customerId;
   AnexosState.loadingUnidadeAnexos = true;
-
-  let costCenterId = null;
+    
+    let costCenterId = null;
   let saleHint = null;
-  if (typeof AppState !== 'undefined') {
+    if (typeof AppState !== 'undefined') {
       const titleId = String(AppState.selectedSaleId || AppState.selectedTitulo || AppState.currentReceivableBillId || '').replace(/^B-/i, '');
       const sales = AppState.sales || [];
       saleHint = sales.find((s) =>
@@ -37992,10 +37992,10 @@ window.openAnexosClienteModal = async function(customerId) {
         || String(s.contractNumber || s.number || '') === String(AppState.currentContractNumber || '')
       ) || null;
       if (saleHint) costCenterId = saleHint.enterpriseId || saleHint.costCenterId;
-      if (!costCenterId) {
-          let clientMatch = null;
-          if (AppState.dashboardList) clientMatch = AppState.dashboardList.find(c => String(c.customerId) === String(customerId));
-          if (!clientMatch && AppState.subjudiceList) clientMatch = AppState.subjudiceList.find(c => String(c.customerId) === String(customerId));
+        if (!costCenterId) {
+            let clientMatch = null;
+            if (AppState.dashboardList) clientMatch = AppState.dashboardList.find(c => String(c.customerId) === String(customerId));
+            if (!clientMatch && AppState.subjudiceList) clientMatch = AppState.subjudiceList.find(c => String(c.customerId) === String(customerId));
           if (!clientMatch && AppState.customers) {
             clientMatch = Array.isArray(AppState.customers)
               ? AppState.customers.find(c => String(c.id) === String(customerId))
@@ -38004,14 +38004,14 @@ window.openAnexosClienteModal = async function(customerId) {
           if (clientMatch) costCenterId = clientMatch.costCenterId || clientMatch.enterpriseId;
       }
       if (!costCenterId) costCenterId = AppState.currentCostCenterId || saleHint && saleHint.enterpriseId;
-  }
+    }
 
-  if (costCenterId) {
-      AnexosState.contexto = 'Ambos';
-      AnexosState.cc = costCenterId;
-      AnexosState.ccName = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(costCenterId) : costCenterId;
-  }
-  renderAnexosModule();
+    if (costCenterId) {
+        AnexosState.contexto = 'Ambos';
+        AnexosState.cc = costCenterId;
+        AnexosState.ccName = typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(costCenterId) : costCenterId;
+    }
+    renderAnexosModule();
 
   try {
     const titleId = String(
@@ -38058,33 +38058,33 @@ window.openAnexosClienteModal = async function(customerId) {
     const mainCust = (mainC.salesContractCustomers || []).find((cust) => cust.main === true)
       || (mainC.salesContractCustomers || [])[0]
       || {};
-    let fmtDate = '';
-    if (mainC.contractDate || mainC.saleDate) {
-      const rawD = mainC.contractDate || mainC.saleDate;
+            let fmtDate = '';
+            if (mainC.contractDate || mainC.saleDate) {
+                const rawD = mainC.contractDate || mainC.saleDate;
       const parts = String(rawD).split('-');
       fmtDate = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : rawD;
-    }
+            }
 
-    AnexosState.activeContract = {
-      id: mainC.id,
-      contractNumber: mainC.contractNumber || mainC.number || mainC.id,
-      customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
-      contractDate: fmtDate,
+            AnexosState.activeContract = {
+                id: mainC.id,
+                contractNumber: mainC.contractNumber || mainC.number || mainC.id,
+                customerName: mainCust.name || mainCust.customerName || mainC.customerName || 'Cliente',
+                contractDate: fmtDate,
       customerId: mainCust.customerId || mainCust.id || customerId,
       customers: mainC.salesContractCustomers || [],
       receivableBillId: mainC.receivableBillId || titleId,
       enterpriseId: mainC.enterpriseId || costCenterId
     };
 
-    if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
+            if (typeof SiengeApiService !== 'undefined' && SiengeApiService.getCustomerDetails) {
       SiengeApiService.getCustomerDetails(customerId).then((res) => {
-        const cm = { id: customerId, ...res };
-        if (AnexosApp.handleClientMatch) AnexosApp.handleClientMatch(cm);
-      }).catch(() => {});
-    }
+                    const cm = { id: customerId, ...res };
+                    if (AnexosApp.handleClientMatch) AnexosApp.handleClientMatch(cm);
+                }).catch(() => {});
+            }
 
-    let localFiles = null;
-    try {
+            let localFiles = null;
+            try {
       if (typeof AnexosDB !== 'undefined') localFiles = await AnexosDB.load(customerId);
     } catch (e) {}
 
@@ -38106,22 +38106,22 @@ window.openAnexosClienteModal = async function(customerId) {
       ? anexosDedupeAttachments(allAttachments)
       : allAttachments;
     AnexosState.loadingUnidadeAnexos = false;
-    renderAnexosModule();
-
-    if (localFiles && localFiles.length > 0) {
+                renderAnexosModule();
+                
+                if (localFiles && localFiles.length > 0) {
       localFiles.forEach((f) => {
-        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
+                        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
           try { f.previewUrl = URL.createObjectURL(f.file); } catch (e) {}
-        }
-      });
-      AnexosState.files = localFiles;
-      AnexosState.importedContracts.add(mainC.id);
-      if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
+                        }
+                    });
+                    AnexosState.files = localFiles;
+                    AnexosState.importedContracts.add(mainC.id);
+                    if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
     } else if (AnexosState.contractAttachments.length > 0 && AnexosApp.importarAnexosDoContrato) {
       AnexosApp.importarAnexosDoContrato({ auto: true, force: true });
     }
   } catch (err) {
-    console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);
+            console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);
     AnexosState.loadingUnidadeAnexos = false;
     renderAnexosModule();
   }
@@ -38926,10 +38926,10 @@ window.prefetchRecentPayments = async function() {
       try { await SiengeApiService.hydratePaidMaps(); } catch (e) {}
     }
     if (window.paidMapHasBillDays(window.getRecentPaidMap())) {
-      window.hasPrefetchedPayments = true;
+        window.hasPrefetchedPayments = true;
       window.syncRecentPaidMap(window.getRecentPaidMap());
       try { localStorage.setItem(dayFlag, "done"); } catch (e) {}
-      return;
+        return;
     }
     window.hasPrefetchedPayments = true;
     };
@@ -40102,7 +40102,7 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
-                    }
+                      }
                     return;
                 }
                 if (k === "crm_moura_profiles") {
@@ -40493,7 +40493,7 @@ const _originalSetItem = localStorage.setItem;
 window._originalSetItem = _originalSetItem;
 localStorage.setItem = function(key, value) {
     try {
-      _originalSetItem.call(this, key, value);
+    _originalSetItem.call(this, key, value);
     } catch (e) {
       console.warn("[storage] setItem falhou", key, e && e.name);
       return;

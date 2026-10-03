@@ -1,8 +1,21 @@
 const https = require("https");
 
 const CVCRM_HOST = process.env.CVCRM_HOST || "mouraleite.cvcrm.com.br";
-const CVCRM_EMAIL = process.env.CVCRM_EMAIL || "israel@mouraleite.com.br";
-const CVCRM_TOKEN = process.env.CVCRM_TOKEN || "6696627a90411eff6f91334d64bd0cb621300ed7fe0";
+const FALLBACK_EMAIL = "israel@mouraleite.com.br";
+const FALLBACK_TOKEN = "6696627a9041eff6f9134d64bd0cb621305ed7fe";
+
+function resolveEmail() {
+  const env = String(process.env.CVCRM_EMAIL || "").trim();
+  return env.indexOf("@") > 0 ? env : FALLBACK_EMAIL;
+}
+
+function resolveToken() {
+  const env = String(process.env.CVCRM_TOKEN || "").trim();
+  return /^[a-f0-9]{40}$/i.test(env) ? env : FALLBACK_TOKEN;
+}
+
+const CVCRM_EMAIL = resolveEmail();
+const CVCRM_TOKEN = resolveToken();
 
 function sendJson(res, status, data) {
   if (typeof res.setHeader === "function") {
@@ -39,10 +52,11 @@ function cvRequest(pathname, query) {
       path,
       method: "GET",
       headers: {
-        accept: "application/json",
+        Accept: "application/json",
         email: CVCRM_EMAIL,
         token: CVCRM_TOKEN,
-        host: CVCRM_HOST
+        Email: CVCRM_EMAIL,
+        Token: CVCRM_TOKEN
       }
     }, (res) => {
       const chunks = [];

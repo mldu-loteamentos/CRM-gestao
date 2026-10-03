@@ -249,6 +249,9 @@ const CompromissarioApp = {
               </button>
             </div>
           </div>
+          <p style="margin: 12px 0 0; font-size: 0.78rem; color: #475569; line-height: 1.45;">
+            A listagem separa o que aconteceu em cada empreendimento. Unidade distratada e vendida no mesmo mês vira um único movimento de <strong>Troca</strong> para a prefeitura. Contrato e destato já sobem do IntegrA/Sienge quando existirem.
+          </p>
           <p id="comp-cessao-gate-hint" style="display:none; margin: 12px 0 0; font-size: 0.8rem; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 8px 10px;"></p>
         </div>
 
@@ -279,6 +282,270 @@ const CompromissarioApp = {
       .replace(/\s+/g, ' ')
       .trim()
       .toUpperCase();
+  },
+
+  contractUnit(c) {
+    return (c && c.salesContractUnits && c.salesContractUnits[0]) || {};
+  },
+
+  unitPairKey(c) {
+    if (!c) return '';
+    const unit = this.contractUnit(c);
+    const emp = String(c.enterpriseId || '').trim();
+    const uid = String(unit.id || unit.unitId || '').trim();
+    const uname = this.normalizeUnitKey(unit.name || '');
+    if (!emp) return uid || uname;
+    return emp + '|' + (uid || uname);
+  },
+
+  customerNameOf(c) {
+    if (c && c.salesContractCustomers && c.salesContractCustomers.length) {
+      return c.salesContractCustomers[0].name || 'Cliente';
+    }
+    return 'Cliente';
+  },
+
+  unitNameOf(c) {
+    const unit = this.contractUnit(c);
+    return unit.name || (unit.id ? ('Unidade ' + unit.id) : '—');
+  },
+
+  enterpriseLabel(c) {
+    const id = c && c.enterpriseId != null ? String(c.enterpriseId) : '';
+    const name = String((c && c.enterpriseName) || '').trim();
+    if (id && name) return id + ' - ' + name;
+    return name || (id ? ('Emp: ' + id) : 'Sem empreendimento');
+  },
+
+  cityOfContract(c) {
+    const enterpriseName = (c && c.enterpriseName) || '';
+    return enterpriseName.includes(' - ')
+      ? enterpriseName.split(' - ')[0].trim().toUpperCase()
+      : String(enterpriseName || '').toUpperCase();
+  },
+
+  async fetchContractPages(pathBase) {
+    const all = [];
+    let offset = 0;
+    const limit = 200;
+    while (offset < 2000) {
+      const res = await siengeFetchWithRetry(pathBase + '&limit=' + limit + '&offset=' + offset).catch(() => ({ results: [] }));
+      const rows = (res && res.results) || [];
+      all.push.apply(all, rows);
+      if (rows.length < limit) break;
+      offset += limit;
+    }
+    return all;
+  },
+
+  buildMovements(vendas, distratos, monthPrefix) {
+    const sameMonthIssue = (d) => !!(d && d.issueDate && String(d.issueDate).startsWith(monthPrefix));
+    const destIds = new Set((distratos || []).map((d) => String(d.id)));
+    const destKeep = (distratos || []).filter((d) => !sameMonthIssue(d) && this.shouldNotifyContract(d));
+    const vendaKeep = (vendas || []).filter((v) => !destIds.has(String(v.id)) && this.shouldNotifyContract(v));
+
+    const vendaByUnit = new Map();
+    vendaKeep.forEach((v) => {
+      const k = this.unitPairKey(v);
+      if (!k) return;
+      if (!vendaByUnit.has(k)) vendaByUnit.set(k, []);
+      vendaByUnit.get(k).push(v);
+    });
+
+    const usedV = new Set();
+    const usedD = new Set();
+    const movements = [];
+
+    destKeep.forEach((d) => {
+      const k = this.unitPairKey(d);
+      const match = (vendaByUnit.get(k) || []).find((v) => !usedV.has(String(v.id)));
+      if (!match) return;
+      usedV.add(String(match.id));
+      usedD.add(String(d.id));
+      movements.push({
+        id: 'troca-' + d.id + '-' + match.id,
+        _movementType: 'Troca',
+        _operationType: 'Troca',
+        _venda: match,
+        _distrato: d,
+        enterpriseId: match.enterpriseId || d.enterpriseId,
+        enterpriseName: match.enterpriseName || d.enterpriseName,
+        companyName: match.companyName || d.companyName,
+        companyId: match.companyId || d.companyId,
+        salesContractUnits: match.salesContractUnits || d.salesContractUnits,
+        salesContractCustomers: match.salesContractCustomers
+      });
+    });
+
+    vendaKeep.forEach((v) => {
+      if (usedV.has(String(v.id))) return;
+      movements.push(Object.assign({}, v, {
+        _movementType: 'Venda',
+        _operationType: 'Venda',
+        _venda: v
+      }));
+    });
+    destKeep.forEach((d) => {
+      if (usedD.has(String(d.id))) return;
+      movements.push(Object.assign({}, d, {
+        _movementType: 'Distrato',
+        _operationType: 'Distrato',
+        _distrato: d
+      }));
+    });
+
+    movements.sort((a, b) => this.enterpriseLabel(a).localeCompare(this.enterpriseLabel(b), 'pt-BR')
+      || this.unitNameOf(a).localeCompare(this.unitNameOf(b), 'pt-BR', { numeric: true }));
+    return movements;
+  },
+
+  movementDocs(m) {
+    const docs = [];
+    if (m && m._distrato) docs.push({ kind: 'DISTRATO', contract: m._distrato, label: 'Distrato' });
+    if (m && m._venda) docs.push({ kind: 'CONTRATO', contract: m._venda, label: 'Contrato (venda)' });
+    if (!docs.length && m) {
+      docs.push({
+        kind: (m._operationType === 'Distrato' ? 'DISTRATO' : 'CONTRATO'),
+        contract: m,
+        label: m._operationType === 'Distrato' ? 'Distrato' : 'Contrato (venda)'
+      });
+    }
+    return docs;
+  },
+
+  downloadStoredFile(file, fallbackName) {
+    if (!file) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name || fallbackName || 'documento.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {}
+  },
+
+  downloadMovementFiles(m) {
+    this.movementDocs(m).forEach((doc) => {
+      const id = String((doc.contract && doc.contract.id) || '');
+      const f = id && this.state.files[id];
+      if (f) this.downloadStoredFile(f, (doc.kind || 'doc') + '-' + id + '.pdf');
+    });
+  },
+
+  cessaoBadgeHtml(c) {
+    const cessaoHist = this.findCessaoHistoryForContract(c);
+    if (!cessaoHist.length) return '';
+    const latest = cessaoHist[cessaoHist.length - 1];
+    const atuais = (latest.atuais && latest.atuais.length)
+      ? latest.atuais
+      : (latest.clients || []).filter((x) => x.atual);
+    const principal = latest.principal || atuais[0];
+    const secundarios = atuais.filter((x) => principal && String(x.id) !== String(principal.id));
+    const tipLines = cessaoHist.map((h) => {
+      const names = (h.clients || []).map((cl) => {
+        const marks = [cl.principal ? '(P)' : '', cl.atual ? '*' : ''].filter(Boolean).join('');
+        return `${cl.id ? cl.id + ' - ' : ''}${cl.name}${marks ? ' ' + marks : ''}`;
+      }).join(' / ');
+      return `${h.data || '—'} → ${names}`;
+    }).join(' | ');
+    return `
+      <div style="margin-top:6px;font-size:0.7rem;line-height:1.35;color:#6b21a8;background:#faf5ff;border:1px solid #e9d5ff;border-radius:4px;padding:4px 6px;" title="${this.escHtml(tipLines)}">
+        <strong>Cessão:</strong> ${cessaoHist.length} evento(s)
+        ${principal ? `<br>Atual (P*): ${this.escHtml((principal.id ? principal.id + ' - ' : '') + (principal.name || ''))}` : ''}
+        ${secundarios.length ? `<br>Secundário: ${this.escHtml(secundarios.map((s) => (s.id ? s.id + ' - ' : '') + s.name).join(', '))}` : ''}
+      </div>`;
+  },
+
+  renderDocDropzone(contractId, label) {
+    const id = String(contractId || '');
+    const fileLoaded = !!(id && this.state.files[id]);
+    const fromAnexos = !!(fileLoaded && this.state.files[id]._fromAnexos);
+    const fileName = fileLoaded
+      ? (fromAnexos ? `IntegrA: ${this.state.files[id].name}` : this.state.files[id].name)
+      : 'Buscando PDF / arraste aqui...';
+    const dropBorder = fileLoaded ? (fromAnexos ? '#0ea5e9' : '#10b981') : '#cbd5e1';
+    const dropBg = fileLoaded ? (fromAnexos ? '#f0f9ff' : '#ecfdf5') : '#f8fafc';
+    const dropColor = fileLoaded ? (fromAnexos ? '#0369a1' : '#047857') : '#64748b';
+    const dropIcon = fileLoaded ? (fromAnexos ? 'cloud-download' : 'check-circle') : 'upload-cloud';
+    return `
+      <div style="margin-bottom:6px;">
+        <div style="font-size:0.68rem;font-weight:700;color:#475569;margin-bottom:3px;text-transform:uppercase;letter-spacing:.02em;">${this.escHtml(label || 'Documento')}</div>
+        <div
+          id="comp-drop-${id}"
+          style="border: 1.5px dashed ${dropBorder}; background: ${dropBg}; border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; color: ${dropColor}; text-align: center; cursor: pointer; transition: all 0.2s;"
+          ondragover="CompromissarioApp.onDragOver(event, '${id}')"
+          ondragleave="CompromissarioApp.onDragLeave(event, '${id}')"
+          ondrop="CompromissarioApp.onDrop(event, '${id}')"
+          onclick="document.getElementById('comp-file-${id}').click()"
+        >
+          <i data-lucide="${dropIcon}" style="width: 14px; vertical-align: middle; margin-right: 4px;"></i>
+          ${this.escHtml(fileName)}
+        </div>
+        <input type="file" id="comp-file-${id}" style="display: none;" onchange="CompromissarioApp.onFileSelect(event, '${id}')">
+        ${fileLoaded ? `<button type="button" onclick="event.stopPropagation();CompromissarioApp.downloadStoredFile(CompromissarioApp.state.files['${id}'])" style="margin-top:4px;border:none;background:transparent;color:#0369a1;font-size:0.7rem;font-weight:600;cursor:pointer;padding:0;">Abrir PDF</button>` : ''}
+      </div>`;
+  },
+
+  renderMovementRow(c, cityName, configs) {
+    const id = c.id || '--';
+    const opType = c._movementType || c._operationType || 'Desconhecido';
+    const badgeMap = {
+      Troca: { color: '#7c3aed', bg: '#f5f3ff' },
+      Venda: { color: '#10b981', bg: '#ecfdf5' },
+      Distrato: { color: '#f43f5e', bg: '#fff1f2' }
+    };
+    const badge = badgeMap[opType] || { color: '#64748b', bg: '#f1f5f9' };
+    const dest = c._distrato;
+    const venda = c._venda;
+    const companyName = c.companyName || '';
+    const unitInfo = this.unitNameOf(c);
+    let buyerHtml = this.escHtml(this.customerNameOf(c));
+    let idHtml = this.escHtml(String(id));
+    if (opType === 'Troca') {
+      const oldName = this.customerNameOf(dest);
+      const newName = this.customerNameOf(venda);
+      idHtml = `${dest && dest.id ? '#' + dest.id : '—'} → ${venda && venda.id ? '#' + venda.id : '—'}`;
+      buyerHtml = `
+        <div style="font-size:0.78rem;color:#64748b;">Anterior</div>
+        <div style="font-weight:600;color:#334155;">${this.escHtml(oldName)}</div>
+        <div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Novo</div>
+        <div style="font-weight:600;color:#334155;">${this.escHtml(newName)}</div>`;
+    }
+    const docsHtml = this.movementDocs(c).map((doc) => this.renderDocDropzone(doc.contract && doc.contract.id, doc.label)).join('');
+    const cityCfg = configs[this.normalizeCityKey(cityName)] || {};
+    return `
+      <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.1s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
+        <td style="padding: 12px 15px; font-weight: 600; color: #1e293b;">
+          ${idHtml}
+          <div style="margin-top: 4px;">
+            <span style="font-size: 0.7rem; font-weight: 700; background: ${badge.bg}; color: ${badge.color}; padding: 2px 6px; border-radius: 4px; border: 1px solid ${badge.color}33; display: inline-block;">${opType}</span>
+          </div>
+          ${this.cessaoBadgeHtml(c)}
+        </td>
+        <td style="padding: 12px 15px; color: #334155;">${buyerHtml}</td>
+        <td style="padding: 12px 15px; color: #475569; font-size: 0.8rem;">
+          <span style="color: #64748b;">${this.escHtml(companyName)}</span><br>
+          <strong style="color: #0f172a;">${this.escHtml(unitInfo)}</strong>
+        </td>
+        <td style="padding: 12px 15px;">${docsHtml}</td>
+        <td style="padding: 12px 15px; text-align: center; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: center; height: 100%;">
+          ${cityCfg.agrupar ? `
+            <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;"><i data-lucide="layers" style="width: 12px;"></i> Agrupado</span>
+          ` : `
+            <button onclick="CompromissarioApp.sendEmail('${id}')" style="background: ${this.state.notifiedContracts[id] ? '#f1f5f9' : '#e0f2fe'}; color: ${this.state.notifiedContracts[id] ? '#64748b' : '#0284c7'}; border: 1px solid ${this.state.notifiedContracts[id] ? '#cbd5e1' : '#bae6fd'}; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="${this.state.notifiedContracts[id] ? 'Comunicação já realizada' : 'Iniciar Comunicação'}">
+              <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : (cityCfg.hasPortal ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : (cityCfg.hasPortal ? 'Portal' : 'Notificar')}
+            </button>
+          `}
+          ${cityCfg.reqEspecial ? `
+            <button onclick="CompromissarioApp.generateRequirement('${id}')" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="Gerar Documento de Requerimento Especial">
+              <i data-lucide="file-text" style="width: 14px;"></i> Requerimento
+            </button>
+          ` : ''}
+        </td>
+      </tr>`;
   },
 
   getActivePortfolioCompanies() {
@@ -698,15 +965,22 @@ const CompromissarioApp = {
 
   findCessaoHistoryForContract(contract) {
     if (!contract) return [];
-    const titulo = String(contract.id || '').trim();
-    if (!titulo) return [];
+    const ids = new Set();
+    const addId = (c) => {
+      const raw = c && c.id != null ? String(c.id).trim() : '';
+      if (raw && !raw.startsWith('troca-')) ids.add(raw);
+    };
+    addId(contract);
+    addId(contract._venda);
+    addId(contract._distrato);
+    if (!ids.size) return [];
     const companyId = contract.companyId != null ? String(contract.companyId) : null;
     const all = [];
     Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
       if (row.status !== 'has' || !Array.isArray(row.records)) return;
       if (companyId && cid !== companyId) return;
       row.records.forEach((rec) => {
-        if (String(rec.titulo) === titulo) all.push(rec);
+        if (ids.has(String(rec.titulo))) all.push(rec);
       });
     });
     // Ordena por data DD/MM/YYYY se possível
@@ -778,46 +1052,21 @@ const CompromissarioApp = {
     this.state.loading = true;
 
     try {
-      // Endpoint 1: Vendas do mês
-      const endpointVendas = `/sales-contracts?limit=200&offset=0&situation=2&initialIssueDate=${firstDay}&finalIssueDate=${finalDay}`;
-      // Endpoint 2: Distratos do mês
-      const endpointDistratos = `/sales-contracts?limit=200&offset=0&situation=3&initialCancelDate=${firstDay}&finalCancelDate=${finalDay}`;
-
-      const [resVendas, resDistratos] = await Promise.all([
-        siengeFetchWithRetry(endpointVendas).catch(() => ({ results: [] })),
-        siengeFetchWithRetry(endpointDistratos).catch(() => ({ results: [] }))
+      const [vendas, distratos] = await Promise.all([
+        this.fetchContractPages(`/sales-contracts?situation=2&initialIssueDate=${firstDay}&finalIssueDate=${finalDay}`),
+        this.fetchContractPages(`/sales-contracts?situation=3&initialCancelDate=${firstDay}&finalCancelDate=${finalDay}`)
       ]);
 
-      let vendas = resVendas.results || [];
-      let distratos = resDistratos.results || [];
+      vendas.forEach((v) => { v._operationType = 'Venda'; });
+      distratos.forEach((d) => { d._operationType = 'Distrato'; });
 
-      // Marca o tipo em cada um
-      vendas.forEach(v => v._operationType = 'Venda');
-      distratos.forEach(d => d._operationType = 'Distrato');
-
-      // Cruzamento: remover contratos que foram emitidos e distratados no mesmo mês
-      const currentMonthPrefix = monthVal; // YYYY-MM
-      
-      const distratosValidos = distratos.filter(d => {
-        // Se a data de emissão também for do mesmo mês do distrato, ignora
-        if (d.issueDate && d.issueDate.startsWith(currentMonthPrefix)) {
-          return false;
-        }
-        return true;
-      });
-
-      // Se por algum motivo o distratado do mês aparecer nas vendas (improvável por causa da situation=2), removemos também
-      const distratadosIds = new Set(distratos.map(d => d.id));
-      const vendasValidas = vendas.filter(v => !distratadosIds.has(v.id));
-
-      let mergedResults = [...vendasValidas, ...distratosValidos];
-
-      const beforeFilter = mergedResults.length;
-      mergedResults = mergedResults.filter((c) => this.shouldNotifyContract(c));
-      const skippedIncorp = beforeFilter - mergedResults.length;
-      this.state._skippedIncorporacao = skippedIncorp;
-
-      this.state.contracts = mergedResults;
+      const destIds = new Set(distratos.map((d) => String(d.id)));
+      const destRaw = distratos.filter((d) => !(d && d.issueDate && String(d.issueDate).startsWith(monthVal)));
+      const vendaRaw = vendas.filter((v) => !destIds.has(String(v.id)));
+      this.state._skippedIncorporacao = destRaw.filter((d) => !this.shouldNotifyContract(d)).length
+        + vendaRaw.filter((v) => !this.shouldNotifyContract(v)).length;
+      const movements = this.buildMovements(vendas, distratos, monthVal);
+      this.state.contracts = movements;
 
       this.renderTable();
       this.hydrateTermosFromAnexos().catch((e) => console.warn('[Compromissario] hydrate termos', e));
@@ -832,7 +1081,7 @@ const CompromissarioApp = {
     }
   },
 
-  /** Baixa CONTRATO/DISTRATO já enviados pelo Assistente de Anexos (unidade no Sienge). */
+  /** Baixa CONTRATO/DISTRATO já enviados pelo Assistente / IntegrA (unidade e contrato no Sienge). */
   async hydrateTermosFromAnexos() {
     const list = this.state.contracts || [];
     if (!list.length) return;
@@ -841,22 +1090,28 @@ const CompromissarioApp = {
       console.warn('[Compromissario] anexosFetchTermoBlobForContract indisponível');
       return;
     }
+    const jobs = [];
+    list.forEach((m) => {
+      this.movementDocs(m).forEach((doc) => {
+        const id = String((doc.contract && doc.contract.id) || '');
+        if (!id || this.state.files[id]) return;
+        const payload = Object.assign({}, doc.contract, { _operationType: doc.kind === 'DISTRATO' ? 'Distrato' : 'Venda' });
+        jobs.push({ id, payload });
+      });
+    });
     const concurrency = 3;
     let i = 0;
     const run = async () => {
-      while (i < list.length) {
-        const idx = i++;
-        const c = list[idx];
-        const id = String(c.id || '');
-        if (!id || this.state.files[id]) continue;
+      while (i < jobs.length) {
+        const job = jobs[i++];
         try {
-          const file = await fetchFn(c);
+          const file = await fetchFn(job.payload);
           if (file) {
             file._fromAnexos = true;
-            this.state.files[id] = file;
+            this.state.files[job.id] = file;
           }
         } catch (e) {
-          console.warn('[Compromissario] termo', id, e);
+          console.warn('[Compromissario] termo', job.id, e);
         }
       }
     };
@@ -880,21 +1135,21 @@ const CompromissarioApp = {
       return;
     }
 
-    countLabel.textContent = `${this.state.contracts.length} encontrados`;
+    countLabel.textContent = `${this.state.contracts.length} movimento(s)`;
     const skipped = Number(this.state._skippedIncorporacao) || 0;
 
-    // Agrupar por Cidade (parte antes do ' - ' no enterpriseName)
     const groups = {};
     let configs = this.loadConfigs();
 
     let configsChanged = false;
 
     this.state.contracts.forEach(c => {
-      const enterpriseName = c.enterpriseName || `Emp: ${c.enterpriseId}`;
-      const cityName = enterpriseName.includes(' - ') ? enterpriseName.split(' - ')[0].trim().toUpperCase() : enterpriseName.toUpperCase();
+      const cityName = this.cityOfContract(c) || 'SEM CIDADE';
       const cityKey = this.normalizeCityKey(cityName);
-      if (!groups[cityName]) groups[cityName] = [];
-      groups[cityName].push(c);
+      const empLabel = this.enterpriseLabel(c);
+      if (!groups[cityName]) groups[cityName] = {};
+      if (!groups[cityName][empLabel]) groups[cityName][empLabel] = [];
+      groups[cityName][empLabel].push(c);
       
       // Auto-ativar cidade se ela aparecer na busca
       if (!configs[cityKey]) {
@@ -941,7 +1196,9 @@ const CompromissarioApp = {
     }
 
     Object.keys(groups).sort().forEach(cityName => {
-      const groupContracts = groups[cityName];
+      const empMap = groups[cityName] || {};
+      const empLabels = Object.keys(empMap).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      const groupContracts = empLabels.reduce((acc, k) => acc.concat(empMap[k]), []);
       const accId = 'acc-' + cityName.replace(/[^a-zA-Z0-9]/g, '');
       const isOpen = this.state.openAccordions.has(accId);
       const isMissingEmail = missingEmails.includes(cityName);
@@ -953,7 +1210,7 @@ const CompromissarioApp = {
               <i data-lucide="${isMissingEmail ? 'alert-circle' : 'building-2'}" style="width: 16px; color: ${isMissingEmail ? '#ef4444' : '#105436'};"></i> ${cityName}
             </h4>
             <div style="display: flex; align-items: center; gap: 10px;">
-              <span style="font-size: 0.75rem; background: ${isMissingEmail ? '#fecaca' : '#e2e8f0'}; color: ${isMissingEmail ? '#991b1b' : '#475569'}; padding: 3px 8px; border-radius: 12px; font-weight: 600;">${groupContracts.length} contratos</span>
+              <span style="font-size: 0.75rem; background: ${isMissingEmail ? '#fecaca' : '#e2e8f0'}; color: ${isMissingEmail ? '#991b1b' : '#475569'}; padding: 3px 8px; border-radius: 12px; font-weight: 600;">${groupContracts.length} movimento(s) · ${empLabels.length} emp.</span>
               <i data-lucide="chevron-down" style="width: 16px; color: #94a3b8; transition: transform 0.2s; transform: rotate(${isOpen ? '0deg' : '-90deg'});" id="icon-${accId}"></i>
             </div>
           </div>
@@ -966,120 +1223,37 @@ const CompromissarioApp = {
                 </button>
               </div>
             ` : ''}
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-              <thead>
-                <tr style="background: #fff; border-bottom: 1px solid #e2e8f0;">
-                  <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Contrato</th>
-                  <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Comprador</th>
-                  <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Empresa / Unidade</th>
-                  <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600; width: 250px;">Documento / Termo</th>
-                  <th style="padding: 10px 15px; text-align: center; color: #64748b; font-weight: 600; width: 120px;">Ação</th>
-                </tr>
-              </thead>
-              <tbody>
       `;
 
-      html += groupContracts.map(c => {
-        const id = c.id || '--';
-        
-        let customerName = 'Cliente Indisponível';
-        if (c.salesContractCustomers && c.salesContractCustomers.length > 0) {
-          customerName = c.salesContractCustomers[0].name || customerName;
-        }
-
-        const companyName = c.companyName || '';
-        
-        let unitInfo = '';
-        if (c.salesContractUnits && c.salesContractUnits.length > 0) {
-          unitInfo = c.salesContractUnits[0].name || `Unidade ${c.salesContractUnits[0].id || '--'}`;
-        }
-
-        const fileLoaded = this.state.files[id] ? true : false;
-        const fromAnexos = !!(fileLoaded && this.state.files[id]._fromAnexos);
-        const fileName = fileLoaded
-          ? (fromAnexos ? `Assistente: ${this.state.files[id].name}` : this.state.files[id].name)
-          : 'Buscando do Assistente / arraste o termo...';
-
-        const opType = c._operationType || 'Desconhecido';
-        const badgeColor = opType === 'Venda' ? '#10b981' : '#f43f5e';
-        const badgeBg = opType === 'Venda' ? '#ecfdf5' : '#fff1f2';
-        const dropBorder = fileLoaded ? (fromAnexos ? '#0ea5e9' : '#10b981') : '#cbd5e1';
-        const dropBg = fileLoaded ? (fromAnexos ? '#f0f9ff' : '#ecfdf5') : '#f8fafc';
-        const dropColor = fileLoaded ? (fromAnexos ? '#0369a1' : '#047857') : '#64748b';
-        const dropIcon = fileLoaded ? (fromAnexos ? 'cloud-download' : 'check-circle') : 'upload-cloud';
-        const cessaoHist = this.findCessaoHistoryForContract(c);
-        let cessaoBadge = '';
-        if (cessaoHist.length) {
-          const latest = cessaoHist[cessaoHist.length - 1];
-          const atuais = (latest.atuais && latest.atuais.length)
-            ? latest.atuais
-            : (latest.clients || []).filter((x) => x.atual);
-          const principal = latest.principal || atuais[0];
-          const secundarios = atuais.filter((x) => principal && String(x.id) !== String(principal.id));
-          const tipLines = cessaoHist.map((h) => {
-            const names = (h.clients || []).map((cl) => {
-              const marks = [cl.principal ? '(P)' : '', cl.atual ? '*' : ''].filter(Boolean).join('');
-              return `${cl.id ? cl.id + ' - ' : ''}${cl.name}${marks ? ' ' + marks : ''}`;
-            }).join(' / ');
-            return `${h.data || '—'} → ${names}`;
-          }).join(' | ');
-          cessaoBadge = `
-            <div style="margin-top:6px;font-size:0.7rem;line-height:1.35;color:#6b21a8;background:#faf5ff;border:1px solid #e9d5ff;border-radius:4px;padding:4px 6px;" title="${this.escHtml(tipLines)}">
-              <strong>Cessão:</strong> ${cessaoHist.length} evento(s)
-              ${principal ? `<br>Atual (P*): ${this.escHtml((principal.id ? principal.id + ' - ' : '') + (principal.name || ''))}` : ''}
-              ${secundarios.length ? `<br>Secundário: ${this.escHtml(secundarios.map((s) => (s.id ? s.id + ' - ' : '') + s.name).join(', '))}` : ''}
-            </div>`;
-        }
-
-        return `
-          <tr style="border-bottom: 1px solid #f0f0f0; transition: background 0.1s;" onmouseover="this.style.backgroundColor='#f8fafc'" onmouseout="this.style.backgroundColor='transparent'">
-            <td style="padding: 12px 15px; font-weight: 600; color: #1e293b;">
-              ${id}
-              <div style="margin-top: 4px;">
-                <span style="font-size: 0.7rem; font-weight: 700; background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; border: 1px solid ${badgeColor}33; display: inline-block;">${opType}</span>
-              </div>
-              ${cessaoBadge}
-            </td>
-            <td style="padding: 12px 15px; color: #334155;">${customerName}</td>
-            <td style="padding: 12px 15px; color: #475569; font-size: 0.8rem;">
-              <span style="color: #64748b;">${companyName}</span><br>
-              <strong style="color: #0f172a;">${unitInfo}</strong>
-            </td>
-            <td style="padding: 12px 15px;">
-              <div 
-                id="comp-drop-${id}"
-                style="border: 1.5px dashed ${dropBorder}; background: ${dropBg}; border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; color: ${dropColor}; text-align: center; cursor: pointer; transition: all 0.2s;"
-                ondragover="CompromissarioApp.onDragOver(event, '${id}')"
-                ondragleave="CompromissarioApp.onDragLeave(event, '${id}')"
-                ondrop="CompromissarioApp.onDrop(event, '${id}')"
-                onclick="document.getElementById('comp-file-${id}').click()"
-              >
-                <i data-lucide="${dropIcon}" style="width: 14px; vertical-align: middle; margin-right: 4px;"></i>
-                ${fileName}
-              </div>
-              <input type="file" id="comp-file-${id}" style="display: none;" onchange="CompromissarioApp.onFileSelect(event, '${id}')">
-            </td>
-            <td style="padding: 12px 15px; text-align: center; display: flex; flex-direction: column; gap: 6px; justify-content: center; align-items: center; height: 100%;">
-              ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].agrupar) ? `
-                <span style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;"><i data-lucide="layers" style="width: 12px;"></i> Agrupado</span>
-              ` : `
-                <button onclick="CompromissarioApp.sendEmail('${id}')" style="background: ${this.state.notifiedContracts[id] ? '#f1f5f9' : '#e0f2fe'}; color: ${this.state.notifiedContracts[id] ? '#64748b' : '#0284c7'}; border: 1px solid ${this.state.notifiedContracts[id] ? '#cbd5e1' : '#bae6fd'}; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="${this.state.notifiedContracts[id] ? 'Comunicação já realizada' : 'Iniciar Comunicação'}">
-                  <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : ((configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : ((configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].hasPortal) ? 'Portal' : 'Notificar')}
-                </button>
-              `}
-              ${(configs[this.normalizeCityKey(cityName)] && configs[this.normalizeCityKey(cityName)].reqEspecial) ? `
-                <button onclick="CompromissarioApp.generateRequirement('${id}')" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="Gerar Documento de Requerimento Especial">
-                  <i data-lucide="file-text" style="width: 14px;"></i> Requerimento
-                </button>
-              ` : ''}
-            </td>
-          </tr>
+      empLabels.forEach((empLabel) => {
+        const empRows = empMap[empLabel] || [];
+        const trocaN = empRows.filter((m) => m._movementType === 'Troca').length;
+        html += `
+          <div style="padding: 10px 15px 8px; background: #f1f5f9; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div style="font-size: 0.82rem; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+              <i data-lucide="map-pin" style="width: 14px; color: #105436;"></i>
+              ${this.escHtml(empLabel)}
+            </div>
+            <span style="font-size: 0.72rem; color: #475569; font-weight: 600;">${empRows.length} movimento(s)${trocaN ? ` · ${trocaN} troca(s)` : ''}</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+              <tr style="background: #fff; border-bottom: 1px solid #e2e8f0;">
+                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Contrato</th>
+                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Comprador</th>
+                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600;">Empresa / Unidade</th>
+                <th style="padding: 10px 15px; text-align: left; color: #64748b; font-weight: 600; width: 250px;">Documento / Termo</th>
+                <th style="padding: 10px 15px; text-align: center; color: #64748b; font-weight: 600; width: 120px;">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${empRows.map((c) => this.renderMovementRow(c, cityName, configs)).join('')}
+            </tbody>
+          </table>
         `;
-      }).join('');
+      });
 
       html += `
-              </tbody>
-            </table>
           </div>
         </div>
       `;
@@ -1280,21 +1454,19 @@ const CompromissarioApp = {
       }
     }
 
-    const opType = c._operationType || 'Venda';
-    const operationName = opType === 'Venda' ? 'Venda Emitida (o lote saiu da empresa para o cliente)' : 'Distrato Realizado (o lote saiu do cliente para a empresa)';
+    const opType = c._movementType || c._operationType || 'Venda';
+    const dest = c._distrato;
+    const venda = c._venda;
+    let operationName = 'Venda Emitida (o lote saiu da empresa para o cliente)';
+    if (opType === 'Distrato') operationName = 'Distrato Realizado (o lote saiu do cliente para a empresa)';
+    if (opType === 'Troca') operationName = 'Troca de Compromissário (unidade distratada e vendida no mesmo mês)';
 
-    let customerName = 'Cliente';
-    if (c.salesContractCustomers && c.salesContractCustomers.length > 0) {
-      customerName = c.salesContractCustomers[0].name || customerName;
-    }
-    
-    const enterpriseName = c.enterpriseName || '';
-    const cityName = enterpriseName.includes(' - ') ? enterpriseName.split(' - ')[0].trim().toUpperCase() : enterpriseName.toUpperCase();
-    
-    let unitId = '';
-    if (c.salesContractUnits && c.salesContractUnits.length > 0) {
-      unitId = c.salesContractUnits[0].name || `Unidade ${c.salesContractUnits[0].id || ''}`;
-    }
+    const customerName = this.customerNameOf(c);
+    const oldName = dest ? this.customerNameOf(dest) : '';
+    const newName = venda ? this.customerNameOf(venda) : customerName;
+    const enterpriseName = this.enterpriseLabel(c);
+    const cityName = this.cityOfContract(c);
+    const unitId = this.unitNameOf(c);
 
     const configs = this.loadConfigs();
     const cityKey = this.normalizeCityKey(cityName);
@@ -1309,29 +1481,26 @@ const CompromissarioApp = {
     body += `Detalhes:%0D%0A`;
     body += `- Empreendimento: ${enterpriseName}%0D%0A`;
     body += `- Unidade: ${unitId}%0D%0A`;
-    body += `- Cliente Envolvido: ${customerName}%0D%0A%0D%0A`;
+    if (opType === 'Troca') {
+      body += `- Contrato destato: ${dest && dest.id ? dest.id : '—'}%0D%0A`;
+      body += `- Contrato venda: ${venda && venda.id ? venda.id : '—'}%0D%0A`;
+      body += `- Cliente anterior: ${oldName}%0D%0A`;
+      body += `- Cliente novo: ${newName}%0D%0A%0D%0A`;
+    } else {
+      body += `- Contrato: ${venda && venda.id ? venda.id : (dest && dest.id ? dest.id : id)}%0D%0A`;
+      body += `- Cliente envolvido: ${customerName}%0D%0A%0D%0A`;
+    }
     body += `Segue(m) anexo(s) o(s) documento(s) necessário(s).`;
 
     // Trigger action
     if (cityConfig.hasPortal && cityConfig.portalUrl) {
       let msg = `ATENÇÃO OPERADOR:\n\nEsta prefeitura exige protocolo diretamente no site.\nUma nova aba será aberta agora.\n\nLogin: ${cityConfig.portalLogin || 'Não configurado'}\nSenha: ${cityConfig.portalSenha || 'Não configurado'}`;
-      if (this.state.files[id]) msg += `\n\nO termo do Assistente/Sienge será baixado para você anexar no portal.`;
+      if (this.movementDocs(c).some((d) => this.state.files[String(d.contract && d.contract.id)])) {
+        msg += `\n\nO(s) PDF(s) do IntegrA/Sienge serão baixados para você anexar no portal.`;
+      }
       if (hasSpecialReq) msg += `\n\n⚠️ ALERTA IMPORTANTE ⚠️\nA prefeitura de ${cityName} exige um REQUERIMENTO ESPECIAL. Lembre-se de gerar e anexar.`;
       alert(msg);
-
-      if (this.state.files[id]) {
-        try {
-          const f = this.state.files[id];
-          const url = URL.createObjectURL(f);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = f.name || `termo-${id}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 2000);
-        } catch (e) {}
-      }
+      this.downloadMovementFiles(c);
       
       this.state.notifiedContracts[id] = true;
       localStorage.setItem('crm_compromissario_notified', JSON.stringify(this.state.notifiedContracts));
@@ -1341,30 +1510,16 @@ const CompromissarioApp = {
       return;
     }
 
-    let alertMsg = this.state.files[id]
-      ? `ATENÇÃO OPERADOR:\n\nO termo já foi carregado do Assistente/Sienge e será baixado agora. Anexe esse arquivo no rascunho de e-mail.`
+    const hasPdf = this.movementDocs(c).some((d) => this.state.files[String(d.contract && d.contract.id)]);
+    let alertMsg = hasPdf
+      ? `ATENÇÃO OPERADOR:\n\nO(s) PDF(s) já foram carregados do IntegrA/Sienge e serão baixados agora. Anexe no rascunho de e-mail.`
       : `ATENÇÃO OPERADOR:\n\nUm rascunho de e-mail será aberto agora. Não se esqueça de anexar manualmente o arquivo da listagem.`;
     if (hasSpecialReq) {
       alertMsg += `\n\n⚠️ ALERTA IMPORTANTE ⚠️\nA prefeitura de ${cityName} exige um REQUERIMENTO ESPECIAL. Verifique se ele está preenchido e assinado corretamente antes de enviar.`;
     }
 
     alert(alertMsg);
-
-    if (this.state.files[id]) {
-      try {
-        const f = this.state.files[id];
-        const url = URL.createObjectURL(f);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = f.name || `termo-${id}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-      } catch (e) {
-        console.warn('[Compromissario] download termo', e);
-      }
-    }
+    this.downloadMovementFiles(c);
 
     // Save state
     this.state.notifiedContracts[id] = true;
@@ -1380,19 +1535,17 @@ const CompromissarioApp = {
     const c = this.state.contracts.find(x => String(x.id) === String(id));
     if (!c) return;
 
-    let customerName = 'Cliente';
-    if (c.salesContractCustomers && c.salesContractCustomers.length > 0) {
-      customerName = c.salesContractCustomers[0].name || customerName;
+    const dest = c._distrato;
+    const venda = c._venda;
+    const opType = c._movementType || c._operationType || 'Venda';
+    let customerName = this.customerNameOf(c);
+    if (opType === 'Troca') {
+      customerName = `${this.customerNameOf(dest)} → ${this.customerNameOf(venda)}`;
     }
 
     const enterpriseName = c.companyName || 'MOURA LEITE DESENVOLVIMENTO E URBANIZACAO LTDA';
-    const originalEnterpriseName = c.enterpriseName || '';
-    const cityName = originalEnterpriseName.includes(' - ') ? originalEnterpriseName.split(' - ')[0].trim().toUpperCase() : originalEnterpriseName.toUpperCase();
-    
-    let unitId = '';
-    if (c.salesContractUnits && c.salesContractUnits.length > 0) {
-      unitId = c.salesContractUnits[0].name || `Unidade ${c.salesContractUnits[0].id || ''}`;
-    }
+    const cityName = this.cityOfContract(c);
+    const unitId = this.unitNameOf(c);
 
     const today = new Date();
     const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -1423,8 +1576,9 @@ Botucatu, [DATA]
 `;
 
     let template = cityConfig.template || defaultTemplate;
-    const opType = c._operationType || 'Venda';
-    const textOp = opType === 'Venda' ? 'VENDA EMITIDA (o lote saiu da empresa para o cliente)' : 'DISTRATO REALIZADO (o lote saiu do cliente para a empresa)';
+    let textOp = 'VENDA EMITIDA (o lote saiu da empresa para o cliente)';
+    if (opType === 'Distrato') textOp = 'DISTRATO REALIZADO (o lote saiu do cliente para a empresa)';
+    if (opType === 'Troca') textOp = 'TROCA DE COMPROMISSÁRIO (distrato e nova venda no mesmo mês)';
 
     const finalTemplate = template
       .replace(/\[EMPRESA\]/g, enterpriseName.toUpperCase())
@@ -1446,7 +1600,12 @@ Botucatu, [DATA]
           </div>
           <div style="padding: 20px; overflow-y: auto; flex: 1;">
             <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">Revise e ajuste o texto se necessário antes de copiar para o seu documento oficial.</p>
-            <textarea id="comp-req-text" style="width: 100%; height: 400px; padding: 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: 'Times New Roman', serif; font-size: 1rem; resize: vertical; line-height: 1.5;">${template}</textarea>
+            <textarea id="comp-req-text" style="width: 100%; height: 400px; padding: 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: 'Times New Roman', serif; font-size: 1rem; resize: vertical; line-height: 1.5;">${template
+      .replace(/\[EMPRESA\]/g, enterpriseName.toUpperCase())
+      .replace(/\[UNIDADE\]/g, unitId)
+      .replace(/\[COMPRADOR\]/g, customerName.toUpperCase())
+      .replace(/\[DATA\]/g, dateStr)
+      .replace(/\[TIPO_OPERACAO\]/g, textOp)}</textarea>
           </div>
           <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; text-align: right; background: #f8fafc; border-radius: 0 0 8px 8px; display: flex; justify-content: flex-end; gap: 10px;">
             <button onclick="CompromissarioApp.copyRequirement()" style="padding: 8px 20px; background: #10b981; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px;">
@@ -1472,31 +1631,22 @@ Botucatu, [DATA]
   sendGroupedEmail(cityName) {
     if (!this.assertCessaoGate('notificar vendas/distratos em lote')) return;
     const cityKey = this.normalizeCityKey(cityName);
-    const groupContracts = this.state.contracts.filter(c => {
-      const entName = c.enterpriseName || '';
-      const cName = entName.includes(' - ') ? entName.split(' - ')[0].trim().toUpperCase() : entName.toUpperCase();
-      return this.normalizeCityKey(cName) === cityKey;
-    });
+    const groupContracts = this.state.contracts.filter(c => this.normalizeCityKey(this.cityOfContract(c)) === cityKey);
 
     if (groupContracts.length === 0) return;
 
-    // Build CSV Content
-    let csvContent = "data:text/csv;charset=utf-8,%EF%BB%BF"; // BOM for excel
-    csvContent += "Contrato;Comprador;Empresa;Unidade\n";
+    let csvContent = "data:text/csv;charset=utf-8,%EF%BB%BF";
+    csvContent += "Tipo;Empreendimento;Contrato destato;Contrato venda;Comprador anterior;Comprador novo;Empresa;Unidade\n";
 
     groupContracts.forEach(c => {
-      let customerName = 'Cliente';
-      if (c.salesContractCustomers && c.salesContractCustomers.length > 0) {
-        customerName = c.salesContractCustomers[0].name || customerName;
-      }
-      const companyName = c.companyName || '';
-      let unitId = '';
-      if (c.salesContractUnits && c.salesContractUnits.length > 0) {
-        unitId = c.salesContractUnits[0].name || c.salesContractUnits[0].id || '';
-      }
-      csvContent += `${c.id};${customerName};${companyName};${unitId}\n`;
-      
-      // Mark as notified visually
+      const tipo = c._movementType || c._operationType || '';
+      const dest = c._distrato;
+      const venda = c._venda;
+      const destId = dest && dest.id ? dest.id : (tipo === 'Distrato' ? c.id : '');
+      const vendaId = venda && venda.id ? venda.id : (tipo === 'Venda' ? c.id : '');
+      const oldName = dest ? this.customerNameOf(dest) : (tipo === 'Distrato' ? this.customerNameOf(c) : '');
+      const newName = venda ? this.customerNameOf(venda) : (tipo === 'Venda' ? this.customerNameOf(c) : '');
+      csvContent += `${tipo};${this.enterpriseLabel(c)};${destId};${vendaId};${oldName};${newName};${c.companyName || ''};${this.unitNameOf(c)}\n`;
       this.state.notifiedContracts[c.id] = true;
     });
     
@@ -1518,12 +1668,14 @@ Botucatu, [DATA]
     const defaultEmail = cityConfig.email || '';
     const hasSpecialReq = cityConfig.reqEspecial;
 
-    const hasVendas = groupContracts.some(c => c._operationType === 'Venda');
-    const hasDistratos = groupContracts.some(c => c._operationType === 'Distrato');
-    let operationName = '';
-    if (hasVendas && hasDistratos) operationName = 'Vendas Emitidas e Distratos Realizados';
-    else if (hasVendas) operationName = 'Vendas Emitidas (lotes saindo da empresa para clientes)';
-    else operationName = 'Distratos Realizados (lotes retornando dos clientes para a empresa)';
+    const hasTroca = groupContracts.some(c => c._movementType === 'Troca');
+    const hasVendas = groupContracts.some(c => (c._movementType || c._operationType) === 'Venda');
+    const hasDistratos = groupContracts.some(c => (c._movementType || c._operationType) === 'Distrato');
+    const parts = [];
+    if (hasTroca) parts.push('Trocas de Compromissário (distrato + venda no mesmo mês)');
+    if (hasVendas) parts.push('Vendas Emitidas');
+    if (hasDistratos) parts.push('Distratos Realizados');
+    const operationName = parts.join(', ') || 'alterações de compromissário';
 
     const subject = `Troca de Compromissários - Lote ${cityName}`;
     
@@ -1532,15 +1684,17 @@ Botucatu, [DATA]
     body += `Os detalhes de todos os contratos, lotes e clientes envolvidos encontram-se na planilha anexa, junto com a documentação em PDF de cada contrato.%0D%0A%0D%0A`;
 
     // Trigger action
+    groupContracts.forEach((m) => this.downloadMovementFiles(m));
+
     if (cityConfig.hasPortal && cityConfig.portalUrl) {
-      let msg = `ATENÇÃO OPERADOR:\n\nEsta prefeitura exige protocolo diretamente no site.\nUma planilha foi baixada no seu computador.\nUma nova aba do portal será aberta agora.\n\nLogin: ${cityConfig.portalLogin || 'Não configurado'}\nSenha: ${cityConfig.portalSenha || 'Não configurado'}`;
+      let msg = `ATENÇÃO OPERADOR:\n\nEsta prefeitura exige protocolo diretamente no site.\nUma planilha e os PDFs já encontrados no IntegrA/Sienge foram baixados.\nUma nova aba do portal será aberta agora.\n\nLogin: ${cityConfig.portalLogin || 'Não configurado'}\nSenha: ${cityConfig.portalSenha || 'Não configurado'}`;
       if (hasSpecialReq) msg += `\n\nLembre-se de gerar e anexar os requerimentos no site!`;
       alert(msg);
       window.open(cityConfig.portalUrl, '_blank');
       return;
     }
 
-    let alertMsg = `ATENÇÃO OPERADOR:\n\nUma planilha com ${groupContracts.length} contratos foi baixada no seu computador.\nO rascunho de e-mail será aberto agora. NÃO SE ESQUEÇA de arrastar a planilha E todos os termos de distrato para dentro dele!`;
+    let alertMsg = `ATENÇÃO OPERADOR:\n\nUma planilha com ${groupContracts.length} movimento(s) foi baixada, junto com os PDFs já encontrados no IntegrA/Sienge.\nO rascunho de e-mail será aberto agora. Anexe a planilha e os PDFs.`;
     if (hasSpecialReq) {
       alertMsg += `\n\n⚠️ ALERTA IMPORTANTE ⚠️\nA prefeitura de ${cityName} exige REQUERIMENTOS ESPECIAIS. Gere e anexe também os requerimentos.`;
     }
