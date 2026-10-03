@@ -276,8 +276,11 @@ const CompromissarioApp = {
     if (!root) return;
 
     if (!this.state.cessaoMonth && !this.state.searchMonth) {
-      const working = this.getCessaoWorkingMonth();
-      if (working) this.ensureCessaoMonth(working);
+      const store = this.readCessaoStore();
+      const best = this.pickBestCessaoMonth('');
+      if (best && this.monthHasCessaoWork(store[best])) {
+        this.ensureCessaoMonth(best);
+      }
     } else if (this.state.cessaoMonth) {
       this.persistCessaoMonth();
     } else if (this.state.searchMonth) {
@@ -395,7 +398,6 @@ const CompromissarioApp = {
           O IntegrA considera só o evento do mês e trata as datas anteriores como cedente.
         </p>
         <p id="comp-cessao-gate-hint" style="display:none;margin:0 0 12px;font-size:0.8rem;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 10px;"></p>
-        <div id="comp-cessao-city-summary"></div>
         <div id="comp-cessao-panel"></div>
       </div>
     `;
@@ -993,7 +995,8 @@ const CompromissarioApp = {
           return iso && month && iso.slice(0, 7) === month;
         });
         const ver = Number(row.parseVersion || 0);
-        if (ver >= this.CESSAO_PARSE_VERSION && allInMonth && recs.length >= 1) return;
+        const missingCedente = recs.some((r) => !(r.anteriores && r.anteriores.length));
+        if (ver >= this.CESSAO_PARSE_VERSION && allInMonth && recs.length >= 1 && !missingCedente) return;
         const payload = await this.loadCessaoFileBlob(id);
         const file = this.cessaoPayloadToFile(payload);
         if (!file) return;
@@ -1255,8 +1258,10 @@ const CompromissarioApp = {
       const preview = recs.slice(0, 6).map((r) => {
         const atuais = (r.atuais || []).map((c) => (c.principal ? '(P)* ' : '* ') + (c.name || c.id)).join(', ');
         const ant = (r.anteriores || []).map((c) => c.name || c.id).join(', ');
+        const city = this.cityLabelFromCessao(r);
         return `<div style="font-size:0.75rem;color:#334155;line-height:1.35;">
           <strong>${this.escHtml(r.data || this.formatCessaoDate(r.dataIso))}</strong>
+          ${city ? ` · ${this.escHtml(city)}` : ''}
           · título ${this.escHtml(r.titulo || '—')}
           ${atuais ? ` · atual ${this.escHtml(atuais)}` : ''}
           ${ant ? ` · cedente ${this.escHtml(ant)}` : ''}
@@ -1291,6 +1296,13 @@ const CompromissarioApp = {
         </div>`;
     }).join('');
 
+    const citySummary = this.cessaoCitySummary();
+    const cityHtml = citySummary.length
+      ? `<div class="comp-pref-alert" style="background:#ecfdf5;border-color:#a7f3d0;color:#047857;">
+          <strong>Cidades com cessão neste mês:</strong>
+          ${citySummary.map(([city, n]) => `${this.escHtml(city)} (${n})`).join(' · ')}
+        </div>`
+      : '';
     panel.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
         <div>
@@ -1299,18 +1311,17 @@ const CompromissarioApp = {
             Relatórios de Cessão por Empresa
           </h3>
           <p style="margin:0;font-size:0.8rem;color:#64748b;max-width:720px;line-height:1.45;">
-            Declare cada empresa com carteira ativa. Os relatórios enviados ficam salvos e <strong>não são apagados</strong> ao mudar a competência da busca.
-            Se houve cessão, envie o relatório padrão do Sienge (colunas Data, Empresa-loteamento, Título, Documento, Cliente — com <code>(P)</code>, <code>*</code> e comprador secundário).
-            Preferência: XLS/XLSX/CSV para ler o histórico; PDF também libera o gate.
-            Sem declaração ou anexo, a busca de vendas e distratos fica bloqueada.
-            ${this.state.searchMonth && this.state.cessaoMonth && this.state.searchMonth !== this.state.cessaoMonth
-              ? `<br><span style="color:#9a3412;font-weight:600;">Busca: ${this.escHtml(this.state.searchMonth)} · Cessões desta tela: ${this.escHtml(month)} (arquivos preservados).</span>`
-              : ` Cessões deste bloco: <strong>${this.escHtml(month)}</strong>.`}
+            Informe se a empresa teve cessão no mês <strong>${this.escHtml(month)}</strong> e anexe o XLS do Sienge.
+            O arquivo lista o lote que cedeu e o histórico antigo do mesmo lote — só a data da competência vira movimento.
           </p>
         </div>
-        ${badge}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${badge}
+          ${ready ? `<button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('notificar')">Continuar para Notificar</button>` : ''}
+        </div>
       </div>
-      <div id="comp-cessao-list" style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow:auto;">
+      ${cityHtml}
+      <div id="comp-cessao-list" style="display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow:auto;">
         ${companies.length ? rows : '<p style="color:#64748b;font-size:0.85rem;margin:0;">Nenhuma empresa com carteira ativa configurada.</p>'}
       </div>
     `;
@@ -1442,13 +1453,23 @@ const CompromissarioApp = {
   mergeCessaoParses(list) {
     const raw = [];
     (list || []).forEach((p) => {
-      (p && p.records || []).forEach((rec) => raw.push(rec));
+      if (p && Array.isArray(p.raw) && p.raw.length) {
+        p.raw.forEach((rec) => raw.push(rec));
+      }
     });
+    if (!raw.length) {
+      (list || []).forEach((p) => {
+        ((p && p.all) || (p && p.records) || []).forEach((rec) => raw.push(rec));
+      });
+    }
     const records = this.normalizeCessaoRecords(raw);
-    return {
-      records,
-      note: records.length ? `${records.length} cessão(ões)` : ((list[0] && list[0].note) || 'Nenhuma cessão lida')
-    };
+    const all = this.normalizeCessaoRecords(raw, { all: true });
+    let note = records.length ? `${records.length} cessão(ões) na competência` : ((list[0] && list[0].note) || 'Nenhuma cessão lida na competência');
+    if (!records.length && all.length) {
+      const months = [...new Set(all.map((r) => (r.dataIso || '').slice(0, 7)).filter(Boolean))].join(', ');
+      note = `O Sienge trouxe ${all.length} evento(s) em ${months || 'outras datas'}, nenhum em ${this.competenciaValue() || '—'}. Confira o mês em Parâmetros.`;
+    }
+    return { records, all, raw, note };
   },
 
   excelSheetToMatrix(sheet, wb) {
@@ -1675,13 +1696,15 @@ const CompromissarioApp = {
   buildCessaoEvent(rows, isoHint) {
     const list = (rows || []).filter(Boolean);
     if (!list.length) return null;
+    const inheritedAnt = this.mergeCessaoClients(list.flatMap((r) => r.anteriores || []));
     const firstBuilt = list.find((r) => Array.isArray(r.atuais) && !r.clients);
-    if (firstBuilt && list.length === 1) {
+    if (firstBuilt && list.every((r) => Array.isArray(r.atuais) && !r.clients)) {
       const iso = isoHint || this.resolveCessaoIso(firstBuilt);
       return Object.assign({}, firstBuilt, {
         dataIso: iso,
         data: firstBuilt.data || this.formatCessaoDate(iso),
-        competencia: (iso || '').slice(0, 7) || firstBuilt.competencia || this.competenciaValue()
+        competencia: (iso || '').slice(0, 7) || firstBuilt.competencia || this.competenciaValue(),
+        anteriores: inheritedAnt.length ? inheritedAnt : (firstBuilt.anteriores || [])
       });
     }
     const clients = this.mergeCessaoClients(list.flatMap((r) => r.clients || r.atuais || []));
@@ -1701,7 +1724,7 @@ const CompromissarioApp = {
       principais: atuais.filter((c) => c.principal),
       principal: atuais.find((c) => c.principal) || atuais[0] || null,
       atuais,
-      anteriores: [],
+      anteriores: inheritedAnt,
       unitName: first.unitName || '',
       enterpriseId: first.enterpriseId || '',
       enterpriseName: first.enterpriseName || ''
@@ -1746,7 +1769,9 @@ const CompromissarioApp = {
       ordered.forEach((ev, idx) => {
         const prev = idx > 0 ? ordered[idx - 1] : null;
         if (prev) {
-          ev.anteriores = this.mergeCessaoClients(prev.clients || prev.atuais || []);
+          if (!(ev.anteriores && ev.anteriores.length)) {
+            ev.anteriores = this.mergeCessaoClients(prev.clients || prev.atuais || []);
+          }
           ev.historico = ordered.slice(0, idx).map((h) => ({
             data: h.data,
             dataIso: h.dataIso,
@@ -1855,7 +1880,7 @@ const CompromissarioApp = {
     flushPending();
 
     if (!foundHeader) {
-      return { records: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
+      return { records: [], all: [], raw: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
     }
 
     const records = this.normalizeCessaoRecords(raw);
@@ -1865,7 +1890,7 @@ const CompromissarioApp = {
       const months = [...new Set(all.map((r) => (r.dataIso || '').slice(0, 7)).filter(Boolean))].join(', ');
       note = `O Sienge trouxe ${all.length} evento(s) em ${months || 'outras datas'}, nenhum em ${this.competenciaValue() || '—'}. Confira o mês em Parâmetros.`;
     }
-    return { records, note };
+    return { records, all, raw, note };
   },
 
   parseCessaoMatrixLoose(matrix) {
@@ -1930,9 +1955,13 @@ const CompromissarioApp = {
       });
     });
     flushPending();
+    const records = this.normalizeCessaoRecords(raw);
+    const all = this.normalizeCessaoRecords(raw, { all: true });
     return {
-      records: this.normalizeCessaoRecords(raw),
-      note: raw.length ? `${this.normalizeCessaoRecords(raw).length} cessão(ões)` : ''
+      records,
+      all,
+      raw,
+      note: records.length ? `${records.length} cessão(ões) na competência` : (raw.length ? 'Nenhuma cessão lida na competência' : '')
     };
   },
 
@@ -1991,7 +2020,10 @@ const CompromissarioApp = {
   },
 
   parseCessaoClientCell(raw) {
-    const text = String(raw || '').replace(/\r/g, '\n').replace(/\n+(?=\s*[\*(])/g, ' ');
+    const text = String(raw || '')
+      .replace(/\r/g, '\n')
+      .replace(/(\S)\s+(?=\d{3,6}\s*[-–])/g, '$1\n')
+      .replace(/\n+(?=\s*[\*(])/g, ' ');
     const parts = text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
     const flat = parts.length ? parts : [text.trim()].filter(Boolean);
     return flat.map((line) => {
@@ -2590,7 +2622,7 @@ const CompromissarioApp = {
     return raw != null ? String(raw).trim() : '';
   },
 
-  openConfigModal() {
+  openConfigModal(focusCity) {
     let existingModal = document.getElementById('comp-config-modal');
     if (existingModal) existingModal.remove();
 
@@ -2673,6 +2705,13 @@ const CompromissarioApp = {
     `;
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    if (focusCity) {
+      const row = document.getElementById('cfg-row-' + focusCity);
+      if (row) {
+        row.classList.add('comp-pref-city-focus');
+        row.scrollIntoView({ block: 'center' });
+      }
+    }
   },
 
   async saveConfigModal() {
@@ -2710,9 +2749,11 @@ const CompromissarioApp = {
     try {
       await this.persistConfigs(configs, true);
       if (modal) modal.remove();
+      this.renderPrefeituraShell();
       alert("Configurações salvas e enviadas para a nuvem. Os demais operadores passam a ver ao atualizar a página.");
     } catch (err) {
       if (modal) modal.remove();
+      this.renderPrefeituraShell();
       alert("Configurações ficaram neste computador, mas a nuvem falhou: " + (err && err.message ? err.message : err));
     }
   },

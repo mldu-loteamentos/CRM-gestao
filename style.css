@@ -726,6 +726,99 @@ body {
   background-color: rgba(16, 84, 54, 0.01);
 }
 
+/* Fila / 0% / Sub judice: todas as colunas visíveis em notebook 100% */
+.fila-fit-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+.fila-fit-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 0.72rem;
+}
+.fila-fit-table col.fila-col-id { width: 3.2%; }
+.fila-fit-table col.fila-col-cli { width: 15.5%; }
+.fila-fit-table col.fila-col-tit { width: 6.4%; }
+.fila-fit-table col.fila-col-unid { width: 10.5%; }
+.fila-fit-table col.fila-col-op { width: 11%; }
+.fila-fit-table col.fila-col-aging { width: 14.2%; }
+.fila-fit-table col.fila-col-venc { width: 5%; }
+.fila-fit-table col.fila-col-val { width: 8%; }
+.fila-fit-table col.fila-col-date { width: 7.1%; }
+.fila-fit-table col.fila-col-acao { width: 11.9%; }
+.fila-fit-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 4px !important;
+  font-size: 0.6rem !important;
+  letter-spacing: 0.02em;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: auto !important;
+}
+.fila-fit-table tbody td {
+  padding: 4px 4px !important;
+  font-size: 0.7rem !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.fila-fit-table tbody tr:not(.fila-group-header) td {
+  white-space: nowrap;
+}
+.fila-fit-table .badge {
+  font-size: 0.6rem !important;
+  padding: 1px 5px !important;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+.fila-fit-table .delay-badge,
+.fila-fit-table .tag-boleto-webro {
+  font-size: 0.6rem !important;
+  padding: 2px 5px !important;
+  gap: 3px !important;
+  max-width: 100%;
+}
+.fila-fit-table tbody td svg,
+.fila-fit-table tbody td i[data-lucide] {
+  width: 11px !important;
+  height: 11px !important;
+}
+.fila-fit-table tbody td .btn-sm,
+.fila-fit-table tbody td button {
+  padding: 2px 5px !important;
+  font-size: 0.6rem !important;
+  line-height: 1.15 !important;
+}
+.fila-fit-table tbody td [style*="border-radius: 12px"],
+.fila-fit-table tbody td [style*="border-radius:12px"] {
+  font-size: 0.6rem !important;
+  padding: 2px 5px !important;
+  gap: 3px !important;
+}
+#defaulters-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(6),
+#zeropaid-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(6),
+#subjudice-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(7) {
+  white-space: normal;
+}
+.fila-fit-table tbody tr:not(.fila-group-header) td:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fila-fit-table .fila-group-header td {
+  overflow: hidden;
+  font-size: 0.66rem !important;
+  padding: 5px 8px !important;
+}
+
 /* Destaque Visual Especial 0% Pago (Sem Receita) */
 .zero-paid-highlight {
   position: relative;
@@ -5232,7 +5325,30 @@ circle.donut-segment {
 }
 .cprev-tag-pago { background: #dcfce7; color: #166534; }
 .cprev-tag-aberto { background: #fff7ed; color: #9a3412; }
+.cprev-tag-liberado { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-nota { background: #dbeafe; color: #1d4ed8; }
+.ecau-selection-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 8px;
+  padding: 10px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  color: #14532d;
+}
+.ecau-selection-bar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cprev-table-wrap .ecau-col-chk { width: 36px; text-align: center; }
+.cprev-table-wrap .ecau-col-sit { width: 92px; }
+.ecau-table tbody tr.cprev-row { cursor: default; }
+.ecau-col-sit .cprev-tag { margin-left: 0; }
 .cprev-modal-overlay {
   position: fixed;
   inset: 0;
@@ -5792,4 +5908,10 @@ circle.donut-segment {
 .comp-pref-pill.is-ok { background: #ecfdf5; color: #047857; }
 .comp-pref-pill.is-warn { background: #fff7ed; color: #c2410c; }
 .comp-pref-pill.is-wait { background: #eff6ff; color: #1d4ed8; }
+.comp-pref-city-focus {
+  background: #ecfdf5;
+  outline: 2px solid #10b981;
+  border-radius: 8px;
+  padding: 8px;
+}
 

@@ -1018,6 +1018,57 @@ async function siengePost(endpoint, payload, retries = 8, onRetry) {
   throw lastError;
 }
 
+async function siengePatch(endpoint, payload, retries = 6) {
+  if (s_apiMode === "simulado") {
+    throw new Error("Chamada de API em Modo Simulado. Use os métodos simulados.");
+  }
+  let baseUrl = SIENGE_CONFIG.baseUrl;
+  if (endpoint.startsWith("/bulk-data/")) {
+    if (baseUrl.endsWith("/v1")) {
+      baseUrl = baseUrl.substring(0, baseUrl.length - 3);
+    }
+  }
+  const url = `${baseUrl}${endpoint}`;
+  let lastError;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Authorization": getBasicAuthHeader(),
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        let errBody = "";
+        try { errBody = await response.text(); } catch (e) {}
+        const err = new Error(`Erro na requisição Sienge ERP: ${response.status} - ${response.statusText} | ${errBody}`);
+        err.status = response.status;
+        err.retryAfter = response.headers.get("Retry-After");
+        throw err;
+      }
+      const text = await response.text();
+      if (!text || !String(text).trim()) return { success: true };
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        return { success: true, message: text };
+      }
+    } catch (err) {
+      lastError = err;
+      if (isSiengeRateLimitError(err) && attempt < retries - 1) {
+        const waitMs = siengeRateLimitWaitMs(attempt, err.retryAfter);
+        await new Promise((r) => setTimeout(r, waitMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // -----------------------------------------------
 // Paginação automática sequencial (300ms entre páginas)
 // -----------------------------------------------
@@ -3240,3 +3291,4 @@ window.setSiengeApiMode = setApiMode;
 window.getSiengeApiMode = getApiMode;
 window.SIENGE_CONFIG = SIENGE_CONFIG;
 window.siengeFetchWithRetry = siengeFetchWithRetry;
+window.siengePatch = siengePatch;

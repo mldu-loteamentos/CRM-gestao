@@ -188,7 +188,10 @@ const ConfigUsersApp = {
   modules: [
     {
       name: "Engenharia", icon: "hard-hat", key: "mod_eng",
-      submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [{ id: "engenharia", label: "Engenharia" }] }]
+      submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [
+        { id: "engenharia", label: "Engenharia" },
+        { id: "caucao", label: "Gestão de caução", permBase: "sub_eng_geral_caucao" }
+      ] }]
     },
     {
       name: "Vistoria", icon: "camera", key: "mod_vistoria",

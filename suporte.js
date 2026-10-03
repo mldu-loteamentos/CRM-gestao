@@ -32,7 +32,9 @@
 
   const MENU = [
     { id: "home", label: "Home" },
-    { id: "engenharia", label: "Engenharia" },
+    { id: "engenharia", label: "Engenharia", subs: [
+      { id: "caucao", label: "Gestão de caução" }
+    ]},
     { id: "vistoria", label: "Vistoria", subs: [
       { id: "vistoria_tela", label: "Vistoria" },
       { id: "verificar_construcao", label: "Verificar Construção" }
@@ -127,7 +129,8 @@
 
   const TAB_TO_LOC = {
     "construcao-home": { modulo: "home" },
-    "construcao-engenharia": { modulo: "engenharia" },
+    "construcao-engenharia": { modulo: "engenharia", subitem: "caucao" },
+    "engenharia-caucao": { modulo: "engenharia", subitem: "caucao" },
     vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
     "construcao-compras": { modulo: "compras" },
     "compras-previsoes": { modulo: "compras", subitem: "previsoes" },

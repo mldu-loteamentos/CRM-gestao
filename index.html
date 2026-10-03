@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=931">
+  <link rel="stylesheet" href="style.css?v=932">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=931" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=932" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -953,11 +953,17 @@
           </a>
         </li>
         <!-- 2 - ENGENHARIA -->
-        <li class="nav-item" data-tab="construcao-engenharia" data-module="mod_eng">
-          <a onclick="switchTab('construcao-engenharia', 'Engenharia')" title="Engenharia">
+        <li class="nav-item nav-group" data-module="mod_eng">
+          <a onclick="toggleNavMenu(event, 'submenu-engenharia')" title="Engenharia">
             <i data-lucide="hard-hat"></i>
             <span>Engenharia</span>
+            <i data-lucide="chevron-down" class="nav-chevron"></i>
           </a>
+          <ul class="nav-submenu" id="submenu-engenharia" style="display: none;">
+            <li data-tab="engenharia-caucao" data-module="mod_eng">
+              <a onclick="switchTab('engenharia-caucao', 'Gestão de caução')">Gestão de caução</a>
+            </li>
+          </ul>
         </li>
         <!-- 3 - VISTORIA -->
         <li class="nav-item" data-tab="vistoria" data-module="mod_vistoria">
@@ -1308,7 +1314,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.931 &nbsp;&middot;&nbsp; 03/10/2026
+            v1.0.932 &nbsp;&middot;&nbsp; 03/10/2026
           </span>
         </div>
       </div>
@@ -2639,7 +2645,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=931" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=932" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -2886,11 +2892,9 @@ ____________________________________________
 
       </section>
 
-      <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;">
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=931" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
-          <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
-        </div>
+      <section id="tab-construcao-engenharia" class="tab-pane" style="display: none;"></section>
+      <section id="tab-engenharia-caucao" class="tab-pane" style="display: none;">
+        <div id="engenharia-caucao-root"></div>
       </section>
 
 
@@ -3278,7 +3282,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=931" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=932" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -3424,29 +3428,24 @@ ____________________________________________
           </div>
 
           <!-- Tabela de Clientes Delinquentes -->
-          <style>
-            #defaulters-table th { font-size: 0.75rem !important; padding: 6px 10px !important; }
-            #defaulters-table td { font-size: 0.8rem !important; padding: 4px 10px !important; }
-          </style>
-          <div class="table-container" style="margin-top: 1.5rem; max-height: calc(100vh - 250px); overflow-y: auto;">
-            <table class="custom-table" id="defaulters-table">
+          <div class="table-container fila-fit-wrap" style="margin-top: 1.5rem; max-height: calc(100vh - 250px); overflow-y: auto;">
+            <table class="custom-table fila-fit-table" id="defaulters-table">
+              <colgroup>
+                <col class="fila-col-id"><col class="fila-col-cli"><col class="fila-col-tit"><col class="fila-col-unid"><col class="fila-col-op">
+                <col class="fila-col-aging"><col class="fila-col-venc"><col class="fila-col-val"><col class="fila-col-date"><col class="fila-col-date"><col class="fila-col-acao">
+              </colgroup>
               <thead>
                 <tr>
-                  <th title="ID da Empresa" style="width: 1%; white-space: nowrap; text-align: center; padding-right: 5px !important;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px;">ID <i data-lucide="info" style="width: 12px; cursor: help; color: #64748b;"></i></div></th>
-                  <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i
-                      data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: left;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i>
-                  </th>
-                  <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('maxDaysDelay')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Dias em Atraso
-                    (Aging) <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('billCount')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Vencidas <i
-                      data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('overdueValue')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; padding-right: 10px !important;">R$ Atualizado <i
-                      data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('lastContactDate')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center; padding-left: 5px !important; padding-right: 5px !important;">Último Contato <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('lastPaymentDays')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Último Pagamento <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
+                  <th title="ID da Empresa" style="text-align: center;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 2px;">ID <i data-lucide="info" style="width: 11px; cursor: help; color: #64748b;"></i></div></th>
+                  <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none; text-align: left;">Título <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('maxDaysDelay')" title="Dias em Atraso (Aging)" style="cursor: pointer; user-select: none; text-align: center;">Atraso <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('billCount')" style="cursor: pointer; user-select: none; text-align: center;">Venc. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('overdueValue')" title="R$ Atualizado" style="cursor: pointer; user-select: none;">R$ Atual. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('lastContactDate')" title="Último Contato" style="cursor: pointer; user-select: none; text-align: center;">Últ. Contato <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('lastPaymentDays')" title="Último Pagamento" style="cursor: pointer; user-select: none; text-align: center;">Últ. Pagto <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th style="text-align: center;">Ações</th>
                 </tr>
               </thead>
@@ -3514,24 +3513,24 @@ ____________________________________________
             <div id="subjudice-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
           </div>
 
-          <style>
-            #subjudice-table th { font-size: 0.75rem !important; padding: 6px 10px !important; }
-            #subjudice-table td { font-size: 0.8rem !important; padding: 4px 10px !important; }
-          </style>
-          <div class="table-container" style="margin-top: 1.5rem; max-height: calc(100vh - 250px); overflow-y: auto;">
-            <table class="custom-table" id="subjudice-table">
+          <div class="table-container fila-fit-wrap" style="margin-top: 1.5rem; max-height: calc(100vh - 250px); overflow-y: auto;">
+            <table class="custom-table fila-fit-table" id="subjudice-table">
+              <colgroup>
+                <col class="fila-col-id"><col class="fila-col-cli"><col class="fila-col-tit"><col class="fila-col-unid"><col class="fila-col-op">
+                <col class="fila-col-date"><col class="fila-col-aging"><col class="fila-col-venc"><col class="fila-col-val"><col class="fila-col-date"><col class="fila-col-acao">
+              </colgroup>
               <thead>
                 <tr>
-                  <th title="ID da Empresa" style="width: 1%; white-space: nowrap; text-align: center; padding-right: 5px !important;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px;">ID <i data-lucide="info" style="width: 12px; cursor: help; color: #64748b;"></i></div></th>
-                  <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: left;">Fase Processual <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th style="cursor: default; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Data Fase</th>
-                  <th onclick="toggleSort('maxDaysDelay')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Dias em Atraso (Aging) <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('billCount')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Vencidas <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('overdueValue')" style="cursor: pointer; user-select: none;">R$ Atualizado <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSort('lastContactDate')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Última Atualização <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
+                  <th title="ID da Empresa" style="text-align: center;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 2px;">ID <i data-lucide="info" style="width: 11px; cursor: help; color: #64748b;"></i></div></th>
+                  <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none;">Título <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('assignedOperator')" title="Fase Processual" style="cursor: pointer; user-select: none; text-align: left;">Fase <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th title="Data da Fase" style="text-align: center;">Data Fase</th>
+                  <th onclick="toggleSort('maxDaysDelay')" title="Dias em Atraso (Aging)" style="cursor: pointer; user-select: none; text-align: center;">Atraso <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('billCount')" style="cursor: pointer; user-select: none; text-align: center;">Venc. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('overdueValue')" title="R$ Atualizado" style="cursor: pointer; user-select: none;">R$ Atual. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSort('lastContactDate')" title="Última Atualização" style="cursor: pointer; user-select: none; text-align: center;">Atualização <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th style="text-align: center;">Ações</th>
                 </tr>
               </thead>
@@ -3785,26 +3784,24 @@ ____________________________________________
             <div id="zeropaid-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
           </div>
 
-          <style>
-            #zeropaid-table th { font-size: 0.75rem !important; padding: 6px 10px !important; }
-            #zeropaid-table td { font-size: 0.8rem !important; padding: 4px 10px !important; }
-          </style>
-
-
-          <div class="table-container" style="margin-top: 1rem; max-height: calc(100vh - 250px); overflow-y: auto;">
-            <table class="custom-table" id="zeropaid-table">
+          <div class="table-container fila-fit-wrap" style="margin-top: 1rem; max-height: calc(100vh - 250px); overflow-y: auto;">
+            <table class="custom-table fila-fit-table" id="zeropaid-table">
+              <colgroup>
+                <col class="fila-col-id"><col class="fila-col-cli"><col class="fila-col-tit"><col class="fila-col-unid"><col class="fila-col-op">
+                <col class="fila-col-aging"><col class="fila-col-venc"><col class="fila-col-val"><col class="fila-col-date"><col class="fila-col-date"><col class="fila-col-acao">
+              </colgroup>
               <thead>
                 <tr>
-                  <th title="ID da Empresa" style="width: 1%; white-space: nowrap; text-align: center; padding-right: 5px !important;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 4px;">ID <i data-lucide="info" style="width: 12px; cursor: help; color: #64748b;"></i></div></th>
-                  <th onclick="toggleSortZero('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('title')" style="cursor: pointer; user-select: none;">TÍTULO <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('assignedOperator')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('maxDaysDelay')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Dias em Atraso (Aging) <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('billCount')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Vencidas <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('overdueValue')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; padding-right: 10px !important;">R$ Atualizado <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('saleDate')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Data da Venda <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
-                  <th onclick="toggleSortZero('lastContactDate')" style="cursor: pointer; user-select: none; width: 1%; white-space: nowrap; text-align: center;">Último Contato <i data-lucide="chevrons-up-down" style="width: 12px; vertical-align: middle;"></i></th>
+                  <th title="ID da Empresa" style="text-align: center;"><div style="display: inline-flex; align-items: center; justify-content: center; gap: 2px;">ID <i data-lucide="info" style="width: 11px; cursor: help; color: #64748b;"></i></div></th>
+                  <th onclick="toggleSortZero('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('title')" style="cursor: pointer; user-select: none;">Título <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('assignedOperator')" style="cursor: pointer; user-select: none; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('maxDaysDelay')" title="Dias em Atraso (Aging)" style="cursor: pointer; user-select: none; text-align: center;">Atraso <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('billCount')" style="cursor: pointer; user-select: none; text-align: center;">Venc. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('overdueValue')" title="R$ Atualizado" style="cursor: pointer; user-select: none;">R$ Atual. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('saleDate')" title="Data da Venda" style="cursor: pointer; user-select: none; text-align: center;">Venda <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th onclick="toggleSortZero('lastContactDate')" title="Último Contato" style="cursor: pointer; user-select: none; text-align: center;">Últ. Contato <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th style="text-align: center;">Ações</th>
                 </tr>
               </thead>
@@ -7520,59 +7517,60 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=931"></script>
+  <script type="module" src="firebase-config.js?v=932"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=931"></script>
-  <script defer src="sienge-api.js?v=931"></script>
-  <script defer src="consumo-api.js?v=931"></script>
-  <script defer src="azure-auth.js?v=931"></script>
-  <script defer src="app.js?v=931"></script>
-  <script defer src="empresa-filter.js?v=931"></script>
-  <script defer src="cartao-taxas.js?v=931"></script>
-  <script defer src="alcada-desconto.js?v=931"></script>
-  <script defer src="alcada-distrato.js?v=931"></script>
-  <script defer src="home-dashboard.js?v=931"></script>
-  <script defer src="anexos.js?v=931"></script>
-  <script defer src="contas-pagar.js?v=931"></script>
-  <script defer src="compras-previsoes.js?v=931"></script>
-  <script defer src="config-tags.js?v=931"></script>
-  <script defer src="config-users.js?v=931"></script>
-  <script defer src="suporte.js?v=931"></script>
-  <script defer src="construcao.js?v=931"></script>
-  <script defer src="empresas.js?v=931"></script>
-  <script defer src="relacionamento.js?v=931"></script>
-  <script defer src="cessao-direitos.js?v=931"></script>
-  <script defer src="compromissario.js?v=931"></script>
-  <script defer src="comercial.js?v=931"></script>
-  <script defer src="estoque-comercial.js?v=931"></script>
-  <script defer src="condicoes-pagamento.js?v=931"></script>
-  <script defer src="tabelas-vigentes.js?v=931"></script>
-  <script defer src="controle-comissao.js?v=931"></script>
-  <script defer src="centros-custo.js?v=931"></script>
-  <script defer src="marketing.js?v=931"></script>
-  <script defer src="plano-financeiro.js?v=931"></script>
-  <script defer src="prestacao-contas.js?v=931"></script>
+  <script defer src="data.js?v=932"></script>
+  <script defer src="sienge-api.js?v=932"></script>
+  <script defer src="consumo-api.js?v=932"></script>
+  <script defer src="azure-auth.js?v=932"></script>
+  <script defer src="app.js?v=932"></script>
+  <script defer src="empresa-filter.js?v=932"></script>
+  <script defer src="cartao-taxas.js?v=932"></script>
+  <script defer src="alcada-desconto.js?v=932"></script>
+  <script defer src="alcada-distrato.js?v=932"></script>
+  <script defer src="home-dashboard.js?v=932"></script>
+  <script defer src="anexos.js?v=932"></script>
+  <script defer src="contas-pagar.js?v=932"></script>
+  <script defer src="compras-previsoes.js?v=932"></script>
+  <script defer src="engenharia-caucao.js?v=932"></script>
+  <script defer src="config-tags.js?v=932"></script>
+  <script defer src="config-users.js?v=932"></script>
+  <script defer src="suporte.js?v=932"></script>
+  <script defer src="construcao.js?v=932"></script>
+  <script defer src="empresas.js?v=932"></script>
+  <script defer src="relacionamento.js?v=932"></script>
+  <script defer src="cessao-direitos.js?v=932"></script>
+  <script defer src="compromissario.js?v=932"></script>
+  <script defer src="comercial.js?v=932"></script>
+  <script defer src="estoque-comercial.js?v=932"></script>
+  <script defer src="condicoes-pagamento.js?v=932"></script>
+  <script defer src="tabelas-vigentes.js?v=932"></script>
+  <script defer src="controle-comissao.js?v=932"></script>
+  <script defer src="centros-custo.js?v=932"></script>
+  <script defer src="marketing.js?v=932"></script>
+  <script defer src="plano-financeiro.js?v=932"></script>
+  <script defer src="prestacao-contas.js?v=932"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=931"></script>
-  <script defer src="caixa-diario.js?v=931"></script>
-  <script defer src="investimento.js?v=931"></script>
-  <script defer src="parametrizacao-parceiro.js?v=931"></script>
-  <script defer src="societario.js?v=931"></script>
-  <script defer src="participacoes.js?v=931"></script>
-  <script defer src="fiscal.js?v=931"></script>
-  <script defer src="indexadores.js?v=931"></script>
-  <script defer src="verificar-construcao.js?v=931"></script>
-  <script defer src="financiamento.js?v=931"></script>
-  <script src="repactuacoes.js?v=931"></script>
-  <script defer src="repactuacao-lote.js?v=931"></script>
+  <script defer src="fluxo-caixa.js?v=932"></script>
+  <script defer src="caixa-diario.js?v=932"></script>
+  <script defer src="investimento.js?v=932"></script>
+  <script defer src="parametrizacao-parceiro.js?v=932"></script>
+  <script defer src="societario.js?v=932"></script>
+  <script defer src="participacoes.js?v=932"></script>
+  <script defer src="fiscal.js?v=932"></script>
+  <script defer src="indexadores.js?v=932"></script>
+  <script defer src="verificar-construcao.js?v=932"></script>
+  <script defer src="financiamento.js?v=932"></script>
+  <script src="repactuacoes.js?v=932"></script>
+  <script defer src="repactuacao-lote.js?v=932"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=931"></script>
+  <script defer src="dashboard-inadimplencia.js?v=932"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

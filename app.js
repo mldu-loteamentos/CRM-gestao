@@ -2756,6 +2756,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   if (tabId === 'construcao-compras') tabId = 'compras-previsoes';
+  if (tabId === 'construcao-engenharia') tabId = 'engenharia-caucao';
   if (tabId === 'acessos') tabId = 'auditoria';
   if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
   if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
@@ -2908,6 +2909,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "controle-comissao": "Controle de comissão",
     "compras-previsoes": "Follow-up de previsões",
     "compras-config": "Calendário de vencimento de títulos a pagar",
+    "engenharia-caucao": "Gestão de caução",
+    "construcao-engenharia": "Gestão de caução",
     "construcao-compras": "Follow-up de previsões",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
@@ -2960,6 +2963,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "controle-comissao": "percent",
     "compras-previsoes": "clipboard-list",
     "compras-config": "calendar-clock",
+    "engenharia-caucao": "shield-check",
+    "construcao-engenharia": "shield-check",
     "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
@@ -3047,6 +3052,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       AnexosApp.resetAndRender();
     } else if (typeof renderAnexosModule === "function") {
       renderAnexosModule();
+    }
+  } else if (tabId === "engenharia-caucao") {
+    if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
+      EngenhariaCaucaoApp.init();
     }
   } else if (tabId === "contas-pagar") {
     try {
@@ -4609,6 +4618,14 @@ window.isCrmSuperAdmin = function() {
 window.permCoversMenuKey = function(perms, modKey) {
   if (!perms || !modKey) return false;
   if (perms[modKey] === true) return true;
+  if (modKey === "sub_eng_geral_caucao_acessar") {
+    return perms.mod_eng === true
+      || perms.sub_eng_geral === true
+      || perms.sub_eng_geral_engenharia_acessar === true
+      || perms.sub_eng_geral_engenharia_visualizar === true
+      || perms.sub_eng_geral_caucao_visualizar === true
+      || perms.sub_eng_geral_caucao_editar === true;
+  }
   if (modKey === "sub_fiscal_geral_csll_acessar") {
     return perms.sub_fiscal_geral_fiscal_acessar === true
       || perms.sub_fiscal_geral_csll_acessar === true
@@ -39544,7 +39561,8 @@ window.SYNC_KEYS = [
     "crm_moura_alcada_distrato",
     "crm_compromissario_configs",
     "crm_compromissario_cessao_v1",
-    "crm_compras_prazo_lancamento_v1"
+    "crm_compras_prazo_lancamento_v1",
+    "crm_engenharia_caucao_liberados_v1"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -40278,6 +40296,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_engenharia_caucao_liberados_v1" && typeof window.mergeEngenhariaCaucaoLiberados === "function") {
+                    const merged = window.mergeEngenhariaCaucaoLiberados(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_moura_condicoes_pagamento" && typeof window.mergeCondicoesPagamento === "function") {
                     const merged = window.mergeCondicoesPagamento(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -40537,6 +40566,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_compras_prazo_lancamento_v1", payload.crm_compras_prazo_lancamento_v1); } catch (e) {}
             } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
               payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
+            }
+          }
+          if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {
+            if (typeof window.mergeEngenhariaCaucaoLiberados === "function") {
+              payload.crm_engenharia_caucao_liberados_v1 = window.mergeEngenhariaCaucaoLiberados(
+                payload.crm_engenharia_caucao_liberados_v1 || "{}",
+                cloud.crm_engenharia_caucao_liberados_v1 || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_liberados_v1", payload.crm_engenharia_caucao_liberados_v1); } catch (e) {}
+            } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
+              payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
             }
           }
           if (payload.crm_users || cloud.crm_users) {
@@ -40817,6 +40857,16 @@ localStorage.setItem = function(key, value) {
                           );
                         } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
                           payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
+                        }
+                      }
+                      if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {
+                        if (typeof window.mergeEngenhariaCaucaoLiberados === "function") {
+                          payload.crm_engenharia_caucao_liberados_v1 = window.mergeEngenhariaCaucaoLiberados(
+                            payload.crm_engenharia_caucao_liberados_v1 || "{}",
+                            cloud.crm_engenharia_caucao_liberados_v1 || "{}"
+                          );
+                        } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
+                          payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
                         }
                       }
                       if (window.mergeCondicoesPagamento) {

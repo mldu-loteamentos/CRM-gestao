@@ -62,7 +62,7 @@ module.exports = async function handler(req, res) {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).end();
   }
@@ -123,7 +123,7 @@ module.exports = async function handler(req, res) {
 
     const headers = { ...proxyRes.headers };
     headers['access-control-allow-origin'] = '*';
-    headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    headers['access-control-allow-methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
     headers['access-control-allow-headers'] = 'Content-Type, Authorization';
     headers['access-control-expose-headers'] = 'Location, location, X-Pagination-Total-Count';
     
