@@ -12,7 +12,8 @@ const {
   classifyCustomerUnits,
   planBatimentoWork,
   stampInadimplenteFromFila,
-  filaOverdueForUnit
+  filaOverdueForUnit,
+  needsCensus
 } = require("../lib/estoque-batimento-core");
 
 const SIENGE_DOMAIN = "mouraleite";
@@ -267,7 +268,8 @@ module.exports = async function handler(req, res) {
 
     const pendingByCust = new Map();
     units.forEach((u) => {
-      if (!isFinanceUnit(u) || isSettledUnit(u) || !u.customerId) return;
+      if (!isFinanceUnit(u) || !u.customerId) return;
+      if (isSettledUnit(u) && !needsCensus(u) && u.statementDone && u.receivedLocked) return;
       const cid = String(u.customerId);
       if (!pendingByCust.has(cid)) pendingByCust.set(cid, []);
       pendingByCust.get(cid).push(u);
@@ -281,7 +283,7 @@ module.exports = async function handler(req, res) {
       try {
         const billsRes = await siengeFetch(`${SIENGE_API_BASE}/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(customerId)}&limit=100&offset=0`);
         const stmtRes = await siengeFetch(`${SIENGE_API_BASE}/customer-financial-statements?customerId=${encodeURIComponent(customerId)}&includeSubJudice=true&includeRemadeInstallments=N&includeRenegotiation=N`);
-        const classified = classifyCustomerUnits(mine, extractRows(billsRes), flattenStatements(stmtRes));
+        const classified = classifyCustomerUnits(mine, extractRows(billsRes), flattenStatements(stmtRes), { includeSettled: true });
         classified.forEach((u) => {
           byId.set(String(u.id), u);
           if (u.enterpriseId) dirtyCc.add(String(u.enterpriseId));

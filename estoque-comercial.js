@@ -689,10 +689,9 @@ const EstoqueComercialApp = {
     const el = document.getElementById("est-batimento-pause");
     if (!el) return;
     el.style.display = "block";
-    el.innerHTML = "<strong>Batimento diário</strong> — todos os empreendimentos na mesma atualização. " +
-      "Quitados não voltam a ser consultados. Ativos e inadimplentes entram no censo uma vez. " +
-      "Depois: quem pagou nos últimos 5 dias atualiza recebido/a receber; inadimplente sem pagamento usa a fila. " +
-      "A base (estoque + caixa) é gravada todo dia.";
+    el.innerHTML = "<strong>Classificar situação</strong> lê a ficha de ativos, inadimplentes e quitados. " +
+      "Recebido = valor pago + juros/multa − desconto. Vencido entra com acréscimo. " +
+      "O automático do dia só atualiza quem pagou em 5 dias ou está na fila.";
   },
 
   requireEmpForApiHeavy() {
@@ -719,17 +718,18 @@ const EstoqueComercialApp = {
   },
 
   unitNeedsCensus(u) {
-    if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return false;
-    if (u.quitado === true || u.relFin === "quitado") return false;
-    return !(u.statementDone && u.relFin);
+    if (!this.isFinanceUnit(u) || !u.customerId) return false;
+    return !(u.statementDone && u.relFin && u.receivedLocked);
   },
 
-  stampFilaOnUnits(scopeEmp) {
+  stampFilaOnUnits(scopeEmp, opts) {
+    const onlyWithoutStatement = !!(opts && opts.onlyWithoutStatement);
     this.buildDefaulterIndex();
     let n = 0;
     this.state.units = this.state.units.map((u) => {
       if (scopeEmp && String(u.enterpriseId) !== String(scopeEmp)) return u;
       if (!this.isFinanceUnit(u) || this.isSettledUnit(u)) return u;
+      if (onlyWithoutStatement && u.statementDone && u.relFin) return u;
       const ov = this.overdueValue(u);
       if (ov <= 0.009) return u;
       const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
@@ -750,13 +750,27 @@ const EstoqueComercialApp = {
     return n;
   },
 
+  collectAllFinanceCustomers(empSel, includeSettled) {
+    const byCc = new Map();
+    this.state.units.forEach((u) => {
+      if (!u || (empSel && String(u.enterpriseId) !== String(empSel))) return;
+      if (!this.isFinanceUnit(u) || !u.customerId) return;
+      if (!includeSettled && this.isSettledUnit(u)) return;
+      const ccKey = String(u.enterpriseId);
+      if (!byCc.has(ccKey)) byCc.set(ccKey, new Set());
+      byCc.get(ccKey).add(String(u.customerId));
+    });
+    return { byCc };
+  },
+
   collectBatimentoCustomers(empSel, includeCensus) {
     const deltaDays = Number(this.BATIMENTO_DELTA_DAYS) || 5;
     const byCc = new Map();
     const census = new Set();
     this.state.units.forEach((u) => {
       if (!u || (empSel && String(u.enterpriseId) !== String(empSel))) return;
-      if (!this.isFinanceUnit(u) || this.isSettledUnit(u) || !u.customerId) return;
+      if (!this.isFinanceUnit(u) || !u.customerId) return;
+      if (this.isSettledUnit(u) && u.statementDone && u.receivedLocked) return;
       const ccKey = String(u.enterpriseId);
       const cid = String(u.customerId);
       if (includeCensus && this.unitNeedsCensus(u)) {
@@ -979,9 +993,6 @@ const EstoqueComercialApp = {
   displayReceived(u) {
     if (!u) return "";
     if (u.receivedAmount != null && !Number.isNaN(Number(u.receivedAmount))) return this.money(u.receivedAmount);
-    const val = u.contractValue != null ? Number(u.contractValue) : null;
-    const bal = this.unitBalance(u);
-    if (val != null && bal != null) return this.money(Math.max(0, val - bal));
     return "";
   },
 
@@ -1320,12 +1331,6 @@ const EstoqueComercialApp = {
       if (numOpen && info.saleId != null && String(numOpen) === String(info.saleId) && this.displayContract(u)) {
         numOpen = this.displayContract(u);
       }
-      let received = u.receivedAmount;
-      let locked = !!u.receivedLocked;
-      if (!locked && value != null) {
-        received = Math.max(0, Number(value) - Number(bal));
-        locked = true;
-      }
       return {
         ...u,
         contractId: info.saleId || u.contractId,
@@ -1337,8 +1342,8 @@ const EstoqueComercialApp = {
         outstandingBalance: Number(bal),
         presentDebitBalance: Number(bal),
         contractValue: value != null ? value : u.contractValue,
-        receivedAmount: received,
-        receivedLocked: locked,
+        receivedAmount: u.receivedLocked ? u.receivedAmount : u.receivedAmount,
+        receivedLocked: !!u.receivedLocked,
         situation: info.situation || u.situation,
         quitado: false,
         quitacaoDate: null,
@@ -1361,13 +1366,7 @@ const EstoqueComercialApp = {
       num = this.displayContract(u);
     }
     if (!num) num = this.displayContract(u) || "";
-    let received = u.receivedAmount;
-    let locked = !!u.receivedLocked;
     const nextBal = bal == null ? u.outstandingBalance : Number(bal);
-    if (!locked && value != null && nextBal != null && !Number.isNaN(Number(nextBal)) && Number(nextBal) > 0.009) {
-      received = Math.max(0, Number(value) - Number(nextBal));
-      locked = true;
-    }
     return {
       ...u,
       contractId: info.saleId || u.contractId,
@@ -1378,10 +1377,10 @@ const EstoqueComercialApp = {
       customerName: info.customerName || u.customerName,
       outstandingBalance: nextBal,
       presentDebitBalance: info.presentDebitBalance != null ? Number(info.presentDebitBalance) : u.presentDebitBalance,
-      contractValue: value != null ? value : u.contractValue,
-      receivedAmount: received,
-      receivedLocked: locked,
-      situation: info.situation || u.situation,
+        contractValue: value != null ? value : u.contractValue,
+        receivedAmount: u.receivedAmount,
+        receivedLocked: !!u.receivedLocked,
+        situation: info.situation || u.situation,
       quitado: u.quitado || !!quitado,
       quitacaoDate: quitado ? (u.quitacaoDate || info.payOffDate || null) : null,
       finAt: new Date().toISOString()
@@ -1585,22 +1584,33 @@ const EstoqueComercialApp = {
   },
 
   kpisFromInstallments(installments) {
+    if (typeof window.mapaJuridicoKpisFromInstallments === "function") {
+      return window.mapaJuridicoKpisFromInstallments(installments);
+    }
     let paid = 0;
+    let add = 0;
+    let disc = 0;
+    let net = 0;
     let due = 0;
     let upcoming = 0;
     const today = new Date().toISOString().split("T")[0];
     (installments || []).forEach(inst => {
       const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
       (inst.receipts || []).forEach(rec => {
-        const rType = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || "").toLowerCase();
-        if (rType.includes("distrato") || rType.includes("cancel") || rType === "3" || rType === "7") return;
+        if (typeof window.isWriteOffReceipt === "function" ? window.isWriteOffReceipt(rec) : false) return;
         paid += Number(rec.receiptValue || 0);
+        add += Number(rec.additionalValue || 0);
+        disc += Number(rec.discountValue || 0);
+        net += Number(rec.netReceiptValue || 0);
       });
       const dueDate = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
-      if (cb > 0.009 && dueDate && dueDate < today) due += cb;
-      else if (cb > 0.009) upcoming += cb;
+      if (cb > 0.009 && dueDate && dueDate < today) {
+        const withAdd = Number(inst.currentBalanceWithAddition != null ? inst.currentBalanceWithAddition : NaN);
+        due += Number.isFinite(withAdd) && withAdd > 0.009 ? withAdd : cb;
+      } else if (cb > 0.009) upcoming += cb;
     });
-    return { kpiPago: paid, kpiVencidas: due, kpiAVencer: upcoming };
+    if (net <= 0.009 && paid > 0) net = Math.max(0, paid + add - disc);
+    return { kpiPago: paid, kpiAcrescimo: add, kpiDesconto: disc, kpiLiquido: net, recebido: net, kpiVencidas: due, kpiAVencer: upcoming };
   },
 
   billMatchesUnit(bill, u) {
@@ -1619,9 +1629,11 @@ const EstoqueComercialApp = {
     const installments = (bill && bill.installments) || [];
     const kpis = this.kpisFromInstallments(installments);
     const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
-    const received = Number(kpis.kpiPago) || 0;
+    const received = Number(kpis.recebido != null ? kpis.recebido : kpis.kpiLiquido) || 0;
     const quitado = aReceber <= 0.009 && (received <= 0.009 || !u.contractValue || received >= Number(u.contractValue) * 0.8);
-    const value = u.contractValue != null ? Number(u.contractValue) : (received + aReceber);
+    const value = Number(kpis.kpiTotalContrato) > 0.009
+      ? kpis.kpiTotalContrato
+      : (u.contractValue != null ? Number(u.contractValue) : (received + aReceber));
     return {
       ...u,
       receivableBillId: u.receivableBillId || bill.billReceivableId || bill.receivableBillId || null,
@@ -1963,8 +1975,16 @@ const EstoqueComercialApp = {
 
   billMatchesEstoqueUnit(b, u) {
     if (!b || !u) return false;
-    const bid = String(b.id || b.receivableBillId || b.billReceivableId || "");
-    if (u.receivableBillId && bid && String(u.receivableBillId) === bid) return true;
+    const bid = String(b.id || b.receivableBillId || b.billReceivableId || "").replace(/^B-/, "").split("-")[0];
+    const uBill = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+    if (uBill && bid && uBill === bid) return true;
+    const sale = String(u.contractId || u.saleId || "");
+    const bSale = String(b.saleId || b.salesContractId || b.contractId || "");
+    if (sale && bSale && sale === bSale) return true;
+    const num = this.displayContract(u);
+    if (num && [b.document, b.documentNumber, b.contractNumber, b.salesContractNumber, b.number].some(d => this.docMatchesContract(d, num))) {
+      return true;
+    }
     const bEnt = String(b.enterpriseId || b.costCenterId || "");
     if (bEnt && String(u.enterpriseId) !== bEnt) return false;
     const bName = b.unityName || b.unitName || b.unit || "";
@@ -1973,6 +1993,21 @@ const EstoqueComercialApp = {
     if (uk && bk && uk === bk) return true;
     if (this.unitNameMatches(bName, u.name)) return true;
     return false;
+  },
+
+  pickStatementForUnit(u, statements, bills) {
+    const list = statements || [];
+    const mine = (bills || []).filter(b => this.billMatchesEstoqueUnit(b, u));
+    const byRb = list.find(s => {
+      const sid = String(s.billReceivableId || s.receivableBillId || s.id || "").replace(/^B-/, "").split("-")[0];
+      const uBill = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      if (uBill && sid && uBill === sid) return true;
+      return mine.some(b => String(b.id || b.receivableBillId || "").replace(/^B-/, "").split("-")[0] === sid);
+    });
+    if (byRb) return byRb;
+    const byDoc = list.find(s => this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u));
+    if (byDoc) return byDoc;
+    return null;
   },
 
   applyRelFin(u, status, bill) {
@@ -2009,7 +2044,7 @@ const EstoqueComercialApp = {
   applyFichaMoney(u, installments, status, rb) {
     const kpis = this.kpisFromInstallments(installments);
     const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
-    const received = Number(kpis.kpiPago) || 0;
+    const received = Number(kpis.recebido != null ? kpis.recebido : kpis.kpiLiquido) || 0;
     let fin = status;
     if (kpis.kpiVencidas <= 0.009 && kpis.kpiAVencer <= 0.009) fin = "quitado";
     else if (kpis.kpiVencidas > 0.009) fin = "inadimplente";
@@ -2021,6 +2056,11 @@ const EstoqueComercialApp = {
     next.presentDebitBalance = aReceber;
     next.kpiVencidas = kpis.kpiVencidas;
     next.kpiAVencer = kpis.kpiAVencer;
+    next.kpiPago = kpis.kpiPago;
+    next.kpiAcrescimo = kpis.kpiAcrescimo;
+    next.kpiDesconto = kpis.kpiDesconto;
+    next.kpiLiquido = kpis.kpiLiquido;
+    if (Number(kpis.kpiTotalContrato) > 0.009) next.contractValue = kpis.kpiTotalContrato;
     if (fin === "quitado") {
       next.quitado = true;
       next.outstandingBalance = 0;
@@ -2116,10 +2156,12 @@ const EstoqueComercialApp = {
 
   async applyRelacionamentoBatimento(ccId, opts) {
     this.buildDefaulterIndex();
+    const includeSettled = !!(opts && opts.includeSettled);
     const sold = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isFinanceUnit(u));
     const byCust = new Map();
     sold.forEach(u => {
-      if (this.isSettledUnit(u) || !u.customerId) return;
+      if (!includeSettled && this.isSettledUnit(u)) return;
+      if (!u.customerId) return;
       const id = String(u.customerId);
       if (!byCust.has(id)) byCust.set(id, []);
       byCust.get(id).push(u);
@@ -2131,18 +2173,14 @@ const EstoqueComercialApp = {
       if (this.state.stopSync) break;
       const customerId = custIds[i];
       if (refreshSet && !refreshSet.has(String(customerId))) continue;
-      this.setProgress(`Valores da ficha ${i + 1}/${custIds.length} — cliente ${customerId}…`, ((i + 1) / Math.max(custIds.length, 1)) * 100);
+      this.setProgress(`Ficha ${i + 1}/${custIds.length} — cliente ${customerId} (ativos, inadimplentes e quitados)…`, ((i + 1) / Math.max(custIds.length, 1)) * 100);
       const bills = await this.fetchReceivableBillsCached(customerId);
       const statements = await this.fetchStatementsCached(customerId);
       const unitIds = new Set(byCust.get(customerId).map(u => String(u.id)));
       this.state.units = this.state.units.map(u => {
         if (!unitIds.has(String(u.id))) return u;
         const mine = bills.filter(b => this.billMatchesEstoqueUnit(b, u));
-        const stmt = statements.find(s => {
-          const sid = String(s.billReceivableId || s.receivableBillId || s.id || "").replace(/^B-/, "").split("-")[0];
-          if (mine.some(b => String(b.id || b.receivableBillId || "") === sid)) return true;
-          return this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u);
-        }) || (statements.length === 1 && unitIds.size === 1 ? statements[0] : null);
+        const stmt = this.pickStatementForUnit(u, statements, bills);
         const status = this.classifyUnitBills(mine)
           || (this.isInadimplente(u) ? "inadimplente" : this.defaultFinanceStatus(u));
         const rb = mine
@@ -2154,21 +2192,17 @@ const EstoqueComercialApp = {
           marked += 1;
           return this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt);
         }
-        marked += 1;
-        return this.applyRelFin(u, status, rb);
+        if (mine.length) {
+          marked += 1;
+          return this.applyRelFin(u, status, rb);
+        }
+        return u;
       });
       if ((i + 1) % 10 === 0) {
         this.saveCache();
         this.renderTable();
       }
       await this.sleep(this.BATIMENTO_AUTO_PAUSED ? 220 : 90);
-    }
-    if (!refreshSet) {
-      this.state.units = this.state.units.map(u => {
-        if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u) || u.relFin || this.isSettledUnit(u)) return u;
-        marked += 1;
-        return this.applyRelFin(u, this.defaultFinanceStatus(u), null);
-      });
     }
     this.saveCache();
     await this.saveFirebaseCc(ccId);
@@ -2206,9 +2240,14 @@ const EstoqueComercialApp = {
         return;
       }
 
-      const stamped = this.stampFilaOnUnits(empSel);
+      const forceFull = !isAuto;
+      if (forceFull) this.state.stCache = {};
+      if (forceFull) this.state.rbCache = {};
+      const stampedPre = forceFull ? 0 : this.stampFilaOnUnits(empSel);
       const includeCensus = !isAuto;
-      const planned = this.collectBatimentoCustomers(empSel, includeCensus);
+      const planned = forceFull
+        ? this.collectAllFinanceCustomers(empSel, true)
+        : this.collectBatimentoCustomers(empSel, includeCensus);
       this._censusStillOpen = this.state.units.some(u =>
         (!empSel || String(u.enterpriseId) === String(empSel)) && this.unitNeedsCensus(u)
       );
@@ -2229,12 +2268,18 @@ const EstoqueComercialApp = {
         for (let i = 0; i < ccIds.length; i++) {
           if (this.state.stopSync) break;
           const ccId = ccIds[i];
-          const soldN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isSoldUnit(u)).length;
-          this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${soldN} vendidas)…`, ((i + 1) / ccIds.length) * 100);
+          const soldN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isFinanceUnit(u)).length;
+          this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${soldN} contratos)…`, ((i + 1) / ccIds.length) * 100);
           const refreshSet = custIdsToRefreshByCc.get(String(ccId)) || null;
-          marked += await this.applyRelacionamentoBatimento(ccId, { custIdsToRefresh: refreshSet });
+          marked += await this.applyRelacionamentoBatimento(ccId, {
+            custIdsToRefresh: refreshSet,
+            includeSettled: forceFull
+          });
         }
       }
+      const stamped = forceFull
+        ? this.stampFilaOnUnits(empSel, { onlyWithoutStatement: true })
+        : stampedPre;
       this._censusStillOpen = this.state.units.some(u =>
         (!empSel || String(u.enterpriseId) === String(empSel)) && this.unitNeedsCensus(u)
       );
