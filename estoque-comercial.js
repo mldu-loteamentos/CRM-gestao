@@ -1,5 +1,6 @@
 const EstoqueComercialApp = {
   CACHE_KEY: "crm_estoque_posicao_v1",
+  FIN_KEY: "crm_estoque_fin_v1",
   FB_COL: "estoque_comercial",
   CC_WITH_KEY: "crm_cc_ids_com_unidade",
   CC_EMPTY_KEY: "crm_cc_ids_sem_unidade",
@@ -285,14 +286,62 @@ const EstoqueComercialApp = {
     };
   },
 
-  loadCache() {
+  loadFinanceOverlay() {
     try {
-      const raw = localStorage.getItem(this.CACHE_KEY);
+      const raw = localStorage.getItem(this.FIN_KEY);
       if (!raw) return null;
-      return JSON.parse(raw);
+      const data = JSON.parse(raw);
+      return data && Array.isArray(data.items) ? data.items : null;
     } catch (e) {
       return null;
     }
+  },
+
+  financeLite(u) {
+    if (!u) return null;
+    return {
+      id: u.id,
+      relFin: u.relFin || null,
+      quitado: !!u.quitado,
+      statementDone: !!u.statementDone,
+      receivedLocked: !!u.receivedLocked,
+      contractNumber: u.contractNumber || null,
+      contractId: u.contractId || null,
+      receivableBillId: u.receivableBillId || null,
+      customerId: u.customerId || null,
+      customerDoc: u.customerDoc || "",
+      customerName: u.customerName || "",
+      contractValue: u.contractValue != null ? Number(u.contractValue) : null,
+      receivedAmount: u.receivedAmount != null ? Number(u.receivedAmount) : null,
+      outstandingBalance: u.outstandingBalance != null ? Number(u.outstandingBalance) : null,
+      presentDebitBalance: u.presentDebitBalance != null ? Number(u.presentDebitBalance) : null,
+      kpiVencidas: u.kpiVencidas != null ? Number(u.kpiVencidas) : null,
+      kpiAVencer: u.kpiAVencer != null ? Number(u.kpiAVencer) : null,
+      quitacaoDate: u.quitacaoDate || null,
+      situation: u.situation || ""
+    };
+  },
+
+  applyFinanceLite(units, lites) {
+    if (!lites || !lites.length) return units || [];
+    return this.keepQuitado(lites, units || []);
+  },
+
+  loadCache() {
+    let data = null;
+    try {
+      const raw = localStorage.getItem(this.CACHE_KEY);
+      if (raw) data = JSON.parse(raw);
+    } catch (e) {
+      data = null;
+    }
+    const overlay = this.loadFinanceOverlay();
+    if (data && overlay && overlay.length) {
+      data.units = this.applyFinanceLite(data.units || [], overlay);
+    } else if (!data && overlay && overlay.length) {
+      this._pendingFin = overlay;
+    }
+    return data;
   },
 
   saveCache() {
@@ -311,7 +360,31 @@ const EstoqueComercialApp = {
     try {
       localStorage.setItem(this.CACHE_KEY, JSON.stringify(payload));
     } catch (e) {
-      console.warn("[Estoque] localStorage cheio; Firebase permanece a fonte.", e);
+      try {
+        const compact = {
+          ...payload,
+          units: (payload.units || []).map((u) => {
+            if (!u || !u.openParcelas) return u;
+            const next = { ...u };
+            delete next.openParcelas;
+            return next;
+          })
+        };
+        localStorage.setItem(this.CACHE_KEY, JSON.stringify(compact));
+      } catch (e2) {
+        console.warn("[Estoque] localStorage cheio; overlay financeiro + Firebase permanecem a fonte.", e2);
+      }
+    }
+    try {
+      const items = (this.state.units || [])
+        .filter((u) => u && (u.relFin || u.quitado || u.contractNumber || u.statementDone))
+        .map((u) => this.financeLite(u));
+      localStorage.setItem(this.FIN_KEY, JSON.stringify({
+        date: this.todayStr(),
+        items
+      }));
+    } catch (e) {
+      console.warn("[Estoque] overlay financeiro não coube no localStorage.", e);
     }
   },
 
@@ -379,6 +452,16 @@ const EstoqueComercialApp = {
     if (!this.fbReady()) return false;
     const { doc, setDoc, getDocs, collection, deleteDoc } = window.firebaseCollections;
     try {
+      if (!this._skipFinanceGuard) {
+        const existing = await this.loadFirebase();
+        const curF = (this.state.units || []).filter((u) => u && u.relFin).length;
+        const oldF = existing && existing.units
+          ? existing.units.filter((u) => u && u.relFin).length
+          : 0;
+        if (oldF > curF) {
+          this.state.units = this.mergeUnitsPreferFinance(existing.units, this.state.units);
+        }
+      }
       const grouped = {};
       this.state.units.forEach(u => {
         const cc = String(u.enterpriseId || "0");
@@ -442,6 +525,11 @@ const EstoqueComercialApp = {
   async persistTodayResult(opts) {
     opts = opts || {};
     const today = this.todayStr();
+    const finN = (this.state.units || []).filter((u) => u && (u.relFin || u.quitado)).length;
+    if (!finN) {
+      this.saveCache();
+      return today;
+    }
     this.state.fetchedAt = new Date().toISOString();
     this.state.batimentoAt = this.state.fetchedAt;
     this.state.lastSnapshotDate = today;
@@ -596,13 +684,22 @@ const EstoqueComercialApp = {
     }).catch(() => {});
 
     await this.loadFirebaseInBackground();
+    if (this._pendingFin && this._pendingFin.length) {
+      this.state.units = this.applyFinanceLite(this.state.units, this._pendingFin);
+      this._pendingFin = null;
+    }
+    if (!this.hasFinanceFields()) {
+      await this.restoreFromLastSnapshot();
+    }
+    this.updateMeta();
+    this.renderTable();
   },
 
   async loadFirebaseInBackground() {
     if (this._fbBgPromise) return this._fbBgPromise;
     this._fbBgPromise = (async () => {
       try {
-        if (!this.fbReady()) await this.waitFirebase(6000);
+        if (!this.fbReady()) await this.waitFirebase(12000);
         const fb = await this.loadFirebase();
         if (!fb || !fb.units || !fb.units.length) return;
 
@@ -611,17 +708,16 @@ const EstoqueComercialApp = {
           return;
         }
 
-        const fbFinance = (fb.units || []).filter((u) => u && u.relFin).length;
-        const localFinance = (this.state.units || []).filter((u) => u && u.relFin).length;
-        if (fbFinance >= localFinance || !this.state.units.length) {
-          this.applyCache(fb);
-        } else {
-          this.state.units = this.keepQuitado(fb.units, this.state.units);
-          this.state.batimentoDate = this.state.batimentoDate || fb.batimentoDate || null;
-          this.state.batimentoAt = this.state.batimentoAt || fb.batimentoAt || null;
-          this.state.fetchedAt = fb.fetchedAt || this.state.fetchedAt;
-          this.state.batimentoDone = this.state.batimentoDone || !!fb.batimentoDone;
-        }
+        const overlay = this._pendingFin || this.loadFinanceOverlay();
+        let next = this.mergeUnitsPreferFinance(this.state.units, fb.units);
+        if (overlay && overlay.length) next = this.applyFinanceLite(next, overlay);
+        this.applyCache({
+          ...fb,
+          units: next,
+          batimentoDate: this.state.batimentoDate || fb.batimentoDate || null,
+          batimentoAt: this.state.batimentoAt || fb.batimentoAt || null,
+          batimentoDone: this.state.batimentoDone || !!fb.batimentoDone
+        });
         this.state.firebaseOk = true;
         this.fillEnterprisesFromUnits();
         this.fillUnitSelect();
@@ -796,15 +892,24 @@ const EstoqueComercialApp = {
     if (this.state._autoFinanceRunning) return;
 
     await this.loadFirebaseInBackground();
+    if (this._pendingFin && this._pendingFin.length) {
+      this.state.units = this.applyFinanceLite(this.state.units, this._pendingFin);
+      this._pendingFin = null;
+    }
+    if (!this.hasFinanceFields()) {
+      this.setProgress("Restaurando a última classificação gravada…");
+      await this.restoreFromLastSnapshot();
+      this.setProgress("");
+    }
 
     const meta = await this.tryLoadBatimentoMetaOnly();
     if (meta && meta.batimentoDate === today) return;
     if (this.state.batimentoDate === today) return;
 
     if (!this.state.units.length) {
-      await this.consultar(true);
+      this.setProgress("Sem estoque salvo. Use Baixar unidades do Sienge — a classificação anterior será reaproveitada.");
+      return;
     }
-    if (!this.state.units.length) return;
 
     this._firebasePendingData = null;
     this._autoDeltaRun = true;
@@ -815,7 +920,8 @@ const EstoqueComercialApp = {
       if (this._firebasePendingData) {
         const fb = this._firebasePendingData;
         this._firebasePendingData = null;
-        this.applyCache(fb);
+        const merged = this.mergeUnitsPreferFinance(this.state.units, fb.units || []);
+        this.applyCache({ ...fb, units: merged });
         this.state.firebaseOk = true;
         this.fillEnterprisesFromUnits();
         this.fillUnitSelect();
@@ -942,12 +1048,17 @@ const EstoqueComercialApp = {
   },
 
   buildDefaulterIndex() {
-    const idx = { byRb: new Map(), byUnit: new Map() };
+    const idx = { byRb: new Map(), byUnit: new Map(), byCustomer: new Map() };
     const bills = (window.AppState && AppState.defaultersBills) || [];
     bills.forEach(b => {
-      const val = Number(b.value) || 0;
+      const val = this.filaBillAmount(b);
       const rb = String(b.receivableBillId || b.id || "");
       if (rb) idx.byRb.set(rb, (idx.byRb.get(rb) || 0) + val);
+      const cust = String(b.customerId || b.clientId || "");
+      if (cust) {
+        if (!idx.byCustomer) idx.byCustomer = new Map();
+        idx.byCustomer.set(cust, (idx.byCustomer.get(cust) || 0) + val);
+      }
       const cc = String(b.costCenterId || (b.costCentersId && b.costCentersId[0]) || "");
       const units = String(b.units || "");
       units.split(/[;,|/]/).forEach(part => {
@@ -966,13 +1077,37 @@ const EstoqueComercialApp = {
     return this.overdueValue(u) > 0.009;
   },
 
+  filaBillAmount(b) {
+    if (!b) return 0;
+    const charges = Number(b.overdueCharges);
+    const principal = Number(b.overdueValue != null ? b.overdueValue : b.value) || 0;
+    if (Number.isFinite(charges) && charges > 0.009) return principal + charges;
+    const interest = Number(b.interest || b.interestValue || 0);
+    const fine = Number(b.fine || b.fineValue || 0);
+    if (interest + fine > 0.009) return principal + interest + fine;
+    const insts = b.defaulterInstallments || [];
+    if (insts.length) {
+      return insts.reduce((s, inst) => {
+        if (inst.correctedValueWithAdditions != null) return s + Number(inst.correctedValueWithAdditions || 0);
+        return s + Number(inst.value || inst.correctedValueWithoutAdditions || 0)
+          + Number(inst.interest || 0) + Number(inst.fine || 0);
+      }, 0);
+    }
+    return principal;
+  },
+
   overdueValue(u) {
+    const ficha = Number(u && u.kpiVencidas);
+    if (Number.isFinite(ficha) && ficha > 0.009) return ficha;
     const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
     if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) {
       return idx.byRb.get(String(u.receivableBillId)) || 0;
     }
     const k = `${String(u.enterpriseId || "")}|${this.normName(u.name)}`;
-    return idx.byUnit.get(k) || 0;
+    if (idx.byUnit.has(k)) return idx.byUnit.get(k) || 0;
+    const cust = String(u.customerId || "");
+    if (cust && idx.byCustomer && idx.byCustomer.has(cust)) return idx.byCustomer.get(cust) || 0;
+    return 0;
   },
 
   sanitizeUnit(u) {
@@ -1106,7 +1241,7 @@ const EstoqueComercialApp = {
         : `<small>${p.ativos} contrato(s) ativo(s) · ${p.inadimplentes} em atraso</small>`;
       finEl.innerHTML = `
         <div class="est-fin-card"><label>A receber</label><strong>${this.money(p.aReceber)}</strong>${falta}</div>
-        <div class="est-fin-card is-warn"><label>Em atraso</label><strong>${this.money(p.atraso)}</strong><small>Da fila de inadimplência do dia (se carregada)</small></div>
+        <div class="est-fin-card is-warn"><label>Em atraso</label><strong>${this.money(p.atraso)}</strong><small>Principal + juros e multa</small></div>
         <div class="est-fin-card"><label>A vencer</label><strong>${this.money(p.aVencer)}</strong><small>A receber menos o atraso (aprox.)</small></div>
         <div class="est-fin-card is-ok"><label>Quitados</label><strong>${p.quitados}</strong><small>Saldo zero — fora do a receber</small></div>
       `;
@@ -1190,6 +1325,114 @@ const EstoqueComercialApp = {
 
   sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
+  },
+
+  unitFinanceScore(u) {
+    if (!u) return 0;
+    let s = 0;
+    if (u.relFin) s += 10;
+    if (u.statementDone) s += 5;
+    if (u.quitado || u.relFin === "quitado") s += 8;
+    if (u.contractNumber) s += 3;
+    if (u.receivableBillId) s += 2;
+    if (u.receivedLocked) s += 2;
+    if (u.kpiVencidas != null || u.kpiAVencer != null) s += 2;
+    if (u.receivedAmount != null) s += 1;
+    return s;
+  },
+
+  mergeUnitsPreferFinance(a, b) {
+    const map = {};
+    (a || []).forEach((u) => {
+      if (u && u.id != null) map[String(u.id)] = u;
+    });
+    (b || []).forEach((u) => {
+      if (!u || u.id == null) return;
+      const id = String(u.id);
+      const cur = map[id];
+      if (!cur) {
+        map[id] = u;
+        return;
+      }
+      const richer = this.unitFinanceScore(u) > this.unitFinanceScore(cur) ? u : cur;
+      const poorer = richer === u ? cur : u;
+      map[id] = this.keepQuitado([poorer], [richer])[0];
+    });
+    return Object.keys(map).map((k) => map[k]);
+  },
+
+  applyCaixaRows(units, rows) {
+    if (!rows || !rows.length) return units || [];
+    const byId = {};
+    rows.forEach((r) => {
+      if (r && r.uid) byId[String(r.uid)] = r;
+    });
+    return (units || []).map((u) => {
+      const r = byId[String(u.id)];
+      if (!r) return u;
+      if (this.unitFinanceScore(u) >= 15) return u;
+      const st = r.st || u.relFin || null;
+      return {
+        ...u,
+        relFin: u.relFin || st || null,
+        quitado: !!(u.quitado || st === "quitado"),
+        statementDone: !!(u.statementDone || st),
+        receivedLocked: !!(u.receivedLocked || st),
+        customerId: u.customerId || r.cid || null,
+        customerDoc: u.customerDoc || r.cpf || "",
+        customerName: u.customerName || r.nome || "",
+        receivedAmount: u.receivedAmount != null ? u.receivedAmount : r.rec,
+        kpiVencidas: u.kpiVencidas != null ? u.kpiVencidas : r.ven,
+        kpiAVencer: u.kpiAVencer != null ? u.kpiAVencer : r.av,
+        outstandingBalance: u.outstandingBalance != null ? u.outstandingBalance : r.vp,
+        presentDebitBalance: u.presentDebitBalance != null ? u.presentDebitBalance : r.vp,
+        pmp3m: u.pmp3m != null ? u.pmp3m : r.pmp,
+        openParcelas: (u.openParcelas && u.openParcelas.length) ? u.openParcelas : (r.parc || u.openParcelas)
+      };
+    });
+  },
+
+  async loadLastCaixaOverlay() {
+    if (!window.CaixaPosicaoStore || typeof CaixaPosicaoStore.listDates !== "function") return [];
+    try {
+      if (!this.fbReady()) await this.waitFirebase(8000);
+      const dates = await CaixaPosicaoStore.listDates();
+      if (!dates.length) return [];
+      return await CaixaPosicaoStore.loadDate(dates[0]);
+    } catch (e) {
+      console.warn("[Estoque] última posição de caixa", e);
+      return [];
+    }
+  },
+
+  async restoreFromLastSnapshot() {
+    const rows = await this.loadLastCaixaOverlay();
+    if (!rows.length) return 0;
+    const before = (this.state.units || []).filter((u) => u && u.relFin).length;
+    this.state.units = this.applyCaixaRows(this.state.units, rows);
+    const after = (this.state.units || []).filter((u) => u && u.relFin).length;
+    if (after > before) {
+      this.saveCache();
+      if (this.fbReady()) {
+        try { await this.saveFirebase(); } catch (e) {}
+      }
+    }
+    return after - before;
+  },
+
+  async previousFinanceUnits() {
+    const mem = this.state.units || [];
+    let fbUnits = [];
+    try {
+      const fb = await this.loadFirebase();
+      if (fb && fb.units) fbUnits = fb.units;
+    } catch (e) {}
+    let merged = this.mergeUnitsPreferFinance(mem, fbUnits);
+    const overlay = this._pendingFin || this.loadFinanceOverlay();
+    if (overlay && overlay.length) merged = this.applyFinanceLite(merged, overlay);
+    const caixa = await this.loadLastCaixaOverlay();
+    if (caixa.length) merged = this.applyCaixaRows(merged, caixa);
+    return merged;
   },
 
   keepQuitado(prev, next) {
@@ -2474,15 +2717,15 @@ const EstoqueComercialApp = {
       return;
     }
 
-    const prev = this.state.units.slice();
     this.state.stopSync = false;
+    this.setProgress("Carregando a última classificação para não perder o batimento…");
+    this._prevQuitados = await this.previousFinanceUnits();
     if (!empSel) {
       this.state.units = [];
       this.state.ccDone = [];
       this.state.complete = false;
       this.state.fetchedAt = null;
     }
-    this._prevQuitados = prev;
 
     this.setBusy(true);
     try {

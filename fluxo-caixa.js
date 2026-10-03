@@ -202,6 +202,18 @@ const FluxoCaixaApp = {
     return /ADIANTAMENTO A PARCEIRO/.test(n);
   },
 
+  /** Contas de saída de 04.01, sem o adiantamento (2.11.03). */
+  isRepasseTerrenistaCashAccount(categoryId, categoryName) {
+    const nk = this.normAccountKey(categoryId);
+    if (nk === "21103") return false;
+    if (["2020401", "2050110", "20708", "20108"].includes(nk)) return true;
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /\bREPASSE/.test(n) && !/ADIANTAMENTO/.test(n);
+  },
+
   creditorSettlementKey(mov) {
     if (!mov) return "";
     const title = this.movTitleInfo(mov);
@@ -245,11 +257,38 @@ const FluxoCaixaApp = {
   },
 
   /**
-   * Excel (04.01): 2.11.03 fica na própria linha — não reclassificar para Repasses.
+   * Excel (04.01): Repasses = valor de baixa inteiro; 2.11.03 fica na própria linha.
    * 04.01 = 2.02.04.01 + 2.05.01.10 + 2.07.08 + 2.11.03
    * ex.: −721.639,74 + 177.800,00 = −543.839,74
+   *
+   * Se o abatimento veio em outro movimento do mesmo título (parcela 2 = abatimento,
+   * parcela 1 = pagamento), soma o |2.11.03| de volta no 2.02.04.01.
+   * No mesmo movimento isso já foi feito pelo rateio renormalizado.
    */
   settleAdvancesInAllocs(allocs) {
+    if (!Array.isArray(allocs) || !allocs.length) return allocs;
+    const groups = new Map();
+    allocs.forEach((a) => {
+      const t = this.movTitleInfo(a.mov);
+      const key = String((t && t.titleKey) || this.movNumber(a.mov) || "").trim();
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(a);
+    });
+    groups.forEach((list) => {
+      const partners = list.filter((a) => this.isAdiantamentoParceirosAccount(a.categoryId, a.categoryName));
+      const cash = list.filter((a) => this.isRepasseTerrenistaCashAccount(a.categoryId, a.categoryName));
+      if (!partners.length || !cash.length) return;
+      const addFrom = partners.filter((p) => !cash.some((c) => c.mov === p.mov));
+      if (!addFrom.length) return;
+      const add = addFrom.reduce((s, p) => s + Math.abs(Number(p.rateadoBruto) || 0), 0);
+      if (add <= 0.009) return;
+      const target = cash.find((a) => this.normAccountKey(a.categoryId) === "2020401") || cash[0];
+      const signBruto = (Number(target.rateadoBruto) || 0) < 0 ? -1 : 1;
+      const signAmt = (Number(target.amount) || 0) < 0 ? -1 : 1;
+      target.rateadoBruto = (Number(target.rateadoBruto) || 0) + signBruto * add;
+      target.amount = (Number(target.amount) || 0) + signAmt * add * (Number(target.factor) || 1);
+    });
     return allocs;
   },
 
@@ -259,29 +298,26 @@ const FluxoCaixaApp = {
     // Sem plano financeiro = transferência / aplicação / movimento bancário puro — fora do DFC
     if (!catsAll.length) return [];
 
-    // Reaprop em 2.11.03 permanece no DFC (Excel: Adiantamento a Parceiros positivo).
-    // Reaprop em outras contas (rateio junto com Repasses) sai do caixa.
     const role = this.movAdvanceRole(mov);
     const is21103 = (fc) => this.isAdiantamentoParceirosAccount(
       fc && fc.financialCategoryId,
       fc && fc.financialCategoryName
     );
-    if (role === "abatimento" && !catsAll.some(is21103)) return [];
+    const partnerCats = catsAll.filter(is21103);
+    const cashCats = catsAll.filter((fc) => !is21103(fc) && !this.isAbatimentoCategory(fc));
 
-    const cashCats = catsAll.filter((fc) => !this.isAbatimentoCategory(fc) || is21103(fc));
-    const removedAbate = cashCats.length < catsAll.length;
-    if (!cashCats.length) return [];
+    // Abatimento sem 2.11.03 e sem conta de caixa: fora do DFC.
+    if (role === "abatimento" && !partnerCats.length && !cashCats.length) return [];
+    if (!partnerCats.length && !cashCats.length) return [];
 
     const ignored = this.ignoredAccountKeys();
-    return this.categoryShareEntries(cashCats, { renormalize: removedAbate }).map(({ fc, share }) => {
+    const toAllocs = (entries) => entries.map(({ fc, share }) => {
       const categoryId = String(fc.financialCategoryId || "").trim();
       if (!categoryId) return null;
       const nk = this.normAccountKey(categoryId);
       if (ignored.has(categoryId) || (nk && ignored.has(nk))) return null;
       const rateRaw = Number(fc.financialCategoryRate);
-      // Total do título/movimento (ex.: 52.200) × % apropriação C.C. (53% / 47%)
       const rateadoBruto = rawBank * share;
-      // Depois aplica o fator MLDU da empresa consolidada
       const amount = rateadoBruto * factor;
       return {
         amount,
@@ -301,6 +337,18 @@ const FluxoCaixaApp = {
         mov
       };
     }).filter(Boolean);
+
+    const out = [];
+    // Excel: 2.02.04.01 = valor de baixa inteiro (−721.639,74), não o líquido.
+    if (cashCats.length) {
+      const renormalize = partnerCats.length > 0 || cashCats.length < catsAll.length;
+      out.push(...toAllocs(this.categoryShareEntries(cashCats, { renormalize })));
+    }
+    // Excel: 2.11.03 fica na própria linha (+177.800).
+    if (partnerCats.length) {
+      out.push(...toAllocs(this.categoryShareEntries(partnerCats, { renormalize: false })));
+    }
+    return out;
   },
 
   ignoredAccountKeys() {
@@ -388,7 +436,7 @@ const FluxoCaixaApp = {
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
    * Adiantamento × abatimento (reapropriação) em 04.01:
-   * — 2.02.04.01 Repasses = só a conta de repasse (não misturar 2.11.03)
+   * — 2.02.04.01 Repasses = valor de baixa inteiro (não o líquido)
    * — 2.11.03 Adiantamento a Parceiros fica na própria linha
    * — reaprop. nessa conta entra positivo (reduz o custo), como no Excel
    * — reaprop. em outras contas continua fora do DFC

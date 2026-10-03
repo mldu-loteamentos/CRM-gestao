@@ -51,13 +51,13 @@ const ComprasPrevisoesApp = {
     DEV: 1, DEVO: 1
   },
   WEEKDAYS: [
-    { id: 0, label: "Domingo" },
-    { id: 6, label: "Sábado" },
-    { id: 1, label: "Segunda-feira" },
-    { id: 2, label: "Terça-feira" },
-    { id: 3, label: "Quarta-feira" },
-    { id: 4, label: "Quinta-feira" },
-    { id: 5, label: "Sexta-feira" }
+    { id: 0, label: "Domingo", short: "Dom", weekend: true },
+    { id: 6, label: "Sábado", short: "Sáb", weekend: true },
+    { id: 1, label: "Segunda-feira", short: "Seg" },
+    { id: 2, label: "Terça-feira", short: "Ter" },
+    { id: 3, label: "Quarta-feira", short: "Qua" },
+    { id: 4, label: "Quinta-feira", short: "Qui" },
+    { id: 5, label: "Sexta-feira", short: "Sex" }
   ],
   GROUPS: {
     VENCIDOS: "vencidos",
@@ -1098,29 +1098,27 @@ const ComprasPrevisoesApp = {
     root.innerHTML = `
       <div class="cprev-config-page">
         <div class="crm-card cprev-config-card">
-          <h2 class="tvig-page-title">
-            <i data-lucide="calendar-clock" style="width:22px;height:22px;color:var(--color-primary);"></i>
-            Calendário de vencimento de títulos a pagar
-          </h2>
-          <p class="cprev-config-help">Ao lançar a nota hoje, o documento a pagar precisa respeitar o mínimo de dias do <strong>dia da semana em que o documento entra</strong>. Previsões cujo vencimento já não cabe nesse prazo aparecem no follow-up em <strong>Prazo insuficiente para lançar</strong>.</p>
-          <div class="table-container" style="box-shadow:none;border:1px solid rgba(16,84,54,0.08);overflow:auto;">
-            <table class="custom-table cprev-prazo-table">
-              <thead>
-                <tr>
-                  <th>Dia da semana</th>
-                  <th>Mínimo de dias para vencimento</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${this.WEEKDAYS.map((d) => `<tr>
-                  <td>${this.esc(d.label)}</td>
-                  <td>
-                    <input type="number" min="0" max="60" step="1" class="form-control" value="${this.esc(prazo[d.id])}"
-                      onchange="ComprasPrevisoesApp.onPrazoField(${d.id}, this.value)">
-                  </td>
-                </tr>`).join("")}
-              </tbody>
-            </table>
+          <div class="cprev-config-help">
+            <i data-lucide="info"></i>
+            <p>Ao lançar a nota hoje, o documento a pagar precisa respeitar o mínimo de dias do <strong>dia da semana em que o documento entra</strong>. Previsões cujo vencimento já não cabe nesse prazo aparecem no follow-up em <strong>Prazo insuficiente para lançar</strong>.</p>
+          </div>
+          <div class="cprev-prazo-list">
+            <div class="cprev-prazo-head">
+              <span>Dia da semana</span>
+              <span>Mínimo de dias para vencimento</span>
+            </div>
+            ${this.WEEKDAYS.map((d) => `<label class="cprev-prazo-row${d.weekend ? " is-weekend" : ""}">
+              <span class="cprev-prazo-day">
+                <span class="cprev-prazo-chip">${this.esc(d.short)}</span>
+                <span class="cprev-prazo-name">${this.esc(d.label)}</span>
+              </span>
+              <span class="cprev-prazo-field">
+                <input type="number" min="0" max="60" step="1" value="${this.esc(prazo[d.id])}"
+                  aria-label="Mínimo de dias para ${this.esc(d.label)}"
+                  onchange="ComprasPrevisoesApp.onPrazoField(${d.id}, this.value)">
+                <span>dias</span>
+              </span>
+            </label>`).join("")}
           </div>
           <div class="cprev-config-actions">
             <button type="button" class="btn btn-cancel" onclick="ComprasPrevisoesApp.cancelPrazoEdit()">Cancelar</button>
