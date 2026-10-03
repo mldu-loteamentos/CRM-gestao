@@ -78,10 +78,51 @@ const ComprasPrevisoesApp = {
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   },
 
+  isoDate(v) {
+    const s = String(v == null ? "" : v).trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+  },
+
+  paymentDateOf(bill, pay, bm) {
+    return this.isoDate(bm && bm.bankMovementDate)
+      || this.isoDate(pay && (pay.paymentDate || pay.date || pay.payOffDate || pay.bankMovementDate))
+      || this.isoDate(bill && (bill.paymentDate || bill.payOffDate || bill.payoffDate || bill.liquidationDate || bill.settlementDate));
+  },
+
+  billBalance(bill) {
+    if (!bill) return null;
+    const raw = bill.balanceAmount != null ? bill.balanceAmount
+      : (bill.outstandingBalance != null ? bill.outstandingBalance
+        : (bill.currentBalance != null ? bill.currentBalance
+          : (bill.remainingAmount != null ? bill.remainingAmount : null)));
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  billSituation(bill, pay) {
+    return this.fold(
+      (bill && (bill.situation || bill.status || bill.billStatus || bill.installmentStatus || bill.paymentStatus))
+      || (pay && (pay.situation || pay.status))
+      || ""
+    );
+  },
+
+  isPago(bill, pay, bm) {
+    if (this.paymentDateOf(bill, pay, bm)) return true;
+    const sit = this.billSituation(bill, pay);
+    if (sit === "PG" || /\b(PG|PAGO|PAGA|LIQUIDADO|BAIXADO|QUITADO|PAID|SETTLED)\b/.test(sit)) return true;
+    const bal = this.billBalance(bill);
+    if (bal != null && Math.abs(bal) <= 0.009) return true;
+    const tipo = this.fold((pay && (pay.operationTypeName || pay.operationName)) || (bm && bm.operationName) || "");
+    if (tipo && /BAIXA|LIQUID|QUITAC/.test(tipo) && !/ESTORNO|CANCEL/.test(tipo)) return true;
+    return false;
+  },
+
   defaultRange() {
     const d = new Date();
     const start = new Date(d.getFullYear(), d.getMonth(), 1);
-    const end = new Date(d.getFullYear(), d.getMonth() + 2, 0);
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     const iso = (x) => x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
     return { startDate: iso(start), endDate: iso(end) };
   },
@@ -183,7 +224,10 @@ const ComprasPrevisoesApp = {
                   ccNome: (cat && cat.costCenterName) || "",
                   rateio,
                   tipoBaixa: (pay && pay.operationTypeName) || "",
-                  dataPagamento: bm && bm.bankMovementDate ? String(bm.bankMovementDate).slice(0, 10) : "",
+                  dataPagamento: this.paymentDateOf(bill, pay, bm),
+                  pago: this.isPago(bill, pay, bm),
+                  saldo: this.billBalance(bill),
+                  situacao: this.billSituation(bill, pay),
                   operacao,
                   conta,
                   departamento: (dep && dep.name) || this.ccDeptHint((cat && cat.costCenterName) || "") || "",
@@ -255,8 +299,8 @@ const ComprasPrevisoesApp = {
       }
       if (start && r.vencimento && r.vencimento < start) return false;
       if (end && r.vencimento && r.vencimento > end) return false;
-      if (status === "aberto" && r.dataPagamento) return false;
-      if (status === "pago" && !r.dataPagamento) return false;
+      if (status === "aberto" && r.pago) return false;
+      if (status === "pago" && !r.pago) return false;
       if (q) {
         const blob = this.fold([r.credor, r.titulo, r.documento, r.docId, r.ccNome, r.plano].join(" "));
         if (blob.indexOf(q) < 0) return false;
@@ -276,8 +320,9 @@ const ComprasPrevisoesApp = {
     rows.forEach((r) => {
       const v = Number(r.valorAjustado) || 0;
       total += v;
-      if (!r.dataPagamento && r.vencimento && r.vencimento < today) vencido += v;
-      else if (!r.dataPagamento) aVencer += v;
+      if (r.pago) return;
+      if (r.vencimento && r.vencimento < today) vencido += v;
+      else aVencer += v;
     });
     return { qtd: rows.length, total, vencido, aVencer };
   },
@@ -514,7 +559,7 @@ const ComprasPrevisoesApp = {
           </thead>
           <tbody>
             ${slice.map((r) => {
-              const late = !r.dataPagamento && r.vencimento && r.vencimento < today;
+              const late = !r.pago && r.vencimento && r.vencimento < today;
               return `<tr class="${late ? "cprev-late" : ""}">
                 <td>${this.esc(r.companyId)}</td>
                 <td>${this.esc((r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—"))}</td>

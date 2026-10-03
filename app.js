@@ -1790,7 +1790,7 @@ window.installmentIsEntradaWebro = function(inst) {
 };
 
 window.webroBoletoTagHtml = function() {
-  return `<span class="tag-boleto-webro" title="Boleto parcela Webro"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> BOLETO WEBRO</span>`;
+  return `<span class="tag-boleto-webro" title="Boleto parcela Webro"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Boleto WEBRO</span>`;
 };
 
 window.findContractInstallmentById = function(id) {
@@ -6594,7 +6594,7 @@ window.wrapAgingWithWebro = function(client, innerHtml) {
 window.getEntradaWebroAgingHtml = function(client) {
   const days = Number(client && client.maxDaysDelay) || 0;
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span class="tag-boleto-webro" title="Cliente pagando entrada Webro — permanece na carteira interna"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> BOLETO WEBRO - ${dayLabel}</span>`;
+  return `<span class="tag-boleto-webro" title="Cliente pagando entrada Webro — permanece na carteira interna"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Boleto WEBRO - ${dayLabel}</span>`;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
@@ -12923,7 +12923,7 @@ function formatCpfCnpj(val) {
                     if (isWebroParcela) {
                       statusHtml = typeof window.webroBoletoTagHtml === "function"
                         ? window.webroBoletoTagHtml()
-                        : `<span class="tag-boleto-webro">BOLETO WEBRO</span>`;
+                        : `<span class="tag-boleto-webro">Boleto WEBRO</span>`;
                       acoesHtml = "";
                     } else if (!allowsSiengeBol) {
                       statusHtml = `<span style="background:#f8fafc;color:#475569;border:1px solid #cbd5e1;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Sem boleto Sienge</span>`;

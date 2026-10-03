@@ -593,7 +593,7 @@ const ComercialApp = {
           plugins: Object.assign({}, chartOpts.plugins, {
             tooltip: {
               enabled: false,
-              external: (ctx) => this.paintMonthTip(ctx, serie)
+              external: (ctx) => this.paintMonthTip(ctx, serie, 'vd')
             }
           })
         })
@@ -620,7 +620,7 @@ const ComercialApp = {
             legend: { display: false },
             tooltip: {
               enabled: false,
-              external: (ctx) => this.paintMonthTip(ctx, serie)
+              external: (ctx) => this.paintMonthTip(ctx, serie, 'var')
             }
           }
         })
@@ -639,14 +639,17 @@ const ComercialApp = {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   },
 
-  paintMonthTip(context, serie) {
-    const tip = document.getElementById('comercial-chart-tip');
+  paintMonthTip(context, serie, kind) {
+    const isVar = kind === 'var';
+    const tip = document.getElementById(isVar ? 'comercial-chart-var-tip' : 'comercial-chart-tip');
+    const other = document.getElementById(isVar ? 'comercial-chart-tip' : 'comercial-chart-var-tip');
     if (!tip) return;
     const tooltip = context && context.tooltip;
     if (!tooltip || !tooltip.opacity || !tooltip.dataPoints || !tooltip.dataPoints.length) {
       tip.hidden = true;
       return;
     }
+    if (other) other.hidden = true;
     const idx = tooltip.dataPoints[0].dataIndex;
     const point = (serie || [])[idx];
     if (!point) { tip.hidden = true; return; }
@@ -657,7 +660,23 @@ const ComercialApp = {
     const top = rows.slice(0, 8);
     const extra = rows.length - top.length;
     const mesNome = COM_MESES_FULL[point.month - 1] + ' ' + point.year;
-    tip.innerHTML = `
+    const varCls = point.variacao > 0 ? 'com-tip-pos' : (point.variacao < 0 ? 'com-tip-neg' : '');
+    tip.innerHTML = isVar ? `
+      <div class="com-chart-tip-head">
+        <strong>${this.esc(mesNome)}</strong>
+        <span>variação <em class="${varCls}">${point.variacao}</em></span>
+      </div>
+      ${top.length ? `<table>
+        <thead><tr><th>Empreendimento</th><th>Variação</th></tr></thead>
+        <tbody>
+          ${top.map((r) => `<tr>
+            <td>${this.esc(r.name)}</td>
+            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : '')}">${r.var}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<div class="com-chart-tip-empty">Sem movimento neste mês</div>'}
+      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${extra} empreendimento(s)</div>` : ''}
+    ` : `
       <div class="com-chart-tip-head">
         <strong>${this.esc(mesNome)}</strong>
         <span><em class="com-tip-v">${point.vendas}</em> vendas · <em class="com-tip-d">${point.distratos}</em> distratos · saldo ${point.variacao}</span>

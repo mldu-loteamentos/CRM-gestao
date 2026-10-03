@@ -83,7 +83,7 @@ const CompromissarioApp = {
   CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
   CESSAO_WORKING_MONTH_KEY: 'crm_compromissario_cessao_working_month',
   CESSAO_FILE_DB: 'crm_compromissario_cessao_files_v1',
-  CESSAO_PARSE_VERSION: 3,
+  CESSAO_PARSE_VERSION: 4,
 
   state: {
     prefeituras: [],
@@ -764,7 +764,12 @@ const CompromissarioApp = {
     try {
       const jobs = Object.entries(this.state.cessaoByCompany || {}).map(async ([id, row]) => {
         if (!row || row.status !== 'has') return;
-        if (row.parseVersion === this.CESSAO_PARSE_VERSION && Array.isArray(row.records) && row.records.length) return;
+        const month = String(this.state.cessaoMonth || '').slice(0, 7);
+        const allInMonth = Array.isArray(row.records) && row.records.length && row.records.every((r) => {
+          const iso = this.resolveCessaoIso(r);
+          return iso && month && iso.slice(0, 7) === month;
+        });
+        if (row.parseVersion === this.CESSAO_PARSE_VERSION && allInMonth) return;
         const payload = await this.loadCessaoFileBlob(id);
         const file = this.cessaoPayloadToFile(payload);
         if (!file) return;
@@ -1162,9 +1167,29 @@ const CompromissarioApp = {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array', cellDates: false, cellText: true, raw: false });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      matrix = this.excelSheetToMatrix(sheet, wb);
+      const matrixA = this.excelSheetToMatrix(sheet, wb);
+      const matrixB = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+      const parsedA = this.parseCessaoMatrix(matrixA);
+      const parsedB = this.parseCessaoMatrix(matrixB);
+      return this.preferCessaoParse(parsedA, parsedB);
     }
     return this.parseCessaoMatrix(matrix);
+  },
+
+  preferCessaoParse(a, b) {
+    const month = String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
+    const score = (p) => {
+      const recs = (p && p.records) || [];
+      const inMonth = recs.filter((r) => {
+        const iso = this.resolveCessaoIso(r);
+        return iso && month && iso.slice(0, 7) === month;
+      }).length;
+      return recs.length * 10 + inMonth * 25;
+    };
+    if (!a && !b) return { records: [], note: '' };
+    if (!b) return a;
+    if (!a) return b;
+    return score(b) > score(a) ? b : a;
   },
 
   excelSheetToMatrix(sheet, wb) {
@@ -1385,9 +1410,11 @@ const CompromissarioApp = {
     const iso = this.pickCessaoGroupIso(list);
     const first = list.find((r) => r.titulo) || list[0];
     const documento = (list.find((r) => r.documento) || {}).documento || '';
+    const competencia = String(this.state.cessaoMonth || this.state.searchMonth || (iso ? iso.slice(0, 7) : '') || first.competencia || '').slice(0, 7);
     return {
       data: this.formatCessaoDate(iso) || first.data || '',
       dataIso: iso,
+      competencia,
       empresa: (list.find((r) => r.empresa) || {}).empresa || '',
       titulo: String(first.titulo || '').replace(/\.0$/, ''),
       documento,
@@ -1405,11 +1432,16 @@ const CompromissarioApp = {
 
   pickCessaoGroupIso(list) {
     const rows = list || [];
+    const preferMonth = String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
     const starred = rows.filter((r) => (r.clients || []).some((c) => c.atual));
     const pick = (pool) => {
       const isos = (pool || []).map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
       if (!isos.length) return '';
-      const recent = isos.filter((iso) => iso >= '2023-01-01');
+      if (preferMonth) {
+        const inMonth = isos.filter((iso) => iso.slice(0, 7) === preferMonth);
+        if (inMonth.length) return inMonth[inMonth.length - 1];
+      }
+      const recent = isos.filter((iso) => iso >= '2024-01-01');
       const use = recent.length ? recent : isos;
       return use[use.length - 1];
     };
@@ -1687,17 +1719,43 @@ const CompromissarioApp = {
     return this.validIsoDate(rec.dataIso) || this.cessaoDateIso(rec.dataIso) || this.cessaoDateIso(rec.data);
   },
 
-  cessaoInSearchMonth(rec, monthVal) {
+  cessaoInSearchMonth(rec, monthVal, fromReportMonth) {
+    if (!rec || !monthVal) return false;
     const iso = this.resolveCessaoIso(rec);
-    return !!(iso && monthVal && iso.slice(0, 7) === monthVal);
+    if (iso && iso.slice(0, 7) === monthVal) return true;
+    if (rec.competencia && rec.competencia === monthVal) return true;
+    // Relatório anexado nesta competência: 21/09/2026 não pode cair fora
+    // só porque o agrupamento ficou com a data do cliente anterior (03/10/2020).
+    if (fromReportMonth) return true;
+    return false;
+  },
+
+  cessaoRowsForMonth(monthVal) {
+    const out = {};
+    const month = String(monthVal || '').slice(0, 7);
+    const store = this.readCessaoStore();
+    const disk = (month && store[month] && typeof store[month] === 'object') ? store[month] : {};
+    Object.entries(disk).forEach(([id, row]) => { out[String(id)] = row; });
+    if (this.state.cessaoMonth === month) {
+      Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
+        if (row && (row.status === 'has' || (Array.isArray(row.records) && row.records.length))) {
+          out[String(id)] = row;
+        }
+      });
+    }
+    return out;
   },
 
   buildCessaoMovements(monthVal) {
     const movements = [];
-    Object.entries(this.state.cessaoByCompany || {}).forEach(([cid, row]) => {
-      if (row.status !== 'has') return;
+    const seen = new Set();
+    Object.entries(this.cessaoRowsForMonth(monthVal)).forEach(([cid, row]) => {
+      if (!row || row.status !== 'has') return;
       this.normalizeCessaoRecords(row.records).forEach((rec) => {
-        if (!this.cessaoInSearchMonth(rec, monthVal)) return;
+        if (!this.cessaoInSearchMonth(rec, monthVal, true)) return;
+        const key = String(cid) + '|' + (this.digitsOnly(rec.titulo) || rec.contratoNumero || rec.documento || movements.length);
+        if (seen.has(key)) return;
+        seen.add(key);
         const atuais = rec.atuais || [];
         movements.push({
           id: 'cessao-' + cid + '-' + (rec.titulo || rec.contratoNumero || movements.length),
@@ -1790,6 +1848,11 @@ const CompromissarioApp = {
       const vendaRaw = vendas.filter((v) => !destIds.has(String(v.id)));
       this.state._skippedIncorporacao = destRaw.filter((d) => !this.shouldNotifyContract(d)).length
         + vendaRaw.filter((v) => !this.shouldNotifyContract(v)).length;
+      if (this._cessaoReparseTimer) {
+        clearTimeout(this._cessaoReparseTimer);
+        this._cessaoReparseTimer = null;
+      }
+      await this.reparseStoredCessaoFiles();
       await this.hydrateCessaoUnits();
       const movements = this.buildMovements(vendas, distratos, monthVal);
       const cessaoMoves = this.buildCessaoMovements(monthVal);
