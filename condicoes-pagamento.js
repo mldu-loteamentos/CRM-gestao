@@ -222,7 +222,22 @@ const CondicoesPagamentoApp = {
 
   flagOf(id) {
     const key = String(id == null ? "" : id).trim();
-    return this.normalizeFlagRow(this.flags[key] || {});
+    if (!key) return this.normalizeFlagRow({});
+    if (this.flags[key]) return this.normalizeFlagRow(this.flags[key]);
+    const fold = (s) => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const token = fold(key).split(/[\s\-_\/.,;:]+/)[0];
+    if (token && this.flags[token]) return this.normalizeFlagRow(this.flags[token]);
+    const keys = Object.keys(this.flags || {});
+    const byKey = keys.find((k) => fold(k) === fold(key) || fold(k) === token || fold(k).split(/[\s\-_\/]+/)[0] === token);
+    if (byKey) return this.normalizeFlagRow(this.flags[byKey]);
+    const hit = (this.items || []).find((it) => {
+      const iid = fold(it.id);
+      const iname = fold(it.name);
+      return iid === fold(key) || iid === token || iname === fold(key)
+        || (token && (iname.split(/[\s\-_\/]+/)[0] === token || iname.indexOf(token) === 0));
+    });
+    if (hit && this.flags[hit.id]) return this.normalizeFlagRow(this.flags[hit.id]);
+    return this.normalizeFlagRow({});
   },
 
   async persistFlags(opts) {
