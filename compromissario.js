@@ -83,7 +83,7 @@ const CompromissarioApp = {
   CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
   CESSAO_WORKING_MONTH_KEY: 'crm_compromissario_cessao_working_month',
   CESSAO_FILE_DB: 'crm_compromissario_cessao_files_v1',
-  CESSAO_PARSE_VERSION: 4,
+  CESSAO_PARSE_VERSION: 5,
 
   state: {
     prefeituras: [],
@@ -334,10 +334,13 @@ const CompromissarioApp = {
   cityFromEnterprise(name) {
     const raw = String(name || '').trim();
     if (!raw) return '';
-    const parts = raw.split(/\s+-\s+/).map((p) => p.trim()).filter(Boolean);
+    const parts = raw.split(/\s*-\s*/).map((p) => p.trim()).filter(Boolean);
     if (!parts.length) return raw.toUpperCase();
-    if (/^\d+$/.test(parts[0]) && parts[1]) return parts[1].toUpperCase();
-    return parts[0].toUpperCase();
+    let i = 0;
+    if (/^\d+$/.test(parts[0])) i = 1;
+    const city = parts[i] || parts[0];
+    if (/^\d+$/.test(city) && parts[i + 1]) return parts[i + 1].toUpperCase();
+    return String(city || raw).toUpperCase();
   },
 
   cityOfContract(c) {
@@ -777,11 +780,13 @@ const CompromissarioApp = {
       const jobs = Object.entries(this.state.cessaoByCompany || {}).map(async ([id, row]) => {
         if (!row || row.status !== 'has') return;
         const month = String(this.state.cessaoMonth || '').slice(0, 7);
-        const allInMonth = Array.isArray(row.records) && row.records.length && row.records.every((r) => {
+        const recs = Array.isArray(row.records) ? row.records : [];
+        const allInMonth = recs.length && recs.every((r) => {
           const iso = this.resolveCessaoIso(r);
           return iso && month && iso.slice(0, 7) === month;
         });
-        if (row.parseVersion === this.CESSAO_PARSE_VERSION && allInMonth) return;
+        const ver = Number(row.parseVersion || 0);
+        if (ver >= this.CESSAO_PARSE_VERSION && allInMonth && recs.length >= 2) return;
         const payload = await this.loadCessaoFileBlob(id);
         const file = this.cessaoPayloadToFile(payload);
         if (!file) return;
@@ -1178,30 +1183,32 @@ const CompromissarioApp = {
       }
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array', cellDates: false, cellText: true, raw: false });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const matrixA = this.excelSheetToMatrix(sheet, wb);
-      const matrixB = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-      const parsedA = this.parseCessaoMatrix(matrixA);
-      const parsedB = this.parseCessaoMatrix(matrixB);
-      return this.preferCessaoParse(parsedA, parsedB);
+      const merged = [];
+      (wb.SheetNames || []).forEach((sheetName) => {
+        const sheet = wb.Sheets[sheetName];
+        if (!sheet) return;
+        const matrixA = this.excelSheetToMatrix(sheet, wb);
+        const matrixB = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+        merged.push(this.parseCessaoMatrix(matrixA));
+        merged.push(this.parseCessaoMatrix(matrixB));
+        merged.push(this.parseCessaoMatrixLoose(matrixA));
+        merged.push(this.parseCessaoMatrixLoose(matrixB));
+      });
+      return this.mergeCessaoParses(merged);
     }
     return this.parseCessaoMatrix(matrix);
   },
 
-  preferCessaoParse(a, b) {
-    const month = String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
-    const score = (p) => {
-      const recs = (p && p.records) || [];
-      const inMonth = recs.filter((r) => {
-        const iso = this.resolveCessaoIso(r);
-        return iso && month && iso.slice(0, 7) === month;
-      }).length;
-      return recs.length * 10 + inMonth * 25;
+  mergeCessaoParses(list) {
+    const raw = [];
+    (list || []).forEach((p) => {
+      (p && p.records || []).forEach((rec) => raw.push(rec));
+    });
+    const records = this.normalizeCessaoRecords(raw);
+    return {
+      records,
+      note: records.length ? `${records.length} cessão(ões)` : ((list[0] && list[0].note) || 'Nenhuma cessão lida')
     };
-    if (!a && !b) return { records: [], note: '' };
-    if (!b) return a;
-    if (!a) return b;
-    return score(b) > score(a) ? b : a;
   },
 
   excelSheetToMatrix(sheet, wb) {
@@ -1217,6 +1224,17 @@ const CompromissarioApp = {
       }
       rows.push(row);
     }
+    (sheet['!merges'] || []).forEach((m) => {
+      if (!m) return;
+      const src = rows[m.s.r] && rows[m.s.r][m.s.c];
+      if (src == null || src === '') return;
+      for (let r = m.s.r; r <= m.e.r; r++) {
+        if (!rows[r]) continue;
+        for (let c = m.s.c; c <= m.e.c; c++) {
+          if (rows[r][c] == null || rows[r][c] === '') rows[r][c] = src;
+        }
+      }
+    });
     return rows;
   },
 
@@ -1277,7 +1295,7 @@ const CompromissarioApp = {
 
   isCessaoHeaderRow(cells) {
     const folded = (cells || []).map((c) => this.foldHeader(c));
-    const hasData = folded.some((h) => h.includes('DATA CESSAO') || h === 'DATA');
+    const hasData = folded.some((h) => h.includes('DATA CESSAO') || h.includes('DATA DA CESSAO') || (h.includes('CESSAO') && h.includes('DATA')) || h === 'DATA');
     const hasTitulo = folded.some((h) => h === 'TITULO' || h.includes('TITULO'));
     const hasCliente = folded.some((h) => h.includes('CLIENTE'));
     return hasData && hasTitulo && hasCliente;
@@ -1378,7 +1396,8 @@ const CompromissarioApp = {
       if (ma) return this.dateToIsoParts(y, ma, Number(b));
       if (mb) return this.dateToIsoParts(y, mb, Number(a));
     }
-    const sl = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
+    const sl = s.replace(/[\u200e\u200f\u00a0]/g, ' ').trim()
+      .match(/^(\d{1,2})[\s/\-.](\d{1,2})[\s/\-.](\d{2,4})/);
     if (sl) {
       const dayOrMonth = Number(sl[1]);
       const monthOrDay = Number(sl[2]);
@@ -1445,19 +1464,20 @@ const CompromissarioApp = {
   pickCessaoGroupIso(list) {
     const rows = list || [];
     const preferMonth = String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
+    const allIsos = rows.map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
+    if (preferMonth) {
+      const inMonth = allIsos.filter((iso) => iso.slice(0, 7) === preferMonth);
+      if (inMonth.length) return inMonth[inMonth.length - 1];
+    }
     const starred = rows.filter((r) => (r.clients || []).some((c) => c.atual));
     const pick = (pool) => {
       const isos = (pool || []).map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
       if (!isos.length) return '';
-      if (preferMonth) {
-        const inMonth = isos.filter((iso) => iso.slice(0, 7) === preferMonth);
-        if (inMonth.length) return inMonth[inMonth.length - 1];
-      }
       const recent = isos.filter((iso) => iso >= '2024-01-01');
       const use = recent.length ? recent : isos;
       return use[use.length - 1];
     };
-    return pick(starred) || pick(rows) || '';
+    return pick(starred) || pick(rows) || allIsos[allIsos.length - 1] || '';
   },
 
   normalizeCessaoRecords(records) {
@@ -1497,9 +1517,26 @@ const CompromissarioApp = {
 
     const raw = [];
     let carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+    let pending = [];
+    const flushPending = () => {
+      if (!carry.titulo || !pending.length) return;
+      pending.forEach((p) => {
+        raw.push({
+          data: p.data || carry.data,
+          dataIso: p.dataIso || carry.dataIso || this.cessaoDateIso(p.data || carry.data),
+          empresa: p.empresa || carry.empresa,
+          titulo: carry.titulo,
+          documento: p.documento || carry.documento,
+          clients: p.clients
+        });
+      });
+      pending = [];
+    };
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] || [];
       if (this.isCessaoHeaderRow(r)) {
+        flushPending();
+        pending = [];
         detectCols(r);
         foundHeader = true;
         carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
@@ -1522,11 +1559,23 @@ const CompromissarioApp = {
       if (data) carry.data = data;
       if (dataIso) carry.dataIso = dataIso;
       if (empresa) carry.empresa = empresa;
-      if (titulo && this.foldHeader(titulo) !== 'TITULO') carry.titulo = String(titulo).replace(/\.0$/, '');
+      if (titulo && this.foldHeader(titulo) !== 'TITULO') {
+        carry.titulo = String(titulo).replace(/\.0$/, '');
+        flushPending();
+      }
       if (documento) carry.documento = documento;
-      if (!carry.titulo || !clienteRaw) continue;
       const clients = this.parseCessaoClientCell(clienteRaw);
       if (!clients.length) continue;
+      if (!carry.titulo) {
+        pending.push({
+          data: data || carry.data,
+          dataIso: dataIso || carry.dataIso,
+          empresa: empresa || carry.empresa,
+          documento: documento || carry.documento,
+          clients
+        });
+        continue;
+      }
       raw.push({
         data: carry.data,
         dataIso: carry.dataIso || this.cessaoDateIso(carry.data),
@@ -1536,6 +1585,7 @@ const CompromissarioApp = {
         clients
       });
     }
+    flushPending();
 
     if (!foundHeader) {
       return { records: [], note: 'Cabeçalho Sienge não identificado — arquivo guardado mesmo assim' };
@@ -1546,6 +1596,110 @@ const CompromissarioApp = {
       records,
       note: records.length ? `${records.length} cessão(ões)` : 'Nenhuma cessão lida'
     };
+  },
+
+  parseCessaoMatrixLoose(matrix) {
+    const rows = Array.isArray(matrix) ? matrix : [];
+    const raw = [];
+    let carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+    let pending = [];
+    const flushPending = () => {
+      if (!carry.titulo || !pending.length) return;
+      pending.forEach((p) => {
+        raw.push({
+          data: p.data || carry.data,
+          dataIso: p.dataIso || carry.dataIso || this.cessaoDateIso(p.data || carry.data),
+          empresa: p.empresa || carry.empresa,
+          titulo: carry.titulo,
+          documento: p.documento || carry.documento,
+          clients: p.clients
+        });
+      });
+      pending = [];
+    };
+    rows.forEach((r) => {
+      const cells = (r || []).map((c) => this.cellToText(c));
+      if (this.isCessaoHeaderRow(cells)) {
+        flushPending();
+        pending = [];
+        carry = { data: '', dataIso: '', empresa: '', titulo: '', documento: '' };
+        return;
+      }
+      const picked = this.findCessaoBitsInRow(cells);
+      if (this.isCessaoNoiseText(picked.data, picked.titulo, picked.documento, picked.clienteRaw)) return;
+      if (!picked.titulo && !picked.clienteRaw && !picked.documento && !picked.data) return;
+      if (picked.data) {
+        carry.data = picked.data;
+        carry.dataIso = picked.dataIso;
+      }
+      if (picked.empresa) carry.empresa = picked.empresa;
+      if (picked.titulo) {
+        carry.titulo = picked.titulo;
+        flushPending();
+      }
+      if (picked.documento) carry.documento = picked.documento;
+      const clients = this.parseCessaoClientCell(picked.clienteRaw);
+      if (!clients.length) return;
+      if (!carry.titulo) {
+        pending.push({
+          data: picked.data || carry.data,
+          dataIso: picked.dataIso || carry.dataIso,
+          empresa: picked.empresa || carry.empresa,
+          documento: picked.documento || carry.documento,
+          clients
+        });
+        return;
+      }
+      raw.push({
+        data: carry.data,
+        dataIso: carry.dataIso || this.cessaoDateIso(carry.data),
+        empresa: carry.empresa,
+        titulo: carry.titulo,
+        documento: carry.documento,
+        clients
+      });
+    });
+    flushPending();
+    return {
+      records: this.normalizeCessaoRecords(raw),
+      note: raw.length ? `${this.normalizeCessaoRecords(raw).length} cessão(ões)` : ''
+    };
+  },
+
+  findCessaoBitsInRow(cells) {
+    const out = { data: '', dataIso: '', empresa: '', titulo: '', documento: '', clienteRaw: '' };
+    (cells || []).forEach((raw) => {
+      const text = this.cellToText(raw);
+      if (!text) return;
+      if (!out.dataIso) {
+        const iso = this.cessaoDateIso(text);
+        if (iso) {
+          out.data = text;
+          out.dataIso = iso;
+          return;
+        }
+      }
+      const folded = this.foldHeader(text);
+      const looksEmpresa = /^\d+\s*-\s*.+\s-\s*.+/.test(text)
+        || /EMPREENDIMENTO|LOTEAMENTO|RESERVA DO|SPE LTDA/.test(folded);
+      if (!out.empresa && looksEmpresa) {
+        out.empresa = text;
+        return;
+      }
+      if (!out.clienteRaw && (/\*|(\(P\))/i.test(text)
+        || (/^\d{3,6}\s*[-–]\s*[A-Za-zÀ-ÿ]/.test(text) && !/^\d+\s*-\s*.+\s-\s*/.test(text)))) {
+        out.clienteRaw = text;
+        return;
+      }
+      if (!out.documento && (/\bCT\s*\/|\bCV\s*\/|CVMOURALEIT/i.test(text))) {
+        out.documento = text;
+        return;
+      }
+      if (!out.titulo && /^\d{4,8}(?:\.0)?$/.test(text.replace(/\s/g, ''))) {
+        out.titulo = text.replace(/\.0$/, '');
+      }
+    });
+    return out;
   },
 
   pickCessaoRowDate(row, dataCol) {
