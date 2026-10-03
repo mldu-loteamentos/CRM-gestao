@@ -434,7 +434,7 @@ window.EngenhariaCaucaoApp = {
     }));
     set("ecau-cred-slot", MlEmpresaFilter.html({
       id: "ecau-filter-cred",
-      label: "Credor",
+      label: "Credores",
       items: this.credItems(),
       selectedIds: this.state.creditorIds,
       open: !!this.state.openCred,
@@ -682,11 +682,11 @@ window.EngenhariaCaucaoApp = {
     const busy = this.state.busy;
     bar.innerHTML = n
       ? `<strong>${n} selecionada${n === 1 ? "" : "s"}</strong>
-         <button type="button" class="btn btn-primary" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.openDueModal()">
-           <i data-lucide="calendar-clock" style="width:14px;"></i> Ajustar vencimento
+         <button type="button" class="btn btn-primary btn-sm ecau-bar-btn" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.openDueModal()">
+           <i data-lucide="calendar-clock"></i> Ajustar vencimento
          </button>
-         <button type="button" class="btn btn-secondary" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.liberarSelecionadas()">
-           <i data-lucide="unlock" style="width:14px;"></i> Liberar para pagamento
+         <button type="button" class="btn btn-secondary btn-sm ecau-bar-btn" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.liberarSelecionadas()">
+           <i data-lucide="unlock"></i> Liberar para pagamento
          </button>`
       : `<span>Selecione uma ou várias cauções para ajustar o vencimento ou liberar para pagamento.</span>`;
     if (window.lucide) lucide.createIcons();
@@ -928,46 +928,41 @@ window.EngenhariaCaucaoApp = {
     const s = this.state;
     const updated = s.updatedAt ? new Date(s.updatedAt).toLocaleString("pt-BR") : "—";
     root.innerHTML = `
-      <div class="cprev-page">
-        <div class="search-filter-panel cprev-toolbar">
-          <div class="cprev-toolbar-head">
+      <div class="cprev-page ecau-page">
+        <div class="search-filter-panel cprev-toolbar ecau-toolbar">
+          <div class="ecau-toolbar-top">
+            <div class="ecau-filters">
+              <div id="ecau-emp-slot" class="ecau-slot"></div>
+              <div class="form-group ecau-date">
+                <label>Vencimento de</label>
+                <input type="date" class="form-control" value="${this.esc(s.startDate)}"
+                  onchange="EngenhariaCaucaoApp.onField('startDate', this.value)">
+              </div>
+              <div class="form-group ecau-date">
+                <label>Vencimento até</label>
+                <input type="date" class="form-control" value="${this.esc(s.endDate)}"
+                  onchange="EngenhariaCaucaoApp.onField('endDate', this.value)">
+              </div>
+              <div class="ecau-actions">
+                <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
+                  <i data-lucide="search" style="width:14px;height:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
+                </button>
+                <button type="button" class="btn btn-cancel btn-sm" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
+                <button type="button" class="btn btn-sm cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
+                  <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+                </button>
+              </div>
+            </div>
             <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
           </div>
-          <div class="cprev-filters">
-            <div id="ecau-emp-slot" class="tvig-filter-slot"></div>
-            <div class="form-group cprev-date-field">
-              <label>Vencimento de</label>
-              <input type="date" class="form-control" value="${this.esc(s.startDate)}"
-                onchange="EngenhariaCaucaoApp.onField('startDate', this.value)">
-            </div>
-            <div class="form-group cprev-date-field">
-              <label>Vencimento até</label>
-              <input type="date" class="form-control" value="${this.esc(s.endDate)}"
-                onchange="EngenhariaCaucaoApp.onField('endDate', this.value)">
-            </div>
-            <div class="tvig-filter-actions">
-              <button type="button" class="btn btn-primary fila-align-btn" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
-                <i data-lucide="search" style="width:16px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
-              </button>
-              <button type="button" class="btn btn-cancel fila-align-btn" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
-              <button type="button" class="btn btn-secondary fila-align-btn cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
-                <i data-lucide="download" style="width:14px;"></i> Exportar em Excel
-              </button>
-            </div>
-          </div>
-          <div class="cprev-extra">
-            <div class="form-group cprev-search-field">
+          <div class="ecau-extra">
+            <div class="form-group ecau-search">
               <label>Título</label>
-              <input type="search" class="form-control" placeholder="Filtrar por título ou nº do documento"
+              <input type="search" class="form-control" placeholder="Título ou nº do documento"
                 value="${this.esc(s.qTitulo)}" oninput="EngenhariaCaucaoApp.onField('qTitulo', this.value)" autocomplete="off">
             </div>
-            <div class="form-group cprev-search-field">
-              <label>Credor</label>
-              <input type="search" class="form-control" placeholder="Filtrar pelo nome do credor"
-                value="${this.esc(s.qCredor)}" oninput="EngenhariaCaucaoApp.onField('qCredor', this.value)" autocomplete="off">
-            </div>
-            <div id="ecau-cred-slot" class="tvig-filter-slot"></div>
-            <div class="form-group cprev-status-field">
+            <div id="ecau-cred-slot" class="ecau-slot"></div>
+            <div class="form-group ecau-status">
               <label>Situação</label>
               <select class="form-control" onchange="EngenhariaCaucaoApp.onField('status', this.value)">
                 <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Retidos</option>

@@ -217,14 +217,16 @@ const FluxoCaixaApp = {
     return /ADIANTAMENTO A PARCEIRO/.test(n);
   },
 
-  /** Qualquer conta de adiantamento (2.11.03 e demais linhas ADIANTAMENTO). */
+  /** Qualquer conta de adiantamento (2.11.01 fornecedor, 2.11.03 parceiro, nome ADIANTAMENTO/S). */
   isAdiantamentoAccount(categoryId, categoryName) {
     if (this.isAdiantamentoParceirosAccount(categoryId, categoryName)) return true;
+    const nk = this.normAccountKey(categoryId);
+    if (nk === "21101" || nk === "21103") return true;
     const n = String(categoryName || "")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toUpperCase();
-    return /\bADIANTAMENTO\b/.test(n);
+    return /ADIANTAMENTOS?/.test(n);
   },
 
   /** Contas de saída de 04.01, sem o adiantamento (2.11.03). */
@@ -381,7 +383,18 @@ const FluxoCaixaApp = {
    * Em grupo de saída, a redutora entra positiva (como no Excel: 05.09 Retenções).
    * Em RECEITAS, a redutora entra negativa (01.04 Cancelamentos).
    */
+  isDescontoFolhaAccount(categoryId, categoryName) {
+    const nk = this.normAccountKey(categoryId);
+    if (nk === "2030126") return true;
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /DESCONTO EM FOLHA/.test(n);
+  },
+
   isReducingAccount(categoryId, categoryName, node) {
+    if (this.isDescontoFolhaAccount(categoryId, categoryName)) return false;
     if (node && node.redutora) return true;
     const n = String(categoryName || "")
       .normalize("NFD")
@@ -417,7 +430,9 @@ const FluxoCaixaApp = {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
-    if (this.isAdiantamentoAccount(categoryId, categoryName)) return Math.abs(raw);
+    if (role === "adiantamento") return Math.abs(raw);
+    if (this.isAdiantamentoAccount(categoryId, categoryName) && role !== "abatimento") return Math.abs(raw);
+    if (this.isDescontoFolhaAccount(categoryId, categoryName)) return -Math.abs(raw);
     if (role === "abatimento") return -Math.abs(raw);
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());

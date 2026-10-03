@@ -81,12 +81,15 @@ const ComprasPrevisoesApp = {
     companyIds: [],
     creditorIds: [],
     deptIds: [],
+    ccIds: [],
     openEmp: false,
     openCred: false,
     openDept: false,
+    openCc: false,
     qEmp: "",
     qCred: "",
     qDept: "",
+    qCc: "",
     qTitulo: "",
     qCredor: "",
     status: "aberto",
@@ -451,6 +454,20 @@ const ComprasPrevisoesApp = {
     return this.uniqueItems(this.state.allRows, (r) => this.fold(r.departamento), (r) => r.departamento.toUpperCase());
   },
 
+  ccItems() {
+    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.ccId, (r) => {
+      const name = String(r.ccNome || "").toUpperCase();
+      return r.ccId ? r.ccId + " - " + name : name;
+    });
+    if (fromRows.length) return fromRows;
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    return list.map((c) => {
+      const id = String(c.id || c.code || "");
+      const name = String(c.name || c.nome || "").toUpperCase();
+      return { id, name, label: id ? id + " - " + name : name };
+    }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+  },
+
   rowGroup(r) {
     if (r.substituido) return this.GROUPS.SUBSTITUIDOS;
     if (r.pago) return this.GROUPS.PAGOS;
@@ -476,6 +493,7 @@ const ComprasPrevisoesApp = {
     const emp = new Set((this.state.companyIds || []).map(String));
     const cred = new Set((this.state.creditorIds || []).map(String));
     const dept = new Set((this.state.deptIds || []).map(String));
+    const cc = new Set((this.state.ccIds || []).map(String));
     const qTitulo = this.fold(this.state.qTitulo).replace(/\s+/g, "");
     const qCredor = this.fold(this.state.qCredor);
     const status = this.state.status;
@@ -483,6 +501,7 @@ const ComprasPrevisoesApp = {
     const end = this.state.endDate || "";
     this.state.shown = (this.state.allRows || []).filter((r) => {
       if (emp.size && !emp.has(String(r.companyId))) return false;
+      if (cc.size && !cc.has(String(r.ccId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
       if (dept.size) {
         const depFold = this.fold(r.departamento);
@@ -538,9 +557,10 @@ const ComprasPrevisoesApp = {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           self.state[openKey] = !self.state[openKey];
-          if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; }
-          if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; }
-          if (openKey === "openDept") { self.state.openEmp = false; self.state.openCred = false; }
+          if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
+          if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
+          if (openKey === "openDept") { self.state.openEmp = false; self.state.openCred = false; self.state.openCc = false; }
+          if (openKey === "openCc") { self.state.openEmp = false; self.state.openCred = false; self.state.openDept = false; }
           self.paintFilters();
         },
         setQuery(q) {
@@ -582,6 +602,7 @@ const ComprasPrevisoesApp = {
       });
     };
     bind("cprev-filter-emp", "companyIds", "openEmp", "qEmp", () => this.empItems(), { singular: "empresa", plural: "empresas" });
+    bind("cprev-filter-cc", "ccIds", "openCc", "qCc", () => this.ccItems(), { singular: "empreendimento", plural: "empreendimentos" });
     bind("cprev-filter-cred", "creditorIds", "openCred", "qCred", () => this.credItems(), { singular: "credor", plural: "credores" });
     bind("cprev-filter-dept", "deptIds", "openDept", "qDept", () => this.deptItems(), { singular: "departamento", plural: "departamentos" });
   },
@@ -602,6 +623,16 @@ const ComprasPrevisoesApp = {
       query: this.state.qEmp,
       emptyMeansAll: true,
       nouns: { singular: "empresa", plural: "empresas" }
+    }));
+    set("cprev-cc-slot", MlEmpresaFilter.html({
+      id: "cprev-filter-cc",
+      label: "Empreendimentos",
+      items: this.ccItems(),
+      selectedIds: this.state.ccIds,
+      open: !!this.state.openCc,
+      query: this.state.qCc,
+      emptyMeansAll: true,
+      nouns: { singular: "empreendimento", plural: "empreendimentos" }
     }));
     set("cprev-cred-slot", MlEmpresaFilter.html({
       id: "cprev-filter-cred",
@@ -684,6 +715,7 @@ const ComprasPrevisoesApp = {
     this.state.companyIds = [];
     this.state.creditorIds = [];
     this.state.deptIds = [];
+    this.state.ccIds = [];
     this.state.qTitulo = "";
     this.state.qCredor = "";
     this.state.status = "aberto";
@@ -1100,56 +1132,52 @@ const ComprasPrevisoesApp = {
     root.innerHTML = `
       <div class="cprev-page">
         <div class="search-filter-panel cprev-toolbar">
-          <div class="cprev-toolbar-head">
-            <h2 class="tvig-page-title">
-              <i data-lucide="clipboard-list" style="width:22px;height:22px;color:var(--color-primary);"></i>
-              Follow-up de previsões
-            </h2>
+          <div class="cprev-toolbar-meta">
             <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
           </div>
-          <div class="cprev-filters">
-            <div id="cprev-emp-slot" class="tvig-filter-slot"></div>
-            <div id="cprev-dept-slot" class="tvig-filter-slot"></div>
-            <div class="form-group cprev-date-field">
-              <label>Vencimento de</label>
-              <input type="date" class="form-control" value="${this.esc(s.startDate)}"
-                onchange="ComprasPrevisoesApp.onField('startDate', this.value)">
+          <div class="cprev-org">
+            <div class="cprev-org-row">
+              <div id="cprev-emp-slot" class="cprev-org-slot"></div>
+              <div id="cprev-cc-slot" class="cprev-org-slot"></div>
             </div>
-            <div class="form-group cprev-date-field">
-              <label>Vencimento até</label>
-              <input type="date" class="form-control" value="${this.esc(s.endDate)}"
-                onchange="ComprasPrevisoesApp.onField('endDate', this.value)">
+            <div class="cprev-org-row cprev-org-row--2">
+              <div class="cprev-org-period">
+                <span class="cprev-org-label">Período</span>
+                <div class="cprev-org-dates">
+                  <input type="date" class="form-control" value="${this.esc(s.startDate)}"
+                    onchange="ComprasPrevisoesApp.onField('startDate', this.value)" aria-label="Vencimento de">
+                  <span class="cprev-org-dates-sep">até</span>
+                  <input type="date" class="form-control" value="${this.esc(s.endDate)}"
+                    onchange="ComprasPrevisoesApp.onField('endDate', this.value)" aria-label="Vencimento até">
+                </div>
+              </div>
+              <div id="cprev-dept-slot" class="cprev-org-slot"></div>
+              <div class="cprev-org-actions">
+                <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">
+                  <i data-lucide="search" style="width:14px;height:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
+                </button>
+                <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasPrevisoesApp.limpar()">Limpar</button>
+                <button type="button" class="btn btn-sm cprev-excel-btn" onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
+                  <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+                </button>
+              </div>
             </div>
-            <div class="tvig-filter-actions">
-              <button type="button" class="btn btn-primary fila-align-btn" ${s.loading ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">
-                <i data-lucide="search" style="width:16px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
-              </button>
-              <button type="button" class="btn btn-cancel fila-align-btn" onclick="ComprasPrevisoesApp.limpar()">Limpar</button>
-              <button type="button" class="btn btn-secondary fila-align-btn cprev-excel-btn" onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
-                <i data-lucide="download" style="width:14px;"></i> Exportar em Excel
-              </button>
-            </div>
-          </div>
-          <div class="cprev-extra">
-            <div class="form-group cprev-search-field">
-              <label>Título</label>
-              <input type="search" class="form-control" placeholder="Filtrar por título ou nº do documento"
-                value="${this.esc(s.qTitulo)}" oninput="ComprasPrevisoesApp.onField('qTitulo', this.value)" autocomplete="off">
-            </div>
-            <div class="form-group cprev-search-field">
-              <label>Credor</label>
-              <input type="search" class="form-control" placeholder="Filtrar pelo nome do credor"
-                value="${this.esc(s.qCredor)}" oninput="ComprasPrevisoesApp.onField('qCredor', this.value)" autocomplete="off">
-            </div>
-            <div id="cprev-cred-slot" class="tvig-filter-slot"></div>
-            <div class="form-group cprev-status-field">
-              <label>Situação</label>
-              <select class="form-control" onchange="ComprasPrevisoesApp.onField('status', this.value)">
-                <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
-                <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
-                <option value="substituido" ${s.status === "substituido" ? "selected" : ""}>Substituídos</option>
-                <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
-              </select>
+            <div class="cprev-org-row cprev-org-row--3">
+              <div class="form-group cprev-org-field">
+                <label>Consultar por título</label>
+                <input type="search" class="form-control" placeholder="Título ou nº do documento"
+                  value="${this.esc(s.qTitulo)}" oninput="ComprasPrevisoesApp.onField('qTitulo', this.value)" autocomplete="off">
+              </div>
+              <div id="cprev-cred-slot" class="cprev-org-slot"></div>
+              <div class="form-group cprev-org-field">
+                <label>Situação da previsão</label>
+                <select class="form-control" onchange="ComprasPrevisoesApp.onField('status', this.value)">
+                  <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
+                  <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
+                  <option value="substituido" ${s.status === "substituido" ? "selected" : ""}>Substituídos</option>
+                  <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
+                </select>
+              </div>
             </div>
           </div>
           <p class="cprev-hint">Lançando a nota hoje, o vencimento precisa de no mínimo <strong>${minDays} dias</strong> (até ${this.esc(this.fmtDate(minDue))}). Títulos abaixo desse prazo ficam em <strong>Prazo insuficiente para lançar</strong>.</p>

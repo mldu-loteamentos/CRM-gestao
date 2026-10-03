@@ -2784,7 +2784,7 @@ window.bootEngenhariaCaucao = function () {
   if (!document.getElementById("engenharia-caucao-script")) {
     var s = document.createElement("script");
     s.id = "engenharia-caucao-script";
-    s.src = "engenharia-caucao.js?v=933";
+    s.src = "engenharia-caucao.js?v=935";
     s.onload = function () { start(); };
     s.onerror = function () {
       if (root) {
@@ -16587,6 +16587,28 @@ window.leaveDistratoSimulation = function() {
   } catch (e) {}
 };
 
+window.parseDistratoCurrencyInput = function(id) {
+  const el = document.getElementById(id);
+  if (!el) return 0;
+  const raw = String(el.value || "").replace(/\./g, "").replace(",", ".");
+  const val = parseFloat(raw) || 0;
+  return val < 0 ? 0 : val;
+};
+
+window.distratoDespesasInformadas = function() {
+  return ["dist-comissao", "dist-homolog", "dist-taxa-assoc", "dist-iptu", "dist-agua", "dist-luz", "dist-outros"]
+    .reduce((sum, id) => sum + window.parseDistratoCurrencyInput(id), 0);
+};
+
+window.distratoAlcadaLiquida = function(gross) {
+  const g = Number(gross) || 0;
+  return Math.max(0, g - (window.distratoDespesasInformadas() || 0));
+};
+
+window.fmtDistratoMoney = function(n) {
+  return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+};
+
 function calculateDistrato() {
   if (!g_distSale) return;
 
@@ -16604,14 +16626,7 @@ function calculateDistrato() {
   const penalty = isPermuta ? (totalPaid * 0.10) : (contractVal * 0.10);
   
   // Converte string formatada pt-BR (ex: "1.500,75") para número
-  const parseCurrencyInput = (id) => {
-    const el = document.getElementById(id);
-    if (!el) return 0;
-    // Remove pontos de milhar e troca vírgula por ponto
-    const raw = el.value.replace(/\./g, '').replace(',', '.');
-    const val = parseFloat(raw) || 0;
-    return val < 0 ? 0 : val;
-  };
+  const parseCurrencyInput = (id) => window.parseDistratoCurrencyInput(id);
   
   const fruitionMonths = isPermuta ? 0 : parseCurrencyInput("dist-fruition-months");
   const fruitionRate = 0.0075; // 0.75% a.m.
@@ -16644,7 +16659,7 @@ window.handleCustomPctInput = function() {
     pct = 100;
     document.getElementById("dist-restitution-pct").value = 100;
   }
-  const val = totalPaid * (pct / 100);
+  const val = window.distratoAlcadaLiquida(totalPaid * (pct / 100));
   
   const valEl = document.getElementById("dist-restitution-val");
   if (valEl) {
@@ -16678,7 +16693,7 @@ window.handleCustomValInput = function() {
   valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   if (totalPaid > 0) {
-    const pct = (valNum / totalPaid) * 100;
+    const pct = ((valNum + window.distratoDespesasInformadas()) / totalPaid) * 100;
     const pctEl = document.getElementById("dist-restitution-pct");
     if (pctEl) {
       pctEl.value = pct.toFixed(1);
@@ -16713,8 +16728,11 @@ window.handleDistratoChoiceChange = function() {
   // 3. Negociação de Devolução
   const minPctCfg = Number(distAlcada.minPct) || 0;
   const maxPctCfg = Number(distAlcada.maxPct) || 0;
-  const minRefund = totalPaid * (minPctCfg / 100);
-  const maxRefund = totalPaid * (maxPctCfg / 100);
+  const despesasInformadas = isPermuta ? 0 : (comissao + homolog + outrasDeducoes);
+  const minRefundGross = totalPaid * (minPctCfg / 100);
+  const maxRefundGross = totalPaid * (maxPctCfg / 100);
+  const minRefund = Math.max(0, minRefundGross - despesasInformadas);
+  const maxRefund = Math.max(0, maxRefundGross - despesasInformadas);
   const leiRefund = restituicaoLiquida;
   const leiRefundPct = totalPaid > 0 ? ((leiRefund / totalPaid) * 100).toFixed(1).replace('.0', '') : 0;
   const negotiationEnabled = !!distAlcada.enabled && !isPermuta;
@@ -16722,10 +16740,18 @@ window.handleDistratoChoiceChange = function() {
   const minDisabled = !negotiationEnabled || minRefund < leiRefund;
   const maxDisabled = !negotiationEnabled || maxRefund < leiRefund;
 
+  const alcadaHoverHtml = (pct, gross, net) => {
+    const money = window.fmtDistratoMoney;
+    if (!(despesasInformadas > 0.009)) {
+      return `<div class="dist-alcada-hover">A devolução seria de <strong>${money(gross)}</strong>, correspondente a ${pct}% do valor pago.</div>`;
+    }
+    return `<div class="dist-alcada-hover">A devolução seria de <strong>${money(gross)}</strong>, correspondente a ${pct}% do valor pago.<br>Com as deduções ficou <strong>${money(net)}</strong>.</div>`;
+  };
+
   // Sort and render options
   const options = [
-    { id: "min", label: `Devolução Mínima (${minPctCfg}%)`, value: minRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
-    { id: "max", label: `Devolução Máxima (${maxPctCfg}%)`, value: maxRefund, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
+    { id: "min", label: `Devolução Mínima (${minPctCfg}%)`, value: minRefund, gross: minRefundGross, pct: minPctCfg, color: "#cbd5e1", titleColor: "#64748b", disabled: minDisabled },
+    { id: "max", label: `Devolução Máxima (${maxPctCfg}%)`, value: maxRefund, gross: maxRefundGross, pct: maxPctCfg, color: "#cbd5e1", titleColor: "#64748b", disabled: maxDisabled },
     { id: "lei", label: `Lei do Distrato (${leiRefundPct}%)`, value: leiRefund, color: "#f97316", titleColor: "#ea580c", highlight: true, disabled: false }
   ];
   if (!negotiationEnabled) {
@@ -16736,13 +16762,16 @@ window.handleDistratoChoiceChange = function() {
   const container = document.getElementById("dist-negotiation-options");
   if (container) {
     container.innerHTML = options.map(opt => `
-      <div style="background: ${opt.highlight ? '#fff7ed' : '#f8fafc'}; padding: 10px; border-radius: 6px; border: 2px solid ${opt.color}; text-align: center; cursor: ${opt.disabled ? 'not-allowed' : 'pointer'}; opacity: ${opt.disabled ? '0.5' : '1'}; transition: all 0.2s;" 
+      <div class="dist-alcada-card" style="background: ${opt.highlight ? '#fff7ed' : '#f8fafc'}; padding: 10px; border-radius: 6px; border: 2px solid ${opt.color}; text-align: center; cursor: ${opt.disabled ? 'not-allowed' : 'pointer'}; opacity: ${opt.disabled ? '0.5' : '1'}; transition: all 0.2s;" 
            ${opt.disabled ? '' : `onclick="selectDistratoOption('${opt.id}', ${opt.value})"`} 
            ${opt.disabled ? '' : `onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.1)'"`} 
            ${opt.disabled ? '' : `onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'"`}>
         <div style="font-size: 0.75rem; color: ${opt.titleColor}; font-weight: ${opt.highlight ? '700' : '600'}; margin-bottom: 4px;">${opt.label}</div>
         <div style="font-weight: 800; color: ${opt.highlight ? '#c2410c' : '#334155'}; font-size: 1.1rem;">${opt.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
         <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px;">${opt.disabled ? 'Abaixo da Lei Distrato' : 'Clique para escolher'}</div>
+        ${opt.highlight
+          ? `<div class="dist-alcada-hover">Restituição líquida da Lei do Distrato após multa e despesas: <strong>${window.fmtDistratoMoney(opt.value)}</strong>.</div>`
+          : alcadaHoverHtml(opt.pct, opt.gross, opt.value)}
       </div>
     `).join('');
   }
@@ -16788,11 +16817,11 @@ window.handleDistratoChoiceChange = function() {
     if (pctContainer) pctContainer.style.display = "none";
   } else if (choice === "min") {
     negotiatedRefund = minRefund;
-    restitutionPct = 55;
+    restitutionPct = minPctCfg;
     if (pctContainer) pctContainer.style.display = "none";
   } else if (choice === "max") {
     negotiatedRefund = maxRefund;
-    restitutionPct = 65;
+    restitutionPct = maxPctCfg;
     if (pctContainer) pctContainer.style.display = "none";
   } else if (choice === "lei") {
     negotiatedRefund = leiRefund;
@@ -16802,30 +16831,11 @@ window.handleDistratoChoiceChange = function() {
     // custom
     restitutionPct = Number(pctEl && pctEl.value) || 0;
     
-    let valStr = valEl ? valEl.value.replace(/\D/g, '') : '0';
-    if (!valStr) valStr = '0';
-    let valNum = parseInt(valStr, 10) / 100;
-
-    if (totalPaid > 0 && valNum > totalPaid) {
-      valNum = totalPaid;
-      if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    
-    // Fallback if valNum is 0 but we have a valid percentage typed
-    if (valNum === 0 && restitutionPct > 0) {
-      if (restitutionPct > 100) restitutionPct = 100;
-      valNum = totalPaid * (restitutionPct / 100);
-      if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    
-    if (negotiationEnabled && restitutionPct > 0 && restitutionPct < minPctCfg) {
-      restitutionPct = minPctCfg;
-      valNum = totalPaid * (restitutionPct / 100);
-    }
-    if (negotiationEnabled && restitutionPct > maxPctCfg) {
-      restitutionPct = maxPctCfg;
-      valNum = totalPaid * (restitutionPct / 100);
-    }
+    if (restitutionPct > 100) restitutionPct = 100;
+    if (negotiationEnabled && restitutionPct > 0 && restitutionPct < minPctCfg) restitutionPct = minPctCfg;
+    if (negotiationEnabled && restitutionPct > maxPctCfg) restitutionPct = maxPctCfg;
+    let valNum = window.distratoAlcadaLiquida(totalPaid * (restitutionPct / 100));
+    if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     // NUNCA DEIXAR MENOR QUE LEI DO DISTRATO
     if (valNum < leiRefund) {
@@ -16834,12 +16844,8 @@ window.handleDistratoChoiceChange = function() {
     }
     
     negotiatedRefund = valNum;
-    
-    if (totalPaid > 0) {
-      restitutionPct = (valNum / totalPaid) * 100;
-      if (pctEl) pctEl.value = restitutionPct.toFixed(1);
-      if (rangeEl) rangeEl.value = restitutionPct.toFixed(1);
-    }
+    if (pctEl) pctEl.value = Number(restitutionPct).toFixed(1);
+    if (rangeEl) rangeEl.value = Number(restitutionPct).toFixed(1);
 
     if (pctContainer) pctContainer.style.display = "flex";
   }

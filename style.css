@@ -4014,6 +4014,30 @@ circle.donut-segment {
 .dist-obra-table thead th.dist-obra-switch { text-align: center; white-space: nowrap; }
 .dist-obra-table .dist-obra-switch .moura-switch { justify-content: center; }
 
+.dist-alcada-card { position: relative; }
+.dist-alcada-hover {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 20;
+  width: max(220px, 100%);
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
+  pointer-events: none;
+}
+.dist-alcada-hover strong { color: #fff; font-weight: 800; }
+.dist-alcada-card:hover .dist-alcada-hover { display: block; }
+
 .quitacao-alcada-banner {
   margin-top: 10px;
   padding: 10px 14px;
@@ -4163,13 +4187,17 @@ circle.donut-segment {
   letter-spacing: 0.04em;
 }
 .com-month-squares-grid {
-  display: grid;
-  grid-template-columns: repeat(6, 42px);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
 }
 .com-month-sq {
-  width: 42px;
-  height: 42px;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 36px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
@@ -5419,6 +5447,88 @@ circle.donut-segment {
   min-width: 0;
 }
 .cprev-toolbar-head .tvig-page-title { margin: 0; }
+.cprev-toolbar-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.cprev-org {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.cprev-org-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+  min-width: 0;
+}
+.cprev-org-row--2 {
+  grid-template-columns: minmax(280px, 1.2fr) minmax(200px, 1fr) auto;
+}
+.cprev-org-row--3 {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(180px, 220px);
+}
+.cprev-org-slot,
+.cprev-org .ml-emp-filter {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  flex: none;
+}
+.cprev-org-period,
+.cprev-org-field {
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+.cprev-org-label,
+.cprev-org-field label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.cprev-org-dates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.cprev-org-dates-sep {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: lowercase;
+}
+.cprev-org-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cprev-org-actions .btn {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 0.75rem;
+  width: auto;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .cprev-org-row--2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cprev-org-row--2 .cprev-org-actions { grid-column: 1 / -1; }
+  .cprev-org-row--3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .cprev-org-row,
+  .cprev-org-row--2,
+  .cprev-org-row--3 { grid-template-columns: 1fr; }
+}
 .cprev-filters,
 .cprev-extra {
   display: flex;
@@ -5560,16 +5670,85 @@ circle.donut-segment {
 .cprev-table tbody tr.cprev-row.is-open td {
   background: #eef2f7;
 }
-#tab-engenharia-caucao .cprev-toolbar-head {
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-#tab-engenharia-caucao .cprev-filters,
-#tab-engenharia-caucao .cprev-extra {
-  flex-wrap: wrap;
+#tab-engenharia-caucao,
+#engenharia-caucao-root,
+.ecau-page {
+  overflow: visible;
+  max-width: 100%;
   min-width: 0;
 }
-#tab-engenharia-caucao .cprev-hint { display: none; }
+.ecau-toolbar { overflow: visible; }
+.ecau-toolbar-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.ecau-filters,
+.ecau-extra {
+  display: grid;
+  align-items: end;
+  gap: 12px 14px;
+  min-width: 0;
+}
+.ecau-filters {
+  flex: 1 1 auto;
+  grid-template-columns: minmax(200px, 1.3fr) 168px 168px auto;
+}
+.ecau-extra {
+  grid-template-columns: minmax(200px, 1.4fr) minmax(200px, 1.2fr) 168px;
+}
+.ecau-slot,
+.ecau-filters .ml-emp-filter,
+.ecau-extra .ml-emp-filter {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  flex: none;
+}
+.ecau-date,
+.ecau-search,
+.ecau-status {
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+.ecau-date label,
+.ecau-search label,
+.ecau-status label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.ecau-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ecau-actions .btn {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 0.75rem;
+  width: auto;
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .ecau-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ecau-filters .ecau-actions { grid-column: 1 / -1; }
+  .ecau-extra { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ecau-toolbar-top { flex-wrap: wrap; }
+}
+@media (max-width: 720px) {
+  .ecau-filters,
+  .ecau-extra { grid-template-columns: 1fr; }
+}
 .cprev-group-header.is-neutral td {
   background: #f1f5f9 !important;
   color: #475569 !important;
@@ -5628,19 +5807,30 @@ circle.donut-segment {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   margin: 10px 0 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  font-size: 0.82rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
   color: #14532d;
 }
-.ecau-selection-bar .btn {
+.ecau-selection-bar .btn,
+.ecau-selection-bar .ecau-bar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+  width: auto;
+  min-width: 0;
+}
+.ecau-selection-bar .btn i,
+.ecau-selection-bar .ecau-bar-btn i {
+  width: 13px;
+  height: 13px;
 }
 .cprev-table-wrap .ecau-col-chk { width: 36px; text-align: center; }
 .cprev-table-wrap .ecau-col-sit { width: 92px; }
