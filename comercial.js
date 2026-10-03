@@ -1,6 +1,7 @@
 // comercial.js - Dashboard Comercial (Vendas e Distratos)
 
 const COM_MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const COM_MESES_FULL = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 const ComercialApp = {
   state: {
@@ -10,6 +11,10 @@ const ComercialApp = {
     year: 0,
     months: [],
     monthOpen: false,
+    monthQuery: '',
+    selectedProduct: '',
+    sortKey: 'var',
+    sortDir: 'desc',
     updatedAt: null,
     charts: {}
   },
@@ -73,25 +78,54 @@ const ComercialApp = {
     this.renderMonthFilter();
   },
 
-  renderMonthFilter() {
+  monthListHtml() {
     const { year, months } = this.currentPeriod();
+    const selected = new Set(months);
+    const q = String(this.state.monthQuery || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    return this.availableMonths(year).filter((m) => {
+      if (!q) return true;
+      const full = COM_MESES_FULL[m - 1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const short = COM_MESES[m - 1];
+      return full.indexOf(q) >= 0 || short.indexOf(q) >= 0 || String(m) === q;
+    }).map((m) => `
+      <label class="com-month-filter-item${selected.has(m) ? ' is-on' : ''}">
+        <input type="checkbox" value="${m}" ${selected.has(m) ? 'checked' : ''} onchange="ComercialApp.toggleMonth(${m}, this.checked)">
+        <span>${COM_MESES_FULL[m - 1]} <em>${year}</em></span>
+      </label>`).join('') || '<div class="com-month-filter-empty">Nenhum mês encontrado</div>';
+  },
+
+  renderMonthFilter() {
+    const { months } = this.currentPeriod();
     const list = document.getElementById('comercial-month-list');
     const label = document.getElementById('comercial-month-label');
+    const search = document.getElementById('comercial-month-search');
     if (label) label.textContent = this.periodLabel(months);
-    if (list) {
-      const selected = new Set(months);
-      list.innerHTML = this.availableMonths(year).map((m) => `
-        <label class="com-month-filter-item">
-          <input type="checkbox" value="${m}" ${selected.has(m) ? 'checked' : ''} onchange="ComercialApp.toggleMonth(${m}, this.checked)">
-          ${COM_MESES[m - 1]}
-        </label>`).join('');
-    }
+    if (list) list.innerHTML = this.monthListHtml();
+    if (search && search.value !== (this.state.monthQuery || '')) search.value = this.state.monthQuery || '';
     const wrap = document.getElementById('comercial-month-filter');
     const panel = document.getElementById('comercial-month-panel');
     if (wrap) wrap.classList.toggle('is-open', !!this.state.monthOpen);
     if (panel) panel.hidden = !this.state.monthOpen;
     this.bindMonthOutside();
     if (window.lucide) window.lucide.createIcons();
+  },
+
+  setMonthQuery(q) {
+    this.state.monthQuery = q || '';
+    const list = document.getElementById('comercial-month-list');
+    if (list) list.innerHTML = this.monthListHtml();
+  },
+
+  presetMonths(kind) {
+    const { yNow, mNow } = this.todayParts();
+    const { year } = this.currentPeriod();
+    const last = year === yNow ? mNow : 12;
+    if (kind === 'atual') this.applyMonths([year === yNow ? mNow : last], true);
+    else if (kind === 'ytd') {
+      const all = [];
+      for (let m = 1; m <= last; m++) all.push(m);
+      this.applyMonths(all, true);
+    }
   },
 
   bindMonthOutside() {
@@ -313,6 +347,7 @@ const ComercialApp = {
     const produtos = {};
     const cidades = {};
     const serie = [];
+    const selectedProd = this.state.selectedProduct || '';
     let vendasPeriodo = 0;
     let distratosPeriodo = 0;
     let vendasPeriodoAnt = 0;
@@ -333,12 +368,20 @@ const ComercialApp = {
 
       let vMes = 0;
       let dMes = 0;
+      const mesProdutos = {};
+      const bumpMes = (name, field, qty) => {
+        if (!mesProdutos[name]) mesProdutos[name] = { vendas: 0, distratos: 0 };
+        mesProdutos[name][field] += qty;
+      };
 
       res.vendas.forEach((v) => {
         const qty = this.contractQty(v);
         const area = this.contractArea(v);
         const { name } = this.resolveEnterprise(v);
-        if (inChart) vMes += qty;
+        if (inChart) {
+          bumpMes(name, 'vendas', qty);
+          if (!selectedProd || selectedProd === name) vMes += qty;
+        }
         if (inPeriod || inYear) {
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
         }
@@ -362,7 +405,10 @@ const ComercialApp = {
         const qty = this.contractQty(d);
         const area = this.contractArea(d);
         const { name } = this.resolveEnterprise(d);
-        if (inChart) dMes += qty;
+        if (inChart) {
+          bumpMes(name, 'distratos', qty);
+          if (!selectedProd || selectedProd === name) dMes += qty;
+        }
         if (inPeriod || inYear) {
           if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
         }
@@ -389,7 +435,8 @@ const ComercialApp = {
           label: `${COM_MESES[res.month - 1]}/${String(res.year).slice(2)}`,
           vendas: vMes,
           distratos: dMes,
-          variacao: vMes - dMes
+          variacao: vMes - dMes,
+          produtos: mesProdutos
         });
       }
     });
@@ -542,7 +589,13 @@ const ComercialApp = {
           ]
         },
         options: Object.assign({}, chartOpts, {
-          datasets: { bar: { categoryPercentage: 0.72, barPercentage: 0.86 } }
+          datasets: { bar: { categoryPercentage: 0.72, barPercentage: 0.86 } },
+          plugins: Object.assign({}, chartOpts.plugins, {
+            tooltip: {
+              enabled: false,
+              external: (ctx) => this.paintMonthTip(ctx, serie)
+            }
+          })
         })
       });
     }
@@ -564,11 +617,74 @@ const ComercialApp = {
         },
         options: Object.assign({}, chartOpts, {
           plugins: {
-            legend: { display: false }
+            legend: { display: false },
+            tooltip: {
+              enabled: false,
+              external: (ctx) => this.paintMonthTip(ctx, serie)
+            }
           }
         })
       });
     }
+    const filterEl = document.getElementById('comercial-chart-filter');
+    if (filterEl) {
+      filterEl.innerHTML = this.state.selectedProduct
+        ? `<span class="com-chart-chip">${this.esc(this.state.selectedProduct)} <button type="button" onclick="ComercialApp.selectProduct('')" title="Limpar filtro">×</button></span>`
+        : '';
+    }
+  },
+
+  esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  },
+
+  paintMonthTip(context, serie) {
+    const tip = document.getElementById('comercial-chart-tip');
+    if (!tip) return;
+    const tooltip = context && context.tooltip;
+    if (!tooltip || !tooltip.opacity || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+      tip.hidden = true;
+      return;
+    }
+    const idx = tooltip.dataPoints[0].dataIndex;
+    const point = (serie || [])[idx];
+    if (!point) { tip.hidden = true; return; }
+    const rows = Object.keys(point.produtos || {}).map((name) => {
+      const d = point.produtos[name];
+      return { name, v: d.vendas || 0, d: d.distratos || 0, var: (d.vendas || 0) - (d.distratos || 0) };
+    }).filter((r) => r.v || r.d).sort((a, b) => (b.v - b.d) - (a.v - a.d));
+    const top = rows.slice(0, 8);
+    const extra = rows.length - top.length;
+    const mesNome = COM_MESES_FULL[point.month - 1] + ' ' + point.year;
+    tip.innerHTML = `
+      <div class="com-chart-tip-head">
+        <strong>${this.esc(mesNome)}</strong>
+        <span><em class="com-tip-v">${point.vendas}</em> vendas · <em class="com-tip-d">${point.distratos}</em> distratos · saldo ${point.variacao}</span>
+      </div>
+      ${top.length ? `<table>
+        <thead><tr><th>Empreendimento</th><th>Vendas</th><th>Distratos</th><th>Saldo</th></tr></thead>
+        <tbody>
+          ${top.map((r) => `<tr>
+            <td>${this.esc(r.name)}</td>
+            <td class="com-tip-v">${r.v}</td>
+            <td class="com-tip-d">${r.d}</td>
+            <td class="${r.var > 0 ? 'com-tip-pos' : (r.var < 0 ? 'com-tip-neg' : '')}">${r.var}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<div class="com-chart-tip-empty">Sem movimento neste mês</div>'}
+      ${extra > 0 ? `<div class="com-chart-tip-more">+ ${extra} empreendimento(s)</div>` : ''}
+    `;
+    const box = tip.parentElement;
+    const caretX = tooltip.caretX || 0;
+    const caretY = tooltip.caretY || 0;
+    tip.hidden = false;
+    const tw = tip.offsetWidth || 280;
+    const th = tip.offsetHeight || 120;
+    const maxW = box ? box.clientWidth : 400;
+    const maxH = box ? box.clientHeight : 380;
+    tip.style.left = Math.max(8, Math.min(caretX + 14, maxW - tw - 8)) + 'px';
+    tip.style.top = Math.max(8, Math.min(caretY - 10, maxH - th - 8)) + 'px';
   },
 
   fmtRel(vendas, distratos) {
@@ -612,48 +728,7 @@ const ComercialApp = {
     set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
 
     set('comercial-produto-period', periodLbl + ' · ' + agg.year + '  ·  acum. ' + ytdLbl);
-
-    const tbody = document.getElementById('comercial-table-body');
-    if (tbody) {
-      const rows = Object.keys(agg.produtos).sort((a, b) => {
-        const pa = agg.produtos[a];
-        const pb = agg.produtos[b];
-        const va = (pa.vendas - pa.distratos) || (pa.vendasYtd - pa.distratosYtd);
-        const vb = (pb.vendas - pb.distratos) || (pb.vendasYtd - pb.distratosYtd);
-        return vb - va;
-      });
-      const num = (n, kind) => {
-        const cls = kind === 'venda' ? 'com-num com-num--venda'
-          : kind === 'distrato' ? 'com-num com-num--distrato'
-          : (n > 0 ? 'com-num com-num--var' : (n < 0 ? 'com-num com-num--var-neg' : 'com-num'));
-        return `<td class="${cls}">${n}</td>`;
-      };
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
-      } else {
-        let totV = 0, totD = 0, totVY = 0, totDY = 0;
-        tbody.innerHTML = rows.map((prod) => {
-          const d = agg.produtos[prod];
-          const vMes = d.vendas || 0;
-          const dMes = d.distratos || 0;
-          const vYtd = d.vendasYtd || 0;
-          const dYtd = d.distratosYtd || 0;
-          totV += vMes;
-          totD += dMes;
-          totVY += vYtd;
-          totDY += dYtd;
-          return `<tr>
-            <td class="com-prod-name">${prod}</td>
-            ${num(vMes, 'venda')}${num(dMes, 'distrato')}${num(vMes - dMes, 'var')}
-            ${num(vYtd, 'venda')}${num(dYtd, 'distrato')}${num(vYtd - dYtd, 'var')}
-          </tr>`;
-        }).join('') + `<tr class="com-dash-total">
-            <td class="com-prod-name">Total</td>
-            ${num(totV, 'venda')}${num(totD, 'distrato')}${num(totV - totD, 'var')}
-            ${num(totVY, 'venda')}${num(totDY, 'distrato')}${num(totVY - totDY, 'var')}
-          </tr>`;
-      }
-    }
+    this.renderProdutoTable(agg);
 
     const upd = document.getElementById('comercial-updated');
     if (upd && this.state.updatedAt) {
@@ -664,6 +739,110 @@ const ComercialApp = {
     if (content) content.style.display = 'block';
     this.renderCharts(agg);
     if (window.lucide) window.lucide.createIcons();
+  },
+
+  sortValue(row, key) {
+    if (key === 'name') return row.name;
+    if (key === 'vendas') return row.v;
+    if (key === 'distratos') return row.d;
+    if (key === 'var') return row.v - row.d;
+    if (key === 'vendasYtd') return row.vy;
+    if (key === 'distratosYtd') return row.dy;
+    if (key === 'varYtd') return row.vy - row.dy;
+    return row.v - row.d;
+  },
+
+  sortProdutos(key) {
+    if (this.state.sortKey === key) {
+      this.state.sortDir = this.state.sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      this.state.sortKey = key;
+      this.state.sortDir = key === 'name' ? 'asc' : 'desc';
+    }
+    if (this.state.loaded) this.renderProdutoTable(this.aggregate());
+  },
+
+  selectProduct(name) {
+    const next = String(name || '');
+    this.state.selectedProduct = this.state.selectedProduct === next ? '' : next;
+    if (this.state.loaded) this.updateDashboardUI();
+  },
+
+  thSort(key, label, cls, rowspan) {
+    const on = this.state.sortKey === key;
+    const arrow = on ? (this.state.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th ${rowspan ? 'rowspan="2"' : ''} class="${cls} com-th-sort${on ? ' is-sorted' : ''}" onclick="ComercialApp.sortProdutos('${key}')">${label}${arrow}</th>`;
+  },
+
+  renderProdutoTable(agg) {
+    const thead = document.getElementById('comercial-table-head');
+    const tbody = document.getElementById('comercial-table-body');
+    if (thead) {
+      thead.innerHTML = `
+        <tr>
+          ${this.thSort('name', 'Produto', 'com-th-prod', true)}
+          <th colspan="3" class="com-th-mensal">Mensal (período selecionado)</th>
+          <th colspan="3" class="com-th-acum">Acumulado</th>
+        </tr>
+        <tr>
+          ${this.thSort('vendas', 'Vendas', 'com-th-venda')}
+          ${this.thSort('distratos', 'Distrato', 'com-th-dist')}
+          ${this.thSort('var', 'Variação', 'com-th-var')}
+          ${this.thSort('vendasYtd', 'Vendas', 'com-th-venda com-th-acum-col')}
+          ${this.thSort('distratosYtd', 'Distrato', 'com-th-dist com-th-acum-col')}
+          ${this.thSort('varYtd', 'Variação', 'com-th-var com-th-acum-col')}
+        </tr>`;
+    }
+    if (!tbody) return;
+    const rows = Object.keys(agg.produtos || {}).map((name) => {
+      const d = agg.produtos[name];
+      return {
+        name,
+        v: d.vendas || 0,
+        d: d.distratos || 0,
+        vy: d.vendasYtd || 0,
+        dy: d.distratosYtd || 0
+      };
+    });
+    const dir = this.state.sortDir === 'asc' ? 1 : -1;
+    const key = this.state.sortKey || 'var';
+    rows.sort((a, b) => {
+      const va = this.sortValue(a, key);
+      const vb = this.sortValue(b, key);
+      if (typeof va === 'string' || typeof vb === 'string') {
+        return String(va).localeCompare(String(vb), 'pt-BR') * dir;
+      }
+      return (va - vb) * dir;
+    });
+    const num = (n, kind) => {
+      const cls = kind === 'venda' ? 'com-num com-num--venda'
+        : kind === 'distrato' ? 'com-num com-num--distrato'
+        : (n > 0 ? 'com-num com-num--var' : (n < 0 ? 'com-num com-num--var-neg' : 'com-num'));
+      const sign = kind === 'var' && n > 0 ? '+' : '';
+      return `<td class="${cls}">${sign}${n}</td>`;
+    };
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
+      return;
+    }
+    let totV = 0, totD = 0, totVY = 0, totDY = 0;
+    const selected = this.state.selectedProduct || '';
+    tbody.innerHTML = rows.map((r, i) => {
+      totV += r.v;
+      totD += r.d;
+      totVY += r.vy;
+      totDY += r.dy;
+      const on = selected === r.name;
+      return `<tr class="com-prod-row${i % 2 ? ' is-alt' : ''}${on ? ' is-selected' : ''}" onclick="ComercialApp.selectProduct(${JSON.stringify(r.name)})">
+        <td class="com-prod-name">${this.esc(r.name)}</td>
+        ${num(r.v, 'venda')}${num(r.d, 'distrato')}${num(r.v - r.d, 'var')}
+        ${num(r.vy, 'venda')}${num(r.dy, 'distrato')}${num(r.vy - r.dy, 'var')}
+      </tr>`;
+    }).join('') + `<tr class="com-dash-total">
+        <td class="com-prod-name">Total</td>
+        ${num(totV, 'venda')}${num(totD, 'distrato')}${num(totV - totD, 'var')}
+        ${num(totVY, 'venda')}${num(totDY, 'distrato')}${num(totVY - totDY, 'var')}
+      </tr>`;
   }
 };
 

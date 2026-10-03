@@ -15,8 +15,25 @@ const ComprasPrevisoesApp = {
     "76363-3": 1, "76363-4": 1, "76363-5": 1, "76363-6": 1,
     "76074-3": 1, "76074-4": 1, "76074-5": 1, "76074-6": 1
   },
-  /** Tipos do Controle de Previsões no Sienge — não entram NF, REP, DIST, DEV etc. */
-  DOC_PREVISAO: { PRV: 1, PCT: 1, PPC: 1 },
+  /** Tipos de documento "PREVISÃO" no Sienge (cadastro de identificação). */
+  DOC_PREVISAO: {
+    PRCOMC: 1,
+    PRDIST: 1,
+    PFATDIR: 1,
+    PFINBAN: 1,
+    PRV: 1,
+    PRVC: 1,
+    PRVR: 1,
+    PCT: 1,
+    PPC: 1
+  },
+  /** Documentos que não são previsão (repasse, distrato, NF, devolução…). */
+  DOC_NAO_PREVISAO: {
+    NF: 1, NFE: 1, NFS: 1, NFSE: 1, NFF: 1,
+    REP: 1, REPF: 1, REPASSE: 1,
+    DIST: 1, DISTR: 1,
+    DEV: 1, DEVO: 1
+  },
 
   state: {
     inited: false,
@@ -97,8 +114,12 @@ const ComprasPrevisoesApp = {
 
   isDocPrevisao(docId, docName) {
     const id = this.docCode(docId);
-    if (this.DOC_PREVISAO[id]) return true;
-    return this.fold(docName).indexOf("PREVIS") >= 0;
+    const nome = this.fold(docName);
+    const token = this.docCode(this.firstWord(docId || docName));
+    if (this.DOC_NAO_PREVISAO[id] || this.DOC_NAO_PREVISAO[token]) return false;
+    if (this.DOC_PREVISAO[id] || this.DOC_PREVISAO[token]) return true;
+    if (nome.indexOf("PREVISAO") >= 0 || nome.indexOf("PREVIS") >= 0) return true;
+    return false;
   },
 
   transform(payload) {

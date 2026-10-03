@@ -517,6 +517,7 @@ const CondicoesPagamentoApp = {
 };
 
 window.CondicoesPagamentoApp = CondicoesPagamentoApp;
+try { CondicoesPagamentoApp.loadFlagsFromLocal(); } catch (e) {}
 
 window.mergeCondicoesPagamento = function(localStr, cloudStr) {
   const app = window.CondicoesPagamentoApp;

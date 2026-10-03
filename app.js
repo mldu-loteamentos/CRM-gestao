@@ -1743,6 +1743,104 @@ window.installmentIsSinalSI = function(inst) {
   });
 };
 
+window.installmentConditionKey = function(inst) {
+  const parts = (typeof collectInstallmentTypeParts === "function")
+    ? collectInstallmentTypeParts(inst)
+    : [];
+  const fold = (s) => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const codes = [];
+  const add = (t) => { if (t && codes.indexOf(t) < 0) codes.push(t); };
+  parts.forEach((p) => {
+    const n = fold(p);
+    if (!n) return;
+    const matches = n.match(/\b([A-Z]{1,3}\d+)\b/g);
+    if (matches) matches.forEach(add);
+    n.split(/[\s\-_\/.,;:]+/).forEach((t) => {
+      if (t === "SI" || t === "SA" || t === "PU" || t === "AT" || t === "CJ") add(t);
+    });
+  });
+  if (codes.length) return codes.find((t) => t !== "SI") || codes[0];
+  const code = (typeof getInstallmentConditionCode === "function")
+    ? getInstallmentConditionCode(inst)
+    : String((inst && (inst.conditionType || inst.paymentConditionType || inst.tipo)) || "");
+  const token = fold(code).split(/[\s\-_\/.,;:]+/)[0];
+  return token || String(code || "").trim();
+};
+
+window.installmentAllowsSiengeBoleto = function(inst) {
+  if (typeof window.paymentConditionAllowsBoleto !== "function") return true;
+  return window.paymentConditionAllowsBoleto(window.installmentConditionKey(inst));
+};
+
+window.installmentIsParcelaWebro = function(inst) {
+  if (typeof window.paymentConditionIsWebro !== "function") return false;
+  return window.paymentConditionIsWebro(window.installmentConditionKey(inst)) === true;
+};
+
+window.installmentIsEntradaWebro = function(inst) {
+  if (!inst) return false;
+  if (typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst)) return false;
+  if (!window.installmentIsParcelaWebro(inst)) return false;
+  const parts = ((typeof collectInstallmentTypeParts === "function") ? collectInstallmentTypeParts(inst) : [])
+    .concat([window.installmentConditionKey(inst)]);
+  return parts.some((p) => {
+    const fold = String(p || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return /\bE\d+\b/.test(fold) || fold.indexOf("ENTRADA") >= 0;
+  });
+};
+
+window.webroBoletoTagHtml = function() {
+  return `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;white-space:nowrap;">Boleto parcela Webro</span>`;
+};
+
+window.findContractInstallmentById = function(id) {
+  const sid = String(id == null ? "" : id);
+  if (!sid) return null;
+  const pools = [
+    (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [],
+    (typeof AppState !== "undefined" && AppState._simVencidas) || []
+  ];
+  for (let p = 0; p < pools.length; p++) {
+    const hit = (pools[p] || []).find((i) => i && String(i.installmentId) === sid);
+    if (hit) return hit;
+  }
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  for (let b = 0; b < bills.length; b++) {
+    const insts = (bills[b] && bills[b].defaulterInstallments) || [];
+    const hit = insts.find((i) => i && String(i.installmentId) === sid);
+    if (hit) return hit;
+  }
+  return null;
+};
+
+window.clientHasPagamentoEntradaWebro = function(client) {
+  if (!client) return false;
+  if (client.isZeroPaid) return false;
+  if (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client)) return false;
+  const insts = typeof window.listInstallmentsForSiCheck === "function"
+    ? window.listInstallmentsForSiCheck(client)
+    : [];
+  return insts.some((inst) => {
+    if (!window.installmentIsEntradaWebro(inst)) return false;
+    const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.cb);
+    if (Number.isFinite(cb) && cb <= 0) return false;
+    if (inst.receipts && inst.receipts.some((r) => r && r.receiptType != null && r.receiptType !== undefined)) return false;
+    if (inst.installmentSituation != null && Number(inst.installmentSituation) !== 1) return false;
+    return true;
+  });
+};
+
+window.assertInstallmentsAllowSiengeBoleto = function(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map((id) => window.findContractInstallmentById(id)).filter(Boolean);
+  const blocked = list.filter((inst) => !window.installmentAllowsSiengeBoleto(inst));
+  if (!blocked.length) return true;
+  const webro = blocked.some((inst) => window.installmentIsParcelaWebro(inst));
+  alert(webro
+    ? "Essa condição é Boleto parcela Webro. O IntegrA não gera boleto Sienge para esse tipo."
+    : "Essa condição de pagamento não está com Boleto Sienge ligado. O IntegrA não pode gerar o boleto.");
+  return false;
+};
+
 window.sinalInstallmentOverdueDays = function(inst, bill) {
   if (!inst) return 0;
   if (typeof installmentOverdueDays === "function") {
@@ -2503,6 +2601,9 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     } else if (c.isZeroPaid) {
       requiredType = "interno_absoluto";
       ruleSuffix = "INTERNO_ABSOLUTO";
+    } else if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(c)) {
+      requiredType = "interno_absoluto";
+      ruleSuffix = "INTERNO_ABSOLUTO / ENTRADA WEBRO";
     } else if (days >= threshJuridico) {
       requiredType = "apoio_juridico";
       ruleSuffix = "APOIO_JURIDICO / ENVIAR JURIDICO";
@@ -5736,6 +5837,9 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
     return G.ACORDO_INTERNO_QUEBRADO;
   }
   if (client && client.isZeroPaid) return G.ZERO_PAGO;
+  if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(client)) {
+    return G.ENTRADA_WEBRO;
+  }
   if (client && client.hasOverdueAgreement) {
     if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
       return G.EXECUTAR_ACORDO_QUEBRADO;
@@ -5756,6 +5860,7 @@ window.getFilaQueueGroupMeta = function(group) {
   const map = {
     [G.ACORDO_INTERNO_QUEBRADO]: { label: 'Acordo Interno Quebrado', bg: '#ffedd5', color: '#9a3412' },
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
+    [G.ENTRADA_WEBRO]: { label: 'Pagamento de entrada Webro', bg: '#fff7ed', color: '#c2410c' },
     [G.SUBJUDICE]: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
     [G.ACORDO_JURIDICO]: { label: 'Acordo Judicial Quebrado', bg: '#fef3c7', color: '#92400e' },
     [G.EXECUTAR_ACORDO_QUEBRADO]: { label: 'Executar Acordo Quebrado', bg: '#ffe4e6', color: '#9f1239' },
@@ -6484,6 +6589,15 @@ window.wrapAgingWithWebro = function(client, innerHtml) {
   if (!webro) return innerHtml || "";
   // Substitui a badge de aging: mesma forma, com tag Webro + dias de atraso
   return webro;
+};
+
+window.getEntradaWebroAgingHtml = function(client) {
+  const days = Number(client && client.maxDaysDelay) || 0;
+  return `
+    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fdba74; background-color: #fff7ed; color: #c2410c; font-weight: 600;" title="Cliente pagando entrada Webro — permanece na carteira interna">
+      <i data-lucide="banknote" style="width: 14px; height: 14px;"></i> Pagamento de entrada Webro - ${days} dia${days === 1 ? "" : "s"}
+    </span>
+  `;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {
@@ -8601,6 +8715,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                   }
                   if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(client)) {
                       return window.getAcordoQuebradoAgingHtml(client);
+                  }
+                  if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(client)
+                    && typeof window.getEntradaWebroAgingHtml === "function") {
+                      return window.getEntradaWebroAgingHtml(client);
                   }
                   if (client.hasOverdueAgreement) {
                       if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)
@@ -12605,7 +12723,7 @@ function formatCpfCnpj(val) {
                  : dueIso < hojeIso;
                const hasBoletoFlag = inst.generatedBillet === true || (recentFresh && recentIds.includes(String(inst.installmentId)));
                if (!overdue && !hasBoletoFlag) return;
-               vencidasSimulador.push({
+               const row = {
                   ...inst,
                   cb: cb,
                   due: new Date((typeof window.installmentDueIsoDate === "function"
@@ -12618,9 +12736,17 @@ function formatCpfCnpj(val) {
                   isFetchingBoleto: !!hasBoletoFlag,
                   originalValue: Number(inst.originalValue != null ? inst.originalValue : cb),
                   correctedValue: Number(inst.correctedValue != null ? inst.correctedValue : (inst.balanceDue != null ? inst.balanceDue : cb))
-               });
+               };
+               const blocksSienge = (typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(row))
+                 || (typeof window.installmentAllowsSiengeBoleto === "function" && !window.installmentAllowsSiengeBoleto(row));
+               if (blocksSienge) {
+                 row.selected = false;
+                 row.isFetchingBoleto = false;
+               }
+               vencidasSimulador.push(row);
             });
             vencidasSimulador.sort((a, b) => a.due - b.due);
+            if (typeof AppState !== "undefined") AppState._simVencidas = vencidasSimulador;
          }
 
          const fetchSlipForSimInst = async (simInst) => {
@@ -12703,6 +12829,7 @@ function formatCpfCnpj(val) {
                });
             });
             vencidasSimulador.sort((a, b) => a.due - b.due);
+            if (typeof AppState !== "undefined") AppState._simVencidas = vencidasSimulador;
             vencidasSimulador.forEach((s) => {
                if (s.isFetchingBoleto) fetchSlipForSimInst(s);
             });
@@ -12789,8 +12916,22 @@ function formatCpfCnpj(val) {
 
                   let statusHtml = `<span style="color:#94a3b8;font-size:0.72rem;">Sem boleto</span>`;
                   let acoesHtml = "";
+                  const isWebroParcela = typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(inst);
+                  const allowsSiengeBol = typeof window.installmentAllowsSiengeBoleto !== "function" || window.installmentAllowsSiengeBoleto(inst);
+                  if (isWebroParcela || !allowsSiengeBol) {
+                    inst.selected = false;
+                    chkHtml = `<input type="checkbox" disabled title="Essa condição não gera boleto pelo IntegrA" style="opacity:0.35;cursor:not-allowed;">`;
+                  }
                   if (!AppState.isSubjudiceMode) {
-                    if (inst.isFetchingBoleto) {
+                    if (isWebroParcela) {
+                      statusHtml = typeof window.webroBoletoTagHtml === "function"
+                        ? window.webroBoletoTagHtml()
+                        : `<span style="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Boleto parcela Webro</span>`;
+                      acoesHtml = "";
+                    } else if (!allowsSiengeBol) {
+                      statusHtml = `<span style="background:#f8fafc;color:#475569;border:1px solid #cbd5e1;padding:2px 6px;border-radius:4px;font-size:0.7rem;font-weight:700;">Sem boleto Sienge</span>`;
+                      acoesHtml = "";
+                    } else if (inst.isFetchingBoleto) {
                       statusHtml = `<span style="color:#64748b;font-size:0.72rem;">Consultando…</span>`;
                     } else if (inst.boletoBaixado) {
                       statusHtml = `<span style="background:var(--color-danger);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;white-space:nowrap;">Baixado (&gt;28 dias)</span>`;
@@ -13206,6 +13347,10 @@ function formatCpfCnpj(val) {
       }
 
       const instIds = Array.from(checkboxes).map(c => parseInt(c.getAttribute('data-inst-id')));
+      if (typeof AppState !== "undefined") AppState._simVencidas = vencidasSimulador;
+      if (typeof window.assertInstallmentsAllowSiengeBoleto === "function" && !window.assertInstallmentsAllowSiengeBoleto(instIds)) {
+        return;
+      }
       const billIdToMatch = sale.receivableBillId || saleId;
       window.reprocessBoleto(billIdToMatch, instIds, empIdToUse, 'simulacao');
   };
@@ -13221,6 +13366,9 @@ function formatCpfCnpj(val) {
       : AppState.selectedPromisedInstallments;
     if (!instIds || instIds.length === 0) {
       alert("Não foi possível identificar o ID Sienge das parcelas selecionadas. Selecione novamente as parcelas e tente gerar o boleto.");
+      return;
+    }
+    if (typeof window.assertInstallmentsAllowSiengeBoleto === "function" && !window.assertInstallmentsAllowSiengeBoleto(instIds)) {
       return;
     }
     const billIdToMatch = sale.receivableBillId || saleId;
@@ -13904,7 +14052,9 @@ window.openPromisedInstallmentsModal = function() {
         </td>
         <td style="padding: 10px;">
           <div style="font-weight: 500;">${datePart}</div>
-          <div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">⚠️ Parcela com boleto gerado</div>
+          ${typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(inst)
+            ? `<div style="margin-top:4px;">${typeof window.webroBoletoTagHtml === "function" ? window.webroBoletoTagHtml() : "Boleto parcela Webro"}</div>`
+            : `<div id="prom-modal-boleto-${idx}" style="font-size: 0.75rem; color: #b45309; display: none; margin-top: 4px; font-weight: 600;">⚠️ Parcela com boleto gerado</div>`}
         </td>
         <td style="padding: 10px;">${diasAtraso > 0 ? diasAtraso : '-'}</td>
         <td style="padding: 10px;">${baseVal.toLocaleString("pt-BR", {style: "currency", currency: "BRL"})}</td>
@@ -13915,7 +14065,9 @@ window.openPromisedInstallmentsModal = function() {
     `;
     
     // Check boletos async
-    if (AppState.selectedSaleId && inst.installmentId) {
+    if (AppState.selectedSaleId && inst.installmentId
+        && !(typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(inst))
+        && !(typeof window.installmentAllowsSiengeBoleto === "function" && !window.installmentAllowsSiengeBoleto(inst))) {
       SiengeApiService.getPaymentSlipNotification(AppState.selectedSaleId, inst.installmentId).then(slip => {
         const usable = typeof window.siengePaymentSlipIsUsable === "function"
           ? window.siengePaymentSlipIsUsable(slip)
@@ -14009,19 +14161,35 @@ window.renderPromisedInstallments = function() {
     if (btnSimular) btnSimular.style.display = "none";
   } else {
     container.innerHTML = "";
+    let anySiengeBoleto = false;
     AppState.selectedPromisedInstallments.forEach(item => {
       const label = window.getPromisedInstallmentLabel(item);
       const id = window.getPromisedInstallmentId(item);
       const removeKey = id != null ? String(id) : String(label).replace(/'/g, "\\'");
+      const inst = id != null && typeof window.findContractInstallmentById === "function"
+        ? window.findContractInstallmentById(id)
+        : null;
+      const isWebro = inst && typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(inst);
+      const allowsSienge = !inst || typeof window.installmentAllowsSiengeBoleto !== "function" || window.installmentAllowsSiengeBoleto(inst);
+      if (!isWebro && allowsSienge) anySiengeBoleto = true;
       const pill = document.createElement("div");
-      pill.style.cssText = "display: flex; align-items: center; gap: 5px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;";
-      pill.innerHTML = `
-        ${label}
-        <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;" onclick="removePromisedInstallment('${removeKey}')"></i>
-      `;
+      if (isWebro) {
+        pill.style.cssText = "display: flex; align-items: center; gap: 5px; background: #fff7ed; color: #c2410c; border: 1px solid #fdba74; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;";
+        pill.innerHTML = `
+          ${label}
+          <span style="font-size:0.65rem;font-weight:800;letter-spacing:0.02em;">BOLETO PARCELA WEBRO</span>
+          <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;" onclick="removePromisedInstallment('${removeKey}')"></i>
+        `;
+      } else {
+        pill.style.cssText = "display: flex; align-items: center; gap: 5px; background: var(--color-primary); color: white; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;";
+        pill.innerHTML = `
+          ${label}
+          <i data-lucide="x" style="width: 12px; height: 12px; cursor: pointer;" onclick="removePromisedInstallment('${removeKey}')"></i>
+        `;
+      }
       container.appendChild(pill);
     });
-    if (btnSimular) btnSimular.style.display = "inline-block";
+    if (btnSimular) btnSimular.style.display = anySiengeBoleto ? "inline-block" : "none";
   }
   
   if (typeof window.populatePromisedInstallmentsDropdown === 'function') {
@@ -20961,6 +21129,13 @@ window.submitReprocessBoleto = async function() {
       if (pdfWin && !pdfWin.closed) try { pdfWin.close(); } catch (e) {}
       window._pendingBoletoPdfWin = null;
       alert("Não foi possível identificar as parcelas para gerar o boleto. Selecione novamente e tente de novo.");
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+      return;
+    }
+    if (typeof window.assertInstallmentsAllowSiengeBoleto === "function" && !window.assertInstallmentsAllowSiengeBoleto(resolvedInstIds)) {
+      if (pdfWin && !pdfWin.closed) try { pdfWin.close(); } catch (e) {}
+      window._pendingBoletoPdfWin = null;
       btn.innerHTML = originalHtml;
       btn.disabled = false;
       return;

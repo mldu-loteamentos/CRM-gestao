@@ -3928,7 +3928,7 @@ circle.donut-segment {
   font-weight: 600;
 }
 .com-dash-filters .btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
-.com-month-filter { position: relative; min-width: 168px; z-index: 80; }
+.com-month-filter { position: relative; min-width: 196px; z-index: 80; }
 .com-month-filter.is-open { z-index: 220; }
 .com-month-filter-label {
   display: block;
@@ -3942,7 +3942,7 @@ circle.donut-segment {
 .com-month-filter-btn {
   width: 100%;
   height: 36px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #334155;
   border-radius: 6px;
   background: #fff;
   display: flex;
@@ -3950,7 +3950,7 @@ circle.donut-segment {
   justify-content: space-between;
   padding: 0 10px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   color: #0f172a;
   gap: 8px;
 }
@@ -3958,9 +3958,8 @@ circle.donut-segment {
 .com-month-filter-panel {
   position: absolute;
   left: 0;
-  right: 0;
   top: calc(100% + 4px);
-  min-width: 220px;
+  width: 300px;
   background: #fff;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -3969,21 +3968,43 @@ circle.donut-segment {
   z-index: 230;
 }
 .com-month-filter-panel[hidden] { display: none; }
-.com-month-filter-list { max-height: 260px; overflow: auto; }
+.com-month-presets {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px 8px;
+}
+.com-month-presets button {
+  flex: 1;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.com-month-presets button:hover { background: #ecfdf5; border-color: #105436; color: #105436; }
+.com-month-filter-list { max-height: 280px; overflow: auto; }
 .com-month-filter-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid #f1f5f9;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: #334155;
   font-weight: 600;
   margin: 0;
 }
 .com-month-filter-item:last-child { border-bottom: none; }
+.com-month-filter-item:hover { background: #f0fdf4; }
+.com-month-filter-item.is-on { background: #ecfdf5; }
+.com-month-filter-item span { flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.com-month-filter-item em { font-style: normal; font-size: 0.72rem; color: #64748b; font-weight: 700; }
 .com-month-filter-item input { width: 16px; height: 16px; margin: 0; accent-color: #105436; flex-shrink: 0; }
+.com-month-filter-empty { padding: 16px; text-align: center; color: #94a3b8; font-size: 0.8rem; }
 .com-kpi-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -4077,40 +4098,119 @@ circle.donut-segment {
   border-radius: 0;
 }
 .com-prod-scroll { max-height: 480px; overflow: auto; }
-.com-prod-table { width: 100%; font-size: 0.9rem; }
+.com-prod-table { width: 100%; font-size: 0.9rem; border-collapse: separate; border-spacing: 0; }
 .com-prod-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
   text-align: center;
   white-space: nowrap;
+  padding: 8px 10px;
 }
 .com-prod-table thead tr:first-child th { top: 0; }
 .com-prod-table thead tr:nth-child(2) th { top: 34px; }
-.com-th-prod { text-align: left !important; min-width: 240px; background: #f8fafc; }
-.com-th-mensal { background: #eff6ff; color: #1e3a8a; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.72rem; }
-.com-th-acum { background: #ecfdf5; color: #166534; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.72rem; }
-.com-th-venda { color: #1e3a8a; background: #f8fafc; }
-.com-th-dist { color: #b91c1c; background: #f8fafc; }
-.com-th-var { color: #166534; background: #f8fafc; }
+.com-th-prod { text-align: left !important; min-width: 240px; background: #0f172a; color: #fff; }
+.com-th-mensal { background: #1e3a8a; color: #fff; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.72rem; }
+.com-th-acum { background: #14532d; color: #fff; letter-spacing: 0.03em; text-transform: uppercase; font-size: 0.72rem; }
+.com-th-venda { color: #1e3a8a; background: #dbeafe; }
+.com-th-dist { color: #991b1b; background: #fee2e2; }
+.com-th-var { color: #166534; background: #dcfce7; }
+.com-th-acum-col.com-th-venda { background: #bbf7d0; color: #14532d; }
+.com-th-acum-col.com-th-dist { background: #fecaca; color: #7f1d1d; }
+.com-th-acum-col.com-th-var { background: #86efac; color: #14532d; }
+.com-th-sort { cursor: pointer; user-select: none; }
+.com-th-sort:hover { filter: brightness(0.96); }
+.com-th-sort.is-sorted { box-shadow: inset 0 -3px 0 #f37021; }
 .com-prod-name {
   font-weight: 700;
   color: #0f172a;
   text-align: left;
 }
+.com-prod-row td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
+.com-prod-row.is-alt td { background: #f8fafc; }
+.com-prod-row:hover td { background: #ecfdf5; cursor: pointer; }
+.com-prod-row.is-selected td { background: #dbeafe; }
+.com-prod-row td.com-num--venda { background: rgba(219, 234, 254, 0.45); }
+.com-prod-row td.com-num--distrato { background: rgba(254, 226, 226, 0.5); }
+.com-prod-row td.com-num--var { background: rgba(220, 252, 231, 0.55); }
+.com-prod-row td.com-num--var-neg { background: rgba(254, 226, 226, 0.65); }
+.com-prod-row.is-alt td.com-num--venda { background: rgba(219, 234, 254, 0.7); }
+.com-prod-row.is-alt td.com-num--distrato { background: rgba(254, 226, 226, 0.7); }
+.com-prod-row.is-alt td.com-num--var { background: rgba(220, 252, 231, 0.75); }
+.com-prod-row:hover td.com-num--venda,
+.com-prod-row:hover td.com-num--distrato,
+.com-prod-row:hover td.com-num--var,
+.com-prod-row:hover td.com-num--var-neg { filter: brightness(0.97); }
 .com-num {
   text-align: center;
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+  border-left: 1px solid rgba(15, 23, 42, 0.06);
 }
 .com-num--venda { color: #1e3a8a; }
 .com-num--distrato { color: #dc2626; }
 .com-num--var { color: #15803d; }
 .com-num--var-neg { color: #dc2626; }
-.com-dash-total td { background: #f8fafc; border-top: 2px solid #e2e8f0; }
-.com-dash-total .com-num { font-size: 1.28rem; }
+.com-dash-total td { background: #0f172a !important; color: #fff; border-top: 0; }
+.com-dash-total .com-prod-name { color: #fff; }
+.com-dash-total .com-num { font-size: 1.22rem; color: #fff; }
+.com-dash-total .com-num--venda { color: #93c5fd; }
+.com-dash-total .com-num--distrato { color: #fca5a5; }
+.com-dash-total .com-num--var { color: #86efac; }
+.com-dash-total .com-num--var-neg { color: #fca5a5; }
+.com-chart-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #dbeafe;
+  color: #1e3a8a;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  max-width: 360px;
+}
+.com-chart-chip button {
+  border: none;
+  background: #1e3a8a;
+  color: #fff;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.com-dash-chartbox { position: relative; }
+.com-chart-tip {
+  position: absolute;
+  z-index: 8;
+  min-width: 280px;
+  max-width: 420px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+  padding: 10px 12px;
+  pointer-events: none;
+}
+.com-chart-tip-head { margin-bottom: 8px; }
+.com-chart-tip-head strong { display: block; color: #0f172a; font-size: 0.88rem; }
+.com-chart-tip-head span { font-size: 0.75rem; color: #64748b; font-weight: 600; }
+.com-chart-tip table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.com-chart-tip th { text-align: left; color: #64748b; font-size: 0.68rem; text-transform: uppercase; padding: 4px 6px; border-bottom: 1px solid #e2e8f0; }
+.com-chart-tip td { padding: 4px 6px; border-bottom: 1px solid #f1f5f9; color: #0f172a; font-weight: 600; }
+.com-chart-tip th:nth-child(n+2),
+.com-chart-tip td:nth-child(n+2) { text-align: right; }
+.com-tip-v { color: #1d4ed8; font-weight: 800; font-style: normal; }
+.com-tip-d { color: #dc2626; font-weight: 800; font-style: normal; }
+.com-tip-pos { color: #15803d; font-weight: 800; }
+.com-tip-neg { color: #dc2626; font-weight: 800; }
+.com-chart-tip-empty,
+.com-chart-tip-more { font-size: 0.72rem; color: #64748b; margin-top: 6px; }
 @media (max-width: 1100px) {
   .com-dash-kpis { grid-template-columns: 1fr 1fr; }
 }

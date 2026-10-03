@@ -279,6 +279,45 @@ const TabelasVigentesApp = {
     return field !== "desconto" && field !== "descontoOn" && field !== "descontoPct";
   },
 
+  isEditorContextReady(draft) {
+    const d = draft || (this.state.editor && this.state.editor.draft);
+    return !!(d && String(d.competencia || "").trim() && d.cityId && d.enterpriseId);
+  },
+
+  sheetFieldLocked(idx, field, r) {
+    if (!this.isEditorContextReady()) return true;
+    return this.boletoFieldLocked(idx, field, r);
+  },
+
+  refreshEditorSheetLock() {
+    const ready = this.isEditorContextReady();
+    const wrap = document.querySelector(".tvig-editor-table-wrap");
+    const hint = document.getElementById("tvig-editor-lock-hint");
+    const addBtn = document.getElementById("tvig-add-plano");
+    if (hint) hint.hidden = ready;
+    if (addBtn) addBtn.disabled = !ready;
+    if (wrap) wrap.classList.toggle("is-context-locked", !ready);
+    const d = this.state.editor && this.state.editor.draft;
+    if (!wrap || !d) return;
+    (d.rows || []).forEach((r, i) => {
+      wrap.querySelectorAll('td[data-row="' + i + '"] input, td[data-row="' + i + '"] select').forEach((el) => {
+        const td = el.closest("td");
+        const field = td && td.getAttribute("data-field");
+        if (field === "desconto" && el.classList.contains("tvig-sheet-input")) {
+          el.disabled = !ready || !r.descontoOn;
+          return;
+        }
+        el.disabled = this.sheetFieldLocked(i, field === "desconto" ? "descontoOn" : field, r);
+      });
+      const del = wrap.querySelectorAll("tbody tr")[i];
+      const btn = del && del.querySelector(".tvig-ico");
+      if (btn) btn.disabled = !ready;
+    });
+    if (!ready) {
+      document.querySelectorAll(".tvig-fill-handle").forEach((el) => el.remove());
+    }
+  },
+
   normalizeBoletoRow(r) {
     if (!r) return r;
     r.plano = "Boleto único";
@@ -733,6 +772,7 @@ const TabelasVigentesApp = {
             ed.openEmp = true;
           }
           self.paintEditorFilters();
+          self.refreshEditorSheetLock();
         },
         selectAll() {
           const items = kind === "city" ? self.editorCityOptions() : self.editorEmpOptions();
@@ -787,12 +827,13 @@ const TabelasVigentesApp = {
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
     d[field] = val;
+    if (field === "competencia") this.refreshEditorSheetLock();
   },
 
   onSheetInput(idx, field, el) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
-    if (this.boletoFieldLocked(idx, field, d.rows[idx])) {
+    if (this.sheetFieldLocked(idx, field, d.rows[idx])) {
       if (field === "plano") el.value = "Boleto único";
       else if (field === "reajuste") el.value = "REAL";
       else el.value = "";
@@ -827,7 +868,7 @@ const TabelasVigentesApp = {
   onReajuste(idx, val) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
-    if (this.boletoFieldLocked(idx, "reajuste", d.rows[idx])) {
+    if (this.sheetFieldLocked(idx, "reajuste", d.rows[idx])) {
       d.rows[idx].reajuste = "REAL";
       return;
     }
@@ -839,7 +880,7 @@ const TabelasVigentesApp = {
   onEditorFlag(idx, field, on) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
-    if (this.boletoFieldLocked(idx, field, d.rows[idx])) return;
+    if (this.sheetFieldLocked(idx, field, d.rows[idx])) return;
     if (!!d.rows[idx][field] === !!on) return;
     this.pushUndo();
     d.rows[idx][field] = !!on;

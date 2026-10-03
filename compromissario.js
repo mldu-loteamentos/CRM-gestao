@@ -853,9 +853,42 @@ const CompromissarioApp = {
     }
   },
 
-  renderCessaoPanel() {
+  captureCessaoScroll() {
+    const list = document.getElementById('comp-cessao-list');
+    const main = document.querySelector('.main-content');
+    return {
+      list: list ? list.scrollTop : 0,
+      main: main ? main.scrollTop : 0,
+      win: window.scrollY || document.documentElement.scrollTop || 0
+    };
+  },
+
+  restoreCessaoScroll(saved, companyId) {
+    const apply = () => {
+      const list = document.getElementById('comp-cessao-list');
+      const main = document.querySelector('.main-content');
+      if (list && saved) list.scrollTop = saved.list || 0;
+      if (main && saved) main.scrollTop = saved.main || 0;
+      if (saved && typeof window.scrollTo === 'function') {
+        try { window.scrollTo({ top: saved.win || 0, left: 0, behavior: 'instant' }); }
+        catch (e) { window.scrollTo(0, saved.win || 0); }
+      }
+      if (companyId) {
+        const el = document.querySelector('input[name="comp-cessao-' + companyId + '"]:checked');
+        if (el && typeof el.focus === 'function') {
+          try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+        }
+      }
+    };
+    apply();
+    requestAnimationFrame(apply);
+  },
+
+  renderCessaoPanel(opts) {
     const panel = document.getElementById('comp-cessao-panel');
     if (!panel) return;
+    const saved = this.captureCessaoScroll();
+    const focusId = opts && opts.focusCompanyId;
     const companies = this.getActivePortfolioCompanies();
     const month = this.state.cessaoMonth || '';
     const ready = this.isCessaoGateReady();
@@ -928,11 +961,12 @@ const CompromissarioApp = {
         </div>
         ${badge}
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow:auto;">
+      <div id="comp-cessao-list" style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow:auto;">
         ${companies.length ? rows : '<p style="color:#64748b;font-size:0.85rem;margin:0;">Nenhuma empresa com carteira ativa configurada.</p>'}
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
+    this.restoreCessaoScroll(saved, focusId);
   },
 
   escHtml(s) {
@@ -959,7 +993,7 @@ const CompromissarioApp = {
       this.deleteCessaoFileBlob(id);
     }
     this.persistCessaoMonth();
-    this.renderCessaoPanel();
+    this.renderCessaoPanel({ focusCompanyId: id });
     this.syncCessaoGateUi();
   },
 
@@ -976,7 +1010,7 @@ const CompromissarioApp = {
     }
     this.deleteCessaoFileBlob(id);
     this.persistCessaoMonth();
-    this.renderCessaoPanel();
+    this.renderCessaoPanel({ focusCompanyId: id });
     this.syncCessaoGateUi();
   },
 
@@ -999,10 +1033,10 @@ const CompromissarioApp = {
       row.declaredAt = Date.now();
       await this.saveCessaoFileBlob(id, file);
       this.persistCessaoMonth();
-      this.renderCessaoPanel();
+      this.renderCessaoPanel({ focusCompanyId: id });
       this.syncCessaoGateUi();
       this.hydrateCessaoUnits().then(() => {
-        this.renderCessaoPanel();
+        this.renderCessaoPanel({ focusCompanyId: id });
       }).catch(() => {});
     } catch (e) {
       console.warn('[Compromissario] parse cessão', e);
@@ -1013,7 +1047,7 @@ const CompromissarioApp = {
       row.uploadedAt = Date.now();
       await this.saveCessaoFileBlob(id, file);
       this.persistCessaoMonth();
-      this.renderCessaoPanel();
+      this.renderCessaoPanel({ focusCompanyId: id });
       this.syncCessaoGateUi();
       alert('Relatório anexado, mas a leitura automática falhou. O gate foi liberado para esta empresa. Detalhe: ' + (e && e.message ? e.message : e));
     } finally {
@@ -1040,7 +1074,7 @@ const CompromissarioApp = {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array', cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+      matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, cellDates: true, defval: '' });
     }
     return this.parseCessaoMatrix(matrix);
   },
@@ -1090,11 +1124,77 @@ const CompromissarioApp = {
     return String(v == null ? '' : v).replace(/\.0$/, '').replace(/\D/g, '');
   },
 
+  validIsoDate(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+    return m[1] + '-' + m[2] + '-' + m[3];
+  },
+
+  pad2(n) {
+    return String(n).padStart(2, '0');
+  },
+
+  dateToIsoParts(y, month, day) {
+    if (!Number.isFinite(y) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+    if (y < 100) y += y >= 70 ? 1900 : 2000;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+    return y + '-' + this.pad2(month) + '-' + this.pad2(day);
+  },
+
+  cellToText(v) {
+    if (v == null || v === '') return '';
+    if (v instanceof Date && !isNaN(v.getTime())) {
+      return this.pad2(v.getDate()) + '/' + this.pad2(v.getMonth() + 1) + '/' + v.getFullYear();
+    }
+    return String(v).trim();
+  },
+
   cessaoDateIso(raw) {
-    const s = String(raw || '').trim();
-    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    if (raw instanceof Date && !isNaN(raw.getTime())) {
+      return this.dateToIsoParts(raw.getFullYear(), raw.getMonth() + 1, raw.getDate());
+    }
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s) return '';
+    const valid = this.validIsoDate(s);
+    if (valid) return valid;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return this.validIsoDate(s.slice(0, 10));
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      if (n > 20000 && n < 80000) {
+        const utc = new Date(Math.round((n - 25569) * 86400 * 1000));
+        if (!isNaN(utc.getTime())) {
+          return this.dateToIsoParts(utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate());
+        }
+      }
+    }
+    const long = s.match(/([A-Za-z]{3,})[ .,-]+(\d{1,2})[ .,-]+(\d{2,4})/)
+      || s.match(/(\d{1,2})[ .,-]+([A-Za-z]{3,})[ .,-]+(\d{2,4})/);
+    if (long) {
+      const months = {
+        JAN: 1, FEV: 2, FEB: 2, MAR: 3, ABR: 4, APR: 4, MAI: 5, MAY: 5,
+        JUN: 6, JUL: 7, AGO: 8, AUG: 8, SET: 9, SEP: 9, OUT: 10, OCT: 10,
+        NOV: 11, DEZ: 12, DEC: 12
+      };
+      const a = long[1];
+      const b = long[2];
+      const y = Number(long[3]);
+      const ma = months[String(a).slice(0, 3).toUpperCase()];
+      const mb = months[String(b).slice(0, 3).toUpperCase()];
+      if (ma) return this.dateToIsoParts(y, ma, Number(b));
+      if (mb) return this.dateToIsoParts(y, mb, Number(a));
+    }
+    const sl = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
+    if (sl) {
+      const a = Number(sl[1]);
+      const b = Number(sl[2]);
+      const y = Number(sl[3]);
+      if (a > 12 && b <= 12) return this.dateToIsoParts(y, b, a);
+      if (b > 12 && a <= 12) return this.dateToIsoParts(y, a, b);
+      return this.dateToIsoParts(y, b, a);
+    }
     return '';
   },
 
@@ -1124,10 +1224,10 @@ const CompromissarioApp = {
     const anteriores = clients.filter((c) => !c.atual);
     const starred = list.filter((r) => (r.clients || []).some((c) => c.atual));
     const datePool = (starred.length ? starred : list)
-      .map((r) => this.cessaoDateIso(r.data))
+      .map((r) => this.validIsoDate(r.dataIso) || this.cessaoDateIso(r.data))
       .filter(Boolean)
       .sort();
-    const iso = datePool.length ? datePool[datePool.length - 1] : this.cessaoDateIso(list[0].data);
+    const iso = datePool.length ? datePool[datePool.length - 1] : (this.validIsoDate(list[0].dataIso) || this.cessaoDateIso(list[0].data));
     const first = list.find((r) => r.titulo) || list[0];
     const documento = (list.find((r) => r.documento) || {}).documento || '';
     return {
@@ -1198,11 +1298,11 @@ const CompromissarioApp = {
         continue;
       }
       if (!foundHeader) continue;
-      const data = String(r[col.data] != null ? r[col.data] : '').trim();
-      const empresa = col.empresa >= 0 ? String(r[col.empresa] != null ? r[col.empresa] : '').trim() : '';
-      const titulo = String(r[col.titulo] != null ? r[col.titulo] : '').trim();
-      const documento = col.documento >= 0 ? String(r[col.documento] != null ? r[col.documento] : '').trim() : '';
-      const clienteRaw = String(r[col.cliente] != null ? r[col.cliente] : '').trim();
+      const data = this.cellToText(r[col.data]);
+      const empresa = col.empresa >= 0 ? this.cellToText(r[col.empresa]) : '';
+      const titulo = this.cellToText(r[col.titulo]);
+      const documento = col.documento >= 0 ? this.cellToText(r[col.documento]) : '';
+      const clienteRaw = this.cellToText(r[col.cliente]);
       if (this.isCessaoNoiseText(data, titulo, documento, clienteRaw)) continue;
       if (!titulo && !clienteRaw && !documento) continue;
       if (data) carry.data = data;
@@ -1393,7 +1493,7 @@ const CompromissarioApp = {
   },
 
   cessaoInSearchMonth(rec, monthVal) {
-    const iso = rec && (rec.dataIso || this.cessaoDateIso(rec.data));
+    const iso = this.validIsoDate(rec && rec.dataIso) || this.cessaoDateIso(rec && rec.data);
     return !!(iso && monthVal && iso.slice(0, 7) === monthVal);
   },
 
