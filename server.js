@@ -789,6 +789,16 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
         return handler(req, res);
       }
 
+      if (pathRoute === '/api/controle-comissao' && req.method === 'GET') {
+        const handler = require('./api/controle-comissao');
+        return handler(req, res);
+      }
+
+      if (pathRoute.startsWith('/api/cvcrm-proxy')) {
+        const handler = require('./api/cvcrm-proxy');
+        return handler(req, res);
+      }
+
       if (pathRoute === '/api/proxy-download' && req.method === 'GET') {
         const queryParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
         const targetUrl = queryParams.get('url');

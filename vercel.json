@@ -6,6 +6,7 @@
   },
   "rewrites": [
     { "source": "/api/sienge-proxy/:path*", "destination": "/api/sienge-proxy" },
+    { "source": "/api/cvcrm-proxy/:path*", "destination": "/api/cvcrm-proxy" },
     { "source": "/api/participacoes/:path*", "destination": "/api/participacoes" },
     { "source": "/proxy-storage/:path*", "destination": "https://firebasestorage.googleapis.com/v0/b/crm-gestao-mldu.firebasestorage.app/o/:path*" }
   ],

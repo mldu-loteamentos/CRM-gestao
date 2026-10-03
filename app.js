@@ -2654,6 +2654,7 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // ----------------------------------------------------
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
+  if (tabId === 'construcao-compras') tabId = 'compras-previsoes';
   if (tabId === 'acessos') tabId = 'auditoria';
   if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
   if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
@@ -2803,6 +2804,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_cessao": "Cessão de Direitos",
     "condicoes-pagamento": "Condições de Pagamento",
     "tabelas-vigentes": "Tabelas vigentes",
+    "controle-comissao": "Controle de comissão",
+    "compras-previsoes": "Follow-up de previsões",
+    "construcao-compras": "Follow-up de previsões",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
     "marketing-budget": "Budget",
@@ -2851,6 +2855,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_cessao": "handshake",
     "condicoes-pagamento": "file-text",
     "tabelas-vigentes": "table",
+    "controle-comissao": "percent",
+    "compras-previsoes": "clipboard-list",
+    "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
@@ -4369,7 +4376,13 @@ window.applyPermissions = function(profileName) {
           || perms.sub_com_geral_estoque_acessar === true
           || perms.sub_com_geral_condicoes_pagamento_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || window.permCoversMenuKey(perms, modKey)) {
+        const ccomAlias = modKey === "sub_com_geral_controle_comissao_acessar" && (
+          perms.mod_comercial === true
+          || perms.sub_com_geral_dashboard_acessar === true
+          || perms.sub_com_geral_estoque_acessar === true
+          || perms.sub_com_geral_tabelas_vigentes_acessar === true
+        );
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';

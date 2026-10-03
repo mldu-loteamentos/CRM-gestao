@@ -582,7 +582,10 @@ const TabelasVigentesApp = {
       openEmp: false,
       qCity: "",
       qEmp: "",
-      sel: null
+      sel: null,
+      undo: [],
+      redo: [],
+      _editSnap: null
     };
     this.paintEditor();
   },
@@ -744,6 +747,7 @@ const TabelasVigentesApp = {
   onSheetInput(idx, field, el) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
+    this.beginCellEdit();
     let v = el.value;
     if (field === "plano") v = this.sanitizePlano(v, idx === 0);
     else if (field === "entradaMin" || field === "descontoPct") v = this.sanitizeDec(v, 2);
@@ -754,6 +758,7 @@ const TabelasVigentesApp = {
   },
 
   onPlanoBlur(idx, el) {
+    if (this._paintingEditor) return;
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
     if (idx === 0) {
@@ -761,24 +766,26 @@ const TabelasVigentesApp = {
       d.rows[idx].plano = "Boleto único";
       return;
     }
+    this.commitCellEdit();
     const n = this.normalizePlano(el.value, false);
     d.rows[idx].plano = n;
-    const keepId = d.rows[idx].id;
-    const next = this.sortDraftRows(keepId);
-    this.paintEditor();
-    const focusAt = next >= 0 ? next : idx;
-    setTimeout(() => this.focusSheetCell(focusAt, "plano"), 0);
+    if (el.value !== n) el.value = n;
+    this.sortDraftRows(d.rows[idx].id);
   },
 
   onReajuste(idx, val) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
+    if (String(d.rows[idx].reajuste || "") === String(val || "")) return;
+    this.pushUndo();
     d.rows[idx].reajuste = val;
   },
 
   onEditorFlag(idx, field, on) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[idx]) return;
+    if (!!d.rows[idx][field] === !!on) return;
+    this.pushUndo();
     d.rows[idx][field] = !!on;
     if (field === "descontoOn") {
       const wrap = document.querySelector('td[data-row="' + idx + '"][data-field="desconto"] .tvig-affix');
@@ -802,17 +809,24 @@ const TabelasVigentesApp = {
       this.focusSheetCell(pending, "plano");
       return;
     }
+    this.pushUndo();
     d.rows.push(this.migrateRow({ id: this.uid(), plano: "" }));
+    const last = d.rows.length - 1;
+    if (this.state.editor) {
+      this.state.editor.sel = { row: last, field: "plano", id: d.rows[last].id };
+      this.state.editor._keepFocus = true;
+    }
     this.paintEditor();
-    setTimeout(() => this.focusSheetCell(d.rows.length - 1, "plano"), 0);
   },
 
   removeEditorRow(idx) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
     if (idx === 0 || this.isBoletoPlano(d.rows[idx] && d.rows[idx].plano)) return;
+    this.pushUndo();
     d.rows.splice(idx, 1);
     this.sortDraftRows();
+    if (this.state.editor) this.state.editor._keepFocus = true;
     this.paintEditor();
   },
 
@@ -849,6 +863,7 @@ const TabelasVigentesApp = {
     const ov = document.getElementById("tvig-editor-overlay");
     const ed = this.state.editor;
     if (!ov || !ed) return;
+    this._paintingEditor = true;
     const d = ed.draft;
     this.sortDraftRows();
     ov.style.display = "flex";
@@ -945,13 +960,290 @@ const TabelasVigentesApp = {
     this.paintEditorFilters();
     this.ensureSheetEvents();
     if (window.lucide) lucide.createIcons();
+    const keep = ed._keepFocus ? ed.sel : null;
+    ed._keepFocus = false;
+    this._paintingEditor = false;
+    if (keep && keep.field) {
+      let row = keep.row;
+      if (keep.id) {
+        const found = (d.rows || []).findIndex((r) => String(r.id) === String(keep.id));
+        if (found >= 0) row = found;
+      }
+      setTimeout(() => this.focusSheetCell(row, keep.field), 0);
+    }
+  },
+
+  cloneRows(rows) {
+    return JSON.parse(JSON.stringify(rows || []));
+  },
+
+  rowsEqual(a, b) {
+    return JSON.stringify(a || []) === JSON.stringify(b || []);
+  },
+
+  beginCellEdit() {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d || ed._editSnap) return;
+    ed._editSnap = this.cloneRows(d.rows);
+  },
+
+  commitCellEdit() {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d || !ed._editSnap) return;
+    if (!this.rowsEqual(ed._editSnap, d.rows)) {
+      ed.undo = ed.undo || [];
+      ed.undo.push(ed._editSnap);
+      if (ed.undo.length > 80) ed.undo.shift();
+      ed.redo = [];
+    }
+    ed._editSnap = null;
+  },
+
+  pushUndo() {
+    this.commitCellEdit();
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d) return;
+    const snap = this.cloneRows(d.rows);
+    const last = (ed.undo || [])[(ed.undo || []).length - 1];
+    if (last && this.rowsEqual(last, snap)) return;
+    ed.undo = ed.undo || [];
+    ed.undo.push(snap);
+    if (ed.undo.length > 80) ed.undo.shift();
+    ed.redo = [];
+  },
+
+  undoEditor() {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d) return;
+    if (ed._editSnap && !this.rowsEqual(ed._editSnap, d.rows)) {
+      ed.redo = ed.redo || [];
+      ed.redo.push(this.cloneRows(d.rows));
+      d.rows = ed._editSnap;
+      ed._editSnap = null;
+      ed._keepFocus = true;
+      this.paintEditor();
+      return;
+    }
+    ed._editSnap = null;
+    if (!(ed.undo || []).length) return;
+    ed.redo = ed.redo || [];
+    ed.redo.push(this.cloneRows(d.rows));
+    d.rows = ed.undo.pop();
+    ed._keepFocus = true;
+    this.paintEditor();
+  },
+
+  redoEditor() {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d || !(ed.redo || []).length) return;
+    ed._editSnap = null;
+    ed.undo = ed.undo || [];
+    ed.undo.push(this.cloneRows(d.rows));
+    d.rows = ed.redo.pop();
+    ed._keepFocus = true;
+    this.paintEditor();
+  },
+
+  matchIndexador(raw) {
+    const t = String(raw == null ? "" : raw).trim();
+    if (!t || t === "—" || t === "-" || t === "–") return "";
+    const names = this.indexadorOptions(t);
+    const fold = this.fold(t);
+    const exact = names.find((n) => this.fold(n) === fold);
+    if (exact) return exact;
+    const part = names.find((n) => this.fold(n).indexOf(fold) >= 0);
+    return part || "";
+  },
+
+  parseFlagValue(raw) {
+    const t = this.fold(raw).replace(/\s+/g, "");
+    if (!t || t === "0" || t === "N" || t === "NAO" || t === "FALSE" || t === "OFF" || t === "NAO") return false;
+    return true;
+  },
+
+  readCellPayload(td) {
+    const d = this.state.editor && this.state.editor.draft;
+    if (!td || !d) return null;
+    const row = Number(td.dataset.row);
+    const field = td.dataset.field;
+    const r = d.rows[row];
+    if (!r || !field) return null;
+    if (field === "intermediarias") {
+      return { field, kind: "flag", on: !!r.intermediarias, text: r.intermediarias ? "Sim" : "Não" };
+    }
+    if (field === "desconto") {
+      return {
+        field,
+        kind: "desconto",
+        descontoOn: !!r.descontoOn,
+        descontoPct: r.descontoPct || "",
+        text: r.descontoOn ? String(r.descontoPct || "") : ""
+      };
+    }
+    if (field === "reajuste") return { field, kind: "reajuste", text: r.reajuste || "" };
+    return { field, kind: "text", text: String(r[field] == null ? "" : r[field]) };
+  },
+
+  copySheetCell(td) {
+    const payload = this.readCellPayload(td);
+    if (!payload) return "";
+    this._sheetClip = payload;
+    return payload.text == null ? "" : String(payload.text);
+  },
+
+  writeClipText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text || "").catch(function () {});
+    }
+  },
+
+  applyPastedValue(row, field, raw) {
+    const d = this.state.editor && this.state.editor.draft;
+    const r = d && d.rows[row];
+    if (!r) return;
+    if (row === 0 && field === "plano") return;
+    if (field === "plano") r.plano = this.normalizePlano(raw, false);
+    else if (field === "entradaMin") r.entradaMin = this.sanitizeDec(raw, 2);
+    else if (field === "parcelamentoEntrada") r.parcelamentoEntrada = this.sanitizeInt(raw);
+    else if (field === "taxaJuros") r.taxaJuros = this.sanitizeDec(raw, 4);
+    else if (field === "reajuste") r.reajuste = this.matchIndexador(raw);
+    else if (field === "intermediarias") r.intermediarias = this.parseFlagValue(raw);
+    else if (field === "desconto") {
+      const t = String(raw == null ? "" : raw).trim();
+      if (!t) {
+        r.descontoOn = false;
+        r.descontoPct = "";
+        return;
+      }
+      const fold = this.fold(t).replace(/\s+/g, "");
+      if (fold === "SIM" || fold === "NAO" || fold === "S" || fold === "N" || fold === "1" || fold === "0") {
+        r.descontoOn = this.parseFlagValue(t);
+        if (!r.descontoOn) r.descontoPct = "";
+        return;
+      }
+      r.descontoOn = true;
+      r.descontoPct = this.sanitizeDec(t, 2);
+    }
+  },
+
+  applyStructuredCell(row, field, clip) {
+    const d = this.state.editor && this.state.editor.draft;
+    const r = d && d.rows[row];
+    if (!r || !clip) return;
+    if (clip.kind === "flag" && field === "intermediarias") {
+      r.intermediarias = !!clip.on;
+      return;
+    }
+    if (clip.kind === "desconto" && field === "desconto") {
+      r.descontoOn = !!clip.descontoOn;
+      r.descontoPct = clip.descontoPct || "";
+      return;
+    }
+    this.applyPastedValue(row, field, clip.text);
+  },
+
+  parseSheetClipboard(text) {
+    const raw = String(text == null ? "" : text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = raw.split("\n");
+    if (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return lines.map((line) => line.split("\t"));
+  },
+
+  pasteIntoSheet(startTd, text) {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!ed || !d || !startTd) return;
+    const fields = this.SHEET_FIELDS;
+    const startRow = Number(startTd.dataset.row);
+    const startFi = fields.indexOf(startTd.dataset.field);
+    if (startFi < 0 || !d.rows[startRow]) return;
+    const grid = this.parseSheetClipboard(text);
+    if (!grid.length) return;
+    const clip = this._sheetClip;
+    const single = grid.length === 1 && grid[0].length === 1;
+    const useStruct = !!(clip && single && String(grid[0][0]) === String(clip.text || ""));
+    this.pushUndo();
+    const before = this.cloneRows(d.rows);
+    for (let i = 0; i < grid.length; i++) {
+      const row = startRow + i;
+      if (!d.rows[row]) break;
+      for (let j = 0; j < grid[i].length; j++) {
+        const fi = startFi + j;
+        if (fi >= fields.length) break;
+        const field = fields[fi];
+        if (useStruct && i === 0 && j === 0) this.applyStructuredCell(row, field, clip);
+        else this.applyPastedValue(row, field, grid[i][j]);
+      }
+    }
+    if (this.rowsEqual(before, d.rows)) {
+      if (ed.undo && ed.undo.length) ed.undo.pop();
+      return;
+    }
+    this.sortDraftRows();
+    if (ed.sel) ed.sel = { row: startRow, field: fields[startFi] };
+    ed._keepFocus = true;
+    this.paintEditor();
+  },
+
+  async pasteSheetFromClipboard(td) {
+    let text = "";
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) text = await navigator.clipboard.readText();
+    } catch (e) {
+      text = "";
+    }
+    if (!text && this._sheetClip) text = this._sheetClip.text || "";
+    this.pasteIntoSheet(td, text);
+  },
+
+  clearSheetCell(row, field) {
+    const d = this.state.editor && this.state.editor.draft;
+    const r = d && d.rows[row];
+    if (!r) return;
+    if (row === 0 && field === "plano") return;
+    if (field === "plano") r.plano = "";
+    else if (field === "intermediarias") r.intermediarias = false;
+    else if (field === "desconto") {
+      r.descontoOn = false;
+      r.descontoPct = "";
+    } else if (field === "reajuste") r.reajuste = "";
+    else r[field] = "";
+  },
+
+  cutSheetCell(td) {
+    const text = this.copySheetCell(td);
+    const row = Number(td.dataset.row);
+    const field = td.dataset.field;
+    if (row === 0 && field === "plano") return text;
+    this.pushUndo();
+    this.clearSheetCell(row, field);
+    if (this.state.editor) this.state.editor._keepFocus = true;
+    this.paintEditor();
+    return text;
+  },
+
+  activeSheetTd(fromEl) {
+    if (fromEl && fromEl.closest) {
+      const td = fromEl.closest(".tvig-sheet-td");
+      if (td && td.closest(".tvig-plan-table")) return td;
+    }
+    const sel = this.state.editor && this.state.editor.sel;
+    if (!sel) return null;
+    return document.querySelector('.tvig-sheet-td[data-row="' + sel.row + '"][data-field="' + sel.field + '"]');
   },
 
   focusSheetCell(row, field) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d) return;
     const max = (d.rows || []).length - 1;
-    if (row < 0 || row > max) return;
+    if (max < 0) return;
+    if (row > max) row = max;
+    if (row < 0) return;
     const td = document.querySelector('.tvig-sheet-td[data-row="' + row + '"][data-field="' + field + '"]');
     if (!td) return;
     this.selectSheetTd(td);
@@ -965,6 +1257,7 @@ const TabelasVigentesApp = {
   },
 
   moveSheetFocus(fromTd, dir, shift) {
+    this.commitCellEdit();
     const fields = this.SHEET_FIELDS;
     let row = Number(fromTd.dataset.row);
     let fi = fields.indexOf(fromTd.dataset.field);
@@ -1000,15 +1293,25 @@ const TabelasVigentesApp = {
     h.className = "tvig-fill-handle";
     h.title = "Arraste para copiar";
     td.appendChild(h);
-    if (this.state.editor) this.state.editor.sel = { row: Number(td.dataset.row), field: td.dataset.field };
+    if (this.state.editor) {
+      const row = Number(td.dataset.row);
+      const d = this.state.editor.draft;
+      this.state.editor.sel = {
+        row,
+        field: td.dataset.field,
+        id: d && d.rows[row] ? d.rows[row].id : null
+      };
+    }
   },
 
   applyFill(field, from, to) {
     const d = this.state.editor && this.state.editor.draft;
     if (!d || !d.rows[from]) return;
+    this.pushUndo();
     const a = Math.min(from, to);
     const b = Math.max(from, to);
     const src = d.rows[from];
+    const before = this.cloneRows(d.rows);
     for (let i = a; i <= b; i++) {
       if (!d.rows[i]) continue;
       if (i === 0 && field === "plano") continue;
@@ -1021,6 +1324,12 @@ const TabelasVigentesApp = {
         d.rows[i][field] = src[field];
       }
     }
+    if (this.rowsEqual(before, d.rows)) {
+      const ed = this.state.editor;
+      if (ed && ed.undo && ed.undo.length) ed.undo.pop();
+      return;
+    }
+    if (this.state.editor) this.state.editor._keepFocus = true;
     this.paintEditor();
   },
 
@@ -1037,15 +1346,77 @@ const TabelasVigentesApp = {
         self._fill = { field: td.dataset.field, from: Number(td.dataset.row), to: Number(td.dataset.row) };
         return;
       }
-      if (td && td.closest(".tvig-plan-table")) self.selectSheetTd(td);
+      if (td && td.closest(".tvig-plan-table")) {
+        self.commitCellEdit();
+        self.selectSheetTd(td);
+      }
+    });
+    ov.addEventListener("copy", (e) => {
+      const td = self.activeSheetTd(e.target);
+      if (!td) return;
+      const text = self.copySheetCell(td);
+      e.preventDefault();
+      if (e.clipboardData) e.clipboardData.setData("text/plain", text);
+    });
+    ov.addEventListener("cut", (e) => {
+      const td = self.activeSheetTd(e.target);
+      if (!td) return;
+      const text = self.cutSheetCell(td);
+      e.preventDefault();
+      if (e.clipboardData) e.clipboardData.setData("text/plain", text);
+      self.writeClipText(text);
+    });
+    ov.addEventListener("paste", (e) => {
+      const td = self.activeSheetTd(e.target);
+      if (!td) return;
+      e.preventDefault();
+      const text = (e.clipboardData && e.clipboardData.getData("text")) || "";
+      self.pasteIntoSheet(td, text);
     });
     ov.addEventListener("keydown", (e) => {
       const td = e.target.closest && e.target.closest(".tvig-sheet-td");
-      if (!td || !td.closest(".tvig-plan-table")) return;
+      const inSheet = !!(td && td.closest(".tvig-plan-table"));
+      const inChrome = !!(e.target.closest && (e.target.closest(".tvig-editor-grid") || e.target.closest(".ml-emp-filter")));
       const key = e.key;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.altKey) {
+        const k = key.length === 1 ? key.toLowerCase() : key;
+        if ((k === "z" && !e.shiftKey) && (inSheet || !inChrome)) {
+          e.preventDefault();
+          self.undoEditor();
+          return;
+        }
+        if ((k === "y" || (k === "z" && e.shiftKey)) && (inSheet || !inChrome)) {
+          e.preventDefault();
+          self.redoEditor();
+          return;
+        }
+        if (inSheet && k === "c") {
+          if (e.target.type === "checkbox" || e.target.tagName === "SELECT") {
+            e.preventDefault();
+            self.writeClipText(self.copySheetCell(td));
+          }
+          return;
+        }
+        if (inSheet && k === "x") {
+          e.preventDefault();
+          self.writeClipText(self.cutSheetCell(td));
+          return;
+        }
+        if (inSheet && k === "v") {
+          if (e.target.type === "checkbox" || e.target.tagName === "SELECT") {
+            e.preventDefault();
+            self.pasteSheetFromClipboard(td);
+          }
+          return;
+        }
+      }
+      if (!inSheet) return;
       const isInput = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT");
       const caret = isInput && e.target.tagName === "INPUT" && e.target.type !== "checkbox" ? e.target.selectionStart : null;
+      const end = isInput && e.target.tagName === "INPUT" && e.target.type !== "checkbox" ? e.target.selectionEnd : null;
       const len = isInput && e.target.value != null ? String(e.target.value).length : 0;
+      const allSel = caret != null && end != null && caret === 0 && end === len;
       if (key === "Tab") {
         e.preventDefault();
         self.moveSheetFocus(td, "tab", e.shiftKey);
@@ -1066,12 +1437,12 @@ const TabelasVigentesApp = {
         self.moveSheetFocus(td, "up");
         return;
       }
-      if (key === "ArrowRight" && (e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === len)) {
+      if (key === "ArrowRight" && (allSel || e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === len)) {
         e.preventDefault();
         self.moveSheetFocus(td, "right");
         return;
       }
-      if (key === "ArrowLeft" && (e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === 0)) {
+      if (key === "ArrowLeft" && (allSel || e.target.tagName === "SELECT" || e.target.type === "checkbox" || caret == null || caret === 0)) {
         e.preventDefault();
         self.moveSheetFocus(td, "left");
       }

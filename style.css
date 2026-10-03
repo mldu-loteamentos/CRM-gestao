@@ -4814,6 +4814,77 @@ circle.donut-segment {
   border-top: 1px solid #e2e8f0;
 }
 
+.ccom-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+}
+.ccom-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 0 0 18px;
+}
+.ccom-kpi {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ccom-kpi span {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ccom-kpi strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.15rem;
+  color: #105436;
+}
+.ccom-aviso {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.84rem;
+}
+.cprev-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(180px, 1fr) 150px 150px auto;
+  gap: 12px;
+  align-items: end;
+}
+.cprev-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.cprev-extra .form-control { max-width: 360px; }
+.cprev-updated { font-size: 0.8rem; color: #64748b; margin-left: auto; }
+.cprev-kpis { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
+.cprev-table { font-size: 0.82rem; }
+.cprev-late td { color: #b91c1c; }
+.cprev-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 0 0;
+  font-size: 0.82rem;
+  color: #475569;
+}
+@media (max-width: 1100px) {
+  .cprev-filters { grid-template-columns: 1fr 1fr; }
+}
+
 /* Comercial · Tabelas vigentes */
 .tvig-page { padding: 4px 0 28px; }
 .tvig-params { overflow: visible; margin-bottom: 18px; }

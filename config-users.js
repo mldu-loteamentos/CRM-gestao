@@ -139,6 +139,26 @@ const ConfigUsersApp = {
         || savedPerms.sub_com_geral_estoque_editar
       );
     }
+    if (savedPerms.sub_compras_geral_previsoes_acessar == null && (
+      savedPerms.mod_compras
+      || savedPerms.sub_compras_geral_compras_acessar
+    )) {
+      savedPerms.sub_compras_geral_previsoes_acessar = true;
+      savedPerms.sub_compras_geral_previsoes_visualizar = true;
+      savedPerms.sub_compras_geral_previsoes_editar = !!savedPerms.sub_compras_geral_compras_editar;
+    }
+    if (savedPerms.sub_com_geral_controle_comissao_acessar == null && (
+      savedPerms.mod_comercial
+      || savedPerms.sub_com_geral_dashboard_acessar
+      || savedPerms.sub_com_geral_tabelas_vigentes_acessar
+    )) {
+      savedPerms.sub_com_geral_controle_comissao_acessar = true;
+      savedPerms.sub_com_geral_controle_comissao_visualizar = true;
+      savedPerms.sub_com_geral_controle_comissao_editar = !!(
+        savedPerms.sub_com_geral_tabelas_vigentes_editar
+        || savedPerms.sub_com_geral_dashboard_editar
+      );
+    }
     return savedPerms;
   },
 
@@ -167,7 +187,10 @@ const ConfigUsersApp = {
     },
     {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
-      submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [{ id: "compras", label: "Compras" }] }]
+      submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [
+        { id: "compras", label: "Compras" },
+        { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" }
+      ] }]
     },
     {
       name: "Financeiro", icon: "dollar-sign", key: "mod_fin",
@@ -232,7 +255,8 @@ const ConfigUsersApp = {
         { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
         { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] },
         { name: "Condições de Pagamento", key: "sub_com_condicoes", actions: [{ id: "condicoes_pagamento", label: "Condições de Pagamento", permBase: "sub_com_geral_condicoes_pagamento" }] },
-        { name: "Tabelas vigentes", key: "sub_com_tabelas", actions: [{ id: "tabelas_vigentes", label: "Tabelas vigentes", permBase: "sub_com_geral_tabelas_vigentes" }] }
+        { name: "Tabelas vigentes", key: "sub_com_tabelas", actions: [{ id: "tabelas_vigentes", label: "Tabelas vigentes", permBase: "sub_com_geral_tabelas_vigentes" }] },
+        { name: "Controle de comissão", key: "sub_com_comissao", actions: [{ id: "controle_comissao", label: "Controle de comissão", permBase: "sub_com_geral_controle_comissao" }] }
       ]
     },
     {
