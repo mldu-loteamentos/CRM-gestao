@@ -550,6 +550,15 @@ const TabelasVigentesApp = {
           <h4 class="tvig-plan-title">Planos de pagamento</h4>
           <div class="tvig-editor-table-wrap">
             <table class="custom-table tvig-plan-table">
+              <colgroup>
+                <col class="tvig-col-plano">
+                <col class="tvig-col-entrada">
+                <col class="tvig-col-parc">
+                <col class="tvig-col-taxa">
+                <col class="tvig-col-reaj">
+                <col class="tvig-col-cond">
+                <col class="tvig-col-acao">
+              </colgroup>
               <thead>
                 <tr>
                   <th>Plano de pagamento</th>
