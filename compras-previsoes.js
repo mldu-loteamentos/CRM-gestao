@@ -707,34 +707,47 @@ const ComprasPrevisoesApp = {
       const pago = r.pago
         ? `<span class="cprev-tag cprev-tag-pago">Pago</span>`
         : "";
+      const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
       return header + `<tr class="cprev-row${late ? " cprev-late" : ""}${open ? " is-open" : ""}" data-titulo="${this.esc(r.titulo)}" data-idx="${idx}" onclick="ComprasPrevisoesApp.openParcelas('${this.esc(r.titulo)}')">
-        <td>${this.esc(r.companyId)}</td>
-        <td>${this.esc((r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—"))}</td>
-        <td>${this.esc(r.departamento || "—")}</td>
-        <td>${this.esc(r.credor || "—")}</td>
-        <td>${this.esc(r.titulo)}${nota}${pago}</td>
-        <td>${this.esc(r.parcela || "—")}</td>
-        <td>${this.esc(r.docId || "—")}</td>
-        <td>${this.esc(r.documento || "—")}</td>
-        <td>${this.esc(this.fmtDate(r.vencimento))}</td>
-        <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(r.valorAjustado))}</td>
+        <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
+        <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
+        <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
+        <td class="cprev-col-cred" title="${this.esc(r.credor || "—")}">${this.esc(r.credor || "—")}</td>
+        <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${pago}</td>
+        <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
+        <td class="cprev-col-doc" title="${this.esc(r.docId || "—")}">${this.esc(r.docId || "—")}</td>
+        <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
+        <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
+        <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
       </tr>`;
     }).join("");
     box.innerHTML = `
       <div class="table-container cprev-table-wrap">
         <table class="custom-table cprev-table" id="cprev-table">
+          <colgroup>
+            <col class="cprev-col-id">
+            <col class="cprev-col-cc">
+            <col class="cprev-col-dept">
+            <col class="cprev-col-cred">
+            <col class="cprev-col-tit">
+            <col class="cprev-col-parc">
+            <col class="cprev-col-doc">
+            <col class="cprev-col-ndoc">
+            <col class="cprev-col-venc">
+            <col class="cprev-col-val">
+          </colgroup>
           <thead>
             <tr>
-              <th>Id Empresa</th>
-              <th>Centro de custo</th>
-              <th>Departamento</th>
-              <th>Credor</th>
-              <th>Título</th>
-              <th>Parcela</th>
-              <th>Documento</th>
-              <th>Nº documento</th>
-              <th>Vencimento</th>
-              <th style="text-align:right;">Valor</th>
+              <th class="cprev-col-id" title="Id Empresa">Emp.</th>
+              <th class="cprev-col-cc">Centro de custo</th>
+              <th class="cprev-col-dept">Depto</th>
+              <th class="cprev-col-cred">Credor</th>
+              <th class="cprev-col-tit">Título</th>
+              <th class="cprev-col-parc">Parc.</th>
+              <th class="cprev-col-doc">Doc.</th>
+              <th class="cprev-col-ndoc">Nº doc.</th>
+              <th class="cprev-col-venc">Vencimento</th>
+              <th class="cprev-col-val">Valor</th>
             </tr>
           </thead>
           <tbody>${body}</tbody>

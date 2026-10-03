@@ -281,7 +281,10 @@ const EstoqueComercialApp = {
       outstandingBalance: balNum != null && !Number.isNaN(balNum) && balNum > 0.009 ? balNum : null,
       contractValue: u.totalSellingValue || u.value || null,
       situation: u.situation || "",
-      quitado: false,
+      quitado: !!(u.quitado || u.relFin === "quitado"),
+      quitacaoDate: this.isoQuitacao(
+        u.quitacaoDate || u.payOffDate || u.payoffDate || u.quittanceDate || u.settlementDate
+      ),
       area: u.totalArea || u.privateArea || u.indexedPrivateArea || null
     };
   },
@@ -317,7 +320,7 @@ const EstoqueComercialApp = {
       presentDebitBalance: u.presentDebitBalance != null ? Number(u.presentDebitBalance) : null,
       kpiVencidas: u.kpiVencidas != null ? Number(u.kpiVencidas) : null,
       kpiAVencer: u.kpiAVencer != null ? Number(u.kpiAVencer) : null,
-      quitacaoDate: u.quitacaoDate || null,
+      quitacaoDate: this.isoQuitacao(u.quitacaoDate),
       situation: u.situation || ""
     };
   },
@@ -390,7 +393,9 @@ const EstoqueComercialApp = {
 
   applyCache(data) {
     if (!data) return;
-    this.state.units = (Array.isArray(data.units) ? data.units : []).map(u => this.sanitizeUnit(u));
+    const locked = this.ensureQuitacaoLocked(Array.isArray(data.units) ? data.units : []);
+    this.state.units = locked.units;
+    if (locked.changed) this._quitacaoDirty = true;
     this.state.ccDone = Array.isArray(data.ccDone) ? data.ccDone.map(String) : [];
     this.state.complete = !!data.complete;
     this.state.contractsEnriched = !!data.contractsEnriched;
@@ -691,6 +696,7 @@ const EstoqueComercialApp = {
     if (!this.hasFinanceFields()) {
       await this.restoreFromLastSnapshot();
     }
+    this.persistQuitacaoIfDirty();
     this.updateMeta();
     this.renderTable();
   },
@@ -719,6 +725,7 @@ const EstoqueComercialApp = {
           batimentoDone: this.state.batimentoDone || !!fb.batimentoDone
         });
         this.state.firebaseOk = true;
+        this.persistQuitacaoIfDirty();
         this.fillEnterprisesFromUnits();
         this.fillUnitSelect();
         this.updateMeta();
@@ -923,6 +930,7 @@ const EstoqueComercialApp = {
         const merged = this.mergeUnitsPreferFinance(this.state.units, fb.units || []);
         this.applyCache({ ...fb, units: merged });
         this.state.firebaseOk = true;
+        this.persistQuitacaoIfDirty();
         this.fillEnterprisesFromUnits();
         this.fillUnitSelect();
         this.updateMeta();
@@ -1118,6 +1126,14 @@ const EstoqueComercialApp = {
     } else {
       next.contractNumber = null;
     }
+    const dist = next.relFin === "distratado" || String(next.situation || "").toLowerCase().includes("distrat");
+    if (dist) return next;
+    if (next.quitado || next.relFin === "quitado") {
+      next.quitado = true;
+      next.quitacaoDate = this.sealQuitacao(next);
+    } else {
+      next.quitacaoDate = this.isoQuitacao(next.quitacaoDate);
+    }
     return next;
   },
 
@@ -1301,9 +1317,7 @@ const EstoqueComercialApp = {
         <td style="text-align:right;white-space:nowrap;">${this.displayReceived(u) || "—"}</td>
         <td><span class="est-fin-chip ${finClass}">${this.esc(fin)}</span></td>
         <td style="text-align:right;white-space:nowrap;">${this.esc(saldo)}</td>
-        <td style="white-space:nowrap;">${fin === "Quitado" && u.quitacaoDate
-          ? this.esc(new Date(u.quitacaoDate + "T12:00:00").toLocaleDateString("pt-BR"))
-          : "—"}</td>
+        <td style="white-space:nowrap;">${fin === "Quitado" ? this.esc(this.formatQuitacao(u)) : "—"}</td>
       </tr>`;
     }).join("");
   },
@@ -1452,11 +1466,16 @@ const EstoqueComercialApp = {
         receivedAmount: keep.receivedLocked ? keep.receivedAmount : (u.receivedAmount != null ? u.receivedAmount : keep.receivedAmount),
         receivedLocked: !!(keep.receivedLocked || u.receivedLocked),
         statementDone: !!(keep.statementDone || u.statementDone),
-        quitacaoDate: keep.quitacaoDate || u.quitacaoDate || null,
+        quitacaoDate: this.sealQuitacao({
+          quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
+          relFin: keep.relFin || u.relFin,
+          quitacaoDate: keep.quitacaoDate || u.quitacaoDate,
+          finAt: keep.finAt || u.finAt
+        }, u.quitacaoDate, keep.quitacaoDate),
         finAt: u.finAt || keep.finAt,
         situation: u.situation || keep.situation,
-        quitado: !!(keep.quitado || u.quitado),
-        relFin: keep.relFin || u.relFin || null,
+        quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
+        relFin: (keep.quitado || keep.relFin === "quitado") ? (keep.relFin || "quitado") : (keep.relFin || u.relFin || null),
         filaAt: keep.filaAt || u.filaAt || null,
         receivableBillId: u.receivableBillId || keep.receivableBillId,
         customerId: u.customerId || keep.customerId,
@@ -1519,6 +1538,52 @@ const EstoqueComercialApp = {
     return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
   },
 
+  isoQuitacao(v) {
+    if (v == null || v === "") return null;
+    const s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const br = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (br) return `${br[3]}-${String(br[2]).padStart(2, "0")}-${String(br[1]).padStart(2, "0")}`;
+    return this.isoDate(s);
+  },
+
+  /** Data de quitação trava: uma vez gravada, não some no baixar/classificar. */
+  sealQuitacao(u, ...candidates) {
+    const locked = this.isoQuitacao(u && u.quitacaoDate);
+    if (locked) return locked;
+    for (let i = 0; i < candidates.length; i++) {
+      const iso = this.isoQuitacao(candidates[i]);
+      if (iso) return iso;
+    }
+    if (u && (u.quitado || u.relFin === "quitado")) {
+      return this.isoQuitacao(u.finAt) || this.todayStr();
+    }
+    return null;
+  },
+
+  formatQuitacao(u) {
+    const iso = this.isoQuitacao(u && u.quitacaoDate);
+    if (!iso) return "—";
+    return new Date(iso + "T12:00:00").toLocaleDateString("pt-BR");
+  },
+
+  ensureQuitacaoLocked(units) {
+    let changed = 0;
+    const out = (units || []).map((u) => {
+      if (!u) return u;
+      const next = this.sanitizeUnit(u);
+      if (next.quitacaoDate !== u.quitacaoDate || !!next.quitado !== !!u.quitado) changed += 1;
+      return next;
+    });
+    return { units: out, changed };
+  },
+
+  persistQuitacaoIfDirty() {
+    if (!this._quitacaoDirty) return;
+    this._quitacaoDirty = false;
+    this.saveCache();
+  },
+
   lastBaixaFromExtractRow(row) {
     if (!row) return null;
     return this.lastBaixaFromReceipts(row.receipts);
@@ -1569,7 +1634,7 @@ const EstoqueComercialApp = {
     const distrato = sit.includes("distrat") || (info.active === false && !info.payOffDate);
     const sitQuit = /quit|pago|liquid|baixad/.test(sit);
     const hasOpenBal = bal != null && Number(bal) > 0.009;
-    if (hasOpenBal) {
+    if (hasOpenBal && !(u.quitado || u.relFin === "quitado")) {
       let numOpen = info.contractNumber ? String(info.contractNumber) : "";
       if (numOpen && info.saleId != null && String(numOpen) === String(info.saleId) && this.displayContract(u)) {
         numOpen = this.displayContract(u);
@@ -1589,7 +1654,7 @@ const EstoqueComercialApp = {
         receivedLocked: !!u.receivedLocked,
         situation: info.situation || u.situation,
         quitado: false,
-        quitacaoDate: null,
+        quitacaoDate: this.isoQuitacao(u.quitacaoDate),
         statementDone: false,
         finAt: new Date().toISOString()
       };
@@ -1600,7 +1665,7 @@ const EstoqueComercialApp = {
         contractNumber: u.contractNumber || info.contractNumber || null,
         receivableBillId: u.receivableBillId || info.receivableBillId,
         customerId: u.customerId || info.customerId,
-        quitacaoDate: u.quitacaoDate || info.payOffDate || null
+        quitacaoDate: this.sealQuitacao(u, info.payOffDate)
       };
     }
     const quitado = !distrato && (!!info.payOffDate || sitQuit);
@@ -1625,7 +1690,10 @@ const EstoqueComercialApp = {
         receivedLocked: !!u.receivedLocked,
         situation: info.situation || u.situation,
       quitado: u.quitado || !!quitado,
-      quitacaoDate: quitado ? (u.quitacaoDate || info.payOffDate || null) : null,
+      quitacaoDate: this.sealQuitacao({
+        ...u,
+        quitado: u.quitado || !!quitado
+      }, info.payOffDate),
       finAt: new Date().toISOString()
     };
   },
@@ -1884,8 +1952,11 @@ const EstoqueComercialApp = {
       receivedAmount: u.receivedLocked && !quitado && aReceber <= 0.009 ? u.receivedAmount : received,
       receivedLocked: true,
       contractValue: value || u.contractValue,
-      quitado: aReceber > 0.009 ? false : (u.quitado || quitado),
-      quitacaoDate: aReceber > 0.009 ? null : (u.quitacaoDate || this.lastBaixaFromInstallments(installments) || null),
+      quitado: aReceber > 0.009 && !(u.quitado || u.relFin === "quitado") ? false : (u.quitado || quitado),
+      quitacaoDate: this.sealQuitacao({
+        ...u,
+        quitado: aReceber > 0.009 && !(u.quitado || u.relFin === "quitado") ? false : (u.quitado || quitado)
+      }, this.lastBaixaFromInstallments(installments)),
       statementDone: true,
       finAt: new Date().toISOString()
     };
@@ -1982,7 +2053,7 @@ const EstoqueComercialApp = {
 
   applyExtractQuitado(u, g) {
     if (!u || !g) return u;
-    if (g.hasOpen || g.remaining > 0.009) {
+    if ((g.hasOpen || g.remaining > 0.009) && !(u.quitado || u.relFin === "quitado")) {
       const received = g.paid != null ? g.paid : u.receivedAmount;
       return {
         ...u,
@@ -1992,7 +2063,7 @@ const EstoqueComercialApp = {
         receivedAmount: received,
         receivedLocked: true,
         quitado: false,
-        quitacaoDate: null,
+        quitacaoDate: this.isoQuitacao(u.quitacaoDate),
         statementDone: true,
         finAt: new Date().toISOString()
       };
@@ -2016,7 +2087,7 @@ const EstoqueComercialApp = {
       receivedAmount: received,
       receivedLocked: true,
       quitado: true,
-      quitacaoDate: lastBaixa || u.quitacaoDate || null,
+      quitacaoDate: this.sealQuitacao({ ...u, quitado: true }, lastBaixa),
       statementDone: true,
       finAt: new Date().toISOString()
     };
@@ -2034,7 +2105,15 @@ const EstoqueComercialApp = {
   applyExtractMap(ccId, byBill) {
     let marked = 0;
     this.state.units = this.state.units.map(u => {
-      if (String(u.enterpriseId) !== String(ccId) || !this.isSoldUnit(u) || this.isSettledUnit(u)) return u;
+      if (String(u.enterpriseId) !== String(ccId) || !this.isSoldUnit(u)) return u;
+      if (this.isSettledUnit(u)) {
+        if (this.isoQuitacao(u.quitacaoDate)) return u;
+        const g = this.pickExtractForUnit(u, byBill);
+        if (!g || !g.lastBaixa) return u;
+        const next = { ...u, quitado: true, quitacaoDate: this.sealQuitacao({ ...u, quitado: true }, g.lastBaixa) };
+        if (next.quitacaoDate !== u.quitacaoDate) marked += 1;
+        return next;
+      }
       const g = this.pickExtractForUnit(u, byBill);
       if (!g) return u;
       const next = this.applyExtractQuitado(u, g);
@@ -2268,14 +2347,14 @@ const EstoqueComercialApp = {
       next.quitado = true;
       next.outstandingBalance = 0;
       next.presentDebitBalance = 0;
-      next.quitacaoDate = this.isoDate(bill && (bill.payOffDate || bill.payoffDate)) || u.quitacaoDate || null;
+      next.quitacaoDate = this.sealQuitacao(u, bill && (bill.payOffDate || bill.payoffDate));
     } else if (status === "distratado") {
       next.quitado = false;
       next.quitacaoDate = null;
       next.situation = u.situation || "Distratado";
     } else {
       next.quitado = false;
-      next.quitacaoDate = null;
+      next.quitacaoDate = this.isoQuitacao(u.quitacaoDate);
       if (status === "inadimplente") {
         const ov = this.overdueValue(next);
         if (ov > 0.009 && next.outstandingBalance == null) next.outstandingBalance = ov;
@@ -2308,10 +2387,11 @@ const EstoqueComercialApp = {
       next.quitado = true;
       next.outstandingBalance = 0;
       next.presentDebitBalance = 0;
-      next.quitacaoDate = this.lastBaixaFromInstallments(installments)
-        || this.isoDate(rb && (rb.payOffDate || rb.payoffDate))
-        || u.quitacaoDate
-        || null;
+      next.quitacaoDate = this.sealQuitacao(
+        { ...u, ...next, quitado: true },
+        this.lastBaixaFromInstallments(installments),
+        rb && (rb.payOffDate || rb.payoffDate)
+      );
     }
     next.pmp3m = this.pmpLastMonths(installments, 3);
     next.openParcelas = next.quitado ? [] : this.openParcelasFromInstallments(installments);
@@ -2616,7 +2696,14 @@ const EstoqueComercialApp = {
     if (idx < 0) return;
     let u = this.sanitizeUnit(this.state.units[idx]);
     if (this.isSettledUnit(u)) {
-      this.setProgress("Contrato quitado — sem consultas auxiliares.");
+      const sealed = this.sealQuitacao({ ...u, quitado: true });
+      if (sealed && sealed !== u.quitacaoDate) {
+        u.quitado = true;
+        u.quitacaoDate = sealed;
+        this.state.units[idx] = u;
+        this.saveCache();
+      }
+      this.setProgress("Contrato quitado — data de quitação mantida.");
       this.renderTable();
       return;
     }
@@ -2651,7 +2738,11 @@ const EstoqueComercialApp = {
         if (present != null) {
           u.presentDebitBalance = present;
           if (u.outstandingBalance == null) u.outstandingBalance = present;
-          if (present === 0 && u.statementDone) u.quitado = true;
+          if (present === 0 && u.statementDone) {
+            u.quitado = true;
+            u.relFin = u.relFin || "quitado";
+            u.quitacaoDate = this.sealQuitacao({ ...u, quitado: true });
+          }
         }
       } catch (e) {
         console.warn("[Estoque] saldo devedor presente", e);

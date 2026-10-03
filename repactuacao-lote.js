@@ -258,7 +258,12 @@ const RepactuacaoLoteApp = {
         if (gen !== this.state._previewGen) return;
         const retro = idx.revenueRetroactivity != null ? Number(idx.revenueRetroactivity) : 0;
         const expectedBase = this.expectedBaseIso(adjustIso, retro);
-        const rates = await this.ratesForIndexer(idx);
+        let rates = {};
+        try {
+          rates = await this.ratesForIndexer(idx);
+        } catch (e) {
+          console.warn("[Repactuação] série BCB", idx && idx.name, e);
+        }
         const acc = this.accumulated12(rates, expectedBase);
         const lastAvail = Object.keys(rates).sort().reverse()[0] || null;
         rows.push({
@@ -575,16 +580,24 @@ const RepactuacaoLoteApp = {
 
   async ensureIndexers() {
     if (this.state.indexers.length) return;
-    const fn = window.siengeFetchWithRetry;
     let list = [];
-    if (typeof fn === "function") {
-      const res = await fn("/indexers?limit=200");
-      list = (res && res.results) || [];
-    } else if (window.IndexadoresState && IndexadoresState.allSiengeIndexers && IndexadoresState.allSiengeIndexers.length) {
+    try {
+      const fn = window.siengeFetchWithRetry;
+      if (typeof fn === "function") {
+        const res = await fn("/indexers?limit=200");
+        list = (res && res.results) || [];
+      }
+    } catch (e) {
+      console.warn("[Repactuação] cadastro Sienge de indexadores", e);
+    }
+    if (!list.length && window.IndexadoresState && IndexadoresState.allSiengeIndexers && IndexadoresState.allSiengeIndexers.length) {
       list = IndexadoresState.allSiengeIndexers;
     }
     this.state.indexers = list;
-    if (window.IndexadoresState) IndexadoresState.allSiengeIndexers = list;
+    if (window.IndexadoresState && list.length) IndexadoresState.allSiengeIndexers = list;
+    if (!list.length) {
+      throw new Error("Não foi possível carregar os indexadores do Sienge. Atualize a prévia.");
+    }
   },
 
   indexerById(id) {
@@ -592,11 +605,41 @@ const RepactuacaoLoteApp = {
   },
 
   bcbCodeForName(name) {
-    const u = String(name || "").toUpperCase();
-    for (const key of Object.keys(this.BCB_MAP)) {
+    const u = String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const keys = Object.keys(this.BCB_MAP).sort((a, b) => b.length - a.length);
+    for (const key of keys) {
       if (u === key || u.includes(key)) return this.BCB_MAP[key];
     }
     return null;
+  },
+
+  mapBcbRates(data) {
+    const mapped = {};
+    (data || []).forEach((d) => {
+      const parts = String(d.data || "").split("/");
+      if (parts.length === 3) mapped[`${parts[2]}-${parts[1]}`] = parseFloat(String(d.valor).replace(",", "."));
+    });
+    return mapped;
+  },
+
+  async fetchBcbSeries(code) {
+    const dataInicial = "01/01/2018";
+    const q = `code=${encodeURIComponent(code)}&dataInicial=${encodeURIComponent(dataInicial)}`;
+    const urls = [
+      `/api/bcb-sgs?${q}`,
+      `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${code}/dados?formato=json&dataInicial=${encodeURIComponent(dataInicial)}`
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const json = await res.json();
+        if (Array.isArray(json) && json.length) return json;
+      } catch (e) {
+        console.warn("[Repactuação] BCB", code, url, e);
+      }
+    }
+    return [];
   },
 
   async ratesForIndexer(idx) {
@@ -604,28 +647,18 @@ const RepactuacaoLoteApp = {
     if (!name) return {};
     if (this.state.ratesByIndexer[name]) return this.state.ratesByIndexer[name];
     if (window.IndexadoresState && IndexadoresState.bcbData && IndexadoresState.bcbData[name]) {
-      const mapped = {};
-      IndexadoresState.bcbData[name].forEach((d) => {
-        const parts = String(d.data || "").split("/");
-        if (parts.length === 3) mapped[`${parts[2]}-${parts[1]}`] = parseFloat(d.valor);
-      });
+      const mapped = this.mapBcbRates(IndexadoresState.bcbData[name]);
       this.state.ratesByIndexer[name] = mapped;
       return mapped;
     }
     const code = this.bcbCodeForName(name);
     if (!code) return {};
-    const res = await fetch(`https://api.bcb.gov.br/dados/serie/bcdata.sgs.${code}/dados?formato=json`);
-    if (!res.ok) return {};
-    const data = await res.json();
-    const mapped = {};
-    (data || []).forEach((d) => {
-      const parts = String(d.data || "").split("/");
-      if (parts.length === 3) mapped[`${parts[2]}-${parts[1]}`] = parseFloat(d.valor);
-    });
+    const data = await this.fetchBcbSeries(code);
+    const mapped = this.mapBcbRates(data);
     this.state.ratesByIndexer[name] = mapped;
     if (window.IndexadoresState) {
       if (!IndexadoresState.bcbData) IndexadoresState.bcbData = {};
-      IndexadoresState.bcbData[name] = data;
+      if (data.length) IndexadoresState.bcbData[name] = data;
     }
     return mapped;
   },
@@ -706,7 +739,12 @@ const RepactuacaoLoteApp = {
     for (const id of uniqueIdx) {
       const idx = this.indexerById(id);
       if (!idx || String(idx.name || "").toUpperCase() === "REAL") continue;
-      const rates = await this.ratesForIndexer(idx);
+      let rates = {};
+      try {
+        rates = await this.ratesForIndexer(idx);
+      } catch (e) {
+        console.warn("[Repactuação] série BCB planilha", idx && idx.name, e);
+      }
       this.state.rows = this.state.rows.map((row) => {
         if (String(row.indexerId) !== String(id) || !row.expectedBase) return row;
         const acc = this.accumulated12(rates, row.expectedBase);

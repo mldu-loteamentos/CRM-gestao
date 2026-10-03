@@ -217,9 +217,6 @@ const PrestacaoContasApp = {
 
   allocate(mov) {
     const fcApp = this.fc();
-    if (fcApp && typeof fcApp.movAdvanceRole === "function" && fcApp.movAdvanceRole(mov) === "abatimento") {
-      return [];
-    }
     const amount = Number(mov.bankMovementAmount) || 0;
     const wanted = this.costCenterIds.map(String);
     let cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
@@ -230,18 +227,11 @@ const PrestacaoContasApp = {
     }
     if (!cats.length) return [];
 
-    const beforeAbate = cats.length;
-    if (fcApp && typeof fcApp.isAbatimentoCategory === "function") {
-      cats = cats.filter((fc) => !fcApp.isAbatimentoCategory(fc));
-    }
-    const removedAbate = cats.length < beforeAbate;
-    if (!cats.length) return [];
-
     const ignored = this.ignoredAccountKeys();
     const part = this.activePartnership();
     const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
     const shareEntries = (fcApp && typeof fcApp.categoryShareEntries === "function")
-      ? fcApp.categoryShareEntries(cats, { renormalize: removedAbate })
+      ? fcApp.categoryShareEntries(cats)
       : cats.map((fc) => ({ fc, share: 1 / cats.length }));
 
     return shareEntries.map(({ fc, share }) => {

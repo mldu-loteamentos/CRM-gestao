@@ -5024,18 +5024,19 @@ circle.donut-segment {
   font-size: 0.84rem;
 }
 #tab-compras-previsoes {
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
+  max-width: 100%;
 }
 #compras-previsoes-root,
 .cprev-page {
-  min-width: max-content;
+  min-width: 0;
   width: 100%;
+  max-width: 100%;
 }
 .cprev-toolbar {
   overflow: visible;
   margin-bottom: 12px;
-  min-width: max-content;
+  min-width: 0;
 }
 .cprev-toolbar-head {
   display: flex;
@@ -5122,14 +5123,58 @@ circle.donut-segment {
   overflow-x: auto;
   grid-template-columns: none;
 }
-.cprev-kpis .ccom-kpi { flex: 1 0 150px; min-width: 150px; }
-.cprev-results { min-width: 0; }
+.cprev-kpis .ccom-kpi { flex: 1 1 0; min-width: 110px; padding: 10px 12px; }
+.cprev-kpis .ccom-kpi strong { font-size: 1.02rem; }
+.cprev-results { min-width: 0; width: 100%; max-width: 100%; }
 .cprev-table-wrap {
   margin-top: 0;
+  width: 100%;
+  max-width: 100%;
   max-height: calc(100vh - 290px);
   overflow: auto;
 }
-.cprev-table { font-size: 0.82rem; min-width: 1100px; }
+.cprev-table-wrap .cprev-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 0.74rem;
+}
+.cprev-table-wrap .cprev-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  padding: 8px 6px;
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cprev-table-wrap .cprev-table tbody td {
+  padding: 7px 6px;
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.cprev-table-wrap .cprev-col-id { width: 52px; }
+.cprev-table-wrap .cprev-col-cc { width: 20%; }
+.cprev-table-wrap .cprev-col-dept { width: 11%; }
+.cprev-table-wrap .cprev-col-cred { width: 18%; }
+.cprev-table-wrap .cprev-col-tit { width: 78px; }
+.cprev-table-wrap .cprev-col-parc { width: 58px; }
+.cprev-table-wrap .cprev-col-doc { width: 72px; }
+.cprev-table-wrap .cprev-col-ndoc { width: 86px; }
+.cprev-table-wrap .cprev-col-venc { width: 84px; }
+.cprev-table-wrap .cprev-col-val { width: 96px; text-align: right; }
+.cprev-table-wrap .cprev-group-header td {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: nowrap;
+}
+.cprev-table { font-size: 0.78rem; }
 .cprev-table thead th {
   position: sticky;
   top: 0;
