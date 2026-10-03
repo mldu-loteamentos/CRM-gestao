@@ -1790,7 +1790,7 @@ window.installmentIsEntradaWebro = function(inst) {
 };
 
 window.webroBoletoTagHtml = function() {
-  return `<span class="tag-boleto-webro">BOLETO WEBRO</span>`;
+  return `<span class="tag-boleto-webro" title="Boleto parcela Webro"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> BOLETO WEBRO</span>`;
 };
 
 window.findContractInstallmentById = function(id) {
@@ -6591,8 +6591,10 @@ window.wrapAgingWithWebro = function(client, innerHtml) {
   return webro;
 };
 
-window.getEntradaWebroAgingHtml = function() {
-  return `<span class="tag-boleto-webro" title="Cliente pagando entrada Webro — permanece na carteira interna">BOLETO WEBRO</span>`;
+window.getEntradaWebroAgingHtml = function(client) {
+  const days = Number(client && client.maxDaysDelay) || 0;
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  return `<span class="tag-boleto-webro" title="Cliente pagando entrada Webro — permanece na carteira interna"><i data-lucide="banknote" style="width: 14px; height: 14px; flex-shrink: 0;"></i> BOLETO WEBRO - ${dayLabel}</span>`;
 };
 
 window.canonicalJudicialPhaseName = function(fase) {

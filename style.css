@@ -540,16 +540,23 @@ body {
 .tag-boleto-webro {
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--color-secondary);
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #f37021;
+  background-color: #fff7ed;
+  color: #c2410c;
+  font-size: 0.75rem;
+  font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
-  border: none;
+}
+
+.tag-boleto-webro i,
+.tag-boleto-webro svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .zeropaid-toolbar-actions .fila-cache-status {
