@@ -5737,3 +5737,59 @@ circle.donut-segment {
   .tvig-editor-grid { grid-template-columns: 1fr; }
 }
 
+.comp-pref-page { padding: 16px 20px 24px; max-width: 1180px; margin: 0 auto; }
+.comp-pref-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.comp-pref-tab {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.comp-pref-tab.is-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.comp-pref-tab.is-locked { opacity: 0.45; cursor: not-allowed; }
+.comp-pref-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  margin-bottom: 14px;
+}
+.comp-pref-card h3 { margin: 0 0 8px; font-size: 1rem; color: #0f172a; }
+.comp-pref-card label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.comp-pref-help { font-size: 0.8rem; color: #64748b; line-height: 1.45; }
+.comp-pref-alert {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  margin-bottom: 14px;
+}
+.comp-pref-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.comp-pref-pill.is-ok { background: #ecfdf5; color: #047857; }
+.comp-pref-pill.is-warn { background: #fff7ed; color: #c2410c; }
+.comp-pref-pill.is-wait { background: #eff6ff; color: #1d4ed8; }
+

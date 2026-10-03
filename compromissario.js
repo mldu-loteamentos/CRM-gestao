@@ -83,7 +83,8 @@ const CompromissarioApp = {
   CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
   CESSAO_WORKING_MONTH_KEY: 'crm_compromissario_cessao_working_month',
   CESSAO_FILE_DB: 'crm_compromissario_cessao_files_v1',
-  CESSAO_PARSE_VERSION: 5,
+  CESSAO_PARSE_VERSION: 7,
+  FOLLOW_LS_KEY: 'crm_compromissario_followup_v1',
 
   state: {
     prefeituras: [],
@@ -92,6 +93,8 @@ const CompromissarioApp = {
     files: {}, // contratoId -> file Object (temporary reference)
     openAccordions: new Set(),
     notifiedContracts: {},
+    followups: [],
+    uiTab: 'parametros',
     /** companyId -> { status: 'none'|'has'|null, fileName, records, uploadedAt } */
     cessaoByCompany: {},
     cessaoMonth: '',
@@ -149,23 +152,17 @@ const CompromissarioApp = {
 
   async init() {
     this.state.notifiedContracts = JSON.parse(localStorage.getItem('crm_compromissario_notified') || '{}');
+    this.state.followups = this.loadFollowups();
     this.loadPrefeituras();
     const root = document.getElementById('compromissario-prefeitura-root');
     const monthEl = document.getElementById('comp-pref-month');
     const existingMonth = monthEl && monthEl.value ? monthEl.value : '';
     if (existingMonth) this.state.searchMonth = existingMonth;
-    // Reentrar na aba: não apaga cessões já declaradas nem troca o mês dos relatórios
-    if (root && root.querySelector('#comp-cessao-panel') && existingMonth) {
-      if (!this.state.cessaoMonth) this.ensureCessaoMonth(this.pickBestCessaoMonth(existingMonth));
-      else {
-        this.persistCessaoMonth();
-        this.scheduleCessaoReparse();
-      }
-      this.renderCessaoPanel();
-      this.syncCessaoGateUi();
-    } else {
-      this.renderPrefeituraShell();
+    if (this.state.cessaoMonth) {
+      this.persistCessaoMonth();
+      this.scheduleCessaoReparse();
     }
+    if (root) this.renderPrefeituraShell();
     this.pushLocalConfigsToCloudIfNeeded();
   },
 
@@ -223,69 +220,273 @@ const CompromissarioApp = {
     } catch (e) {}
   },
 
+  competenciaValue() {
+    return String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
+  },
+
+  cityIsConfigured(cfg) {
+    if (!cfg) return false;
+    if (cfg.hasPortal) return !!(cfg.portalUrl && String(cfg.portalUrl).trim());
+    return !!(cfg.email && String(cfg.email).trim());
+  },
+
+  cityNotifyLabel(cfg) {
+    if (!this.cityIsConfigured(cfg)) return 'Não configurada';
+    return cfg.hasPortal ? 'Portal' : 'E-mail';
+  },
+
+  loadFollowups() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(this.FOLLOW_LS_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  persistFollowups() {
+    localStorage.setItem(this.FOLLOW_LS_KEY, JSON.stringify(this.state.followups || []));
+  },
+
+  setUiTab(tab) {
+    const next = String(tab || 'parametros');
+    if (next === 'cessoes' && !this.competenciaValue()) {
+      alert('Informe a competência na aba Parâmetros antes de lançar as cessões.');
+      this.state.uiTab = 'parametros';
+    } else if (next === 'notificar' && !this.competenciaValue()) {
+      alert('Informe a competência na aba Parâmetros.');
+      this.state.uiTab = 'parametros';
+    } else if (next === 'notificar' && !this.isCessaoGateReady()) {
+      alert('Declare a cessão (ou a ausência) de todas as empresas na aba Cessões antes de notificar.');
+      this.state.uiTab = 'cessoes';
+    } else {
+      this.state.uiTab = next;
+    }
+    this.renderPrefeituraShell();
+    if (this.state.uiTab === 'notificar') this.ensureNotificarLoaded();
+  },
+
+  unconfiguredCities() {
+    const configs = this.loadConfigs();
+    return this.getCitiesWithAssignedOperator().filter((city) => !this.cityIsConfigured(configs[this.normalizeCityKey(city)]));
+  },
+
   renderPrefeituraShell() {
     const root = document.getElementById('compromissario-prefeitura-root');
     if (!root) return;
 
-    const today = new Date();
-    const currentMonth = this.state.searchMonth || today.toISOString().slice(0, 7);
-    this.state.searchMonth = currentMonth;
-    if (!this.state.cessaoMonth) this.ensureCessaoMonth(this.pickBestCessaoMonth(currentMonth));
-    else this.persistCessaoMonth();
+    if (!this.state.cessaoMonth && !this.state.searchMonth) {
+      const working = this.getCessaoWorkingMonth();
+      if (working) this.ensureCessaoMonth(working);
+    } else if (this.state.cessaoMonth) {
+      this.persistCessaoMonth();
+    } else if (this.state.searchMonth) {
+      this.ensureCessaoMonth(this.state.searchMonth);
+    }
+
+    const tab = this.state.uiTab || 'parametros';
+    const competencia = this.competenciaValue();
+    const gate = this.isCessaoGateReady();
+    const tabs = [
+      { id: 'parametros', label: '1. Parâmetros', locked: false },
+      { id: 'cessoes', label: '2. Cessões', locked: !competencia },
+      { id: 'notificar', label: '3. Notificar', locked: !competencia || !gate },
+      { id: 'followup', label: '4. Follow-up', locked: false }
+    ];
 
     root.innerHTML = `
-      <div style="padding: 20px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; height: 100%;">
-
-        <div id="comp-cessao-panel" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"></div>
-        
-        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <h3 style="margin: 0 0 15px 0; color: #1e293b; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="filter" style="width: 18px; color: #64748b;"></i> Filtros de Busca
-          </h3>
-          <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-            <div style="width: 200px;">
-              <label style="display: block; font-size: 0.8rem; font-weight: 600; color: #475569; margin-bottom: 5px;">Mês Referência (Competência)</label>
-              <input type="month" id="comp-pref-month" value="${currentMonth}" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none;" onchange="CompromissarioApp.onMonthChange()">
-            </div>
-            <div style="flex: 1; min-width: 200px; display: none;">
-              <input type="hidden" id="comp-pref-type" value="ALL">
-            </div>
-            <div>
-              <button onclick="CompromissarioApp.openConfigModal()" style="padding: 8px 15px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; transition: background 0.2s; margin-right: 10px;" title="Configurar e-mails e requerimentos por cidade">
-                <i data-lucide="settings" style="width: 16px;"></i> Configurações
-              </button>
-            </div>
-            <div>
-              <button onclick="CompromissarioApp.fetchContracts()" style="padding: 8px 20px; background: #105436; color: #fff; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: auto; white-space: nowrap; gap: 6px; font-weight: 600; transition: background 0.2s;" id="comp-pref-btn-search">
-                <i data-lucide="search" style="width: 16px;"></i> <span>Buscar Contratos</span>
-              </button>
-            </div>
-          </div>
-          <p style="margin: 12px 0 0; font-size: 0.78rem; color: #475569; line-height: 1.45;">
-            A competência abaixo vale só para a busca de vendas e distratos. Mudar o mês <strong>não apaga</strong> os relatórios de cessão já enviados no bloco acima.
-            A listagem separa o que aconteceu em cada empreendimento. Unidade distratada e vendida no mesmo mês vira um único movimento de <strong>Troca</strong> para a prefeitura. Contrato e destato já sobem do IntegrA/Sienge quando existirem.
-          </p>
-          <p id="comp-cessao-gate-hint" style="display:none; margin: 12px 0 0; font-size: 0.8rem; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 8px 10px;"></p>
+      <div class="comp-pref-page">
+        <div class="comp-pref-tabs" role="tablist">
+          ${tabs.map((t) => `
+            <button type="button" class="comp-pref-tab ${tab === t.id ? 'is-active' : ''} ${t.locked ? 'is-locked' : ''}"
+              ${t.locked ? 'disabled' : ''} onclick="CompromissarioApp.setUiTab('${t.id}')">${t.label}</button>
+          `).join('')}
         </div>
+        <div id="comp-pref-tab-body"></div>
+      </div>
+    `;
+    this.renderActiveTab();
+    if (window.lucide) window.lucide.createIcons();
+  },
 
-        <div style="flex: 1; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <div style="padding: 15px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0; color: #1e293b; font-size: 0.95rem; font-weight: 700;">Resultados da Busca (Agrupados por Cidade/Empreendimento)</h3>
-            <span style="font-size: 0.8rem; color: #64748b; background: #e2e8f0; padding: 2px 8px; border-radius: 10px;" id="comp-pref-count">0 encontrados</span>
+  renderActiveTab() {
+    const tab = this.state.uiTab || 'parametros';
+    if (tab === 'cessoes') this.renderCessoesTab();
+    else if (tab === 'notificar') this.renderNotificarTab();
+    else if (tab === 'followup') this.renderFollowupTab();
+    else this.renderParametrosTab();
+    this.syncCessaoGateUi();
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  renderParametrosTab() {
+    const host = document.getElementById('comp-pref-tab-body');
+    if (!host) return;
+    const month = this.competenciaValue();
+    const configs = this.loadConfigs();
+    const cities = this.getCitiesWithAssignedOperator();
+    const missing = this.unconfiguredCities();
+    const rows = cities.map((city) => {
+      const cfg = configs[this.normalizeCityKey(city)] || {};
+      const ok = this.cityIsConfigured(cfg);
+      const how = this.cityNotifyLabel(cfg);
+      const detail = cfg.hasPortal
+        ? (cfg.portalUrl || 'Portal sem URL')
+        : (cfg.email || 'Sem e-mail');
+      return `
+        <tr>
+          <td style="font-weight:700;color:#0f172a;">${this.escHtml(city)}</td>
+          <td><span class="comp-pref-pill ${ok ? 'is-ok' : 'is-warn'}">${this.escHtml(how)}</span></td>
+          <td style="color:#475569;font-size:0.82rem;">${this.escHtml(detail)}</td>
+          <td style="white-space:nowrap;text-align:right;">
+            <button type="button" class="btn btn-outline" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','view')">Visualizar</button>
+            <button type="button" class="btn btn-primary" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','edit')">Editar</button>
+          </td>
+        </tr>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="comp-pref-card">
+        <h3>Competência</h3>
+        <p class="comp-pref-help">Escolha o mês das movimentações. O relatório Sienge de 01/09 a 30/09 entra na competência <strong>setembro</strong> — a planilha também traz cessões antigas do mesmo lote; o IntegrA usa só a data do período.</p>
+        <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
+          <div style="max-width:240px;">
+            <label for="comp-pref-month">Mês de referência</label>
+            <input type="month" id="comp-pref-month" class="form-control" value="${this.escHtml(month)}"
+              onchange="CompromissarioApp.onMonthChange()">
           </div>
-          <div style="flex: 1; overflow-y: auto; padding: 15px;" id="comp-pref-tbody">
-            <div style="text-align: center; padding: 40px; color: #94a3b8;">
-              <i data-lucide="inbox" style="width: 32px; height: 32px; margin-bottom: 10px; opacity: 0.5;"></i><br>
-              Utilize os filtros acima para buscar contratos.
-            </div>
+          ${month ? `<button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões</button>` : ''}
+        </div>
+      </div>
+      ${missing.length ? `
+        <div class="comp-pref-alert">
+          <strong>Cidades sem configuração:</strong> ${this.escHtml(missing.join(', '))}.
+          Defina e-mail ou portal antes de notificar.
+        </div>` : ''}
+      <div class="comp-pref-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+          <h3 style="margin:0;">Cidades cadastradas</h3>
+          <button type="button" class="btn btn-outline" onclick="CompromissarioApp.openConfigModal()">
+            <i data-lucide="settings" style="width:14px;"></i> Todas as configurações
+          </button>
+        </div>
+        ${cities.length ? `
+          <div class="table-container" style="overflow:auto;">
+            <table class="custom-table" style="font-size:0.85rem;">
+              <thead><tr><th>Cidade</th><th>Forma de notificar</th><th>Destino</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>` : '<p style="color:#64748b;margin:0;">Nenhuma cidade com operador. Cadastre a carteira em Atribuição de Operadores.</p>'}
+      </div>
+    `;
+  },
+
+  renderCessoesTab() {
+    const host = document.getElementById('comp-pref-tab-body');
+    if (!host) return;
+    if (!this.competenciaValue()) {
+      host.innerHTML = `<div class="comp-pref-card"><p>Informe a competência na aba Parâmetros.</p></div>`;
+      return;
+    }
+    host.innerHTML = `
+      <div class="comp-pref-card">
+        <p class="comp-pref-help" style="margin-top:0;">
+          Informe se cada empresa teve cessão no mês. O XLS do Sienge, no período da competência, lista o lote que cedeu
+          <strong>e também o histórico anterior daquele lote</strong> (ex.: compra em 03/10/2020 e cessão em 21/09/2026).
+          O IntegrA considera só o evento do mês e trata as datas anteriores como cedente.
+        </p>
+        <p id="comp-cessao-gate-hint" style="display:none;margin:0 0 12px;font-size:0.8rem;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 10px;"></p>
+        <div id="comp-cessao-city-summary"></div>
+        <div id="comp-cessao-panel"></div>
+      </div>
+    `;
+    this.renderCessaoPanel();
+  },
+
+  renderNotificarTab() {
+    const host = document.getElementById('comp-pref-tab-body');
+    if (!host) return;
+    host.innerHTML = `
+      <div class="comp-pref-card" style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0 0 4px;">Notificar prefeituras</h3>
+            <p class="comp-pref-help" style="margin:0;">Venda, distrato, troca e cessão da competência, agrupados por cidade.</p>
           </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline" onclick="CompromissarioApp.openConfigModal()">
+              <i data-lucide="settings" style="width:14px;"></i> Configurações de cidades
+            </button>
+            <button type="button" class="btn btn-primary" id="comp-pref-btn-search" onclick="CompromissarioApp.fetchContracts()">
+              <i data-lucide="search" style="width:16px;"></i> <span>Carregar movimentos</span>
+            </button>
+          </div>
+        </div>
+        <input type="hidden" id="comp-pref-month" value="${this.escHtml(this.competenciaValue())}">
+        <input type="hidden" id="comp-pref-type" value="ALL">
+      </div>
+      <div class="comp-pref-card" style="padding:0;overflow:hidden;">
+        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+          <strong>Movimentos</strong>
+          <span id="comp-pref-count" style="font-size:0.78rem;color:#64748b;">0 encontrados</span>
+        </div>
+        <div id="comp-pref-tbody" style="padding:16px;">
+          <div style="text-align:center;padding:32px;color:#94a3b8;">Clique em Carregar movimentos.</div>
         </div>
       </div>
     `;
+    if (this.state.contracts && this.state.contracts.length) this.renderTable();
+  },
 
-    this.renderCessaoPanel();
-    this.syncCessaoGateUi();
-    if (window.lucide) window.lucide.createIcons();
+  renderFollowupTab() {
+    const host = document.getElementById('comp-pref-tab-body');
+    if (!host) return;
+    const month = this.competenciaValue();
+    const rows = (this.state.followups || [])
+      .filter((f) => !month || f.month === month)
+      .sort((a, b) => String(b.notifiedAt || '').localeCompare(String(a.notifiedAt || '')));
+    const body = rows.length ? rows.map((f) => {
+      const done = f.status === 'concluido';
+      return `<tr>
+        <td>${this.escHtml(this.formatCessaoDate((f.notifiedAt || '').slice(0, 10)) || '—')}</td>
+        <td>${this.escHtml(f.city || '—')}</td>
+        <td>${this.escHtml(f.type || '—')}</td>
+        <td>${this.escHtml(f.unit || f.contractLabel || f.id)}</td>
+        <td>${this.escHtml(f.channel === 'portal' ? 'Portal' : 'E-mail')}</td>
+        <td>
+          <input type="text" class="form-control" value="${this.escHtml(f.protocol || '')}"
+            placeholder="Nº protocolo" style="min-width:120px;padding:5px 8px;font-size:0.78rem;"
+            onchange="CompromissarioApp.setMovementProtocol('${this.escHtml(f.id)}', this.value)">
+        </td>
+        <td><span class="comp-pref-pill ${done ? 'is-ok' : 'is-wait'}">${done ? 'Concluído' : 'Aguardando prefeitura'}</span></td>
+        <td style="text-align:right;">${done ? '' : `<button type="button" class="btn btn-primary" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.markFollowupDone('${this.escHtml(f.id)}')">Concluído</button>`}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">Nenhuma notificação neste mês.</td></tr>`;
+    host.innerHTML = `
+      <div class="comp-pref-card">
+        <h3>Follow-up das notificações</h3>
+        <p class="comp-pref-help">Quando a prefeitura confirmar, marque como concluído. Protocolo do portal fica registrado aqui.</p>
+        <div class="table-container" style="overflow:auto;">
+          <table class="custom-table" style="font-size:0.82rem;">
+            <thead>
+              <tr>
+                <th>Data</th><th>Cidade</th><th>Tipo</th><th>Unidade / contrato</th>
+                <th>Canal</th><th>Protocolo</th><th>Situação</th><th></th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  ensureNotificarLoaded() {
+    if (!this.competenciaValue() || !this.isCessaoGateReady()) return;
+    if (this.state.contracts && this.state.contracts.length) {
+      this.renderTable();
+      return;
+    }
+    this.fetchContracts();
   },
 
   normalizeUnitKey(name) {
@@ -584,6 +785,12 @@ const CompromissarioApp = {
               <i data-lucide="${this.state.notifiedContracts[id] ? 'check-check' : (cityCfg.hasPortal ? 'external-link' : 'mail')}" style="width: 14px;"></i> ${this.state.notifiedContracts[id] ? 'Notificado' : (cityCfg.hasPortal ? 'Portal' : 'Notificar')}
             </button>
           `}
+          ${cityCfg.hasPortal ? `
+            <input type="text" id="comp-proto-${id}" class="form-control" placeholder="Nº protocolo"
+              value="${this.escHtml(this.protocolOf(id))}"
+              onchange="CompromissarioApp.setMovementProtocol('${id}', this.value)"
+              style="width:120px;padding:5px 8px;font-size:0.75rem;" title="Protocolo do portal da prefeitura">
+          ` : ''}
           ${cityCfg.reqEspecial ? `
             <button onclick="CompromissarioApp.generateRequirement('${id}')" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s; width: 100px; justify-content: center;" title="Gerar Documento de Requerimento Especial">
               <i data-lucide="file-text" style="width: 14px;"></i> Requerimento
@@ -786,7 +993,7 @@ const CompromissarioApp = {
           return iso && month && iso.slice(0, 7) === month;
         });
         const ver = Number(row.parseVersion || 0);
-        if (ver >= this.CESSAO_PARSE_VERSION && allInMonth && recs.length >= 2) return;
+        if (ver >= this.CESSAO_PARSE_VERSION && allInMonth && recs.length >= 1) return;
         const payload = await this.loadCessaoFileBlob(id);
         const file = this.cessaoPayloadToFile(payload);
         if (!file) return;
@@ -845,7 +1052,7 @@ const CompromissarioApp = {
         records,
         uploadedAt: prev.uploadedAt || null,
         declaredAt: prev.declaredAt || null,
-        parseNote: prev.parseNote || (records.length ? `${records.length} cessão(ões)` : ''),
+          parseNote: this.keepCessaoParseNote(prev.parseNote, records),
         parseVersion: prev.parseVersion || 0
       };
     });
@@ -872,13 +1079,13 @@ const CompromissarioApp = {
           fileName: prev.fileName,
           records,
           uploadedAt: prev.uploadedAt || row.uploadedAt || null,
-          parseNote: records.length ? `${records.length} cessão(ões)` : (row.parseNote || prev.parseNote || '')
+          parseNote: this.keepCessaoParseNote(row.parseNote || prev.parseNote, records)
         };
       } else {
         const records = this.normalizeCessaoRecords(Array.isArray(row.records) ? row.records : []);
         next[id] = Object.assign({}, row, {
           records,
-          parseNote: records.length ? `${records.length} cessão(ões)` : (row.parseNote || '')
+          parseNote: this.keepCessaoParseNote(row.parseNote, records)
         });
       }
     });
@@ -890,25 +1097,45 @@ const CompromissarioApp = {
     }
   },
 
+  keepCessaoParseNote(note, records) {
+    const text = String(note || '');
+    const warn = /nenhum em|outras datas|confira o mês|não identificado|falhou|parcial|PDF/i.test(text);
+    if (warn) return text;
+    const n = Array.isArray(records) ? records.length : 0;
+    return n ? `${n} cessão(ões) na competência` : text;
+  },
+
+  cityLabelFromCessao(rec) {
+    const emp = String((rec && rec.empresa) || '');
+    const parts = emp.split(/\s*-\s*/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2 && /^\d+$/.test(parts[0])) return parts[1];
+    return (rec && rec.enterpriseName) || emp || '';
+  },
+
+  cessaoCitySummary() {
+    const cities = new Map();
+    Object.values(this.state.cessaoByCompany || {}).forEach((row) => {
+      if (!row || row.status !== 'has') return;
+      this.normalizeCessaoRecords(row.records).forEach((rec) => {
+        const city = this.cityLabelFromCessao(rec) || 'Cidade não identificada';
+        cities.set(city, (cities.get(city) || 0) + 1);
+      });
+    });
+    return [...cities.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+  },
+
   onMonthChange() {
     const el = document.getElementById('comp-pref-month');
     const month = el ? el.value : '';
-    this.persistCessaoMonth();
-    this.state.searchMonth = month || this.state.searchMonth;
+    if (this.state.cessaoMonth && this.state.cessaoMonth !== month) {
+      this.persistCessaoMonth();
+    }
+    this.state.searchMonth = month;
     this.state.contracts = [];
     this.state.files = {};
-    this.renderCessaoPanel();
-    this.syncCessaoGateUi();
-    const tbody = document.getElementById('comp-pref-tbody');
-    const countLabel = document.getElementById('comp-pref-count');
-    if (tbody) {
-      tbody.innerHTML = `
-        <div style="text-align: center; padding: 40px; color: #94a3b8;">
-          Utilize os filtros acima para buscar contratos.
-        </div>`;
-    }
-    if (countLabel) countLabel.textContent = '0 encontrados';
-    if (window.lucide) window.lucide.createIcons();
+    if (month) this.ensureCessaoMonth(month);
+    else this.state.cessaoMonth = '';
+    this.renderPrefeituraShell();
   },
 
   getCessaoPendingCompanies() {
@@ -1019,10 +1246,22 @@ const CompromissarioApp = {
         const cessaoN = this.normalizeCessaoRecords(row.records).length;
         statusLine = `<span style="color:#0369a1;font-weight:600;">Relatório: ${this.escHtml(row.fileName)}</span>` +
           (cessaoN ? ` <span style="color:#64748b;">· ${cessaoN} cessão(ões)</span>` : '') +
-          (row.parseNote && !/cessão/i.test(row.parseNote) ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
+          (row.parseNote && (/nenhum|confira|outras datas|não identificado|falhou|parcial|PDF/i.test(row.parseNote) || !cessaoN)
+            ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
       } else if (status === 'has' && !hasFile) {
         statusLine = '<span style="color:#b45309;font-weight:600;">Envie o relatório padrão Sienge (XLS/XLSX/CSV)</span>';
       }
+      const recs = this.normalizeCessaoRecords(row.records);
+      const preview = recs.slice(0, 6).map((r) => {
+        const atuais = (r.atuais || []).map((c) => (c.principal ? '(P)* ' : '* ') + (c.name || c.id)).join(', ');
+        const ant = (r.anteriores || []).map((c) => c.name || c.id).join(', ');
+        return `<div style="font-size:0.75rem;color:#334155;line-height:1.35;">
+          <strong>${this.escHtml(r.data || this.formatCessaoDate(r.dataIso))}</strong>
+          · título ${this.escHtml(r.titulo || '—')}
+          ${atuais ? ` · atual ${this.escHtml(atuais)}` : ''}
+          ${ant ? ` · cedente ${this.escHtml(ant)}` : ''}
+        </div>`;
+      }).join('');
 
       return `
         <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;display:flex;flex-direction:column;gap:10px;">
@@ -1048,6 +1287,7 @@ const CompromissarioApp = {
               ${hasFile ? `<button type="button" onclick="CompromissarioApp.clearCessaoFile('${c.id}')" style="padding:4px 10px;border:1px solid #f37021;background:#fff7ed;color:#c2410c;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;">Remover</button>` : ''}
             </div>
           </div>
+          ${preview ? `<div style="background:#fff;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 10px;">${preview}${recs.length > 6 ? `<div style="font-size:0.72rem;color:#64748b;">+ ${recs.length - 6} cessão(ões)</div>` : ''}</div>` : ''}
         </div>`;
     }).join('');
 
@@ -1432,21 +1672,28 @@ const CompromissarioApp = {
     return out;
   },
 
-  buildCessaoGroup(rows) {
+  buildCessaoEvent(rows, isoHint) {
     const list = (rows || []).filter(Boolean);
     if (!list.length) return null;
-    const clients = this.mergeCessaoClients(list.flatMap((r) => r.clients || []));
-    const atuais = clients.filter((c) => c.atual);
-    const anteriores = clients.filter((c) => !c.atual);
-    const iso = this.pickCessaoGroupIso(list);
+    const firstBuilt = list.find((r) => Array.isArray(r.atuais) && !r.clients);
+    if (firstBuilt && list.length === 1) {
+      const iso = isoHint || this.resolveCessaoIso(firstBuilt);
+      return Object.assign({}, firstBuilt, {
+        dataIso: iso,
+        data: firstBuilt.data || this.formatCessaoDate(iso),
+        competencia: (iso || '').slice(0, 7) || firstBuilt.competencia || this.competenciaValue()
+      });
+    }
+    const clients = this.mergeCessaoClients(list.flatMap((r) => r.clients || r.atuais || []));
+    const atuais = clients.filter((c) => c.atual).length ? clients.filter((c) => c.atual) : clients;
+    const iso = isoHint || this.resolveCessaoIso(list[0]) || this.pickCessaoGroupIso(list);
     const first = list.find((r) => r.titulo) || list[0];
-    const documento = (list.find((r) => r.documento) || {}).documento || '';
-    const competencia = String(this.state.cessaoMonth || this.state.searchMonth || (iso ? iso.slice(0, 7) : '') || first.competencia || '').slice(0, 7);
+    const documento = (list.find((r) => r.documento) || {}).documento || first.documento || '';
     return {
       data: this.formatCessaoDate(iso) || first.data || '',
       dataIso: iso,
-      competencia,
-      empresa: (list.find((r) => r.empresa) || {}).empresa || '',
+      competencia: (iso || '').slice(0, 7) || this.competenciaValue(),
+      empresa: (list.find((r) => r.empresa) || {}).empresa || first.empresa || '',
       titulo: String(first.titulo || '').replace(/\.0$/, ''),
       documento,
       contratoNumero: this.extractContratoNumero(documento),
@@ -1454,45 +1701,65 @@ const CompromissarioApp = {
       principais: atuais.filter((c) => c.principal),
       principal: atuais.find((c) => c.principal) || atuais[0] || null,
       atuais,
-      anteriores,
+      anteriores: [],
       unitName: first.unitName || '',
       enterpriseId: first.enterpriseId || '',
       enterpriseName: first.enterpriseName || ''
     };
   },
 
-  pickCessaoGroupIso(list) {
-    const rows = list || [];
-    const preferMonth = String(this.state.cessaoMonth || this.state.searchMonth || '').slice(0, 7);
-    const allIsos = rows.map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
-    if (preferMonth) {
-      const inMonth = allIsos.filter((iso) => iso.slice(0, 7) === preferMonth);
-      if (inMonth.length) return inMonth[inMonth.length - 1];
-    }
-    const starred = rows.filter((r) => (r.clients || []).some((c) => c.atual));
-    const pick = (pool) => {
-      const isos = (pool || []).map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
-      if (!isos.length) return '';
-      const recent = isos.filter((iso) => iso >= '2024-01-01');
-      const use = recent.length ? recent : isos;
-      return use[use.length - 1];
-    };
-    return pick(starred) || pick(rows) || allIsos[allIsos.length - 1] || '';
+  buildCessaoGroup(rows) {
+    return this.buildCessaoEvent(rows, this.pickCessaoGroupIso(rows));
   },
 
-  normalizeCessaoRecords(records) {
+  pickCessaoGroupIso(list) {
+    const rows = list || [];
+    const allIsos = rows.map((r) => this.resolveCessaoIso(r)).filter(Boolean).sort();
+    return allIsos[allIsos.length - 1] || '';
+  },
+
+  normalizeCessaoRecords(records, opts) {
     const raw = Array.isArray(records) ? records : [];
-    const groups = new Map();
+    const byLot = new Map();
     raw.forEach((rec) => {
       if (!rec || this.isCessaoNoiseText(rec.data, rec.titulo, rec.documento, '')) return;
       const titulo = String(rec.titulo || '').replace(/\.0$/, '').trim();
       if (!titulo || this.foldHeader(titulo) === 'TITULO') return;
       const contrato = rec.contratoNumero || this.extractContratoNumero(rec.documento);
-      const key = this.digitsOnly(titulo) || contrato || titulo;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(rec);
+      const lot = this.digitsOnly(titulo) || contrato || titulo;
+      if (!byLot.has(lot)) byLot.set(lot, []);
+      byLot.get(lot).push(rec);
     });
-    return [...groups.values()].map((rows) => this.buildCessaoGroup(rows)).filter(Boolean);
+    const month = opts && opts.all ? '' : this.competenciaValue();
+    const out = [];
+    byLot.forEach((rows) => {
+      const events = new Map();
+      rows.forEach((rec) => {
+        const iso = this.resolveCessaoIso(rec) || String(rec.data || '').trim() || 'sem-data';
+        if (!events.has(iso)) events.set(iso, []);
+        events.get(iso).push(rec);
+      });
+      const ordered = [...events.entries()]
+        .map(([iso, list]) => this.buildCessaoEvent(list, /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso : this.resolveCessaoIso(list[0])))
+        .filter(Boolean)
+        .sort((a, b) => String(a.dataIso || '').localeCompare(String(b.dataIso || '')));
+      ordered.forEach((ev, idx) => {
+        const prev = idx > 0 ? ordered[idx - 1] : null;
+        if (prev) {
+          ev.anteriores = this.mergeCessaoClients(prev.clients || prev.atuais || []);
+          ev.historico = ordered.slice(0, idx).map((h) => ({
+            data: h.data,
+            dataIso: h.dataIso,
+            clients: h.clients || h.atuais || []
+          }));
+        }
+      });
+      const inMonth = month
+        ? ordered.filter((ev) => ev.dataIso && ev.dataIso.slice(0, 7) === month)
+        : ordered;
+      inMonth.forEach((ev) => out.push(ev));
+    });
+    return out;
   },
 
   parseCessaoMatrix(matrix) {
@@ -1592,10 +1859,13 @@ const CompromissarioApp = {
     }
 
     const records = this.normalizeCessaoRecords(raw);
-    return {
-      records,
-      note: records.length ? `${records.length} cessão(ões)` : 'Nenhuma cessão lida'
-    };
+    const all = this.normalizeCessaoRecords(raw, { all: true });
+    let note = records.length ? `${records.length} cessão(ões) na competência` : 'Nenhuma cessão lida na competência';
+    if (!records.length && all.length) {
+      const months = [...new Set(all.map((r) => (r.dataIso || '').slice(0, 7)).filter(Boolean))].join(', ');
+      note = `O Sienge trouxe ${all.length} evento(s) em ${months || 'outras datas'}, nenhum em ${this.competenciaValue() || '—'}. Confira o mês em Parâmetros.`;
+    }
+    return { records, note };
   },
 
   parseCessaoMatrixLoose(matrix) {
@@ -1885,15 +2155,10 @@ const CompromissarioApp = {
     return this.validIsoDate(rec.dataIso) || this.cessaoDateIso(rec.dataIso) || this.cessaoDateIso(rec.data);
   },
 
-  cessaoInSearchMonth(rec, monthVal, fromReportMonth) {
+  cessaoInSearchMonth(rec, monthVal) {
     if (!rec || !monthVal) return false;
     const iso = this.resolveCessaoIso(rec);
-    if (iso && iso.slice(0, 7) === monthVal) return true;
-    if (rec.competencia && rec.competencia === monthVal) return true;
-    // Relatório anexado nesta competência: 21/09/2026 não pode cair fora
-    // só porque o agrupamento ficou com a data do cliente anterior (03/10/2020).
-    if (fromReportMonth) return true;
-    return false;
+    return !!(iso && iso.slice(0, 7) === monthVal);
   },
 
   cessaoRowsForMonth(monthVal) {
@@ -1916,7 +2181,7 @@ const CompromissarioApp = {
     Object.entries(this.cessaoRowsForMonth(monthVal)).forEach(([cid, row]) => {
       if (!row || row.status !== 'has') return;
       this.normalizeCessaoRecords(row.records).forEach((rec) => {
-        if (!this.cessaoInSearchMonth(rec, monthVal, true)) return;
+        if (!this.cessaoInSearchMonth(rec, monthVal)) return;
         const key = String(cid) + '|' + (this.digitsOnly(rec.titulo) || rec.contratoNumero || rec.documento || movements.length);
         if (seen.has(key)) return;
         seen.add(key);
@@ -1984,11 +2249,14 @@ const CompromissarioApp = {
     if (this.state.loading) return;
     if (!this.assertCessaoGate('buscar vendas e distratos')) return;
     
-    const monthVal = document.getElementById('comp-pref-month').value;
+    const monthEl = document.getElementById('comp-pref-month');
+    const monthVal = (monthEl && monthEl.value) || this.competenciaValue();
     if (!monthVal) {
       alert("Por favor, selecione um mês de referência.");
       return;
     }
+    this.state.searchMonth = monthVal;
+    this.ensureCessaoMonth(monthVal);
     this.persistCessaoMonth();
 
     // Parse month to first and last day
@@ -1998,7 +2266,7 @@ const CompromissarioApp = {
     const finalDay = `${year}-${month}-${lastDay}`;
 
     const btn = document.getElementById('comp-pref-btn-search');
-    btn.innerHTML = '<i data-lucide="loader" class="spin" style="width: 16px;"></i> <span>Buscando...</span>';
+    if (btn) btn.innerHTML = '<i data-lucide="loader" class="spin" style="width: 16px;"></i> <span>Buscando...</span>';
     this.state.loading = true;
 
     try {
@@ -2033,7 +2301,7 @@ const CompromissarioApp = {
       alert("Falha ao buscar os contratos no Sienge.");
     } finally {
       this.state.loading = false;
-      btn.innerHTML = '<i data-lucide="search" style="width: 16px;"></i> <span>Buscar Contratos</span>';
+      if (btn) btn.innerHTML = '<i data-lucide="search" style="width: 16px;"></i> <span>Carregar movimentos</span>';
       if (window.lucide) window.lucide.createIcons();
     }
   },
@@ -2225,6 +2493,103 @@ const CompromissarioApp = {
     this.renderTable();
   },
 
+  openCityConfig(city, mode) {
+    const cityName = String(city || '');
+    if (!cityName) return;
+    if (mode === 'edit') {
+      this.openConfigModal(cityName);
+      return;
+    }
+    const cfg = this.loadConfigs()[this.normalizeCityKey(cityName)] || {};
+    const existing = document.getElementById('comp-city-view-modal');
+    if (existing) existing.remove();
+    const how = this.cityNotifyLabel(cfg);
+    document.body.insertAdjacentHTML('beforeend', `
+      <div id="comp-city-view-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div style="background:#fff;border-radius:10px;width:520px;max-width:100%;box-shadow:0 8px 24px rgba(0,0,0,.12);">
+          <div style="padding:16px 18px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;font-size:1.05rem;">${this.escHtml(cityName)}</h3>
+            <button type="button" class="btn btn-outline" onclick="document.getElementById('comp-city-view-modal').remove()">Fechar</button>
+          </div>
+          <div style="padding:18px;display:flex;flex-direction:column;gap:10px;font-size:0.9rem;color:#334155;">
+            <div><strong>Forma:</strong> ${this.escHtml(how)}</div>
+            ${cfg.hasPortal ? `
+              <div><strong>Portal:</strong> ${this.escHtml(cfg.portalUrl || '—')}</div>
+              <div><strong>Login:</strong> ${this.escHtml(cfg.portalLogin || '—')}</div>
+            ` : `<div><strong>E-mail:</strong> ${this.escHtml(cfg.email || '—')}</div>`}
+            <div><strong>Requerimento especial:</strong> ${cfg.reqEspecial ? 'Sim' : 'Não'}</div>
+            <div><strong>Agrupar em planilha:</strong> ${cfg.agrupar ? 'Sim' : 'Não'}</div>
+          </div>
+          <div style="padding:12px 18px;border-top:1px solid #e2e8f0;text-align:right;">
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('comp-city-view-modal').remove();CompromissarioApp.openCityConfig('${this.escHtml(cityName)}','edit')">Editar</button>
+          </div>
+        </div>
+      </div>`);
+  },
+
+  recordFollowup(c, extras) {
+    if (!c) return;
+    const extra = extras || {};
+    const rec = c._cessao || {};
+    const item = {
+      id: String(c.id),
+      month: this.competenciaValue(),
+      city: this.cityOfContract(c) || extra.city || '',
+      type: c._movementType || c._operationType || 'Movimento',
+      contractLabel: rec.titulo || rec.documento || String(c.id),
+      unit: this.unitNameOf(c) || '',
+      channel: extra.channel || 'email',
+      protocol: extra.protocol || '',
+      notifiedAt: extra.notifiedAt || new Date().toISOString(),
+      status: extra.status || 'aguardando',
+      confirmedAt: extra.confirmedAt || null
+    };
+    const list = this.state.followups || [];
+    const idx = list.findIndex((x) => String(x.id) === item.id && x.month === item.month);
+    if (idx >= 0) list[idx] = Object.assign({}, list[idx], item);
+    else list.push(item);
+    this.state.followups = list;
+    this.persistFollowups();
+  },
+
+  markFollowupDone(id) {
+    const list = this.state.followups || [];
+    const hit = list.find((x) => String(x.id) === String(id) && (!this.competenciaValue() || x.month === this.competenciaValue()));
+    if (!hit) return;
+    hit.status = 'concluido';
+    hit.confirmedAt = new Date().toISOString();
+    this.persistFollowups();
+    this.renderFollowupTab();
+  },
+
+  protocolOf(id) {
+    const hit = (this.state.followups || []).find((x) => String(x.id) === String(id) && x.month === this.competenciaValue());
+    return (hit && hit.protocol) || '';
+  },
+
+  setMovementProtocol(id, value) {
+    const c = (this.state.contracts || []).find((x) => String(x.id) === String(id));
+    const protocol = String(value || '').trim();
+    if (c) this.recordFollowup(c, { channel: 'portal', protocol, status: (this.state.notifiedContracts[id] ? 'aguardando' : 'rascunho') });
+    else {
+      const hit = (this.state.followups || []).find((x) => String(x.id) === String(id));
+      if (hit) {
+        hit.protocol = protocol;
+        this.persistFollowups();
+      }
+    }
+  },
+
+  askPortalProtocol(cityName, movementId) {
+    const typed = movementId ? this.protocolOf(movementId) : '';
+    if (typed) return typed;
+    const raw = window.prompt(
+      'Informe o número de protocolo do portal da prefeitura (pode completar depois no Follow-up):',
+      ''
+    );
+    return raw != null ? String(raw).trim() : '';
+  },
+
   openConfigModal() {
     let existingModal = document.getElementById('comp-config-modal');
     if (existingModal) existingModal.remove();
@@ -2299,8 +2664,9 @@ const CompromissarioApp = {
           <div style="padding: 20px; overflow-y: auto; flex: 1;">
             ${sortedCities.length === 0 ? '<p style="color:#64748b; font-size:0.9rem;">Nenhuma cidade com operador atrelado. Cadastre a carteira em Atribuição de Operadores para configurar as prefeituras com antecedência.</p>' : citiesListHtml}
           </div>
-          <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; text-align: right; background: #f8fafc; border-radius: 0 0 8px 8px;">
-            <button onclick="CompromissarioApp.saveConfigModal()" style="padding: 8px 20px; background: #105436; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Salvar Configurações</button>
+          <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; text-align: right; background: #f8fafc; border-radius: 0 0 8px 8px; display:flex;justify-content:flex-end;gap:8px;">
+            <button type="button" class="btn btn-cancel" onclick="document.getElementById('comp-config-modal').remove()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="CompromissarioApp.saveConfigModal()">Salvar Configurações</button>
           </div>
         </div>
       </div>
@@ -2468,6 +2834,8 @@ const CompromissarioApp = {
       
       this.state.notifiedContracts[id] = true;
       localStorage.setItem('crm_compromissario_notified', JSON.stringify(this.state.notifiedContracts));
+      const protocol = this.askPortalProtocol(cityName, id);
+      this.recordFollowup(c, { channel: 'portal', protocol, status: 'aguardando' });
       this.renderTable();
       
       window.open(cityConfig.portalUrl, '_blank');
@@ -2488,6 +2856,7 @@ const CompromissarioApp = {
     // Save state
     this.state.notifiedContracts[id] = true;
     localStorage.setItem('crm_compromissario_notified', JSON.stringify(this.state.notifiedContracts));
+    this.recordFollowup(c, { channel: 'email', status: 'aguardando' });
     this.renderTable(); // Update button visually
 
     const mailtoLink = `mailto:${defaultEmail}?subject=${subject}&body=${body}`;
@@ -2615,7 +2984,6 @@ Botucatu, [DATA]
     });
     
     localStorage.setItem('crm_compromissario_notified', JSON.stringify(this.state.notifiedContracts));
-    this.renderTable();
 
     // Trigger Download
     const encodedUri = encodeURI(csvContent);
@@ -2654,6 +3022,9 @@ Botucatu, [DATA]
       let msg = `ATENÇÃO OPERADOR:\n\nEsta prefeitura exige protocolo diretamente no site.\nUma planilha e os PDFs já encontrados no IntegrA/Sienge foram baixados.\nUma nova aba do portal será aberta agora.\n\nLogin: ${cityConfig.portalLogin || 'Não configurado'}\nSenha: ${cityConfig.portalSenha || 'Não configurado'}`;
       if (hasSpecialReq) msg += `\n\nLembre-se de gerar e anexar os requerimentos no site!`;
       alert(msg);
+      const protocol = this.askPortalProtocol(cityName);
+      groupContracts.forEach((c) => this.recordFollowup(c, { channel: 'portal', protocol, city: cityName, status: 'aguardando' }));
+      this.renderTable();
       window.open(cityConfig.portalUrl, '_blank');
       return;
     }
@@ -2664,6 +3035,8 @@ Botucatu, [DATA]
     }
 
     alert(alertMsg);
+    groupContracts.forEach((c) => this.recordFollowup(c, { channel: 'email', city: cityName, status: 'aguardando' }));
+    this.renderTable();
 
     const mailtoLink = `mailto:${defaultEmail}?subject=${subject}&body=${body}`;
     window.location.href = mailtoLink;
