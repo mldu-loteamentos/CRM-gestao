@@ -4814,3 +4814,170 @@ circle.donut-segment {
   border-top: 1px solid #e2e8f0;
 }
 
+/* Comercial · Tabelas vigentes */
+.tvig-page { padding: 4px 0 28px; }
+.tvig-params { overflow: visible; margin-bottom: 18px; }
+.tvig-page-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.tvig-section-title {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #105436;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid #105436;
+  padding-bottom: 6px;
+  display: inline-block;
+}
+.tvig-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.2fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+.tvig-filter-slot { min-width: 0; width: 100%; }
+.tvig-filters .ml-emp-filter {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.tvig-filter-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-bottom: 2px;
+}
+.tvig-empty {
+  background: #fff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+.tvig-list-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.tvig-list-table thead th {
+  padding: 10px 14px;
+  background: #105436;
+  color: #fff;
+  text-align: left;
+  font-weight: 700;
+}
+.tvig-list-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #0f172a;
+}
+.tvig-list-table tbody tr:hover { background: #f8fafc; }
+.tvig-ico {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #105436;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tvig-ico:hover { background: #ecfdf3; }
+.tvig-ico.is-danger { color: #b91c1c; }
+.tvig-ico.is-danger:hover { background: #fef2f2; }
+.tvig-editor-overlay { z-index: 1400; }
+.tvig-editor-box {
+  width: min(1180px, 96vw);
+  max-width: 96vw;
+  max-height: 92vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tvig-editor-head {
+  padding: 16px 20px 12px;
+  margin: 0;
+}
+.tvig-editor-body {
+  padding: 8px 20px 16px;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+.tvig-editor-grid {
+  display: grid;
+  grid-template-columns: 180px minmax(180px, 1fr) minmax(240px, 1.4fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tvig-plan-title {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #14532d;
+}
+.tvig-editor-table-wrap {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.tvig-plan-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.tvig-plan-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 8px;
+  background: #105436;
+  color: #fff;
+  text-align: left;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tvig-plan-table thead th:nth-child(2),
+.tvig-plan-table thead th:nth-child(3),
+.tvig-plan-table thead th:nth-child(4),
+.tvig-plan-table thead th:nth-child(5) { text-align: center; }
+.tvig-plan-table td {
+  padding: 6px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  vertical-align: middle;
+}
+.tvig-plan-table tbody tr:nth-child(even) td { background: #f8fafc; }
+.tvig-plan-table .form-control {
+  min-width: 0;
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 6px 8px;
+}
+.tvig-cell-center { text-align: center; }
+.tvig-plan-table th:first-child,
+.tvig-plan-table td:first-child { min-width: 180px; }
+.tvig-plan-table th:nth-child(6),
+.tvig-plan-table td:nth-child(6) { min-width: 180px; }
+.tvig-plan-table th:last-child,
+.tvig-plan-table td:last-child { width: 44px; text-align: center; }
+.tvig-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+@media (max-width: 900px) {
+  .tvig-filters { grid-template-columns: 1fr; }
+  .tvig-editor-grid { grid-template-columns: 1fr; }
+}
+

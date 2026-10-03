@@ -2802,6 +2802,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_vencimento": "Alteração de vencimento",
     "relacionamento_cessao": "Cessão de Direitos",
     "condicoes-pagamento": "Condições de Pagamento",
+    "tabelas-vigentes": "Tabelas vigentes",
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
     "marketing-budget": "Budget",
@@ -2849,6 +2850,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_vencimento": "calendar-clock",
     "relacionamento_cessao": "handshake",
     "condicoes-pagamento": "file-text",
+    "tabelas-vigentes": "table",
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
@@ -4361,7 +4363,13 @@ window.applyPermissions = function(profileName) {
           || perms.sub_suporte_geral_chamados_visualizar === true
           || perms.sub_suporte_geral_chamados_editar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || window.permCoversMenuKey(perms, modKey)) {
+        const tvigAlias = modKey === "sub_com_geral_tabelas_vigentes_acessar" && (
+          perms.mod_comercial === true
+          || perms.sub_com_geral_dashboard_acessar === true
+          || perms.sub_com_geral_estoque_acessar === true
+          || perms.sub_com_geral_condicoes_pagamento_acessar === true
+        );
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
