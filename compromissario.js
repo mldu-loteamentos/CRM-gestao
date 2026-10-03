@@ -945,6 +945,16 @@ const CompromissarioApp = {
     return null;
   },
 
+  async openCessaoFile(companyId) {
+    const payload = await this.loadCessaoFileBlob(companyId);
+    const file = this.cessaoPayloadToFile(payload);
+    if (!file) {
+      alert('Não foi possível abrir o Excel desta empresa.');
+      return;
+    }
+    this.downloadStoredFile(file, file.name || 'cessao.xlsx');
+  },
+
   async loadCessaoFileBlob(companyId) {
     const id = String(companyId);
     if (this.state.cessaoBlobs[id] && this.state.cessaoBlobs[id].buf) return this.state.cessaoBlobs[id];
@@ -1229,7 +1239,6 @@ const CompromissarioApp = {
     const ready = this.isCessaoGateReady();
     const btn = document.getElementById('comp-pref-btn-search');
     const hint = document.getElementById('comp-cessao-gate-hint');
-    const pending = this.getCessaoPendingCompanies();
     if (btn) {
       btn.disabled = !ready;
       btn.style.opacity = ready ? '1' : '0.55';
@@ -1239,13 +1248,8 @@ const CompromissarioApp = {
         : 'Declare cessão (ou ausência) de todas as empresas com carteira ativa';
     }
     if (hint) {
-      if (ready) {
-        hint.style.display = 'none';
-        hint.textContent = '';
-      } else {
-        hint.style.display = 'block';
-        hint.textContent = `${pending.length} empresa(s) ainda sem declaração nesta competência.`;
-      }
+      hint.style.display = 'none';
+      hint.textContent = '';
     }
   },
 
@@ -1297,16 +1301,32 @@ const CompromissarioApp = {
       const row = this.state.cessaoByCompany[c.id] || {};
       const status = row.status;
       const hasFile = !!(row.fileName);
-      const recs = this.normalizeCessaoRecords(row.records);
       const noneChecked = status === 'none' ? 'checked' : '';
       const hasChecked = status === 'has' ? 'checked' : '';
       const uploadDisabled = status !== 'has' ? 'disabled' : '';
       const tone = status === 'none' ? 'is-none' : (status === 'has' && hasFile ? 'is-has' : (status === 'has' ? 'is-wait' : 'is-pending'));
-      let extra = '';
+      const fileInput = `<input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
+                onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">`;
+      let relHtml = fileInput;
       if (status === 'has' && hasFile) {
-        extra = `<div class="comp-cessao-file">${this.escHtml(row.fileName)}${recs.length ? ' · ' + recs.length + ' cessão(ões) no mês' : ''}</div>`;
-      } else if (status === 'has' && !hasFile) {
-        extra = '<div class="comp-cessao-file is-warn">Anexe o XLS do Sienge</div>';
+        relHtml = `
+            <div class="comp-cessao-upload">
+              ${fileInput}
+              <button type="button" class="comp-cessao-xls" onclick="CompromissarioApp.openCessaoFile('${c.id}')" title="${this.escHtml(row.fileName || 'Abrir Excel')}">
+                <i data-lucide="file-spreadsheet"></i>
+                <span>Excel</span>
+              </button>
+              <button type="button" class="btn btn-cancel" style="padding:4px 10px;font-size:0.74rem;" onclick="CompromissarioApp.clearCessaoFile('${c.id}')">Remover</button>
+            </div>`;
+      } else if (status === 'has') {
+        relHtml = `
+            <div class="comp-cessao-upload">
+              ${fileInput}
+              <button type="button" class="comp-cessao-xls is-empty" onclick="document.getElementById('comp-cessao-file-${c.id}').click()">
+                <i data-lucide="file-spreadsheet"></i>
+                <span>Anexar Excel</span>
+              </button>
+            </div>`;
       }
       return `
         <tr class="comp-cessao-row ${tone}">
@@ -1322,14 +1342,7 @@ const CompromissarioApp = {
                 onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')"> Teve</label>
             </div>
           </td>
-          <td class="comp-cessao-rel">
-            <div class="comp-cessao-upload">
-              <input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
-                onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">
-              ${hasFile ? `<button type="button" class="btn btn-cancel" style="padding:4px 10px;font-size:0.74rem;" onclick="CompromissarioApp.clearCessaoFile('${c.id}')">Remover</button>` : ''}
-            </div>
-            ${extra}
-          </td>
+          <td class="comp-cessao-rel">${relHtml}</td>
         </tr>`;
     }).join('');
 
@@ -2761,12 +2774,12 @@ const CompromissarioApp = {
     const esc = this.escHtml(city);
     const modalHtml = `
       <div id="comp-config-modal" class="modal-overlay active" data-city="${esc}" style="z-index:9999;">
-        <div class="modal-box" style="width:min(640px,96vw);max-height:90vh;padding:0;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
-          <div class="modal-header" style="margin:0;padding:16px 20px;">
+        <div class="modal-box" style="width:min(860px,96vw);max-height:90vh;padding:0;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+          <div class="modal-header" style="margin:0;padding:16px 24px;">
             <h3 style="margin:0;">Editar ${esc}</h3>
             <button type="button" class="modal-close" onclick="document.getElementById('comp-config-modal').remove()">&times;</button>
           </div>
-          <div style="padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px;">
+          <div style="padding:18px 24px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:16px;">
             <label class="moura-switch">
               <input type="checkbox" id="cfg-portal-${sid}" ${cityCfg.hasPortal ? 'checked' : ''}
                 onchange="document.getElementById('portal-fields-${sid}').style.display=this.checked?'grid':'none';document.getElementById('email-field-${sid}').style.display=this.checked?'none':'block';">
@@ -2775,22 +2788,20 @@ const CompromissarioApp = {
             </label>
             <div id="email-field-${sid}" style="display:${cityCfg.hasPortal ? 'none' : 'block'};">
               <label class="tvig-comp-label" for="cfg-email-${sid}">E-mail da prefeitura</label>
-              <input type="text" id="cfg-email-${sid}" class="form-control" placeholder="protocolo@prefeitura.gov.br" value="${this.escHtml(cityCfg.email || '')}">
+              <input type="text" id="cfg-email-${sid}" class="form-control comp-cfg-input" placeholder="protocolo@prefeitura.gov.br" value="${this.escHtml(cityCfg.email || '')}">
             </div>
-            <div id="portal-fields-${sid}" style="display:${cityCfg.hasPortal ? 'grid' : 'none'};gap:10px;">
+            <div id="portal-fields-${sid}" style="display:${cityCfg.hasPortal ? 'grid' : 'none'};gap:14px;">
               <div>
                 <label class="tvig-comp-label" for="cfg-url-${sid}">URL do portal</label>
-                <input type="text" id="cfg-url-${sid}" class="form-control" placeholder="https://..." value="${this.escHtml(cityCfg.portalUrl || '')}">
+                <input type="text" id="cfg-url-${sid}" class="form-control comp-cfg-input" placeholder="https://..." value="${this.escHtml(cityCfg.portalUrl || '')}">
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-                <div>
-                  <label class="tvig-comp-label" for="cfg-login-${sid}">Login</label>
-                  <input type="text" id="cfg-login-${sid}" class="form-control" value="${this.escHtml(cityCfg.portalLogin || '')}">
-                </div>
-                <div>
-                  <label class="tvig-comp-label" for="cfg-senha-${sid}">Senha</label>
-                  <input type="password" id="cfg-senha-${sid}" class="form-control" value="${this.escHtml(cityCfg.portalSenha || '')}">
-                </div>
+              <div>
+                <label class="tvig-comp-label" for="cfg-login-${sid}">Login</label>
+                <input type="text" id="cfg-login-${sid}" class="form-control comp-cfg-input" value="${this.escHtml(cityCfg.portalLogin || '')}">
+              </div>
+              <div>
+                <label class="tvig-comp-label" for="cfg-senha-${sid}">Senha</label>
+                <input type="password" id="cfg-senha-${sid}" class="form-control comp-cfg-input" value="${this.escHtml(cityCfg.portalSenha || '')}">
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:#334155;font-weight:600;">

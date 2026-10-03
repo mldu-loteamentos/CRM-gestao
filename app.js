@@ -16541,6 +16541,15 @@ window.resetDistratoEditableFields = function(opts) {
   if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
 
   window._distBankCardUploaded = false;
+  window._distExpenseFiles = {};
+  ["iptu", "agua", "luz"].forEach((key) => {
+    const input = document.getElementById("dist-file-" + key);
+    const lbl = document.getElementById("dist-file-" + key + "-lbl");
+    const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
+    if (input) input.value = "";
+    if (lbl) lbl.textContent = "Anexar";
+    if (wrap) wrap.classList.remove("is-ok");
+  });
   setChk("dist-bank-other-beneficiary", false);
   setVal("dist-bank-other-name", "");
   setVal("dist-bank-other-cpf", "");
@@ -16609,6 +16618,131 @@ window.fmtDistratoMoney = function(n) {
   return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 };
 
+window.distratoCcTipo = function() {
+  const sale = g_distSale || {};
+  const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+  const ccId = unit.costCenterId
+    || sale.costCenterId
+    || sale.enterpriseId
+    || (window.AppState && AppState.currentCostCenterId)
+    || "";
+  const unitName = unit.unitName || unit.name || sale.unitName || "";
+  const cfg = typeof window.nexCcConfig === "function" ? window.nexCcConfig(ccId, unitName) : {};
+  return String((cfg && cfg.tipo_cc) || "");
+};
+
+window.isDistratoLoteamentoFechado = function() {
+  return /loteamento\s*fechado/i.test(window.distratoCcTipo());
+};
+
+window.onDistratoExpenseFile = function(key) {
+  const input = document.getElementById("dist-file-" + key);
+  const lbl = document.getElementById("dist-file-" + key + "-lbl");
+  const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
+  const file = input && input.files && input.files[0];
+  if (!window._distExpenseFiles) window._distExpenseFiles = {};
+  window._distExpenseFiles[key] = { uploaded: false, file: file || null };
+  if (lbl) lbl.textContent = file ? file.name : "Anexar";
+  if (wrap) wrap.classList.toggle("is-ok", !!file);
+};
+
+window.syncDistratoExpenseDocs = function() {
+  const fechado = window.isDistratoLoteamentoFechado();
+  const taxaRow = document.getElementById("dist-row-taxa-assoc");
+  if (taxaRow) {
+    const permutaOn = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
+    taxaRow.style.display = (!permutaOn && fechado) ? "flex" : "none";
+  }
+  if (!fechado) {
+    const el = document.getElementById("dist-taxa-assoc");
+    if (el && window.parseDistratoCurrencyInput("dist-taxa-assoc") > 0.009) el.value = "0,00";
+  }
+  if (window._distExpenseFiles) {
+    const rules = window.distratoExpenseDocRules();
+    for (let i = 0; i < rules.length; i++) {
+      const rec = window._distExpenseFiles[rules[i].key];
+      if (rec && rec.uploaded && rec.tag && rec.tag !== rules[i].tag) rec.uploaded = false;
+    }
+  }
+  const setHint = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  const iptu = window.parseDistratoCurrencyInput("dist-iptu");
+  setHint("dist-iptu-doc-hint", iptu > 0.009
+    ? "Com valor: anexe o extrato com os débitos"
+    : "Sem valor: anexe CERTIDÃO NEGATIVA DE DÉBITO");
+  const agua = window.parseDistratoCurrencyInput("dist-agua");
+  setHint("dist-agua-doc-hint", agua > 0.009
+    ? "Com valor: anexe o extrato com os débitos"
+    : "Anexe o print da consulta ao cliente de que não há instalação");
+  const luz = window.parseDistratoCurrencyInput("dist-luz");
+  setHint("dist-luz-doc-hint", luz > 0.009
+    ? "Com valor: anexe o extrato com os débitos"
+    : "Anexe o print da consulta ao cliente de que não há instalação");
+};
+
+window.distratoExpenseDocRules = function() {
+  const money = (id) => window.parseDistratoCurrencyInput(id);
+  return [
+    {
+      key: "iptu",
+      tag: money("dist-iptu") > 0.009 ? "EXTRATO IPTU DISTRATO" : "CERTIDAO NEGATIVA DE DEBITO IPTU",
+      label: money("dist-iptu") > 0.009 ? "o extrato de IPTU com os valores" : "a CERTIDÃO NEGATIVA DE DÉBITO de IPTU"
+    },
+    {
+      key: "agua",
+      tag: money("dist-agua") > 0.009 ? "EXTRATO AGUA DISTRATO" : "PRINT SEM INSTALACAO AGUA",
+      label: money("dist-agua") > 0.009
+        ? "o extrato de água com os valores"
+        : "o print da consulta ao cliente de que não há instalação de água"
+    },
+    {
+      key: "luz",
+      tag: money("dist-luz") > 0.009 ? "EXTRATO ENERGIA DISTRATO" : "PRINT SEM INSTALACAO ENERGIA",
+      label: money("dist-luz") > 0.009
+        ? "o extrato de energia com os valores"
+        : "o print da consulta ao cliente de que não há instalação de energia"
+    }
+  ];
+};
+
+window.validateDistratoExpenseDocs = function() {
+  if (!window._distExpenseFiles) window._distExpenseFiles = {};
+  const rules = window.distratoExpenseDocRules();
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i];
+    const rec = window._distExpenseFiles[r.key] || {};
+    const input = document.getElementById("dist-file-" + r.key);
+    const file = rec.file || (input && input.files && input.files[0]);
+    if (!rec.uploaded && !file) return "Anexe " + r.label + " antes de gerar o termo.";
+  }
+  return "";
+};
+
+window.uploadDistratoExpenseDocs = async function() {
+  const customer = g_distCustomer;
+  const customerId = customer && (customer.id || customer.customerId);
+  if (!customerId) throw new Error("Cliente não identificado para gravar os anexos.");
+  if (typeof window.anexosUploadCustomerAttachment !== "function") {
+    throw new Error("Módulo de anexos indisponível.");
+  }
+  if (!window._distExpenseFiles) window._distExpenseFiles = {};
+  const rules = window.distratoExpenseDocRules();
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i];
+    const rec = window._distExpenseFiles[r.key] || {};
+    if (rec.uploaded) continue;
+    const input = document.getElementById("dist-file-" + r.key);
+    const file = rec.file || (input && input.files && input.files[0]);
+    if (!file) continue;
+    await window.anexosUploadCustomerAttachment(customerId, file, r.tag);
+    window._distExpenseFiles[r.key] = { uploaded: true, file, tag: r.tag };
+    const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
+    if (wrap) wrap.classList.add("is-ok");
+  }
+};
+
 function calculateDistrato() {
   if (!g_distSale) return;
 
@@ -16641,7 +16775,7 @@ function calculateDistrato() {
   const restituicaoTotal = Math.max(0, totalPaid - totalMulta);
   
   // 2. Despesas
-  const taxaAssoc = isPermuta ? 0 : parseCurrencyInput("dist-taxa-assoc");
+  const taxaAssoc = (isPermuta || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
   const iptu = isPermuta ? 0 : parseCurrencyInput("dist-iptu");
   const agua = isPermuta ? 0 : parseCurrencyInput("dist-agua");
   const luz = isPermuta ? 0 : parseCurrencyInput("dist-luz");
@@ -16955,6 +17089,7 @@ window.handleDistratoChoiceChange = function() {
     isPermuta,
     permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
   };
+  if (typeof window.syncDistratoExpenseDocs === "function") window.syncDistratoExpenseDocs();
   if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
   if (document.querySelector(".dist-permuta-inst-check") && typeof window.onDistratoPermutaInstToggle === "function") {
     window.onDistratoPermutaInstToggle();
@@ -19899,6 +20034,22 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   if (comissaoAplicavel && saleDate && !isNaN(saleDate.getTime()) && saleDate <= dataLimite && comissaoInfo <= 0) {
     alert("Preencha a comissão deste contrato.");
     return;
+  }
+
+  if (!isPermuta) {
+    if (typeof window.syncDistratoExpenseDocs === "function") window.syncDistratoExpenseDocs();
+    const missDocs = typeof window.validateDistratoExpenseDocs === "function" ? window.validateDistratoExpenseDocs() : "";
+    if (missDocs) {
+      alert(missDocs);
+      return;
+    }
+    try {
+      if (typeof window.uploadDistratoExpenseDocs === "function") await window.uploadDistratoExpenseDocs();
+    } catch (e) {
+      console.error(e);
+      alert("Não foi possível gravar os anexos de IPTU / água / energia no cadastro do cliente. Verifique os arquivos e tente de novo.");
+      return;
+    }
   }
 
   const unit = (AppState.units && g_distSale.unitId && AppState.units[g_distSale.unitId]) || {};
