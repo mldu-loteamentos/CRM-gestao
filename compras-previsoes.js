@@ -1122,7 +1122,7 @@ const ComprasPrevisoesApp = {
           </div>
           <div class="cprev-config-actions">
             <button type="button" class="btn btn-cancel" onclick="ComprasPrevisoesApp.cancelPrazoEdit()">Cancelar</button>
-            <button type="button" class="btn btn-secondary" onclick="ComprasPrevisoesApp.restorePrazoDefault()">Restaurar padrão</button>
+            <button type="button" class="btn btn-outline" onclick="ComprasPrevisoesApp.restorePrazoDefault()">Restaurar padrão</button>
             <button type="button" class="btn btn-primary" onclick="ComprasPrevisoesApp.savePrazoConfig()">Salvar</button>
           </div>
         </div>

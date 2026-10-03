@@ -218,6 +218,10 @@ async function login() {
       return user;
     }
 
+    if (g_authConfig.enabled) {
+      throw new Error("Login Microsoft indisponível. Atualize a página (Ctrl+F5) e tente de novo.");
+    }
+
     return new Promise((resolve, reject) => {
       window.showMockLoginModal(resolve, reject);
     });

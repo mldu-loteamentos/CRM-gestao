@@ -3655,19 +3655,39 @@ window.exportAuditExcel = function() {
 
 // ----------------------------------------------------
 // 3. FLUXO DE LOGIN E RENDER DO USUÃRIO
+function ensureMockLoginEmailInput() {
+  const wrap = document.getElementById("mock-login-fields");
+  if (!wrap) return null;
+  let emailInput = document.getElementById("login-email");
+  if (emailInput) {
+    emailInput.style.display = "";
+    emailInput.value = "";
+    return emailInput;
+  }
+  emailInput = document.createElement("input");
+  emailInput.type = "email";
+  emailInput.id = "login-email";
+  emailInput.className = "login-input";
+  emailInput.name = "crm-login-email";
+  emailInput.placeholder = "seuemail@mouraleite.com.br";
+  emailInput.autocomplete = "off";
+  emailInput.autocapitalize = "off";
+  emailInput.spellcheck = false;
+  wrap.insertBefore(emailInput, wrap.firstChild);
+  return emailInput;
+}
+
 window.showMockLoginModal = function(resolve, reject) {
-  // O modal já está visível por causa do checkAuthentication.
-  // Apenas configuramos o evento do botão para a lógica do simulador.
+  // Só o simulador local pede e-mail. No Azure o usuário vem da Microsoft.
   const btn = document.getElementById("btn-submit-login");
-  const emailInput = document.getElementById("login-email");
+  const emailInput = ensureMockLoginEmailInput();
   const errorMsg = document.getElementById("login-error-msg");
-  if (emailInput) emailInput.value = "";
   
   // Limpar onclick antigo se houver
   btn.onclick = null;
   
   btn.onclick = () => {
-    const email = emailInput.value.trim();
+    const email = ((emailInput && emailInput.value) || "").trim();
     const name = email.split("@")[0].toUpperCase(); // Usa o começo do e-mail como nome fallback
     
     if (!MouraAuth.validateDomain(email)) {
@@ -3860,23 +3880,16 @@ async function checkAuthentication() {
     const loginVideo = document.getElementById("login-bg-video");
     if (loginVideo) loginVideo.play().catch(() => {});
     const loginEmail = document.getElementById("login-email");
-    if (loginEmail) loginEmail.value = "";
+    if (loginEmail) loginEmail.remove();
     
     const authConfig = MouraAuth.getAuthConfig();
     const btn = document.getElementById("btn-submit-login");
     
     if (authConfig.enabled) {
-      // Azure AD habilitado: botão aciona MSAL Popup
-      const emailInput = document.getElementById("login-email");
       const labelEl = document.querySelector(".login-label");
-      if (emailInput) emailInput.style.display = "none";
       if (labelEl) labelEl.style.display = "none";
-      
-      btn.textContent = "Entrar com Microsoft";
-      
-      // Mostrar botão de forma isolada
+      btn.textContent = "Entrar no CRM";
       btn.style.display = "block";
-      btn.style.marginTop = "20px";
       
       btn.onclick = () => {
         if (btn.dataset.loginBusy === "1") return;
@@ -3893,7 +3906,7 @@ async function checkAuthentication() {
           }
         }).finally(() => {
           btn.dataset.loginBusy = "0";
-          btn.textContent = prevText || "Entrar com Microsoft";
+          btn.textContent = prevText || "Entrar no CRM";
         });
       };
     } else {

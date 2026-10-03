@@ -5228,21 +5228,126 @@ circle.donut-segment {
 }
 .cprev-modal-body { overflow: auto; padding: 0; }
 .cprev-config-page { padding: 4px 0 28px; }
-.cprev-config-card { padding: 20px 22px; }
-.cprev-config-help {
-  margin: 12px 0 16px;
-  font-size: 0.86rem;
-  color: #475569;
-  max-width: 820px;
-  line-height: 1.45;
+.cprev-config-card {
+  padding: 20px 22px 18px;
+  max-width: 720px;
 }
-.cprev-prazo-table { font-size: 0.9rem; }
-.cprev-prazo-table td:last-child { width: 240px; }
+.cprev-config-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  color: #334155;
+  line-height: 1.45;
+  background: #f4f7f5;
+  border: 1px solid rgba(16, 84, 54, 0.1);
+  border-radius: 10px;
+}
+.cprev-config-help i {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 1px;
+  color: var(--color-primary);
+}
+.cprev-config-help p { margin: 0; }
+.cprev-prazo-list {
+  border: 1px solid rgba(16, 84, 54, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cprev-prazo-head,
+.cprev-prazo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  align-items: center;
+  gap: 16px;
+}
+.cprev-prazo-head {
+  padding: 10px 16px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.cprev-prazo-head span:last-child { text-align: right; }
+.cprev-prazo-row {
+  margin: 0;
+  padding: 10px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+}
+.cprev-prazo-row:nth-child(even) { background: #f8fafc; }
+.cprev-prazo-row.is-weekend { background: #fff7ed; }
+.cprev-prazo-row:hover { background: #ecfdf5; }
+.cprev-prazo-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.cprev-prazo-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 28px;
+  border-radius: 999px;
+  background: #105436;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  flex: 0 0 42px;
+}
+.cprev-prazo-row.is-weekend .cprev-prazo-chip {
+  background: var(--color-secondary);
+}
+.cprev-prazo-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+.cprev-prazo-field {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.cprev-prazo-field input {
+  width: 88px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  text-align: right;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+  background: #fff;
+}
+.cprev-prazo-field input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(16, 84, 54, 0.12);
+}
+.cprev-prazo-field span {
+  min-width: 32px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #64748b;
+}
 .cprev-config-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 /* Comercial · Tabelas vigentes */
