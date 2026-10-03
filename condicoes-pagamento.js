@@ -424,20 +424,14 @@ const CondicoesPagamentoApp = {
     tbody.innerHTML = rows.map((it) => {
       const f = this.flagOf(it.id);
       return `<tr>
-        <td style="padding:12px 14px;font-weight:800;color:#105436;white-space:nowrap;">${this.esc(it.id)}</td>
-        <td style="padding:12px 14px;">
-          <div style="font-weight:700;color:#0f172a;">${this.esc(it.name)}</div>
-          ${it.description ? `<div style="font-size:0.78rem;color:#64748b;margin-top:3px;">${this.esc(it.description)}</div>` : ""}
+        <td class="cpag-td-code">${this.esc(it.id)}</td>
+        <td>
+          <div class="cpag-name">${this.esc(it.name)}</div>
+          ${it.description ? `<div class="cpag-desc">${this.esc(it.description)}</div>` : ""}
         </td>
-        <td style="padding:12px 14px;">
-          ${this.switchHtml(it.id, "boletoSienge", f.boletoSienge, "Boleto Sienge")}
-        </td>
-        <td style="padding:12px 14px;">
-          ${this.switchHtml(it.id, "parcelaWebro", f.parcelaWebro, "Parcela Webro")}
-        </td>
-        <td style="padding:12px 14px;">
-          ${this.switchHtml(it.id, "repasseAdvogado", f.repasseAdvogado, "Repasse Advogado")}
-        </td>
+        <td>${this.switchHtml(it.id, "boletoSienge", f.boletoSienge, "Boleto Sienge")}</td>
+        <td>${this.switchHtml(it.id, "parcelaWebro", f.parcelaWebro, "Parcela Webro")}</td>
+        <td>${this.switchHtml(it.id, "repasseAdvogado", f.repasseAdvogado, "Repasse Advogado")}</td>
       </tr>`;
     }).join("");
     this.renderStatus();
@@ -448,33 +442,25 @@ const CondicoesPagamentoApp = {
     const root = document.getElementById("condicoes-pagamento-root");
     if (!root) return;
     root.innerHTML = `
-      <div style="padding:16px 18px 28px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">
-          <h2 style="margin:0;display:flex;align-items:center;gap:8px;font-size:1.15rem;font-weight:800;color:#0f172a;">
-            <i data-lucide="file-text" style="width:22px;color:var(--color-primary);"></i>
-            Condições de Pagamento
-          </h2>
-          <button type="button" class="btn btn-primary" onclick="CondicoesPagamentoApp.reload()" ${this.loading ? "disabled" : ""}>
-            <i data-lucide="refresh-cw" style="width:16px;"></i> Atualizar
+      <div class="cpag-page">
+        <div class="cpag-toolbar">
+          <input class="form-control cpag-search" id="cpag-search" placeholder="Filtrar por código ou nome…" value="${this.esc(this.q)}"
+            oninput="CondicoesPagamentoApp.q=this.value;CondicoesPagamentoApp.renderTable()">
+          <span id="cpag-status" class="cpag-status"></span>
+          <button type="button" class="btn btn-primary cpag-refresh" onclick="CondicoesPagamentoApp.reload()" ${this.loading ? "disabled" : ""}>
+            <i data-lucide="refresh-cw" style="width:14px;"></i> Atualizar
           </button>
         </div>
-
-        <div class="crm-card" style="padding:12px 14px;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-          <input class="form-control" id="cpag-search" placeholder="Filtrar por código ou nome…" value="${this.esc(this.q)}"
-            oninput="CondicoesPagamentoApp.q=this.value;CondicoesPagamentoApp.renderTable()" style="max-width:320px;font-size:0.85rem;">
-          <span id="cpag-status" style="font-size:0.8rem;color:#64748b;"></span>
-        </div>
-
-        <div class="crm-card" style="padding:0;overflow:hidden;">
-          <div style="overflow:auto;">
-            <table class="custom-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+        <div class="crm-card cpag-card">
+          <div class="crm-scroll-table cpag-table-wrap">
+            <table class="custom-table cpag-table">
               <thead>
                 <tr>
-                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;width:90px;">Código</th>
-                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;">Condição</th>
-                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Gera boleto (Sienge)</th>
-                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Parcela Webro</th>
-                  <th style="padding:10px 14px;background:#105436;color:#fff;text-align:left;min-width:180px;">Repasse Advogado</th>
+                  <th class="cpag-col-code">Código</th>
+                  <th>Condição</th>
+                  <th class="cpag-col-flag">Gera boleto (Sienge)</th>
+                  <th class="cpag-col-flag">Parcela Webro</th>
+                  <th class="cpag-col-flag">Repasse Advogado</th>
                 </tr>
               </thead>
               <tbody id="cpag-tbody"></tbody>

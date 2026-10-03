@@ -312,6 +312,7 @@ const TabelasVigentesApp = {
     if (hint) hint.hidden = ready;
     if (addBtn) addBtn.disabled = !ready;
     if (wrap) wrap.classList.toggle("is-context-locked", !ready);
+    this.paintKeyHint();
     const d = this.state.editor && this.state.editor.draft;
     if (!wrap || !d) return;
     (d.rows || []).forEach((r, i) => {
@@ -521,11 +522,40 @@ const TabelasVigentesApp = {
   },
 
   isDuplicate(d) {
+    const city = String((d && (d.cityId || d.city)) || "");
+    const emp = String((d && d.enterpriseId) || "");
+    const comp = String((d && d.competencia) || "");
+    if (!city || !emp || !comp) return false;
     return (this.state.tables || []).some((t) =>
       String(t.id) !== String(d.id)
-      && String(t.competencia || "") === String(d.competencia || "")
-      && String(t.enterpriseId || "") === String(d.enterpriseId || "")
+      && String(t.competencia || "") === comp
+      && String(t.cityId || t.city || "") === city
+      && String(t.enterpriseId || "") === emp
     );
+  },
+
+  editorKeyError() {
+    const ed = this.state.editor;
+    const d = ed && ed.draft;
+    if (!d) return "";
+    if (ed.mode === "copy" && ed.sourceCompetencia && String(d.competencia || "") === String(ed.sourceCompetencia)) {
+      return "A cópia precisa de uma competência diferente da tabela de origem (" + this.competenciaLabel(ed.sourceCompetencia) + ").";
+    }
+    if (this.isDuplicate(d)) {
+      return "Já existe tabela nesta competência, cidade e empreendimento.";
+    }
+    return "";
+  },
+
+  paintKeyHint() {
+    const el = document.getElementById("tvig-key-error");
+    const msg = this.editorKeyError();
+    if (el) {
+      el.textContent = msg;
+      el.hidden = !msg;
+    }
+    const saveBtn = document.querySelector("#tvig-editor-overlay .tvig-editor-foot .btn-primary");
+    if (saveBtn) saveBtn.disabled = !!msg;
   },
 
   setCompetencia(ym) {
@@ -625,10 +655,6 @@ const TabelasVigentesApp = {
     root.innerHTML = `
       <div class="tvig-page">
         <div class="search-filter-panel tvig-params">
-          <h2 class="tvig-page-title">
-            <i data-lucide="table" style="width:22px;height:22px;color:var(--color-primary);"></i>
-            Tabelas vigentes
-          </h2>
           <h3 class="tvig-section-title">Parâmetros da consulta</h3>
           <div class="tvig-filters">
             <div id="tvig-city-slot" class="tvig-filter-slot"></div>
@@ -679,6 +705,7 @@ const TabelasVigentesApp = {
       if (mode === "copy") {
         draft.id = this.uid();
         draft.createdAt = new Date().toISOString();
+        draft.competencia = "";
       }
     } else {
       draft = this.emptyTable();
@@ -694,6 +721,8 @@ const TabelasVigentesApp = {
     this.state.editor = {
       draft,
       mode: mode || "new",
+      sourceCompetencia: mode === "copy" && src ? String(src.competencia || "") : "",
+      sourceId: mode === "copy" && src ? String(src.id) : "",
       readOnly: mode === "view",
       title: titles[mode] || titles.new,
       openCity: false,
@@ -873,6 +902,7 @@ const TabelasVigentesApp = {
     if (!d) return;
     d[field] = val;
     if (field === "competencia") this.refreshEditorSheetLock();
+    else this.paintKeyHint();
   },
 
   onSheetInput(idx, field, el) {
@@ -1046,6 +1076,8 @@ const TabelasVigentesApp = {
               <label>Competência</label>
               <input type="month" class="form-control" value="${this.esc(d.competencia || "")}"
                 ${ro ? "disabled" : ""} onchange="TabelasVigentesApp.onEditorField('competencia', this.value)">
+              ${ed.mode === "copy" && ed.sourceCompetencia ? `<p class="tvig-copy-hint">Origem: ${this.esc(this.competenciaLabel(ed.sourceCompetencia))}. Escolha outro mês.</p>` : ""}
+              <p id="tvig-key-error" class="tvig-key-error" hidden></p>
             </div>
             <div id="tvig-ed-city-slot" class="tvig-ed-filter-slot"></div>
             <div id="tvig-ed-emp-slot" class="tvig-ed-filter-slot"></div>
@@ -1130,6 +1162,7 @@ const TabelasVigentesApp = {
       </div>`;
     this.paintEditorFilters();
     this.ensureSheetEvents();
+    this.paintKeyHint();
     if (window.lucide) lucide.createIcons();
     const keep = ed._keepFocus ? ed.sel : null;
     ed._keepFocus = false;
@@ -1687,8 +1720,10 @@ const TabelasVigentesApp = {
       alert("Selecione o empreendimento.");
       return;
     }
-    if (this.isDuplicate(d)) {
-      alert("Já existe uma tabela nesta competência para o empreendimento " + (d.enterpriseName || d.enterpriseId) + ".");
+    const keyErr = this.editorKeyError();
+    if (keyErr) {
+      alert(keyErr);
+      this.paintKeyHint();
       return;
     }
     const pending = (d.rows || []).findIndex((r, i) => this.rowNeedsPlano(r, i));

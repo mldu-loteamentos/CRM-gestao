@@ -404,6 +404,7 @@ const EstoqueComercialApp = {
     this.state.batimentoDate = data.batimentoDate || null;
     this.state.batimentoAt = data.batimentoAt || data.fetchedAt || null;
     this.state.batimentoDone = !!data.batimentoDone;
+    this.sealInferredFinance();
   },
 
   fbReady() {
@@ -625,6 +626,7 @@ const EstoqueComercialApp = {
     this.renderPills();
     this.paintBatimentoPauseBanner();
     if (this.state.inited && this.state.units.length) {
+      this.sealInferredFinance();
       this.fillEnterprisesFromUnits();
       this.fillUnitSelect();
       this.updateMeta();
@@ -760,18 +762,7 @@ const EstoqueComercialApp = {
     }
   },
 
-  hideManualFinanceButtons() {
-    const b1 = document.getElementById("est-btn-consultar");
-    if (b1 && b1.closest) {
-      const g = b1.closest(".est-stock-action-group");
-      if (g) g.style.display = "none";
-    }
-    const b2 = document.getElementById("est-btn-batimento");
-    if (b2 && b2.closest) {
-      const g = b2.closest(".est-stock-action-group");
-      if (g) g.style.display = "none";
-    }
-  },
+  hideManualFinanceButtons() {},
 
   hasFinanceFields() {
     return (this.state.units || []).some(u => {
@@ -790,11 +781,42 @@ const EstoqueComercialApp = {
 
   paintBatimentoPauseBanner() {
     const el = document.getElementById("est-batimento-pause");
-    if (!el) return;
-    el.style.display = "block";
-    el.innerHTML = "<strong>Classificar situação</strong> lê a ficha de ativos, inadimplentes e quitados. " +
-      "Recebido = valor pago + juros/multa − desconto. Vencido entra com acréscimo. " +
-      "O automático do dia só atualiza quem pagou em 5 dias ou está na fila.";
+    if (el) {
+      el.hidden = true;
+      el.style.display = "none";
+      el.innerHTML = "";
+    }
+  },
+
+  inferRelFin(u) {
+    if (!u || !this.isFinanceUnit(u)) return null;
+    if (u.relFin) return u.relFin;
+    if (u.quitado) return "quitado";
+    if (String(u.situation || "").toLowerCase().includes("distrat")) return "distratado";
+    if (this.isInadimplente(u)) return "inadimplente";
+    const bal = this.unitBalance(u);
+    const rec = u.receivedAmount != null ? Number(u.receivedAmount) : null;
+    if (bal != null && Number(bal) <= 0.009 && (rec > 0.009 || u.receivedLocked || u.statementDone)) return "quitado";
+    if (bal != null && Number(bal) > 0.009) return "adimplente";
+    if (u.statementDone || u.receivedLocked || this.displayContract(u) || u.contractId) return "adimplente";
+    return null;
+  },
+
+  sealInferredFinance() {
+    let n = 0;
+    this.state.units = (this.state.units || []).map((u) => {
+      if (!this.isFinanceUnit(u) || u.relFin) return u;
+      const inferred = this.inferRelFin(u);
+      if (!inferred) return u;
+      n += 1;
+      return {
+        ...u,
+        relFin: inferred,
+        quitado: inferred === "quitado" ? true : !!u.quitado,
+        statementDone: !!(u.statementDone || inferred)
+      };
+    });
+    return n;
   },
 
   requireEmpForApiHeavy() {
@@ -1170,22 +1192,37 @@ const EstoqueComercialApp = {
 
   financialStatus(u) {
     if (!this.isFinanceUnit(u)) return "—";
-    if (u.relFin === "distratado" || String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
-    if (u.relFin === "quitado" || u.quitado) return "Quitado";
-    if (u.relFin === "inadimplente" || this.isInadimplente(u)) return "Ativo inadimplente";
-    if (u.relFin === "adimplente") return "Ativo adimplente";
-    if (!u.relFin && !u.statementDone) return "A apurar";
+    const rel = u.relFin || this.inferRelFin(u);
+    if (rel === "distratado" || String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
+    if (rel === "quitado" || u.quitado) return "Quitado";
+    if (rel === "inadimplente" || this.isInadimplente(u)) return "Ativo inadimplente";
+    if (rel === "adimplente") return "Ativo adimplente";
     const bal = this.unitBalance(u);
     if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
     const fallback = this.defaultFinanceStatus(u);
     if (fallback === "quitado") return "Quitado";
     if (fallback === "inadimplente") return "Ativo inadimplente";
     if (fallback === "distratado") return "Distratado";
-    return u.relFin ? "Ativo adimplente" : "A apurar";
+    if (this.displayContract(u) || u.contractId || u.statementDone) return "Ativo adimplente";
+    return "A apurar";
   },
 
   money(v) {
-    return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  displayContractValue(u) {
+    const rec = u && u.receivedAmount != null && !Number.isNaN(Number(u.receivedAmount))
+      ? Number(u.receivedAmount)
+      : null;
+    const fin = this.financialStatus(u);
+    const balRaw = this.unitBalance(u);
+    const bal = fin === "Quitado"
+      ? 0
+      : (fin === "—" || fin === "Distratado" || balRaw == null ? null : Number(balRaw));
+    if (rec != null || bal != null) return (rec || 0) + (bal || 0);
+    if (u && u.contractValue != null && !Number.isNaN(Number(u.contractValue))) return Number(u.contractValue);
+    return null;
   },
 
   contractKey(u) {
@@ -1306,6 +1343,7 @@ const EstoqueComercialApp = {
         : (fin === "—" || fin === "Distratado" || bal == null
           ? "—"
           : this.money(bal));
+      const valorContrato = this.displayContractValue(u);
       return `<tr>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
         <td>${this.esc(u.enterpriseId)} / ${this.esc(empName)}</td>
@@ -1313,10 +1351,10 @@ const EstoqueComercialApp = {
         <td>${this.esc(this.mapCode(this.LEGAL_MAP, u.legalStock))}</td>
         <td>${this.esc(area)}</td>
         <td>${this.esc(contrato)}</td>
-        <td style="text-align:right;white-space:nowrap;">${u.contractValue != null ? this.esc(this.money(u.contractValue)) : "—"}</td>
-        <td style="text-align:right;white-space:nowrap;">${this.displayReceived(u) || "—"}</td>
+        <td class="est-num">${valorContrato == null ? "—" : this.esc(this.money(valorContrato))}</td>
+        <td class="est-num">${this.displayReceived(u) || "—"}</td>
         <td><span class="est-fin-chip ${finClass}">${this.esc(fin)}</span></td>
-        <td style="text-align:right;white-space:nowrap;">${this.esc(saldo)}</td>
+        <td class="est-num">${this.esc(saldo)}</td>
         <td style="white-space:nowrap;">${fin === "Quitado" ? this.esc(this.formatQuitacao(u)) : "—"}</td>
       </tr>`;
     }).join("");
@@ -2606,6 +2644,7 @@ const EstoqueComercialApp = {
       this._censusStillOpen = this.state.units.some(u =>
         (!empSel || String(u.enterpriseId) === String(empSel)) && this.unitNeedsCensus(u)
       );
+      this.sealInferredFinance();
       const inScope = u => !empSel || String(u.enterpriseId) === empSel;
       const qtdQ = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Quitado").length;
       const qtdI = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo inadimplente").length;

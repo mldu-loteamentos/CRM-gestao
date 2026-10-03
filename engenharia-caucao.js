@@ -3,9 +3,9 @@
  * Lista títulos a pagar de caução, agrupa por credor e permite
  * ajustar vencimento e liberar para pagamento.
  */
-const ECAU_LIBERA_LS = "crm_engenharia_caucao_liberados_v1";
+var ECAU_LIBERA_LS = "crm_engenharia_caucao_liberados_v1";
 
-const EngenhariaCaucaoApp = {
+window.EngenhariaCaucaoApp = {
   SKIP_OPS: {
     "Reaprop. Abatimento Adiantamento - entrada": 1,
     Recebimento: 1
@@ -1014,13 +1014,32 @@ const EngenhariaCaucaoApp = {
   },
 
   async init() {
-    const root = document.getElementById("engenharia-caucao-root");
-    if (!root) return;
+    let root = document.getElementById("engenharia-caucao-root");
+    if (!root) {
+      let pane = document.getElementById("tab-engenharia-caucao");
+      if (!pane) {
+        pane = document.createElement("section");
+        pane.id = "tab-engenharia-caucao";
+        pane.className = "tab-pane";
+        pane.style.display = "block";
+        const main = document.querySelector(".main-content");
+        if (main) main.appendChild(pane);
+      }
+      root = document.createElement("div");
+      root.id = "engenharia-caucao-root";
+      pane.appendChild(root);
+    }
     this.loadLiberated();
     if (!this.state.inited) {
-      const range = this.defaultRange();
-      this.state.startDate = range.startDate;
-      this.state.endDate = range.endDate;
+      try {
+        const range = this.defaultRange();
+        this.state.startDate = range.startDate;
+        this.state.endDate = range.endDate;
+      } catch (e) {
+        const t = this.isoToday();
+        this.state.startDate = t.slice(0, 8) + "01";
+        this.state.endDate = t;
+      }
       this.state.inited = true;
       this.renderPage();
       await this.loadCompanies();
@@ -1030,7 +1049,6 @@ const EngenhariaCaucaoApp = {
   }
 };
 
-window.EngenhariaCaucaoApp = EngenhariaCaucaoApp;
 window.mergeEngenhariaCaucaoLiberados = function (localStr, cloudStr) {
   const parse = (raw) => {
     try { return JSON.parse(raw || "{}") || {}; } catch (e) { return {}; }

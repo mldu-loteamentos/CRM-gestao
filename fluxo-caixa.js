@@ -202,6 +202,16 @@ const FluxoCaixaApp = {
     return /ADIANTAMENTO A PARCEIRO/.test(n);
   },
 
+  /** Qualquer conta de adiantamento (2.11.03 e demais linhas ADIANTAMENTO). */
+  isAdiantamentoAccount(categoryId, categoryName) {
+    if (this.isAdiantamentoParceirosAccount(categoryId, categoryName)) return true;
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /\bADIANTAMENTO\b/.test(n);
+  },
+
   /** Contas de saída de 04.01, sem o adiantamento (2.11.03). */
   isRepasseTerrenistaCashAccount(categoryId, categoryName) {
     const nk = this.normAccountKey(categoryId);
@@ -383,17 +393,17 @@ const FluxoCaixaApp = {
    * — redutora em RECEITAS (cancelamento) → negativo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
-   * Reaprop. / ABATE (abatimento de adiantamento): sempre negativo no DFC,
-   * na conta em que o movimento caiu (repasse, obras, marketing, pessoas…).
-   * 2.11.03 que não é ABATE: inverte o sinal da API (crédito +, débito −).
+   * Reaprop. / ABATE: negativo no DFC na conta em que o movimento foi
+   * apropriado (repasse, obras, marketing, pessoas…).
+   * Conta de adiantamento (2.11.03 etc.) com pagamento: positivo no DFC,
+   * inclusive quando o histórico é ABATE.
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
+    if (this.isAdiantamentoAccount(categoryId, categoryName)) return Math.abs(raw);
     if (role === "abatimento") return -Math.abs(raw);
-    const onAdiantParceiros = this.isAdiantamentoParceirosAccount(categoryId, categoryName);
-    if (onAdiantParceiros) return -raw;
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);

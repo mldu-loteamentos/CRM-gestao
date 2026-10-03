@@ -1176,4 +1176,11 @@ document.addEventListener("tabChanged", function (e) {
   if (e.detail === "compras-config") {
     ComprasPrevisoesApp.initConfig();
   }
+  if (e.detail === "engenharia-caucao" || e.detail === "construcao-engenharia") {
+    if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
+      EngenhariaCaucaoApp.init();
+    } else if (typeof window.bootEngenhariaCaucao === "function") {
+      window.bootEngenhariaCaucao();
+    }
+  }
 });

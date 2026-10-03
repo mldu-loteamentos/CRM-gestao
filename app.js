@@ -2753,10 +2753,60 @@ function evaluateOperatorRules(client, sale, clientBills, allClientSales) {
 // ----------------------------------------------------
 // 2. CONTROLE DO FLUXO SPA (ABAS E CONTEÚDO)
 // ----------------------------------------------------
+window.bootEngenhariaCaucao = function () {
+  var main = document.querySelector(".main-content");
+  var pane = document.getElementById("tab-engenharia-caucao");
+  if (!pane && main) {
+    pane = document.createElement("section");
+    pane.id = "tab-engenharia-caucao";
+    pane.className = "tab-pane";
+    pane.innerHTML = '<div id="engenharia-caucao-root"></div>';
+    main.appendChild(pane);
+  }
+  if (pane) pane.style.display = "block";
+  var root = document.getElementById("engenharia-caucao-root");
+  if (!root && pane) {
+    root = document.createElement("div");
+    root.id = "engenharia-caucao-root";
+    pane.appendChild(root);
+  }
+  var start = function () {
+    if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
+      EngenhariaCaucaoApp.init();
+      return true;
+    }
+    return false;
+  };
+  if (start()) return;
+  if (root && !String(root.innerHTML || "").trim()) {
+    root.innerHTML = '<div class="tvig-empty">Carregando gestão de caução…</div>';
+  }
+  if (!document.getElementById("engenharia-caucao-script")) {
+    var s = document.createElement("script");
+    s.id = "engenharia-caucao-script";
+    s.src = "engenharia-caucao.js?v=933";
+    s.onload = function () { start(); };
+    s.onerror = function () {
+      if (root) {
+        root.innerHTML = '<div class="tvig-empty">A tela de caução não carregou. Publique o arquivo <strong>engenharia-caucao.js</strong> e dê Ctrl+F5.</div>';
+      }
+    };
+    document.body.appendChild(s);
+  }
+  var n = 0;
+  var timer = setInterval(function () {
+    n += 1;
+    if (start() || n > 25) clearInterval(timer);
+  }, 200);
+};
+
 function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   if (tabId === 'construcao-compras') tabId = 'compras-previsoes';
   if (tabId === 'construcao-engenharia') tabId = 'engenharia-caucao';
+  if (tabId === 'engenharia-caucao' && typeof window.bootEngenhariaCaucao === 'function') {
+    window.bootEngenhariaCaucao();
+  }
   if (tabId === 'acessos') tabId = 'auditoria';
   if (tabId === 'regras-cobranca' || tabId === 'regras-negociacao') tabId = 'configuracoes';
   if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
@@ -3054,7 +3104,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       renderAnexosModule();
     }
   } else if (tabId === "engenharia-caucao") {
-    if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
+    if (typeof window.bootEngenhariaCaucao === "function") window.bootEngenhariaCaucao();
+    else if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
       EngenhariaCaucaoApp.init();
     }
   } else if (tabId === "contas-pagar") {

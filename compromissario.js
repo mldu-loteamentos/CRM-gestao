@@ -57,6 +57,8 @@ window.mergeCompromissarioCessao = function(localStr, cloudStr) {
   const parse = (raw) => {
     try { return JSON.parse(raw || "{}") || {}; } catch (e) { return {}; }
   };
+  const declared = (row) => row && (row.status === "none" || row.status === "has");
+  const stamp = (row) => Number((row && (row.declaredAt || row.uploadedAt)) || 0);
   const local = parse(localStr);
   const cloud = parse(cloudStr);
   const out = {};
@@ -67,13 +69,10 @@ window.mergeCompromissarioCessao = function(localStr, cloudStr) {
     new Set([...Object.keys(lm), ...Object.keys(cm)]).forEach((id) => {
       const a = lm[id] || {};
       const b = cm[id] || {};
-      const aOk = a.status === "none" || a.status === "has";
-      const bOk = b.status === "none" || b.status === "has";
-      if (aOk && !bOk) { out[month][id] = a; return; }
-      if (bOk && !aOk) { out[month][id] = b; return; }
-      const aAt = Number(a.declaredAt || a.uploadedAt || 0);
-      const bAt = Number(b.declaredAt || b.uploadedAt || 0);
-      out[month][id] = aAt >= bAt ? a : b;
+      if (declared(a) && !declared(b)) { out[month][id] = a; return; }
+      if (declared(b) && !declared(a)) { out[month][id] = b; return; }
+      if (!declared(a) && !declared(b)) { out[month][id] = stamp(a) >= stamp(b) ? a : b; return; }
+      out[month][id] = stamp(a) >= stamp(b) ? a : b;
     });
   });
   return JSON.stringify(out);
@@ -291,21 +290,21 @@ const CompromissarioApp = {
     const competencia = this.competenciaValue();
     const gate = this.isCessaoGateReady();
     const tabs = [
-      { id: 'parametros', label: '1. Parâmetros', locked: false },
-      { id: 'cessoes', label: '2. Cessões', locked: !competencia },
-      { id: 'notificar', label: '3. Notificar', locked: !competencia || !gate },
-      { id: 'followup', label: '4. Follow-up', locked: false }
+      { id: 'parametros', label: 'Parâmetros', locked: false },
+      { id: 'cessoes', label: 'Cessões', locked: !competencia },
+      { id: 'notificar', label: 'Notificar', locked: !competencia || !gate },
+      { id: 'followup', label: 'Follow-up', locked: false }
     ];
 
     root.innerHTML = `
       <div class="comp-pref-page">
-        <div class="comp-pref-tabs" role="tablist">
+        <div class="customer-tabs-menu comp-pref-tabs" role="tablist">
           ${tabs.map((t) => `
-            <button type="button" class="comp-pref-tab ${tab === t.id ? 'is-active' : ''} ${t.locked ? 'is-locked' : ''}"
+            <button type="button" class="customer-tab-btn ${tab === t.id ? 'active' : ''} ${t.locked ? 'is-locked' : ''}"
               ${t.locked ? 'disabled' : ''} onclick="CompromissarioApp.setUiTab('${t.id}')">${t.label}</button>
           `).join('')}
         </div>
-        <div id="comp-pref-tab-body"></div>
+        <div id="comp-pref-tab-body" class="comp-pref-tab-body"></div>
       </div>
     `;
     this.renderActiveTab();
@@ -338,26 +337,29 @@ const CompromissarioApp = {
         : (cfg.email || 'Sem e-mail');
       return `
         <tr>
-          <td style="font-weight:700;color:#0f172a;">${this.escHtml(city)}</td>
+          <td>${this.escHtml(city)}</td>
           <td><span class="comp-pref-pill ${ok ? 'is-ok' : 'is-warn'}">${this.escHtml(how)}</span></td>
-          <td style="color:#475569;font-size:0.82rem;">${this.escHtml(detail)}</td>
-          <td style="white-space:nowrap;text-align:right;">
-            <button type="button" class="btn btn-outline" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','view')">Visualizar</button>
-            <button type="button" class="btn btn-primary" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','edit')">Editar</button>
+          <td>${this.escHtml(detail)}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button type="button" class="tvig-ico" title="Visualizar" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','view')">
+              <i data-lucide="eye" style="width:15px;height:15px;"></i>
+            </button>
+            <button type="button" class="tvig-ico" title="Editar" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','edit')">
+              <i data-lucide="pencil" style="width:15px;height:15px;"></i>
+            </button>
           </td>
         </tr>`;
     }).join('');
     host.innerHTML = `
-      <div class="comp-pref-card">
-        <h3>Competência</h3>
-        <p class="comp-pref-help">Escolha o mês das movimentações. O relatório Sienge de 01/09 a 30/09 entra na competência <strong>setembro</strong> — a planilha também traz cessões antigas do mesmo lote; o IntegrA usa só a data do período.</p>
-        <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
-          <div style="max-width:240px;">
-            <label for="comp-pref-month">Mês de referência</label>
-            <input type="month" id="comp-pref-month" class="form-control" value="${this.escHtml(month)}"
+      <div class="search-filter-panel tvig-params">
+        <h3 class="tvig-section-title">Competência</h3>
+        <div class="tvig-filters">
+          <div class="tvig-filter-slot tvig-comp-slot">
+            <label class="tvig-comp-label" for="comp-pref-month">Mês de referência</label>
+            <input type="month" id="comp-pref-month" class="tvig-comp-input" value="${this.escHtml(month)}"
               onchange="CompromissarioApp.onMonthChange()">
           </div>
-          ${month ? `<button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões</button>` : ''}
+          ${month ? `<div class="tvig-filter-actions"><button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões</button></div>` : ''}
         </div>
       </div>
       ${missing.length ? `
@@ -365,21 +367,21 @@ const CompromissarioApp = {
           <strong>Cidades sem configuração:</strong> ${this.escHtml(missing.join(', '))}.
           Defina e-mail ou portal antes de notificar.
         </div>` : ''}
-      <div class="comp-pref-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-          <h3 style="margin:0;">Cidades cadastradas</h3>
-          <button type="button" class="btn btn-outline" onclick="CompromissarioApp.openConfigModal()">
-            <i data-lucide="settings" style="width:14px;"></i> Todas as configurações
-          </button>
-        </div>
-        ${cities.length ? `
-          <div class="table-container" style="overflow:auto;">
-            <table class="custom-table" style="font-size:0.85rem;">
-              <thead><tr><th>Cidade</th><th>Forma de notificar</th><th>Destino</th><th></th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>` : '<p style="color:#64748b;margin:0;">Nenhuma cidade com operador. Cadastre a carteira em Atribuição de Operadores.</p>'}
-      </div>
+      <h3 class="tvig-section-title">Cidades cadastradas</h3>
+      ${cities.length ? `
+        <div class="crm-card" style="padding:0;overflow:hidden;">
+          <table class="custom-table tvig-list-table">
+            <thead>
+              <tr>
+                <th>Cidade</th>
+                <th>Forma de notificar</th>
+                <th>Destino</th>
+                <th style="width:100px;text-align:right;">Ações</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>` : '<p style="color:#64748b;margin:0;">Nenhuma cidade com operador. Cadastre a carteira em Atribuição de Operadores.</p>'}
     `;
   },
 
@@ -391,15 +393,8 @@ const CompromissarioApp = {
       return;
     }
     host.innerHTML = `
-      <div class="comp-pref-card">
-        <p class="comp-pref-help" style="margin-top:0;">
-          Informe se cada empresa teve cessão no mês. O XLS do Sienge, no período da competência, lista o lote que cedeu
-          <strong>e também o histórico anterior daquele lote</strong> (ex.: compra em 03/10/2020 e cessão em 21/09/2026).
-          O IntegrA considera só o evento do mês e trata as datas anteriores como cedente.
-        </p>
-        <p id="comp-cessao-gate-hint" style="display:none;margin:0 0 12px;font-size:0.8rem;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 10px;"></p>
-        <div id="comp-cessao-panel"></div>
-      </div>
+      <p id="comp-cessao-gate-hint" class="comp-pref-alert" style="display:none;"></p>
+      <div id="comp-cessao-panel"></div>
     `;
     this.renderCessaoPanel();
   },
@@ -415,9 +410,6 @@ const CompromissarioApp = {
             <p class="comp-pref-help" style="margin:0;">Venda, distrato, troca e cessão da competência, agrupados por cidade.</p>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button type="button" class="btn btn-outline" onclick="CompromissarioApp.openConfigModal()">
-              <i data-lucide="settings" style="width:14px;"></i> Configurações de cidades
-            </button>
             <button type="button" class="btn btn-primary" id="comp-pref-btn-search" onclick="CompromissarioApp.fetchContracts()">
               <i data-lucide="search" style="width:16px;"></i> <span>Carregar movimentos</span>
             </button>
@@ -550,6 +542,8 @@ const CompromissarioApp = {
     if (c && c._city) return String(c._city).toUpperCase();
     if (c && c._cessao) {
       const rec = c._cessao;
+      const labeled = this.cityLabelFromCessao(rec);
+      if (labeled && !/^\d+$/.test(labeled)) return String(labeled).toUpperCase();
       const fromCessao = this.cityFromEnterprise(c.enterpriseName || rec.enterpriseName || rec.empresa);
       if (fromCessao && !/^\d+$/.test(fromCessao)) return fromCessao;
     }
@@ -634,9 +628,7 @@ const CompromissarioApp = {
   movementDocs(m) {
     const docs = [];
     if (m && m._movementType === 'Cessão') {
-      const rec = m._cessao || {};
-      const cid = rec.contractId || m.contractId;
-      if (cid) docs.push({ kind: 'CONTRATO', contract: { id: cid }, label: 'Contrato' });
+      docs.push({ kind: 'CESSAO', contract: { id: m.id }, label: 'Cessão de direitos' });
       return docs;
     }
     if (m && m._distrato) docs.push({ kind: 'DISTRATO', contract: m._distrato, label: 'Distrato' });
@@ -704,7 +696,7 @@ const CompromissarioApp = {
     const fromAnexos = !!(fileLoaded && this.state.files[id]._fromAnexos);
     const fileName = fileLoaded
       ? (fromAnexos ? `IntegrA: ${this.state.files[id].name}` : this.state.files[id].name)
-      : 'Buscando PDF / arraste aqui...';
+      : (String(label || '').toLowerCase().includes('cess') ? 'Anexe o PDF da cessão' : 'Buscando PDF / arraste aqui...');
     const dropBorder = fileLoaded ? (fromAnexos ? '#0ea5e9' : '#10b981') : '#cbd5e1';
     const dropBg = fileLoaded ? (fromAnexos ? '#f0f9ff' : '#ecfdf5') : '#f8fafc';
     const dropColor = fileLoaded ? (fromAnexos ? '#0369a1' : '#047857') : '#64748b';
@@ -1072,6 +1064,10 @@ const CompromissarioApp = {
     Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
       if (!row) return;
       const prev = next[id] || next[String(id)] || next[Number(id)] || {};
+      if ((row.status == null || row.status === '') && (prev.status === 'none' || prev.status === 'has')) {
+        next[id] = prev;
+        return;
+      }
       const incomingEmpty = !row.fileName && row.status !== 'none' && !(Array.isArray(row.records) && row.records.length);
       const prevHasFile = !!(prev.fileName || (Array.isArray(prev.records) && prev.records.length));
       if (incomingEmpty && prevHasFile && row.status !== 'none') {
@@ -1187,7 +1183,7 @@ const CompromissarioApp = {
         hint.textContent = '';
       } else {
         hint.style.display = 'block';
-        hint.textContent = `Pendência de cessão: ${pending.length} empresa(s). Informe se houve cessão e anexe o relatório Sienge quando houver — sem isso não é permitido buscar vendas/distratos.`;
+        hint.textContent = `${pending.length} empresa(s) ainda sem declaração nesta competência.`;
       }
     }
   },
@@ -1230,99 +1226,86 @@ const CompromissarioApp = {
     const focusId = opts && opts.focusCompanyId;
     const companies = this.getActivePortfolioCompanies();
     const month = this.state.cessaoMonth || '';
+    const monthLabel = this.formatCessaoDate(month + '-01') || month;
     const ready = this.isCessaoGateReady();
-    const badge = ready
-      ? '<span style="font-size:0.72rem;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Pronto para buscar</span>'
-      : '<span style="font-size:0.72rem;font-weight:700;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">Obrigatório antes da busca</span>';
+    const pending = this.getCessaoPendingCompanies().length;
+    const citySummary = this.cessaoCitySummary();
+    const totalMonth = citySummary.reduce((n, x) => n + x[1], 0);
 
     const rows = companies.map((c) => {
       const row = this.state.cessaoByCompany[c.id] || {};
       const status = row.status;
       const hasFile = !!(row.fileName);
-      const recCount = Array.isArray(row.records) ? row.records.length : 0;
+      const recs = this.normalizeCessaoRecords(row.records);
       const noneChecked = status === 'none' ? 'checked' : '';
       const hasChecked = status === 'has' ? 'checked' : '';
       const uploadDisabled = status !== 'has' ? 'disabled' : '';
-      let statusLine = '<span style="color:#94a3b8;">Aguardando declaração</span>';
-      if (status === 'none') statusLine = '<span style="color:#047857;font-weight:600;">Sem cessão neste período (salvo)</span>';
+      const tone = status === 'none' ? 'is-none' : (status === 'has' && hasFile ? 'is-has' : (status === 'has' ? 'is-wait' : 'is-pending'));
+      let extra = '';
       if (status === 'has' && hasFile) {
-        const cessaoN = this.normalizeCessaoRecords(row.records).length;
-        statusLine = `<span style="color:#0369a1;font-weight:600;">Relatório: ${this.escHtml(row.fileName)}</span>` +
-          (cessaoN ? ` <span style="color:#64748b;">· ${cessaoN} cessão(ões)</span>` : '') +
-          (row.parseNote && (/nenhum|confira|outras datas|não identificado|falhou|parcial|PDF/i.test(row.parseNote) || !cessaoN)
-            ? ` <span style="color:#b45309;">· ${this.escHtml(row.parseNote)}</span>` : '');
+        extra = `<div class="comp-cessao-file">${this.escHtml(row.fileName)}${recs.length ? ' · ' + recs.length + ' cessão(ões) no mês' : ''}</div>`;
+        if (recs.length) {
+          extra += '<table class="comp-cessao-mini"><tbody>' + recs.map((r) => {
+            const atuais = (r.atuais || []).map((x) => (x.principal ? '(P)* ' : '') + (x.name || x.id)).join(', ');
+            const ant = (r.anteriores || []).map((x) => x.name || x.id).join(', ');
+            const city = this.cityLabelFromCessao(r);
+            return `<tr>
+              <td>${this.escHtml(r.data || this.formatCessaoDate(r.dataIso) || '—')}</td>
+              <td>${this.escHtml(city || '—')}</td>
+              <td>${this.escHtml(r.titulo || '—')}</td>
+              <td>${this.escHtml(atuais || '—')}</td>
+              <td>${this.escHtml(ant || '—')}</td>
+            </tr>`;
+          }).join('') + '</tbody></table>';
+        }
       } else if (status === 'has' && !hasFile) {
-        statusLine = '<span style="color:#b45309;font-weight:600;">Envie o relatório padrão Sienge (XLS/XLSX/CSV)</span>';
+        extra = '<div class="comp-cessao-file is-warn">Anexe o XLS do Sienge</div>';
       }
-      const recs = this.normalizeCessaoRecords(row.records);
-      const preview = recs.slice(0, 6).map((r) => {
-        const atuais = (r.atuais || []).map((c) => (c.principal ? '(P)* ' : '* ') + (c.name || c.id)).join(', ');
-        const ant = (r.anteriores || []).map((c) => c.name || c.id).join(', ');
-        const city = this.cityLabelFromCessao(r);
-        return `<div style="font-size:0.75rem;color:#334155;line-height:1.35;">
-          <strong>${this.escHtml(r.data || this.formatCessaoDate(r.dataIso))}</strong>
-          ${city ? ` · ${this.escHtml(city)}` : ''}
-          · título ${this.escHtml(r.titulo || '—')}
-          ${atuais ? ` · atual ${this.escHtml(atuais)}` : ''}
-          ${ant ? ` · cedente ${this.escHtml(ant)}` : ''}
-        </div>`;
-      }).join('');
-
       return `
-        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;background:#f8fafc;display:flex;flex-direction:column;gap:10px;">
-          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;">
-            <div style="font-weight:700;color:#0f172a;font-size:0.9rem;">${c.id} — ${this.escHtml(c.name)}</div>
-            <div style="font-size:0.78rem;">${statusLine}</div>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
-            <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;color:#334155;cursor:pointer;font-weight:600;">
-              <input type="radio" name="comp-cessao-${c.id}" value="none" ${noneChecked}
-                onchange="CompromissarioApp.setCessaoStatus('${c.id}','none')">
-              Não teve cessão
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;color:#334155;cursor:pointer;font-weight:600;">
-              <input type="radio" name="comp-cessao-${c.id}" value="has" ${hasChecked}
-                onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')">
-              Teve cessão — anexar relatório
-            </label>
-            <div style="display:inline-flex;align-items:center;gap:8px;">
-              <input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf"
-                style="font-size:0.78rem;max-width:220px;" ${uploadDisabled}
-                onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">
-              ${hasFile ? `<button type="button" onclick="CompromissarioApp.clearCessaoFile('${c.id}')" style="padding:4px 10px;border:1px solid #f37021;background:#fff7ed;color:#c2410c;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;">Remover</button>` : ''}
+        <tr class="comp-cessao-row ${tone}">
+          <td class="comp-cessao-emp">${c.id} — ${this.escHtml(c.name)}</td>
+          <td>
+            <div class="comp-cessao-choice">
+              <label><input type="radio" name="comp-cessao-${c.id}" value="none" ${noneChecked}
+                onchange="CompromissarioApp.setCessaoStatus('${c.id}','none')"> Não teve</label>
+              <label><input type="radio" name="comp-cessao-${c.id}" value="has" ${hasChecked}
+                onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')"> Teve</label>
             </div>
-          </div>
-          ${preview ? `<div style="background:#fff;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 10px;">${preview}${recs.length > 6 ? `<div style="font-size:0.72rem;color:#64748b;">+ ${recs.length - 6} cessão(ões)</div>` : ''}</div>` : ''}
-        </div>`;
+          </td>
+          <td>
+            <div class="comp-cessao-upload">
+              <input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
+                onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">
+              ${hasFile ? `<button type="button" class="btn btn-cancel" style="padding:4px 10px;font-size:0.74rem;" onclick="CompromissarioApp.clearCessaoFile('${c.id}')">Remover</button>` : ''}
+            </div>
+            ${extra}
+          </td>
+        </tr>`;
     }).join('');
 
-    const citySummary = this.cessaoCitySummary();
-    const cityHtml = citySummary.length
-      ? `<div class="comp-pref-alert" style="background:#ecfdf5;border-color:#a7f3d0;color:#047857;">
-          <strong>Cidades com cessão neste mês:</strong>
-          ${citySummary.map(([city, n]) => `${this.escHtml(city)} (${n})`).join(' · ')}
-        </div>`
-      : '';
     panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-        <div>
-          <h3 style="margin:0 0 6px 0;color:#1e293b;font-size:1rem;display:flex;align-items:center;gap:8px;">
-            <i data-lucide="file-stack" style="width:18px;color:#64748b;"></i>
-            Relatórios de Cessão por Empresa
-          </h3>
-          <p style="margin:0;font-size:0.8rem;color:#64748b;max-width:720px;line-height:1.45;">
-            Informe se a empresa teve cessão no mês <strong>${this.escHtml(month)}</strong> e anexe o XLS do Sienge.
-            O arquivo lista o lote que cedeu e o histórico antigo do mesmo lote — só a data da competência vira movimento.
-          </p>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          ${badge}
+      <div class="search-filter-panel tvig-params">
+        <h3 class="tvig-section-title">Cessões · ${this.escHtml(month || monthLabel)}</h3>
+        <div class="comp-cessao-toolbar">
+          <div class="comp-cessao-stats">
+            ${pending ? `<span class="comp-pref-pill is-warn">${pending} empresa(s) sem declaração</span>` : `<span class="comp-pref-pill is-ok">Competência gravada</span>`}
+            ${totalMonth ? `<span class="comp-pref-pill is-ok">${totalMonth} cessão(ões) no mês${citySummary.length ? ' · ' + citySummary.map(([city, n]) => this.escHtml(city) + ' (' + n + ')').join(', ') : ''}</span>` : ''}
+          </div>
           ${ready ? `<button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('notificar')">Continuar para Notificar</button>` : ''}
         </div>
       </div>
-      ${cityHtml}
-      <div id="comp-cessao-list" style="display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow:auto;">
-        ${companies.length ? rows : '<p style="color:#64748b;font-size:0.85rem;margin:0;">Nenhuma empresa com carteira ativa configurada.</p>'}
+      <div class="crm-card" style="padding:0;overflow:hidden;" id="comp-cessao-list">
+        ${companies.length ? `
+          <table class="custom-table tvig-list-table comp-cessao-table">
+            <thead>
+              <tr>
+                <th>Empresa</th>
+                <th style="width:210px;">Neste mês</th>
+                <th>Relatório / cessões</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>` : '<p style="color:#64748b;padding:16px;">Nenhuma empresa com carteira ativa.</p>'}
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
@@ -2207,25 +2190,35 @@ const CompromissarioApp = {
     return out;
   },
 
+  cessaoMovementKey(cid, rec, fallback) {
+    return [
+      String(cid || ''),
+      this.digitsOnly(rec && rec.titulo) || (rec && rec.contratoNumero) || (rec && rec.documento) || '',
+      this.resolveCessaoIso(rec) || (rec && rec.data) || '',
+      fallback == null ? '' : String(fallback)
+    ].join('|');
+  },
+
   buildCessaoMovements(monthVal) {
     const movements = [];
     const seen = new Set();
     Object.entries(this.cessaoRowsForMonth(monthVal)).forEach(([cid, row]) => {
       if (!row || row.status !== 'has') return;
-      this.normalizeCessaoRecords(row.records).forEach((rec) => {
+      this.normalizeCessaoRecords(row.records).forEach((rec, idx) => {
         if (!this.cessaoInSearchMonth(rec, monthVal)) return;
-        const key = String(cid) + '|' + (this.digitsOnly(rec.titulo) || rec.contratoNumero || rec.documento || movements.length);
+        const key = this.cessaoMovementKey(cid, rec, idx);
         if (seen.has(key)) return;
         seen.add(key);
         const atuais = rec.atuais || [];
         const enterpriseName = rec.enterpriseName || this.enterpriseNameFromCessao(rec) || String(rec.empresa || '').replace(/^\d+\s*-\s*/, '');
         const enterpriseId = rec.enterpriseId || ((String(rec.empresa || '').match(/^(\d+)/) || [])[1] || '');
+        const city = this.cityLabelFromCessao(rec) || this.cityFromEnterprise(enterpriseName || rec.empresa);
         movements.push({
-          id: 'cessao-' + cid + '-' + (rec.titulo || rec.contratoNumero || movements.length),
+          id: 'cessao-' + cid + '-' + (this.digitsOnly(rec.titulo) || rec.contratoNumero || idx) + '-' + (this.resolveCessaoIso(rec) || idx),
           _movementType: 'Cessão',
           _operationType: 'Cessão',
           _cessao: rec,
-          _city: this.cityFromEnterprise(enterpriseName || rec.empresa),
+          _city: city,
           _unitName: rec.unitName || '',
           enterpriseId,
           enterpriseName,
@@ -2381,11 +2374,9 @@ const CompromissarioApp = {
     const countLabel = document.getElementById('comp-pref-count');
 
     if (!this.state.contracts || this.state.contracts.length === 0) {
-      const skippedEmpty = Number(this.state._skippedIncorporacao) || 0;
       tbody.innerHTML = `
         <div style="text-align: center; padding: 40px; color: #94a3b8;">
           Nenhum contrato encontrado para este período.
-          ${skippedEmpty > 0 ? `<div style="margin-top:12px;color:#166534;font-size:0.85rem;">${skippedEmpty} contrato(s) de Incorporação foram omitidos (sem lotes de exceção).</div>` : ''}
         </div>
       `;
       countLabel.textContent = '0 encontrados';
@@ -2393,7 +2384,6 @@ const CompromissarioApp = {
     }
 
     countLabel.textContent = `${this.state.contracts.length} movimento(s)`;
-    const skipped = Number(this.state._skippedIncorporacao) || 0;
 
     const groups = {};
     let configs = this.loadConfigs();
@@ -2424,17 +2414,6 @@ const CompromissarioApp = {
 
     let html = '';
 
-    if (skipped > 0) {
-      html += `
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #16a34a; border-radius: 6px; padding: 12px 15px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 10px;">
-          <i data-lucide="building-2" style="width: 20px; color: #16a34a; margin-top: 2px;"></i>
-          <div>
-            <h4 style="margin: 0 0 5px 0; color: #14532d; font-size: 0.9rem;">Incorporação — notificação dispensada</h4>
-            <p style="margin: 0; color: #166534; font-size: 0.8rem;">${skipped} contrato(s) de empreendimento(s) tipo Incorporação foram ocultados. Só entram na fila lotes marcados como exceção (fora da incorporação) no Centro de Custo.</p>
-          </div>
-        </div>
-      `;
-    } 
     // Alerta de cidades sem e-mail
     const missingEmails = Object.keys(groups).filter(city => {
       const cityKey = this.normalizeCityKey(city);
@@ -2446,7 +2425,7 @@ const CompromissarioApp = {
           <i data-lucide="alert-triangle" style="width: 20px; color: #ef4444; margin-top: 2px;"></i>
           <div>
             <h4 style="margin: 0 0 5px 0; color: #991b1b; font-size: 0.9rem;">Atenção: E-mails Não Cadastrados</h4>
-            <p style="margin: 0; color: #b91c1c; font-size: 0.8rem;">As seguintes prefeituras possuem distratos na fila, mas não têm um e-mail configurado: <strong>${missingEmails.join(', ')}</strong>. Por favor, clique em "Configurações" no topo para preencher.</p>
+            <p style="margin: 0; color: #b91c1c; font-size: 0.8rem;">As seguintes prefeituras possuem movimentos na fila, mas não têm e-mail ou portal configurado: <strong>${missingEmails.join(', ')}</strong>. Ajuste na aba Parâmetros.</p>
           </div>
         </div>
       `;
@@ -2622,130 +2601,103 @@ const CompromissarioApp = {
     return raw != null ? String(raw).trim() : '';
   },
 
-  openConfigModal(focusCity) {
-    let existingModal = document.getElementById('comp-config-modal');
+  cfgSid(city) {
+    return this.normalizeCityKey(city).replace(/[^A-Z0-9]+/g, '_');
+  },
+
+  openConfigModal(cityName) {
+    const city = String(cityName || '');
+    if (!city) return;
+    const existingModal = document.getElementById('comp-config-modal');
     if (existingModal) existingModal.remove();
 
-    let configs = this.loadConfigs();
-
-    const sortedCities = this.getCitiesWithAssignedOperator().sort((a, b) => {
-      const activeA = configs[this.normalizeCityKey(a)]?.ativo ? 1 : 0;
-      const activeB = configs[this.normalizeCityKey(b)]?.ativo ? 1 : 0;
-      if (activeA !== activeB) return activeB - activeA;
-      return a.localeCompare(b);
-    });
-
-    const citiesListHtml = sortedCities.map(city => {
-      const cityCfg = configs[this.normalizeCityKey(city)] || {};
-      const currentEmail = cityCfg.email || '';
-      const currentReq = cityCfg.reqEspecial ? 'checked' : '';
-      const isActive = cityCfg.ativo ? 'checked' : '';
-      const opacity = cityCfg.ativo ? '1' : '0.5';
-      const bgColor = cityCfg.ativo ? '#10b981' : '#cbd5e1';
-      const transX = cityCfg.ativo ? '16px' : '0px';
-
-      return `
-        <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e2e8f0; transition: opacity 0.2s;" id="cfg-row-${city}">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h5 style="margin: 0; font-size: 0.85rem; color: #1e293b;">${city}</h5>
-          </div>
-          <div style="display: flex; gap: 20px; align-items: flex-start;">
-            <div style="flex: 1;">
-              <div id="email-field-${city}" style="display: ${cityCfg.hasPortal ? 'none' : 'block'};">
-                <input type="text" id="cfg-email-${city}" placeholder="E-mail da prefeitura" value="${currentEmail}" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;">
-              </div>
-              <div id="portal-fields-${city}" style="display: ${cityCfg.hasPortal ? 'flex' : 'none'}; gap: 10px; flex-wrap: wrap;">
-                <input type="text" id="cfg-url-${city}" placeholder="URL do site (ex: https://...)" value="${cityCfg.portalUrl || ''}" style="flex: 2; min-width: 150px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;">
-                <input type="text" id="cfg-login-${city}" placeholder="Login" value="${cityCfg.portalLogin || ''}" style="flex: 1; min-width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;">
-                <input type="password" id="cfg-senha-${city}" placeholder="Senha" value="${cityCfg.portalSenha || ''}" style="flex: 1; min-width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem;">
-              </div>
-            </div>
-            <div style="width: 250px; display: flex; flex-direction: column; gap: 8px;">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 5px;">
-                  <input type="checkbox" id="cfg-req-${city}" ${currentReq} style="accent-color: #105436; width: 16px; height: 16px; cursor: pointer;" onchange="document.getElementById('cfg-btn-tpl-${city}').style.display = this.checked ? 'inline-block' : 'none'">
-                  <label for="cfg-req-${city}" style="font-size: 0.85rem; color: #475569; cursor: pointer; font-weight: 500;">Exige Requerimento</label>
-                </div>
-                <button id="cfg-btn-tpl-${city}" style="display: ${cityCfg.reqEspecial ? 'inline-block' : 'none'}; padding: 2px 8px; font-size: 0.7rem; border-radius: 4px; background: #e2e8f0; border: 1px solid #cbd5e1; cursor: pointer; color: #475569;" onclick="CompromissarioApp.editTemplate('${city}')">Editar Padrão</button>
-              </div>
-              <div style="display: flex; align-items: center; gap: 5px;">
-                <input type="checkbox" id="cfg-agrupar-${city}" ${cityCfg.agrupar ? 'checked' : ''} style="accent-color: #105436; width: 16px; height: 16px; cursor: pointer;">
-                <label for="cfg-agrupar-${city}" style="font-size: 0.85rem; color: #475569; cursor: pointer; font-weight: 500;">Agrupar em Planilha</label>
-              </div>
-              <div style="display: flex; align-items: center; gap: 5px;">
-                <input type="checkbox" id="cfg-portal-${city}" ${cityCfg.hasPortal ? 'checked' : ''} style="accent-color: #105436; width: 16px; height: 16px; cursor: pointer;" onchange="
-                  document.getElementById('portal-fields-${city}').style.display = this.checked ? 'flex' : 'none';
-                  document.getElementById('email-field-${city}').style.display = this.checked ? 'none' : 'block';
-                ">
-                <label for="cfg-portal-${city}" style="font-size: 0.85rem; color: #475569; cursor: pointer; font-weight: 500;">Usa Portal Online</label>
-              </div>
-            </div>
-            
-          </div>
-        </div>
-      `;
-    }).join('');
-
+    const sid = this.cfgSid(city);
+    const cityCfg = this.loadConfigs()[this.normalizeCityKey(city)] || {};
+    const esc = this.escHtml(city);
     const modalHtml = `
-      <div id="comp-config-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center;">
-        <div style="background: #fff; border-radius: 8px; width: 800px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b;">Configurações de Prefeituras</h3>
-            <button onclick="document.getElementById('comp-config-modal').remove()" style="background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">&times;</button>
+      <div id="comp-config-modal" class="modal-overlay active" data-city="${esc}" style="z-index:9999;">
+        <div class="modal-box" style="width:min(640px,96vw);max-height:90vh;padding:0;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+          <div class="modal-header" style="margin:0;padding:16px 20px;">
+            <h3 style="margin:0;">Editar ${esc}</h3>
+            <button type="button" class="modal-close" onclick="document.getElementById('comp-config-modal').remove()">&times;</button>
           </div>
-          <div style="padding: 20px; overflow-y: auto; flex: 1;">
-            ${sortedCities.length === 0 ? '<p style="color:#64748b; font-size:0.9rem;">Nenhuma cidade com operador atrelado. Cadastre a carteira em Atribuição de Operadores para configurar as prefeituras com antecedência.</p>' : citiesListHtml}
+          <div style="padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px;">
+            <label class="moura-switch">
+              <input type="checkbox" id="cfg-portal-${sid}" ${cityCfg.hasPortal ? 'checked' : ''}
+                onchange="document.getElementById('portal-fields-${sid}').style.display=this.checked?'grid':'none';document.getElementById('email-field-${sid}').style.display=this.checked?'none':'block';">
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">Usa portal online</span>
+            </label>
+            <div id="email-field-${sid}" style="display:${cityCfg.hasPortal ? 'none' : 'block'};">
+              <label class="tvig-comp-label" for="cfg-email-${sid}">E-mail da prefeitura</label>
+              <input type="text" id="cfg-email-${sid}" class="form-control" placeholder="protocolo@prefeitura.gov.br" value="${this.escHtml(cityCfg.email || '')}">
+            </div>
+            <div id="portal-fields-${sid}" style="display:${cityCfg.hasPortal ? 'grid' : 'none'};gap:10px;">
+              <div>
+                <label class="tvig-comp-label" for="cfg-url-${sid}">URL do portal</label>
+                <input type="text" id="cfg-url-${sid}" class="form-control" placeholder="https://..." value="${this.escHtml(cityCfg.portalUrl || '')}">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                  <label class="tvig-comp-label" for="cfg-login-${sid}">Login</label>
+                  <input type="text" id="cfg-login-${sid}" class="form-control" value="${this.escHtml(cityCfg.portalLogin || '')}">
+                </div>
+                <div>
+                  <label class="tvig-comp-label" for="cfg-senha-${sid}">Senha</label>
+                  <input type="password" id="cfg-senha-${sid}" class="form-control" value="${this.escHtml(cityCfg.portalSenha || '')}">
+                </div>
+              </div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:#334155;font-weight:600;">
+              <input type="checkbox" id="cfg-req-${sid}" ${cityCfg.reqEspecial ? 'checked' : ''} style="accent-color:#105436;width:16px;height:16px;"
+                onchange="document.getElementById('cfg-btn-tpl-${sid}').style.display=this.checked?'inline-flex':'none'">
+              Exige requerimento
+              <button type="button" id="cfg-btn-tpl-${sid}" class="btn btn-outline" style="display:${cityCfg.reqEspecial ? 'inline-flex' : 'none'};padding:4px 8px;font-size:0.72rem;" onclick="CompromissarioApp.editTemplate('${esc}')">Editar padrão</button>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:#334155;font-weight:600;">
+              <input type="checkbox" id="cfg-agrupar-${sid}" ${cityCfg.agrupar ? 'checked' : ''} style="accent-color:#105436;width:16px;height:16px;">
+              Agrupar em planilha
+            </label>
           </div>
-          <div style="padding: 15px 20px; border-top: 1px solid #e2e8f0; text-align: right; background: #f8fafc; border-radius: 0 0 8px 8px; display:flex;justify-content:flex-end;gap:8px;">
+          <div class="tvig-editor-foot">
             <button type="button" class="btn btn-cancel" onclick="document.getElementById('comp-config-modal').remove()">Cancelar</button>
-            <button type="button" class="btn btn-primary" onclick="CompromissarioApp.saveConfigModal()">Salvar Configurações</button>
+            <button type="button" class="btn btn-primary" onclick="CompromissarioApp.saveConfigModal()">Salvar</button>
           </div>
         </div>
       </div>
     `;
 
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-    if (focusCity) {
-      const row = document.getElementById('cfg-row-' + focusCity);
-      if (row) {
-        row.classList.add('comp-pref-city-focus');
-        row.scrollIntoView({ block: 'center' });
-      }
-    }
+    if (window.lucide) window.lucide.createIcons();
   },
 
   async saveConfigModal() {
-    let configs = this.loadConfigs();
-
-    const citiesToSave = this.getCitiesWithAssignedOperator();
-    citiesToSave.forEach(city => {
-      const cityKey = this.normalizeCityKey(city);
-      const emailEl = document.getElementById(`cfg-email-${city}`);
-      const reqEl = document.getElementById(`cfg-req-${city}`);
-      const agruparEl = document.getElementById(`cfg-agrupar-${city}`);
-      const ativoEl = document.getElementById(`cfg-ativo-${city}`);
-      const portalEl = document.getElementById(`cfg-portal-${city}`);
-      const urlEl = document.getElementById(`cfg-url-${city}`);
-      const loginEl = document.getElementById(`cfg-login-${city}`);
-      const senhaEl = document.getElementById(`cfg-senha-${city}`);
-
-      if (emailEl) {
-        configs[cityKey] = {
-          ...(configs[cityKey] || {}), // Keep previous properties like template
-          email: emailEl.value.trim(),
-          reqEspecial: reqEl.checked,
-          agrupar: agruparEl.checked,
-          ativo: ativoEl ? ativoEl.checked : true,
-          hasPortal: portalEl ? portalEl.checked : false,
-          portalUrl: urlEl ? urlEl.value : '',
-          portalLogin: loginEl ? loginEl.value : '',
-          portalSenha: senhaEl ? senhaEl.value : '',
-          updatedAt: Date.now()
-        };
-      }
-    });
-
     const modal = document.getElementById('comp-config-modal');
+    const city = modal && modal.getAttribute('data-city');
+    if (!city) return;
+    const sid = this.cfgSid(city);
+    const cityKey = this.normalizeCityKey(city);
+    const configs = this.loadConfigs();
+    const emailEl = document.getElementById('cfg-email-' + sid);
+    const reqEl = document.getElementById('cfg-req-' + sid);
+    const agruparEl = document.getElementById('cfg-agrupar-' + sid);
+    const portalEl = document.getElementById('cfg-portal-' + sid);
+    const urlEl = document.getElementById('cfg-url-' + sid);
+    const loginEl = document.getElementById('cfg-login-' + sid);
+    const senhaEl = document.getElementById('cfg-senha-' + sid);
+    configs[cityKey] = {
+      ...(configs[cityKey] || {}),
+      email: emailEl ? emailEl.value.trim() : '',
+      reqEspecial: !!(reqEl && reqEl.checked),
+      agrupar: !!(agruparEl && agruparEl.checked),
+      ativo: true,
+      hasPortal: !!(portalEl && portalEl.checked),
+      portalUrl: urlEl ? urlEl.value : '',
+      portalLogin: loginEl ? loginEl.value : '',
+      portalSenha: senhaEl ? senhaEl.value : '',
+      updatedAt: Date.now()
+    };
+
     try {
       await this.persistConfigs(configs, true);
       if (modal) modal.remove();
@@ -2807,10 +2759,18 @@ const CompromissarioApp = {
     }
   },
 
+  movementHasPdf(c) {
+    return this.movementDocs(c).some((d) => this.state.files[String(d.contract && d.contract.id)]);
+  },
+
   sendEmail(id) {
     if (!this.assertCessaoGate('notificar troca de venda/distrato')) return;
     const c = this.state.contracts.find(x => String(x.id) === String(id));
     if (!c) return;
+    if ((c._movementType || c._operationType) === 'Cessão' && !this.movementHasPdf(c)) {
+      alert('Anexe o PDF da cessão de direitos antes de notificar a prefeitura.');
+      return;
+    }
 
     if (this.state.notifiedContracts[id]) {
       if (!confirm("Você já preparou um rascunho de e-mail para este contrato anteriormente. Deseja criar um novo rascunho mesmo assim?")) {
@@ -3008,6 +2968,11 @@ Botucatu, [DATA]
     const groupContracts = this.state.contracts.filter(c => this.normalizeCityKey(this.cityOfContract(c)) === cityKey);
 
     if (groupContracts.length === 0) return;
+    const missingCessaoPdf = groupContracts.filter((c) => (c._movementType || c._operationType) === 'Cessão' && !this.movementHasPdf(c));
+    if (missingCessaoPdf.length) {
+      alert('Anexe o PDF da cessão de direitos em ' + missingCessaoPdf.length + ' movimento(s) antes de notificar a prefeitura.');
+      return;
+    }
 
     let csvContent = "data:text/csv;charset=utf-8,%EF%BB%BF";
     csvContent += "Tipo;Empreendimento;Contrato destato;Contrato venda;Comprador anterior;Comprador novo;Empresa;Unidade\n";
@@ -3044,10 +3009,12 @@ Botucatu, [DATA]
     const hasTroca = groupContracts.some(c => c._movementType === 'Troca');
     const hasVendas = groupContracts.some(c => (c._movementType || c._operationType) === 'Venda');
     const hasDistratos = groupContracts.some(c => (c._movementType || c._operationType) === 'Distrato');
+    const hasCessoes = groupContracts.some(c => (c._movementType || c._operationType) === 'Cessão');
     const parts = [];
     if (hasTroca) parts.push('Trocas de Compromissário (distrato + venda no mesmo mês)');
     if (hasVendas) parts.push('Vendas Emitidas');
     if (hasDistratos) parts.push('Distratos Realizados');
+    if (hasCessoes) parts.push('Cessões de direitos');
     const operationName = parts.join(', ') || 'alterações de compromissário';
 
     const subject = `Troca de Compromissários - Lote ${cityName}`;

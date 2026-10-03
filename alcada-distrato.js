@@ -336,20 +336,18 @@
     const previsao = (state && state.previsao) || "";
     const disabled = canEdit() ? "" : " disabled";
     return (
-      '<div class="dist-obra-row" data-id="' + escapeHtml(emp.id) + '" style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-bottom:1px solid #e2e8f0;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">' +
-          '<strong style="color:#1e293b;font-size:0.84rem;line-height:1.35;">' + escapeHtml(emp.label) + '</strong>' +
+      '<tr class="dist-obra-row" data-id="' + escapeHtml(emp.id) + '">' +
+        '<td><strong>' + escapeHtml(emp.label) + '</strong></td>' +
+        '<td>' +
+          '<input type="date" class="dist-obra-previsao" value="' + escapeHtml(previsao) + '"' + disabled + '>' +
+        '</td>' +
+        '<td class="dist-obra-switch">' +
           '<label class="moura-switch" title="Marcar obra em andamento">' +
             '<input type="checkbox" class="dist-obra-toggle"' + (isOn ? " checked" : "") + disabled + '>' +
             '<span class="moura-switch-track" aria-hidden="true"></span>' +
           '</label>' +
-        '</div>' +
-        '<div class="dist-obra-date-wrap" style="display:' + (isOn ? "flex" : "none") + ';align-items:center;gap:8px;">' +
-          '<span style="font-size:0.8rem;color:#64748b;">Previsão de término:</span>' +
-          '<input type="date" class="dist-obra-previsao" value="' + escapeHtml(previsao) + '"' + disabled +
-            ' style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.8rem;color:#334155;outline:none;">' +
-        '</div>' +
-      '</div>'
+        '</td>' +
+      '</tr>'
     );
   }
 
@@ -367,8 +365,11 @@
       '<div style="padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:0.78rem;color:#64748b;">' +
         '<strong style="color:#334155;">' + onCount + '</strong> com obra ativa · ' + list.length + ' empreendimento(s)' +
       '</div>' +
-      '<div style="max-height:420px;overflow:auto;">' +
-        list.map((emp) => obraRowHtml(emp, state[emp.id])).join("") +
+      '<div class="dist-obra-scroll">' +
+        '<table class="dist-obra-table">' +
+          '<thead><tr><th>Empreendimento</th><th>Término de obra</th><th></th></tr></thead>' +
+          '<tbody>' + list.map((emp) => obraRowHtml(emp, state[emp.id])).join("") + '</tbody>' +
+        '</table>' +
       '</div>';
   }
 
@@ -380,11 +381,6 @@
       const t = ev.target;
       if (!t) return;
       if (t.classList && (t.classList.contains("dist-obra-toggle") || t.classList.contains("dist-obra-previsao"))) {
-        const row = t.closest(".dist-obra-row");
-        if (row && t.classList.contains("dist-obra-toggle")) {
-          const wrap = row.querySelector(".dist-obra-date-wrap");
-          if (wrap) wrap.style.display = t.checked ? "flex" : "none";
-        }
         scheduleObrasSave();
         return;
       }

@@ -458,9 +458,7 @@
       nouns: { singular: "empreendimento", plural: "empreendimentos" }
     });
 
-    host.innerHTML =
-      '<p class="alcada-scope-hint">Marque onde a regra de teto taxa 0 vale. Sem seleção = todas. SPE/empreendimento de fora fica sem desconto por essa alçada, mesmo com contrato 0%.</p>' +
-      '<div class="alcada-scope-filters">' + empHtml + ccHtml + "</div>";
+    host.innerHTML = '<div class="alcada-scope-filters">' + empHtml + ccHtml + "</div>";
 
     MlEmpresaFilter.bind("alcada-emp", {
       toggleOpen: function () {

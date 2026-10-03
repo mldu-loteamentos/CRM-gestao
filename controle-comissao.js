@@ -24,7 +24,20 @@ const ControleComissaoApp = {
 
   money(n) {
     const v = Number(n) || 0;
-    return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  fmtDate(raw) {
+    const s = String(raw || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
+    return s || "—";
+  },
+
+  sitClass(p) {
+    if (p && p.pago) return "ccom-sit-pago";
+    const t = String((p && p.situacao) || "").toUpperCase();
+    if (t.indexOf("PROGRAM") >= 0) return "ccom-sit-prog";
+    return "";
   },
 
   defaultCompetencia() {
@@ -42,6 +55,31 @@ const ControleComissaoApp = {
 
   onField(field, val) {
     this.state[field] = val;
+  },
+
+  comissaoTip(r) {
+    const dets = r.beneficiariosDetalhe && r.beneficiariosDetalhe.length
+      ? r.beneficiariosDetalhe
+      : String(r.beneficiarios || "").split(",").map((n) => n.trim()).filter(Boolean).map((nome) => ({ nome, valor: null }));
+    if (!dets.length) return "";
+    const lines = dets.map((d) => {
+      const val = d.valor == null ? "" : this.money(d.valor);
+      return `<div class="ccom-tip-row"><span>${this.esc(d.nome)}</span><strong>${this.esc(val)}</strong></div>`;
+    }).join("");
+    return `<div class="ccom-tip-box">${lines}</div>`;
+  },
+
+  rowHtml(r) {
+    const tip = this.comissaoTip(r);
+    return `<tr>
+      <td class="ccom-td-id">${this.esc(r.contrato || "—")}</td>
+      <td>${this.esc(r.empreendimento || "—")}</td>
+      <td>${this.esc(r.unidade || "—")}</td>
+      <td>${this.esc(r.pagador || "—")}</td>
+      <td class="ccom-num ccom-tip">${this.esc(this.money(r.comissaoTotal || r.valor || 0))}${tip}</td>
+      <td class="ccom-num">${this.esc(this.money(r.aReceber))}</td>
+      <td class="ccom-num">${this.esc(this.money(r.recebido))}</td>
+    </tr>`;
   },
 
   async consultar() {
@@ -81,22 +119,18 @@ const ControleComissaoApp = {
     if (!s.competencia) s.competencia = this.defaultCompetencia();
     const rows = s.contratos || [];
     root.innerHTML = `
-      <div class="tvig-page">
-        <div class="search-filter-panel tvig-params">
-          <h2 class="tvig-page-title">
-            <i data-lucide="percent" style="width:22px;height:22px;color:var(--color-primary);"></i>
-            Controle de comissão
-          </h2>
+      <div class="ccom-page">
+        <div class="search-filter-panel tvig-params ccom-params">
           <h3 class="tvig-section-title">Parâmetros da consulta</h3>
           <div class="ccom-filters">
             <div class="form-group">
               <label>Competência</label>
-              <input type="month" class="form-control" value="${this.esc(s.competencia)}"
+              <input type="month" class="form-control ccom-month" value="${this.esc(s.competencia)}"
                 onchange="ControleComissaoApp.onField('competencia', this.value)">
             </div>
             <div class="tvig-filter-actions">
-              <button type="button" class="btn btn-primary" ${s.loading ? "disabled" : ""} onclick="ControleComissaoApp.consultar()">
-                <i data-lucide="search" style="width:16px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
+              <button type="button" class="btn btn-primary ccom-consult" ${s.loading ? "disabled" : ""} onclick="ControleComissaoApp.consultar()">
+                <i data-lucide="search" style="width:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
               </button>
             </div>
           </div>
@@ -106,48 +140,28 @@ const ControleComissaoApp = {
         ${s.loading ? `<div class="tvig-empty">Buscando comissões no CV CRM…</div>` : ""}
         ${!s.loading && !s.error && rows.length ? `
           <div class="ccom-kpis">
-            <div class="ccom-kpi">
-              <span>Contratos</span>
-              <strong>${s.totais.contratos || 0}</strong>
-            </div>
-            <div class="ccom-kpi">
-              <span>Moura Leite a receber</span>
-              <strong>${this.esc(this.money(s.totais.aReceber))}</strong>
-            </div>
-            <div class="ccom-kpi">
-              <span>Moura Leite recebido</span>
-              <strong>${this.esc(this.money(s.totais.recebido))}</strong>
-            </div>
+            <div class="ccom-kpi"><span>Contratos</span><strong>${s.totais.contratos || 0}</strong></div>
+            <div class="ccom-kpi"><span>Moura Leite a receber</span><strong>${this.esc(this.money(s.totais.aReceber))}</strong></div>
+            <div class="ccom-kpi"><span>Moura Leite recebido</span><strong>${this.esc(this.money(s.totais.recebido))}</strong></div>
           </div>
           <h3 class="tvig-section-title">Comissão por contrato</h3>
-          <div class="crm-card" style="padding:0;overflow:hidden;">
-            <table class="custom-table">
-              <thead>
-                <tr>
-                  <th>Contrato / Reserva</th>
-                  <th>Empreendimento</th>
-                  <th>Unidade</th>
-                  <th>Pagador</th>
-                  <th>Beneficiários</th>
-                  <th style="text-align:right;">Comissão</th>
-                  <th style="text-align:right;">Moura Leite a receber</th>
-                  <th style="text-align:right;">Moura Leite recebido</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.map((r) => `
+          <div class="crm-card ccom-card">
+            <div class="crm-scroll-table ccom-table-wrap">
+              <table class="custom-table ccom-table">
+                <thead>
                   <tr>
-                    <td>${this.esc(r.contrato || "—")}</td>
-                    <td>${this.esc(r.empreendimento || "—")}</td>
-                    <td>${this.esc(r.unidade || "—")}</td>
-                    <td>${this.esc(r.pagador || "—")}</td>
-                    <td>${this.esc(r.beneficiarios || r.beneficiario || "—")}</td>
-                    <td style="text-align:right;">${this.esc(this.money(r.comissaoTotal))}</td>
-                    <td style="text-align:right;font-weight:800;color:#1e3a8a;">${this.esc(this.money(r.aReceber))}</td>
-                    <td style="text-align:right;font-weight:700;color:#15803d;">${this.esc(this.money(r.recebido))}</td>
-                  </tr>`).join("")}
-              </tbody>
-            </table>
+                    <th>Contrato / Reserva</th>
+                    <th>Empreendimento</th>
+                    <th>Unidade</th>
+                    <th>Pagador</th>
+                    <th class="ccom-num">Comissão</th>
+                    <th class="ccom-num">Moura Leite a receber</th>
+                    <th class="ccom-num">Moura Leite recebido</th>
+                  </tr>
+                </thead>
+                <tbody>${rows.map((r) => this.rowHtml(r)).join("")}</tbody>
+              </table>
+            </div>
           </div>` : ""}
         ${!s.loading && !s.error && !rows.length ? `<div class="tvig-empty">${s.consulted ? "Nenhuma comissão encontrada nesta competência." : "Use <strong>Consultar</strong> para ver a comissão a receber por contrato."}</div>` : ""}
       </div>`;

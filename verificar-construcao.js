@@ -1496,34 +1496,32 @@ window.VerificarConstrucaoApp = {
             const badgeNew = state.isNew ? '<span style="background:#ef4444; color:white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight:bold; margin-left: 8px;">NOVO</span>' : '';
 
             html += `
-                <div style="display: flex; flex-direction: column; padding: 14px 0; border-bottom: 1px solid #e2e8f0; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
-                        <div>
-                            <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${label} ${badgeNew}</div>
-                        </div>
+                <tr class="dist-obra-row">
+                    <td><strong>${label}</strong> ${badgeNew}</td>
+                    <td>
+                        <input type="date" class="dist-obra-previsao" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${String(costCenterId).replace(/'/g, "\\'")}', this.value)">
+                    </td>
+                    <td class="dist-obra-switch">
                         <label class="moura-switch" id="${toggleId}-label" title="Ligar/desligar vistoria do empreendimento">
                             <input type="checkbox" id="${toggleId}" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">
                             <span class="moura-switch-track" aria-hidden="true"></span>
                         </label>
-                    </div>
-                    <div id="${toggleId}-date-container" style="display: ${isOn ? 'flex' : 'none'}; align-items: center; gap: 8px; margin-top: 4px;">
-                        <span style="font-size: 0.8rem; color: #64748b;">Previsão de término:</span>
-                        <input type="date" value="${previsao}" id="${toggleId}-date" onchange="window.VerificarConstrucaoApp._onPrevisaoChange('${String(costCenterId).replace(/'/g, "\\'")}', this.value)" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; color: #334155; outline: none;">
-                    </div>
-                </div>
+                    </td>
+                </tr>
             `;
         });
 
-        listDiv.innerHTML = html;
+        listDiv.innerHTML =
+            '<table class="dist-obra-table">' +
+              '<thead><tr><th>Empreendimento</th><th>Término de obra</th><th></th></tr></thead>' +
+              '<tbody>' + html + '</tbody>' +
+            '</table>';
         modal.style.display = 'flex';
     },
 
     _onToggleObraChange(input) {
         const emp = input.dataset.emp;
         const checked = input.checked;
-        const dateContainer = document.getElementById(input.id + '-date-container');
-        if (dateContainer) dateContainer.style.display = checked ? 'flex' : 'none';
-
         if (!this._tempObrasState) this._tempObrasState = {};
         if (!this._tempObrasState[emp]) this._tempObrasState[emp] = { isOn: false, previsao: '' };
         this._tempObrasState[emp].isOn = checked;
