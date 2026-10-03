@@ -81,6 +81,8 @@ window.mergeCompromissarioCessao = function(localStr, cloudStr) {
 
 const CompromissarioApp = {
   CESSAO_LS_KEY: 'crm_compromissario_cessao_v1',
+  CESSAO_WORKING_MONTH_KEY: 'crm_compromissario_cessao_working_month',
+  CESSAO_FILE_DB: 'crm_compromissario_cessao_files_v1',
 
   state: {
     prefeituras: [],
@@ -91,7 +93,9 @@ const CompromissarioApp = {
     notifiedContracts: {},
     /** companyId -> { status: 'none'|'has'|null, fileName, records, uploadedAt } */
     cessaoByCompany: {},
-    cessaoMonth: ''
+    cessaoMonth: '',
+    searchMonth: '',
+    cessaoBlobs: {}
   },
 
   normalizeCityKey(city) {
@@ -148,9 +152,11 @@ const CompromissarioApp = {
     const root = document.getElementById('compromissario-prefeitura-root');
     const monthEl = document.getElementById('comp-pref-month');
     const existingMonth = monthEl && monthEl.value ? monthEl.value : '';
-    // Reentrar na aba: não apaga a tela — só recarrega declarações salvas do período
+    if (existingMonth) this.state.searchMonth = existingMonth;
+    // Reentrar na aba: não apaga cessões já declaradas nem troca o mês dos relatórios
     if (root && root.querySelector('#comp-cessao-panel') && existingMonth) {
-      this.ensureCessaoMonth(existingMonth);
+      if (!this.state.cessaoMonth) this.ensureCessaoMonth(this.pickBestCessaoMonth(existingMonth));
+      else this.persistCessaoMonth();
       this.renderCessaoPanel();
       this.syncCessaoGateUi();
     } else {
@@ -218,8 +224,10 @@ const CompromissarioApp = {
     if (!root) return;
 
     const today = new Date();
-    const currentMonth = today.toISOString().slice(0, 7); // YYYY-MM
-    this.ensureCessaoMonth(currentMonth);
+    const currentMonth = this.state.searchMonth || today.toISOString().slice(0, 7);
+    this.state.searchMonth = currentMonth;
+    if (!this.state.cessaoMonth) this.ensureCessaoMonth(this.pickBestCessaoMonth(currentMonth));
+    else this.persistCessaoMonth();
 
     root.innerHTML = `
       <div style="padding: 20px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; height: 100%;">
@@ -250,6 +258,7 @@ const CompromissarioApp = {
             </div>
           </div>
           <p style="margin: 12px 0 0; font-size: 0.78rem; color: #475569; line-height: 1.45;">
+            A competência abaixo vale só para a busca de vendas e distratos. Mudar o mês <strong>não apaga</strong> os relatórios de cessão já enviados no bloco acima.
             A listagem separa o que aconteceu em cada empreendimento. Unidade distratada e vendida no mesmo mês vira um único movimento de <strong>Troca</strong> para a prefeitura. Contrato e destato já sobem do IntegrA/Sienge quando existirem.
           </p>
           <p id="comp-cessao-gate-hint" style="display:none; margin: 12px 0 0; font-size: 0.8rem; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 8px 10px;"></p>
@@ -577,10 +586,125 @@ const CompromissarioApp = {
     }
   },
 
+  rowHasCessaoWork(row) {
+    return !!(row && (
+      row.status === 'none' ||
+      row.status === 'has' ||
+      row.fileName ||
+      (Array.isArray(row.records) && row.records.length)
+    ));
+  },
+
+  hasCessaoWorkInMemory() {
+    return Object.values(this.state.cessaoByCompany || {}).some((r) => this.rowHasCessaoWork(r));
+  },
+
+  monthHasCessaoWork(monthMap) {
+    if (!monthMap || typeof monthMap !== 'object') return false;
+    return Object.values(monthMap).some((r) => this.rowHasCessaoWork(r));
+  },
+
+  getCessaoWorkingMonth() {
+    try {
+      return String(localStorage.getItem(this.CESSAO_WORKING_MONTH_KEY) || '').slice(0, 7);
+    } catch (e) {
+      return '';
+    }
+  },
+
+  setCessaoWorkingMonth(month) {
+    const m = String(month || '').slice(0, 7);
+    if (!m) return;
+    try {
+      localStorage.setItem(this.CESSAO_WORKING_MONTH_KEY, m);
+    } catch (e) {}
+  },
+
+  pickBestCessaoMonth(preferred) {
+    const store = this.readCessaoStore();
+    const working = this.getCessaoWorkingMonth();
+    if (this.state.cessaoMonth && this.hasCessaoWorkInMemory()) return this.state.cessaoMonth;
+    if (working && this.monthHasCessaoWork(store[working])) return working;
+    const pref = String(preferred || '').slice(0, 7);
+    if (pref && this.monthHasCessaoWork(store[pref])) return pref;
+    let best = '';
+    let bestTs = 0;
+    Object.keys(store || {}).forEach((m) => {
+      const map = store[m] || {};
+      Object.values(map).forEach((r) => {
+        if (!this.rowHasCessaoWork(r)) return;
+        const ts = Number((r && (r.uploadedAt || r.declaredAt)) || 0);
+        if (ts >= bestTs) {
+          bestTs = ts;
+          best = m;
+        }
+      });
+    });
+    return best || working || pref;
+  },
+
+  cessaoFileKey(month, companyId) {
+    return String(month || this.state.cessaoMonth || '') + '|' + String(companyId);
+  },
+
+  openCessaoFileDb() {
+    if (this._cessaoFileDb) return Promise.resolve(this._cessaoFileDb);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.CESSAO_FILE_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('files')) db.createObjectStore('files');
+      };
+      req.onsuccess = () => {
+        this._cessaoFileDb = req.result;
+        resolve(this._cessaoFileDb);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async saveCessaoFileBlob(companyId, file) {
+    if (!file || !companyId || !this.state.cessaoMonth) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const payload = { name: file.name, type: file.type || '', buf, savedAt: Date.now() };
+      this.state.cessaoBlobs[String(companyId)] = payload;
+      const db = await this.openCessaoFileDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('files', 'readwrite');
+        tx.objectStore('files').put(payload, this.cessaoFileKey(this.state.cessaoMonth, companyId));
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) {
+      console.warn('[Compromissario] não gravou o arquivo da cessão', e);
+    }
+  },
+
+  async deleteCessaoFileBlob(companyId) {
+    const id = String(companyId);
+    delete this.state.cessaoBlobs[id];
+    if (!this.state.cessaoMonth) return;
+    try {
+      const db = await this.openCessaoFileDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('files', 'readwrite');
+        tx.objectStore('files').delete(this.cessaoFileKey(this.state.cessaoMonth, id));
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) {}
+  },
+
   ensureCessaoMonth(month) {
     const m = String(month || '').slice(0, 7);
     if (!m) return;
+    if (this.state.cessaoMonth && this.state.cessaoMonth !== m) {
+      this.persistCessaoMonth();
+    }
+    if (this.state.cessaoMonth === m && this.hasCessaoWorkInMemory()) return;
     this.state.cessaoMonth = m;
+    this.setCessaoWorkingMonth(m);
     const store = this.readCessaoStore();
     const monthMap = store[m] || {};
     const pickPrev = (id) => {
@@ -606,10 +730,29 @@ const CompromissarioApp = {
     const m = this.state.cessaoMonth;
     if (!m) return;
     const store = this.readCessaoStore();
-    // Mantém empresas já gravadas no mês (mesmo se saírem da carteira ativa)
     const prevMonth = store[m] && typeof store[m] === 'object' ? store[m] : {};
-    store[m] = { ...prevMonth, ...(this.state.cessaoByCompany || {}) };
+    const next = { ...prevMonth };
+    Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
+      if (!row) return;
+      const prev = next[id] || next[String(id)] || next[Number(id)] || {};
+      const incomingEmpty = !row.fileName && row.status !== 'none' && !(Array.isArray(row.records) && row.records.length);
+      const prevHasFile = !!(prev.fileName || (Array.isArray(prev.records) && prev.records.length));
+      if (incomingEmpty && prevHasFile && row.status !== 'none') {
+        next[id] = {
+          ...prev,
+          ...row,
+          fileName: prev.fileName,
+          records: Array.isArray(prev.records) ? prev.records : [],
+          uploadedAt: prev.uploadedAt || row.uploadedAt || null,
+          parseNote: row.parseNote || prev.parseNote || ''
+        };
+      } else {
+        next[id] = row;
+      }
+    });
+    store[m] = next;
     this.writeCessaoStore(store);
+    this.setCessaoWorkingMonth(m);
     if (window.forceUploadLocalConfig) {
       window.forceUploadLocalConfig(true).catch(() => {});
     }
@@ -618,8 +761,10 @@ const CompromissarioApp = {
   onMonthChange() {
     const el = document.getElementById('comp-pref-month');
     const month = el ? el.value : '';
-    this.ensureCessaoMonth(month);
+    this.persistCessaoMonth();
+    this.state.searchMonth = month || this.state.searchMonth;
     this.state.contracts = [];
+    this.state.files = {};
     this.renderCessaoPanel();
     this.syncCessaoGateUi();
     const tbody = document.getElementById('comp-pref-tbody');
@@ -748,11 +893,13 @@ const CompromissarioApp = {
             Relatórios de Cessão por Empresa
           </h3>
           <p style="margin:0;font-size:0.8rem;color:#64748b;max-width:720px;line-height:1.45;">
-            Para o mês <strong>${this.escHtml(month)}</strong>, declare cada empresa com carteira ativa.
+            Declare cada empresa com carteira ativa. Os relatórios enviados ficam salvos e <strong>não são apagados</strong> ao mudar a competência da busca.
             Se houve cessão, envie o relatório padrão do Sienge (colunas Data, Empresa-loteamento, Título, Documento, Cliente — com <code>(P)</code>, <code>*</code> e comprador secundário).
             Preferência: XLS/XLSX/CSV para ler o histórico; PDF também libera o gate.
-            A resposta <strong>Não teve cessão</strong> fica salva neste período (local + nuvem) e não será pedida de novo ao consultar o mesmo mês.
             Sem declaração ou anexo, a busca de vendas e distratos fica bloqueada.
+            ${this.state.searchMonth && this.state.cessaoMonth && this.state.searchMonth !== this.state.cessaoMonth
+              ? `<br><span style="color:#9a3412;font-weight:600;">Busca: ${this.escHtml(this.state.searchMonth)} · Cessões desta tela: ${this.escHtml(month)} (arquivos preservados).</span>`
+              : ` Cessões deste bloco: <strong>${this.escHtml(month)}</strong>.`}
           </p>
         </div>
         ${badge}
@@ -785,6 +932,7 @@ const CompromissarioApp = {
       row.records = [];
       row.uploadedAt = null;
       row.parseNote = '';
+      this.deleteCessaoFileBlob(id);
     }
     this.persistCessaoMonth();
     this.renderCessaoPanel();
@@ -802,6 +950,7 @@ const CompromissarioApp = {
     if (row.status === 'has') {
       // permanece "has" até novo upload
     }
+    this.deleteCessaoFileBlob(id);
     this.persistCessaoMonth();
     this.renderCessaoPanel();
     this.syncCessaoGateUi();
@@ -824,6 +973,7 @@ const CompromissarioApp = {
       row.parseNote = parsed.note || '';
       row.uploadedAt = Date.now();
       row.declaredAt = Date.now();
+      await this.saveCessaoFileBlob(id, file);
       this.persistCessaoMonth();
       this.renderCessaoPanel();
       this.syncCessaoGateUi();
@@ -834,6 +984,7 @@ const CompromissarioApp = {
       row.records = [];
       row.parseNote = 'Arquivo anexado (leitura parcial/indisponível)';
       row.uploadedAt = Date.now();
+      await this.saveCessaoFileBlob(id, file);
       this.persistCessaoMonth();
       this.renderCessaoPanel();
       this.syncCessaoGateUi();
@@ -1039,7 +1190,7 @@ const CompromissarioApp = {
       alert("Por favor, selecione um mês de referência.");
       return;
     }
-    this.ensureCessaoMonth(monthVal);
+    this.persistCessaoMonth();
 
     // Parse month to first and last day
     const [year, month] = monthVal.split('-');

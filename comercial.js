@@ -339,16 +339,21 @@ const ComercialApp = {
         const area = this.contractArea(v);
         const { name } = this.resolveEnterprise(v);
         if (inChart) vMes += qty;
+        if (inPeriod || inYear) {
+          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
+        }
         if (inPeriod) {
           vendasPeriodo += qty;
           m2Venda += area;
-          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
           produtos[name].vendas += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
           cidades[city].vendas += qty;
         }
-        if (inYear) vendasAno += qty;
+        if (inYear) {
+          vendasAno += qty;
+          produtos[name].vendasYtd += qty;
+        }
         if (inPeriodPrev) vendasPeriodoAnt += qty;
         if (inPrev) vendasAnoAnt += qty;
       });
@@ -358,16 +363,21 @@ const ComercialApp = {
         const area = this.contractArea(d);
         const { name } = this.resolveEnterprise(d);
         if (inChart) dMes += qty;
+        if (inPeriod || inYear) {
+          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0, vendasYtd: 0, distratosYtd: 0 };
+        }
         if (inPeriod) {
           distratosPeriodo += qty;
           m2Dist += area;
-          if (!produtos[name]) produtos[name] = { vendas: 0, distratos: 0 };
           produtos[name].distratos += qty;
           const city = this.cityFromName(name);
           if (!cidades[city]) cidades[city] = { vendas: 0, distratos: 0 };
           cidades[city].distratos += qty;
         }
-        if (inYear) distratosAno += qty;
+        if (inYear) {
+          distratosAno += qty;
+          produtos[name].distratosYtd += qty;
+        }
         if (inPeriodPrev) distratosPeriodoAnt += qty;
         if (inPrev) distratosAnoAnt += qty;
       });
@@ -413,22 +423,93 @@ const ComercialApp = {
     this.state.charts = {};
   },
 
+  chartBarLabelsPlugin() {
+    return {
+      id: 'comBarValueLabels',
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (!meta || meta.hidden || ds.type === 'line') return;
+          meta.data.forEach((bar, i) => {
+            const val = ds.data[i];
+            if (val == null || val === '') return;
+            const color = ds.datalabelColor || '#0f172a';
+            ctx.save();
+            ctx.font = '700 11px Inter, system-ui, sans-serif';
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = val >= 0 ? 'bottom' : 'top';
+            ctx.fillText(String(val), bar.x, val >= 0 ? bar.y - 4 : bar.y + 12);
+            ctx.restore();
+          });
+        });
+      }
+    };
+  },
+
+  chartYearAxisPlugin(serie) {
+    return {
+      id: 'comYearAxis',
+      afterDraw(chart) {
+        const rows = serie || [];
+        if (!rows.length) return;
+        const xScale = chart.scales.x;
+        if (!xScale) return;
+        const groups = {};
+        rows.forEach((s, i) => {
+          if (!groups[s.year]) groups[s.year] = { min: i, max: i };
+          groups[s.year].max = i;
+        });
+        const { ctx, chartArea } = chart;
+        ctx.save();
+        ctx.fillStyle = '#334155';
+        ctx.font = '700 12px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        Object.keys(groups).forEach((year) => {
+          const g = groups[year];
+          const left = xScale.getPixelForValue(g.min);
+          const right = xScale.getPixelForValue(g.max);
+          ctx.fillText(String(year), (left + right) / 2, chartArea.bottom + 22);
+        });
+        ctx.restore();
+      }
+    };
+  },
+
   renderCharts(agg) {
     if (typeof Chart === 'undefined') return;
     this.destroyCharts();
 
-    const labels = agg.serie.map((s) => s.label);
-    const vars = agg.serie.map((s) => s.variacao);
+    const serie = agg.serie || [];
+    const labels = serie.map((s) => COM_MESES[s.month - 1]);
+    const vars = serie.map((s) => s.variacao);
+    const vendaColor = '#1e3a8a';
+    const distColor = '#ef4444';
+    const varColor = '#15803d';
     const chartOpts = {
       responsive: true,
       maintainAspectRatio: false,
+      clip: false,
       interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 18, bottom: 28 } },
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, usePointStyle: true, padding: 16 } }
+        legend: {
+          position: 'right',
+          labels: { boxWidth: 10, usePointStyle: true, pointStyle: 'circle', padding: 16, color: '#334155' }
+        }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true } },
-        y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,0.25)' } }
+        x: {
+          grid: { display: false },
+          ticks: { maxRotation: 0, autoSkip: false, color: '#64748b', font: { size: 11 } }
+        },
+        y: {
+          beginAtZero: true,
+          grace: '18%',
+          display: false
+        }
       }
     };
     const vd = document.getElementById('comercial-chart-vd');
@@ -436,64 +517,54 @@ const ComercialApp = {
     if (vd) {
       this.state.charts.vd = new Chart(vd, {
         type: 'bar',
+        plugins: [this.chartBarLabelsPlugin(), this.chartYearAxisPlugin(serie)],
         data: {
           labels,
           datasets: [
-            { label: 'Vendas', data: agg.serie.map((s) => s.vendas), backgroundColor: '#2563eb', borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
-            { label: 'Distratos', data: agg.serie.map((s) => s.distratos), backgroundColor: '#ef4444', borderRadius: 6, borderSkipped: false, maxBarThickness: 28 },
             {
-              type: 'line',
-              label: 'Variação',
-              data: vars,
-              borderColor: '#16a34a',
-              backgroundColor: 'transparent',
-              pointBackgroundColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
-              pointBorderColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
-              pointRadius: 4,
-              pointHoverRadius: 6,
-              borderWidth: 2,
-              tension: 0.25,
-              segment: {
-                borderColor: (ctx) => {
-                  const cur = ctx.p1 && ctx.p1.parsed ? ctx.p1.parsed.y : 0;
-                  return cur >= 0 ? '#16a34a' : '#ef4444';
-                }
-              }
+              label: 'Vendas',
+              data: serie.map((s) => s.vendas),
+              backgroundColor: vendaColor,
+              borderRadius: 0,
+              borderSkipped: false,
+              maxBarThickness: 34,
+              datalabelColor: vendaColor
+            },
+            {
+              label: 'Distratos',
+              data: serie.map((s) => s.distratos),
+              backgroundColor: distColor,
+              borderRadius: 0,
+              borderSkipped: false,
+              maxBarThickness: 34,
+              datalabelColor: distColor
             }
           ]
         },
         options: Object.assign({}, chartOpts, {
-          datasets: { bar: { categoryPercentage: 0.62, barPercentage: 0.78 } }
+          datasets: { bar: { categoryPercentage: 0.72, barPercentage: 0.86 } }
         })
       });
     }
     if (vr) {
       this.state.charts.vr = new Chart(vr, {
         type: 'bar',
+        plugins: [this.chartBarLabelsPlugin(), this.chartYearAxisPlugin(serie)],
         data: {
           labels,
           datasets: [{
             label: 'Variação',
             data: vars,
-            backgroundColor: vars.map((v) => v >= 0 ? '#16a34a' : '#ef4444'),
-            borderRadius: 6,
+            backgroundColor: varColor,
+            borderRadius: 0,
             borderSkipped: false,
-            maxBarThickness: 36
+            maxBarThickness: 42,
+            datalabelColor: varColor
           }]
         },
         options: Object.assign({}, chartOpts, {
           plugins: {
-            legend: {
-              position: 'bottom',
-              labels: {
-                generateLabels() {
-                  return [
-                    { text: 'Variação positiva', fillStyle: '#16a34a', strokeStyle: '#16a34a', hidden: false },
-                    { text: 'Variação negativa', fillStyle: '#ef4444', strokeStyle: '#ef4444', hidden: false }
-                  ];
-                }
-              }
-            }
+            legend: { display: false }
           }
         })
       });
@@ -540,42 +611,47 @@ const ComercialApp = {
     set('kpi-variacao-ytd', String(saldoYtd));
     set('kpi-variacao-ytd-comp', this.fmtPct(saldoYtd, saldoYtdAnt, false));
 
-    set('comercial-produto-period', periodLbl + ' · ' + agg.year);
-    set('comercial-ytd-period', 'Acum. ' + ytdLbl + ' · ' + agg.year);
-    set('comercial-ytd-venda', String(agg.vendasAno));
-    set('comercial-ytd-distrato', String(agg.distratosAno));
-    set('comercial-ytd-var', String(saldoYtd));
-    const ytdVarCard = document.getElementById('comercial-ytd-var-card');
-    if (ytdVarCard) ytdVarCard.classList.toggle('is-neg', saldoYtd < 0);
+    set('comercial-produto-period', periodLbl + ' · ' + agg.year + '  ·  acum. ' + ytdLbl);
 
     const tbody = document.getElementById('comercial-table-body');
     if (tbody) {
       const rows = Object.keys(agg.produtos).sort((a, b) => {
-        const va = agg.produtos[a].vendas - agg.produtos[a].distratos;
-        const vb = agg.produtos[b].vendas - agg.produtos[b].distratos;
+        const pa = agg.produtos[a];
+        const pb = agg.produtos[b];
+        const va = (pa.vendas - pa.distratos) || (pa.vendasYtd - pa.distratosYtd);
+        const vb = (pb.vendas - pb.distratos) || (pb.vendasYtd - pb.distratosYtd);
         return vb - va;
       });
+      const num = (n, kind) => {
+        const cls = kind === 'venda' ? 'com-num com-num--venda'
+          : kind === 'distrato' ? 'com-num com-num--distrato'
+          : (n > 0 ? 'com-num com-num--var' : (n < 0 ? 'com-num com-num--var-neg' : 'com-num'));
+        return `<td class="${cls}">${n}</td>`;
+      };
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
       } else {
-        let totV = 0, totD = 0;
+        let totV = 0, totD = 0, totVY = 0, totDY = 0;
         tbody.innerHTML = rows.map((prod) => {
           const d = agg.produtos[prod];
-          const varn = d.vendas - d.distratos;
-          totV += d.vendas;
-          totD += d.distratos;
+          const vMes = d.vendas || 0;
+          const dMes = d.distratos || 0;
+          const vYtd = d.vendasYtd || 0;
+          const dYtd = d.distratosYtd || 0;
+          totV += vMes;
+          totD += dMes;
+          totVY += vYtd;
+          totDY += dYtd;
           return `<tr>
-            <td><strong>${prod}</strong></td>
-            <td style="text-align:center;">${d.vendas}</td>
-            <td style="text-align:center;">${d.distratos}</td>
-            <td style="text-align:center;font-weight:700;color:${varn > 0 ? 'var(--color-success)' : (varn < 0 ? 'var(--color-danger)' : '#1e293b')}">${varn}</td>
+            <td class="com-prod-name">${prod}</td>
+            ${num(vMes, 'venda')}${num(dMes, 'distrato')}${num(vMes - dMes, 'var')}
+            ${num(vYtd, 'venda')}${num(dYtd, 'distrato')}${num(vYtd - dYtd, 'var')}
           </tr>`;
         }).join('') + `<tr class="com-dash-total">
-          <td><strong>Total</strong></td>
-          <td style="text-align:center;"><strong>${totV}</strong></td>
-          <td style="text-align:center;"><strong>${totD}</strong></td>
-          <td style="text-align:center;"><strong>${totV - totD}</strong></td>
-        </tr>`;
+            <td class="com-prod-name">Total</td>
+            ${num(totV, 'venda')}${num(totD, 'distrato')}${num(totV - totD, 'var')}
+            ${num(totVY, 'venda')}${num(totDY, 'distrato')}${num(totVY - totDY, 'var')}
+          </tr>`;
       }
     }
 
