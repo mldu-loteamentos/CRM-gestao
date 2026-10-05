@@ -25,7 +25,7 @@ window.EngenhariaCaucaoApp = {
     companyIds: [],
     creditorIds: [],
     ccIds: [],
-    statusIds: ["aberto"],
+    statusIds: ["aberto", "liberado"],
     openEmp: false,
     openCred: false,
     openCc: false,
@@ -510,6 +510,16 @@ window.EngenhariaCaucaoApp = {
     ];
   },
 
+  defaultStatusIds() {
+    return ["aberto", "liberado"];
+  },
+
+  resetStatusFilter() {
+    this.state.statusIds = this.defaultStatusIds();
+    this.state.qSit = "";
+    this.state.openSit = false;
+  },
+
   rowStatus(r) {
     if (r && r.pago) return "pago";
     if (r && this.isLiberated(r)) return "liberado";
@@ -785,7 +795,7 @@ window.EngenhariaCaucaoApp = {
     this.state.companyIds = [];
     this.state.creditorIds = [];
     this.state.ccIds = [];
-    this.state.statusIds = ["aberto"];
+    this.state.statusIds = this.defaultStatusIds();
     this.state.qTitulo = "";
     this.state.qCredor = "";
     this.state.qCc = "";
@@ -1447,6 +1457,7 @@ window.EngenhariaCaucaoApp = {
       pane.appendChild(root);
     }
     this.loadLiberated();
+    this.resetStatusFilter();
     if (!this.state.inited) {
       try {
         const range = this.defaultRange();
