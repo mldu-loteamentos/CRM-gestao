@@ -1051,11 +1051,13 @@ window.EngenhariaCaucaoApp = {
     if (retirar) retirar.disabled = !canRetirar;
   },
 
-  retirarLiberacao() {
+  async retirarLiberacao() {
     const rows = this.selectedRows().filter((r) => !r.pago && this.isLiberated(r));
     if (!rows.length) return;
     const n = rows.length;
-    if (!confirm("Retirar a liberação de " + n + " caução(ões)? O vencimento no Sienge permanece.")) return;
+    const msg = "Retirar a liberação de " + n + " caução(ões)? O vencimento no Sienge permanece.";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
     rows.forEach((r) => { delete this.state.liberated[this.rowKey(r)]; });
     this.persistLiberated();
     this.applyFilters();
@@ -1209,7 +1211,9 @@ window.EngenhariaCaucaoApp = {
     if (prorrogar.length) lines.push(prorrogar.length + " caução(ões) com vencimento dentro do prazo mínimo de " + minDays + " dias serão prorrogadas em 30 dias e liberadas.");
     if (manter.length) lines.push(manter.length + " caução(ões) serão liberadas mantendo o vencimento atual.");
     if (jaLiberadas.length) lines.push(jaLiberadas.length + " já liberada(s) mantêm o vencimento para a tesouraria.");
-    if (!confirm("Liberar as cauções selecionadas?\n\n" + lines.join("\n"))) return;
+    const msg = "Liberar as cauções selecionadas?\n\n" + lines.join("\n");
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
 
     this.state.busy = true;
     this.paintSelectionBar();
