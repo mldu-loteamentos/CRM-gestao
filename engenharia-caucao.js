@@ -4,6 +4,7 @@
  * ajustar vencimento e liberar para pagamento.
  */
 var ECAU_LIBERA_LS = "crm_engenharia_caucao_liberados_v1";
+var ECAU_AVISO_LS = "crm_engenharia_caucao_avisos_v1";
 
 window.EngenhariaCaucaoApp = {
   SKIP_OPS: {
@@ -173,6 +174,110 @@ window.EngenhariaCaucaoApp = {
     if (typeof window.forceUploadLocalConfig === "function") {
       window.forceUploadLocalConfig(true).catch(function () {});
     }
+  },
+
+  avisoStore() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ECAU_AVISO_LS) || "{}") || {};
+      return {
+        sent: raw.sent && typeof raw.sent === "object" ? raw.sent : {},
+        queue: Array.isArray(raw.queue) ? raw.queue : [],
+        lastTry: Number(raw.lastTry) || 0
+      };
+    } catch (e) {
+      return { sent: {}, queue: [], lastTry: 0 };
+    }
+  },
+
+  saveAvisoStore(store) {
+    try { localStorage.setItem(ECAU_AVISO_LS, JSON.stringify(store)); } catch (e) {}
+    if (typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true).catch(function () {});
+    }
+  },
+
+  destinatariosCaucao() {
+    let users = [];
+    try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
+    const out = new Set();
+    (users || []).forEach((u) => {
+      if (!u) return;
+      if (this.fold(u.status) === "INATIVO") return;
+      if (this.fold(u.profile_name) !== "ENGENHARIA") return;
+      const email = String(u.email || "").trim();
+      const gestor = String(u.manager_email || "").trim();
+      if (email) out.add(email);
+      if (gestor) out.add(gestor);
+    });
+    return [...out];
+  },
+
+  avisoItem(r, extra) {
+    return Object.assign({
+      titulo: String(r && r.titulo || ""),
+      parcela: String(r && r.parcela || ""),
+      credor: String(r && r.credor || ""),
+      vencimento: this.fmtDate(r && r.vencimento),
+      anterior: "",
+      valor: this.money(r && r.valorAjustado)
+    }, extra || {});
+  },
+
+  enqueueAviso(kind, items) {
+    const store = this.avisoStore();
+    (items || []).forEach((item) => {
+      if (!item || !item.titulo) return;
+      const key = kind + "|" + item.titulo + "|" + item.parcela + "|" + (item.vencimento || "");
+      if (store.sent[key] || store.queue.some((q) => q.key === key)) return;
+      store.queue.push({ key: key, kind: kind, item: item });
+    });
+    this.saveAvisoStore(store);
+  },
+
+  async flushAvisos() {
+    const store = this.avisoStore();
+    if (!store.queue.length) return;
+    if (store.lastTry && Date.now() - store.lastTry < 60 * 60 * 1000) return;
+    const to = this.destinatariosCaucao();
+    store.lastTry = Date.now();
+    this.saveAvisoStore(store);
+    if (!to.length) return;
+    const kinds = [...new Set(store.queue.map((q) => q.kind))];
+    const sentKeys = [];
+    let blocked = false;
+    for (const kind of kinds) {
+      const batch = store.queue.filter((q) => q.kind === kind);
+      try {
+        const res = await fetch("/api/caucao/avisos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: kind, to: to, items: batch.map((q) => q.item) })
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (data && data.sent) sentKeys.push.apply(sentKeys, batch.map((q) => q.key));
+        else blocked = true;
+      } catch (e) {
+        blocked = true;
+      }
+    }
+    const next = this.avisoStore();
+    sentKeys.forEach((k) => { next.sent[k] = this.isoToday(); });
+    if (sentKeys.length) next.queue = next.queue.filter((q) => sentKeys.indexOf(q.key) < 0);
+    next.lastTry = blocked ? Date.now() : 0;
+    this.saveAvisoStore(next);
+  },
+
+  avisarPagamentosProximos() {
+    const hoje = this.isoToday();
+    const limite = this.addDaysIso(hoje, 3);
+    const items = (this.state.allRows || []).filter((r) => {
+      if (!r || r.pago || !this.isLiberated(r)) return false;
+      const due = this.isoDate(r.vencimento);
+      return !!(due && due > hoje && due <= limite);
+    }).map((r) => this.avisoItem(r));
+    if (!items.length) return Promise.resolve();
+    this.enqueueAviso("pagamento", items);
+    return this.flushAvisos();
   },
 
   isLiberated(r) {
@@ -660,6 +765,7 @@ window.EngenhariaCaucaoApp = {
     }
     this.state.loading = false;
     this.renderPage();
+    if (!this.state.error) this.avisarPagamentosProximos().catch(function () {});
   },
 
   limpar() {
@@ -923,12 +1029,26 @@ window.EngenhariaCaucaoApp = {
   },
 
   paintSelectionBar() {
-    const n = this.selectedCount();
-    const canAct = n > 0 && !this.state.busy;
+    const open = this.selectedRows().filter((r) => !r.pago);
+    const canAct = open.length > 0 && !this.state.busy;
+    const canRetirar = open.some((r) => this.isLiberated(r)) && !this.state.busy;
     ["ecau-btn-due", "ecau-btn-liberar"].forEach((id) => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = !canAct;
     });
+    const retirar = document.getElementById("ecau-btn-retirar");
+    if (retirar) retirar.disabled = !canRetirar;
+  },
+
+  retirarLiberacao() {
+    const rows = this.selectedRows().filter((r) => !r.pago && this.isLiberated(r));
+    if (!rows.length) return;
+    const n = rows.length;
+    if (!confirm("Retirar a liberação de " + n + " caução(ões)? O vencimento no Sienge permanece.")) return;
+    rows.forEach((r) => { delete this.state.liberated[this.rowKey(r)]; });
+    this.persistLiberated();
+    this.applyFilters();
+    this.renderList();
   },
 
   openDueModal() {
@@ -1097,6 +1217,7 @@ window.EngenhariaCaucaoApp = {
     };
     let prorrogadas = 0;
     let liberadas = 0;
+    const avisosProrroga = [];
     const errors = [];
     const byBill = new Map();
     prorrogar.forEach((r) => {
@@ -1110,9 +1231,11 @@ window.EngenhariaCaucaoApp = {
       try {
         await this.patchBillInstallments(billId, list.map((r) => this.installmentPayload(r, nextByKey[this.rowKey(r)])));
         list.forEach((r) => {
+          const anterior = r.vencimento;
           r.vencimento = nextByKey[this.rowKey(r)];
           mark(r);
           prorrogadas += 1;
+          avisosProrroga.push(this.avisoItem(r, { anterior: this.fmtDate(anterior) }));
         });
       } catch (e) {
         errors.push("Título " + billId + ": " + (e && e.message ? e.message : e));
@@ -1120,6 +1243,10 @@ window.EngenhariaCaucaoApp = {
     }
     manter.forEach((r) => { mark(r); liberadas += 1; });
     this.persistLiberated();
+    if (avisosProrroga.length) {
+      this.enqueueAviso("prorrogacao", avisosProrroga);
+      this.flushAvisos().catch(function () {});
+    }
     this.state.busy = false;
     this.applyFilters();
     this.renderList();
@@ -1127,7 +1254,6 @@ window.EngenhariaCaucaoApp = {
     if (prorrogadas) parts.push(prorrogadas + " prorrogada(s) em 30 dias e liberada(s).");
     if (liberadas) parts.push(liberadas + " liberada(s) com o vencimento atual.");
     if (jaLiberadas.length) parts.push(jaLiberadas.length + " já liberada(s): vencimento mantido para a tesouraria.");
-    if (futuras.length) parts.push(futuras.length + " não liberada(s): emissão futura.");
     if (errors.length) parts.push("Falhas:\n" + errors.slice(0, 6).join("\n"));
     alert(parts.join("\n") || "Nenhuma caução foi alterada.");
   },
@@ -1271,6 +1397,9 @@ window.EngenhariaCaucaoApp = {
               <button type="button" id="ecau-btn-liberar" class="btn btn-secondary btn-sm ecau-bar-btn" disabled onclick="EngenhariaCaucaoApp.liberarSelecionadas()">
                 <i data-lucide="unlock" style="width:14px;height:14px;"></i> Liberar para pagamento
               </button>
+              <button type="button" id="ecau-btn-retirar" class="btn btn-sm ecau-bar-btn" disabled onclick="EngenhariaCaucaoApp.retirarLiberacao()">
+                <i data-lucide="lock" style="width:14px;height:14px;"></i> Retirar liberação
+              </button>
             </div>
           </div>
         </div>
@@ -1335,6 +1464,24 @@ window.mergeEngenhariaCaucaoLiberados = function (localStr, cloudStr) {
     else out[k] = String(a.at || "") >= String(b.at || "") ? a : b;
   });
   return JSON.stringify(out);
+};
+
+window.mergeEngenhariaCaucaoAvisos = function (localStr, cloudStr) {
+  const parse = (raw) => {
+    try { return JSON.parse(raw || "{}") || {}; } catch (e) { return {}; }
+  };
+  const local = parse(localStr);
+  const cloud = parse(cloudStr);
+  const sent = Object.assign({}, cloud.sent || {}, local.sent || {});
+  const queue = new Map();
+  [].concat(cloud.queue || [], local.queue || []).forEach((q) => {
+    if (q && q.key && !sent[q.key]) queue.set(q.key, q);
+  });
+  return JSON.stringify({
+    sent: sent,
+    queue: Array.from(queue.values()),
+    lastTry: Math.max(Number(local.lastTry) || 0, Number(cloud.lastTry) || 0)
+  });
 };
 
 document.addEventListener("tabChanged", function (e) {

@@ -2796,7 +2796,7 @@ window.bootEngenhariaCaucao = function () {
   if (!document.getElementById("engenharia-caucao-script")) {
     var s = document.createElement("script");
     s.id = "engenharia-caucao-script";
-    s.src = "engenharia-caucao.js?v=951";
+    s.src = "engenharia-caucao.js?v=952";
     s.onload = function () { start(); };
     s.onerror = function () {
       if (root) {
@@ -39949,7 +39949,8 @@ window.SYNC_KEYS = [
     "crm_compromissario_configs",
     "crm_compromissario_cessao_v1",
     "crm_compras_prazo_lancamento_v1",
-    "crm_engenharia_caucao_liberados_v1"
+    "crm_engenharia_caucao_liberados_v1",
+    "crm_engenharia_caucao_avisos_v1"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -40683,6 +40684,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_engenharia_caucao_avisos_v1" && typeof window.mergeEngenhariaCaucaoAvisos === "function") {
+                    const merged = window.mergeEngenhariaCaucaoAvisos(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_engenharia_caucao_liberados_v1" && typeof window.mergeEngenhariaCaucaoLiberados === "function") {
                     const merged = window.mergeEngenhariaCaucaoLiberados(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -40964,6 +40976,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_liberados_v1", payload.crm_engenharia_caucao_liberados_v1); } catch (e) {}
             } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
               payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
+            }
+          }
+          if (payload.crm_engenharia_caucao_avisos_v1 || cloud.crm_engenharia_caucao_avisos_v1) {
+            if (typeof window.mergeEngenhariaCaucaoAvisos === "function") {
+              payload.crm_engenharia_caucao_avisos_v1 = window.mergeEngenhariaCaucaoAvisos(
+                payload.crm_engenharia_caucao_avisos_v1 || "{}",
+                cloud.crm_engenharia_caucao_avisos_v1 || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_avisos_v1", payload.crm_engenharia_caucao_avisos_v1); } catch (e) {}
+            } else if (!payload.crm_engenharia_caucao_avisos_v1 && cloud.crm_engenharia_caucao_avisos_v1) {
+              payload.crm_engenharia_caucao_avisos_v1 = cloud.crm_engenharia_caucao_avisos_v1;
             }
           }
           if (payload.crm_users || cloud.crm_users) {
@@ -41254,6 +41277,16 @@ localStorage.setItem = function(key, value) {
                           );
                         } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
                           payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
+                        }
+                      }
+                      if (payload.crm_engenharia_caucao_avisos_v1 || cloud.crm_engenharia_caucao_avisos_v1) {
+                        if (typeof window.mergeEngenhariaCaucaoAvisos === "function") {
+                          payload.crm_engenharia_caucao_avisos_v1 = window.mergeEngenhariaCaucaoAvisos(
+                            payload.crm_engenharia_caucao_avisos_v1 || "{}",
+                            cloud.crm_engenharia_caucao_avisos_v1 || "{}"
+                          );
+                        } else if (!payload.crm_engenharia_caucao_avisos_v1 && cloud.crm_engenharia_caucao_avisos_v1) {
+                          payload.crm_engenharia_caucao_avisos_v1 = cloud.crm_engenharia_caucao_avisos_v1;
                         }
                       }
                       if (window.mergeCondicoesPagamento) {

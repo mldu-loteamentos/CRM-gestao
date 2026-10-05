@@ -542,6 +542,76 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, kmzList);
       }
 
+      if (pathRoute === '/api/caucao/avisos' && req.method === 'POST') {
+        const body = await getJsonBody(req);
+        const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+        const to = [...new Set((Array.isArray(body.to) ? body.to : []).map((v) => String(v || '').trim()).filter(emailOk))];
+        const kind = body.kind === 'prorrogacao' ? 'prorrogacao' : 'pagamento';
+        const items = (Array.isArray(body.items) ? body.items : []).slice(0, 200).map((item) => ({
+          titulo: String(item && item.titulo || ''),
+          parcela: String(item && item.parcela || ''),
+          credor: String(item && item.credor || ''),
+          vencimento: String(item && item.vencimento || ''),
+          anterior: String(item && item.anterior || ''),
+          valor: String(item && item.valor || '')
+        })).filter((item) => item.titulo);
+        if (!to.length || !items.length) return sendJson(res, 400, { error: 'Sem destinatários ou cauções.' });
+        const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const rows = items.map((item) => `
+          <tr>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(item.titulo)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(item.parcela)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(item.credor)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(kind === 'prorrogacao' ? item.anterior : item.vencimento)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(item.vencimento)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${esc(item.valor)}</td>
+          </tr>`).join('');
+        const subject = kind === 'prorrogacao'
+          ? 'Cauções prorrogadas por falta de liberação'
+          : 'Cauções liberadas com pagamento em até 3 dias';
+        const lead = kind === 'prorrogacao'
+          ? 'Os cauções abaixo não estavam liberados e chegaram na data mínima de pagamento da tesouraria. O vencimento foi prorrogado em 30 dias por falta de liberação.'
+          : 'Os cauções abaixo estão liberados e serão pagos na data de vencimento.';
+        const html = `
+          <div style="font-family:Arial,sans-serif;color:#1c2e24;">
+            <div style="background:#105436;color:#fff;padding:14px 18px;font-weight:700;">Moura Leite · Gestão de caução</div>
+            <div style="padding:16px 18px;">
+              <p style="margin:0 0 12px;">${lead}</p>
+              <table style="border-collapse:collapse;width:100%;font-size:14px;">
+                <thead>
+                  <tr style="background:#f4f7f5;text-align:left;">
+                    <th style="padding:8px 10px;">Título</th>
+                    <th style="padding:8px 10px;">Parc.</th>
+                    <th style="padding:8px 10px;">Credor</th>
+                    <th style="padding:8px 10px;">${kind === 'prorrogacao' ? 'Vencimento anterior' : 'Vencimento'}</th>
+                    <th style="padding:8px 10px;">${kind === 'prorrogacao' ? 'Novo vencimento' : 'Pagamento'}</th>
+                    <th style="padding:8px 10px;">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>`;
+        const smtpReady = process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'COLOQUE_SUA_SENHA_AQUI';
+        if (!smtpReady) {
+          console.log('[CAUCAO AVISO] SMTP sem senha. Fila mantida. Destinatários: ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
+          return sendJson(res, 200, { sent: false, simulated: true, reason: 'SMTP sem senha configurada' });
+        }
+        try {
+          await transporter.sendMail({
+            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            to: to.join(', '),
+            subject,
+            html
+          });
+          console.log('[CAUCAO AVISO] Enviado para ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
+          return sendJson(res, 200, { sent: true });
+        } catch (mailError) {
+          console.error('[CAUCAO AVISO] Falha no envio:', mailError && mailError.message ? mailError.message : mailError);
+          return sendJson(res, 200, { sent: false, simulated: false, reason: 'Falha no envio' });
+        }
+      }
+
       if (pathRoute === '/api/tags/request' && req.method === 'POST') {
         const body = await getJsonBody(req);
         const token = Math.random().toString(36).substring(2, 15);
