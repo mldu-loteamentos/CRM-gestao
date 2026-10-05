@@ -63,6 +63,35 @@ window.EngenhariaCaucaoApp = {
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
   },
 
+  addDaysIso(iso, days) {
+    const s = this.isoDate(iso);
+    if (!s) return "";
+    const d = new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+    d.setDate(d.getDate() + Number(days || 0));
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  minDaysToday() {
+    let prazo = { 0: 9, 1: 8, 2: 8, 3: 8, 4: 8, 5: 10, 6: 10 };
+    try {
+      if (typeof parseComprasPrazo === "function") {
+        prazo = parseComprasPrazo(localStorage.getItem("crm_compras_prazo_lancamento_v1") || "{}");
+      }
+    } catch (e) { /* usa o padrão */ }
+    return Number(prazo[new Date().getDay()] || 0);
+  },
+
+  emissaoFutura(r) {
+    const em = this.isoDate(r && r.emissao);
+    return !!(em && em > this.isoToday());
+  },
+
+  dentroPrazoMinimo(r) {
+    const due = this.isoDate(r && r.vencimento);
+    const minDue = this.addDaysIso(this.isoToday(), this.minDaysToday());
+    return !!(due && minDue && due < minDue);
+  },
+
   addMonthsIso(iso, months) {
     const s = this.isoDate(iso) || this.isoToday();
     const d = new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1 + Number(months || 0), 1);
@@ -693,7 +722,7 @@ window.EngenhariaCaucaoApp = {
           <span class="cprev-group-chip">${this.esc(countLabel)}</span>
         </div>
       </td>
-      <td colspan="4" style="${cell}"></td>
+      <td colspan="5" style="${cell}"></td>
       <td style="${cell}text-align:right;white-space:nowrap;letter-spacing:0;text-transform:none;">
         <span class="cprev-group-chip">R$ ${this.esc(valueLabel)}</span>
       </td>
@@ -763,8 +792,9 @@ window.EngenhariaCaucaoApp = {
       const key = this.rowKey(r);
       const checked = !!this.state.selected[key];
       const late = !r.pago && r.vencimento && r.vencimento < this.isoToday();
+      const futura = this.emissaoFutura(r);
       const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
-      return header + `<tr class="cprev-row${late ? " cprev-late" : ""}" data-key="${this.esc(key)}" data-idx="${idx}">
+      return header + `<tr class="cprev-row${late ? " cprev-late" : ""}${futura ? " ecau-emissao-futura" : ""}" data-key="${this.esc(key)}" data-idx="${idx}">
         <td class="ecau-col-chk" onclick="event.stopPropagation()">
           <input type="checkbox" ${r.pago ? "disabled" : ""} ${checked ? "checked" : ""}
             onchange="EngenhariaCaucaoApp.toggleRow('${this.esc(key)}', this.checked, event)">
@@ -776,6 +806,10 @@ window.EngenhariaCaucaoApp = {
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="CAU">CAU</td>
         <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
+        <td class="ecau-col-emissao" title="${this.esc(this.fmtDate(r.emissao))}">
+          <div>${this.esc(this.fmtDate(r.emissao))}</div>
+          ${futura ? '<span class="cprev-tag cprev-tag-bloqueado">Não é possível liberar</span>' : ""}
+        </td>
         <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
         <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
         <td class="ecau-col-sit">${this.statusTag(r)}</td>
@@ -793,6 +827,7 @@ window.EngenhariaCaucaoApp = {
             <col class="cprev-col-parc">
             <col class="cprev-col-doc">
             <col class="cprev-col-ndoc">
+            <col class="ecau-col-emissao">
             <col class="cprev-col-venc">
             <col class="cprev-col-val">
             <col class="ecau-col-sit">
@@ -810,6 +845,7 @@ window.EngenhariaCaucaoApp = {
               <th class="cprev-col-parc">Parc.</th>
               <th class="cprev-col-doc">Doc.</th>
               <th class="cprev-col-ndoc">Nº doc.</th>
+              <th class="ecau-col-emissao">Emissão</th>
               <th class="cprev-col-venc">Vencimento</th>
               <th class="cprev-col-val">Valor</th>
               <th class="ecau-col-sit">Situação</th>
@@ -964,25 +1000,73 @@ window.EngenhariaCaucaoApp = {
       alert("Selecione ao menos uma caução em aberto.");
       return;
     }
-    if (!confirm("Liberar " + rows.length + " caução(ões) para pagamento?\nO financeiro passa a ver esses títulos como liberados pela engenharia.")) {
+    const futuras = rows.filter((r) => this.emissaoFutura(r));
+    const elegiveis = rows.filter((r) => !this.emissaoFutura(r));
+    const jaLiberadas = elegiveis.filter((r) => this.isLiberated(r));
+    const prorrogar = elegiveis.filter((r) => !this.isLiberated(r) && this.dentroPrazoMinimo(r));
+    const manter = elegiveis.filter((r) => !this.isLiberated(r) && !this.dentroPrazoMinimo(r));
+    if (!elegiveis.length) {
+      alert("Não é possível liberar. A data de emissão destas cauções é futura.");
       return;
     }
+    const minDays = this.minDaysToday();
+    const lines = [];
+    if (prorrogar.length) lines.push(prorrogar.length + " caução(ões) com vencimento dentro do prazo mínimo de " + minDays + " dias serão prorrogadas em 30 dias e liberadas.");
+    if (manter.length) lines.push(manter.length + " caução(ões) serão liberadas mantendo o vencimento atual.");
+    if (jaLiberadas.length) lines.push(jaLiberadas.length + " já liberada(s) mantêm o vencimento para a tesouraria.");
+    if (futuras.length) lines.push(futuras.length + " com emissão futura não podem ser liberadas.");
+    if (!confirm("Liberar as cauções selecionadas?\n\n" + lines.join("\n"))) return;
+
+    this.state.busy = true;
+    this.paintSelectionBar();
     const now = new Date().toISOString();
     const user = this.operatorName();
-    rows.forEach((r) => {
+    const mark = (r) => {
       this.state.liberated[this.rowKey(r)] = {
         at: now,
         user,
         titulo: r.titulo,
         parcela: r.parcela,
         credor: r.credor,
-        valor: r.valorAjustado
+        valor: r.valorAjustado,
+        vencimento: r.vencimento
       };
+    };
+    let prorrogadas = 0;
+    let liberadas = 0;
+    const errors = [];
+    const byBill = new Map();
+    prorrogar.forEach((r) => {
+      const id = String(r.titulo);
+      if (!byBill.has(id)) byBill.set(id, []);
+      byBill.get(id).push(r);
     });
+    for (const [billId, list] of byBill.entries()) {
+      const nextByKey = {};
+      list.forEach((r) => { nextByKey[this.rowKey(r)] = this.addDaysIso(r.vencimento, 30); });
+      try {
+        await this.patchBillInstallments(billId, list.map((r) => this.installmentPayload(r, nextByKey[this.rowKey(r)])));
+        list.forEach((r) => {
+          r.vencimento = nextByKey[this.rowKey(r)];
+          mark(r);
+          prorrogadas += 1;
+        });
+      } catch (e) {
+        errors.push("Título " + billId + ": " + (e && e.message ? e.message : e));
+      }
+    }
+    manter.forEach((r) => { mark(r); liberadas += 1; });
     this.persistLiberated();
+    this.state.busy = false;
     this.applyFilters();
     this.renderList();
-    alert(rows.length + " caução(ões) liberada(s) para pagamento.");
+    const parts = [];
+    if (prorrogadas) parts.push(prorrogadas + " prorrogada(s) em 30 dias e liberada(s).");
+    if (liberadas) parts.push(liberadas + " liberada(s) com o vencimento atual.");
+    if (jaLiberadas.length) parts.push(jaLiberadas.length + " já liberada(s): vencimento mantido para a tesouraria.");
+    if (futuras.length) parts.push(futuras.length + " não liberada(s): emissão futura.");
+    if (errors.length) parts.push("Falhas:\n" + errors.slice(0, 6).join("\n"));
+    alert(parts.join("\n") || "Nenhuma caução foi alterada.");
   },
 
   exportExcel() {
@@ -1003,7 +1087,7 @@ window.EngenhariaCaucaoApp = {
     });
     const aoa = [[
       "Credor", "Id Empresa", "Centro de custo", "Título", "Parcela",
-      "Documento", "Nº documento", "Vencimento", "Valor (R$)", "Situação"
+      "Documento", "Nº documento", "Emissão", "Vencimento", "Valor (R$)", "Situação"
     ]];
     const headerRows = new Set([0]);
     const groupRows = new Set();
@@ -1015,7 +1099,7 @@ window.EngenhariaCaucaoApp = {
         credor.toUpperCase(),
         "",
         list.length + (list.length === 1 ? " título" : " títulos"),
-        "", "", "", "", "",
+        "", "", "", "", "", "",
         total,
         ""
       ]);
@@ -1028,9 +1112,10 @@ window.EngenhariaCaucaoApp = {
           r.parcela || "",
           "CAU",
           r.documento || "",
+          this.fmtDate(r.emissao),
           this.fmtDate(r.vencimento),
           Number(r.valorAjustado) || 0,
-          r.pago ? "Pago" : (this.isLiberated(r) ? "Liberado" : "Retido")
+          r.pago ? "Pago" : (this.emissaoFutura(r) ? "Emissão futura" : (this.isLiberated(r) ? "Liberado" : "Retido"))
         ]);
       });
     });
@@ -1038,7 +1123,7 @@ window.EngenhariaCaucaoApp = {
     const range = XLSX.utils.decode_range(ws["!ref"]);
     ws["!cols"] = [
       { wch: 40 }, { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 10 },
-      { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }
+      { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }
     ];
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -1064,7 +1149,7 @@ window.EngenhariaCaucaoApp = {
           cell.s.fill = { fgColor: { rgb: "D1FAE5" } };
           cell.s.font.bold = true;
         }
-        if (R > 0 && C === 8 && cell.t === "n") cell.z = "#,##0.00";
+        if (R > 0 && C === 9 && cell.t === "n") cell.z = "#,##0.00";
       }
     }
     const wb = XLSX.utils.book_new();
@@ -1114,6 +1199,8 @@ window.EngenhariaCaucaoApp = {
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
                 </button>
               </div>
+            </div>
+            <div class="ecau-release">
               <button type="button" id="ecau-btn-due" class="btn btn-primary btn-sm ecau-bar-btn" disabled onclick="EngenhariaCaucaoApp.openDueModal()">
                 <i data-lucide="calendar-clock" style="width:14px;height:14px;"></i> Ajustar vencimento
               </button>

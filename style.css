@@ -5835,20 +5835,16 @@ circle.donut-segment {
   border-color: var(--color-primary);
 }
 .ecau-actions {
-  grid-column: 2 / 4;
+  grid-column: 2;
   grid-row: 3;
   align-self: end;
-  justify-self: start;
+  justify-self: stretch;
   width: 100%;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: block;
   min-width: 0;
 }
 .ecau-actions-main {
-  width: 50%;
-  flex: 0 0 50%;
+  width: 100%;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
@@ -5865,14 +5861,29 @@ circle.donut-segment {
   box-sizing: border-box;
   white-space: nowrap;
 }
-.ecau-actions .ecau-bar-btn {
-  width: auto;
-  flex: 0 0 auto;
+.ecau-release {
+  grid-column: 3;
+  grid-row: 3;
+  align-self: end;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  min-width: 0;
+}
+.ecau-release .ecau-bar-btn {
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 8px;
+  font-size: 0.72rem;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
-.ecau-actions .ecau-bar-btn:disabled {
+.ecau-release .ecau-bar-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -5894,6 +5905,7 @@ circle.donut-segment {
   .ecau-cell-sit { grid-column: 1 / -1; grid-row: 3; }
   .ecau-cell-dates { grid-column: 1; grid-row: 4; }
   .ecau-actions { grid-column: 2; grid-row: 4; }
+  .ecau-release { grid-column: 1 / -1; grid-row: 5; }
 }
 @media (max-width: 720px) {
   .ecau-grid { grid-template-columns: 1fr; }
@@ -5903,10 +5915,12 @@ circle.donut-segment {
   .ecau-cell-titulo,
   .ecau-cell-sit,
   .ecau-cell-dates,
-  .ecau-actions { grid-column: 1; }
+  .ecau-actions,
+  .ecau-release { grid-column: 1; }
   .ecau-cell-sit { grid-row: auto; }
   .ecau-cell-dates,
-  .ecau-actions { grid-row: auto; }
+  .ecau-actions,
+  .ecau-release { grid-row: auto; }
 }
 .cprev-group-header.is-neutral td {
   background: #f1f5f9 !important;
@@ -5991,6 +6005,10 @@ circle.donut-segment {
   width: 13px;
   height: 13px;
 }
+.cprev-tag-bloqueado { background: #fee2e2; color: #991b1b; }
+.ecau-col-emissao { white-space: nowrap; }
+.ecau-col-emissao .cprev-tag { display: inline-flex; margin: 4px 0 0; }
+.ecau-emissao-futura .ecau-col-emissao { color: #b91c1c; font-weight: 700; }
 .cprev-table-wrap .ecau-col-chk { width: 36px; text-align: center; }
 .cprev-table-wrap .ecau-col-sit { width: 92px; }
 .ecau-table tbody tr.cprev-row { cursor: default; }

@@ -2230,6 +2230,7 @@ function maxAgreementInstallmentDays(installments) {
 }
 
 window.ACORDO_JUDICIAL_INTERNO_DIAS = 60;
+window.ACORDO_JUDICIAL_ENVIAR_JURIDICO_DIAS = 31;
 
 window.installmentDueIsoDate = function(instOrDate) {
   if (!instOrDate) return "";
@@ -2533,6 +2534,17 @@ window.clientIsExecutarAcordoQuebrado = function(client, history) {
   return days >= cutoff + 1;
 };
 
+window.clientIsAcordoJudicialEnviarJuridico = function(client, history) {
+  if (typeof window.clientIsAcordoJudicialQuebrado !== "function") return false;
+  if (!window.clientIsAcordoJudicialQuebrado(client, history)) return false;
+  const lim = Number(window.ACORDO_JUDICIAL_ENVIAR_JURIDICO_DIAS);
+  const cutoff = Number.isFinite(lim) ? lim : 31;
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
+  return days >= cutoff;
+};
+
 function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
   if (getSiengeApiMode() === "simulado") return;
 
@@ -2590,10 +2602,10 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       ruleSuffix = "JURÍDICO";
     } else if (c.isAcordoJudicialQuebrado) {
       requiredType = "apoio_juridico";
-      const executar = typeof window.clientIsExecutarAcordoQuebrado === "function"
-        && window.clientIsExecutarAcordoQuebrado(c);
-      ruleSuffix = executar
-        ? "APOIO_JURIDICO / EXECUTAR ACORDO QUEBRADO"
+      const enviarJuridico = typeof window.clientIsAcordoJudicialEnviarJuridico === "function"
+        && window.clientIsAcordoJudicialEnviarJuridico(c);
+      ruleSuffix = enviarJuridico
+        ? "APOIO_JURIDICO / ENVIAR JURIDICO"
         : "APOIO_JURIDICO / ACORDO JUDICIAL QUEBRADO";
     } else if (passedJuridico && recenteLucelia) {
       requiredType = "apoio_juridico";
@@ -5910,10 +5922,10 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client && (client.subjudice === "S" || client.subjudice === true))) {
     return G.SUBJUDICE;
   }
-  // Acordo judicial quebrado fica com a Lucelia; só o grupo muda no 61º dia
+  // Acordo judicial quebrado: até 30 dias no grupo próprio; 31 ou mais vai para Enviar para Jurídico
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
-    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
-      return G.EXECUTAR_ACORDO_QUEBRADO;
+    if (typeof window.clientIsAcordoJudicialEnviarJuridico === "function" && window.clientIsAcordoJudicialEnviarJuridico(client)) {
+      return G.ENVIAR_JURIDICO;
     }
     return G.ACORDO_JURIDICO;
   }
@@ -5925,8 +5937,8 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
     return G.ENTRADA_WEBRO;
   }
   if (client && client.hasOverdueAgreement) {
-    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)) {
-      return G.EXECUTAR_ACORDO_QUEBRADO;
+    if (typeof window.clientIsAcordoJudicialEnviarJuridico === "function" && window.clientIsAcordoJudicialEnviarJuridico(client)) {
+      return G.ENVIAR_JURIDICO;
     }
     return G.ACORDO_JURIDICO;
   }
@@ -5973,9 +5985,21 @@ window.getAcordoJuridicoAgingHtml = function(client) {
     ? window.getAcordoJudicialQuebradoDays(client)
     : (Number(client && client.maxDaysDelay) || 0);
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece com o Apoio Jurídico (Lucelia). No 61º dia o grupo passa a Executar Acordo Quebrado, ainda com a Lucelia.">
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fef3c7; color: #92400e; font-weight: 600;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece com o Apoio Jurídico (Lucelia). No 31º dia o grupo passa a Enviar para Jurídico.">
     <i data-lucide="handshake" style="width: 14px; height: 14px;"></i> Acordo Judicial Quebrado - ${dayLabel}
   </span>`;
+};
+
+window.getAcordoJudicialEnviarJuridicoAgingHtml = function(client) {
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  const customerId = client && client.customerId != null ? client.customerId : "";
+  const saleId = client && client.saleId != null ? client.saleId : "";
+  return `<button onclick="enviarParaJuridico(${customerId}, ${saleId})" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fca5a5; background-color: #fee2e2; color: #991b1b; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#fecaca'; this.style.borderColor='#f87171'" onmouseout="this.style.backgroundColor='#fee2e2'; this.style.borderColor='#fca5a5'" title="Acordo judicial quebrado há 31 dias ou mais. Clique para enviar ao Jurídico.">
+    <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Enviar Jurídico - ${dayLabel}
+  </button>`;
 };
 
 window.getExecutarAcordoQuebradoAgingHtml = function(client) {
@@ -8788,9 +8812,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               </span>
               ` : (() => {
                   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
-                      if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)
-                        && typeof window.getExecutarAcordoQuebradoAgingHtml === "function") {
-                          return window.getExecutarAcordoQuebradoAgingHtml(client);
+                      if (typeof window.clientIsAcordoJudicialEnviarJuridico === "function" && window.clientIsAcordoJudicialEnviarJuridico(client)
+                        && typeof window.getAcordoJudicialEnviarJuridicoAgingHtml === "function") {
+                          return window.getAcordoJudicialEnviarJuridicoAgingHtml(client);
                       }
                       return window.getAcordoJuridicoAgingHtml(client);
                   }
@@ -8802,9 +8826,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                       return window.getEntradaWebroAgingHtml(client);
                   }
                   if (client.hasOverdueAgreement) {
-                      if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(client)
-                        && typeof window.getExecutarAcordoQuebradoAgingHtml === "function") {
-                          return window.getExecutarAcordoQuebradoAgingHtml(client);
+                      if (typeof window.clientIsAcordoJudicialEnviarJuridico === "function" && window.clientIsAcordoJudicialEnviarJuridico(client)
+                        && typeof window.getAcordoJudicialEnviarJuridicoAgingHtml === "function") {
+                          return window.getAcordoJudicialEnviarJuridicoAgingHtml(client);
                       }
                       return window.getAcordoJuridicoAgingHtml(client);
                   }
@@ -10219,10 +10243,10 @@ function formatCpfCnpj(val) {
     (saleId == null || String(c.saleId) === String(saleId) || (Array.isArray(c.billIds) && c.billIds.some(id => String(id).replace(/^B-/i, "").split("-")[0] === String(saleId))))
   ) || (window.rawClientList || []).find(c => String(c.customerId) === String(customerId));
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(filaMatch)) {
-    if (typeof window.clientIsExecutarAcordoQuebrado === "function" && window.clientIsExecutarAcordoQuebrado(filaMatch)) {
-      subjudiceAlertHtml += `<span style="background-color: #be123c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Acordo judicial quebrado há 61 dias ou mais. Encaminhar para execução (Apoio Jurídico).">Executar Acordo Quebrado</span>`;
+    if (typeof window.clientIsAcordoJudicialEnviarJuridico === "function" && window.clientIsAcordoJudicialEnviarJuridico(filaMatch)) {
+      subjudiceAlertHtml += `<span style="background-color: #c2410c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Acordo judicial quebrado há 31 dias ou mais. Grupo Enviar para Jurídico.">Enviar para Jurídico</span>`;
     } else {
-      subjudiceAlertHtml += `<span style="background-color: #d97706; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece na cobrança interna por 60 dias.">Acordo Judicial Quebrado</span>`;
+      subjudiceAlertHtml += `<span style="background-color: #d97706; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo (SA, A1, A2…) vencida. Permanece no grupo Acordo Judicial Quebrado até o 30º dia.">Acordo Judicial Quebrado</span>`;
     }
   } else if (typeof window.clientIsAcordoInternoQuebrado === "function" && window.clientIsAcordoInternoQuebrado(filaMatch)) {
     subjudiceAlertHtml += `<span style="background-color: #ea580c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; margin-left: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: inline-block; vertical-align: middle;" title="Parcela de acordo interno (SA, A1, A2…) vencida. Não passou pelo jurídico nos últimos 180 dias.">Acordo quebrado</span>`;
@@ -16725,37 +16749,47 @@ window.syncDistratoExpenseDocs = function() {
     if (el) el.textContent = text;
   };
   const obraAndamento = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
-  const iptuRow = document.getElementById("dist-row-iptu");
-  const iptuInput = document.getElementById("dist-iptu");
-  const iptuFile = document.querySelector('label.dist-exp-file[for="dist-file-iptu"]');
-  if (iptuRow) iptuRow.classList.toggle("is-dispensado", obraAndamento);
-  if (iptuInput) {
-    iptuInput.disabled = obraAndamento;
-    iptuInput.readOnly = obraAndamento;
-    if (obraAndamento) iptuInput.value = "0,00";
-  }
-  if (iptuFile) iptuFile.hidden = obraAndamento;
-  if (obraAndamento) {
-    setHint("dist-iptu-doc-hint", "Obra em andamento: IPTU e CND dispensados.");
-  } else {
+  const waiveExpense = (key, hint) => {
+    const row = document.getElementById("dist-row-" + key);
+    const input = document.getElementById("dist-" + key);
+    const file = document.querySelector('label.dist-exp-file[for="dist-file-' + key + '"]');
+    if (row) row.classList.toggle("is-dispensado", obraAndamento);
+    if (input) {
+      input.disabled = obraAndamento;
+      input.readOnly = obraAndamento;
+      if (obraAndamento) input.value = "0,00";
+    }
+    if (file) file.hidden = obraAndamento;
+    if (obraAndamento) setHint("dist-" + key + "-doc-hint", hint);
+    return obraAndamento;
+  };
+  if (!waiveExpense("iptu", "Obra em andamento: IPTU e CND dispensados.")) {
     const iptu = window.parseDistratoCurrencyInput("dist-iptu");
     setHint("dist-iptu-doc-hint", iptu > 0.009
       ? "Com valor: anexe o extrato com os débitos"
       : "Sem valor: anexe CERTIDÃO NEGATIVA DE DÉBITO");
   }
-  const agua = window.parseDistratoCurrencyInput("dist-agua");
-  const luz = window.parseDistratoCurrencyInput("dist-luz");
-  const printUnico = agua <= 0.009 && luz <= 0.009;
-  setHint("dist-agua-doc-hint", agua > 0.009
-    ? "Com valor: anexe o extrato com os débitos"
-    : (printUnico
-      ? "Sem instalação: um print cobre água e energia."
-      : "Anexe o print da consulta ao cliente de que não há instalação"));
-  setHint("dist-luz-doc-hint", luz > 0.009
-    ? "Com valor: anexe o extrato com os débitos"
-    : (printUnico
-      ? "Sem instalação: um print cobre água e energia."
-      : "Anexe o print da consulta ao cliente de que não há instalação"));
+  const aguaWaived = waiveExpense("agua", "Obra em andamento: água dispensada. O cliente não constrói antes do término da obra.");
+  const luzWaived = waiveExpense("luz", "Obra em andamento: energia dispensada. O cliente não constrói antes do término da obra.");
+  if (!aguaWaived || !luzWaived) {
+    const agua = window.parseDistratoCurrencyInput("dist-agua");
+    const luz = window.parseDistratoCurrencyInput("dist-luz");
+    const printUnico = agua <= 0.009 && luz <= 0.009;
+    if (!aguaWaived) {
+      setHint("dist-agua-doc-hint", agua > 0.009
+        ? "Com valor: anexe o extrato com os débitos"
+        : (printUnico
+          ? "Sem instalação: um print cobre água e energia."
+          : "Anexe o print da consulta ao cliente de que não há instalação"));
+    }
+    if (!luzWaived) {
+      setHint("dist-luz-doc-hint", luz > 0.009
+        ? "Com valor: anexe o extrato com os débitos"
+        : (printUnico
+          ? "Sem instalação: um print cobre água e energia."
+          : "Anexe o print da consulta ao cliente de que não há instalação"));
+    }
+  }
 };
 
 window.distratoExpenseDocRules = function() {
@@ -16782,7 +16816,7 @@ window.distratoExpenseDocRules = function() {
     }
   ];
   if (typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento()) {
-    return rules.filter((r) => r.key !== "iptu");
+    return rules.filter((r) => r.key !== "iptu" && r.key !== "agua" && r.key !== "luz");
   }
   return rules;
 };
@@ -16880,10 +16914,11 @@ function calculateDistrato() {
   
   // 2. Despesas
   const taxaAssoc = (isPermuta || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
-  const iptuDispensado = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
+  const obraAndamento = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
+  const iptuDispensado = obraAndamento;
   const iptu = (isPermuta || iptuDispensado) ? 0 : parseCurrencyInput("dist-iptu");
-  const agua = isPermuta ? 0 : parseCurrencyInput("dist-agua");
-  const luz = isPermuta ? 0 : parseCurrencyInput("dist-luz");
+  const agua = (isPermuta || obraAndamento) ? 0 : parseCurrencyInput("dist-agua");
+  const luz = (isPermuta || obraAndamento) ? 0 : parseCurrencyInput("dist-luz");
   const outros = isPermuta ? 0 : parseCurrencyInput("dist-outros");
 
   const outrasDeducoes = taxaAssoc + iptu + agua + luz + outros;
@@ -17190,7 +17225,7 @@ window.handleDistratoChoiceChange = function() {
     instQty,
     refundInstallment,
     distratoAlcada: distAlcada,
-    extraDebits: { homolog, comissao, taxaAssoc, iptu, iptuDispensado, agua, luz, outros },
+    extraDebits: { homolog, comissao, taxaAssoc, iptu, iptuDispensado, agua, luz, utilidadesDispensadas: obraAndamento, outros },
     isPermuta,
     permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
   };
@@ -20597,11 +20632,15 @@ window.generateDemonstrativoDistratoPDF = function() {
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">\u00C1gua:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.agua || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          ${(results.extraDebits && results.extraDebits.utilidadesDispensadas)
+            ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.agua || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Energia (Luz):</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.luz || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          ${(results.extraDebits && results.extraDebits.utilidadesDispensadas)
+            ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.luz || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Taxa associativa:</td>
