@@ -13431,7 +13431,6 @@ function formatCpfCnpj(val) {
       }
 
       const instIds = Array.from(checkboxes).map(c => parseInt(c.getAttribute('data-inst-id')));
-      if (typeof AppState !== "undefined") AppState._simVencidas = vencidasSimulador;
       if (typeof window.assertInstallmentsAllowSiengeBoleto === "function" && !window.assertInstallmentsAllowSiengeBoleto(instIds)) {
         return;
       }

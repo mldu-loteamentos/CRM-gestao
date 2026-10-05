@@ -265,35 +265,106 @@ window.EngenhariaCaucaoApp = {
     return [...map.values()].sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
   },
 
-  empItems() {
-    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.companyId, (r) => {
-      const name = this.companyName(r.companyId) || r.companyId;
-      return r.companyId + " - " + name;
+  empresaCustomMap() {
+    const live = window.EmpresasState && EmpresasState.customFields;
+    if (live && Object.keys(live).length) return live;
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+      const map = {};
+      Object.keys(raw).forEach((k) => {
+        if (k === "_v2") return;
+        const item = raw[k];
+        if (!item || typeof item !== "object") return;
+        const id = item.company_id != null ? item.company_id : k;
+        map[String(id)] = item;
+      });
+      return map;
+    } catch (e) {
+      return {};
+    }
+  },
+
+  geridaIdSet() {
+    const defaults = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 12: 1, 13: 1, 14: 1, 17: 1, 28: 1, 32: 1 };
+    const map = this.empresaCustomMap();
+    const yes = new Set();
+    const seen = new Set();
+    Object.keys(map).forEach((k) => {
+      const item = map[k];
+      if (!item || typeof item !== "object") return;
+      const id = String(item.company_id != null ? item.company_id : k);
+      seen.add(id);
+      if (Number(item.gerida_pelo_grupo) === 1) yes.add(id);
     });
-    if (fromRows.length) return fromRows;
-    return (this.state.companies || []).map((c) => ({
-      id: String(c.id),
-      name: String(c.name || "").toUpperCase(),
-      label: c.id + " - " + String(c.name || "").toUpperCase()
-    }));
+    Object.keys(defaults).forEach((id) => {
+      if (!seen.has(String(id))) yes.add(String(id));
+    });
+    return yes;
+  },
+
+  activeCompanySet() {
+    const gerida = this.geridaIdSet();
+    const picked = (this.state.companyIds || []).map(String).filter((id) => gerida.has(id));
+    return picked.length ? new Set(picked) : gerida;
+  },
+
+  tituloLock() {
+    return String(this.state.qTitulo || "").trim().length > 0;
+  },
+
+  ccCompanyId(cc) {
+    if (!cc) return "";
+    const raw = cc.companyId != null && cc.companyId !== "" ? cc.companyId : cc.idCompany;
+    return raw == null || raw === "" ? "" : String(raw);
+  },
+
+  empItems() {
+    const allowed = this.geridaIdSet();
+    const companies = (this.state.companies || []).filter((c) => allowed.has(String(c.id)));
+    if (companies.length) {
+      return companies.map((c) => ({
+        id: String(c.id),
+        name: String(c.name || "").toUpperCase(),
+        label: c.id + " - " + String(c.name || "").toUpperCase()
+      })).sort((a, b) => Number(a.id) - Number(b.id));
+    }
+    return this.uniqueItems(
+      (this.state.allRows || []).filter((r) => allowed.has(String(r.companyId))),
+      (r) => r.companyId,
+      (r) => {
+        const name = this.companyName(r.companyId) || r.companyId;
+        return r.companyId + " - " + name;
+      }
+    );
   },
 
   credItems() {
-    return this.uniqueItems(this.state.allRows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    const companies = this.activeCompanySet();
+    const rows = (this.state.allRows || []).filter((r) => companies.has(String(r.companyId)));
+    return this.uniqueItems(rows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
   },
 
   ccItems() {
-    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.ccId, (r) => {
-      const name = String(r.ccNome || "").toUpperCase();
-      return r.ccId ? r.ccId + " - " + name : name;
-    });
-    if (fromRows.length) return fromRows;
+    const companies = this.activeCompanySet();
+    const rows = (this.state.allRows || []).filter((r) => r.ccId && companies.has(String(r.companyId)));
+    if (rows.length) {
+      return this.uniqueItems(rows, (r) => r.ccId, (r) => {
+        const name = String(r.ccNome || "").toUpperCase();
+        return r.ccId + " - " + name;
+      });
+    }
     const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
     return list.map((c) => {
       const id = String(c.id || c.code || "");
       const name = String(c.name || c.nome || "").toUpperCase();
-      return { id, name, label: id ? id + " - " + name : name };
-    }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+      return { id, name, label: id ? id + " - " + name : name, companyId: this.ccCompanyId(c) };
+    }).filter((x) => x.id && x.companyId && companies.has(x.companyId))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+  },
+
+  pruneCc() {
+    const allowed = new Set(this.ccItems().map((x) => String(x.id)));
+    this.state.ccIds = (this.state.ccIds || []).filter((id) => allowed.has(String(id)));
   },
 
   statusItems() {
@@ -320,12 +391,17 @@ window.EngenhariaCaucaoApp = {
     const qCredor = this.fold(this.state.qCredor);
     const start = this.state.startDate || "";
     const end = this.state.endDate || "";
+    const gerida = this.geridaIdSet();
+    const byTitle = this.tituloLock();
     this.state.shown = (this.state.allRows || []).filter((r) => {
-      if (emp.size && !emp.has(String(r.companyId))) return false;
-      if (cc.size && !cc.has(String(r.ccId))) return false;
-      if (cred.size && !cred.has(this.fold(r.credor))) return false;
-      if (start && r.vencimento && r.vencimento < start) return false;
-      if (end && r.vencimento && r.vencimento > end) return false;
+      if (!gerida.has(String(r.companyId))) return false;
+      if (!byTitle) {
+        if (emp.size && !emp.has(String(r.companyId))) return false;
+        if (cc.size && !cc.has(String(r.ccId))) return false;
+        if (cred.size && !cred.has(this.fold(r.credor))) return false;
+        if (start && r.vencimento && r.vencimento < start) return false;
+        if (end && r.vencimento && r.vencimento > end) return false;
+      }
       if (!statusAll && !statuses.has(this.rowStatus(r))) return false;
       if (qTitulo) {
         const blob = this.fold([r.titulo, r.documento, r.parcela].join("")).replace(/\s+/g, "");
@@ -393,6 +469,7 @@ window.EngenhariaCaucaoApp = {
     const bind = (id, key, openKey, qKey, itemsFn, nouns) => {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
+          if (self.tituloLock() && key !== "statusIds") return;
           const was = !!self.state[openKey];
           self.state.openEmp = false;
           self.state.openCred = false;
@@ -415,23 +492,29 @@ window.EngenhariaCaucaoApp = {
           }
         },
         toggleId(itemId, checked) {
+          if (self.tituloLock() && key !== "statusIds") return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = checked ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+          if (key === "companyIds") self.pruneCc();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
           self.paintFilters();
         },
         selectAll() {
+          if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = itemsFn().map((x) => String(x.id));
+          if (key === "companyIds") self.pruneCc();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
           self.paintFilters();
         },
         selectNone() {
+          if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = [];
+          if (key === "companyIds") self.pruneCc();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -499,7 +582,10 @@ window.EngenhariaCaucaoApp = {
     if (!window.SiengeApiService || typeof SiengeApiService.getCompanies !== "function") return;
     try {
       const list = await SiengeApiService.getCompanies(false);
-      this.state.companies = Array.isArray(list) ? list : ((list && list.results) || []);
+      const all = Array.isArray(list) ? list : ((list && list.results) || []);
+      const gerida = this.geridaIdSet();
+      this.state.companies = all.filter((c) => gerida.has(String(c.id)));
+      this.state.companyIds = (this.state.companyIds || []).filter((id) => gerida.has(String(id)));
     } catch (e) {
       this.state.companies = [];
     }
@@ -568,11 +654,27 @@ window.EngenhariaCaucaoApp = {
     this.renderPage();
   },
 
+  syncTituloLock() {
+    const lock = this.tituloLock();
+    ["ecau-emp-slot", "ecau-cc-slot", "ecau-cred-slot"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle("is-locked", lock);
+    });
+    document.querySelectorAll(".ecau-date input").forEach((el) => { el.disabled = lock; });
+  },
+
   onField(field, val) {
     this.state[field] = val;
     if (field === "qTitulo" || field === "qCredor" || field === "startDate" || field === "endDate") {
+      if (field === "qTitulo" && this.tituloLock()) {
+        this.state.openEmp = false;
+        this.state.openCc = false;
+        this.state.openCred = false;
+        this.paintFilters();
+      }
       this.applyFilters();
       this.renderList();
+      if (field === "qTitulo") this.syncTituloLock();
     }
   },
 
@@ -986,9 +1088,9 @@ window.EngenhariaCaucaoApp = {
             <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
           </div>
           <div class="ecau-grid">
-            <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp"></div>
-            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra"></div>
-            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred"></div>
+            <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp${this.tituloLock() ? " is-locked" : ""}"></div>
+            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${this.tituloLock() ? " is-locked" : ""}"></div>
+            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred${this.tituloLock() ? " is-locked" : ""}"></div>
             <div class="form-group ecau-search ecau-cell-titulo">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -998,23 +1100,26 @@ window.EngenhariaCaucaoApp = {
             <div class="ecau-cell-dates">
               <div class="form-group ecau-date">
                 <label>Vencimento de</label>
-                <input type="date" class="form-control" value="${this.esc(s.startDate)}"
+                <input type="date" class="form-control" value="${this.esc(s.startDate)}" ${this.tituloLock() ? "disabled" : ""}
                   onchange="EngenhariaCaucaoApp.onField('startDate', this.value)">
               </div>
               <div class="form-group ecau-date">
                 <label>Vencimento até</label>
-                <input type="date" class="form-control" value="${this.esc(s.endDate)}"
+                <input type="date" class="form-control" value="${this.esc(s.endDate)}" ${this.tituloLock() ? "disabled" : ""}
                   onchange="EngenhariaCaucaoApp.onField('endDate', this.value)">
               </div>
-              <div class="ecau-actions">
-                <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
-                  <i data-lucide="search" style="width:14px;height:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
-                </button>
-                <button type="button" class="btn btn-cancel btn-sm" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
-                <button type="button" class="btn btn-sm cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
-                  <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
-                </button>
-              </div>
+            </div>
+            <div class="ecau-actions">
+              <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
+                ${s.loading
+                  ? '<span class="ecau-spin" aria-hidden="true"></span>'
+                  : '<i data-lucide="search" style="width:14px;height:14px;"></i>'}
+                Consultar
+              </button>
+              <button type="button" class="btn btn-cancel btn-sm" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
+              <button type="button" class="btn btn-sm cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
+                <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+              </button>
             </div>
           </div>
         </div>
