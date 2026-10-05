@@ -81,9 +81,10 @@ window.EngenhariaCaucaoApp = {
     return Number(prazo[new Date().getDay()] || 0);
   },
 
-  emissaoFutura(r) {
+  vencimentoAntesDaEmissao(r, due) {
     const em = this.isoDate(r && r.emissao);
-    return !!(em && em > this.isoToday());
+    const d = this.isoDate(due);
+    return !!(em && d && d < em);
   },
 
   dentroPrazoMinimo(r) {
@@ -726,13 +727,69 @@ window.EngenhariaCaucaoApp = {
       <td style="${cell}text-align:right;white-space:nowrap;letter-spacing:0;text-transform:none;">
         <span class="cprev-group-chip">R$ ${this.esc(valueLabel)}</span>
       </td>
+      <td style="${cell}"></td>
     </tr>`;
   },
 
+  statusTip(r) {
+    const venc = this.fmtDate(r && r.vencimento);
+    if (r && r.pago) {
+      const pag = this.fmtDate(r.dataPagamento);
+      return pag && pag !== "—" ? ("Foi pago no dia " + pag) : "Foi pago";
+    }
+    if (this.isLiberated(r)) return "Será pago no dia " + venc;
+    return "Provisionado para pagamento em " + venc;
+  },
+
   statusTag(r) {
-    if (r.pago) return `<span class="cprev-tag cprev-tag-pago">Pago</span>`;
-    if (this.isLiberated(r)) return `<span class="cprev-tag cprev-tag-liberado">Liberado</span>`;
-    return `<span class="cprev-tag cprev-tag-aberto">Retido</span>`;
+    const pago = !!(r && r.pago);
+    const liberado = !pago && this.isLiberated(r);
+    const kind = pago ? "pago" : (liberado ? "liberado" : "retido");
+    const label = pago ? "Pago" : (liberado ? "Liberado" : "Retido");
+    return `<span class="ecau-sit ecau-sit-${kind}" data-ecau-tip="${this.esc(this.statusTip(r))}">${label}</span>`;
+  },
+
+  ensureSitTip() {
+    if (this._sitTipBound) return;
+    this._sitTipBound = true;
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-ecau-tip]") : null;
+      if (!el) return;
+      this.showSitTip(el);
+    });
+    document.addEventListener("mouseout", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-ecau-tip]") : null;
+      if (!el) return;
+      const next = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest("[data-ecau-tip]") : null;
+      if (next === el) return;
+      this.hideSitTip();
+    });
+  },
+
+  showSitTip(el) {
+    let tip = document.getElementById("ecau-sit-tip");
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.id = "ecau-sit-tip";
+      tip.className = "ecau-sit-tip";
+      document.body.appendChild(tip);
+    }
+    tip.textContent = el.getAttribute("data-ecau-tip") || "";
+    tip.style.display = "block";
+    const box = el.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    let left = box.left + (box.width / 2) - (w / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    let top = box.top - h - 8;
+    if (top < 8) top = box.bottom + 8;
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  },
+
+  hideSitTip() {
+    const tip = document.getElementById("ecau-sit-tip");
+    if (tip) tip.style.display = "none";
   },
 
   renderList() {
@@ -792,9 +849,8 @@ window.EngenhariaCaucaoApp = {
       const key = this.rowKey(r);
       const checked = !!this.state.selected[key];
       const late = !r.pago && r.vencimento && r.vencimento < this.isoToday();
-      const futura = this.emissaoFutura(r);
       const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
-      return header + `<tr class="cprev-row${late ? " cprev-late" : ""}${futura ? " ecau-emissao-futura" : ""}" data-key="${this.esc(key)}" data-idx="${idx}">
+      return header + `<tr class="cprev-row${late ? " cprev-late" : ""}" data-key="${this.esc(key)}" data-idx="${idx}">
         <td class="ecau-col-chk" onclick="event.stopPropagation()">
           <input type="checkbox" ${r.pago ? "disabled" : ""} ${checked ? "checked" : ""}
             onchange="EngenhariaCaucaoApp.toggleRow('${this.esc(key)}', this.checked, event)">
@@ -806,11 +862,9 @@ window.EngenhariaCaucaoApp = {
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="CAU">CAU</td>
         <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
-        <td class="ecau-col-emissao" title="${this.esc(this.fmtDate(r.emissao))}">
-          <div>${this.esc(this.fmtDate(r.emissao))}</div>
-          ${futura ? '<span class="cprev-tag cprev-tag-bloqueado">Não é possível liberar</span>' : ""}
-        </td>
+        <td class="ecau-col-emissao" title="${this.esc(this.fmtDate(r.emissao))}">${this.esc(this.fmtDate(r.emissao))}</td>
         <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
+        <td class="ecau-col-pag">${r.pago ? this.esc(this.fmtDate(r.dataPagamento)) : "—"}</td>
         <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
         <td class="ecau-col-sit">${this.statusTag(r)}</td>
       </tr>`;
@@ -829,6 +883,7 @@ window.EngenhariaCaucaoApp = {
             <col class="cprev-col-ndoc">
             <col class="ecau-col-emissao">
             <col class="cprev-col-venc">
+            <col class="ecau-col-pag">
             <col class="cprev-col-val">
             <col class="ecau-col-sit">
           </colgroup>
@@ -847,6 +902,7 @@ window.EngenhariaCaucaoApp = {
               <th class="cprev-col-ndoc">Nº doc.</th>
               <th class="ecau-col-emissao">Emissão</th>
               <th class="cprev-col-venc">Vencimento</th>
+              <th class="ecau-col-pag">Pagamento</th>
               <th class="cprev-col-val">Valor</th>
               <th class="ecau-col-sit">Situação</th>
             </tr>
@@ -855,6 +911,7 @@ window.EngenhariaCaucaoApp = {
         </table>
       </div>`;
     this.paintSelectionBar();
+    this.ensureSitTip();
     if (window.lucide) lucide.createIcons();
   },
 
@@ -872,10 +929,6 @@ window.EngenhariaCaucaoApp = {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = !canAct;
     });
-    const bar = document.getElementById("ecau-selection-bar");
-    if (!bar) return;
-    bar.hidden = !n;
-    bar.innerHTML = n ? `<strong>${n} selecionada${n === 1 ? "" : "s"}</strong>` : "";
   },
 
   openDueModal() {
@@ -914,14 +967,27 @@ window.EngenhariaCaucaoApp = {
           </div>
           <div class="cprev-modal-body" style="padding:18px;">
             <label for="ecau-new-due" style="display:block;font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:6px;">Novo vencimento</label>
-            <input type="date" id="ecau-new-due" class="form-control" value="${this.esc(this.isoToday())}">
+            <input type="date" id="ecau-new-due" class="form-control" value="${this.esc(this.isoToday())}" oninput="EngenhariaCaucaoApp.syncDueWarn()">
+            <p id="ecau-due-warn" class="ecau-due-warn" hidden>Não é possível liberar</p>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
               <button type="button" class="btn btn-cancel" onclick="EngenhariaCaucaoApp.closeModal()">Cancelar</button>
-              <button type="button" class="btn btn-primary" onclick="EngenhariaCaucaoApp.applyDueDate()">Aplicar no Sienge</button>
+              <button type="button" class="btn btn-primary" id="ecau-due-apply" onclick="EngenhariaCaucaoApp.applyDueDate()">Aplicar no Sienge</button>
             </div>
           </div>
         </div>
       </div>`;
+    this.syncDueWarn();
+  },
+
+  syncDueWarn() {
+    const input = document.getElementById("ecau-new-due");
+    const warn = document.getElementById("ecau-due-warn");
+    const btn = document.getElementById("ecau-due-apply");
+    const due = this.isoDate(input && input.value);
+    const rows = this.selectedRows().filter((r) => !r.pago);
+    const blocked = !!(due && rows.some((r) => this.vencimentoAntesDaEmissao(r, due)));
+    if (warn) warn.hidden = !blocked;
+    if (btn) btn.disabled = blocked;
   },
 
   installmentPayload(r, dueDate) {
@@ -965,6 +1031,10 @@ window.EngenhariaCaucaoApp = {
       alert("Selecione ao menos uma caução em aberto.");
       return;
     }
+    if (rows.some((r) => this.vencimentoAntesDaEmissao(r, due))) {
+      this.syncDueWarn();
+      return;
+    }
     this.state.busy = true;
     this.paintSelectionBar();
     const byBill = new Map();
@@ -1000,21 +1070,14 @@ window.EngenhariaCaucaoApp = {
       alert("Selecione ao menos uma caução em aberto.");
       return;
     }
-    const futuras = rows.filter((r) => this.emissaoFutura(r));
-    const elegiveis = rows.filter((r) => !this.emissaoFutura(r));
-    const jaLiberadas = elegiveis.filter((r) => this.isLiberated(r));
-    const prorrogar = elegiveis.filter((r) => !this.isLiberated(r) && this.dentroPrazoMinimo(r));
-    const manter = elegiveis.filter((r) => !this.isLiberated(r) && !this.dentroPrazoMinimo(r));
-    if (!elegiveis.length) {
-      alert("Não é possível liberar. A data de emissão destas cauções é futura.");
-      return;
-    }
+    const jaLiberadas = rows.filter((r) => this.isLiberated(r));
+    const prorrogar = rows.filter((r) => !this.isLiberated(r) && this.dentroPrazoMinimo(r));
+    const manter = rows.filter((r) => !this.isLiberated(r) && !this.dentroPrazoMinimo(r));
     const minDays = this.minDaysToday();
     const lines = [];
     if (prorrogar.length) lines.push(prorrogar.length + " caução(ões) com vencimento dentro do prazo mínimo de " + minDays + " dias serão prorrogadas em 30 dias e liberadas.");
     if (manter.length) lines.push(manter.length + " caução(ões) serão liberadas mantendo o vencimento atual.");
     if (jaLiberadas.length) lines.push(jaLiberadas.length + " já liberada(s) mantêm o vencimento para a tesouraria.");
-    if (futuras.length) lines.push(futuras.length + " com emissão futura não podem ser liberadas.");
     if (!confirm("Liberar as cauções selecionadas?\n\n" + lines.join("\n"))) return;
 
     this.state.busy = true;
@@ -1087,7 +1150,7 @@ window.EngenhariaCaucaoApp = {
     });
     const aoa = [[
       "Credor", "Id Empresa", "Centro de custo", "Título", "Parcela",
-      "Documento", "Nº documento", "Emissão", "Vencimento", "Valor (R$)", "Situação"
+      "Documento", "Nº documento", "Emissão", "Vencimento", "Pagamento", "Valor (R$)", "Situação"
     ]];
     const headerRows = new Set([0]);
     const groupRows = new Set();
@@ -1099,7 +1162,7 @@ window.EngenhariaCaucaoApp = {
         credor.toUpperCase(),
         "",
         list.length + (list.length === 1 ? " título" : " títulos"),
-        "", "", "", "", "", "",
+        "", "", "", "", "", "", "",
         total,
         ""
       ]);
@@ -1114,8 +1177,9 @@ window.EngenhariaCaucaoApp = {
           r.documento || "",
           this.fmtDate(r.emissao),
           this.fmtDate(r.vencimento),
+          r.pago ? this.fmtDate(r.dataPagamento) : "",
           Number(r.valorAjustado) || 0,
-          r.pago ? "Pago" : (this.emissaoFutura(r) ? "Emissão futura" : (this.isLiberated(r) ? "Liberado" : "Retido"))
+          r.pago ? "Pago" : (this.isLiberated(r) ? "Liberado" : "Retido")
         ]);
       });
     });
@@ -1123,7 +1187,7 @@ window.EngenhariaCaucaoApp = {
     const range = XLSX.utils.decode_range(ws["!ref"]);
     ws["!cols"] = [
       { wch: 40 }, { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 10 },
-      { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }
+      { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }
     ];
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -1149,7 +1213,7 @@ window.EngenhariaCaucaoApp = {
           cell.s.fill = { fgColor: { rgb: "D1FAE5" } };
           cell.s.font.bold = true;
         }
-        if (R > 0 && C === 9 && cell.t === "n") cell.z = "#,##0.00";
+        if (R > 0 && C === 10 && cell.t === "n") cell.z = "#,##0.00";
       }
     }
     const wb = XLSX.utils.book_new();
@@ -1210,7 +1274,6 @@ window.EngenhariaCaucaoApp = {
             </div>
           </div>
         </div>
-        <div id="ecau-selection-bar" class="ecau-selection-bar"></div>
         <div class="ccom-kpis cprev-kpis" id="ecau-kpis"></div>
         <div id="ecau-results" class="cprev-results"></div>
         <div id="ecau-modal"></div>
