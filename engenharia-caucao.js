@@ -23,16 +23,18 @@ window.EngenhariaCaucaoApp = {
     companies: [],
     companyIds: [],
     creditorIds: [],
-    deptIds: [],
+    ccIds: [],
+    statusIds: ["aberto"],
     openEmp: false,
     openCred: false,
-    openDept: false,
+    openCc: false,
+    openSit: false,
     qEmp: "",
     qCred: "",
-    qDept: "",
+    qCc: "",
+    qSit: "",
     qTitulo: "",
     qCredor: "",
-    status: "aberto",
     allRows: [],
     shown: [],
     billsByTitulo: {},
@@ -280,27 +282,51 @@ window.EngenhariaCaucaoApp = {
     return this.uniqueItems(this.state.allRows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
   },
 
-  deptItems() {
-    return this.uniqueItems(this.state.allRows, (r) => this.fold(r.departamento || r.ccNome), (r) => (r.departamento || r.ccNome || "").toUpperCase());
+  ccItems() {
+    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.ccId, (r) => {
+      const name = String(r.ccNome || "").toUpperCase();
+      return r.ccId ? r.ccId + " - " + name : name;
+    });
+    if (fromRows.length) return fromRows;
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    return list.map((c) => {
+      const id = String(c.id || c.code || "");
+      const name = String(c.name || c.nome || "").toUpperCase();
+      return { id, name, label: id ? id + " - " + name : name };
+    }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+  },
+
+  statusItems() {
+    return [
+      { id: "aberto", label: "Retidos" },
+      { id: "liberado", label: "Liberados" },
+      { id: "pago", label: "Pagos" }
+    ];
+  },
+
+  rowStatus(r) {
+    if (r && r.pago) return "pago";
+    if (r && this.isLiberated(r)) return "liberado";
+    return "aberto";
   },
 
   applyFilters() {
     const emp = new Set((this.state.companyIds || []).map(String));
     const cred = new Set((this.state.creditorIds || []).map(String));
+    const cc = new Set((this.state.ccIds || []).map(String));
+    const statuses = new Set((this.state.statusIds || []).map(String));
+    const statusAll = !statuses.size || statuses.size >= this.statusItems().length;
     const qTitulo = this.fold(this.state.qTitulo).replace(/\s+/g, "");
     const qCredor = this.fold(this.state.qCredor);
-    const status = this.state.status;
     const start = this.state.startDate || "";
     const end = this.state.endDate || "";
     this.state.shown = (this.state.allRows || []).filter((r) => {
       if (emp.size && !emp.has(String(r.companyId))) return false;
+      if (cc.size && !cc.has(String(r.ccId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
       if (start && r.vencimento && r.vencimento < start) return false;
       if (end && r.vencimento && r.vencimento > end) return false;
-      const lib = this.isLiberated(r);
-      if (status === "aberto" && (r.pago || lib)) return false;
-      if (status === "liberado" && (!lib || r.pago)) return false;
-      if (status === "pago" && !r.pago) return false;
+      if (!statusAll && !statuses.has(this.rowStatus(r))) return false;
       if (qTitulo) {
         const blob = this.fold([r.titulo, r.documento, r.parcela].join("")).replace(/\s+/g, "");
         if (blob.indexOf(qTitulo) < 0) return false;
@@ -367,10 +393,12 @@ window.EngenhariaCaucaoApp = {
     const bind = (id, key, openKey, qKey, itemsFn, nouns) => {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
-          self.state[openKey] = !self.state[openKey];
-          if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; }
-          if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; }
-          if (openKey === "openDept") { self.state.openEmp = false; self.state.openCred = false; }
+          const was = !!self.state[openKey];
+          self.state.openEmp = false;
+          self.state.openCred = false;
+          self.state.openCc = false;
+          self.state.openSit = false;
+          self.state[openKey] = !was;
           self.paintFilters();
         },
         setQuery(q) {
@@ -412,7 +440,9 @@ window.EngenhariaCaucaoApp = {
       });
     };
     bind("ecau-filter-emp", "companyIds", "openEmp", "qEmp", () => this.empItems(), { singular: "empresa", plural: "empresas" });
+    bind("ecau-filter-cc", "ccIds", "openCc", "qCc", () => this.ccItems(), { singular: "empreendimento", plural: "empreendimentos" });
     bind("ecau-filter-cred", "creditorIds", "openCred", "qCred", () => this.credItems(), { singular: "credor", plural: "credores" });
+    bind("ecau-filter-sit", "statusIds", "openSit", "qSit", () => this.statusItems(), { singular: "situação", plural: "situações" });
   },
 
   paintFilters() {
@@ -432,15 +462,35 @@ window.EngenhariaCaucaoApp = {
       emptyMeansAll: true,
       nouns: { singular: "empresa", plural: "empresas" }
     }));
+    set("ecau-cc-slot", MlEmpresaFilter.html({
+      id: "ecau-filter-cc",
+      label: "Empreendimento",
+      items: this.ccItems(),
+      selectedIds: this.state.ccIds,
+      open: !!this.state.openCc,
+      query: this.state.qCc,
+      emptyMeansAll: true,
+      nouns: { singular: "empreendimento", plural: "empreendimentos" }
+    }));
     set("ecau-cred-slot", MlEmpresaFilter.html({
       id: "ecau-filter-cred",
-      label: "Credores",
+      label: "Credor",
       items: this.credItems(),
       selectedIds: this.state.creditorIds,
       open: !!this.state.openCred,
       query: this.state.qCred,
       emptyMeansAll: true,
       nouns: { singular: "credor", plural: "credores" }
+    }));
+    set("ecau-sit-slot", MlEmpresaFilter.html({
+      id: "ecau-filter-sit",
+      label: "Situação",
+      items: this.statusItems(),
+      selectedIds: this.state.statusIds,
+      open: !!this.state.openSit,
+      query: this.state.qSit,
+      emptyMeansAll: true,
+      nouns: { singular: "situação", plural: "situações" }
     }));
     if (window.lucide) lucide.createIcons();
   },
@@ -502,10 +552,12 @@ window.EngenhariaCaucaoApp = {
     this.state.endDate = range.endDate;
     this.state.companyIds = [];
     this.state.creditorIds = [];
-    this.state.deptIds = [];
+    this.state.ccIds = [];
+    this.state.statusIds = ["aberto"];
     this.state.qTitulo = "";
     this.state.qCredor = "";
-    this.state.status = "aberto";
+    this.state.qCc = "";
+    this.state.qSit = "";
     this.state.shown = [];
     this.state.allRows = [];
     this.state.billsByTitulo = {};
@@ -518,7 +570,7 @@ window.EngenhariaCaucaoApp = {
 
   onField(field, val) {
     this.state[field] = val;
-    if (field === "qTitulo" || field === "qCredor" || field === "status" || field === "startDate" || field === "endDate") {
+    if (field === "qTitulo" || field === "qCredor" || field === "startDate" || field === "endDate") {
       this.applyFilters();
       this.renderList();
     }
@@ -930,9 +982,20 @@ window.EngenhariaCaucaoApp = {
     root.innerHTML = `
       <div class="cprev-page ecau-page">
         <div class="search-filter-panel cprev-toolbar ecau-toolbar">
-          <div class="ecau-toolbar-top">
-            <div class="ecau-filters">
-              <div id="ecau-emp-slot" class="ecau-slot"></div>
+          <div class="ecau-toolbar-meta">
+            <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
+          </div>
+          <div class="ecau-grid">
+            <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp"></div>
+            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra"></div>
+            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred"></div>
+            <div class="form-group ecau-search ecau-cell-titulo">
+              <label>Título</label>
+              <input type="search" class="form-control" placeholder="Título ou nº do documento"
+                value="${this.esc(s.qTitulo)}" oninput="EngenhariaCaucaoApp.onField('qTitulo', this.value)" autocomplete="off">
+            </div>
+            <div id="ecau-sit-slot" class="ecau-slot ecau-cell-sit"></div>
+            <div class="ecau-cell-dates">
               <div class="form-group ecau-date">
                 <label>Vencimento de</label>
                 <input type="date" class="form-control" value="${this.esc(s.startDate)}"
@@ -952,24 +1015,6 @@ window.EngenhariaCaucaoApp = {
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
                 </button>
               </div>
-            </div>
-            <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
-          </div>
-          <div class="ecau-extra">
-            <div class="form-group ecau-search">
-              <label>Título</label>
-              <input type="search" class="form-control" placeholder="Título ou nº do documento"
-                value="${this.esc(s.qTitulo)}" oninput="EngenhariaCaucaoApp.onField('qTitulo', this.value)" autocomplete="off">
-            </div>
-            <div id="ecau-cred-slot" class="ecau-slot"></div>
-            <div class="form-group ecau-status">
-              <label>Situação</label>
-              <select class="form-control" onchange="EngenhariaCaucaoApp.onField('status', this.value)">
-                <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Retidos</option>
-                <option value="liberado" ${s.status === "liberado" ? "selected" : ""}>Liberados</option>
-                <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
-                <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
-              </select>
             </div>
           </div>
         </div>

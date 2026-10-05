@@ -12192,6 +12192,7 @@ function formatCpfCnpj(val) {
           // For paid installments (situationCode===2): always valid receipt
           const isPaid = situationCode === 2;
           const isValidReceipt = isPaid;
+          const hasGeneratedBillet = inst.generatedBillet === true || inst.generatedBoleto === true;
 
           return {
             installmentId: inst.installmentId || inst.installmentNumber,
@@ -12206,7 +12207,8 @@ function formatCpfCnpj(val) {
             currentBalanceWithAddition: inst.currentBalanceWithAddition !== undefined ? inst.currentBalanceWithAddition : (inst.correctedValueWithAdditions !== undefined ? inst.correctedValueWithAdditions : (inst.currentBalance !== undefined ? inst.currentBalance + (inst.additionalValue || 0) : orig + (inst.additionalValue || 0))),
             additionalValue: inst.additionalValue,
             dueDate: inst.dueDate,
-            generatedBoleto: inst.generatedBoleto || false,
+            generatedBillet: hasGeneratedBillet,
+            generatedBoleto: hasGeneratedBillet,
             receiptId: rId,
             receiptTypeStr: rType,
             receiptDate: receiptDate,
@@ -13348,7 +13350,8 @@ function formatCpfCnpj(val) {
           currentBalance: inst.currentBalance || 0,
           currentBalanceWithAddition: (inst.currentBalance || 0) + (inst.additionalValue || 0),
           dueDate: inst.dueDate,
-          generatedBoleto: inst.generatedBoleto || false,
+          generatedBillet: inst.generatedBillet === true || inst.generatedBoleto === true || src.generatedBillet === true || src.generatedBoleto === true,
+          generatedBoleto: inst.generatedBillet === true || inst.generatedBoleto === true || src.generatedBillet === true || src.generatedBoleto === true,
           conditionType: src.conditionType || inst.conditionType || inst.paymentConditionType || "",
           indexerId: src.indexerId != null ? src.indexerId
             : (src.indexerCode != null ? src.indexerCode
