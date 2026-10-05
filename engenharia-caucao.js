@@ -1101,7 +1101,7 @@ window.EngenhariaCaucaoApp = {
           <div class="cprev-modal-body" style="padding:18px;">
             <label for="ecau-new-due" style="display:block;font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:6px;">Novo vencimento</label>
             <input type="date" id="ecau-new-due" class="form-control" value="${this.esc(this.isoToday())}" oninput="EngenhariaCaucaoApp.syncDueWarn()">
-            <p id="ecau-due-warn" class="ecau-due-warn" hidden>Não é possível liberar</p>
+            <p id="ecau-due-warn" class="ecau-due-warn" hidden>Não é possível liberar, pois a data de emissão do título é posterior ao vencimento. Contate o financeiro para ajustar.</p>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
               <button type="button" class="btn btn-cancel" onclick="EngenhariaCaucaoApp.closeModal()">Cancelar</button>
               <button type="button" class="btn btn-primary" id="ecau-due-apply" onclick="EngenhariaCaucaoApp.applyDueDate()">Aplicar no Sienge</button>
