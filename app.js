@@ -16637,6 +16637,29 @@ window.isDistratoLoteamentoFechado = function() {
   return /loteamento\s*fechado/i.test(window.distratoCcTipo());
 };
 
+window.isDistratoObraEmAndamento = function() {
+  if (typeof window.resolveDistratoAlcada === "function") {
+    try {
+      const rule = window.resolveDistratoAlcada();
+      if (rule && rule.kind === "work_in_progress") return true;
+      if (rule && rule.kind === "with_tvo") return false;
+    } catch (e) { /* segue para o cadastro local */ }
+  }
+  try {
+    const raw = JSON.parse(localStorage.getItem("crm_obras_andamento") || "{}");
+    const sale = (typeof g_distSale !== "undefined" && g_distSale) || {};
+    const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+    const ccId = String(unit.costCenterId || sale.costCenterId || sale.enterpriseId || (window.AppState && AppState.currentCostCenterId) || "");
+    const name = String(unit.enterpriseName || unit.projectName || sale.enterpriseName || "");
+    const entry = (ccId && raw[ccId]) || (name && raw[name]) || null;
+    if (!entry) return false;
+    if (typeof entry === "boolean") return entry;
+    return !!entry.isOn;
+  } catch (e) {
+    return false;
+  }
+};
+
 window.onDistratoExpenseFile = function(key) {
   const input = document.getElementById("dist-file-" + key);
   const lbl = document.getElementById("dist-file-" + key + "-lbl");
@@ -16670,10 +16693,25 @@ window.syncDistratoExpenseDocs = function() {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   };
-  const iptu = window.parseDistratoCurrencyInput("dist-iptu");
-  setHint("dist-iptu-doc-hint", iptu > 0.009
-    ? "Com valor: anexe o extrato com os débitos"
-    : "Sem valor: anexe CERTIDÃO NEGATIVA DE DÉBITO");
+  const obraAndamento = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
+  const iptuRow = document.getElementById("dist-row-iptu");
+  const iptuInput = document.getElementById("dist-iptu");
+  const iptuFile = document.querySelector('label.dist-exp-file[for="dist-file-iptu"]');
+  if (iptuRow) iptuRow.classList.toggle("is-dispensado", obraAndamento);
+  if (iptuInput) {
+    iptuInput.disabled = obraAndamento;
+    iptuInput.readOnly = obraAndamento;
+    if (obraAndamento) iptuInput.value = "0,00";
+  }
+  if (iptuFile) iptuFile.hidden = obraAndamento;
+  if (obraAndamento) {
+    setHint("dist-iptu-doc-hint", "Obra em andamento: IPTU e CND dispensados.");
+  } else {
+    const iptu = window.parseDistratoCurrencyInput("dist-iptu");
+    setHint("dist-iptu-doc-hint", iptu > 0.009
+      ? "Com valor: anexe o extrato com os débitos"
+      : "Sem valor: anexe CERTIDÃO NEGATIVA DE DÉBITO");
+  }
   const agua = window.parseDistratoCurrencyInput("dist-agua");
   setHint("dist-agua-doc-hint", agua > 0.009
     ? "Com valor: anexe o extrato com os débitos"
@@ -16686,7 +16724,7 @@ window.syncDistratoExpenseDocs = function() {
 
 window.distratoExpenseDocRules = function() {
   const money = (id) => window.parseDistratoCurrencyInput(id);
-  return [
+  const rules = [
     {
       key: "iptu",
       tag: money("dist-iptu") > 0.009 ? "EXTRATO IPTU DISTRATO" : "CERTIDAO NEGATIVA DE DEBITO IPTU",
@@ -16707,6 +16745,10 @@ window.distratoExpenseDocRules = function() {
         : "o print da consulta ao cliente de que não há instalação de energia"
     }
   ];
+  if (typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento()) {
+    return rules.filter((r) => r.key !== "iptu");
+  }
+  return rules;
 };
 
 window.validateDistratoExpenseDocs = function() {
@@ -16778,7 +16820,8 @@ function calculateDistrato() {
   
   // 2. Despesas
   const taxaAssoc = (isPermuta || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
-  const iptu = isPermuta ? 0 : parseCurrencyInput("dist-iptu");
+  const iptuDispensado = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
+  const iptu = (isPermuta || iptuDispensado) ? 0 : parseCurrencyInput("dist-iptu");
   const agua = isPermuta ? 0 : parseCurrencyInput("dist-agua");
   const luz = isPermuta ? 0 : parseCurrencyInput("dist-luz");
   const outros = isPermuta ? 0 : parseCurrencyInput("dist-outros");
@@ -17087,7 +17130,7 @@ window.handleDistratoChoiceChange = function() {
     instQty,
     refundInstallment,
     distratoAlcada: distAlcada,
-    extraDebits: { homolog, comissao, taxaAssoc, iptu, agua, luz, outros },
+    extraDebits: { homolog, comissao, taxaAssoc, iptu, iptuDispensado, agua, luz, outros },
     isPermuta,
     permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
   };
@@ -20488,7 +20531,9 @@ window.generateDemonstrativoDistratoPDF = function() {
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">IPTU:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.iptu || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          ${(results.extraDebits && results.extraDebits.iptuDispensado)
+            ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.iptu || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">\u00C1gua:</td>
