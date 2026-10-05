@@ -14,7 +14,8 @@ const ControleComissaoApp = {
     ate: "",
     totais: { contratos: 0, parcelas: 0, aReceber: 0, recebido: 0 },
     contratos: [],
-    series: []
+    series: [],
+    abertos: {}
   },
 
   esc(s) {
@@ -69,17 +70,87 @@ const ControleComissaoApp = {
     return `<div class="ccom-tip-box">${lines}</div>`;
   },
 
+  cssKey(id) {
+    const key = String(id == null ? "" : id);
+    return window.CSS && CSS.escape ? CSS.escape(key) : key.replace(/"/g, "");
+  },
+
+  toggle(id) {
+    const key = String(id == null ? "" : id);
+    const open = !this.state.abertos[key];
+    this.state.abertos[key] = open;
+    const sel = this.cssKey(key);
+    document.querySelectorAll('[data-ccom-key="' + sel + '"]').forEach((btn) => {
+      btn.classList.toggle("is-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.querySelectorAll('[data-ccom-parc="' + sel + '"]').forEach((row) => {
+      row.hidden = !open;
+    });
+  },
+
+  parcLinha(p, comNome) {
+    const first = comNome
+      ? this.esc(p.beneficiario || "—")
+      : this.esc((p.indice || 1) + "/" + (p.total || 1));
+    return `<tr>
+      <td>${first}</td>
+      <td>${this.esc(this.fmtDate(p.vencimento))}</td>
+      <td><span class="ccom-sit ${this.sitClass(p)}">${this.esc(p.situacao || "—")}</span></td>
+      <td class="ccom-num">${this.esc(this.money(p.valor))}</td>
+    </tr>`;
+  },
+
+  parcRow(r, open) {
+    const list = r.programacao || [];
+    const groups = [];
+    list.forEach((p) => {
+      const nome = p.beneficiario || "—";
+      const last = groups[groups.length - 1];
+      if (last && last.nome === nome) last.itens.push(p);
+      else groups.push({ nome, itens: [p] });
+    });
+    const parcelada = groups.some((g) => g.itens.length > 1);
+    const head = parcelada
+      ? `<tr><th>Parcela</th><th>Vencimento</th><th>Situação</th><th class="ccom-num">Valor</th></tr>`
+      : `<tr><th>Beneficiário</th><th>Vencimento</th><th>Situação</th><th class="ccom-num">Valor</th></tr>`;
+    const body = parcelada
+      ? groups.map((g) => {
+        const label = g.itens.length === 1 ? "1 parcela" : (g.itens.length + " parcelas");
+        const titulo = `<tr class="ccom-parc-ben"><td colspan="4">${this.esc(g.nome)} <span>${label}</span></td></tr>`;
+        return titulo + g.itens.map((p) => this.parcLinha(p, false)).join("");
+      }).join("")
+      : list.map((p) => this.parcLinha(p, true)).join("");
+    const soma = list.reduce((s, p) => s + (Number(p.valor) || 0), 0);
+    return `<tr class="ccom-parc-row" data-ccom-parc="${this.esc(r.contrato)}" ${open ? "" : "hidden"}>
+      <td colspan="7">
+        <table class="ccom-parc-table">
+          <thead>${head}</thead>
+          <tbody>${body}</tbody>
+          <tfoot><tr><td colspan="3">Total</td><td class="ccom-num">${this.esc(this.money(soma))}</td></tr></tfoot>
+        </table>
+      </td>
+    </tr>`;
+  },
+
   rowHtml(r) {
     const tip = this.comissaoTip(r);
+    const prog = r.programacao || [];
+    const open = !!this.state.abertos[String(r.contrato)];
+    const key = this.esc(r.contrato || "");
+    const total = this.esc(this.money(r.comissaoTotal || r.valor || 0));
+    const comissao = prog.length
+      ? `<button type="button" class="ccom-key${open ? " is-open" : ""}" data-ccom-key="${key}" aria-expanded="${open ? "true" : "false"}" aria-label="Parcelas da comissão" onclick="ControleComissaoApp.toggle(this.dataset.ccomKey)"><span class="ccom-chev" aria-hidden="true"></span><span>${total}</span></button>`
+      : total;
     return `<tr>
       <td class="ccom-td-id">${this.esc(r.contrato || "—")}</td>
       <td>${this.esc(r.empreendimento || "—")}</td>
       <td>${this.esc(r.unidade || "—")}</td>
       <td>${this.esc(r.pagador || "—")}</td>
-      <td class="ccom-num ccom-tip">${this.esc(this.money(r.comissaoTotal || r.valor || 0))}${tip}</td>
+      <td class="ccom-num ccom-tip">${comissao}${tip}</td>
       <td class="ccom-num">${this.esc(this.money(r.aReceber))}</td>
       <td class="ccom-num">${this.esc(this.money(r.recebido))}</td>
-    </tr>`;
+    </tr>${prog.length ? this.parcRow(r, open) : ""}`;
   },
 
   async consultar() {

@@ -486,6 +486,42 @@ function mapParcelas(prog) {
   })).sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)) || String(a.id).localeCompare(String(b.id)));
 }
 
+function programacaoLinhas(bens) {
+  const linhas = [];
+  (bens || []).forEach((b) => {
+    const nome = benNome(b);
+    mapParcelas(programacaoOf(b)).forEach((p) => {
+      linhas.push({
+        id: p.id,
+        beneficiario: nome,
+        vencimento: p.vencimento,
+        valor: p.valor,
+        situacao: p.situacao,
+        pago: p.pago
+      });
+    });
+  });
+  return linhas;
+}
+
+function indexarProgramacao(linhas) {
+  const by = new Map();
+  (linhas || []).forEach((p) => {
+    const k = fold(p && p.beneficiario);
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(p);
+  });
+  const out = [];
+  by.forEach((list) => {
+    list.sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)) || String(a.id).localeCompare(String(b.id)));
+    list.forEach((p, i) => {
+      out.push(Object.assign({}, p, { indice: i + 1, total: list.length }));
+    });
+  });
+  out.sort((a, b) => String(a.beneficiario).localeCompare(String(b.beneficiario), "pt-BR") || a.indice - b.indice);
+  return out;
+}
+
 function splitProgramacao(rows) {
   let aReceber = 0;
   let recebido = 0;
@@ -541,6 +577,7 @@ function mapComissao(c) {
     recebido: 0,
     mouraValor,
     parcelas: mapParcelas(prog),
+    programacao: programacaoLinhas(bens),
     commissionSerie: true,
     moura: hasMoura
   };
@@ -565,7 +602,8 @@ function aggregate(rows) {
         aReceber: 0,
         recebido: 0,
         qtdParcelas: 0,
-        parcelas: []
+        parcelas: [],
+        programacao: []
       });
     }
     const g = by.get(key);
@@ -583,6 +621,10 @@ function aggregate(rows) {
     (r.parcelas || []).forEach((p) => {
       if (p.id && g.parcelas.some((x) => x.id === p.id)) return;
       g.parcelas.push(p);
+    });
+    (r.programacao || []).forEach((p) => {
+      if (p.id && g.programacao.some((x) => x.id === p.id)) return;
+      g.programacao.push(p);
     });
     g.qtdParcelas = g.parcelas.length;
     g.comissaoTotal += Number(r.valor) || 0;
@@ -633,6 +675,7 @@ module.exports = async function handler(req, res) {
     contratos.forEach((g) => {
       g.parcelas.sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)) || String(a.id).localeCompare(String(b.id)));
       g.qtdParcelas = g.parcelas.length;
+      g.programacao = indexarProgramacao(g.programacao);
     });
     let nfsRows = [];
     let nfsAviso = "";
