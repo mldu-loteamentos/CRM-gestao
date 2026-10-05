@@ -58,10 +58,24 @@ const ControleComissaoApp = {
     this.state[field] = val;
   },
 
+  isMouraNome(nome) {
+    const compact = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!compact) return false;
+    if (compact === "MOURALEITE") return true;
+    if (compact.indexOf("MOURALEITE") < 0) return false;
+    const rest = compact.replace(/IMOBILIARIA|IMOB|IMO|LTDA|EIRELI|SPE|DESENVOLVIMENTO|URBANIZACAO|INCORPORADORA|EMPREENDIMENTOS|HOLDING/g, "");
+    return rest === "MOURALEITE";
+  },
+
+  mouraProgramacao(r) {
+    return (r && r.programacao || []).filter((p) => this.isMouraNome(p && p.beneficiario));
+  },
+
   comissaoTip(r) {
-    const dets = r.beneficiariosDetalhe && r.beneficiariosDetalhe.length
+    const detsAll = r.beneficiariosDetalhe && r.beneficiariosDetalhe.length
       ? r.beneficiariosDetalhe
       : String(r.beneficiarios || "").split(",").map((n) => n.trim()).filter(Boolean).map((nome) => ({ nome, valor: null }));
+    const dets = detsAll.filter((d) => this.isMouraNome(d.nome));
     if (!dets.length) return "";
     const lines = dets.map((d) => {
       const val = d.valor == null ? "" : this.money(d.valor);
@@ -102,7 +116,7 @@ const ControleComissaoApp = {
   },
 
   parcRow(r, open) {
-    const list = r.programacao || [];
+    const list = this.mouraProgramacao(r);
     const groups = [];
     list.forEach((p) => {
       const nome = p.beneficiario || "—";
@@ -135,7 +149,7 @@ const ControleComissaoApp = {
 
   rowHtml(r) {
     const tip = this.comissaoTip(r);
-    const prog = r.programacao || [];
+    const prog = this.mouraProgramacao(r);
     const open = !!this.state.abertos[String(r.contrato)];
     const key = this.esc(r.contrato || "");
     const total = this.esc(this.money(r.comissaoTotal || r.valor || 0));

@@ -577,7 +577,7 @@ function mapComissao(c) {
     recebido: 0,
     mouraValor,
     parcelas: mapParcelas(prog),
-    programacao: programacaoLinhas(bens),
+    programacao: programacaoLinhas(use),
     commissionSerie: true,
     moura: hasMoura
   };
