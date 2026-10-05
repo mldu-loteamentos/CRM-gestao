@@ -1080,13 +1080,9 @@ window.EngenhariaCaucaoApp = {
     const root = document.getElementById("engenharia-caucao-root");
     if (!root) return;
     const s = this.state;
-    const updated = s.updatedAt ? new Date(s.updatedAt).toLocaleString("pt-BR") : "—";
     root.innerHTML = `
       <div class="cprev-page ecau-page">
         <div class="search-filter-panel cprev-toolbar ecau-toolbar">
-          <div class="ecau-toolbar-meta">
-            <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
-          </div>
           <div class="ecau-grid">
             <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp${this.tituloLock() ? " is-locked" : ""}"></div>
             <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${this.tituloLock() ? " is-locked" : ""}"></div>
