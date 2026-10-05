@@ -16660,15 +16660,46 @@ window.isDistratoObraEmAndamento = function() {
   }
 };
 
-window.onDistratoExpenseFile = function(key) {
+window.distratoSemInstalacaoAguaELuz = function() {
+  const money = window.parseDistratoCurrencyInput;
+  return money("dist-agua") <= 0.009 && money("dist-luz") <= 0.009;
+};
+
+window.distratoExpenseFileOf = function(key) {
+  const rec = (window._distExpenseFiles && window._distExpenseFiles[key]) || {};
   const input = document.getElementById("dist-file-" + key);
+  return rec.file || (input && input.files && input.files[0]) || null;
+};
+
+window.paintDistratoExpenseFile = function(key, file) {
   const lbl = document.getElementById("dist-file-" + key + "-lbl");
+  const input = document.getElementById("dist-file-" + key);
   const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
-  const file = input && input.files && input.files[0];
-  if (!window._distExpenseFiles) window._distExpenseFiles = {};
-  window._distExpenseFiles[key] = { uploaded: false, file: file || null };
   if (lbl) lbl.textContent = file ? file.name : "Anexar";
   if (wrap) wrap.classList.toggle("is-ok", !!file);
+};
+
+window.onDistratoExpenseFile = function(key) {
+  const input = document.getElementById("dist-file-" + key);
+  const file = input && input.files && input.files[0];
+  if (!window._distExpenseFiles) window._distExpenseFiles = {};
+  window._distExpenseFiles[key] = { uploaded: false, file: file || null, shared: false };
+  window.paintDistratoExpenseFile(key, file || null);
+  if (!file || (key !== "agua" && key !== "luz") || !window.distratoSemInstalacaoAguaELuz()) return;
+  const other = key === "agua" ? "luz" : "agua";
+  const otherRec = window._distExpenseFiles[other] || {};
+  if (otherRec.file && !otherRec.shared) return;
+  window._distExpenseFiles[key].shared = true;
+  window._distExpenseFiles[other] = { uploaded: false, file: file, shared: true };
+  const otherInput = document.getElementById("dist-file-" + other);
+  if (otherInput) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      otherInput.files = dt.files;
+    } catch (e) { /* o arquivo segue no registro compartilhado */ }
+  }
+  window.paintDistratoExpenseFile(other, file);
 };
 
 window.syncDistratoExpenseDocs = function() {
@@ -16713,13 +16744,18 @@ window.syncDistratoExpenseDocs = function() {
       : "Sem valor: anexe CERTIDÃO NEGATIVA DE DÉBITO");
   }
   const agua = window.parseDistratoCurrencyInput("dist-agua");
+  const luz = window.parseDistratoCurrencyInput("dist-luz");
+  const printUnico = agua <= 0.009 && luz <= 0.009;
   setHint("dist-agua-doc-hint", agua > 0.009
     ? "Com valor: anexe o extrato com os débitos"
-    : "Anexe o print da consulta ao cliente de que não há instalação");
-  const luz = window.parseDistratoCurrencyInput("dist-luz");
+    : (printUnico
+      ? "Sem instalação: um print cobre água e energia."
+      : "Anexe o print da consulta ao cliente de que não há instalação"));
   setHint("dist-luz-doc-hint", luz > 0.009
     ? "Com valor: anexe o extrato com os débitos"
-    : "Anexe o print da consulta ao cliente de que não há instalação");
+    : (printUnico
+      ? "Sem instalação: um print cobre água e energia."
+      : "Anexe o print da consulta ao cliente de que não há instalação"));
 };
 
 window.distratoExpenseDocRules = function() {
@@ -16754,11 +16790,13 @@ window.distratoExpenseDocRules = function() {
 window.validateDistratoExpenseDocs = function() {
   if (!window._distExpenseFiles) window._distExpenseFiles = {};
   const rules = window.distratoExpenseDocRules();
+  const shared = window.distratoSemInstalacaoAguaELuz();
   for (let i = 0; i < rules.length; i++) {
     const r = rules[i];
     const rec = window._distExpenseFiles[r.key] || {};
-    const input = document.getElementById("dist-file-" + r.key);
-    const file = rec.file || (input && input.files && input.files[0]);
+    let file = window.distratoExpenseFileOf(r.key);
+    if (!file && shared && r.key === "agua") file = window.distratoExpenseFileOf("luz");
+    if (!file && shared && r.key === "luz") file = window.distratoExpenseFileOf("agua");
     if (!rec.uploaded && !file) return "Anexe " + r.label + " antes de gerar o termo.";
   }
   return "";
@@ -16773,17 +16811,39 @@ window.uploadDistratoExpenseDocs = async function() {
   }
   if (!window._distExpenseFiles) window._distExpenseFiles = {};
   const rules = window.distratoExpenseDocRules();
+  const shared = window.distratoSemInstalacaoAguaELuz();
+  let sharedSent = false;
   for (let i = 0; i < rules.length; i++) {
     const r = rules[i];
     const rec = window._distExpenseFiles[r.key] || {};
-    if (rec.uploaded) continue;
-    const input = document.getElementById("dist-file-" + r.key);
-    const file = rec.file || (input && input.files && input.files[0]);
+    if (rec.uploaded && !(shared && rec.shared && (r.key === "agua" || r.key === "luz") && !sharedSent)) continue;
+    let file = window.distratoExpenseFileOf(r.key);
+    if (!file && shared && r.key === "agua") file = window.distratoExpenseFileOf("luz");
+    if (!file && shared && r.key === "luz") file = window.distratoExpenseFileOf("agua");
     if (!file) continue;
-    await window.anexosUploadCustomerAttachment(customerId, file, r.tag);
-    window._distExpenseFiles[r.key] = { uploaded: true, file, tag: r.tag };
-    const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
-    if (wrap) wrap.classList.add("is-ok");
+    const otherKey = r.key === "agua" ? "luz" : (r.key === "luz" ? "agua" : "");
+    const otherFile = otherKey ? window.distratoExpenseFileOf(otherKey) : null;
+    const coversBoth = shared && (r.key === "agua" || r.key === "luz") && (!otherFile || otherFile === file);
+    if (coversBoth && sharedSent) {
+      window._distExpenseFiles[r.key] = { uploaded: true, file: file, tag: "PRINT SEM INSTALACAO AGUA E ENERGIA", shared: true };
+      window.paintDistratoExpenseFile(r.key, file);
+      continue;
+    }
+    if (rec.uploaded) continue;
+    const tag = coversBoth ? "PRINT SEM INSTALACAO AGUA E ENERGIA" : r.tag;
+    await window.anexosUploadCustomerAttachment(customerId, file, tag);
+    if (coversBoth) {
+      sharedSent = true;
+      ["agua", "luz"].forEach((k) => {
+        window._distExpenseFiles[k] = { uploaded: true, file: file, tag: tag, shared: true };
+        window.paintDistratoExpenseFile(k, file);
+      });
+    } else {
+      window._distExpenseFiles[r.key] = { uploaded: true, file: file, tag: r.tag, shared: false };
+      const input = document.getElementById("dist-file-" + r.key);
+      const wrap = input && input.closest ? input.closest(".dist-exp-file") : null;
+      if (wrap) wrap.classList.add("is-ok");
+    }
   }
 };
 

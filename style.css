@@ -5839,7 +5839,16 @@ circle.donut-segment {
   grid-row: 3;
   align-self: end;
   justify-self: start;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ecau-actions-main {
   width: 50%;
+  flex: 0 0 50%;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
@@ -5855,6 +5864,17 @@ circle.donut-segment {
   font-size: 0.75rem;
   box-sizing: border-box;
   white-space: nowrap;
+}
+.ecau-actions .ecau-bar-btn {
+  width: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ecau-actions .ecau-bar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .ecau-spin {
   width: 14px;

@@ -830,20 +830,16 @@ window.EngenhariaCaucaoApp = {
   },
 
   paintSelectionBar() {
+    const n = this.selectedCount();
+    const canAct = n > 0 && !this.state.busy;
+    ["ecau-btn-due", "ecau-btn-liberar"].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = !canAct;
+    });
     const bar = document.getElementById("ecau-selection-bar");
     if (!bar) return;
-    const n = this.selectedCount();
-    const busy = this.state.busy;
-    bar.innerHTML = n
-      ? `<strong>${n} selecionada${n === 1 ? "" : "s"}</strong>
-         <button type="button" class="btn btn-primary btn-sm ecau-bar-btn" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.openDueModal()">
-           <i data-lucide="calendar-clock"></i> Ajustar vencimento
-         </button>
-         <button type="button" class="btn btn-secondary btn-sm ecau-bar-btn" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.liberarSelecionadas()">
-           <i data-lucide="unlock"></i> Liberar para pagamento
-         </button>`
-      : `<span>Selecione uma ou várias cauções para ajustar o vencimento ou liberar para pagamento.</span>`;
-    if (window.lucide) lucide.createIcons();
+    bar.hidden = !n;
+    bar.innerHTML = n ? `<strong>${n} selecionada${n === 1 ? "" : "s"}</strong>` : "";
   },
 
   openDueModal() {
@@ -1106,15 +1102,23 @@ window.EngenhariaCaucaoApp = {
               </div>
             </div>
             <div class="ecau-actions">
-              <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
-                ${s.loading
-                  ? '<span class="ecau-spin" aria-hidden="true"></span>'
-                  : '<i data-lucide="search" style="width:14px;height:14px;"></i>'}
-                Consultar
+              <div class="ecau-actions-main">
+                <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
+                  ${s.loading
+                    ? '<span class="ecau-spin" aria-hidden="true"></span>'
+                    : '<i data-lucide="search" style="width:14px;height:14px;"></i>'}
+                  Consultar
+                </button>
+                <button type="button" class="btn btn-cancel btn-sm" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
+                <button type="button" class="btn btn-sm cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
+                  <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+                </button>
+              </div>
+              <button type="button" id="ecau-btn-due" class="btn btn-primary btn-sm ecau-bar-btn" disabled onclick="EngenhariaCaucaoApp.openDueModal()">
+                <i data-lucide="calendar-clock" style="width:14px;height:14px;"></i> Ajustar vencimento
               </button>
-              <button type="button" class="btn btn-cancel btn-sm" onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
-              <button type="button" class="btn btn-sm cprev-excel-btn" onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
-                <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+              <button type="button" id="ecau-btn-liberar" class="btn btn-secondary btn-sm ecau-bar-btn" disabled onclick="EngenhariaCaucaoApp.liberarSelecionadas()">
+                <i data-lucide="unlock" style="width:14px;height:14px;"></i> Liberar para pagamento
               </button>
             </div>
           </div>
