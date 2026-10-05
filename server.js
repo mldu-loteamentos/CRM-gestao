@@ -20,6 +20,10 @@ try {
   console.error('Aviso: SQLite não inicializado.', e);
 }
 
+function smtpEnabled() {
+  if (String(process.env.SMTP_ENABLED || '').toLowerCase() === 'false') return false;
+  return !!(process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'COLOQUE_SUA_SENHA_AQUI');
+}
 const nodemailer = require('nodemailer');
 // Configuração do Nodemailer
 const transporter = nodemailer.createTransport({
@@ -592,19 +596,20 @@ const server = http.createServer(async (req, res) => {
               </table>
             </div>
           </div>`;
-        const smtpReady = process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'COLOQUE_SUA_SENHA_AQUI';
-        if (!smtpReady) {
-          console.log('[CAUCAO AVISO] SMTP sem senha. Fila mantida. Destinatários: ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
-          return sendJson(res, 200, { sent: false, simulated: true, reason: 'SMTP sem senha configurada' });
+        if (!smtpEnabled()) {
+          console.log('[CAUCAO AVISO] Envio de e-mail desligado. Fila mantida. Destinatários: ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
+          return sendJson(res, 200, { sent: false, simulated: true, reason: 'Envio de e-mail desligado' });
         }
         try {
+          const cc = String(process.env.CAUCAO_EMAIL_CC || 'financeiro@mouraleite.com.br').trim();
           await transporter.sendMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
             to: to.join(', '),
+            cc: cc || undefined,
             subject,
             html
           });
-          console.log('[CAUCAO AVISO] Enviado para ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
+          console.log('[CAUCAO AVISO] Enviado para ' + to.join(', ') + (cc ? ' · cópia ' + cc : '') + ' · ' + kind + ' · ' + items.length);
           return sendJson(res, 200, { sent: true });
         } catch (mailError) {
           console.error('[CAUCAO AVISO] Falha no envio:', mailError && mailError.message ? mailError.message : mailError);
@@ -622,7 +627,7 @@ const server = http.createServer(async (req, res) => {
         // Enviar e-mail para admin
         const approveLink = `http://${req.headers.host}/api/tags/approve/${token}`;
         
-        if (process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'COLOQUE_SUA_SENHA_AQUI') {
+        if (smtpEnabled()) {
           try {
             await transporter.sendMail({
               from: process.env.SMTP_FROM,
@@ -657,7 +662,7 @@ const server = http.createServer(async (req, res) => {
           db.prepare(`UPDATE tag_requests SET status = 'Aprovada' WHERE id = ?`).run(request.id);
           db.prepare(`INSERT OR IGNORE INTO tags (name, created_by, destino) VALUES (?, ?, ?)`).run(request.tag_name, request.requested_by_email, request.type);
           
-          if (process.env.SMTP_USER) {
+          if (smtpEnabled()) {
             await transporter.sendMail({
               from: process.env.SMTP_FROM,
               to: request.requested_by_email,
