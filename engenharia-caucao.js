@@ -479,22 +479,80 @@ window.EngenhariaCaucaoApp = {
     return this.uniqueItems(rows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
   },
 
+  unitEnterpriseIds() {
+    if (this._unitEnterpriseIds && this._unitEnterpriseIds.size) return this._unitEnterpriseIds;
+    const ids = new Set();
+    const add = (id) => {
+      const s = String(id == null ? "" : id).trim();
+      if (s) ids.add(s);
+    };
+    const mem = window.EstoqueComercialApp && EstoqueComercialApp.state && EstoqueComercialApp.state.units;
+    (mem || []).forEach((u) => { if (u) add(u.enterpriseId); });
+    if (!ids.size) {
+      try {
+        const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
+        const units = raw && (raw.units || (raw.data && raw.data.units));
+        (units || []).forEach((u) => { if (u) add(u.enterpriseId); });
+      } catch (e) {}
+    }
+    if (!ids.size) {
+      try {
+        const raw = JSON.parse(localStorage.getItem("crm_cc_ids_com_unidade") || "[]");
+        (Array.isArray(raw) ? raw : []).forEach(add);
+      } catch (e) {}
+    }
+    if (ids.size) this._unitEnterpriseIds = ids;
+    return ids;
+  },
+
+  ccIsStockEnterprise(ccOrId, name) {
+    const cc = ccOrId && typeof ccOrId === "object"
+      ? ccOrId
+      : { id: ccOrId, name: name || "" };
+    const id = String(cc.id || cc.code || "").trim();
+    if (!id) return false;
+    const est = window.EstoqueComercialApp;
+    if (est && typeof est.isEmpreendimentoCcId === "function") {
+      if (!est.isEmpreendimentoCcId(id)) return false;
+      if (typeof est.isDeptOnlyCc === "function" && est.isDeptOnlyCc(cc)) return false;
+    } else if (id.charAt(0) !== "1" && id.charAt(0) !== "2") {
+      return false;
+    }
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_cc_ids_sem_unidade") || "[]");
+      if ((Array.isArray(raw) ? raw : []).map(String).indexOf(id) >= 0) return false;
+    } catch (e) {}
+    const withUnits = this.unitEnterpriseIds();
+    if (withUnits.size && !withUnits.has(id)) return false;
+    return true;
+  },
+
   ccItems() {
     const companies = this.activeCompanySet();
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const catalog = list.filter((c) => {
+      const companyId = this.ccCompanyId(c);
+      return companyId && companies.has(companyId) && this.ccIsStockEnterprise(c);
+    });
+    const allowed = new Set(catalog.map((c) => String(c.id || c.code || "")));
     const rows = (this.state.allRows || []).filter((r) => r.ccId && companies.has(String(r.companyId)));
+    const toItem = (id, nome, companyId) => {
+      const name = String(nome || "").toUpperCase();
+      return { id: String(id), name, label: id ? id + " - " + name : name, companyId: companyId || "" };
+    };
     if (rows.length) {
-      return this.uniqueItems(rows, (r) => r.ccId, (r) => {
+      const stockRows = rows.filter((r) => {
+        const id = String(r.ccId);
+        return allowed.has(id) || this.ccIsStockEnterprise({ id: r.ccId, name: r.ccNome });
+      });
+      return this.uniqueItems(stockRows, (r) => r.ccId, (r) => {
         const name = String(r.ccNome || "").toUpperCase();
         return r.ccId + " - " + name;
       });
     }
-    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
-    return list.map((c) => {
-      const id = String(c.id || c.code || "");
-      const name = String(c.name || c.nome || "").toUpperCase();
-      return { id, name, label: id ? id + " - " + name : name, companyId: this.ccCompanyId(c) };
-    }).filter((x) => x.id && x.companyId && companies.has(x.companyId))
-      .sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+    return catalog.map((c) => toItem(c.id || c.code, c.name || c.nome, this.ccCompanyId(c)))
+      .filter((x) => x.id)
+      .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   pruneCc() {
