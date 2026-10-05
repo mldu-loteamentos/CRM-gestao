@@ -5490,6 +5490,19 @@ circle.donut-segment {
 }
 .ccom-sit-prog { background: #fff7ed; color: #9a3412; }
 .ccom-sit-pago { background: #dcfce7; color: #166534; }
+.ccom-cli { font-size: 0.78rem; color: #64748b; line-height: 1.35; min-width: 180px; }
+.ccom-cli strong { display: block; color: #202124; font-size: 0.82rem; }
+.ccom-cli-ok span { color: #9a3412; font-weight: 600; }
+.ccom-nfs-input {
+  width: 128px;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #e8eaed;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  box-sizing: border-box;
+}
+.ccom-nfs-input.is-needed { border-color: #f37021; background: #fff7ed; }
 .ccom-aviso {
   margin: 0 0 12px;
   padding: 10px 12px;

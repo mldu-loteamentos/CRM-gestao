@@ -4381,6 +4381,23 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
   return JSON.stringify(Array.from(byKey.values()));
 };
 
+window.mergeComissaoNfs = function(localStr, cloudStr) {
+  let local = {};
+  let cloud = {};
+  try { local = JSON.parse(localStr || "{}") || {}; } catch (e) { local = {}; }
+  try { cloud = JSON.parse(cloudStr || "{}") || {}; } catch (e) { cloud = {}; }
+  if (!local || typeof local !== "object" || Array.isArray(local)) local = {};
+  if (!cloud || typeof cloud !== "object" || Array.isArray(cloud)) cloud = {};
+  const out = Object.assign({}, cloud);
+  Object.keys(local).forEach((k) => {
+    const prev = out[k];
+    const next = local[k];
+    if (!next || !next.titulo) return;
+    if (!prev || !prev.titulo || String(next.at || "") >= String(prev.at || "")) out[k] = next;
+  });
+  return JSON.stringify(out);
+};
+
 window.crmUsersDocExists = function(snap) {
   return !!(snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists));
 };
@@ -40101,7 +40118,8 @@ window.SYNC_KEYS = [
     "crm_compromissario_cessao_v1",
     "crm_compras_prazo_lancamento_v1",
     "crm_engenharia_caucao_liberados_v1",
-    "crm_engenharia_caucao_avisos_v1"
+    "crm_engenharia_caucao_avisos_v1",
+    "crm_comissao_nfs_v1"
 ];
 
 window.mergeCartoriosList = function(localStr, cloudStr) {
@@ -40876,6 +40894,19 @@ window.syncGlobalConfigFromFirebase = async function() {
                     } catch (e) {}
                     return;
                 }
+                if (k === "crm_comissao_nfs_v1") {
+                    const merged = typeof window.mergeComissaoNfs === "function"
+                      ? window.mergeComissaoNfs(localStorage.getItem(k), globalData[k] || "{}")
+                      : (localStorage.getItem(k) || globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_users") {
                     const dedicatedUsers = (crmUsersCloud && (crmUsersCloud.list || crmUsersCloud.crm_users)) || "[]";
                     const merged = typeof window.mergeCrmUsers === "function"
@@ -41145,6 +41176,12 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_avisos_v1", payload.crm_engenharia_caucao_avisos_v1); } catch (e) {}
             } else if (!payload.crm_engenharia_caucao_avisos_v1 && cloud.crm_engenharia_caucao_avisos_v1) {
               payload.crm_engenharia_caucao_avisos_v1 = cloud.crm_engenharia_caucao_avisos_v1;
+            }
+          }
+          if (payload.crm_comissao_nfs_v1 || cloud.crm_comissao_nfs_v1) {
+            if (typeof window.mergeComissaoNfs === "function") {
+              payload.crm_comissao_nfs_v1 = window.mergeComissaoNfs(payload.crm_comissao_nfs_v1 || "{}", cloud.crm_comissao_nfs_v1 || "{}");
+              try { _originalSetItem.call(localStorage, "crm_comissao_nfs_v1", payload.crm_comissao_nfs_v1); } catch (e) {}
             }
           }
           if (payload.crm_users || cloud.crm_users) {
@@ -41474,6 +41511,12 @@ localStorage.setItem = function(key, value) {
                           memRaw,
                           cloud.crm_moura_condicoes_pagamento || payload.crm_moura_condicoes_pagamento || "{}"
                         );
+                      }
+                      if (payload.crm_comissao_nfs_v1 || (cloud && cloud.crm_comissao_nfs_v1)) {
+                        if (typeof window.mergeComissaoNfs === "function") {
+                          payload.crm_comissao_nfs_v1 = window.mergeComissaoNfs(payload.crm_comissao_nfs_v1 || "{}", (cloud && cloud.crm_comissao_nfs_v1) || "{}");
+                          try { _originalSetItem.call(localStorage, "crm_comissao_nfs_v1", payload.crm_comissao_nfs_v1); } catch (e) {}
+                        }
                       }
                       if (payload.crm_users || (cloud && cloud.crm_users)) {
                         if (typeof window.mergeCrmUsersWithCloud === "function") {
