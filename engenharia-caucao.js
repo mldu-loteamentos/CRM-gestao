@@ -1096,7 +1096,6 @@ window.EngenhariaCaucaoApp = {
               <h3>Ajustar vencimento</h3>
               <p>${n} caução(ões) selecionada(s). A data será gravada no Sienge.</p>
             </div>
-            <button type="button" class="btn btn-cancel" onclick="EngenhariaCaucaoApp.closeModal()">Cancelar</button>
           </div>
           <div class="cprev-modal-body" style="padding:18px;">
             <label for="ecau-new-due" style="display:block;font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:6px;">Novo vencimento</label>
