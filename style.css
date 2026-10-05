@@ -5778,7 +5778,13 @@ circle.donut-segment {
   opacity: 0.55;
   pointer-events: none;
 }
-.ecau-date input:disabled {
+.ecau-grid.is-consulting .ecau-actions .btn:disabled,
+.ecau-grid.is-consulting .ecau-release .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ecau-date input:disabled,
+.ecau-search input:disabled {
   background: #f8fafc;
   color: #94a3b8;
   cursor: not-allowed;
