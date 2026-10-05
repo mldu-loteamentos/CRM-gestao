@@ -2796,7 +2796,7 @@ window.bootEngenhariaCaucao = function () {
   if (!document.getElementById("engenharia-caucao-script")) {
     var s = document.createElement("script");
     s.id = "engenharia-caucao-script";
-    s.src = "engenharia-caucao.js?v=959";
+    s.src = "engenharia-caucao.js?v=960";
     s.onload = function () { start(); };
     s.onerror = function () {
       if (root) {
@@ -3788,11 +3788,19 @@ window.showMockLoginModal = function(resolve, reject) {
 };
 
 function persistCrmUsersList(crmUsers) {
-  try { localStorage.setItem("crm_users", JSON.stringify(crmUsers)); } catch (e) {}
+  const raw = JSON.stringify(Array.isArray(crmUsers) ? crmUsers : []);
   try {
-    if (window.ConfigUsersApp) window.ConfigUsersApp.users = crmUsers;
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_users", raw);
   } catch (e) {}
-  if (typeof window.forceUploadLocalConfig === "function") {
+  try {
+    if (window.ConfigUsersApp && !document.getElementById("user-modal-overlay")) {
+      window.ConfigUsersApp.users = Array.isArray(crmUsers) ? crmUsers : [];
+    }
+  } catch (e) {}
+  if (typeof window.persistCrmUsersToFirebase === "function") {
+    window.persistCrmUsersToFirebase(crmUsers).catch((e) => console.error("[crm_users]", e));
+  } else if (typeof window.forceUploadLocalConfig === "function") {
     window.forceUploadLocalConfig(true).catch(() => {});
   }
 }
@@ -3807,8 +3815,9 @@ function validateAndLoadCrmUser(user) {
   let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
   
   if (!matchedUser) {
+      const numericIds = crmUsers.map((u) => Number(u && u.id)).filter((n) => Number.isFinite(n));
       matchedUser = {
-        id: "usr_" + Date.now(),
+        id: (numericIds.length ? Math.max.apply(null, numericIds) : 0) + 1,
       name: user.name || String(user.email || "").split("@")[0].toUpperCase(),
       email: String(user.email || "").toLowerCase(),
       sienge_user: "",
@@ -4370,6 +4379,102 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
   cloud.forEach(put);
   local.forEach(put);
   return JSON.stringify(Array.from(byKey.values()));
+};
+
+window.crmUsersDocExists = function(snap) {
+  return !!(snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists));
+};
+
+window.mergeCrmUsersWithCloud = async function(localStr, globalStr) {
+  let dedicated = "[]";
+  if (window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDoc) {
+    const ref = window.firebaseCollections.doc(window.firebaseDb, "config", "crm_users");
+    const snap = await window.firebaseCollections.getDoc(ref);
+    if (window.crmUsersDocExists(snap)) {
+      const data = snap.data() || {};
+      dedicated = data.list || data.crm_users || "[]";
+    }
+  }
+  return window.mergeCrmUsers(
+    window.mergeCrmUsers(localStr || "[]", globalStr || "[]"),
+    dedicated
+  );
+};
+
+window.syncCrmUsersFromFirebase = async function() {
+  if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDoc) return null;
+  const fc = window.firebaseCollections;
+  let dedicated = "[]";
+  let globalUsers = "[]";
+  const dSnap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "crm_users"));
+  if (window.crmUsersDocExists(dSnap)) {
+    const data = dSnap.data() || {};
+    dedicated = data.list || data.crm_users || "[]";
+  }
+  const gSnap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
+  if (window.crmUsersDocExists(gSnap)) {
+    globalUsers = (gSnap.data() || {}).crm_users || "[]";
+  }
+  let local = "[]";
+  try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
+  const merged = window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated);
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_users", merged);
+  } catch (e) {}
+  return merged;
+};
+
+window.persistCrmUsersToFirebase = function(users) {
+  const mem = JSON.stringify(Array.isArray(users) ? users : []);
+  const job = (window._crmUsersWriteChain || Promise.resolve()).then(() => window._writeCrmUsersNow(mem));
+  window._crmUsersWriteChain = job.catch(() => {});
+  return job;
+};
+
+window._writeCrmUsersNow = async function(mem) {
+  if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.setDoc) {
+    throw new Error("Firebase não inicializado. Abra o sistema de novo e salve o usuário outra vez.");
+  }
+  const fc = window.firebaseCollections;
+  let local = "[]";
+  try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
+  const usersRef = fc.doc(window.firebaseDb, "config", "crm_users");
+  const globalRef = fc.doc(window.firebaseDb, "config", "global");
+  let dedicated = "[]";
+  let globalUsers = "[]";
+  const dSnap = await fc.getDoc(usersRef);
+  if (window.crmUsersDocExists(dSnap)) {
+    const data = dSnap.data() || {};
+    dedicated = data.list || data.crm_users || "[]";
+  }
+  const gSnap = await fc.getDoc(globalRef);
+  if (window.crmUsersDocExists(gSnap)) {
+    globalUsers = (gSnap.data() || {}).crm_users || "[]";
+  }
+  const merged = window.mergeCrmUsers(
+    window.mergeCrmUsers(mem, local),
+    window.mergeCrmUsers(dedicated, globalUsers)
+  );
+  const memList = JSON.parse(mem);
+  const out = JSON.parse(merged);
+  const emails = new Set(out.map((u) => String((u && u.email) || "").toLowerCase().trim()).filter(Boolean));
+  const missing = (Array.isArray(memList) ? memList : []).filter((u) => {
+    const em = String((u && u.email) || "").toLowerCase().trim();
+    return em && !emails.has(em);
+  });
+  if (missing.length) throw new Error("O usuário não entrou na lista salva.");
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_users", merged);
+  } catch (e) {}
+  await fc.setDoc(usersRef, { list: merged, updatedAt: new Date().toISOString() }, { merge: true });
+  await fc.setDoc(globalRef, { crm_users: merged }, { merge: true });
+  if (window.ConfigUsersApp && !document.getElementById("user-modal-overlay")) {
+    window.ConfigUsersApp.users = out;
+  }
+  window._cachedCrmUsersBadge = null;
+  return out;
 };
 
 window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
@@ -40608,10 +40713,12 @@ window.syncGlobalConfigFromFirebase = async function() {
         let globalData = null;
         let backOfficeCloud = null;
         let centrosCustoCloud = null;
+        let crmUsersCloud = null;
         snap.forEach(d => {
             if (d.id === "global") globalData = d.data();
             if (d.id === "back_office_perms") backOfficeCloud = d.data();
             if (d.id === "centros_custo") centrosCustoCloud = d.data();
+            if (d.id === "crm_users") crmUsersCloud = d.data();
         });
         
         if (globalData) {
@@ -40770,9 +40877,13 @@ window.syncGlobalConfigFromFirebase = async function() {
                     return;
                 }
                 if (k === "crm_users") {
+                    const dedicatedUsers = (crmUsersCloud && (crmUsersCloud.list || crmUsersCloud.crm_users)) || "[]";
                     const merged = typeof window.mergeCrmUsers === "function"
-                      ? window.mergeCrmUsers(localStorage.getItem(k), globalData[k] || "[]")
-                      : (localStorage.getItem(k) || globalData[k] || "[]");
+                      ? window.mergeCrmUsers(
+                          window.mergeCrmUsers(localStorage.getItem(k), globalData[k] || "[]"),
+                          dedicatedUsers
+                        )
+                      : (localStorage.getItem(k) || globalData[k] || dedicatedUsers || "[]");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         _originalSetItem.call(localStorage, k, merged);
                         changed = true;
@@ -40968,6 +41079,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
           await window.persistCentrosCustoCustomToFirebase();
         }
         const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+        let crmUsersMerged = !payload.crm_users;
         try {
           const snap = await window.firebaseCollections.getDoc(docRef);
           const cloud = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists) ? (snap.data() || {}) : {};
@@ -41036,12 +41148,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
             }
           }
           if (payload.crm_users || cloud.crm_users) {
-            if (typeof window.mergeCrmUsers === "function") {
+            if (typeof window.mergeCrmUsersWithCloud === "function") {
+              payload.crm_users = await window.mergeCrmUsersWithCloud(payload.crm_users || "[]", cloud.crm_users || "[]");
+            } else if (typeof window.mergeCrmUsers === "function") {
               payload.crm_users = window.mergeCrmUsers(payload.crm_users || "[]", cloud.crm_users || "[]");
-              try { _originalSetItem.call(localStorage, "crm_users", payload.crm_users); } catch (e) {}
             } else if (!payload.crm_users && cloud.crm_users) {
               payload.crm_users = cloud.crm_users;
             }
+            crmUsersMerged = true;
+            try { _originalSetItem.call(localStorage, "crm_users", payload.crm_users); } catch (e) {}
+          } else {
+            crmUsersMerged = true;
           }
           if (payload.crm_moura_cartorios_list || cloud.crm_moura_cartorios_list) {
             payload.crm_moura_cartorios_list = window.mergeCartoriosList(payload.crm_moura_cartorios_list || "[]", cloud.crm_moura_cartorios_list || "[]");
@@ -41104,6 +41221,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
             if (chosen) payload[k] = chosen;
           });
         } catch (e) {}
+        if (!crmUsersMerged) delete payload.crm_users;
         await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
         if (!silent) {
             alert("âœ”ï¸ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
@@ -41254,6 +41372,18 @@ localStorage.setItem = function(key, value) {
         return;
     }
     if ((window.SYNC_KEYS && window.SYNC_KEYS.includes(key)) || key.startsWith("crm_perms_")) {
+        if (key === "crm_users") {
+            if (window._fbUsersTimeout) clearTimeout(window._fbUsersTimeout);
+            window._fbUsersTimeout = setTimeout(() => {
+                let parsed = [];
+                try { parsed = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) { parsed = []; }
+                if (!Array.isArray(parsed)) parsed = [];
+                if (typeof window.persistCrmUsersToFirebase === "function") {
+                    window.persistCrmUsersToFirebase(parsed).catch((e) => console.error("[crm_users]", e));
+                }
+            }, 400);
+            return;
+        }
         if (window._fbConfigTimeout) clearTimeout(window._fbConfigTimeout);
         window._fbConfigTimeout = setTimeout(async () => {
             if (window.firebaseDb && window.firebaseCollections) {
@@ -41270,6 +41400,7 @@ localStorage.setItem = function(key, value) {
                         }
                     }
                     const docRef = window.firebaseCollections.doc(window.firebaseDb, "config", "global");
+                    let crmUsersMerged = !payload.crm_users;
                     try {
                       const snap = await window.firebaseCollections.getDoc(docRef);
                       const cloud = snap && snap.exists() ? (snap.data() || {}) : {};
@@ -41344,6 +41475,17 @@ localStorage.setItem = function(key, value) {
                           cloud.crm_moura_condicoes_pagamento || payload.crm_moura_condicoes_pagamento || "{}"
                         );
                       }
+                      if (payload.crm_users || (cloud && cloud.crm_users)) {
+                        if (typeof window.mergeCrmUsersWithCloud === "function") {
+                          payload.crm_users = await window.mergeCrmUsersWithCloud(payload.crm_users || "[]", (cloud && cloud.crm_users) || "[]");
+                        } else if (typeof window.mergeCrmUsers === "function") {
+                          payload.crm_users = window.mergeCrmUsers(payload.crm_users || "[]", (cloud && cloud.crm_users) || "[]");
+                        }
+                        crmUsersMerged = true;
+                        try { _originalSetItem.call(localStorage, "crm_users", payload.crm_users); } catch (e) {}
+                      } else {
+                        crmUsersMerged = true;
+                      }
                       Object.keys(cloud || {}).forEach((k) => {
                         if (!k || !k.startsWith("crm_perms_")) return;
                         const chosen = typeof window.pickPreferredCrmPerms === "function"
@@ -41352,6 +41494,7 @@ localStorage.setItem = function(key, value) {
                         if (chosen) payload[k] = chosen;
                       });
                     } catch (mergeErr) {}
+                    if (!crmUsersMerged) delete payload.crm_users;
                     await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
                     console.log("[Firebase] Upload automático: Configurações globais atualizadas na nuvem.");
                 } catch(e) {

@@ -193,14 +193,55 @@ const ConfigUsersApp = {
   },
 
   persistUsers() {
-    localStorage.setItem("crm_users", JSON.stringify(this.users));
+    const raw = JSON.stringify(this.users);
+    try {
+      const setter = (typeof window !== "undefined" && window._originalSetItem) ? window._originalSetItem : localStorage.setItem.bind(localStorage);
+      setter.call(localStorage, "crm_users", raw);
+    } catch (e) {
+      console.warn("[ConfigUsers] localStorage", e);
+    }
     if (typeof window !== "undefined") {
       window._cachedCrmUsersBadge = null;
       if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI();
-      if (typeof window.forceUploadLocalConfig === "function") {
-        window.forceUploadLocalConfig(true).catch(() => {});
-      }
     }
+    if (typeof window.persistCrmUsersToFirebase === "function") {
+      return window.persistCrmUsersToFirebase(this.users).then((saved) => {
+        if (Array.isArray(saved) && saved.length) this.users = saved;
+        return saved;
+      });
+    }
+    if (typeof window.forceUploadLocalConfig === "function") {
+      return window.forceUploadLocalConfig(true);
+    }
+    return Promise.resolve(this.users);
+  },
+
+  nextUserId() {
+    let max = 0;
+    (this.users || []).forEach((u) => {
+      const n = Number(u && u.id);
+      if (Number.isFinite(n) && n > max) max = n;
+    });
+    return max + 1;
+  },
+
+  normalizeUserIds() {
+    let max = 0;
+    let changed = false;
+    (this.users || []).forEach((u) => {
+      const n = Number(u && u.id);
+      if (Number.isFinite(n) && n > max) max = n;
+    });
+    (this.users || []).forEach((u) => {
+      if (!u) return;
+      const n = Number(u.id);
+      if (!Number.isFinite(n)) {
+        max += 1;
+        u.id = max;
+        changed = true;
+      }
+    });
+    return changed;
   },
 
   modules: [
@@ -357,9 +398,21 @@ const ConfigUsersApp = {
 
   async loadUsers() {
     try {
+    if (typeof window.syncCrmUsersFromFirebase === "function") {
+      try { await window.syncCrmUsersFromFirebase(); } catch (e) { console.warn("[ConfigUsers] sync usuários:", e); }
+    }
     const savedUsers = localStorage.getItem('crm_users');
     if (savedUsers) {
        this.users = JSON.parse(savedUsers);
+    }
+    if (!Array.isArray(this.users)) this.users = [];
+    if (this.normalizeUserIds() && typeof window.persistCrmUsersToFirebase === "function") {
+      try {
+        const saved = await window.persistCrmUsersToFirebase(this.users);
+        if (Array.isArray(saved) && saved.length) this.users = saved;
+      } catch (e) {
+        console.warn("[ConfigUsers] ids:", e);
+      }
     }
 
     // Carregar perfis salvos
@@ -1190,7 +1243,7 @@ const ConfigUsersApp = {
       }
   },
 
-  saveUserModal(userId) {
+  async saveUserModal(userId) {
       const name = document.getElementById('umodal-name').value.trim();
       const email = document.getElementById('umodal-email').value.trim();
       const sienge = document.getElementById('umodal-sienge').value.trim();
@@ -1220,58 +1273,63 @@ const ConfigUsersApp = {
           alert("Nome e E-mail são obrigatórios.");
           return;
       }
-      
+
+      const isOperatorProfile = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR');
+      const resolvedOperatorType = isOperatorProfile ? operatorType : null;
+      const fields = {
+          name: name,
+          email: email,
+          sienge_user: sienge,
+          phone: phone,
+          profile_name: profileName,
+          operator_type: resolvedOperatorType,
+          adv_companies: resolvedOperatorType === 'advogado' ? advCompanies : [],
+          adv_cities: resolvedOperatorType === 'advogado' ? advCities : [],
+          adv_cost_centers: resolvedOperatorType === 'advogado' ? advCostCenters : [],
+          check_construction: checkConstruction,
+          const_companies: [],
+          const_cities: checkConstruction ? constCities : [],
+          manager_name: managerName,
+          manager_email: managerEmail,
+          badge_color: badgeColor,
+          resend_billet: resendBillet,
+          assina_testemunha: assinaTestemunha,
+          doc_rg: docRg
+      };
+
+      try {
       if (userId) {
           const user = this.users.find(u => String(u.id) === String(userId));
-          if (user) {
-              user.name = name;
-              user.email = email;
-              user.sienge_user = sienge;
-              user.phone = phone;
-              user.profile_name = profileName;
-              user.operator_type = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR') ? operatorType : null;
-              user.adv_companies = user.operator_type === 'advogado' ? advCompanies : [];
-              user.adv_cities = user.operator_type === 'advogado' ? advCities : [];
-              user.adv_cost_centers = user.operator_type === 'advogado' ? advCostCenters : [];
-              user.check_construction = checkConstruction;
-              user.const_companies = []; // No longer using companies for construction check
-              user.const_cities = checkConstruction ? constCities : [];
-              user.manager_name = managerName;
-              user.manager_email = managerEmail;
-              user.badge_color = badgeColor;
-              user.resend_billet = resendBillet;
-              user.assina_testemunha = assinaTestemunha;
-              user.doc_rg = docRg;
+          if (!user) {
+              alert("Não encontrei esse usuário na lista. Atualize a tela e tente de novo.");
+              return;
           }
+          Object.assign(user, fields);
+          if (String(user.status || "").toUpperCase() === "PENDENTE") user.status = "ATIVO";
       } else {
-          const newId = this.users.length ? Math.max(...this.users.map(u => u.id)) + 1 : 1;
-          this.users.push({
-             id: newId,
-             name: name,
-             email: email,
-             sienge_user: sienge,
-             phone: phone,
-             profile_name: profileName,
-             operator_type: window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR') ? operatorType : null,
-             adv_companies: operatorType === 'advogado' ? advCompanies : [],
-             adv_cities: operatorType === 'advogado' ? advCities : [],
-             adv_cost_centers: operatorType === 'advogado' ? advCostCenters : [],
-             check_construction: checkConstruction,
-             const_companies: [], // No longer using companies for construction check
-             const_cities: checkConstruction ? constCities : [],
-             manager_name: managerName,
-             manager_email: managerEmail,
-             badge_color: badgeColor,
-             resend_billet: resendBillet,
-             assina_testemunha: assinaTestemunha,
-             doc_rg: docRg,
-             status: "ATIVO"
-          });
+          const emailKey = email.toLowerCase();
+          const existing = this.users.find(u => String(u.email || "").toLowerCase().trim() === emailKey);
+          if (existing) {
+              Object.assign(existing, fields);
+              if (String(existing.status || "").toUpperCase() !== "INATIVO") existing.status = "ATIVO";
+          } else {
+              this.users.push(Object.assign({ id: this.nextUserId(), status: "ATIVO" }, fields));
+          }
       }
-      
-      this.persistUsers();
-      document.getElementById('user-modal-overlay').remove();
+
+      await this.persistUsers();
+      const stillThere = this.users.some(u => String(u.email || "").toLowerCase().trim() === email.toLowerCase());
+      if (!stillThere) {
+          alert("O usuário não permaneceu na lista salva. Nada foi apagado na nuvem. Tente de novo.");
+          return;
+      }
+      const overlay = document.getElementById('user-modal-overlay');
+      if (overlay) overlay.remove();
       this.render();
+      } catch (e) {
+          console.error("[ConfigUsers] save", e);
+          alert("Não foi possível salvar o usuário no Firebase. " + (e && e.message ? e.message : "Tente de novo."));
+      }
   },
 
   render() {
