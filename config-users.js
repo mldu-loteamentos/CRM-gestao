@@ -159,6 +159,24 @@ const ConfigUsersApp = {
         || savedPerms.sub_compras_geral_previsoes_editar
       );
     }
+    if (savedPerms.sub_fin_cr_dashboard_acessar == null && (
+      savedPerms.sub_fin_cr_fila_cobranca_acessar
+      || savedPerms.sub_fin_cr_fila_cobranca_visualizar
+      || savedPerms.sub_fin_cr_fila_cobranca_editar
+    )) {
+      savedPerms.sub_fin_cr_dashboard_acessar = !!savedPerms.sub_fin_cr_fila_cobranca_acessar;
+      savedPerms.sub_fin_cr_dashboard_visualizar = !!savedPerms.sub_fin_cr_fila_cobranca_visualizar;
+      savedPerms.sub_fin_cr_dashboard_editar = !!savedPerms.sub_fin_cr_fila_cobranca_editar;
+    }
+    if (savedPerms.sub_seg_geral_consumo_api_acessar == null && (
+      savedPerms.sub_seg_geral_auditoria_acessar
+      || savedPerms.sub_seg_geral_auditoria_visualizar
+      || savedPerms.sub_seg_geral_auditoria_editar
+    )) {
+      savedPerms.sub_seg_geral_consumo_api_acessar = !!savedPerms.sub_seg_geral_auditoria_acessar;
+      savedPerms.sub_seg_geral_consumo_api_visualizar = !!savedPerms.sub_seg_geral_auditoria_visualizar;
+      savedPerms.sub_seg_geral_consumo_api_editar = !!savedPerms.sub_seg_geral_auditoria_editar;
+    }
     if (savedPerms.sub_com_geral_controle_comissao_acessar == null && (
       savedPerms.mod_comercial
       || savedPerms.sub_com_geral_dashboard_acessar
@@ -189,7 +207,6 @@ const ConfigUsersApp = {
     {
       name: "Engenharia", icon: "hard-hat", key: "mod_eng",
       submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [
-        { id: "engenharia", label: "Engenharia" },
         { id: "caucao", label: "Gestão de caução", permBase: "sub_eng_geral_caucao" }
       ] }]
     },
@@ -203,7 +220,6 @@ const ConfigUsersApp = {
     {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
       submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [
-        { id: "compras", label: "Compras" },
         { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" },
         { id: "config", label: "Configurações", permBase: "sub_compras_geral_config" }
       ] }]
@@ -214,7 +230,8 @@ const ConfigUsersApp = {
         {
           name: "Contas a Receber", key: "sub_fin_cr",
           actions: [
-            { id: "fila_cobranca", label: "Dashboard / Fila de Cobrança" },
+            { id: "dashboard", label: "Dashboard", permBase: "sub_fin_cr_dashboard" },
+            { id: "fila_cobranca", label: "Fila de Cobrança" },
             { id: "agenda", label: "Agenda do Operador" },
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
@@ -267,7 +284,7 @@ const ConfigUsersApp = {
     {
       name: "Comercial", icon: "store", key: "mod_comercial",
       submodules: [
-        { name: "Dashboard", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard", permBase: "sub_com_geral_dashboard" }] },
+        { name: "Dashboard Comercial", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard Comercial", permBase: "sub_com_geral_dashboard" }] },
         { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
         { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] },
         { name: "Condições de Pagamento", key: "sub_com_condicoes", actions: [{ id: "condicoes_pagamento", label: "Condições de Pagamento", permBase: "sub_com_geral_condicoes_pagamento" }] },
@@ -306,13 +323,13 @@ const ConfigUsersApp = {
       submodules: [
         { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [
           { id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" },
-          { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_auditoria" }
+          { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_consumo_api" }
         ] }
       ]
     },
     {
       name: "Suporte", icon: "headphones", key: "mod_suporte",
-      submodules: [{ name: "Chamados", key: "sub_suporte_geral", actions: [{ id: "chamados", label: "Módulo de suporte" }] }]
+      submodules: [{ name: "Suporte", key: "sub_suporte_geral", actions: [{ id: "chamados", label: "Suporte" }] }]
     },
     {
       name: "Configurações", icon: "settings-2", key: "mod_cfg",
@@ -325,7 +342,7 @@ const ConfigUsersApp = {
             { id: "usuarios", label: "Usuários e Perfis" },
             { id: "empresas", label: "Empresas" },
             { id: "centro_custo", label: "Centro de Custo" },
-            { id: "plano_financeiro", label: "Plano Financeiro" },
+            { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
             { id: "doc_padrao", label: "Documentos Padrões" },
             { id: "upload_kmz", label: "Upload de KMZ" },
             { id: "upload_mapa", label: "Projeto Urbanístico" },

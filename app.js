@@ -2796,7 +2796,7 @@ window.bootEngenhariaCaucao = function () {
   if (!document.getElementById("engenharia-caucao-script")) {
     var s = document.createElement("script");
     s.id = "engenharia-caucao-script";
-    s.src = "engenharia-caucao.js?v=955";
+    s.src = "engenharia-caucao.js?v=957";
     s.onload = function () { start(); };
     s.onerror = function () {
       if (root) {
@@ -4682,12 +4682,58 @@ window.permCoversMenuKey = function(perms, modKey) {
   if (!perms || !modKey) return false;
   if (perms[modKey] === true) return true;
   if (modKey === "sub_eng_geral_caucao_acessar") {
-    return perms.mod_eng === true
-      || perms.sub_eng_geral === true
-      || perms.sub_eng_geral_engenharia_acessar === true
-      || perms.sub_eng_geral_engenharia_visualizar === true
+    if (perms.sub_eng_geral_caucao_acessar === true
       || perms.sub_eng_geral_caucao_visualizar === true
-      || perms.sub_eng_geral_caucao_editar === true;
+      || perms.sub_eng_geral_caucao_editar === true) return true;
+    if (perms.sub_eng_geral_caucao_acessar == null
+      && perms.sub_eng_geral_caucao_visualizar == null
+      && perms.sub_eng_geral_caucao_editar == null) {
+      return perms.mod_eng === true
+        || perms.sub_eng_geral === true
+        || perms.sub_eng_geral_engenharia_acessar === true
+        || perms.sub_eng_geral_engenharia_visualizar === true
+        || perms.sub_eng_geral_engenharia_editar === true;
+    }
+    return false;
+  }
+  if (modKey === "sub_compras_geral_previsoes_acessar" || modKey === "sub_compras_geral_config_acessar") {
+    const stem = String(modKey).slice(0, -"_acessar".length);
+    if (perms[modKey] === true || perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true) return true;
+    if (perms[modKey] == null && perms[stem + "_visualizar"] == null && perms[stem + "_editar"] == null) {
+      return perms.mod_compras === true
+        || perms.sub_compras_geral === true
+        || perms.sub_compras_geral_compras_acessar === true
+        || perms.sub_compras_geral_compras_visualizar === true
+        || perms.sub_compras_geral_compras_editar === true;
+    }
+    return false;
+  }
+  if (modKey === "sub_fin_cr_dashboard_acessar") {
+    if (perms.sub_fin_cr_dashboard_acessar === true
+      || perms.sub_fin_cr_dashboard_visualizar === true
+      || perms.sub_fin_cr_dashboard_editar === true) return true;
+    if (perms.sub_fin_cr_dashboard_acessar == null
+      && perms.sub_fin_cr_dashboard_visualizar == null
+      && perms.sub_fin_cr_dashboard_editar == null) {
+      return perms.sub_fin_cr === true
+        || perms.sub_fin_cr_fila_cobranca_acessar === true
+        || perms.sub_fin_cr_fila_cobranca_visualizar === true
+        || perms.sub_fin_cr_fila_cobranca_editar === true;
+    }
+    return false;
+  }
+  if (modKey === "sub_seg_geral_consumo_api_acessar") {
+    if (perms.sub_seg_geral_consumo_api_acessar === true
+      || perms.sub_seg_geral_consumo_api_visualizar === true
+      || perms.sub_seg_geral_consumo_api_editar === true) return true;
+    if (perms.sub_seg_geral_consumo_api_acessar == null
+      && perms.sub_seg_geral_consumo_api_visualizar == null
+      && perms.sub_seg_geral_consumo_api_editar == null) {
+      return perms.sub_seg_geral_auditoria_acessar === true
+        || perms.sub_seg_geral_auditoria_visualizar === true
+        || perms.sub_seg_geral_auditoria_editar === true;
+    }
+    return false;
   }
   if (modKey === "sub_fiscal_geral_csll_acessar") {
     return perms.sub_fiscal_geral_fiscal_acessar === true
