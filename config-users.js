@@ -840,7 +840,11 @@ const ConfigUsersApp = {
           return;
         }
         this.profiles.push({ id, name: profileName.trim().toUpperCase() });
-        localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+        if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(id);
+        const savedProfile = this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+        if (!savedProfile) {
+          alert("Não consegui gravar o perfil neste navegador. Ele pode sumir ao atualizar a página.");
+        }
         if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
           this.unifyBackOfficeProfiles();
         }
@@ -944,6 +948,7 @@ const ConfigUsersApp = {
      if (!ok) return;
 
      this.profiles = this.profiles.filter(p => p.id !== id);
+     if (typeof window.rememberRemovedCrmProfile === "function") window.rememberRemovedCrmProfile(id);
      localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
      localStorage.removeItem(`crm_perms_${id}`);
      this.selectedProfile = "admin";
@@ -952,7 +957,19 @@ const ConfigUsersApp = {
 
   // Método movido para dentro do modal de edição
 
+  isPagadoriaProfile(name) {
+    return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().includes("PAGADORIA");
+  },
+
+  syncDeptBox() {
+    const box = document.getElementById("umodal-dept-box");
+    const sel = document.getElementById("umodal-profile");
+    if (!box || !sel) return;
+    box.style.display = this.isPagadoriaProfile(sel.value) ? "none" : "";
+  },
+
   deptUserLine(u) {
+    if (this.isPagadoriaProfile(u && u.profile_name)) return "";
     const today = new Date();
     const iso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
     const current = this.deptHistoryOf(u).filter((h) => h.name && (!h.to || h.to >= iso));
@@ -1072,6 +1089,8 @@ const ConfigUsersApp = {
   },
 
   collectDeptHistory() {
+    const sel = document.getElementById("umodal-profile");
+    if (this.isPagadoriaProfile(sel && sel.value)) return [];
     if (!document.getElementById("umodal-dept-box")) return null;
     const rows = this.readDeptDraft();
     const out = [];
@@ -1326,7 +1345,7 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } ConfigUsersApp.syncDeptBox(); })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
@@ -1415,10 +1434,13 @@ const ConfigUsersApp = {
       </div>
       `;
       document.body.insertAdjacentHTML('beforeend', modalHtml);
-      this._deptDraft = this.deptHistoryOf(user);
-      this._deptCatalog = this._deptCatalog || [];
-      this.paintDeptRows("");
-      this.loadDeptCatalog();
+      this.syncDeptBox();
+      if (!this.isPagadoriaProfile(user && user.profile_name)) {
+        this._deptDraft = this.deptHistoryOf(user);
+        this._deptCatalog = this._deptCatalog || [];
+        this.paintDeptRows("");
+        this.loadDeptCatalog();
+      }
   },
 
   toggleUserStatus(userId) {

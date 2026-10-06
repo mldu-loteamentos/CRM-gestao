@@ -447,10 +447,15 @@ const ComprasPrevisoesApp = {
     return found || cu;
   },
 
-  /** null = sem restrição (cadastro ainda sem departamento). */
+  isPagadoriaProfile(name) {
+    return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().includes("PAGADORIA");
+  },
+
+  /** null = sem restrição. Pagadoria vê tudo; os demais só restringem se houver departamento no cadastro. */
   departmentWindows() {
     const u = this.sessionUser();
     if (!u) return null;
+    if (this.isPagadoriaProfile(u.profile_name || u.profile)) return null;
     const hist = Array.isArray(u.department_history) ? u.department_history : [];
     const windows = hist.map((h) => ({
       id: String(h && h.id != null ? h.id : ""),

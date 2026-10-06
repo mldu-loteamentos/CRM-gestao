@@ -3815,20 +3815,6 @@ function validateAndLoadCrmUser(user) {
   let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
   
   if (!matchedUser) {
-      const numericIds = crmUsers.map((u) => Number(u && u.id)).filter((n) => Number.isFinite(n));
-      matchedUser = {
-        id: (numericIds.length ? Math.max.apply(null, numericIds) : 0) + 1,
-      name: user.name || String(user.email || "").split("@")[0].toUpperCase(),
-      email: String(user.email || "").toLowerCase(),
-      sienge_user: "",
-      phone: "",
-      profile_name: "OPERADOR",
-        role: "OPERADOR",
-      status: "PENDENTE",
-        createdAt: new Date().toISOString()
-      };
-    crmUsers.push(matchedUser);
-    persistCrmUsersList(crmUsers);
     throw new Error("Seu e-mail não está cadastrado em Usuários e Perfis. Peça ao administrador para incluir e ativar seu acesso.");
   }
   
@@ -3930,10 +3916,12 @@ async function processSuccessfulLogin(loggedUser) {
     }, 2500);
   } catch (err) {
     console.error("Erro no login:", err);
-    if (AppState.currentUser && AppState.currentUser.email) {
+    const loginBlock = /não está cadastrado|pendente de aprovação|foi desativado/i.test(String(err && err.message || ""));
+    if (!loginBlock && AppState.currentUser && AppState.currentUser.email) {
       const overlay = document.getElementById("login-modal-overlay");
       if (overlay) overlay.classList.remove("active");
       try { renderUserSession(); } catch (e) {}
+      try { switchTab("construcao-home", "Home"); } catch (e) {}
       return;
     }
     AppState.currentUser = null;
@@ -4497,40 +4485,90 @@ window._writeCrmUsersNow = async function(mem) {
   try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
   const usersRef = fc.doc(window.firebaseDb, "config", "crm_users");
   const globalRef = fc.doc(window.firebaseDb, "config", "global");
-  let dedicated = "[]";
-  let globalUsers = "[]";
-  const dSnap = await fc.getDoc(usersRef);
-  if (window.crmUsersDocExists(dSnap)) {
-    const data = dSnap.data() || {};
-    dedicated = data.list || data.crm_users || "[]";
+  const writeMerged = async (dedicated, globalUsers) => {
+    const merged = window.mergeCrmUsers(
+      window.mergeCrmUsers(mem, local),
+      window.mergeCrmUsers(dedicated, globalUsers)
+    );
+    const memList = JSON.parse(mem);
+    const out = JSON.parse(merged);
+    const emails = new Set(out.map((u) => String((u && u.email) || "").toLowerCase().trim()).filter(Boolean));
+    const missing = (Array.isArray(memList) ? memList : []).filter((u) => {
+      const em = String((u && u.email) || "").toLowerCase().trim();
+      return em && !emails.has(em);
+    });
+    if (missing.length) throw new Error("O usuário não entrou na lista salva.");
+    return { merged, out };
+  };
+  let saved;
+  if (typeof fc.runTransaction === "function") {
+    saved = await fc.runTransaction(window.firebaseDb, async (tx) => {
+      const dSnap = await tx.get(usersRef);
+      const gSnap = await tx.get(globalRef);
+      const dedicated = window.crmUsersDocExists(dSnap) ? ((dSnap.data() || {}).list || (dSnap.data() || {}).crm_users || "[]") : "[]";
+      const globalUsers = window.crmUsersDocExists(gSnap) ? ((gSnap.data() || {}).crm_users || "[]") : "[]";
+      const packed = await writeMerged(dedicated, globalUsers);
+      tx.set(usersRef, { list: packed.merged, updatedAt: new Date().toISOString() }, { merge: true });
+      tx.set(globalRef, { crm_users: packed.merged }, { merge: true });
+      return packed;
+    });
+  } else {
+    let dedicated = "[]";
+    let globalUsers = "[]";
+    const dSnap = await fc.getDoc(usersRef);
+    if (window.crmUsersDocExists(dSnap)) {
+      const data = dSnap.data() || {};
+      dedicated = data.list || data.crm_users || "[]";
+    }
+    const gSnap = await fc.getDoc(globalRef);
+    if (window.crmUsersDocExists(gSnap)) {
+      globalUsers = (gSnap.data() || {}).crm_users || "[]";
+    }
+    saved = await writeMerged(dedicated, globalUsers);
+    await fc.setDoc(usersRef, { list: saved.merged, updatedAt: new Date().toISOString() }, { merge: true });
+    await fc.setDoc(globalRef, { crm_users: saved.merged }, { merge: true });
   }
-  const gSnap = await fc.getDoc(globalRef);
-  if (window.crmUsersDocExists(gSnap)) {
-    globalUsers = (gSnap.data() || {}).crm_users || "[]";
-  }
-  const merged = window.mergeCrmUsers(
-    window.mergeCrmUsers(mem, local),
-    window.mergeCrmUsers(dedicated, globalUsers)
-  );
-  const memList = JSON.parse(mem);
-  const out = JSON.parse(merged);
-  const emails = new Set(out.map((u) => String((u && u.email) || "").toLowerCase().trim()).filter(Boolean));
-  const missing = (Array.isArray(memList) ? memList : []).filter((u) => {
-    const em = String((u && u.email) || "").toLowerCase().trim();
-    return em && !emails.has(em);
-  });
-  if (missing.length) throw new Error("O usuário não entrou na lista salva.");
+  const merged = saved.merged;
+  const out = saved.out;
   try {
     const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
     setter.call(localStorage, "crm_users", merged);
   } catch (e) {}
-  await fc.setDoc(usersRef, { list: merged, updatedAt: new Date().toISOString() }, { merge: true });
-  await fc.setDoc(globalRef, { crm_users: merged }, { merge: true });
   if (window.ConfigUsersApp && !document.getElementById("user-modal-overlay")) {
     window.ConfigUsersApp.users = out;
   }
   window._cachedCrmUsersBadge = null;
   return out;
+};
+
+window.crmProfileTombstones = function() {
+  try {
+    const ids = JSON.parse(localStorage.getItem("crm_moura_profiles_removed") || "[]");
+    return new Set((Array.isArray(ids) ? ids : []).map((id) => String(id)));
+  } catch (e) {
+    return new Set();
+  }
+};
+
+window.rememberRemovedCrmProfile = function(id) {
+  const ids = window.crmProfileTombstones();
+  ids.add(String(id || ""));
+  ids.delete("");
+  const raw = JSON.stringify(Array.from(ids));
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_moura_profiles_removed", raw);
+  } catch (e) {}
+};
+
+window.forgetRemovedCrmProfile = function(id) {
+  const ids = window.crmProfileTombstones();
+  if (!ids.delete(String(id || ""))) return;
+  const raw = JSON.stringify(Array.from(ids));
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_moura_profiles_removed", raw);
+  } catch (e) {}
 };
 
 window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
@@ -4583,7 +4621,29 @@ window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
     if (!preferKnown.name && p.name) preferKnown.name = p.name;
     byName.set(n, preferKnown);
   });
-  return JSON.stringify(Array.from(byName.values()));
+  const removed = typeof window.crmProfileTombstones === "function" ? window.crmProfileTombstones() : new Set();
+  const kept = Array.from(byName.values()).filter((p) => p && !removed.has(String(p.id)));
+  return JSON.stringify(kept);
+};
+
+window.commitCrmGlobalConfig = async function(payload) {
+  const fc = window.firebaseCollections;
+  if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb) {
+    throw new Error("Firebase não inicializado.");
+  }
+  const docRef = fc.doc(window.firebaseDb, "config", "global");
+  await fc.runTransaction(window.firebaseDb, async (tx) => {
+    const snap = await tx.get(docRef);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    const cloud = exists ? (snap.data() || {}) : {};
+    const next = Object.assign({}, payload || {});
+    const localProfiles = next.crm_moura_profiles || localStorage.getItem("crm_moura_profiles") || "[]";
+    next.crm_moura_profiles = window.mergeCrmMouraProfiles(localProfiles, cloud.crm_moura_profiles || "[]");
+    if (next.crm_users || cloud.crm_users) {
+      next.crm_users = window.mergeCrmUsers(next.crm_users || localStorage.getItem("crm_users") || "[]", cloud.crm_users || "[]");
+    }
+    tx.set(docRef, next, { merge: true });
+  });
 };
 
 window.readCrmProfilePerms = function(profileNameOrId) {
@@ -5932,8 +5992,7 @@ async function initializeApplication() {
       }
     }
     
-    // Iniciar na aba padrão
-    switchTab("dashboard");
+    switchTab("construcao-home", "Home");
   } catch (err) {
     console.error(err);
     alert("Falha na conexão com as APIs Sienge: " + err.message);
@@ -41315,7 +41374,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
           });
         } catch (e) {}
         if (!crmUsersMerged) delete payload.crm_users;
-        await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
+        await window.commitCrmGlobalConfig(payload);
         if (!silent) {
             alert("âœ”ï¸ SUCESSO!\n\nSuas configurações globais, regras de atribuição, personalização de empresas e acessos foram enviadas para a Nuvem!\n\nAgora o resto da equipe já vai puxar essas configurações.");
         } else {
@@ -41594,7 +41653,7 @@ localStorage.setItem = function(key, value) {
                       });
                     } catch (mergeErr) {}
                     if (!crmUsersMerged) delete payload.crm_users;
-                    await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
+                    await window.commitCrmGlobalConfig(payload);
                     console.log("[Firebase] Upload automático: Configurações globais atualizadas na nuvem.");
                 } catch(e) {
                     console.error("Erro ao salvar configs na nuvem:", e);
