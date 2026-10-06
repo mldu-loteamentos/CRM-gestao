@@ -11915,7 +11915,7 @@ function formatCpfCnpj(val) {
                    if (typeof window.installmentIsChargeOverdue === "function"
                      ? window.installmentIsChargeOverdue(inst, today)
                      : (inst.dueDate && String(inst.dueDate).slice(0, 10) < today)) {
-                     valorVencidas += cb;
+                     valorVencidas += contractInstallmentOverdueUpdated(inst, today);
                      valorVencidasOriginal += (inst.originalValue || cb);
                      qtdVencidas++;
                    } else {
@@ -11991,7 +11991,7 @@ function formatCpfCnpj(val) {
           
           const fmt = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
           
-          const kpiTotalTotal = valorPago - valorDesconto + valorVencidasOriginal + valorAVencer;
+          const kpiTotalTotal = valorPago - valorDesconto + valorVencidas + valorAVencer;
           
           const valoresHtml = `
             <div style="display: flex; gap: 8px; font-size: 0.75rem; width: 100%; align-items: stretch; flex-wrap: wrap; padding-bottom: 4px;">
@@ -12036,7 +12036,7 @@ function formatCpfCnpj(val) {
                   <span style="font-size: 1.05rem; font-weight: 800; color: var(--color-primary);">${fmt(kpiTotalTotal)}</span>
                 </div>
                 <span style="font-size: 0.65rem; color: var(--color-text-muted); display: block; margin-top: 2px;">
-                  Líq. receb. ${fmt(valorPago - valorDesconto)} + venc. orig. ${fmt(valorVencidasOriginal)} + a vencer ${fmt(valorAVencer)}
+                  Líq. receb. ${fmt(valorPago - valorDesconto)} + venc. atualiz. ${fmt(valorVencidas)} + a vencer ${fmt(valorAVencer)}
                 </span>
               </div>
             </div>
@@ -12820,7 +12820,7 @@ function formatCpfCnpj(val) {
                      : Math.round((new Date(todayIso) - new Date(inst.dueDate)) / (1000 * 60 * 60 * 24));
                    if (delay > maxDelayDays) maxDelayDays = delay;
                    
-                   kpiVencidas += cb;
+                   kpiVencidas += contractInstallmentOverdueUpdated(inst, todayIso);
                    kpiVencidasOriginal += ov; 
                    kpiQtdVencidas++;
                 } else {
@@ -12859,7 +12859,15 @@ function formatCpfCnpj(val) {
     // Só entra quando há parcela vencida no extrato. Sem isso, a API de inadimplentes
     // pode ainda devolver juros/multa de parcela já paga (título 18139: 0 parc. + R$ em atraso).
     const allBills = getSiengeApiMode() === "simulado" ? (window.MOCK_DATA && window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS ? window.MOCK_DATA.DEFAULTERS_RECEIVABLE_BILLS : []) : (AppState.defaultersBills || []);
-    const customerBills = allBills.filter(b => String(b.customerId) === String(customerId) && String(b.saleId) === String(saleId));
+    const billKeys = new Set([saleId, sale && sale.id, sale && sale.receivableBillId]
+      .map(v => String(v || "").replace(/^B-/, "").trim())
+      .filter(Boolean));
+    const customerBills = allBills.filter(b => {
+      if (String(b.customerId) !== String(customerId)) return false;
+      const ids = [b.saleId, b.id, b.receivableBillId, b.realSaleId]
+        .map(v => String(v || "").replace(/^B-/, "").trim());
+      return ids.some(id => id && billKeys.has(id));
+    });
     
     if (customerBills.length > 0 && kpiQtdVencidas > 0) {
         let totalValWithAdditions = 0;
@@ -12881,7 +12889,7 @@ function formatCpfCnpj(val) {
             totalValWithAdditions += billWithAdditions;
         });
 
-        if (totalValWithAdditions > 0) {
+        if (totalValWithAdditions > kpiVencidasOriginal + 0.05) {
             kpiVencidas = totalValWithAdditions;
         }
     }
@@ -12946,9 +12954,9 @@ function formatCpfCnpj(val) {
     const elTotalCount = document.getElementById("ext-kpi-total-count");
     if(elTotalCount) elTotalCount.textContent = kpiTotalQtd === 1 ? '1 parc.' : `${kpiTotalQtd} parc.`;
     
-    // Total contrato = Pago (Original - Desconto) + Vencido Original + A Vencer
+    // Total contrato = Pago (Original - Desconto) + Vencido atualizado (com acréscimo) + A Vencer
     const recebidoOriginalMenosDesc = kpiPago - kpiDesconto;
-    const kpiTotalContrato = recebidoOriginalMenosDesc + kpiVencidasOriginal + kpiAVencer;
+    const kpiTotalContrato = recebidoOriginalMenosDesc + kpiVencidas + kpiAVencer;
     
     AppState.currentContractKpis = {
        kpiPago, kpiAcrescimo, kpiDesconto, kpiLiquido, kpiQtdPagas,
@@ -12960,11 +12968,11 @@ function formatCpfCnpj(val) {
     const elTotalSum = document.getElementById("ext-kpi-total-sum");
     if(elTotalSum) elTotalSum.textContent = kpiFmt(kpiTotalContrato);
     
-    // Atualiza a legenda para mostrar a conta exata (Recebido s/ Acréscimos + Vencido Orig. + A Vencer)
+    // Atualiza a legenda para mostrar a conta exata (Recebido s/ Acréscimos + Vencido atualizado + A Vencer)
     const elTotalLiq = document.getElementById("ext-kpi-total-liq");
     if(elTotalLiq) elTotalLiq.textContent = kpiFmt(recebidoOriginalMenosDesc);
     const elTotalVenc = document.getElementById("ext-kpi-total-venc");
-    if(elTotalVenc) elTotalVenc.textContent = kpiFmt(kpiVencidasOriginal);
+    if(elTotalVenc) elTotalVenc.textContent = kpiFmt(kpiVencidas);
     const elTotalFut = document.getElementById("ext-kpi-total-fut");
     if(elTotalFut) elTotalFut.textContent = kpiFmt(kpiAVencer);
 
@@ -18212,6 +18220,40 @@ function quitacaoBuildInstallmentLookups(list) {
     if (due && num != null && num !== "" && !byDue.has(due)) byDue.set(due, num);
   });
   return { byId, byDue };
+}
+
+/**
+ * Valor atualizado da parcela vencida no card do contrato.
+ * Usa o saldo corrigido do Sienge quando ele já inclui acréscimo.
+ * Sem isso, aplica a mesma mora da Simulação de Vencidas: multa 2% + juros 1% a.m.
+ */
+function contractInstallmentOverdueUpdated(inst, todayIso) {
+  const cb = Number(inst && inst.currentBalance) || 0;
+  if (!(cb > 0.009)) return 0;
+  const explicit = [
+    inst.correctedValueWithAdditions,
+    inst.currentBalanceWithAddition,
+    inst.updatedValue
+  ];
+  for (let i = 0; i < explicit.length; i++) {
+    const n = Number(explicit[i]);
+    if (Number.isFinite(n) && n > cb + 0.009) return n;
+  }
+  const parts = Number(inst.additionalValue || inst.additionsValue || 0)
+    + Number(inst.fine || inst.fineAmount || 0)
+    + Number(inst.interest || inst.interestAmount || 0)
+    + Number(inst.monetaryCorrection || inst.correctionAmount || 0);
+  if (parts > 0.009) return cb + parts;
+  const due = String(inst.dueDate || "").slice(0, 10);
+  const today = String(todayIso || "").slice(0, 10);
+  let days = 0;
+  if (typeof window.daysOverdueUntilTarget === "function") {
+    days = Number(window.daysOverdueUntilTarget(inst, today)) || 0;
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(due) && /^\d{4}-\d{2}-\d{2}$/.test(today) && due < today) {
+    days = Math.round((new Date(today + "T12:00:00") - new Date(due + "T12:00:00")) / 86400000);
+  }
+  if (days >= 1) return cb + (cb * 0.02) + (cb * 0.01 * (days / 30));
+  return cb;
 }
 
 /**
@@ -32716,8 +32758,8 @@ window.updateJudFaseDropdown = function() {
 };
 
 window.handleJudFaseChange = function(sel) {
-   const selectedOption = sel.options[sel.selectedIndex];
-   const dias = selectedOption.getAttribute('data-dias');
+   const selectedOption = sel && sel.options ? sel.options[sel.selectedIndex] : null;
+   const dias = selectedOption ? selectedOption.getAttribute('data-dias') : null;
    
    const prazoInput = document.getElementById('jud-prazo-date');
    const prazoRow = document.getElementById('jud-prazo-row');
@@ -38761,7 +38803,7 @@ window.renderJudicialTimeline = function() {
     let repetirBtnHtml = "";
     if (canInsertJud && occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociação') {
         repetirBtnHtml = `
-            <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc(${index})" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
+            <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc('${encodeURIComponent(occ.id || occ.date || "")}')" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
                <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Repetir
             </button>
         `;
@@ -39011,25 +39053,42 @@ window.togglePinJudicialOccurrence = function(occDate) {
   window.renderJudicialTimeline();
 };
 
-window.repeatJudicialOcc = function(index) {
+window.repeatJudicialOcc = function(key) {
   if (typeof canInsertJudicialOccurrence === "function" && !canInsertJudicialOccurrence()) {
     alert("Cliente não está mais Sub Judice. Registre novas ocorrências na aba Ocorrências e Promessas.");
     return;
   }
 
-  const list = AppState.judNotes[AppState.selectedCustomerId] || [];
-  const occ = list[index];
+  let token = String(key || "");
+  try { token = decodeURIComponent(token); } catch (e) {}
+  const customerId = AppState.selectedCustomerId;
+  const judList = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.judNotes, customerId)
+    : ((AppState.judNotes && AppState.judNotes[customerId]) || []);
+  const normalList = window.getCustomerNotesList
+    ? window.getCustomerNotesList(AppState.notes, customerId)
+    : ((AppState.notes && AppState.notes[customerId]) || []);
+  const occ = judList.concat(normalList).find((item) => item && (String(item.id) === token || String(item.date) === token));
   if (!occ) return;
-  
+
   const faseEl = document.getElementById("jud-fase");
   const noteEl = document.getElementById("jud-note-text");
-  
+  const prazoEl = document.getElementById("jud-prazo-date");
+  const prazoOriginal = occ.prazo ? String(occ.prazo).slice(0, 10) : "";
+
   if (faseEl) {
-      faseEl.value = occ.fase || '';
+      faseEl.value = occ.fase || "";
+      if (!faseEl.value && occ.faseId) {
+        const opt = Array.from(faseEl.options || []).find((o) => o.getAttribute("data-id") === String(occ.faseId));
+        if (opt) faseEl.value = opt.value;
+      }
       if (window.handleJudFaseChange) window.handleJudFaseChange(faseEl);
   }
+  if (prazoEl && prazoOriginal && occ.fase !== "Nota Interna" && occ.fase !== "Proposta de renegociação") {
+      prazoEl.value = prazoOriginal;
+  }
   if (noteEl) {
-      noteEl.value = occ.text || '';
+      noteEl.value = occ.text || "";
       noteEl.focus();
   }
 };
