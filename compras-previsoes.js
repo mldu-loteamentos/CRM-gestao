@@ -451,20 +451,19 @@ const ComprasPrevisoesApp = {
     return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().includes("PAGADORIA");
   },
 
-  /** null = sem restrição. Pagadoria vê tudo; os demais só restringem se houver departamento no cadastro. */
+  /** null = pagadoria, vê tudo. Lista vazia = sem departamento, não vê nada. */
   departmentWindows() {
     const u = this.sessionUser();
-    if (!u) return null;
+    if (!u) return [];
     if (this.isPagadoriaProfile(u.profile_name || u.profile)) return null;
     const hist = Array.isArray(u.department_history) ? u.department_history : [];
-    const windows = hist.map((h) => ({
+    return hist.map((h) => ({
       id: String(h && h.id != null ? h.id : ""),
       name: this.fold(h && h.name),
       from: this.isoDate(h && h.from),
       to: this.isoDate(h && h.to),
       keep: !!(h && h.keep)
     })).filter((h) => (h.id || h.name) && h.from);
-    return windows.length ? windows : null;
   },
 
   /** null = vê todos. Lista = departamentos que a pessoa pode consultar hoje. */
@@ -554,6 +553,7 @@ const ComprasPrevisoesApp = {
   departmentScopeNote() {
     const windows = this.departmentWindows();
     if (!windows) return "";
+    if (!windows.length) return "Seu usuário não tem departamento cadastrado, então não vê previsões.";
     const today = this.isoToday();
     const current = [];
     const kept = [];
@@ -757,11 +757,12 @@ const ComprasPrevisoesApp = {
 
   deptFilterHtml() {
     const access = this.accessibleDepartments();
-    if (access && access.length === 1) {
+    if (access && access.length <= 1) {
+      const label = access.length === 1 ? access[0].label : "Nenhum departamento";
       return `<div class="ml-emp-filter" id="cprev-filter-dept">
         <div class="ml-emp-filter-label">Departamento</div>
         <button type="button" class="ml-emp-filter-btn" disabled>
-          <span>${this.esc(access[0].label)}</span>
+          <span>${this.esc(label)}</span>
         </button>
       </div>`;
     }
@@ -961,10 +962,14 @@ const ComprasPrevisoesApp = {
         <div class="ccom-kpi"><span>Substituídos</span><strong>${this.esc(this.money(k.substituido))}</strong></div>`;
     }
     if (!rows.length) {
-      const limited = this.departmentWindows() && (this.state.allRows || []).length && !this.scopedRows().length;
-      box.innerHTML = limited
-        ? `<div class="tvig-empty">Nenhuma previsão dos seus departamentos neste período.</div>`
-        : `<div class="tvig-empty">Nenhum título neste filtro.</div>`;
+      const windows = this.departmentWindows();
+      const noDept = Array.isArray(windows) && !windows.length;
+      const limited = !!windows && (this.state.allRows || []).length && !this.scopedRows().length;
+      box.innerHTML = noDept
+        ? `<div class="tvig-empty">Seu usuário não tem departamento cadastrado.</div>`
+        : (limited
+          ? `<div class="tvig-empty">Nenhuma previsão dos seus departamentos neste período.</div>`
+          : `<div class="tvig-empty">Nenhum título neste filtro.</div>`);
       return;
     }
     const totals = {};

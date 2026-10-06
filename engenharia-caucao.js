@@ -175,19 +175,42 @@ window.EngenhariaCaucaoApp = {
     if (!this.state.liberated || typeof this.state.liberated !== "object") this.state.liberated = {};
   },
 
+  async pullLiberated() {
+    this.loadLiberated();
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !fc.doc || !window.firebaseDb) return this.state.liberated;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!exists) return this.state.liberated;
+      const raw = (snap.data() || {}).crm_engenharia_caucao_liberados_v1 || "";
+      if (!raw) return this.state.liberated;
+      const merged = window.mergedCaucaoLiberados
+        ? window.mergedCaucaoLiberados([this.state.liberated, raw])
+        : raw;
+      this.state.liberated = JSON.parse(merged) || this.state.liberated;
+      try {
+        const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+        setter.call(localStorage, ECAU_LIBERA_LS, JSON.stringify(this.state.liberated));
+      } catch (e) {}
+    } catch (e) {}
+    return this.state.liberated;
+  },
+
   persistLiberated() {
     const raw = JSON.stringify(this.state.liberated || {});
     try { localStorage.setItem(ECAU_LIBERA_LS, raw); } catch (e) {}
     const self = this;
-    if (typeof window.persistCaucaoLiberadosNow !== "function") return;
-    window.persistCaucaoLiberadosNow(this.state.liberated).then(function (merged) {
-      if (!merged || merged === raw) return;
-      try { self.state.liberated = JSON.parse(merged) || self.state.liberated; } catch (e) { return; }
-      if (self.state.consulted) {
-        self.applyFilters();
-        self.renderList();
-      }
-    }).catch(function () {});
+    if (typeof window.persistCaucaoLiberadosNow !== "function") return Promise.resolve(raw);
+    return window.persistCaucaoLiberadosNow(this.state.liberated).then(function (merged) {
+      if (!merged) return raw;
+      try { self.state.liberated = JSON.parse(merged) || self.state.liberated; } catch (e) { return merged; }
+      try {
+        const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+        setter.call(localStorage, ECAU_LIBERA_LS, merged);
+      } catch (e) {}
+      return merged;
+    });
   },
 
   avisoStore() {
@@ -849,6 +872,7 @@ window.EngenhariaCaucaoApp = {
       return;
     }
     this.loadLiberated();
+    await this.pullLiberated();
     this.state.loading = true;
     this.state.error = "";
     this.state.consulted = true;
@@ -1403,7 +1427,11 @@ window.EngenhariaCaucaoApp = {
       }
     }
     manter.forEach((r) => { mark(r); liberadas += 1; });
-    this.persistLiberated();
+    try {
+      await this.persistLiberated();
+    } catch (e) {
+      errors.push("A liberação não ficou salva. Não atualize a página antes de tentar de novo.");
+    }
     if (avisosProrroga.length) {
       this.enqueueAviso("prorrogacao", avisosProrroga);
       this.flushAvisos().catch(function () {});
@@ -1596,6 +1624,7 @@ window.EngenhariaCaucaoApp = {
     }
     this.loadLiberated();
     this.resetStatusFilter();
+    const boot = this.pullLiberated();
     if (!this.state.inited) {
       try {
         const range = this.defaultRange();
@@ -1612,6 +1641,11 @@ window.EngenhariaCaucaoApp = {
     }
     if (this.state.consulted) this.applyFilters();
     this.renderPage();
+    boot.then(() => {
+      if (!this.state.consulted) return;
+      this.applyFilters();
+      this.renderList();
+    }).catch(function () {});
   }
 };
 

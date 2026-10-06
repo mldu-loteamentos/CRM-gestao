@@ -1877,10 +1877,20 @@ const ConfigUsersApp = {
           });
        });
     } else if (level === 'submodule') {
-       // Se ligou o submódulo, garanta que o módulo pai está ligado
        const parentModKey = checkbox.getAttribute('data-parent-mod');
        if (isChecked) {
           perms[parentModKey] = true;
+          this.modules.forEach(m => {
+             m.submodules.forEach(s => {
+                if (s.key !== key) return;
+                s.actions.forEach(act => {
+                  const f = this.permFlags(s, act);
+                  perms[f.acessar] = true;
+                  perms[f.visualizar] = true;
+                  perms[f.editar] = true;
+                });
+             });
+          });
        } else {
           // Se desligou o submódulo, desliga todas as actions dele
           const subKey = key;
@@ -1958,7 +1968,7 @@ const ConfigUsersApp = {
     });
   },
 
-  savePermissions() {
+  async savePermissions() {
     const checkboxes = document.querySelectorAll('.profile-perm-checkbox');
     let totalEdit = 0;
     let checkedEdit = 0;
@@ -1993,6 +2003,14 @@ const ConfigUsersApp = {
     if (!this.writePermissionPayload(this.selectedProfile, perms)) {
        alert("Armazenamento local cheio: não foi possível salvar as permissões deste perfil. Libere espaço no navegador e tente de novo.");
        return;
+    }
+    if (typeof window.persistCrmProfilePermsNow === "function") {
+      try {
+        await window.persistCrmProfilePermsNow(this.selectedProfile, perms);
+      } catch (e) {
+        alert("As permissões ficaram neste navegador, mas não chegaram para os outros usuários. Abra de novo e clique em Salvar Permissões.\n\n" + (e && e.message ? e.message : e));
+        return;
+      }
     }
     this.syncPermsToCloud();
     try {

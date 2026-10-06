@@ -4071,6 +4071,20 @@ window.expandCrmMenuPerms = function(perms) {
   )) {
     copy.mod_gerencial = true;
   }
+  const comprasParent = copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true;
+  const comprasLeaves = [
+    "sub_compras_geral_previsoes_acessar",
+    "sub_compras_geral_config_acessar",
+    "sub_compras_geral_compras_acessar"
+  ];
+  if (comprasParent && !comprasLeaves.some((k) => copy[k] === true)) {
+    copy.mod_compras = true;
+    copy.sub_compras_geral = true;
+    copy.sub_compras_geral_previsoes_acessar = true;
+    if (copy.sub_compras_geral_previsoes_visualizar !== false) copy.sub_compras_geral_previsoes_visualizar = true;
+    copy.sub_compras_geral_config_acessar = true;
+    if (copy.sub_compras_geral_config_visualizar !== false) copy.sub_compras_geral_config_visualizar = true;
+  }
   return copy;
 };
 
@@ -4534,6 +4548,48 @@ window.persistCrmProfilesNow = async function(profiles) {
   try { return JSON.parse(merged); } catch (e) { return []; }
 };
 
+window.persistCrmProfilePermsNow = async function(profileId, perms) {
+  const id = String(profileId || "").trim();
+  if (!id) throw new Error("Perfil sem identificador.");
+  const fc = window.firebaseCollections;
+  if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb) {
+    throw new Error("Firebase não inicializado. Abra o sistema de novo e salve as permissões outra vez.");
+  }
+  const key = "crm_perms_" + id;
+  const memObj = Object.assign({}, perms || {});
+  delete memObj.__mirror_of__;
+  if (!memObj._savedAt) memObj._savedAt = Date.now();
+  const mem = JSON.stringify(memObj);
+  const docRef = fc.doc(window.firebaseDb, "config", "global");
+  const saved = await fc.runTransaction(window.firebaseDb, async (tx) => {
+    const snap = await tx.get(docRef);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    const data = exists ? (snap.data() || {}) : {};
+    const chosen = typeof window.pickPreferredCrmPerms === "function"
+      ? window.pickPreferredCrmPerms(mem, data[key] || "")
+      : mem;
+    const patch = {};
+    patch[key] = chosen || mem;
+    let permsObj = {};
+    try { permsObj = JSON.parse(patch[key]); } catch (e) { permsObj = memObj; }
+    let profiles = [];
+    try { profiles = JSON.parse(data.crm_moura_profiles || "[]") || []; } catch (e) { profiles = []; }
+    if (!Array.isArray(profiles)) profiles = [];
+    const idx = profiles.findIndex((p) => String(p && p.id) === id);
+    if (idx >= 0) {
+      profiles[idx] = Object.assign({}, profiles[idx], { perms: permsObj });
+      patch.crm_moura_profiles = JSON.stringify(profiles);
+    }
+    tx.set(docRef, patch, { merge: true });
+    return patch[key];
+  });
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, key, saved);
+  } catch (e) {}
+  return saved;
+};
+
 window.persistCrmUsersToFirebase = function(users) {
   const mem = JSON.stringify(Array.isArray(users) ? users : []);
   const job = (window._crmUsersWriteChain || Promise.resolve()).then(() => window._writeCrmUsersNow(mem));
@@ -4792,6 +4848,14 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     try { payloads.push(localStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
     try { payloads.push(sessionStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
   });
+  try {
+    const profiles = JSON.parse(localStorage.getItem("crm_moura_profiles") || "[]");
+    const wanted = window.normalizeCrmProfileName(profileNameOrId);
+    const hit = (Array.isArray(profiles) ? profiles : []).find((p) => {
+      return String(p && p.id) === String(id) || window.normalizeCrmProfileName(p && p.name) === wanted;
+    });
+    if (hit && hit.perms && typeof hit.perms === "object") payloads.push(JSON.stringify(hit.perms));
+  } catch (e) {}
   const best = window.expandCrmMenuPerms(window.pickBestCrmPermsObject(payloads));
   if (window.crmPermsHasAnyTrue(best)) return best;
   let obj = window.expandCrmMenuPerms(window.materializeCrmProfilePerms(id));
@@ -41328,6 +41392,13 @@ window.syncGlobalConfigFromFirebase = async function() {
                 if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
                 else if (typeof window.applyPermissions === "function" && window.AppState && AppState.currentUser) {
                     window.applyPermissions(AppState.currentUser.profile_name);
+                }
+                if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.pullLiberated === "function") {
+                    EngenhariaCaucaoApp.pullLiberated().then(function () {
+                        if (!EngenhariaCaucaoApp.state || !EngenhariaCaucaoApp.state.consulted) return;
+                        EngenhariaCaucaoApp.applyFilters();
+                        EngenhariaCaucaoApp.renderList();
+                    }).catch(function () {});
                 }
             } catch (e) {}
         }
