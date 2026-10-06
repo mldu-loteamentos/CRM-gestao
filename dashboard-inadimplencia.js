@@ -364,10 +364,99 @@ const DashboardInadimplencia = (function() {
     return Object.assign({}, metrics, {
       total_value,
       total_count,
-      total_customers: total_customers || metrics.total_customers || 0,
+      // Faixa ativa: a quantidade é a soma das faixas escolhidas.
+      // Não reaproveitar o total geral do snapshot (todos os clientes).
+      total_customers,
       avg_ticket: total_count > 0 ? total_value / total_count : 0,
       aging
     });
+  }
+
+  /** Snapshot guarda títulos por faixa; clientes por faixa só existem na carteira ao vivo. */
+  function bucketQuantity(row, metric) {
+    if (!row) return 0;
+    if (metric !== 'count') return Number(row.value) || 0;
+    const clients = Number(row.clients);
+    const count = Number(row.count) || 0;
+    if (Number.isFinite(clients) && clients > 0) return clients;
+    return count;
+  }
+
+  function stampAgingClients(aging) {
+    if (!aging) return aging;
+    Object.keys(aging).forEach((k) => {
+      const row = aging[k];
+      if (!row) return;
+      const count = Number(row.count) || 0;
+      const clients = Number(row.clients);
+      if (!(Number.isFinite(clients) && clients > 0) && count > 0) row.clients = count;
+    });
+    return aging;
+  }
+
+  const AGING_PLUS_KEYS = ['d31_60', 'd61_90', 'd91_120', 'd120p'];
+
+  /** Reparte valor/títulos nas faixas segundo o mix da empresa. Sem mix, divide igual. */
+  function splitAgingByMix(totalValue, totalCount, keys, mix) {
+    const aging = emptyAging();
+    const list = (keys && keys.length) ? keys : Object.keys(aging);
+    const mixV = list.reduce((s, k) => s + (Number(mix && mix[k] && mix[k].value) || 0), 0);
+    const mixC = list.reduce((s, k) => s + (Number(mix && mix[k] && mix[k].count) || 0), 0);
+    const n = list.length || 1;
+    let usedC = 0;
+    let biggest = list[0];
+    let biggestC = -1;
+    list.forEach((k) => {
+      const shareV = mixV > 0.01 ? (Number(mix[k].value) || 0) / mixV : (1 / n);
+      const shareC = mixC > 0 ? (Number(mix[k].count) || 0) / mixC : shareV;
+      const count = Math.round((Number(totalCount) || 0) * shareC);
+      aging[k] = { count, value: (Number(totalValue) || 0) * shareV, clients: count };
+      usedC += count;
+      if (count > biggestC) {
+        biggestC = count;
+        biggest = k;
+      }
+    });
+    const drift = Math.round(Number(totalCount) || 0) - usedC;
+    if (drift && biggest && aging[biggest]) {
+      aging[biggest].count += drift;
+      aging[biggest].clients = aging[biggest].count;
+    }
+    return aging;
+  }
+
+  function companyAgingMix(dj) {
+    const mix = emptyAging();
+    ((dj && dj.companies) || []).forEach((comp) => {
+      if (comp && comp.aging) absorbAging(mix, comp.aging);
+    });
+    return mix;
+  }
+
+  /**
+   * Histórico do operador: o snapshot não cruza operador × faixa.
+   * Usa a carteira gravada do operador (e o acima de 31 dias, quando existir)
+   * e só o mix das empresas para repartir entre as faixas.
+   */
+  function agingFromOperatorBook(ops, dj, totalValue, totalCount) {
+    const mix = companyAgingMix(dj);
+    let aboveC = 0;
+    let aboveV = 0;
+    let hasAbove = false;
+    (ops || []).forEach((o) => {
+      if (!o || (o.above31_count == null && o.above31_value == null)) return;
+      hasAbove = true;
+      aboveC += Number(o.above31_count) || 0;
+      aboveV += Number(o.above31_value) || 0;
+    });
+    if (hasAbove) {
+      const aging = splitAgingByMix(aboveV, aboveC, AGING_PLUS_KEYS, mix);
+      const d0c = Math.max(0, Math.round((Number(totalCount) || 0) - aboveC));
+      const d0v = Math.max(0, (Number(totalValue) || 0) - aboveV);
+      aging.d0_30 = { count: d0c, value: d0v, clients: d0c };
+      return aging;
+    }
+    return splitAgingByMix(totalValue, totalCount, Object.keys(emptyAging()), mix);
   }
 
   function agingFilterItems() {
@@ -380,9 +469,7 @@ const DashboardInadimplencia = (function() {
     const out = {};
     AGING_CHART_SERIES.forEach((s) => {
       const row = aging[s.key] || {};
-      out[s.key] = Number(useCount
-        ? (row.clients != null ? row.clients : row.count)
-        : row.value) || 0;
+      out[s.key] = bucketQuantity(row, useCount ? 'count' : 'value');
     });
     return out;
   }
@@ -821,8 +908,12 @@ const DashboardInadimplencia = (function() {
   let _opRatioCacheKey = '';
   let _opRatioCacheVal = null;
 
-  /** Participação do(s) operador(es) no total — live ou último snapshot com dado. */
-  function operatorShareRatio(f) {
+  /**
+   * Participação do operador na carteira já recortada pelos outros filtros.
+   * Valor e quantidade são razões diferentes: o ticket do operador não é o da carteira,
+   * então aplicar a fatia do valor na quantidade achata o histórico (ex.: ~20 títulos hoje e ~100 no dia corrente).
+   */
+  function operatorShares(f) {
     if (!f || !f.operators.length) return null;
     const key = [
       f.operators.slice().sort().join('|'),
@@ -833,7 +924,8 @@ const DashboardInadimplencia = (function() {
     ].join('||');
     if (_opRatioCacheKey === key) return _opRatioCacheVal;
 
-    let ratio = null;
+    let value = null;
+    let count = null;
     const live = getLiveClients();
     if (live.length) {
       const emptyOps = {
@@ -852,27 +944,33 @@ const DashboardInadimplencia = (function() {
       };
       const base = aggregateFromLive(live, emptyOps);
       const filtered = aggregateFromLive(live, withOps);
-      // Só usa live se o operador tiver valor; senão tenta snapshots (carteira ao vivo pode estar sem assignedOperator)
       if (base.total_value > 0.01 && filtered.total_value > 0.01) {
-        ratio = Math.min(1, filtered.total_value / base.total_value);
+        value = Math.min(1, filtered.total_value / base.total_value);
+      }
+      if (base.total_count > 0 && filtered.total_count > 0) {
+        count = Math.min(1, filtered.total_count / base.total_count);
       }
     }
-    if (ratio == null) {
+    if (value == null || count == null) {
       for (let i = snapshots.length - 1; i >= 0; i--) {
         const snap = snapshots[i];
         const dj = snapDataJson(snap);
         const ops = pickOperatorsFromSnap(dj.operators || [], f.operators);
         const opVal = ops.reduce((s, o) => s + opSnapValue(o), 0);
+        const opCount = ops.reduce((s, o) => s + opSnapCount(o), 0);
         const snapTotal = Number(snap.total_value) || 0;
-        if (opVal > 0.01 && snapTotal > 0.01) {
-          ratio = Math.min(1, opVal / snapTotal);
-          break;
-        }
+        const snapCount = Number(snap.total_count) || 0;
+        if (value == null && opVal > 0.01 && snapTotal > 0.01) value = Math.min(1, opVal / snapTotal);
+        if (count == null && opCount > 0 && snapCount > 0) count = Math.min(1, opCount / snapCount);
+        if (value != null && count != null) break;
       }
     }
+    if (value == null && count != null) value = count;
+    if (count == null && value != null) count = value;
+    const shares = (value != null || count != null) ? { value: value || 0, count: count || 0 } : null;
     _opRatioCacheKey = key;
-    _opRatioCacheVal = ratio;
-    return ratio;
+    _opRatioCacheVal = shares;
+    return shares;
   }
 
   function aggregateFromSnapshot(snap, f) {
@@ -895,6 +993,7 @@ const DashboardInadimplencia = (function() {
           centers.push({ id: cc.id, count: cc.count, value: cc.value });
         });
       });
+      stampAgingClients(aging);
       return applyAgingFilterToMetrics({
         total_value: snap.total_value || 0,
         total_count: snap.total_count || 0,
@@ -920,24 +1019,13 @@ const DashboardInadimplencia = (function() {
       });
       // Snapshot antigo sem operadores → estima pela participação atual
       if (total_value < 0.01 && (Number(snap.total_value) || 0) > 0.01) {
-        const ratio = operatorShareRatio(f);
-        if (ratio != null && ratio > 0) {
-          total_value = (Number(snap.total_value) || 0) * ratio;
-          total_count = Math.round((Number(snap.total_count) || 0) * ratio);
+        const shares = operatorShares(f);
+        if (shares && (shares.value > 0 || shares.count > 0)) {
+          total_value = (Number(snap.total_value) || 0) * (shares.value || shares.count);
+          total_count = Math.round((Number(snap.total_count) || 0) * (shares.count || shares.value));
         }
       }
-      const aging = emptyAging();
-      const snapTotal = Number(snap.total_value) || 0;
-      if (total_value > 0.01 && snapTotal > 0.01) {
-        const r = Math.min(1, total_value / snapTotal);
-        (dj.companies || []).forEach((comp) => {
-          if (comp.aging) absorbAging(aging, comp.aging);
-        });
-        Object.keys(aging).forEach((k) => {
-          aging[k].count = Math.round((aging[k].count || 0) * r);
-          aging[k].value = (aging[k].value || 0) * r;
-        });
-      }
+      const aging = agingFromOperatorBook(ops, dj, total_value, total_count);
       return applyAgingFilterToMetrics({
         total_value,
         total_count,
@@ -996,15 +1084,19 @@ const DashboardInadimplencia = (function() {
     let operators = (dj.operators || []).slice();
     if (f.operators.length) {
       operators = pickOperatorsFromSnap(operators, f.operators);
-      // Sem cruzamento empresa×operador no snapshot: aplica a participação do operador
-      const ratio = operatorShareRatio(f);
-      if (ratio != null && ratio > 0 && total_value > 0.01) {
-        total_value *= ratio;
-        total_count = Math.round(total_count * ratio);
+      // Sem cruzamento empresa×operador no snapshot: participação do operador.
+      // Quantidade usa a fatia de títulos; valor usa a fatia de R$.
+      const shares = operatorShares(f);
+      if (shares && (shares.value > 0 || shares.count > 0) && total_value > 0.01) {
+        const countShare = shares.count > 0 ? shares.count : shares.value;
+        const valueShare = shares.value > 0 ? shares.value : shares.count;
+        total_value *= valueShare;
+        total_count = Math.round(total_count * countShare);
         Object.keys(aging).forEach(k => {
-          aging[k].count = Math.round((aging[k].count || 0) * ratio);
-          aging[k].value = (aging[k].value || 0) * ratio;
+          aging[k].count = Math.round((aging[k].count || 0) * countShare);
+          aging[k].value = (aging[k].value || 0) * valueShare;
         });
+        stampAgingClients(aging);
       } else {
         const opVal = operators.reduce((s, o) => s + opSnapValue(o), 0);
         if (opVal > 0.01 && (Number(snap.total_value) || 0) > 0.01) {
@@ -1015,6 +1107,7 @@ const DashboardInadimplencia = (function() {
       }
     }
 
+    stampAgingClients(aging);
     return applyAgingFilterToMetrics({
       total_value,
       total_count,
