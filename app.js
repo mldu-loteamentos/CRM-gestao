@@ -8475,6 +8475,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   
   const subjudiceList = rawList.filter(c => c.subjudice === "S");
   window.rawClientList = rawList;
+  if (window.DashboardInadimplencia && typeof window.DashboardInadimplencia.persistSprintBaseline === "function") {
+    window.DashboardInadimplencia.persistSprintBaseline(rawList).catch((e) => console.warn("[Sprint] Não salvou a base do dia", e));
+  }
   if (typeof window.updateOperatorTabsUI === "function") {
     window.updateOperatorTabsUI(true);
   }

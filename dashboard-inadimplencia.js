@@ -171,6 +171,87 @@ const DashboardInadimplencia = (function() {
     return 1;
   }
 
+  /** Mesma conta do texto do Sprint: fila já filtrada, não o bruto do Sienge. */
+  function sprintCarteiraMetrics(list) {
+    const bills = Array.isArray(list) ? list : [];
+    let value = 0;
+    let titles = 0;
+    let sumDelay = 0;
+    let counted = 0;
+    const clients = new Set();
+    bills.forEach((b) => {
+      if ((Number(b.overdueValue) || 0) < 0.01) return;
+      value += Number(b.overdueValue) || 0;
+      clients.add(b.customerId);
+      titles += clientTitles(b);
+      sumDelay += Number(b.maxDaysDelay) || 0;
+      counted += 1;
+    });
+    return {
+      value,
+      clients: clients.size,
+      titles,
+      avgDelay: counted > 0 ? Math.round(sumDelay / counted) : 0
+    };
+  }
+
+  function sprintBaseline(snap) {
+    if (!snap) return null;
+    const hasSprint = snap.sprint_value != null && snap.sprint_clients != null && snap.sprint_titles != null;
+    if (hasSprint) {
+      return {
+        value: Number(snap.sprint_value) || 0,
+        clients: Number(snap.sprint_clients) || 0,
+        titles: Number(snap.sprint_titles) || 0
+      };
+    }
+    return {
+      value: Number(snap.total_value) || 0,
+      clients: snap.total_customers,
+      titles: snap.total_count
+    };
+  }
+
+  function todayIsoLocal() {
+    const today = new Date();
+    if (typeof window.localDateStr === "function") return window.localDateStr(today);
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  }
+
+  async function persistSprintBaseline(listOrMetrics) {
+    const metrics = listOrMetrics && listOrMetrics.titles != null && listOrMetrics.clients != null && listOrMetrics.value != null
+      ? listOrMetrics
+      : sprintCarteiraMetrics(listOrMetrics);
+    if (!metrics || (!metrics.clients && !metrics.titles)) return;
+    if (!window.firebaseCollections || !window.firebaseDb) return;
+    const dateStr = todayIsoLocal();
+    const docRef = window.firebaseCollections.doc(window.firebaseDb, "inadimplencia_snapshots", dateStr);
+    try {
+      const existing = await window.firebaseCollections.getDoc(docRef);
+      if (existing && existing.exists()) {
+        const prev = existing.data() || {};
+        const prevTitles = Number(prev.sprint_titles != null ? prev.sprint_titles : prev.total_count) || 0;
+        if (prevTitles > 0 && metrics.titles < prevTitles * 0.5) {
+          console.warn(`[Sprint] Base ${dateStr} não atualizada: ${metrics.titles} títulos contra ${prevTitles} (carga parcial).`);
+          return;
+        }
+      }
+    } catch (e) { /* segue e grava a carteira da fila */ }
+    const payload = {
+      date: dateStr,
+      sprint_value: metrics.value,
+      sprint_clients: metrics.clients,
+      sprint_titles: metrics.titles,
+      sprint_avg_delay: metrics.avgDelay || 0,
+      sprint_saved_at: new Date().toISOString(),
+      total_value: metrics.value,
+      total_customers: metrics.clients,
+      total_count: metrics.titles,
+      source_count: metrics.titles
+    };
+    await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
+  }
+
   function clientDelay(c) {
     return Number(c.maxDaysDelay != null ? c.maxDaysDelay : c.daysDelay) || 0;
   }
@@ -1672,6 +1753,7 @@ const DashboardInadimplencia = (function() {
     if (typeof window.refreshVistoriaSprintCounts === "function") {
       try { await window.refreshVistoriaSprintCounts(); } catch (e) {}
     }
+    try { await carregarDados(); } catch (e) {}
 
     const bills = window.rawClientList;
     
@@ -2060,32 +2142,34 @@ const DashboardInadimplencia = (function() {
     let diffBillsStr = "";
     
     if (ontemSnap) {
-        const diffVal = totalOverdue - (ontemSnap.total_value || 0);
+        const base = sprintBaseline(ontemSnap);
+        const diffVal = totalOverdue - (base.value || 0);
         if (Math.abs(diffVal) > 1) {
             const diffValFmt = formatMoney(Math.abs(diffVal));
             diffValueStr = ` (${diffVal > 0 ? '+' : '-'} ${diffValFmt} do que o último dia útil)`;
         }
-        
-        let ontemTotCust = ontemSnap.total_customers;
-        if (ontemTotCust === undefined && ontemSnap.data_json && ontemSnap.data_json.companies) {
-            // Se não tem salvo, não temos como saber o numero exato de clientes unicos facilmente sem recalcular tudo,
-            // mas o CRM agora salva total_customers.
-        }
-        
-        if (ontemTotCust !== undefined) {
-            const diffCli = uniqueClients.size - ontemTotCust;
+
+        if (base.clients !== undefined && base.clients !== null) {
+            const diffCli = uniqueClients.size - Number(base.clients);
             if (diffCli !== 0) {
                 diffClientsStr = ` (${diffCli > 0 ? '+' : '-'} ${Math.abs(diffCli)} do que o último dia útil)`;
             }
         }
-        
-        if (ontemSnap.total_count !== undefined) {
-            const diffTit = totalBills - ontemSnap.total_count;
+
+        if (base.titles !== undefined && base.titles !== null) {
+            const diffTit = totalBills - Number(base.titles);
             if (diffTit !== 0) {
                 diffBillsStr = ` (${diffTit > 0 ? '+' : '-'} ${Math.abs(diffTit)} do que o último dia útil)`;
             }
         }
     }
+
+    persistSprintBaseline({
+      value: totalOverdue,
+      clients: uniqueClients.size,
+      titles: totalBills,
+      avgDelay
+    }).catch((e) => console.warn("[Sprint] Não salvou a base do dia", e));
 
     const opSummary = (typeof window.buildSprintOperatorSummaries === "function") ? window.buildSprintOperatorSummaries() : "";
     const teamsText = `📊 *Sprint Diário - ${dateStr}*\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}${diffValueStr}\n👥 *Clientes em Atraso:* ${uniqueClients.size}${diffClientsStr}\n📄 *Títulos Vencidos:* ${totalBills}${diffBillsStr}\n⏱️ *Atraso Médio:* ${avgDelay} dias` + (opSummary ? `\n\n${opSummary}` : "");
@@ -2276,6 +2360,7 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     render,
     salvarPosicaoHoje,
     gerarRelatorioDiarioPdf,
+    persistSprintBaseline,
     paint,
     aplicarFiltros,
     limparFiltros,

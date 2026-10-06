@@ -3217,11 +3217,23 @@ const SiengeApiService = {
                 );
                 return;
               }
+              // A busca bruta entra antes da fila filtrada e infla o "último dia útil".
+              // Se o sprint do dia já gravou a carteira da fila, ela permanece.
+              if (prev.sprint_clients != null && prev.sprint_titles != null && prev.sprint_value != null) {
+                payload.total_value = Number(prev.sprint_value) || prev.total_value;
+                payload.total_customers = Number(prev.sprint_clients) || prev.total_customers;
+                payload.total_count = Number(prev.sprint_titles) || prev.total_count;
+                payload.sprint_value = prev.sprint_value;
+                payload.sprint_clients = prev.sprint_clients;
+                payload.sprint_titles = prev.sprint_titles;
+                payload.sprint_avg_delay = prev.sprint_avg_delay;
+                payload.sprint_saved_at = prev.sprint_saved_at;
+              }
             }
           } catch (readPrevErr) {
             console.warn("[Firebase] Não foi possível comparar snapshot anterior:", readPrevErr);
           }
-          await window.firebaseCollections.setDoc(docRef, payload);
+          await window.firebaseCollections.setDoc(docRef, payload, { merge: true });
           console.log(`[Firebase] Snapshot de dashboard (${dateStr}) salvo no Firestore com sucesso.`);
         } catch (fbErr) {
           console.error("[Firebase] Erro ao salvar snapshot no Firestore:", fbErr);
