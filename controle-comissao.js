@@ -260,6 +260,42 @@ const ControleComissaoApp = {
     this.vincularParcelasCliente();
   },
 
+  saldoParcela(inst) {
+    if (!inst) return null;
+    const raw = inst.currentBalance != null ? inst.currentBalance : inst.balanceDue;
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  dataBaixaParcela(inst) {
+    const recs = Array.isArray(inst && inst.receipts) ? inst.receipts : [];
+    const dates = recs.map((rec) => String(rec.date || rec.receiptDate || rec.paymentDate || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    dates.sort();
+    return dates.length ? dates[dates.length - 1] : "";
+  },
+
+  parcelaBaixada(inst) {
+    if (!inst) return false;
+    const sit = inst.installmentSituation;
+    if (Number(sit) === 2 || String(sit) === "2") return true;
+    const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+    if (recs.some((rec) => Number(rec.value || rec.receiptValue || rec.netReceipt || rec.netReceiptValue || 0) > 0.009)) return true;
+    if (this.dataBaixaParcela(inst)) return true;
+    const saldo = this.saldoParcela(inst);
+    return saldo != null && saldo <= 0.009;
+  },
+
+  clienteFromInst(inst, billId) {
+    const num = inst.installmentId != null ? inst.installmentId : inst.id;
+    return {
+      titulo: String(billId),
+      parcela: String(billId) + "/" + String(num),
+      baixada: this.parcelaBaixada(inst),
+      dataBaixa: this.dataBaixaParcela(inst)
+    };
+  },
+
   async loadClienteParcelas(emp, unit) {
     if (typeof window.siengeFetchWithRetry !== "function") return null;
     const data = await window.siengeFetchWithRetry("/units?enterpriseId=" + encodeURIComponent(emp) + "&name=" + encodeURIComponent(unit) + "&limit=50");
@@ -274,26 +310,46 @@ const ControleComissaoApp = {
       billId = (sc && (sc.receivableBillId || sc.billReceivableId)) || "";
     }
     if (!billId) return null;
-    const instRes = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200");
-    const list = (instRes && instRes.results) || (Array.isArray(instRes) ? instRes : []);
+    let list = [];
+    try {
+      const hist = await window.siengeFetchWithRetry("/bulk-data/v1/customer-extract-history?startDueDate=1996-01-01&endDueDate=2045-01-01&billReceivableId=" + encodeURIComponent(billId) + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false");
+      const rows = (hist && (hist.data || hist.results)) || [];
+      const first = Array.isArray(rows) ? rows[0] : null;
+      if (first && Array.isArray(first.installments) && first.installments.length) list = first.installments;
+    } catch (e) {}
+    if (!list.length) {
+      const instRes = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200");
+      list = (instRes && instRes.results) || (Array.isArray(instRes) ? instRes : []);
+    }
     const byDue = {};
     list.forEach((inst) => {
       const due = String(inst && inst.dueDate || "").slice(0, 10);
-      if (!due || byDue[due]) return;
-      const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
-      const baixa = recs.map((rec) => String(rec.paymentDate || rec.receiptDate || rec.date || "").slice(0, 10)).filter(Boolean).sort().pop() || "";
-      const sit = String(inst.installmentSituation || "");
-      const cb = inst.currentBalance;
-      const baixada = sit === "2" || (!!baixa && (cb == null || Number(cb) <= 0.009)) || (cb != null && Number(cb) <= 0.009 && recs.length > 0);
-      const num = inst.installmentNumber != null ? inst.installmentNumber : inst.installmentId;
-      byDue[due] = {
-        titulo: String(billId),
-        parcela: String(billId) + "/" + String(num),
-        baixada: !!baixada,
-        dataBaixa: baixa
-      };
+      if (!due) return;
+      const row = this.clienteFromInst(inst, billId);
+      const prev = byDue[due];
+      if (!prev || (row.baixada && !prev.baixada)) byDue[due] = row;
     });
     return { byDue: byDue };
+  },
+
+  recalcRecebidos() {
+    let aReceber = 0;
+    let recebido = 0;
+    (this.state.contratos || []).forEach((r) => {
+      let ar = 0;
+      let rec = 0;
+      this.mouraProgramacao(r).forEach((p) => {
+        const v = Number(p.valor) || 0;
+        if (p.pago) rec += v;
+        else ar += v;
+      });
+      r.aReceber = Math.round(ar * 100) / 100;
+      r.recebido = Math.round(rec * 100) / 100;
+      aReceber += r.aReceber;
+      recebido += r.recebido;
+    });
+    this.state.totais.aReceber = Math.round(aReceber * 100) / 100;
+    this.state.totais.recebido = Math.round(recebido * 100) / 100;
   },
 
   async vincularParcelasCliente() {
@@ -328,8 +384,13 @@ const ControleComissaoApp = {
         const due = String(p.vencimento || "").slice(0, 10);
         p.clienteBusca = true;
         p.cliente = pack && pack.byDue ? (pack.byDue[due] || null) : null;
+        if (p.cliente && p.cliente.baixada) {
+          p.pago = true;
+          p.situacao = "Recebido";
+        }
       });
     });
+    this.recalcRecebidos();
     if (!this.state.loading) this.render();
   },
 
