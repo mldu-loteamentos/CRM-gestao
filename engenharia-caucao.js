@@ -161,19 +161,33 @@ window.EngenhariaCaucaoApp = {
   },
 
   loadLiberated() {
+    let stored = {};
     try {
-      const raw = JSON.parse(localStorage.getItem(ECAU_LIBERA_LS) || "{}") || {};
-      this.state.liberated = raw && typeof raw === "object" ? raw : {};
+      stored = JSON.parse(localStorage.getItem(ECAU_LIBERA_LS) || "{}") || {};
     } catch (e) {
-      this.state.liberated = {};
+      stored = {};
     }
+    const mem = this.state.liberated && typeof this.state.liberated === "object" ? this.state.liberated : {};
+    const merged = window.mergedCaucaoLiberados
+      ? window.mergedCaucaoLiberados([mem, stored])
+      : JSON.stringify(Object.assign({}, stored, mem));
+    try { this.state.liberated = JSON.parse(merged) || {}; } catch (e) { this.state.liberated = Object.assign({}, stored, mem); }
+    if (!this.state.liberated || typeof this.state.liberated !== "object") this.state.liberated = {};
   },
 
   persistLiberated() {
-    try { localStorage.setItem(ECAU_LIBERA_LS, JSON.stringify(this.state.liberated || {})); } catch (e) {}
-    if (typeof window.forceUploadLocalConfig === "function") {
-      window.forceUploadLocalConfig(true).catch(function () {});
-    }
+    const raw = JSON.stringify(this.state.liberated || {});
+    try { localStorage.setItem(ECAU_LIBERA_LS, raw); } catch (e) {}
+    const self = this;
+    if (typeof window.persistCaucaoLiberadosNow !== "function") return;
+    window.persistCaucaoLiberadosNow(this.state.liberated).then(function (merged) {
+      if (!merged || merged === raw) return;
+      try { self.state.liberated = JSON.parse(merged) || self.state.liberated; } catch (e) { return; }
+      if (self.state.consulted) {
+        self.applyFilters();
+        self.renderList();
+      }
+    }).catch(function () {});
   },
 
   avisoStore() {
@@ -281,7 +295,8 @@ window.EngenhariaCaucaoApp = {
   },
 
   isLiberated(r) {
-    return !!(this.state.liberated && this.state.liberated[this.rowKey(r)]);
+    const hit = this.state.liberated && this.state.liberated[this.rowKey(r)];
+    return !!(hit && !hit.removed);
   },
 
   paymentDateOf(bill, pay, bm) {
@@ -558,7 +573,8 @@ window.EngenhariaCaucaoApp = {
         const id = String(r.ccId);
         return allowed.has(id) || this.ccIsStockEnterprise({ id: r.ccId, name: r.ccNome });
       });
-      return this.uniqueItems(stockRows, (r) => r.ccId, (r) => {
+      const source = stockRows.length ? stockRows : rows;
+      return this.uniqueItems(source, (r) => r.ccId, (r) => {
         const name = String(r.ccNome || "").toUpperCase();
         return r.ccId + " - " + name;
       });
@@ -832,6 +848,7 @@ window.EngenhariaCaucaoApp = {
       alert("A data inicial não pode ser maior que a final.");
       return;
     }
+    this.loadLiberated();
     this.state.loading = true;
     this.state.error = "";
     this.state.consulted = true;
@@ -944,12 +961,16 @@ window.EngenhariaCaucaoApp = {
     });
     const selectable = this.credorRows(credor);
     const allOn = selectable.length > 0 && selectable.every((r) => this.state.selected[this.rowKey(r)]);
-    const markBtn = selectable.length
-      ? `<button type="button" class="ecau-mark-credor" onclick="event.preventDefault();event.stopPropagation();EngenhariaCaucaoApp.toggleCredor('${encodeURIComponent(credor || "Sem credor")}')">${allOn ? "Desmarcar" : "Marcar todos"}</button>`
-      : "";
+    const markBtn = `<button type="button" class="ecau-mark-credor" ${selectable.length ? "" : "disabled"} title="${selectable.length ? (allOn ? "Desmarcar este credor" : "Marcar todos deste credor") : "Nenhum título em aberto neste credor"}" onclick="event.preventDefault();event.stopPropagation();EngenhariaCaucaoApp.toggleCredor('${encodeURIComponent(credor || "Sem credor")}')">${allOn ? "Desmarcar" : "Marcar todos"}</button>`;
     const cell = "background:#f1f5f9;color:#475569;font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;";
     return `<tr class="fila-group-header cprev-group-header is-neutral">
-      <td colspan="6" style="${cell}">
+      <td class="ecau-col-chk" style="${cell}text-transform:none;">
+        <input type="checkbox" ${selectable.length ? "" : "disabled"} ${allOn ? "checked" : ""}
+          title="${allOn ? "Desmarcar este credor" : "Marcar todos deste credor"}"
+          onclick="event.stopPropagation()"
+          onchange="EngenhariaCaucaoApp.toggleCredor('${encodeURIComponent(credor || "Sem credor")}')">
+      </td>
+      <td colspan="5" style="${cell}">
         <div class="cprev-group-label">
           <span>${this.esc(credor || "Sem credor")}</span>
           <span class="ecau-group-tools">
@@ -1176,7 +1197,15 @@ window.EngenhariaCaucaoApp = {
     const msg = "Retirar a liberação de " + n + " caução(ões)? O vencimento no Sienge permanece.";
     const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
     if (!ok) return;
-    rows.forEach((r) => { delete this.state.liberated[this.rowKey(r)]; });
+    const at = new Date().toISOString();
+    rows.forEach((r) => {
+      this.state.liberated[this.rowKey(r)] = {
+        removed: true,
+        at: at,
+        titulo: r.titulo,
+        parcela: r.parcela
+      };
+    });
     this.persistLiberated();
     this.applyFilters();
     this.renderList();

@@ -4465,8 +4465,73 @@ window.syncCrmUsersFromFirebase = async function() {
   try {
     const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
     setter.call(localStorage, "crm_users", merged);
-  } catch (e) {}
+  } catch (e) {
+    if (typeof window.freeCrmLocalStorage === "function") window.freeCrmLocalStorage();
+    try {
+      const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+      setter.call(localStorage, "crm_users", merged);
+    } catch (err) {}
+  }
   return merged;
+};
+
+window.syncCrmProfilesFromFirebase = async function() {
+  if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDoc) return null;
+  const fc = window.firebaseCollections;
+  const gSnap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
+  const cloud = window.crmUsersDocExists(gSnap) ? ((gSnap.data() || {}).crm_moura_profiles || "[]") : "[]";
+  let local = "[]";
+  try { local = localStorage.getItem("crm_moura_profiles") || "[]"; } catch (e) {}
+  const merged = window.mergeCrmMouraProfiles(local, cloud);
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_moura_profiles", merged);
+  } catch (e) {
+    if (typeof window.freeCrmLocalStorage === "function") window.freeCrmLocalStorage();
+  }
+  try { return JSON.parse(merged); } catch (e) { return []; }
+};
+
+window.freeCrmLocalStorage = function() {
+  const drop = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith("crm_perms_bak_") || k.indexOf("__mirror") >= 0) drop.push(k);
+    }
+    drop.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
+  } catch (e) {}
+};
+
+window.persistCrmProfilesNow = async function(profiles) {
+  const fc = window.firebaseCollections;
+  if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb) {
+    throw new Error("Firebase não inicializado. Abra o sistema de novo e crie o perfil outra vez.");
+  }
+  const mem = JSON.stringify(Array.isArray(profiles) ? profiles : []);
+  const docRef = fc.doc(window.firebaseDb, "config", "global");
+  const merged = await fc.runTransaction(window.firebaseDb, async (tx) => {
+    const snap = await tx.get(docRef);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    const cloud = exists ? ((snap.data() || {}).crm_moura_profiles || "[]") : "[]";
+    const next = window.mergeCrmMouraProfiles(mem, cloud);
+    let list = [];
+    try { list = JSON.parse(next); } catch (e) { list = []; }
+    const wanted = JSON.parse(mem);
+    const ids = new Set(list.map((p) => String(p && p.id || "")));
+    const missing = (Array.isArray(wanted) ? wanted : []).filter((p) => p && p.id && !ids.has(String(p.id)));
+    if (missing.length) throw new Error("O perfil não entrou na lista salva.");
+    tx.set(docRef, { crm_moura_profiles: next }, { merge: true });
+    return next;
+  });
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_moura_profiles", merged);
+  } catch (e) {
+    if (typeof window.freeCrmLocalStorage === "function") window.freeCrmLocalStorage();
+  }
+  try { return JSON.parse(merged); } catch (e) { return []; }
 };
 
 window.persistCrmUsersToFirebase = function(users) {
@@ -4637,13 +4702,78 @@ window.commitCrmGlobalConfig = async function(payload) {
     const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
     const cloud = exists ? (snap.data() || {}) : {};
     const next = Object.assign({}, payload || {});
-    const localProfiles = next.crm_moura_profiles || localStorage.getItem("crm_moura_profiles") || "[]";
+    let localProfiles = next.crm_moura_profiles || "[]";
+    try {
+      const storedProfiles = localStorage.getItem("crm_moura_profiles");
+      if (storedProfiles) localProfiles = window.mergeCrmMouraProfiles(localProfiles, storedProfiles);
+    } catch (e) {}
+    const memProfiles = window.ConfigUsersApp && Array.isArray(ConfigUsersApp.profiles) && ConfigUsersApp.profiles.length
+      ? JSON.stringify(ConfigUsersApp.profiles) : "[]";
+    if (memProfiles !== "[]") localProfiles = window.mergeCrmMouraProfiles(localProfiles, memProfiles);
     next.crm_moura_profiles = window.mergeCrmMouraProfiles(localProfiles, cloud.crm_moura_profiles || "[]");
-    if (next.crm_users || cloud.crm_users) {
-      next.crm_users = window.mergeCrmUsers(next.crm_users || localStorage.getItem("crm_users") || "[]", cloud.crm_users || "[]");
+    let localUsers = next.crm_users || "[]";
+    try {
+      const storedUsers = localStorage.getItem("crm_users");
+      if (storedUsers) localUsers = window.mergeCrmUsers(localUsers, storedUsers);
+    } catch (e) {}
+    const memUsers = window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users) && ConfigUsersApp.users.length
+      ? JSON.stringify(ConfigUsersApp.users) : "[]";
+    if (memUsers !== "[]") localUsers = window.mergeCrmUsers(localUsers, memUsers);
+    if (localUsers !== "[]" || cloud.crm_users) {
+      next.crm_users = window.mergeCrmUsers(localUsers, cloud.crm_users || "[]");
     }
+    let localLib = next.crm_engenharia_caucao_liberados_v1 || "{}";
+    try {
+      const storedLib = localStorage.getItem("crm_engenharia_caucao_liberados_v1");
+      if (storedLib) localLib = window.mergedCaucaoLiberados([localLib, storedLib]);
+    } catch (e) {}
+    const memLib = window.EngenhariaCaucaoApp && EngenhariaCaucaoApp.state && EngenhariaCaucaoApp.state.liberated;
+    if (memLib && typeof memLib === "object") localLib = window.mergedCaucaoLiberados([localLib, memLib]);
+    next.crm_engenharia_caucao_liberados_v1 = window.mergedCaucaoLiberados([
+      localLib,
+      cloud.crm_engenharia_caucao_liberados_v1 || "{}"
+    ]);
     tx.set(docRef, next, { merge: true });
   });
+};
+
+window.mergedCaucaoLiberados = function(parts) {
+  const parse = (raw) => {
+    if (!raw) return {};
+    if (typeof raw === "object") return raw;
+    try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+  };
+  const out = {};
+  (parts || []).forEach((raw) => {
+    const obj = parse(raw);
+    Object.keys(obj).forEach((k) => {
+      const next = obj[k];
+      const prev = out[k];
+      if (!prev) { out[k] = next; return; }
+      out[k] = String((next && next.at) || "") >= String((prev && prev.at) || "") ? next : prev;
+    });
+  });
+  return JSON.stringify(out);
+};
+
+window.persistCaucaoLiberadosNow = async function(map) {
+  const fc = window.firebaseCollections;
+  if (!fc || !fc.runTransaction || !window.firebaseDb) return null;
+  const mem = JSON.stringify(map && typeof map === "object" ? map : {});
+  const docRef = fc.doc(window.firebaseDb, "config", "global");
+  const merged = await fc.runTransaction(window.firebaseDb, async (tx) => {
+    const snap = await tx.get(docRef);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    const cloud = exists ? ((snap.data() || {}).crm_engenharia_caucao_liberados_v1 || "{}") : "{}";
+    const next = window.mergedCaucaoLiberados([mem, cloud]);
+    tx.set(docRef, { crm_engenharia_caucao_liberados_v1: next }, { merge: true });
+    return next;
+  });
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_engenharia_caucao_liberados_v1", merged);
+  } catch (e) {}
+  return merged;
 };
 
 window.readCrmProfilePerms = function(profileNameOrId) {
@@ -40981,8 +41111,8 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
-                if (k === "crm_engenharia_caucao_liberados_v1" && typeof window.mergeEngenhariaCaucaoLiberados === "function") {
-                    const merged = window.mergeEngenhariaCaucaoLiberados(localStorage.getItem(k), globalData[k] || "{}");
+                if (k === "crm_engenharia_caucao_liberados_v1" && typeof window.mergedCaucaoLiberados === "function") {
+                    const merged = window.mergedCaucaoLiberados([localStorage.getItem(k), globalData[k] || "{}"]);
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         _originalSetItem.call(localStorage, k, merged);
                         changed = true;
@@ -41272,11 +41402,11 @@ window.forceUploadLocalConfig = async function(silent = true) {
             }
           }
           if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {
-            if (typeof window.mergeEngenhariaCaucaoLiberados === "function") {
-              payload.crm_engenharia_caucao_liberados_v1 = window.mergeEngenhariaCaucaoLiberados(
+            if (typeof window.mergedCaucaoLiberados === "function") {
+              payload.crm_engenharia_caucao_liberados_v1 = window.mergedCaucaoLiberados([
                 payload.crm_engenharia_caucao_liberados_v1 || "{}",
                 cloud.crm_engenharia_caucao_liberados_v1 || "{}"
-              );
+              ]);
               try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_liberados_v1", payload.crm_engenharia_caucao_liberados_v1); } catch (e) {}
             } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
               payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
@@ -41599,11 +41729,11 @@ localStorage.setItem = function(key, value) {
                         }
                       }
                       if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {
-                        if (typeof window.mergeEngenhariaCaucaoLiberados === "function") {
-                          payload.crm_engenharia_caucao_liberados_v1 = window.mergeEngenhariaCaucaoLiberados(
+                        if (typeof window.mergedCaucaoLiberados === "function") {
+                          payload.crm_engenharia_caucao_liberados_v1 = window.mergedCaucaoLiberados([
                             payload.crm_engenharia_caucao_liberados_v1 || "{}",
                             cloud.crm_engenharia_caucao_liberados_v1 || "{}"
-                          );
+                          ]);
                         } else if (!payload.crm_engenharia_caucao_liberados_v1 && cloud.crm_engenharia_caucao_liberados_v1) {
                           payload.crm_engenharia_caucao_liberados_v1 = cloud.crm_engenharia_caucao_liberados_v1;
                         }

@@ -5992,6 +5992,11 @@ circle.donut-segment {
   color: var(--color-text-dark);
 }
 .ecau-grid .ml-emp-filter-btn i { color: #94a3b8; }
+.ecau-grid .ml-emp-filter-btn:disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: var(--color-text-dark);
+}
 .ecau-grid .form-control:focus,
 .ecau-grid .ml-emp-filter.is-open .ml-emp-filter-btn {
   outline: none;
@@ -6155,6 +6160,12 @@ circle.donut-segment {
 .ecau-mark-credor:hover {
   background: #105436;
   color: #fff;
+}
+.ecau-mark-credor:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: #fff;
+  color: #105436;
 }
 .cprev-group-chip {
   flex-shrink: 0;

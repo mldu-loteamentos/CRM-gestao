@@ -467,6 +467,67 @@ const ComprasPrevisoesApp = {
     return windows.length ? windows : null;
   },
 
+  /** null = vê todos. Lista = departamentos que a pessoa pode consultar hoje. */
+  accessibleDepartments() {
+    const windows = this.departmentWindows();
+    if (!windows) return null;
+    const today = this.isoToday();
+    const u = this.sessionUser();
+    const hist = Array.isArray(u && u.department_history) ? u.department_history : [];
+    const seen = new Set();
+    const items = [];
+    windows.forEach((w) => {
+      if (w.from && w.from > today) return;
+      const current = !w.to || w.to >= today;
+      if (!current && !w.keep) return;
+      const raw = hist.find((h) => String(h && h.id != null ? h.id : "") === w.id && this.isoDate(h && h.from) === w.from) || {};
+      const id = w.name || w.id;
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const label = String((raw && raw.name) || w.name || w.id).toUpperCase();
+      items.push({ id: id, name: label, label: label });
+    });
+    items.sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+    return items;
+  },
+
+  departmentFilterLocked() {
+    if (this.state.loading) return true;
+    const access = this.accessibleDepartments();
+    if (access) return access.length <= 1;
+    return !this.state.consulted;
+  },
+
+  syncDepartmentSelection() {
+    const access = this.accessibleDepartments();
+    if (!access) return;
+    const ids = access.map((a) => a.id);
+    if (ids.length <= 1) {
+      this.state.deptIds = ids.slice();
+      this.state.openDept = false;
+      return;
+    }
+    const allowed = new Set(ids);
+    const cur = (this.state.deptIds || []).map(String).filter((id) => allowed.has(id));
+    this.state.deptIds = cur.length ? cur : ids.slice();
+  },
+
+  rowMatchesDepartment(r) {
+    const access = this.accessibleDepartments();
+    if (access) {
+      const sel = (this.state.deptIds || []).map(String);
+      const allOn = !sel.length || access.every((a) => sel.indexOf(a.id) >= 0);
+      if (allOn) return true;
+      const windows = (this.departmentWindows() || []).filter((w) => sel.indexOf(w.name || w.id) >= 0 || sel.indexOf(w.id) >= 0);
+      return this.rowInDepartmentWindows(r, windows);
+    }
+    const dept = new Set((this.state.deptIds || []).map(String));
+    if (!dept.size) return true;
+    const depFold = this.fold(r.departamento);
+    const ccFold = this.fold(r.ccNome);
+    return [...dept].some((id) => depFold === id || (id && ccFold.indexOf(id) >= 0));
+  },
+
   /** Quem está no departamento hoje vê o histórico. Depois da saída, só continua se estiver marcado. */
   rowInDepartmentWindows(row, windows) {
     if (!windows) return true;
@@ -526,6 +587,8 @@ const ComprasPrevisoesApp = {
   },
 
   deptItems() {
+    const access = this.accessibleDepartments();
+    if (access) return access;
     return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.departamento), (r) => r.departamento.toUpperCase());
   },
 
@@ -567,7 +630,6 @@ const ComprasPrevisoesApp = {
   applyFilters() {
     const emp = new Set((this.state.companyIds || []).map(String));
     const cred = new Set((this.state.creditorIds || []).map(String));
-    const dept = new Set((this.state.deptIds || []).map(String));
     const cc = new Set((this.state.ccIds || []).map(String));
     const qTitulo = this.fold(this.state.qTitulo).replace(/\s+/g, "");
     const qCredor = this.fold(this.state.qCredor);
@@ -578,12 +640,7 @@ const ComprasPrevisoesApp = {
       if (emp.size && !emp.has(String(r.companyId))) return false;
       if (cc.size && !cc.has(String(r.ccId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
-      if (dept.size) {
-        const depFold = this.fold(r.departamento);
-        const ccFold = this.fold(r.ccNome);
-        const okDept = [...dept].some((id) => depFold === id || (id && ccFold.indexOf(id) >= 0));
-        if (!okDept) return false;
-      }
+      if (!this.rowMatchesDepartment(r)) return false;
       if (start && r.vencimento && r.vencimento < start) return false;
       if (end && r.vencimento && r.vencimento > end) return false;
       if (status === "aberto" && (r.pago || r.substituido)) return false;
@@ -632,7 +689,8 @@ const ComprasPrevisoesApp = {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          if (key === "deptIds" && self.departmentFilterLocked()) return;
+          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
           self.state[openKey] = !self.state[openKey];
           if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
           if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
@@ -655,7 +713,8 @@ const ComprasPrevisoesApp = {
         },
         toggleId(itemId, on) {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          if (key === "deptIds" && self.departmentFilterLocked()) return;
+          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
@@ -666,7 +725,8 @@ const ComprasPrevisoesApp = {
         },
         selectAll() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          if (key === "deptIds" && self.departmentFilterLocked()) return;
+          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           self.state[openKey] = true;
           self.applyFilters();
@@ -675,8 +735,13 @@ const ComprasPrevisoesApp = {
         },
         selectNone() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
-          self.state[key] = [];
+          if (key === "deptIds" && self.departmentFilterLocked()) return;
+          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+          if (key === "deptIds" && self.accessibleDepartments()) {
+            self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
+          } else {
+            self.state[key] = [];
+          }
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -690,13 +755,36 @@ const ComprasPrevisoesApp = {
     bind("cprev-filter-dept", "deptIds", "openDept", "qDept", () => this.deptItems(), { singular: "departamento", plural: "departamentos" });
   },
 
+  deptFilterHtml() {
+    const access = this.accessibleDepartments();
+    if (access && access.length === 1) {
+      return `<div class="ml-emp-filter" id="cprev-filter-dept">
+        <div class="ml-emp-filter-label">Departamento</div>
+        <button type="button" class="ml-emp-filter-btn" disabled>
+          <span>${this.esc(access[0].label)}</span>
+        </button>
+      </div>`;
+    }
+    return MlEmpresaFilter.html({
+      id: "cprev-filter-dept",
+      label: "Departamento",
+      items: this.deptItems(),
+      selectedIds: this.state.deptIds,
+      open: !!this.state.openDept,
+      query: this.state.qDept,
+      emptyMeansAll: !access,
+      nouns: { singular: "departamento", plural: "departamentos" }
+    });
+  },
+
   paintFilters() {
     if (!window.MlEmpresaFilter) return;
+    this.syncDepartmentSelection();
     if (!this.state.consulted || this.state.loading) {
       this.state.openCc = false;
       this.state.openCred = false;
-      this.state.openDept = false;
     }
+    if (this.departmentFilterLocked()) this.state.openDept = false;
     this.bindFilters();
     const set = (slotId, html) => {
       const el = document.getElementById(slotId);
@@ -732,16 +820,7 @@ const ComprasPrevisoesApp = {
       emptyMeansAll: true,
       nouns: { singular: "credor", plural: "credores" }
     }));
-    set("cprev-dept-slot", MlEmpresaFilter.html({
-      id: "cprev-filter-dept",
-      label: "Departamento",
-      items: this.deptItems(),
-      selectedIds: this.state.deptIds,
-      open: !!this.state.openDept,
-      query: this.state.qDept,
-      emptyMeansAll: true,
-      nouns: { singular: "departamento", plural: "departamentos" }
-    }));
+    set("cprev-dept-slot", this.deptFilterHtml());
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1222,6 +1301,8 @@ const ComprasPrevisoesApp = {
     const s = this.state;
     const busy = !!s.loading;
     const refineLocked = !s.consulted || busy;
+    this.syncDepartmentSelection();
+    const deptLocked = this.departmentFilterLocked();
     const minDays = this.minDaysToday();
     const minDue = this.minLaunchDue();
     root.innerHTML = `
@@ -1258,7 +1339,7 @@ const ComprasPrevisoesApp = {
                   onchange="ComprasPrevisoesApp.onField('endDate', this.value)">
               </div>
             </div>
-            <div id="cprev-dept-slot" class="ecau-slot cprev-cell-dept${refineLocked ? " is-locked" : ""}"></div>
+            <div id="cprev-dept-slot" class="ecau-slot cprev-cell-dept${deptLocked ? " is-locked" : ""}"></div>
             <div class="ecau-actions">
               <div class="ecau-actions-main">
                 <button type="button" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">

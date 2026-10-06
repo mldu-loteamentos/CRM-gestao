@@ -428,12 +428,20 @@ const ConfigUsersApp = {
 
   async loadUsers() {
     try {
+    let gotCloudUsers = false;
     if (typeof window.syncCrmUsersFromFirebase === "function") {
-      try { await window.syncCrmUsersFromFirebase(); } catch (e) { console.warn("[ConfigUsers] sync usuários:", e); }
+      try {
+        const rawUsers = await window.syncCrmUsersFromFirebase();
+        const parsedUsers = typeof rawUsers === "string" ? JSON.parse(rawUsers) : rawUsers;
+        if (Array.isArray(parsedUsers) && parsedUsers.length) {
+          this.users = parsedUsers;
+          gotCloudUsers = true;
+        }
+      } catch (e) { console.warn("[ConfigUsers] sync usuários:", e); }
     }
-    const savedUsers = localStorage.getItem('crm_users');
-    if (savedUsers) {
-       this.users = JSON.parse(savedUsers);
+    if (!gotCloudUsers) {
+      const savedUsers = localStorage.getItem('crm_users');
+      if (savedUsers) this.users = JSON.parse(savedUsers);
     }
     if (!Array.isArray(this.users)) this.users = [];
     if (this.normalizeUserIds() && typeof window.persistCrmUsersToFirebase === "function") {
@@ -445,11 +453,17 @@ const ConfigUsersApp = {
       }
     }
 
-    // Carregar perfis salvos
+    if (typeof window.syncCrmProfilesFromFirebase === "function") {
+      try {
+        const syncedProfiles = await window.syncCrmProfilesFromFirebase();
+        if (Array.isArray(syncedProfiles) && syncedProfiles.length) this.profiles = syncedProfiles;
+      } catch (e) { console.warn("[ConfigUsers] sync perfis:", e); }
+    }
     const savedProfiles = localStorage.getItem('crm_moura_profiles');
-    if (savedProfiles) {
-      this.profiles = JSON.parse(savedProfiles);
-    } else {
+    if (!Array.isArray(this.profiles) || !this.profiles.length) {
+      if (savedProfiles) this.profiles = JSON.parse(savedProfiles);
+    }
+    if (!Array.isArray(this.profiles) || !this.profiles.length) {
       this.profiles = [
         { id: "admin", name: "ADMINISTRADOR" },
         { id: "operador_pagadoria", name: "OPERADOR PAGADORIA" },
@@ -466,6 +480,7 @@ const ConfigUsersApp = {
     }
 
     this.ensureAlcadaProfiles();
+    try { await this.ensureProfilesReferencedByUsers(); } catch (e) { console.warn("[ConfigUsers] perfis dos usuários:", e); }
     try { this.unifyBackOfficeProfiles(); } catch (e) { console.warn("[ConfigUsers] unify back-office:", e); }
     try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
@@ -506,23 +521,56 @@ const ConfigUsersApp = {
   },
 
   safeLocalSet(key, value) {
-    try {
+    const write = () => {
       localStorage.setItem(key, value);
       return true;
+    };
+    try {
+      return write();
     } catch (e) {
       console.warn("[ConfigUsers] localStorage cheio ao gravar", key, e);
       try {
-        if (key.startsWith("crm_perms_")) {
-          this.prunePermissionStorage(key);
-          localStorage.setItem(key, value);
-          console.info("[ConfigUsers] retry de permissão após limpeza de espelhos.");
-          return true;
-        }
+        if (typeof window.freeCrmLocalStorage === "function") window.freeCrmLocalStorage();
+        if (key.startsWith("crm_perms_")) this.prunePermissionStorage(key);
+        return write();
       } catch (retryErr) {
         console.warn("[ConfigUsers] retry do localStorage falhou", retryErr);
+        return false;
       }
-      return false;
     }
+  },
+
+  profileIdFromName(profileName) {
+    return String(profileName || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  },
+
+  async persistProfilesCloud() {
+    if (typeof window.persistCrmProfilesNow !== "function") return this.profiles;
+    const saved = await window.persistCrmProfilesNow(this.profiles);
+    if (Array.isArray(saved) && saved.length) this.profiles = saved;
+    return this.profiles;
+  },
+
+  async ensureProfilesReferencedByUsers() {
+    if (!Array.isArray(this.profiles)) this.profiles = [];
+    const norm = (name) => String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+    const known = new Set(this.profiles.map((p) => norm(p && p.name)));
+    let added = false;
+    (this.users || []).forEach((u) => {
+      const name = String(u && u.profile_name || "").trim();
+      if (!name) return;
+      const key = norm(name);
+      if (!key || known.has(key)) return;
+      const id = this.profileIdFromName(name);
+      if (!id || this.profiles.some((p) => String(p.id) === id)) return;
+      if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(id);
+      this.profiles.push({ id, name: name.toUpperCase() });
+      known.add(key);
+      added = true;
+    });
+    if (!added) return;
+    this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+    await this.persistProfilesCloud();
   },
 
   writePermissionPayload(profileId, perms) {
@@ -830,7 +878,7 @@ const ConfigUsersApp = {
       confirmLabel: "Criar perfil",
       icon: "shield-plus",
       onConfirm: (profileName) => {
-        const id = profileName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        const id = this.profileIdFromName(profileName);
         if (!id) {
           alert("Nome inválido.");
           return;
@@ -843,8 +891,11 @@ const ConfigUsersApp = {
         if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(id);
         const savedProfile = this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
         if (!savedProfile) {
-          alert("Não consegui gravar o perfil neste navegador. Ele pode sumir ao atualizar a página.");
+          alert("O navegador está sem espaço. Vou tentar gravar o perfil direto na nuvem.");
         }
+        this.persistProfilesCloud().catch((e) => {
+          alert("Não consegui gravar o perfil na nuvem. Ele some ao atualizar a página. " + (e && e.message ? e.message : ""));
+        });
         if (window.isOperadorCobrancaProfile(profileName) && String(profileName).toUpperCase().includes("BACK")) {
           this.unifyBackOfficeProfiles();
         }
