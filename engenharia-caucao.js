@@ -381,13 +381,26 @@ window.EngenhariaCaucaoApp = {
         });
       });
     });
-    const seen = new Set();
-    return rows.filter((r) => {
-      const k = [r.titulo, r.parcela, r.departamento, r.ccId].join("|");
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
+    const slices = new Map();
+    rows.forEach((r) => {
+      const sliceKey = [r.titulo, r.parcela, r.departamento, r.ccId, r.planoId].join("|");
+      if (!slices.has(sliceKey)) slices.set(sliceKey, r);
     });
+    const grouped = new Map();
+    slices.forEach((r) => {
+      const k = [r.titulo, r.parcela, r.departamento, r.ccId].join("|");
+      const prev = grouped.get(k);
+      if (!prev) {
+        grouped.set(k, Object.assign({}, r));
+        return;
+      }
+      prev.rateio = (Number(prev.rateio) || 0) + (Number(r.rateio) || 0);
+      prev.valorAjustado = (Number(prev.valorAjustado) || 0) + (Number(r.valorAjustado) || 0);
+      const cheio = Number(prev.valor) || 0;
+      if (cheio && Math.abs(prev.rateio - 100) <= 0.05) prev.valorAjustado = cheio;
+      else prev.valorAjustado = Math.round(prev.valorAjustado * 100) / 100;
+    });
+    return Array.from(grouped.values());
   },
 
   uniqueItems(rows, idFn, labelFn) {
