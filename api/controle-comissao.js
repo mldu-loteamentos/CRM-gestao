@@ -670,6 +670,7 @@ module.exports = async function handler(req, res) {
 
     const mapped = (parc.items || []).filter((c) => !isCancelada(c)).map((p) => mapComissao(p, seriesMap));
     const filtered = mapped.filter((r) => r.moura);
+    const skipNfs = u.searchParams.get("nfs") === "0";
 
     const contratos = aggregate(filtered);
     contratos.forEach((g) => {
@@ -680,8 +681,10 @@ module.exports = async function handler(req, res) {
     let nfsRows = [];
     let nfsAviso = "";
     try {
-      nfsRows = await fetchNfsComissao(ym);
-      applySiengeRecebido(contratos, nfsRows);
+      if (!skipNfs) {
+        nfsRows = await fetchNfsComissao(ym);
+        applySiengeRecebido(contratos, nfsRows);
+      }
     } catch (e) {
       nfsAviso = "Não foi possível cruzar os NFS de comissão no Sienge.";
       contratos.forEach((g) => {

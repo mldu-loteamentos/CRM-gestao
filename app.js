@@ -4830,6 +4830,20 @@ window.permCoversMenuKey = function(perms, modKey) {
     }
     return false;
   }
+  if (modKey === "sub_fin_cr_recebimentos_webro_acessar") {
+    if (perms.sub_fin_cr_recebimentos_webro_acessar === true
+      || perms.sub_fin_cr_recebimentos_webro_visualizar === true
+      || perms.sub_fin_cr_recebimentos_webro_editar === true) return true;
+    if (perms.sub_fin_cr_recebimentos_webro_acessar == null
+      && perms.sub_fin_cr_recebimentos_webro_visualizar == null
+      && perms.sub_fin_cr_recebimentos_webro_editar == null) {
+      return perms.sub_fin_cr === true
+        || perms.sub_fin_cr_fila_cobranca_acessar === true
+        || perms.sub_fin_cr_fila_cobranca_visualizar === true
+        || perms.sub_fin_cr_fila_cobranca_editar === true;
+    }
+    return false;
+  }
   if (modKey === "sub_fin_cr_dashboard_acessar") {
     if (perms.sub_fin_cr_dashboard_acessar === true
       || perms.sub_fin_cr_dashboard_visualizar === true

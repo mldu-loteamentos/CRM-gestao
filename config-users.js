@@ -159,6 +159,18 @@ const ConfigUsersApp = {
         || savedPerms.sub_compras_geral_previsoes_editar
       );
     }
+    if (savedPerms.sub_fin_cr_recebimentos_webro_acessar == null && (
+      savedPerms.sub_fin_cr === true
+      || savedPerms.sub_fin_cr_fila_cobranca_acessar
+      || savedPerms.sub_fin_cr_fila_cobranca_visualizar
+      || savedPerms.sub_fin_cr_fila_cobranca_editar
+    )) {
+      savedPerms.sub_fin_cr_recebimentos_webro_acessar = true;
+      savedPerms.sub_fin_cr_recebimentos_webro_visualizar = true;
+      savedPerms.sub_fin_cr_recebimentos_webro_editar = !!(
+        savedPerms.sub_fin_cr_fila_cobranca_editar || savedPerms.sub_fin_cr === true
+      );
+    }
     if (savedPerms.sub_fin_cr_dashboard_acessar == null && (
       savedPerms.sub_fin_cr_fila_cobranca_acessar
       || savedPerms.sub_fin_cr_fila_cobranca_visualizar
@@ -277,6 +289,7 @@ const ConfigUsersApp = {
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
             { id: "notificacoes", label: "Notificações" },
+            { id: "recebimentos_webro", label: "Recebimentos Webro" },
             { id: "configuracoes", label: "Configurações" }
           ]
         },

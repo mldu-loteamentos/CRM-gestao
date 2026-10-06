@@ -5282,6 +5282,7 @@ circle.donut-segment {
 }
 
 .ccom-page { padding: 0; }
+.rweb-note { margin: 0 0 10px; font-size: 0.78rem; color: #64748b; line-height: 1.4; }
 .ccom-params { padding: 10px 12px 8px; }
 .ccom-filters {
   display: flex;
