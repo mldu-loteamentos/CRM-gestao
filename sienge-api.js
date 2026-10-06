@@ -1215,6 +1215,32 @@ const SiengeApiService = {
     }
   },
 
+  // 1.1. Departamentos (GET /departments)
+  async getDepartments(forceRefresh = false) {
+    if (s_apiMode === "simulado") return [];
+    const fresh = forceRefresh !== true;
+    if (fresh && this._deptCache && (Date.now() - (this._deptCacheAt || 0)) < 10 * 60 * 1000) {
+      return this._deptCache;
+    }
+    const list = await siengeFetchAllPages("/departments");
+    const out = (Array.isArray(list) ? list : []).map((raw) => {
+      if (!raw || typeof raw !== "object") return null;
+      const id = raw.id != null ? raw.id : (raw.departmentId != null ? raw.departmentId : raw.code);
+      const name = raw.name || raw.description || raw.departmentName || "";
+      const companyId = raw.companyId != null ? raw.companyId : (raw.company != null ? raw.company : "");
+      if (id == null || !String(name).trim()) return null;
+      return {
+        id: String(id),
+        name: String(name).trim(),
+        companyId: companyId === "" || companyId == null ? "" : String(companyId)
+      };
+    }).filter(Boolean);
+    out.sort((a, b) => a.name.localeCompare(b.name, "pt-BR") || a.id.localeCompare(b.id, "pt-BR"));
+    this._deptCache = out;
+    this._deptCacheAt = Date.now();
+    return out;
+  },
+
   // 1.5. Centros de Custo (Paginado)
   async getCostCenters(forceRefresh = false) {
     if (s_apiMode === "simulado") {

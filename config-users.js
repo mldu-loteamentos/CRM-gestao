@@ -952,6 +952,155 @@ const ConfigUsersApp = {
 
   // Método movido para dentro do modal de edição
 
+  deptUserLine(u) {
+    const today = new Date();
+    const iso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+    const current = this.deptHistoryOf(u).filter((h) => h.name && (!h.to || h.to >= iso));
+    if (!current.length) return "";
+    return `<div style="font-size: 0.75rem; color: #105436; margin-top: 4px;">${current.map((h) => this.esc(h.name)).join(" · ")}</div>`;
+  },
+
+  esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  },
+
+  deptHistoryOf(user) {
+    const list = user && Array.isArray(user.department_history) ? user.department_history : [];
+    return list.map((h) => ({
+      id: String(h && h.id != null ? h.id : ""),
+      name: String(h && h.name || "").trim(),
+      from: String(h && h.from || "").slice(0, 10),
+      to: String(h && h.to || "").slice(0, 10),
+      keep: !!(h && h.keep)
+    }));
+  },
+
+  deptOptionHtml(selectedId, selectedName) {
+    const cat = this._deptCatalog || [];
+    const sid = String(selectedId || "");
+    let found = !sid;
+    const opts = ['<option value="">Selecione</option>'];
+    cat.forEach((d) => {
+      const id = String(d.id);
+      if (id === sid) found = true;
+      const label = id + " - " + String(d.name || "").toUpperCase();
+      opts.push(`<option value="${this.esc(id)}" data-name="${this.esc(d.name)}" ${id === sid ? "selected" : ""}>${this.esc(label)}</option>`);
+    });
+    if (sid && !found) {
+      opts.push(`<option value="${this.esc(sid)}" data-name="${this.esc(selectedName)}" selected>${this.esc(selectedName || sid)}</option>`);
+    }
+    return opts.join("");
+  },
+
+  deptRowHtml(row) {
+    const item = row || { id: "", name: "", from: "", to: "", keep: false };
+    return `
+      <div data-dept-row style="display:grid; grid-template-columns: minmax(0, 1.4fr) 140px 140px minmax(160px, auto) auto; gap: 8px; align-items: end; margin-bottom: 8px;">
+        <label style="display:block; font-size:0.75rem; font-weight:700; color:#64748b;">
+          Departamento
+          <select data-dept-select style="display:block; width:100%; margin-top:4px; padding:8px; border:1px solid #e8eaed; border-radius:8px; font-size:0.9rem; box-sizing:border-box;">
+            ${this.deptOptionHtml(item.id, item.name)}
+          </select>
+        </label>
+        <label style="display:block; font-size:0.75rem; font-weight:700; color:#64748b;">
+          De
+          <input type="date" data-dept-from value="${this.esc(item.from)}" style="display:block; width:100%; margin-top:4px; padding:8px; border:1px solid #e8eaed; border-radius:8px; font-size:0.9rem; box-sizing:border-box;">
+        </label>
+        <label style="display:block; font-size:0.75rem; font-weight:700; color:#64748b;">
+          Até
+          <input type="date" data-dept-to value="${this.esc(item.to)}" style="display:block; width:100%; margin-top:4px; padding:8px; border:1px solid #e8eaed; border-radius:8px; font-size:0.9rem; box-sizing:border-box;">
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; font-weight:600; color:#334155; margin:0 0 8px;">
+          <input type="checkbox" data-dept-keep ${item.keep ? "checked" : ""}>
+          Continuar vendo
+        </label>
+        <button type="button" onclick="this.closest('[data-dept-row]').remove()" style="height:38px; padding:0 10px; border:1px solid #e8eaed; background:#fff; border-radius:8px; cursor:pointer; color:#64748b; font-size:0.75rem;">Excluir</button>
+      </div>`;
+  },
+
+  paintDeptRows(note) {
+    const box = document.getElementById("umodal-dept-rows");
+    if (!box) return;
+    const rows = this._deptDraft || [];
+    box.innerHTML = rows.length
+      ? rows.map((r) => this.deptRowHtml(r)).join("")
+      : `<p style="margin:0 0 8px; font-size:0.8rem; color:#64748b;">Nenhum período. Sem departamento, a pessoa vê todas as previsões.</p>`;
+    const msg = document.getElementById("umodal-dept-note");
+    if (msg) msg.textContent = note || "";
+  },
+
+  readDeptDraft() {
+    return Array.from(document.querySelectorAll("[data-dept-row]")).map((row) => {
+      const sel = row.querySelector("[data-dept-select]");
+      const opt = sel && sel.selectedOptions ? sel.selectedOptions[0] : null;
+      return {
+        id: sel ? sel.value : "",
+        name: opt ? (opt.getAttribute("data-name") || "") : "",
+        from: (row.querySelector("[data-dept-from]") || {}).value || "",
+        to: (row.querySelector("[data-dept-to]") || {}).value || "",
+        keep: !!((row.querySelector("[data-dept-keep]") || {}).checked)
+      };
+    });
+  },
+
+  addDeptRow() {
+    const today = new Date();
+    const iso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+    this._deptDraft = this.readDeptDraft().concat([{ id: "", name: "", from: iso, to: "" }]);
+    this.paintDeptRows("");
+  },
+
+  async loadDeptCatalog() {
+    const note = document.getElementById("umodal-dept-note");
+    if (!window.SiengeApiService || typeof SiengeApiService.getDepartments !== "function") {
+      if (note) note.textContent = "API Sienge indisponível.";
+      return;
+    }
+    if (note) note.textContent = "Carregando departamentos do Sienge…";
+    try {
+      const list = await SiengeApiService.getDepartments(false);
+      this._deptCatalog = Array.isArray(list) ? list : [];
+      if (!document.getElementById("umodal-dept-rows")) return;
+      this._deptDraft = this.readDeptDraft();
+      this.paintDeptRows(this._deptCatalog.length ? "" : "O Sienge não retornou departamentos.");
+    } catch (e) {
+      if (document.getElementById("umodal-dept-note")) {
+        document.getElementById("umodal-dept-note").textContent = "Não foi possível carregar os departamentos do Sienge.";
+      }
+    }
+  },
+
+  collectDeptHistory() {
+    if (!document.getElementById("umodal-dept-box")) return null;
+    const rows = this.readDeptDraft();
+    const out = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.id && !row.from && !row.to && !row.keep) continue;
+      if (!row.id) {
+        alert("Selecione o departamento na linha " + (i + 1) + ".");
+        return false;
+      }
+      if (!row.from) {
+        alert("Informe desde quando a pessoa está nesse departamento.");
+        return false;
+      }
+      if (row.to && row.to < row.from) {
+        alert("A data final do departamento não pode ser anterior à inicial.");
+        return false;
+      }
+      out.push({
+        id: String(row.id),
+        name: String(row.name || "").trim(),
+        from: row.from,
+        to: row.to || "",
+        keep: !!row.keep
+      });
+    }
+    return out;
+  },
+
   openUserModal(userId = null) {
       let user = null;
       if (userId) {
@@ -1238,6 +1387,14 @@ const ConfigUsersApp = {
                </div>
             </div>
             
+            <div id="umodal-dept-box" style="margin-bottom: 16px; padding: 16px; background: #f8fafc; border-radius: 8px; border: 1px solid #e8eaed;">
+               <h4 style="margin: 0 0 6px; font-size: 0.95rem; color: #202124;">Departamentos</h4>
+               <p style="font-size: 0.8rem; color: #5f6368; margin: 0 0 12px;">Quem está no departamento hoje vê as previsões anteriores dele. Deixe <strong>Até</strong> vazio enquanto ela permanece. Ao mudar de área, preencha a data final e marque <strong>Continuar vendo</strong> só se ela ainda puder ver o departamento anterior. O período fica no histórico.</p>
+               <div id="umodal-dept-rows"></div>
+               <p id="umodal-dept-note" style="margin: 0 0 8px; font-size: 0.78rem; color: #9a3412;"></p>
+               <button type="button" onclick="ConfigUsersApp.addDeptRow()" style="padding: 8px 12px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 700; border-radius: 8px; cursor: pointer; font-size: 0.8rem;">Adicionar departamento</button>
+            </div>
+
             <div style="margin-bottom: 16px; display: flex; gap: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Gestor Imediato (Nome)</label>
@@ -1258,6 +1415,10 @@ const ConfigUsersApp = {
       </div>
       `;
       document.body.insertAdjacentHTML('beforeend', modalHtml);
+      this._deptDraft = this.deptHistoryOf(user);
+      this._deptCatalog = this._deptCatalog || [];
+      this.paintDeptRows("");
+      this.loadDeptCatalog();
   },
 
   toggleUserStatus(userId) {
@@ -1298,6 +1459,8 @@ const ConfigUsersApp = {
       const resendBillet = document.getElementById('umodal-resend-billet') ? document.getElementById('umodal-resend-billet').checked : false;
       const assinaTestemunha = document.getElementById('umodal-assina-testemunha') ? document.getElementById('umodal-assina-testemunha').checked : false;
       const docRg = document.getElementById('umodal-doc-rg') ? document.getElementById('umodal-doc-rg').value.trim() : '';
+      const departmentHistory = this.collectDeptHistory();
+      if (departmentHistory === false) return;
 
       if (!name || !email) {
           alert("Nome e E-mail são obrigatórios.");
@@ -1324,7 +1487,8 @@ const ConfigUsersApp = {
           badge_color: badgeColor,
           resend_billet: resendBillet,
           assina_testemunha: assinaTestemunha,
-          doc_rg: docRg
+          doc_rg: docRg,
+          department_history: departmentHistory || []
       };
 
       try {
@@ -1348,6 +1512,10 @@ const ConfigUsersApp = {
       }
 
       await this.persistUsers();
+      const cu = window.AppState && AppState.currentUser;
+      if (cu && String(cu.email || "").toLowerCase().trim() === email.toLowerCase()) {
+          cu.department_history = fields.department_history;
+      }
       const stillThere = this.users.some(u => String(u.email || "").toLowerCase().trim() === email.toLowerCase());
       if (!stillThere) {
           alert("O usuário não permaneceu na lista salva. Nada foi apagado na nuvem. Tente de novo.");
@@ -1382,6 +1550,7 @@ const ConfigUsersApp = {
           <td style="padding: 16px 15px;">
             <div style="font-weight: 700; color: #202124;">${u.name}</div>
             <div style="font-size: 0.85rem; color: #80868b; margin-top: 4px;">${u.email}</div>
+            ${this.deptUserLine(u)}
           </td>
           <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.sienge_user || '-'}</td>
           <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.phone || '-'}</td>

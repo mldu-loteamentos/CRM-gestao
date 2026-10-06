@@ -382,6 +382,9 @@ const ComprasPrevisoesApp = {
                   operacao,
                   conta,
                   departamento: (dep && dep.name) || this.ccDeptHint((cat && cat.costCenterName) || "") || "",
+                  departamentoId: dep && (dep.id != null ? dep.id : (dep.departmentId != null ? dep.departmentId : dep.departamentId)) != null
+                    ? String(dep.id != null ? dep.id : (dep.departmentId != null ? dep.departmentId : dep.departamentId))
+                    : "",
                   idObra: bld && bld.buildingId != null ? String(bld.buildingId) : "",
                   valorAjustado: valor * ((Number.isFinite(rateio) ? rateio : 100) / 100)
                 });
@@ -433,8 +436,75 @@ const ComprasPrevisoesApp = {
     return [...map.values()].sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
   },
 
+  sessionUser() {
+    const cu = (window.AppState && AppState.currentUser) || null;
+    if (!cu) return null;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) { list = []; }
+    if (!Array.isArray(list)) list = [];
+    const email = String(cu.email || "").toLowerCase().trim();
+    const found = email ? list.find((u) => String(u.email || "").toLowerCase().trim() === email) : null;
+    return found || cu;
+  },
+
+  /** null = sem restrição (cadastro ainda sem departamento). */
+  departmentWindows() {
+    const u = this.sessionUser();
+    if (!u) return null;
+    const hist = Array.isArray(u.department_history) ? u.department_history : [];
+    const windows = hist.map((h) => ({
+      id: String(h && h.id != null ? h.id : ""),
+      name: this.fold(h && h.name),
+      from: this.isoDate(h && h.from),
+      to: this.isoDate(h && h.to),
+      keep: !!(h && h.keep)
+    })).filter((h) => (h.id || h.name) && h.from);
+    return windows.length ? windows : null;
+  },
+
+  /** Quem está no departamento hoje vê o histórico. Depois da saída, só continua se estiver marcado. */
+  rowInDepartmentWindows(row, windows) {
+    if (!windows) return true;
+    const today = this.isoToday();
+    const name = this.fold(row && row.departamento);
+    const id = String(row && row.departamentoId != null ? row.departamentoId : "");
+    return windows.some((w) => {
+      const same = (id && w.id && id === w.id) || (name && w.name && name === w.name);
+      if (!same) return false;
+      if (w.from && w.from > today) return false;
+      const current = !w.to || w.to >= today;
+      if (current) return true;
+      return !!w.keep;
+    });
+  },
+
+  scopedRows() {
+    const windows = this.departmentWindows();
+    const rows = this.state.allRows || [];
+    if (!windows) return rows;
+    return rows.filter((r) => this.rowInDepartmentWindows(r, windows));
+  },
+
+  departmentScopeNote() {
+    const windows = this.departmentWindows();
+    if (!windows) return "";
+    const today = this.isoToday();
+    const current = [];
+    const kept = [];
+    windows.forEach((w) => {
+      const label = w.name || w.id;
+      if (!w.to || w.to >= today) current.push(label);
+      else if (w.keep) kept.push(label);
+    });
+    const bits = [];
+    if (current.length) bits.push(current.join(", ") + " (incluindo as anteriores)");
+    if (kept.length) bits.push("continua vendo " + kept.join(", ") + " depois da mudança");
+    if (!bits.length) return "Seu departamento atual não libera previsões nesta consulta.";
+    return "Você vê previsões de " + bits.join("; ") + ".";
+  },
+
   empItems() {
-    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.companyId, (r) => {
+    const fromRows = this.uniqueItems(this.scopedRows(), (r) => r.companyId, (r) => {
       const name = this.companyName(r.companyId) || r.companyId;
       return r.companyId + " - " + name;
     });
@@ -447,15 +517,15 @@ const ComprasPrevisoesApp = {
   },
 
   credItems() {
-    return this.uniqueItems(this.state.allRows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
   },
 
   deptItems() {
-    return this.uniqueItems(this.state.allRows, (r) => this.fold(r.departamento), (r) => r.departamento.toUpperCase());
+    return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.departamento), (r) => r.departamento.toUpperCase());
   },
 
   ccItems() {
-    const fromRows = this.uniqueItems(this.state.allRows, (r) => r.ccId, (r) => {
+    const fromRows = this.uniqueItems(this.scopedRows(), (r) => r.ccId, (r) => {
       const name = String(r.ccNome || "").toUpperCase();
       return r.ccId ? r.ccId + " - " + name : name;
     });
@@ -499,7 +569,7 @@ const ComprasPrevisoesApp = {
     const status = this.state.status;
     const start = this.state.startDate || "";
     const end = this.state.endDate || "";
-    this.state.shown = (this.state.allRows || []).filter((r) => {
+    this.state.shown = this.scopedRows().filter((r) => {
       if (emp.size && !emp.has(String(r.companyId))) return false;
       if (cc.size && !cc.has(String(r.ccId))) return false;
       if (cred.size && !cred.has(this.fold(r.credor))) return false;
@@ -556,6 +626,8 @@ const ComprasPrevisoesApp = {
     const bind = (id, key, openKey, qKey, itemsFn, nouns) => {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
+          if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           self.state[openKey] = !self.state[openKey];
           if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
           if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
@@ -577,6 +649,8 @@ const ComprasPrevisoesApp = {
           }
         },
         toggleId(itemId, on) {
+          if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
@@ -586,6 +660,8 @@ const ComprasPrevisoesApp = {
           self.paintFilters();
         },
         selectAll() {
+          if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           self.state[openKey] = true;
           self.applyFilters();
@@ -593,6 +669,8 @@ const ComprasPrevisoesApp = {
           self.paintFilters();
         },
         selectNone() {
+          if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           self.state[key] = [];
           self.state[openKey] = true;
           self.applyFilters();
@@ -609,6 +687,11 @@ const ComprasPrevisoesApp = {
 
   paintFilters() {
     if (!window.MlEmpresaFilter) return;
+    if (!this.state.consulted || this.state.loading) {
+      this.state.openCc = false;
+      this.state.openCred = false;
+      this.state.openDept = false;
+    }
     this.bindFilters();
     const set = (slotId, html) => {
       const el = document.getElementById(slotId);
@@ -730,7 +813,10 @@ const ComprasPrevisoesApp = {
   },
 
   onField(field, val) {
+    if (this.state.loading) return;
+    if (!this.state.consulted && (field === "qTitulo" || field === "status" || field === "qCredor")) return;
     this.state[field] = val;
+    if (!this.state.consulted && (field === "startDate" || field === "endDate")) return;
     if (field === "qTitulo" || field === "qCredor" || field === "status" || field === "startDate" || field === "endDate") {
       this.applyFilters();
       this.renderList();
@@ -791,7 +877,10 @@ const ComprasPrevisoesApp = {
         <div class="ccom-kpi"><span>Substituídos</span><strong>${this.esc(this.money(k.substituido))}</strong></div>`;
     }
     if (!rows.length) {
-      box.innerHTML = `<div class="tvig-empty">Nenhum título neste filtro.</div>`;
+      const limited = this.departmentWindows() && (this.state.allRows || []).length && !this.scopedRows().length;
+      box.innerHTML = limited
+        ? `<div class="tvig-empty">Nenhuma previsão dos seus departamentos neste período.</div>`
+        : `<div class="tvig-empty">Nenhum título neste filtro.</div>`;
       return;
     }
     const totals = {};
@@ -1126,6 +1215,8 @@ const ComprasPrevisoesApp = {
     const root = document.getElementById("compras-previsoes-root");
     if (!root) return;
     const s = this.state;
+    const busy = !!s.loading;
+    const refineLocked = !s.consulted || busy;
     const updated = s.updatedAt ? new Date(s.updatedAt).toLocaleString("pt-BR") : "—";
     const minDays = this.minDaysToday();
     const minDue = this.minLaunchDue();
@@ -1135,52 +1226,55 @@ const ComprasPrevisoesApp = {
           <div class="cprev-toolbar-meta">
             <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
           </div>
-          <div class="cprev-org">
-            <div class="cprev-org-row">
-              <div id="cprev-emp-slot" class="cprev-org-slot"></div>
-              <div id="cprev-cc-slot" class="cprev-org-slot"></div>
+          <div class="cprev-grid${busy ? " is-consulting" : ""}">
+            <div id="cprev-emp-slot" class="cprev-slot cprev-cell-emp${busy ? " is-locked" : ""}"></div>
+            <div id="cprev-cc-slot" class="cprev-slot cprev-cell-obra${refineLocked ? " is-locked" : ""}"></div>
+            <div id="cprev-cred-slot" class="cprev-slot cprev-cell-cred${refineLocked ? " is-locked" : ""}"></div>
+            <div class="form-group cprev-search cprev-cell-titulo${refineLocked ? " is-locked" : ""}">
+              <label>Título</label>
+              <input type="search" class="form-control" placeholder="Título ou nº do documento"
+                value="${this.esc(s.qTitulo)}" ${refineLocked ? "disabled" : ""}
+                oninput="ComprasPrevisoesApp.onField('qTitulo', this.value)" autocomplete="off">
             </div>
-            <div class="cprev-org-row cprev-org-row--2">
-              <div class="cprev-org-period">
-                <span class="cprev-org-label">Período</span>
-                <div class="cprev-org-dates">
-                  <input type="date" class="form-control" value="${this.esc(s.startDate)}"
-                    onchange="ComprasPrevisoesApp.onField('startDate', this.value)" aria-label="Vencimento de">
-                  <span class="cprev-org-dates-sep">até</span>
-                  <input type="date" class="form-control" value="${this.esc(s.endDate)}"
-                    onchange="ComprasPrevisoesApp.onField('endDate', this.value)" aria-label="Vencimento até">
-                </div>
+            <div class="form-group cprev-search cprev-cell-sit${refineLocked ? " is-locked" : ""}">
+              <label>Situação</label>
+              <select class="form-control" ${refineLocked ? "disabled" : ""} onchange="ComprasPrevisoesApp.onField('status', this.value)">
+                <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
+                <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
+                <option value="substituido" ${s.status === "substituido" ? "selected" : ""}>Substituídos</option>
+                <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
+              </select>
+            </div>
+            <div class="cprev-cell-dates${busy ? " is-locked" : ""}">
+              <div class="form-group cprev-date">
+                <label>Vencimento de</label>
+                <input type="date" class="form-control" value="${this.esc(s.startDate)}" ${busy ? "disabled" : ""}
+                  onchange="ComprasPrevisoesApp.onField('startDate', this.value)">
               </div>
-              <div id="cprev-dept-slot" class="cprev-org-slot"></div>
-              <div class="cprev-org-actions">
-                <button type="button" class="btn btn-primary btn-sm" ${s.loading ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">
-                  <i data-lucide="search" style="width:14px;height:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
+              <div class="form-group cprev-date">
+                <label>Vencimento até</label>
+                <input type="date" class="form-control" value="${this.esc(s.endDate)}" ${busy ? "disabled" : ""}
+                  onchange="ComprasPrevisoesApp.onField('endDate', this.value)">
+              </div>
+            </div>
+            <div id="cprev-dept-slot" class="cprev-slot cprev-cell-dept${refineLocked ? " is-locked" : ""}"></div>
+            <div class="cprev-actions">
+              <div class="cprev-actions-main">
+                <button type="button" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">
+                  ${busy
+                    ? '<span class="ecau-spin" aria-hidden="true"></span>'
+                    : '<i data-lucide="search" style="width:14px;height:14px;"></i>'}
+                  Consultar
                 </button>
-                <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasPrevisoesApp.limpar()">Limpar</button>
-                <button type="button" class="btn btn-sm cprev-excel-btn" onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
+                <button type="button" class="btn btn-cancel btn-sm" ${busy ? "disabled" : ""} onclick="ComprasPrevisoesApp.limpar()">Limpar</button>
+                <button type="button" class="btn btn-sm cprev-excel-btn" ${busy || !s.consulted ? "disabled" : ""} onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
                 </button>
               </div>
             </div>
-            <div class="cprev-org-row cprev-org-row--3">
-              <div class="form-group cprev-org-field">
-                <label>Consultar por título</label>
-                <input type="search" class="form-control" placeholder="Título ou nº do documento"
-                  value="${this.esc(s.qTitulo)}" oninput="ComprasPrevisoesApp.onField('qTitulo', this.value)" autocomplete="off">
-              </div>
-              <div id="cprev-cred-slot" class="cprev-org-slot"></div>
-              <div class="form-group cprev-org-field">
-                <label>Situação da previsão</label>
-                <select class="form-control" onchange="ComprasPrevisoesApp.onField('status', this.value)">
-                  <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
-                  <option value="pago" ${s.status === "pago" ? "selected" : ""}>Pagos</option>
-                  <option value="substituido" ${s.status === "substituido" ? "selected" : ""}>Substituídos</option>
-                  <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
-                </select>
-              </div>
-            </div>
           </div>
           <p class="cprev-hint">Lançando a nota hoje, o vencimento precisa de no mínimo <strong>${minDays} dias</strong> (até ${this.esc(this.fmtDate(minDue))}). Títulos abaixo desse prazo ficam em <strong>Prazo insuficiente para lançar</strong>.</p>
+          ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
         </div>
         <div id="cprev-kpis" class="ccom-kpis cprev-kpis"></div>
         <div id="cprev-results" class="cprev-results"></div>
