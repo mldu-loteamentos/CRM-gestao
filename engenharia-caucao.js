@@ -673,6 +673,7 @@ window.EngenhariaCaucaoApp = {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           if (self.tituloLock() && key !== "statusIds") return;
           const was = !!self.state[openKey];
           self.state.openEmp = false;
@@ -698,6 +699,7 @@ window.EngenhariaCaucaoApp = {
         },
         toggleId(itemId, checked) {
           if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           if (self.tituloLock() && key !== "statusIds") return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
@@ -710,6 +712,7 @@ window.EngenhariaCaucaoApp = {
         },
         selectAll() {
           if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           if (key === "companyIds") self.pruneCc();
@@ -720,6 +723,7 @@ window.EngenhariaCaucaoApp = {
         },
         selectNone() {
           if (self.state.loading) return;
+          if (!self.state.consulted && key !== "companyIds") return;
           if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = [];
           if (key === "companyIds") self.pruneCc();
@@ -738,6 +742,11 @@ window.EngenhariaCaucaoApp = {
 
   paintFilters() {
     if (!window.MlEmpresaFilter) return;
+    if (!this.state.consulted || this.state.loading) {
+      this.state.openCc = false;
+      this.state.openCred = false;
+      this.state.openSit = false;
+    }
     this.bindFilters();
     const set = (slotId, html) => {
       const el = document.getElementById(slotId);
@@ -879,6 +888,7 @@ window.EngenhariaCaucaoApp = {
 
   onField(field, val) {
     if (this.state.loading) return;
+    if (!this.state.consulted && (field === "qTitulo" || field === "qCredor")) return;
     this.state[field] = val;
     if (field === "qTitulo" || field === "qCredor" || field === "startDate" || field === "endDate") {
       if (field === "qTitulo" && this.tituloLock()) {
@@ -893,6 +903,25 @@ window.EngenhariaCaucaoApp = {
     }
   },
 
+  credorRows(credor) {
+    const name = credor || "Sem credor";
+    return (this.state.shown || []).filter((r) => (r.credor || "Sem credor") === name && !r.pago);
+  },
+
+  toggleCredor(encoded) {
+    let credor = "";
+    try { credor = decodeURIComponent(String(encoded || "")); } catch (e) { credor = String(encoded || ""); }
+    const rows = this.credorRows(credor);
+    if (!rows.length) return;
+    const allOn = rows.every((r) => this.state.selected[this.rowKey(r)]);
+    rows.forEach((r) => {
+      const key = this.rowKey(r);
+      if (allOn) delete this.state.selected[key];
+      else this.state.selected[key] = true;
+    });
+    this.renderList();
+  },
+
   credorHeaderHtml(credor, totals) {
     const count = totals.count || 0;
     const countLabel = count === 1 ? "1 título" : count + " títulos";
@@ -900,12 +929,20 @@ window.EngenhariaCaucaoApp = {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+    const selectable = this.credorRows(credor);
+    const allOn = selectable.length > 0 && selectable.every((r) => this.state.selected[this.rowKey(r)]);
+    const markBtn = selectable.length
+      ? `<button type="button" class="ecau-mark-credor" onclick="event.preventDefault();event.stopPropagation();EngenhariaCaucaoApp.toggleCredor('${encodeURIComponent(credor || "Sem credor")}')">${allOn ? "Desmarcar" : "Marcar todos"}</button>`
+      : "";
     const cell = "background:#f1f5f9;color:#475569;font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;";
     return `<tr class="fila-group-header cprev-group-header is-neutral">
       <td colspan="6" style="${cell}">
         <div class="cprev-group-label">
           <span>${this.esc(credor || "Sem credor")}</span>
-          <span class="cprev-group-chip">${this.esc(countLabel)}</span>
+          <span class="ecau-group-tools">
+            <span class="cprev-group-chip">${this.esc(countLabel)}</span>
+            ${markBtn}
+          </span>
         </div>
       </td>
       <td colspan="5" style="${cell}"></td>
@@ -1436,19 +1473,20 @@ window.EngenhariaCaucaoApp = {
     const s = this.state;
     const busy = !!s.loading;
     const lockFilters = this.tituloLock() || busy;
+    const refineLocked = !s.consulted || busy;
     root.innerHTML = `
       <div class="cprev-page ecau-page">
         <div class="search-filter-panel cprev-toolbar ecau-toolbar">
           <div class="ecau-grid${busy ? " is-consulting" : ""}">
             <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp${lockFilters ? " is-locked" : ""}"></div>
-            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${lockFilters ? " is-locked" : ""}"></div>
-            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred${lockFilters ? " is-locked" : ""}"></div>
-            <div class="form-group ecau-search ecau-cell-titulo${busy ? " is-locked" : ""}">
+            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${refineLocked || this.tituloLock() ? " is-locked" : ""}"></div>
+            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked || this.tituloLock() ? " is-locked" : ""}"></div>
+            <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
-                value="${this.esc(s.qTitulo)}" ${busy ? "disabled" : ""} oninput="EngenhariaCaucaoApp.onField('qTitulo', this.value)" autocomplete="off">
+                value="${this.esc(s.qTitulo)}" ${refineLocked ? "disabled" : ""} oninput="EngenhariaCaucaoApp.onField('qTitulo', this.value)" autocomplete="off">
             </div>
-            <div id="ecau-sit-slot" class="ecau-slot ecau-cell-sit${busy ? " is-locked" : ""}"></div>
+            <div id="ecau-sit-slot" class="ecau-slot ecau-cell-sit${refineLocked ? " is-locked" : ""}"></div>
             <div class="ecau-cell-dates${busy ? " is-locked" : ""}">
               <div class="form-group ecau-date">
                 <label>Vencimento de</label>

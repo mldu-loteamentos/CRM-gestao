@@ -5974,6 +5974,29 @@ circle.donut-segment {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ecau-group-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ecau-mark-credor {
+  border: 1px solid #105436;
+  background: #fff;
+  color: #105436;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.ecau-mark-credor:hover {
+  background: #105436;
+  color: #fff;
+}
 .cprev-group-chip {
   flex-shrink: 0;
   display: inline-flex;
