@@ -164,18 +164,6 @@ const ConfigUsersApp = {
       savedPerms.sub_compras_geral_previsoes_visualizar = true;
       savedPerms.sub_compras_geral_previsoes_editar = !!savedPerms.sub_compras_geral_compras_editar;
     }
-    if (savedPerms.sub_compras_geral_config_acessar == null && (
-      savedPerms.mod_compras
-      || savedPerms.sub_compras_geral_compras_acessar
-      || savedPerms.sub_compras_geral_previsoes_acessar
-    )) {
-      savedPerms.sub_compras_geral_config_acessar = true;
-      savedPerms.sub_compras_geral_config_visualizar = true;
-      savedPerms.sub_compras_geral_config_editar = !!(
-        savedPerms.sub_compras_geral_compras_editar
-        || savedPerms.sub_compras_geral_previsoes_editar
-      );
-    }
     if (savedPerms.sub_fin_cr_recebimentos_webro_acessar == null && (
       savedPerms.sub_fin_cr === true
       || savedPerms.sub_fin_cr_fila_cobranca_acessar

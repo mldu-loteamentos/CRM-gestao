@@ -4071,19 +4071,13 @@ window.expandCrmMenuPerms = function(perms) {
   )) {
     copy.mod_gerencial = true;
   }
-  const comprasParent = copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true;
-  const comprasLeaves = [
-    "sub_compras_geral_previsoes_acessar",
-    "sub_compras_geral_config_acessar",
-    "sub_compras_geral_compras_acessar"
-  ];
-  if (comprasParent && !comprasLeaves.some((k) => copy[k] === true)) {
-    copy.mod_compras = true;
-    copy.sub_compras_geral = true;
+  if (copy.sub_compras_geral_previsoes_acessar == null
+    && copy.sub_compras_geral_previsoes_visualizar == null
+    && copy.sub_compras_geral_previsoes_editar == null
+    && (copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true)) {
     copy.sub_compras_geral_previsoes_acessar = true;
-    if (copy.sub_compras_geral_previsoes_visualizar !== false) copy.sub_compras_geral_previsoes_visualizar = true;
-    copy.sub_compras_geral_config_acessar = true;
-    if (copy.sub_compras_geral_config_visualizar !== false) copy.sub_compras_geral_config_visualizar = true;
+    copy.sub_compras_geral_previsoes_visualizar = true;
+    copy.sub_compras_geral_previsoes_editar = copy.sub_compras_geral_compras_editar === true;
   }
   return copy;
 };
@@ -5111,10 +5105,18 @@ window.permCoversMenuKey = function(perms, modKey) {
     }
     return false;
   }
-  if (modKey === "sub_compras_geral_previsoes_acessar" || modKey === "sub_compras_geral_config_acessar") {
-    const stem = String(modKey).slice(0, -"_acessar".length);
-    if (perms[modKey] === true || perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true) return true;
-    if (perms[modKey] == null && perms[stem + "_visualizar"] == null && perms[stem + "_editar"] == null) {
+  if (modKey === "sub_compras_geral_config_acessar") {
+    return perms.sub_compras_geral_config_acessar === true
+      || perms.sub_compras_geral_config_visualizar === true
+      || perms.sub_compras_geral_config_editar === true;
+  }
+  if (modKey === "sub_compras_geral_previsoes_acessar") {
+    if (perms.sub_compras_geral_previsoes_acessar === true
+      || perms.sub_compras_geral_previsoes_visualizar === true
+      || perms.sub_compras_geral_previsoes_editar === true) return true;
+    if (perms.sub_compras_geral_previsoes_acessar == null
+      && perms.sub_compras_geral_previsoes_visualizar == null
+      && perms.sub_compras_geral_previsoes_editar == null) {
       return perms.mod_compras === true
         || perms.sub_compras_geral === true
         || perms.sub_compras_geral_compras_acessar === true
