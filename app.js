@@ -4057,10 +4057,44 @@ window.crmProfileKind = function(nameOrId) {
   return "other";
 };
 
+window.expandCrmMenuPerms = function(perms) {
+  if (!perms || typeof perms !== "object") return {};
+  const copy = Object.assign({}, perms);
+  const fill = function(to, from) {
+    if (copy[from] === true && copy[to] == null) copy[to] = true;
+  };
+  ["acessar", "visualizar", "editar"].forEach(function(flag) {
+    fill("sub_eng_geral_caucao_" + flag, "sub_eng_geral_engenharia_" + flag);
+    fill("sub_rel_geral_buscar_cliente_" + flag, "sub_rel_geral_relacionamento_" + flag);
+  });
+  if (copy.sub_eng_geral_caucao_acessar == null && (
+    copy.mod_eng === true || copy.sub_eng_geral === true || copy.sub_eng_geral_engenharia_acessar === true
+  )) {
+    copy.sub_eng_geral_caucao_acessar = true;
+    if (copy.sub_eng_geral_caucao_visualizar == null) copy.sub_eng_geral_caucao_visualizar = true;
+    if (copy.sub_eng_geral_caucao_editar == null) {
+      copy.sub_eng_geral_caucao_editar = copy.sub_eng_geral_engenharia_editar === true;
+    }
+  }
+  if (copy.mod_gerencial == null && (
+    copy.mod_societario === true || copy.mod_participacoes === true
+    || copy.sub_soc_geral_estrutura_societaria_acessar === true
+    || copy.sub_part_geral_participacoes_acessar === true
+  )) {
+    copy.mod_gerencial = true;
+  }
+  return copy;
+};
+
 window.crmProfileStorageIds = function(profileId, profileName) {
   const kind = window.crmProfileKind(profileName || profileId);
   const ids = new Set();
   if (profileId) ids.add(String(profileId));
+  const n = window.normalizeCrmProfileName(profileName || profileId);
+  if (n === "OPERADOR PAGADORIA" || String(profileId) === "operador") {
+    ids.add("operador");
+    ids.add("operador_pagadoria");
+  }
   if (kind === "back_office") {
     ids.add(window.CRM_BACK_OFFICE_PROFILE_ID);
     ids.add("operador_cobranca_interno_back_office");
@@ -4091,6 +4125,11 @@ window.resolveCrmProfileId = function(profileName) {
     if (localStorage.getItem("crm_perms_operador_cobranca")) return "operador_cobranca";
     if (localStorage.getItem("crm_perms_operador_cobrança")) return "operador_cobrança";
     return "operador_cobranca";
+  }
+  if (n === "OPERADOR PAGADORIA") {
+    try {
+      if (localStorage.getItem("crm_perms_operador")) return "operador";
+    } catch (e) {}
   }
   return String(profileName || "")
     .trim()
@@ -4563,9 +4602,9 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     try { payloads.push(localStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
     try { payloads.push(sessionStorage.getItem("crm_perms_bak_" + pid)); } catch (e) {}
   });
-  const best = window.pickBestCrmPermsObject(payloads);
+  const best = window.expandCrmMenuPerms(window.pickBestCrmPermsObject(payloads));
   if (window.crmPermsHasAnyTrue(best)) return best;
-  let obj = window.materializeCrmProfilePerms(id);
+  let obj = window.expandCrmMenuPerms(window.materializeCrmProfilePerms(id));
   if (obj && Object.keys(obj).length) return obj;
   return {};
 };
@@ -4747,7 +4786,7 @@ window.applyPermissions = function(profileName) {
     const kids = Array.from(submenu.children).filter(el => el.tagName === "LI");
     if (!kids.length) continue;
     const anyVisible = kids.some(li => li.style.display !== "none");
-    if (!anyVisible) group.style.display = "none";
+    group.style.display = anyVisible ? "" : "none";
   }
 }
 

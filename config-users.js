@@ -110,6 +110,23 @@ const ConfigUsersApp = {
         if (on) savedPerms[sub.key] = true;
       });
     });
+    ["acessar", "visualizar", "editar"].forEach((flag) => {
+      const oldKey = "sub_eng_geral_engenharia_" + flag;
+      const newKey = "sub_eng_geral_caucao_" + flag;
+      if (savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
+    });
+    if (savedPerms.sub_eng_geral_caucao_acessar == null && (
+      savedPerms.mod_eng || savedPerms.sub_eng_geral || savedPerms.sub_eng_geral_engenharia_acessar
+    )) {
+      savedPerms.sub_eng_geral_caucao_acessar = true;
+      savedPerms.sub_eng_geral_caucao_visualizar = true;
+      savedPerms.sub_eng_geral_caucao_editar = !!savedPerms.sub_eng_geral_engenharia_editar;
+    }
+    ["acessar", "visualizar", "editar"].forEach((flag) => {
+      const oldKey = "sub_rel_geral_relacionamento_" + flag;
+      const newKey = "sub_rel_geral_buscar_cliente_" + flag;
+      if (savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
+    });
     if (savedPerms.sub_fiscal_geral_fiscal_acessar && savedPerms.sub_fiscal_geral_csll_acessar == null) {
       savedPerms.sub_fiscal_geral_csll_acessar = true;
       savedPerms.sub_fiscal_geral_csll_visualizar = !!savedPerms.sub_fiscal_geral_fiscal_visualizar;
