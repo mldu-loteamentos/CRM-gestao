@@ -709,7 +709,7 @@ const ComprasPrevisoesApp = {
     }));
     set("cprev-cc-slot", MlEmpresaFilter.html({
       id: "cprev-filter-cc",
-      label: "Empreendimentos",
+      label: "Empreendimento",
       items: this.ccItems(),
       selectedIds: this.state.ccIds,
       open: !!this.state.openCc,
@@ -1217,26 +1217,22 @@ const ComprasPrevisoesApp = {
     const s = this.state;
     const busy = !!s.loading;
     const refineLocked = !s.consulted || busy;
-    const updated = s.updatedAt ? new Date(s.updatedAt).toLocaleString("pt-BR") : "—";
     const minDays = this.minDaysToday();
     const minDue = this.minLaunchDue();
     root.innerHTML = `
       <div class="cprev-page">
         <div class="search-filter-panel cprev-toolbar">
-          <div class="cprev-toolbar-meta">
-            <span class="cprev-updated">Atualização: ${this.esc(updated)}</span>
-          </div>
-          <div class="cprev-grid${busy ? " is-consulting" : ""}">
-            <div id="cprev-emp-slot" class="cprev-slot cprev-cell-emp${busy ? " is-locked" : ""}"></div>
-            <div id="cprev-cc-slot" class="cprev-slot cprev-cell-obra${refineLocked ? " is-locked" : ""}"></div>
-            <div id="cprev-cred-slot" class="cprev-slot cprev-cell-cred${refineLocked ? " is-locked" : ""}"></div>
-            <div class="form-group cprev-search cprev-cell-titulo${refineLocked ? " is-locked" : ""}">
+          <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
+            <div id="cprev-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
+            <div id="cprev-cc-slot" class="ecau-slot ecau-cell-obra${refineLocked ? " is-locked" : ""}"></div>
+            <div id="cprev-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked ? " is-locked" : ""}"></div>
+            <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
                 value="${this.esc(s.qTitulo)}" ${refineLocked ? "disabled" : ""}
                 oninput="ComprasPrevisoesApp.onField('qTitulo', this.value)" autocomplete="off">
             </div>
-            <div class="form-group cprev-search cprev-cell-sit${refineLocked ? " is-locked" : ""}">
+            <div class="form-group ecau-search ecau-cell-sit${refineLocked ? " is-locked" : ""}">
               <label>Situação</label>
               <select class="form-control" ${refineLocked ? "disabled" : ""} onchange="ComprasPrevisoesApp.onField('status', this.value)">
                 <option value="aberto" ${s.status === "aberto" ? "selected" : ""}>Em aberto</option>
@@ -1245,21 +1241,21 @@ const ComprasPrevisoesApp = {
                 <option value="todos" ${s.status === "todos" ? "selected" : ""}>Todos</option>
               </select>
             </div>
-            <div class="cprev-cell-dates${busy ? " is-locked" : ""}">
-              <div class="form-group cprev-date">
+            <div class="ecau-cell-dates${busy ? " is-locked" : ""}">
+              <div class="form-group ecau-date">
                 <label>Vencimento de</label>
                 <input type="date" class="form-control" value="${this.esc(s.startDate)}" ${busy ? "disabled" : ""}
                   onchange="ComprasPrevisoesApp.onField('startDate', this.value)">
               </div>
-              <div class="form-group cprev-date">
+              <div class="form-group ecau-date">
                 <label>Vencimento até</label>
                 <input type="date" class="form-control" value="${this.esc(s.endDate)}" ${busy ? "disabled" : ""}
                   onchange="ComprasPrevisoesApp.onField('endDate', this.value)">
               </div>
             </div>
-            <div id="cprev-dept-slot" class="cprev-slot cprev-cell-dept${refineLocked ? " is-locked" : ""}"></div>
-            <div class="cprev-actions">
-              <div class="cprev-actions-main">
+            <div id="cprev-dept-slot" class="ecau-slot cprev-cell-dept${refineLocked ? " is-locked" : ""}"></div>
+            <div class="ecau-actions">
+              <div class="ecau-actions-main">
                 <button type="button" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""} onclick="ComprasPrevisoesApp.consultar()">
                   ${busy
                     ? '<span class="ecau-spin" aria-hidden="true"></span>'
