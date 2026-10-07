@@ -4,6 +4,7 @@
 // Interceptador Global de Fetch para rotear o Sienge Proxy e Rotas API para a Vercel/Firebase
 (function() {
   const originalSetItem = localStorage.setItem;
+  window._nativeLocalStorageSetItem = originalSetItem;
   localStorage.setItem = function(key, value) {
       if (key === "crm_moura_notes") {
           window.agendaItemsCache = null;
@@ -11,6 +12,7 @@
       try {
       originalSetItem.apply(this, arguments);
       } catch (e) {
+        window._storageQuotaFull = true;
         console.warn("[storage] setItem falhou", key, e && e.name);
       }
   };
@@ -28,6 +30,30 @@
       configurable: true
   });
 })();
+
+window.persistLargeCacheIfRoom = function(key, value) {
+  if (window._storageQuotaFull) return false;
+  const nativeSet = window._nativeLocalStorageSetItem;
+  if (typeof nativeSet !== "function") return false;
+  const probe = "__crm_quota_probe__";
+  try {
+    nativeSet.call(localStorage, probe, "1");
+    localStorage.removeItem(probe);
+  } catch (e) {
+    window._storageQuotaFull = true;
+    console.warn("[storage] cache local cheio; " + key + " fica só na memória.");
+    return false;
+  }
+  try {
+    nativeSet.call(localStorage, key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    window._storageQuotaFull = true;
+    console.warn("[storage] cache local cheio; " + key + " fica só na memória.");
+    return false;
+  }
+};
+
 (function() {
   const _origFetch = window.fetch;
   window.fetch = async function() {
@@ -5619,7 +5645,7 @@ async function initializeApplication() {
                      }
                  });
                  if (hasUpdates) {
-                     localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+                     window.persistLargeCacheIfRoom("crm_moura_notes", AppState.notes);
                  }
                  
                  console.log("[Firebase RT] Sincronizando todos os shards iniciais (Jurídico)...");
@@ -5635,7 +5661,7 @@ async function initializeApplication() {
                      }
                  });
                  if (judHasUpdates) {
-                     localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                     window.persistLargeCacheIfRoom("crm_moura_jud_notes", AppState.judNotes);
                  }
                  
                  try {
@@ -5650,7 +5676,7 @@ async function initializeApplication() {
                          }
                      });
                      if (judHasUpdates) {
-                         localStorage.setItem("crm_moura_jud_notes", JSON.stringify(AppState.judNotes));
+                         window.persistLargeCacheIfRoom("crm_moura_jud_notes", AppState.judNotes);
                      }
                  } catch (judAltErr) {
                      console.warn("[Firebase RT] Shard jud_notes_shards indisponível:", judAltErr);
@@ -10396,6 +10422,19 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
   syncJudicialOccurrenceFormLock(saleObj);
 }
 
+function hideGlobalFichaLoader() {
+  if (window.globalFichaLoaderTimeout) {
+    clearTimeout(window.globalFichaLoaderTimeout);
+    window.globalFichaLoaderTimeout = null;
+  }
+  if (window.globalFichaLoaderCap) {
+    clearTimeout(window.globalFichaLoaderCap);
+    window.globalFichaLoaderCap = null;
+  }
+  const el = document.getElementById("global-ficha-loader");
+  if (el) el.style.display = "none";
+}
+
 async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (typeof window.currentUserCanViewCustomer === "function" && !window.currentUserCanViewCustomer(customerId)) {
     alert("Você só pode visualizar clientes atribuídos à sua carteira.");
@@ -10446,6 +10485,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       window.globalFichaLoaderTimeout = setTimeout(() => {
           globalFichaLoader.style.display = "flex";
       }, 2000);
+      if (window.globalFichaLoaderCap) clearTimeout(window.globalFichaLoaderCap);
+      window.globalFichaLoaderCap = setTimeout(hideGlobalFichaLoader, 20000);
   }
   
   const viewReneg = document.getElementById("view-renegotiation");
@@ -11805,9 +11846,10 @@ function formatCpfCnpj(val) {
   
     let receivableBills = [];
     let debitBalance = [];
-    
+
+    hideGlobalFichaLoader();
+
     try {
-      // Como ambas as APIs agora usam o ID do cliente direto, elas são extremamente rápidas, então podemos aguardar ambas.
       const [billsRes, balRes] = await Promise.all([
         SiengeApiService.getReceivableBills(customerId).catch(e => {
           console.error("Erro ao obter receivable-bills:", e);
@@ -14012,9 +14054,7 @@ function formatCpfCnpj(val) {
     renderCustomerOccurrences();
   };
 
-  if (window.globalFichaLoaderTimeout) clearTimeout(window.globalFichaLoaderTimeout);
-  const globalLoaderEnd = document.getElementById("global-ficha-loader");
-  if (globalLoaderEnd) globalLoaderEnd.style.display = "none";
+  hideGlobalFichaLoader();
 
   lucide.createIcons();
   
@@ -41811,12 +41851,13 @@ window.syncAllNotesToFirebase = async function() {
 
 // --- INTERCEPTADOR PARA FIREBASE ---
 // Captura as chamadas de localStorage.setItem e envia pro Firebase
-const _originalSetItem = localStorage.setItem;
+const _originalSetItem = window._nativeLocalStorageSetItem || localStorage.setItem;
 window._originalSetItem = _originalSetItem;
 localStorage.setItem = function(key, value) {
     try {
-    _originalSetItem.call(this, key, value);
+    _originalSetItem.call(localStorage, key, value);
     } catch (e) {
+      window._storageQuotaFull = true;
       console.warn("[storage] setItem falhou", key, e && e.name);
       return;
     }
