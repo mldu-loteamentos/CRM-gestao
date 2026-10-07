@@ -132,7 +132,11 @@
       return "time_rel";
     }
     if (profile.includes("OPERADOR COBRANCA")) {
-      if (opType === "externo" || opType === "advogado" || opType === "apoio_juridico") return null;
+      if (profile.includes("TERCEIRIZ")) return null;
+      const effective = (typeof window.crmOperatorType === "function")
+        ? window.crmOperatorType(rec)
+        : opType;
+      if (effective === "externo" || effective === "advogado" || effective === "apoio_juridico") return null;
       return "op_cobranca_interno";
     }
     return null;

@@ -10,6 +10,13 @@ window.isOperadorCobrancaTerceirizadoProfile = function(name) {
   return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
 };
 
+/** Tipo efetivo: o perfil Terceirizado vale como Externo, mesmo sem o subtipo antigo. */
+window.crmOperatorType = function(user) {
+  if (!user) return "";
+  if (window.isOperadorCobrancaTerceirizadoProfile(user.profile_name)) return "externo";
+  return String(user.operator_type || "");
+};
+
 /** Perfis/usuários que só enxergam clientes da própria carteira atribuída. */
 window.userSeesOnlyAssignedClients = function(user) {
   const u = user || (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
@@ -315,6 +322,10 @@ const ConfigUsersApp = {
             { id: "fluxo_caixa_diario", label: "Fluxo de caixa diário" },
             { id: "resultado_caixa", label: "Resultado de caixa" }
           ]
+        },
+        {
+          name: "Orçamento", key: "sub_fin_orc",
+          actions: [{ id: "orcamento", label: "Orçamento" }]
         },
         {
           name: "Financiamento", key: "sub_fin_finan",
@@ -1384,11 +1395,11 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = isOp ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } ConfigUsersApp.syncDeptBox(); })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = (isOp && !isTerc) ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } ConfigUsersApp.syncDeptBox(); })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
-               <div id="umodal-operator-type-container" style="flex: 1; display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
+               <div id="umodal-operator-type-container" style="flex: 1; display: ${((window.isOperadorCobrancaProfile(user && user.profile_name) && !window.isOperadorCobrancaTerceirizadoProfile(user && user.profile_name)) || !user) ? 'block' : 'none'};">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Tipo de Operador</label>
                   <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      <option value="interno" ${user && user.operator_type === 'interno' && !window.isOperadorCobrancaTerceirizadoProfile(user.profile_name) ? 'selected' : ''}>Interno</option>
@@ -1617,7 +1628,7 @@ const ConfigUsersApp = {
           <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.phone || '-'}</td>
           <td style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.85rem;">
              ${u.profile_name}
-             ${(u.operator_type && window.isOperadorCobrancaProfile(u.profile_name)) ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${u.operator_type === 'interno' ? 'Cobrança Interna' : (u.operator_type === 'externo' ? 'Terceirizada' : (u.operator_type === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
+             ${(window.crmOperatorType(u) && window.isOperadorCobrancaProfile(u.profile_name)) ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${window.crmOperatorType(u) === 'interno' ? 'Cobrança Interna' : (window.crmOperatorType(u) === 'externo' ? 'Terceirizada' : (window.crmOperatorType(u) === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
           </td>
           <td style="padding: 16px 15px;">${statusSwitch}</td>
           <td style="padding: 16px 15px;">

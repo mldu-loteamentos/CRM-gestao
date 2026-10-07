@@ -1554,6 +1554,10 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
       if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u)) {
         return "apoio_juridico";
       }
+      if (u && typeof window.crmOperatorType === "function") {
+        const effective = window.crmOperatorType(u);
+        if (effective) return effective;
+      }
       if (u && u.operator_type) return u.operator_type;
       const n = String(label || (u && (u.sienge_user || u.name)) || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       if (n.includes("THAIANE")) return "externo";
@@ -1631,7 +1635,9 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
                    const uName = user.name ? user.name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
                    return sName === normalizedO || uName === normalizedO || sName.includes(normalizedO) || uName.includes(normalizedO);
                });
-               const opType = u ? u.operator_type : 'interno';
+               const opType = u
+                 ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(u)) || u.operator_type || "interno")
+                 : "interno";
                return opType !== 'externo' && opType !== 'advogado' && opType !== 'apoio_juridico';
             });
             if (onlyInternals.length > 0) {
@@ -1678,8 +1684,10 @@ window.cityRuleHasOperatorType = function(ruleId, type) {
     if (u && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(u)) {
       return type === "apoio_juridico";
     }
-    const opType = (u && u.operator_type) ? u.operator_type
-      : (normalizedO.includes("THAIANE") ? "externo" : "interno");
+    const opType = (u && typeof window.crmOperatorType === "function" && window.crmOperatorType(u))
+      ? window.crmOperatorType(u)
+      : ((u && u.operator_type) ? u.operator_type
+      : (normalizedO.includes("THAIANE") ? "externo" : "interno"));
     return opType === type;
   });
 };
@@ -3178,6 +3186,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   } else if (tabId === "fluxo-caixa") {
     if (typeof FluxoCaixaApp !== "undefined") FluxoCaixaApp.init();
+  } else if (tabId === "orcamento") {
+    if (typeof OrcamentoApp !== "undefined") OrcamentoApp.init();
   } else if (tabId === "fluxo-caixa-diario") {
     if (typeof FluxoCaixaDiarioApp !== "undefined") FluxoCaixaDiarioApp.init();
   } else if (tabId === "resultado-caixa") {
@@ -4958,6 +4968,11 @@ window.applyPermissions = function(profileName) {
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
+        const orcAlias = modKey === "sub_fin_orc_orcamento_acessar"
+          && perms.sub_fin_orc_orcamento_acessar == null
+          && perms.sub_fin_orc_orcamento_visualizar == null
+          && perms.sub_fin_orc_orcamento_editar == null
+          && perms.mod_fin === true;
         const cbAlias = (
           modKey === 'sub_fin_cb_fluxo_caixa_acessar'
           || modKey === 'sub_fin_cb_caixa_banco_acessar'
@@ -5008,7 +5023,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_com_geral_estoque_acessar === true
           || perms.sub_com_geral_tabelas_vigentes_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -5026,7 +5041,9 @@ window.applyPermissions = function(profileName) {
   }
 
   // --- SOBREPOSIÇÃ•ES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
-  const opType = AppState.currentUser ? AppState.currentUser.operator_type : '';
+  const opType = AppState.currentUser
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(AppState.currentUser)) || AppState.currentUser.operator_type || "")
+    : "";
   
   // 1. Externo (Terceirizado) não vê menu Sub Judice
   if (opType === 'externo') {
@@ -10502,7 +10519,9 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
   const isSubjudice = currentOriginTab === 'subjudice';
   
-  const opType = AppState.currentUser ? AppState.currentUser.operator_type : '';
+  const opType = AppState.currentUser
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(AppState.currentUser)) || AppState.currentUser.operator_type || "")
+    : "";
   const isAdvogado = (opType === 'advogado');
   const isInternoOuApoio = (opType === 'interno' || opType === 'apoio_juridico');
 
@@ -40564,7 +40583,7 @@ window.getDynamicOperators = function(type = 'all') {
     
     // Filtrar tipo se especificado
     if (type === 'interno') {
-        ops = ops.filter(u => u.operator_type === 'interno');
+        ops = ops.filter(u => ((typeof window.crmOperatorType === "function" ? window.crmOperatorType(u) : u.operator_type) === "interno"));
     }
     
     // Retornar os nomes formatados

@@ -13,6 +13,7 @@ const RecebimentosWebroApp = {
     de: "",
     ate: "",
     rows: [],
+    condicoes: [],
     webroSemComissao: 0,
     recebimentos: 0
   },
@@ -133,22 +134,27 @@ const RecebimentosWebroApp = {
     return String(item.paymentTermId || item.conditionTypeId || item.installmentCondition || "").trim();
   },
 
-  receiptDates(item, start, end) {
-    const dates = [];
+  receiptHits(item, start, end) {
+    const hits = [];
     const push = (r) => {
       if (!r) return;
       const op = String(r.operationTypeId != null ? r.operationTypeId : (r.typeId != null ? r.typeId : ""));
       if (op && op !== "2") return;
       const dt = String(r.paymentDate || r.receiptDate || r.date || "").slice(0, 10);
-      if (dt && dt >= start && dt <= end) dates.push(dt);
+      if (!dt || dt < start || dt > end) return;
+      const amount = Number(r.netAmount != null ? r.netAmount : (r.grossAmount != null ? r.grossAmount : (r.value != null ? r.value : r.receiptValue)));
+      hits.push({ date: dt, amount: Number.isFinite(amount) ? amount : 0 });
     };
     (item.receipts || []).forEach(push);
     (item.receiptsCategories || []).forEach((cat) => (cat.receipts || []).forEach(push));
-    if (!dates.length) {
+    if (!hits.length) {
       const dt = String(item.paymentDate || item.receiptDate || "").slice(0, 10);
-      if (dt && dt >= start && dt <= end) dates.push(dt);
+      if (dt && dt >= start && dt <= end) {
+        const amount = Number(item.receiptNetAmount || item.netAmount || item.receivedAmount || 0);
+        hits.push({ date: dt, amount: Number.isFinite(amount) ? amount : 0 });
+      }
     }
-    return dates.sort();
+    return hits;
   },
 
   chunks(startIso, endIso) {
@@ -166,13 +172,28 @@ const RecebimentosWebroApp = {
     return out;
   },
 
-  rowFromIncome(item, paidOn) {
+  costCenterOf(item) {
+    const cats = [];
+    (item.receiptsCategories || []).forEach((c) => cats.push(c));
+    (item.receipts || []).forEach((r) => {
+      (r.bankMovements || []).forEach((bm) => {
+        (bm.financialCategories || []).forEach((c) => cats.push(c));
+      });
+    });
+    const cat = cats.find((c) => c && c.costCenterId) || null;
+    return {
+      id: String((cat && cat.costCenterId) || item.costCenterId || item.enterpriseId || "").trim(),
+      name: String((cat && cat.costCenterName) || item.costCenterName || item.projectName || item.enterpriseName || "").trim()
+    };
+  },
+
+  rowFromIncome(item, paidOn, valorRecebido) {
     const doc = String(item.documentIdentificationId || "").toUpperCase();
     if (doc && doc !== "CT") return null;
     const billId = item.billId || item.billReceivableId || item.receivableBillId || "";
     const installmentId = item.installmentId || item.installmentNumber || "";
     const unit = item.mainUnit || item.unitName || item.unit || "";
-    const project = item.projectId || item.enterpriseId || item.costCenterId || "";
+    const cc = this.costCenterOf(item);
     return {
       billId: billId ? String(billId) : "",
       installmentId: installmentId ? String(installmentId) : "",
@@ -180,9 +201,10 @@ const RecebimentosWebroApp = {
       due: this.isoDue(item.dueDate || item.originalDueDate),
       paidOn: paidOn,
       unit: String(unit || "").trim(),
-      project: String(project || "").trim(),
-      projectName: String(item.projectName || item.enterpriseName || item.costCenterName || "").trim(),
-      client: String(item.clientName || item.customerName || "").trim()
+      project: cc.id,
+      projectName: cc.name,
+      client: String(item.clientName || item.customerName || "").trim(),
+      valorRecebido: Number(valorRecebido) || 0
     };
   },
 
@@ -230,9 +252,11 @@ const RecebimentosWebroApp = {
         data = [];
       }
       data.forEach((item) => {
-        const dates = this.receiptDates(item, start, end);
-        if (!dates.length) return;
-        const row = this.rowFromIncome(item, dates[dates.length - 1]);
+        const hits = this.receiptHits(item, start, end);
+        if (!hits.length) return;
+        const paidOn = hits.map((h) => h.date).sort().pop();
+        const valor = hits.filter((h) => h.date === paidOn).reduce((s, h) => s + h.amount, 0);
+        const row = this.rowFromIncome(item, paidOn, valor);
         if (!row) return;
         const key = row.billId + "|" + row.installmentId + "|" + row.paidOn;
         if (seen.has(key)) return;
@@ -317,6 +341,7 @@ const RecebimentosWebroApp = {
     this.state.de = period.start;
     this.state.ate = period.end;
     this.state.rows = [];
+    this.state.condicoes = [];
     this.state.webroSemComissao = 0;
     this.state.recebimentos = 0;
     this.render();
@@ -348,7 +373,7 @@ const RecebimentosWebroApp = {
           catch (e) { kept = null; }
           cache.set(cacheKey, kept);
         } else if (kept) {
-          kept = Object.assign({}, kept, { paidOn: row.paidOn });
+          kept = Object.assign({}, kept, { paidOn: row.paidOn, valorRecebido: row.valorRecebido });
         }
         if (kept && kept.due) webro.push(kept);
       }
@@ -356,32 +381,29 @@ const RecebimentosWebroApp = {
       this.render();
       const contratos = await this.loadComissoes(period.start);
       const index = this.indexComissoes(contratos);
-      const matched = [];
-      const seen = new Set();
+      const listed = [];
       let sem = 0;
       webro.forEach((row) => {
         const hit = this.match(row, index);
-        if (!hit || !(hit.valor > 0)) {
-          sem += 1;
-          return;
-        }
-        const key = hit.contrato + "|" + hit.vencimento + "|" + hit.valor.toFixed(2);
-        if (seen.has(key)) return;
-        seen.add(key);
-        matched.push({
-          empreendimento: hit.empreendimento,
-          contrato: hit.contrato,
-          unidade: hit.unidade,
-          cliente: hit.pagador || row.client,
-          vencimento: hit.vencimento,
+        const comissao = hit && hit.valor > 0 ? hit : null;
+        if (!comissao) sem += 1;
+        listed.push({
+          empreendimento: (comissao && comissao.empreendimento) || row.projectName || row.project,
+          contrato: comissao ? comissao.contrato : "",
+          unidade: (comissao && comissao.unidade) || row.unit,
+          cliente: row.client || (comissao && comissao.pagador) || "",
+          vencimento: row.due,
           pagoEm: row.paidOn,
           condicao: row.condition,
-          valor: hit.valor
+          valorRecebido: Number(row.valorRecebido) || 0,
+          valor: comissao ? comissao.valor : 0,
+          situacao: comissao ? "Liberar" : "Sem comissão"
         });
       });
-      matched.sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)) || String(a.contrato).localeCompare(String(b.contrato), "pt-BR"));
-      this.state.rows = matched;
+      listed.sort((a, b) => String(b.pagoEm).localeCompare(String(a.pagoEm)) || String(a.empreendimento).localeCompare(String(b.empreendimento), "pt-BR"));
+      this.state.rows = listed;
       this.state.webroSemComissao = sem;
+      this.state.condicoes = codes.slice().sort();
       this.state.status = "";
     } catch (e) {
       this.state.error = e && e.message ? e.message : "Não foi possível montar os recebimentos Webro.";
@@ -394,7 +416,7 @@ const RecebimentosWebroApp = {
   async exportExcel() {
     const rows = this.state.rows || [];
     if (!rows.length) {
-      alert("Não há comissão da Moura Leite para exportar neste período.");
+      alert("Não há recebimento Webro para exportar neste período.");
       return;
     }
     const ExcelJS = window.ExcelJS;
@@ -407,9 +429,15 @@ const RecebimentosWebroApp = {
     const ws = wb.addWorksheet("Recebimentos Webro");
     ws.columns = [
       { header: "Empreendimento", key: "empreendimento", width: 42 },
-      { header: "Contrato", key: "contrato", width: 18 },
-      { header: "Vencimento original", key: "vencimento", width: 22 },
-      { header: "Valor da comissão", key: "valor", width: 20 }
+      { header: "Unidade", key: "unidade", width: 16 },
+      { header: "Cliente", key: "cliente", width: 36 },
+      { header: "Condição", key: "condicao", width: 14 },
+      { header: "Vencimento", key: "vencimento", width: 16 },
+      { header: "Recebido em", key: "pagoEm", width: 16 },
+      { header: "Valor recebido", key: "valorRecebido", width: 18 },
+      { header: "Contrato CV", key: "contrato", width: 16 },
+      { header: "Comissão a liberar", key: "valor", width: 20 },
+      { header: "Situação", key: "situacao", width: 18 }
     ];
     const head = ws.getRow(1);
     head.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Calibri" };
@@ -418,11 +446,18 @@ const RecebimentosWebroApp = {
     rows.forEach((r) => {
       const line = ws.addRow({
         empreendimento: r.empreendimento,
-        contrato: r.contrato,
+        unidade: r.unidade,
+        cliente: r.cliente,
+        condicao: r.condicao,
         vencimento: this.fmtDate(r.vencimento),
-        valor: Number(r.valor) || 0
+        pagoEm: this.fmtDate(r.pagoEm),
+        valorRecebido: Number(r.valorRecebido) || 0,
+        contrato: r.contrato,
+        valor: Number(r.valor) || 0,
+        situacao: r.situacao
       });
-      line.getCell(4).numFmt = "#,##0.00";
+      line.getCell(7).numFmt = "#,##0.00";
+      line.getCell(9).numFmt = "#,##0.00";
     });
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -440,12 +475,15 @@ const RecebimentosWebroApp = {
     const s = this.state;
     const period = (s.de && s.ate) ? (this.fmtDate(s.de) + " a " + this.fmtDate(s.ate)) : "";
     const rows = s.rows || [];
-    const total = rows.reduce((sum, r) => sum + (Number(r.valor) || 0), 0);
+    const recebido = rows.reduce((sum, r) => sum + (Number(r.valorRecebido) || 0), 0);
+    const comissao = rows.reduce((sum, r) => sum + (Number(r.valor) || 0), 0);
+    const comCount = rows.filter((r) => Number(r.valor) > 0).length;
+    const condicoes = (s.condicoes || []).join(", ");
     root.innerHTML = `
       <div class="ccom-page">
         <div class="search-filter-panel tvig-params ccom-params">
           <h3 class="tvig-section-title">Recebimentos Webro</h3>
-          <p class="rweb-note">Contas recebidas nos últimos 30 dias cuja condição é Parcela Webro, cruzadas com a comissão da Moura Leite no mesmo vencimento.</p>
+          <p class="rweb-note">Primeiro entram os recebimentos dos últimos 30 dias cuja condição está marcada como Parcela Webro em Comercial, Condições de pagamento. Depois, pelo empreendimento e pela unidade, a tela procura no CV CRM a comissão da Moura Leite no mesmo vencimento para liberar.</p>
           <div class="ccom-filters">
             <div class="tvig-filter-actions">
               <button type="button" class="btn btn-primary ccom-consult" ${s.loading ? "disabled" : ""} onclick="RecebimentosWebroApp.consultar()">
@@ -456,15 +494,17 @@ const RecebimentosWebroApp = {
               </button>
             </div>
           </div>
-          ${period ? `<p class="rweb-note">Período: ${this.esc(period)}</p>` : ""}
+          ${period ? `<p class="rweb-note">Período: ${this.esc(period)}${condicoes ? " · Condições Webro: " + this.esc(condicoes) : ""}</p>` : ""}
         </div>
         ${s.error ? `<div class="tvig-empty">${this.esc(s.error)}</div>` : ""}
         ${s.loading ? `<div class="tvig-empty">${this.esc(s.status || "Buscando recebimentos Webro…")}</div>` : ""}
         ${!s.loading && !s.error && s.consulted && rows.length ? `
           <div class="ccom-kpis">
-            <div class="ccom-kpi"><span>Comissões a repassar</span><strong>${rows.length}</strong></div>
-            <div class="ccom-kpi"><span>Valor da comissão</span><strong>${this.esc(this.money(total))}</strong></div>
-            <div class="ccom-kpi"><span>Webro sem comissão Moura</span><strong>${s.webroSemComissao || 0}</strong></div>
+            <div class="ccom-kpi"><span>Recebimentos Webro</span><strong>${rows.length}</strong></div>
+            <div class="ccom-kpi"><span>Valor recebido</span><strong>${this.esc(this.money(recebido))}</strong></div>
+            <div class="ccom-kpi"><span>Com comissão a liberar</span><strong>${comCount}</strong></div>
+            <div class="ccom-kpi"><span>Comissão a liberar</span><strong>${this.esc(this.money(comissao))}</strong></div>
+            <div class="ccom-kpi"><span>Sem comissão neste vencimento</span><strong>${s.webroSemComissao || 0}</strong></div>
           </div>
           <div class="crm-card ccom-card">
             <div class="crm-scroll-table ccom-table-wrap">
@@ -472,27 +512,33 @@ const RecebimentosWebroApp = {
                 <thead>
                   <tr>
                     <th>Empreendimento</th>
-                    <th>Contrato</th>
                     <th>Unidade</th>
                     <th>Cliente</th>
-                    <th>Vencimento original</th>
+                    <th>Condição</th>
+                    <th>Vencimento</th>
                     <th>Recebido em</th>
-                    <th class="ccom-num">Valor da comissão</th>
+                    <th class="ccom-num">Valor recebido</th>
+                    <th>Contrato CV</th>
+                    <th class="ccom-num">Comissão</th>
+                    <th>Situação</th>
                   </tr>
                 </thead>
                 <tbody>${rows.map((r) => `<tr>
                   <td>${this.esc(r.empreendimento || "—")}</td>
-                  <td class="ccom-td-id">${this.esc(r.contrato || "—")}</td>
                   <td>${this.esc(r.unidade || "—")}</td>
                   <td>${this.esc(r.cliente || "—")}</td>
+                  <td class="ccom-td-id">${this.esc(r.condicao || "—")}</td>
                   <td>${this.esc(this.fmtDate(r.vencimento))}</td>
                   <td>${this.esc(this.fmtDate(r.pagoEm))}</td>
-                  <td class="ccom-num">${this.esc(this.money(r.valor))}</td>
+                  <td class="ccom-num">${this.esc(this.money(r.valorRecebido))}</td>
+                  <td class="ccom-td-id">${this.esc(r.contrato || "—")}</td>
+                  <td class="ccom-num">${Number(r.valor) > 0 ? this.esc(this.money(r.valor)) : "—"}</td>
+                  <td><span class="ccom-sit ${Number(r.valor) > 0 ? "ccom-sit-pago" : "ccom-sit-prog"}">${this.esc(r.situacao || "—")}</span></td>
                 </tr>`).join("")}</tbody>
               </table>
             </div>
           </div>` : ""}
-        ${!s.loading && !s.error && s.consulted && !rows.length ? `<div class="tvig-empty">Nenhuma comissão da Moura Leite ligada a um recebimento Webro nestes 30 dias.</div>` : ""}
+        ${!s.loading && !s.error && s.consulted && !rows.length ? `<div class="tvig-empty">Nenhum recebimento com condição Parcela Webro nestes 30 dias.</div>` : ""}
       </div>`;
     if (window.lucide) lucide.createIcons();
   },
