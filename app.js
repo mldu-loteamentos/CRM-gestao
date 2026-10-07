@@ -20096,7 +20096,8 @@ function applyDistratoConditionals(text, flags) {
     ['SE_PERMUTA_SALDO', !!flags.hasPermutaSaldo],
     ['SE_PAGAMENTO_BANCARIO', !!flags.hasPagamentoBancario],
     ['SE_INICIATIVA_CLIENTE', flags.iniciativa !== 'empresa'],
-    ['SE_INICIATIVA_EMPRESA', flags.iniciativa === 'empresa']
+    ['SE_INICIATIVA_EMPRESA', flags.iniciativa === 'empresa'],
+    ['SE_CONJUGE', !!flags.hasConjuge]
   ];
   blocks.forEach(([name, keep]) => {
     const re = new RegExp('\\{\\{#' + name + '\\}\\}([\\s\\S]*?)\\{\\{/' + name + '\\}\\}', 'g');
@@ -20303,10 +20304,22 @@ window.enrichCustomerForLegalDocs = async function(customer) {
           if (detail[k] != null && detail[k] !== "" && (c[k] == null || isBlankLegalField(c[k]))) c[k] = detail[k];
         });
         if (Array.isArray(detail.addresses) && detail.addresses.length) c.addresses = detail.addresses;
+        if (detail.spouse && typeof detail.spouse === "object") {
+          const merged = Object.assign({}, detail.spouse);
+          const cur = c.spouse && typeof c.spouse === "object" ? c.spouse : {};
+          Object.keys(cur).forEach((k) => {
+            if (!isBlankLegalField(cur[k])) merged[k] = cur[k];
+          });
+          c.spouse = merged;
+        }
       }
     } catch (e) {
       console.warn("Cadastro do cliente incompleto para o termo:", e);
     }
+  }
+  if (c.spouse && typeof c.spouse === "object") {
+    if (isBlankLegalField(c.spouseName) && !isBlankLegalField(c.spouse.name)) c.spouseName = c.spouse.name;
+    if (isBlankLegalField(c.spouseCpf)) c.spouseCpf = c.spouse.cpf || c.spouse.cpfCnpj || c.spouseCpf;
   }
   c.address = window.formatLegalCustomerAddress(c);
   c.rg = window.pickCustomerRg(c);
@@ -20367,8 +20380,19 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     || (typeof AppState !== "undefined" && (AppState.selectedSaleId || AppState.selectedBillId))
     || saleObj.id
     || "____";
-  const unitName = String(unitObj.name || unitObj.commercialStockName || unitObj.grouping || saleObj.unitName || "").replace(/^U\s*-\s*/i, "").trim();
-  const blockLot = [unitObj.block || saleObj.block, unitObj.lot || saleObj.lot].filter(Boolean).join("-");
+  let unitName = String(unitObj.name || unitObj.commercialStockName || unitObj.grouping || saleObj.unitName || "").replace(/^U\s*-\s*/i, "").trim();
+  let block = unitObj.block || saleObj.block || "";
+  let lot = unitObj.lot || saleObj.lot || "";
+  if (saleObj.unitId && (!unitName || !block || !lot)) {
+    const parts = String(saleObj.unitId).split("-").filter(Boolean);
+    const start = parts.length && /^u$/i.test(parts[0]) ? 1 : 0;
+    const body = parts.slice(start);
+    if (!unitName && body.length >= 2 && /^\d+$/.test(body[0])) unitName = body.slice(1).join("-");
+    else if (!unitName && body.length && !/^\d+$/.test(body[0])) unitName = body.join("-");
+    if (!block && body.length >= 3 && /^\d+$/.test(body[0])) block = body[1];
+    if (!lot && body.length >= 3 && /^\d+$/.test(body[0])) lot = body.slice(2).join("-");
+  }
+  const blockLot = [block, lot].filter(Boolean).join("-");
   const unitShort = unitName || blockLot || "";
   const unidade = extras.unidade || (
     ccId && unitShort && !String(unitShort).startsWith(String(ccId))
@@ -20383,8 +20407,8 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     ? signersRaw
     : (companyName ? [companyName] : []);
   const out = Object.assign({
-    QUADRA: unitObj.block || unitObj.quadra || saleObj.block || "____",
-    LOTE: unitObj.lot || unitObj.lote || saleObj.lot || "____",
+    QUADRA: block || unitObj.block || unitObj.quadra || saleObj.block || "____",
+    LOTE: lot || unitObj.lot || unitObj.lote || saleObj.lot || "____",
     TITULO: titulo,
     UNIDADE: unidade,
     UNIDADE_NOME: unitName || blockLot || "____",
@@ -20397,6 +20421,13 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     ESTADO_CIVIL: civil,
     PROFISSAO_CLIENTE: window.formatLegalProfession(cust.profession || cust.occupation),
     ENDERECO_CLIENTE: window.formatLegalCustomerAddress(cust),
+    NOME_CONJUGE: "",
+    CPF_CONJUGE: "",
+    RG_CONJUGE: "",
+    NACIONALIDADE_CONJUGE: "",
+    PROFISSAO_CONJUGE: "",
+    ESTADO_CIVIL_CONJUGE: "",
+    ENDERECO_CONJUGE: "",
     CIDADE_CLIENTE: cust.city || "",
     DATA_CONTRATO: saleDateStr || "____",
     DATA_CONTRATO_ORIGINAL: saleDateStr || "____",
@@ -20424,8 +20455,30 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     CREDOR_ESPOSA_RG: "",
     CREDOR_ESPOSA_CPF: ""
   }, extras.map || {});
+  const spouse = window.legalSpouseRecord ? window.legalSpouseRecord(cust) : null;
+  if (spouse) {
+    const spouseCivil = [spouse.maritalStatus || spouse.civilStatus || cust.maritalStatus || cust.civilStatus, spouse.matrimonialRegime || cust.matrimonialRegime]
+      .filter(v => !isBlankLegalField(v)).join(" - ");
+    const spouseAddr = window.formatLegalCustomerAddress(spouse) || window.formatLegalCustomerAddress(cust);
+    out.NOME_CONJUGE = String(spouse.name || spouse.spouseName || cust.spouseName || "").trim();
+    out.CPF_CONJUGE = mask(spouse.cpf || spouse.cpfCnpj || cust.spouseCpf || "");
+    out.RG_CONJUGE = window.pickCustomerRg(spouse) || "____";
+    out.NACIONALIDADE_CONJUGE = window.formatLegalNationality(spouse.nationality);
+    out.PROFISSAO_CONJUGE = window.formatLegalProfession(spouse.profession || spouse.occupation);
+    out.ESTADO_CIVIL_CONJUGE = spouseCivil || civil || "casado(a)";
+    out.ENDERECO_CONJUGE = spouseAddr || out.ENDERECO_CLIENTE || "____";
+  }
   out._PREAMBLE_SIGNERS = signers;
+  out._HAS_CONJUGE = !!spouse;
   return out;
+};
+
+window.legalSpouseRecord = function(customer) {
+  const c = customer || {};
+  const sp = c.spouse && typeof c.spouse === "object" ? c.spouse : {};
+  const name = String(sp.name || sp.spouseName || c.spouseName || "").trim();
+  if (!name || name === "-" || name === "- X -" || /^n\/?d$/i.test(name)) return null;
+  return Object.assign({}, sp, { name: name });
 };
 
 function isDistratoSignLine(line) {
@@ -20501,7 +20554,7 @@ window.centerDistratoSignatures = function(html) {
   while (i < rest.length && isDistratoSignLine(rest[i])) {
     const name = rest[i + 1] || "";
     const role = rest[i + 2] || "";
-    if (name && /promitente|confitente/i.test(role)) {
+    if (name && /promitente|confitente|c[oô]njuge/i.test(role)) {
       parties.push({ name, role });
       i += 3;
       continue;
@@ -20649,6 +20702,22 @@ function upgradeDistratoClauses(text) {
 {{/SE_PERMUTA_SALDO}}
 `;
     s = s.replace(/\{\{\/SE_PERMUTA\}\}/, saldoBlock + '{{/SE_PERMUTA}}');
+  }
+  if (!/\{\{#SE_CONJUGE\}\}/.test(s)) {
+    const qual = "{{#SE_CONJUGE}}\nCÔNJUGE: {{NOME_CONJUGE}}, {{NACIONALIDADE_CONJUGE}}, {{PROFISSAO_CONJUGE}}, {{ESTADO_CIVIL_CONJUGE}}, portador(a) da Cédula de Identidade RG nº {{RG_CONJUGE}}, inscrito(a) no CPF/MF sob o nº {{CPF_CONJUGE}}, residente e domiciliado(a) na {{ENDERECO_CONJUGE}}.\n{{/SE_CONJUGE}}";
+    if (/residente e domiciliado\(a\) na \{\{ENDERECO_CLIENTE\}\}\./.test(s)) {
+      s = s.replace(/residente e domiciliado\(a\) na \{\{ENDERECO_CLIENTE\}\}\./, "residente e domiciliado(a) na {{ENDERECO_CLIENTE}}.\n\n" + qual);
+    } else if (/PROMITENTE VENDEDORA/.test(s)) {
+      s = s.replace(/PROMITENTE VENDEDORA/, qual + "\n\nPROMITENTE VENDEDORA");
+    }
+    const sign = "{{#SE_CONJUGE}}\n__________________________________________________________________\n{{NOME_CONJUGE}}\nCônjuge\n{{/SE_CONJUGE}}";
+    if (/Promitente\(s\)\s+Comprador\(es\)/.test(s)) {
+      s = s.replace(/Promitente\(s\)\s+Comprador\(es\)/, "Promitente(s) Comprador(es)\n\n" + sign);
+    }
+  }
+  const firstLine = String(s || "").replace(/^\uFEFF/, "").split(/\r?\n/).find(ln => String(ln || "").trim()) || "";
+  if (!/^t[ií]tulo\s*:/i.test(firstLine) && !/\{\{\s*TITULO\s*\}\}/.test(firstLine)) {
+    s = "Título: {{TITULO}} | Unidade: {{UNIDADE}}\n\n" + s;
   }
   if (!/\{\{#SE_INICIATIVA_CLIENTE\}\}/.test(s) && /CLÁUSULA SEGUNDA/i.test(s)) {
     s = s.replace(
@@ -20891,7 +20960,8 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       hasNovoLote,
       hasPermutaSaldo,
       hasPagamentoBancario: isPermuta ? (!hasNovoLote && hasPermutaSaldo) : hasRestituicao,
-      iniciativa
+      iniciativa,
+      hasConjuge: !!(window.legalSpouseRecord && window.legalSpouseRecord(g_distCustomer))
     });
     clausesReady = (typeof window.upgradeCredorPlaceholdersToPreamble === "function")
       ? window.upgradeCredorPlaceholdersToPreamble(clausesReady)
@@ -20930,10 +21000,16 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       TESTEMUNHA_2_RG: w2.rg || t.test2Rg || '________________'
       }
     });
-    const filled = window.centerDistratoSignatures(applyDistratoTemplateVars(
+    let filled = window.centerDistratoSignatures(applyDistratoTemplateVars(
       (typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup : (x) => String(x || ""))(clausesReady),
       legalBase
     ));
+    const filledPlain = String(filled || "").replace(/<[^>]+>/g, "");
+    if (!/t[ií]tulo\s*:/i.test(filledPlain)) {
+      const topoTitulo = legalBase.TITULO || "____";
+      const topoUnidade = legalBase.UNIDADE || "____";
+      filled = "Título: " + topoTitulo + " | Unidade: " + topoUnidade + "\n\n" + filled;
+    }
     docHtml = `
       <div style="text-align: center; margin-bottom: 1.5rem;">
         <h2 style="color: #105436; font-size: 13pt; font-weight: bold; margin-bottom: 5px;">${docTitle}</h2>
@@ -33784,7 +33860,11 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
   (fieldMap[tipo] || []).forEach(id => {
     const el = document.getElementById(id);
     if (!el || data[id] === undefined) return;
-    if (id === 'doc-distrato-clauses' && isLegacyDistratoClauses(data[id])) return;
+    if (id === 'doc-distrato-clauses') {
+      if (isLegacyDistratoClauses(data[id])) return;
+      el.value = upgradeDistratoClauses(data[id]);
+      return;
+    }
     if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
     if (id === 'doc-reneg-clauses') {
       if (typeof isLegacyRenegClauses === 'function' && isLegacyRenegClauses(data[id])) return;
