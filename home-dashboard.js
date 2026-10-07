@@ -648,9 +648,16 @@ const HomeDashboard = {
     return n.includes("OPERADOR COBRANCA");
   },
 
+  showsOperadorHome(user) {
+    if (this.isCobrancaHome(user)) return true;
+    if (typeof window.isCrmAdministrator === "function") return window.isCrmAdministrator(user);
+    const n = String((user && user.profile_name) || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return n.includes("ADMINISTRADOR");
+  },
+
   init() {
     const user = window.AppState?.currentUser;
-    const isOperador = this.isCobrancaHome(user);
+    const isOperador = this.showsOperadorHome(user);
     
     if (isOperador) {
       document.getElementById('home-em-construcao-container').style.display = 'none';
