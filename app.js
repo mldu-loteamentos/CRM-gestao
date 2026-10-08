@@ -4489,6 +4489,26 @@ window.stripRemovedCrmUsers = function(raw) {
   return JSON.stringify(kept);
 };
 
+window.crmUserEditedAt = function(u) {
+  const n = Number(u && u.editedAt);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+window.crmUserNameIsAzure = function(name) {
+  return /\|\s*moura\s+leite\s*$/i.test(String(name || "").trim());
+};
+
+window.pickCrmUserName = function(prev, next) {
+  const prevName = String((prev && prev.name) || "").trim();
+  const nextName = String((next && next.name) || "").trim();
+  const ap = window.crmUserEditedAt(prev);
+  const an = window.crmUserEditedAt(next);
+  if (ap !== an) return (an > ap ? nextName : prevName) || nextName || prevName;
+  if (window.crmUserNameIsAzure(nextName) && prevName && !window.crmUserNameIsAzure(prevName)) return prevName;
+  if (window.crmUserNameIsAzure(prevName) && nextName && !window.crmUserNameIsAzure(nextName)) return nextName;
+  return nextName || prevName;
+};
+
 window.mergeCrmUsers = function(localStr, cloudStr) {
   let local = [];
   let cloud = [];
@@ -4540,6 +4560,9 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
     }
     if (prev.sienge_user && !next.sienge_user) merged.sienge_user = prev.sienge_user;
     if (prev.phone && !next.phone) merged.phone = prev.phone;
+    merged.name = window.pickCrmUserName(prev, next);
+    const editedAt = Math.max(window.crmUserEditedAt(prev), window.crmUserEditedAt(next));
+    if (editedAt) merged.editedAt = editedAt;
     byKey.set(key, merged);
   };
   cloud.forEach(put);
@@ -9446,7 +9469,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   if (body) {
     body.innerHTML = "";
     if (clientList.length === 0) {
-      body.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
     } else {
       const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
 
@@ -9483,7 +9506,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               </div>
             </td>
             <td style="${cellBase} width:1%; padding-left:10px; padding-right:10px;"></td>
-            <td colspan="4" style="${cellBase}"></td>
+            <td colspan="5" style="${cellBase}"></td>
             <td style="${cellBase} white-space:nowrap; padding-right:10px; letter-spacing:0; text-transform:none;" title="Soma do R$ atualizado em atraso neste grupo">
               <span style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
                 R$ ${valueLabel}
@@ -9549,6 +9572,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           </td>
           <td style="white-space: nowrap;">
             <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
+          </td>
+          <td class="fila-signal-cell" data-fila-key="${String(client.customerId)}-${String(client.saleId)}">
+            ${typeof window.filaSignalHtml === "function" ? window.filaSignalHtml(client) : ""}
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <span class="badge" style="${getOperatorBadgeStyle(client.assignedOperator)}">${client.assignedOperator}</span>
@@ -9632,6 +9658,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         `;
         body.appendChild(row);
       });
+      if (typeof window.ensureFilaSignalsIndex === "function") window.ensureFilaSignalsIndex();
+      if (window.lucide) lucide.createIcons();
     }
   }
 
@@ -26490,6 +26518,11 @@ async function loadWeSendTab() {
     }
     if (hasUnpaidPU(bill)) grouped[key].isZeroPaid = true;
     if (sale && sale.percPaid != null && Number(sale.percPaid) === 0) grouped[key].isZeroPaid = true;
+    (bill.defaulterInstallments || []).forEach((inst) => {
+      if (typeof window.installmentIsEntradaWebro === "function" && window.installmentIsEntradaWebro(inst)) {
+        grouped[key].entradaWebro = true;
+      }
+    });
   });
 
   const zpSet = new Set((window.zeroPaidList || []).map(c => String(c.customerId) + "-" + String(c.saleId)));
@@ -26566,21 +26599,32 @@ async function loadWeSendTab() {
 
   const allItems = Object.values(grouped).filter(matchesFilters);
   const zeroList = [];
+  const entradaList = [];
   const d61List = [];
+  const entradaDays = 31;
   allItems.forEach(item => {
     const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
     const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
       ? window.clientAppliesClausulaSuspensiva(item)
       : (!!cc.clausula_suspensiva_ativa && !!item.hasUnpaidSinal);
     const hasNex = window.nexHasLetter(item.customerId, item.saleId);
+    const fila = filaByKey[String(item.customerId) + "-" + String(item.saleId)];
+    const entradaWebro = !item.isZeroPaid && (
+      !!item.entradaWebro
+      || (fila && typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(fila))
+    );
     if (item.isZeroPaid && item.maxDaysDelay >= regua.zero && !aplicaSuspensiva && !hasNex
         && window.nexCrossedZeroAfterCutoff(item.maxDaysDelay, regua.zero)) {
       zeroList.push(item);
-    } else if (!item.isZeroPaid && item.maxDaysDelay >= regua.standard && !hasNex && window.nexCrossed61AfterCutoff(item.maxDaysDelay)) {
+    } else if (entradaWebro && item.maxDaysDelay >= entradaDays && !hasNex
+        && window.nexCrossedZeroAfterCutoff(item.maxDaysDelay, entradaDays)) {
+      entradaList.push(item);
+    } else if (!item.isZeroPaid && !entradaWebro && item.maxDaysDelay >= regua.standard && !hasNex && window.nexCrossed61AfterCutoff(item.maxDaysDelay)) {
       d61List.push(item);
     }
   });
   zeroList.sort((a, b) => (b.maxDaysDelay || 0) - (a.maxDaysDelay || 0));
+  entradaList.sort((a, b) => (b.maxDaysDelay || 0) - (a.maxDaysDelay || 0));
   d61List.sort((a, b) => (b.maxDaysDelay || 0) - (a.maxDaysDelay || 0));
 
   const lastContactOf = (item) => {
@@ -26629,6 +26673,7 @@ async function loadWeSendTab() {
   };
 
   fillBody("wesend-zero-body", zeroList, "chk-wesend-zero", "elegiveis-zero", true);
+  fillBody("wesend-entrada-body", entradaList, "chk-wesend-entrada", "elegiveis-entrada", false);
   fillBody("wesend-61-body", d61List, "chk-wesend-61", "elegiveis-61", false);
   if (typeof window.updateNexEligibleHelp === "function") window.updateNexEligibleHelp();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
@@ -28859,6 +28904,11 @@ window.updateNexEligibleHelp = function() {
     if (window.lucide) lucide.createIcons();
   }
 
+  const entradaEl = document.getElementById("nex-help-entrada");
+  if (entradaEl) {
+    entradaEl.innerHTML = "Entram nesta lista clientes com a tag <strong>Boleto WEBRO</strong> que estão pagando entrada, com atraso a partir de <strong>31 dias</strong>, ainda <strong>sem NEX gerada</strong>. A notificação segue o mesmo controle dos clientes 0% pago.";
+  }
+
   const d61El = document.getElementById("nex-help-61");
   if (d61El) {
     d61El.innerHTML = "Entram nesta lista os demais clientes (já houve algum pagamento), com atraso a partir de <strong>" + stdDays + " dias</strong> conforme a <strong>régua de cobrança</strong>, e ainda <strong>sem NEX gerada</strong>. Se o prazo da régua mudar, esta lista acompanha o novo valor automaticamente.";
@@ -29018,11 +29068,177 @@ window.nexHasLetter = function(customerId, saleId) {
 
 window.nexHasLetterForClient = function(client) {
   if (!client) return false;
+  return !!window.nexLetterForClient(client);
+};
+
+window.nexLetterForClient = function(client) {
+  if (!client || typeof window.nexCollectAll !== "function") return null;
   const displayed = String((client.billIds && client.billIds[0]) || "").replace(/^B-/, "").split("-")[0];
   const sid = String(client.saleId || "").replace(/^B-/, "").split("-")[0];
   const matchId = displayed || sid;
-  if (!matchId) return false;
-  return window.nexHasLetter(client.customerId, matchId);
+  const cid = String(client.customerId || "");
+  if (!cid || !matchId) return null;
+  const hits = window.nexCollectAll().filter(it => {
+    if (String(it.customerId) !== cid) return false;
+    if (typeof window.nexLostValidityByPayment === "function" && window.nexLostValidityByPayment(it).lost) return false;
+    const t = String(it.titulo || it.saleId || "").replace(/^B-/, "").split("-")[0];
+    return t && t === matchId;
+  });
+  hits.sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
+  return hits[0] || null;
+};
+
+window.filaClientFromKey = function(key) {
+  const want = String(key || "");
+  return (window.clientList || []).find(c => c && String(c.customerId) + "-" + String(c.saleId) === want) || null;
+};
+
+window.filaClientSignalKeys = function(client) {
+  if (typeof _vcClientLookupKeys === "function") return _vcClientLookupKeys(client);
+  const keys = [];
+  const add = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (s && s !== "undefined" && s !== "null") keys.push(s);
+  };
+  if (!client) return keys;
+  add(client.saleId);
+  add(client.customerId);
+  (client.billIds || []).forEach(add);
+  const cc = String(client.costCenterId || "").split(",")[0].trim();
+  const unit = String(client.unitName || "").replace(/^Quadra-Lote:\s*/i, "").trim().toUpperCase();
+  if (cc && unit) keys.push("unit:" + cc + ":" + unit);
+  return keys;
+};
+
+window.filaLookupSignals = function(client) {
+  const idx = window._filaSignals;
+  const keys = window.filaClientSignalKeys(client);
+  let pending = null;
+  let construction = null;
+  keys.forEach((k) => {
+    if (!idx) return;
+    if (!pending && idx.pending && idx.pending[k]) pending = idx.pending[k];
+    const built = idx.construction && idx.construction[k];
+    if (built && (!construction || String(built.date || "") > String(construction.date || ""))) construction = built;
+  });
+  return { pending: pending, construction: construction, ready: !!(idx && idx.ready) };
+};
+
+window.filaSignalHtml = function(client) {
+  const letter = window.nexLetterForClient(client);
+  const mailColor = letter ? "#105436" : "#cbd5e1";
+  const sig = window.filaLookupSignals(client);
+  const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
+    || (sig.pending && sig.pending.fotoFrente)
+    || "";
+  const showHouse = !!(sig.pending || sig.construction);
+  const houseColor = photo ? "#105436" : "#c2410c";
+  const house = showHouse
+    ? `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`
+    : "";
+  return `<span class="fila-signal" data-kind="mail" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="mail" style="width:14px;height:14px;color:${mailColor};"></i></span>${house}`;
+};
+
+window.paintFilaSignalCells = function() {
+  document.querySelectorAll("#defaulters-table-body td.fila-signal-cell").forEach((td) => {
+    const client = window.filaClientFromKey(td.getAttribute("data-fila-key"));
+    if (!client) return;
+    td.innerHTML = window.filaSignalHtml(client);
+  });
+  if (window.lucide) lucide.createIcons();
+};
+
+window.ensureFilaSignalsIndex = function() {
+  if (window._filaSignals && window._filaSignals.ready && Date.now() - window._filaSignals.at < 120000) {
+    window.paintFilaSignalCells();
+    return Promise.resolve(window._filaSignals);
+  }
+  if (window._filaSignalsPromise) return window._filaSignalsPromise;
+  window._filaSignalsPromise = (async () => {
+    const pending = {};
+    const construction = {};
+    const remember = (bucket, keys, value, preferNewer) => {
+      const stamp = (item) => String((item && (item._sortDate || item.date || item.createdAt)) || "");
+      (keys || []).forEach((k) => {
+        if (!k) return;
+        const prev = bucket[k];
+        if (!prev || !preferNewer || stamp(value) >= stamp(prev)) bucket[k] = value;
+      });
+    };
+    if (window.firebaseDb && window.firebaseCollections) {
+      const { collection, getDocs, query, where } = window.firebaseCollections;
+      const snap = await getDocs(query(collection(window.firebaseDb, "vistorias"), where("status", "!=", "concluida")));
+      snap.forEach((docSnap) => {
+        const data = Object.assign({ id: docSnap.id }, docSnap.data() || {});
+        if (data.isTest) return;
+        const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
+        data._sortDate = typeof _vcPendingRequestDate === "function" ? _vcPendingRequestDate(data) : "";
+        remember(pending, keys, data, true);
+      });
+      const checks = await getDocs(collection(window.firebaseDb, "construction_checks"));
+      checks.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        const stage = String(data.stage || "").trim().toUpperCase();
+        if (!stage || stage === "SEM CONSTRUÇÃO" || stage === "SEM CONSTRUCAO" || stage === "TERRAPLANAGEM") return;
+        const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
+        remember(construction, keys, data, true);
+      });
+    }
+    window._filaSignals = { ready: true, at: Date.now(), pending: pending, construction: construction };
+    window._filaSignalsPromise = null;
+    window.paintFilaSignalCells();
+    return window._filaSignals;
+  })().catch((err) => {
+    window._filaSignalsPromise = null;
+    console.warn("[Fila] sinais de NEX e vistoria:", err);
+  });
+  return window._filaSignalsPromise;
+};
+
+window.hideFilaSignalTip = function() {
+  const tip = document.getElementById("fila-signal-tip");
+  if (tip) tip.style.display = "none";
+};
+
+window.showFilaSignalTip = function(event, el) {
+  const td = el && el.closest ? el.closest("td") : null;
+  const client = td ? window.filaClientFromKey(td.getAttribute("data-fila-key")) : null;
+  if (!client) return;
+  let tip = document.getElementById("fila-signal-tip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "fila-signal-tip";
+    tip.style.cssText = "position:fixed;z-index:99999;display:none;pointer-events:none;max-width:240px;";
+    document.body.appendChild(tip);
+  }
+  const kind = el.getAttribute("data-kind");
+  let inner = "";
+  if (kind === "mail") {
+    const letter = window.nexLetterForClient(client);
+    inner = letter
+      ? `<div style="font-weight:800;color:#105436;margin-bottom:4px;">NEX enviada</div><div>${window.nexFmtBr(letter.date || letter.createdAt)}</div>`
+      : `<div style="font-weight:800;color:#64748b;">Sem NEX enviada</div>`;
+  } else {
+    const sig = window.filaLookupSignals(client);
+    const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
+      || (sig.pending && sig.pending.fotoFrente)
+      || "";
+    const status = sig.pending
+      ? (sig.pending.status === "aguardando_validacao" ? "Vistoria em andamento — aguardando validação" : "Vistoria em andamento")
+      : (sig.construction && sig.construction.stage ? "Construção: " + sig.construction.stage : "Construção registrada");
+    const img = photo
+      ? `<img src="${String(photo).replace(/"/g, "&quot;")}" alt="Foto da vistoria" style="display:block;width:200px;height:140px;object-fit:cover;border-radius:8px;margin-bottom:8px;">`
+      : "";
+    inner = `${img}<div style="font-weight:700;color:#105436;">${String(status).replace(/</g, "&lt;")}</div>`;
+  }
+  tip.innerHTML = `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.14);padding:10px;">${inner}</div>`;
+  tip.style.display = "block";
+  let left = event.clientX + 12;
+  let top = event.clientY + 12;
+  if (left + 250 > window.innerWidth) left = Math.max(8, event.clientX - 250);
+  if (top + tip.offsetHeight > window.innerHeight) top = Math.max(8, event.clientY - tip.offsetHeight - 12);
+  tip.style.left = left + "px";
+  tip.style.top = top + "px";
 };
 
 window.nexCorreiosCheckDays = function() {
@@ -29067,20 +29283,24 @@ window.switchWesendPanel = function(panel) {
   sessionStorage.setItem("wesendActivePanel", panel);
   const follow = document.getElementById("wesend-panel-followup");
   const zero = document.getElementById("wesend-panel-zero");
+  const entrada = document.getElementById("wesend-panel-entrada");
   const d61 = document.getElementById("wesend-panel-61");
   const cfg = document.getElementById("wesend-panel-config");
   const filters = document.getElementById("wesend-filters-card");
   const b1 = document.getElementById("btn-wesend-followup");
   const b2 = document.getElementById("btn-wesend-zero");
+  const bEntrada = document.getElementById("btn-wesend-entrada");
   const b3 = document.getElementById("btn-wesend-61");
   const b4 = document.getElementById("btn-wesend-config");
   if (follow) follow.style.display = panel === "followup" ? "block" : "none";
   if (zero) zero.style.display = panel === "elegiveis-zero" ? "block" : "none";
+  if (entrada) entrada.style.display = panel === "elegiveis-entrada" ? "block" : "none";
   if (d61) d61.style.display = panel === "elegiveis-61" ? "block" : "none";
   if (cfg) cfg.style.display = panel === "config" ? "block" : "none";
   if (filters) filters.style.display = panel === "config" ? "none" : "";
   if (b1) b1.classList.toggle("active", panel === "followup");
   if (b2) b2.classList.toggle("active", panel === "elegiveis-zero");
+  if (bEntrada) bEntrada.classList.toggle("active", panel === "elegiveis-entrada");
   if (b3) b3.classList.toggle("active", panel === "elegiveis-61");
   if (b4) b4.classList.toggle("active", panel === "config");
   if (panel === "config" && typeof window.renderNexDueConfigPanel === "function") window.renderNexDueConfigPanel();
@@ -29689,10 +29909,18 @@ window.renderNexFollowup = function() {
   });
   if (!filtered.length) {
     const prazo = window.nexCorreiosCheckDays();
-    body.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias, pendente de consulta ou com ${prazo} dias ou mais sem AR digital.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de consulta ou com ${prazo} dias ou mais sem AR digital.</td></tr>`;
     return;
   }
-  body.innerHTML = filtered.map(it => {
+  const ageOf = (it) => {
+    const sent = window.nexParseIso(it.date || it.createdAt);
+    const days = sent ? window.nexDaysBetween(sent, window.nexTodayIso()) : 0;
+    return Number(days) || 0;
+  };
+  const late = filtered.filter(it => window.nexNeedsCorreiosCheck(it)).sort((a, b) => ageOf(b) - ageOf(a));
+  const lateIds = new Set(late.map(it => it.id));
+  const onTime = filtered.filter(it => !lateIds.has(it.id));
+  const rowHtml = (it) => {
     const valid = window.nexIsLegallyValid(it);
     const name = window.nexResolveCustomerName(it.customerId, it.titulo, it);
     const unitLabel = window.nexUnitLabelForSale(it.customerId, it.titulo, it);
@@ -29716,7 +29944,16 @@ window.renderNexFollowup = function() {
       <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
       <td style="text-align:center;" onclick="event.stopPropagation()">${canDelete ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button>` : `<span title="Somente o autor da NEX ou o administrador pode excluir" style="color:#64748b;font-size:0.75rem;">—</span>`}</td>
     </tr>`;
-  }).join("");
+  };
+  const section = (title, items, tone) => {
+    if (!items.length) return "";
+    const bg = tone === "late" ? "#fff7ed" : "#f0fdf4";
+    const color = tone === "late" ? "#c2410c" : "#166534";
+    const label = items.length === 1 ? "1 consulta" : items.length + " consultas";
+    return `<tr><td colspan="12" style="background:${bg};color:${color};font-weight:800;font-size:0.78rem;letter-spacing:0.03em;text-transform:uppercase;padding:8px 12px;">${title} · ${label}</td></tr>`
+      + items.map(rowHtml).join("");
+  };
+  body.innerHTML = section("No prazo de consulta", onTime, "ok") + section("Fora do prazo para consultar", late, "late");
 };
 
 window.updateNexTrackingFollowup = async function(id, value) {

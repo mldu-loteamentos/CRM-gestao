@@ -240,6 +240,21 @@ const ConfigUsersApp = {
     return savedPerms;
   },
 
+  restoreNaiaraCadastroName() {
+    const email = "naiara.cassio@mouraleite.com.br";
+    const cadastro = "NAIARA DE CASSIO LAMBASSO";
+    let changed = false;
+    (this.users || []).forEach((u) => {
+      if (!u || String(u.email || "").toLowerCase().trim() !== email) return;
+      if (!window.crmUserNameIsAzure || !window.crmUserNameIsAzure(u.name)) return;
+      if (window.crmUserEditedAt && window.crmUserEditedAt(u)) return;
+      u.name = cadastro;
+      u.editedAt = Date.now();
+      changed = true;
+    });
+    return changed;
+  },
+
   persistUsers() {
     const raw = JSON.stringify(this.users);
     try {
@@ -514,6 +529,9 @@ const ConfigUsersApp = {
     try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
     try { this.migrateLuceliaToBackOffice(); } catch (e) { console.warn("[ConfigUsers] migrate lucelia:", e); }
+    if (this.restoreNaiaraCadastroName()) {
+      try { await this.persistUsers(); } catch (e) { console.warn("[ConfigUsers] nome Naiara:", e); }
+    }
     } catch (e) {
       console.error("[ConfigUsers] loadUsers:", e);
       if (!Array.isArray(this.profiles) || !this.profiles.length) {
@@ -1576,6 +1594,7 @@ const ConfigUsersApp = {
           const_cities: checkConstruction ? constCities : [],
           manager_name: managerName,
           manager_email: managerEmail,
+          editedAt: Date.now(),
           badge_color: badgeColor,
           resend_billet: resendBillet,
           assina_testemunha: assinaTestemunha,

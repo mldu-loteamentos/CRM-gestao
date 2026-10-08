@@ -743,6 +743,9 @@ body {
 .fila-fit-table col.fila-col-tit { width: 6.4%; }
 .fila-fit-table col.fila-col-unid { width: 10.5%; }
 .fila-fit-table col.fila-col-op { width: 11%; }
+#defaulters-table col.fila-col-unid { width: 9%; }
+#defaulters-table col.fila-col-signals { width: 3.6%; }
+#defaulters-table col.fila-col-op { width: 8.9%; }
 .fila-fit-table col.fila-col-aging { width: 14.2%; }
 .fila-fit-table col.fila-col-venc { width: 5%; }
 .fila-fit-table col.fila-col-val { width: 8%; }
@@ -804,7 +807,7 @@ body {
   padding: 2px 5px !important;
   gap: 3px !important;
 }
-#defaulters-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(6),
+#defaulters-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(7),
 #zeropaid-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(6),
 #subjudice-table.fila-fit-table tbody tr:not(.fila-group-header) td:nth-child(7) {
   white-space: normal;
@@ -812,6 +815,20 @@ body {
 .fila-fit-table tbody tr:not(.fila-group-header) td:last-child {
   white-space: nowrap;
   overflow: hidden;
+}
+.fila-fit-table tbody td.fila-signal-cell {
+  overflow: visible;
+  text-align: center;
+  white-space: nowrap;
+}
+.fila-signal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 1px;
+  vertical-align: middle;
 }
 .fila-fit-table .fila-group-header td {
   overflow: hidden;

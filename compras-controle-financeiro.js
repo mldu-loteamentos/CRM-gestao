@@ -176,8 +176,9 @@ ComprasControleApp.applyFilters = function () {
     if (cc.size && !cc.has(String(r.ccId))) return false;
     if (cred.size && !cred.has(this.fold(r.credor))) return false;
     if (!this.rowMatchesDepartment(r)) return false;
-    if (start && r.vencimento && r.vencimento < start) return false;
-    if (end && r.vencimento && r.vencimento > end) return false;
+    const shownDate = this.dataRef(r);
+    if (start && (!shownDate || shownDate < start)) return false;
+    if (end && (!shownDate || shownDate > end)) return false;
     if (r.forecast && r.pago) return false;
     if (status !== "todos" && r.natureza !== status) return false;
     if (qTitulo) {
@@ -390,7 +391,7 @@ ComprasControleApp.paintFilters = function () {
       id: id,
       onToggleOpen() {
         if (self.state.loading) return;
-        if (key !== "companyIds" && key !== "deptIds" && !self.state.consulted) return;
+        if (key !== "companyIds" && !self.state.consulted) return;
         self.state[openKey] = !self.state[openKey];
         self.paintFilters();
       },
@@ -409,7 +410,7 @@ ComprasControleApp.paintFilters = function () {
       toggleId(itemId, on) {
         if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
-        if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+        if (!self.state.consulted && key !== "companyIds") return;
         const sid = String(itemId);
         const cur = self.state[key].slice();
         self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
@@ -420,7 +421,7 @@ ComprasControleApp.paintFilters = function () {
       },
       selectAll() {
         if (self.state.loading) return;
-        if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+        if (!self.state.consulted && key !== "companyIds") return;
         self.state[key] = itemsFn().map((x) => String(x.id));
         self.state[openKey] = true;
         self.applyFilters();
@@ -429,6 +430,7 @@ ComprasControleApp.paintFilters = function () {
       },
       selectNone() {
         if (self.state.loading) return;
+        if (!self.state.consulted && key !== "companyIds") return;
         if (key === "deptIds" && self.accessibleDepartments()) {
           self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
         } else {
@@ -517,9 +519,7 @@ ComprasControleApp.renderList = function () {
     box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
   }
-  const sortKey = this.state.sortKey || "data";
-  const arrow = this.state.sortDir === "desc" ? "▼" : "▲";
-  const th = (key, label) => `<th><button type="button" class="cfin-sort" onclick="ComprasControleApp.toggleSort('${key}')">${label}${sortKey === key ? " " + arrow : ""}</button></th>`;
+  const th = (key, label) => `<th onclick="ComprasControleApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
   const body = rows.map((r) => {
     const subst = r.substituido
       ? `<span class="cprev-tag cprev-tag-subst">Substituído${r.tituloSubstituto ? " · " + this.esc(r.tituloSubstituto) : ""}</span>`
@@ -545,7 +545,6 @@ ComprasControleApp.renderList = function () {
   box.innerHTML = `
     <style>
       #cfin-table thead th { white-space: nowrap; }
-      #cfin-table .cfin-sort { background: none; border: 0; padding: 0; margin: 0; color: #105436; font: inherit; font-weight: 800; font-size: 0.72rem; letter-spacing: 0.02em; text-transform: uppercase; cursor: pointer; }
       #cfin-table tbody tr.cprev-row { cursor: default; }
       #cfin-table .cprev-col-venc { width: 108px; }
     </style>
@@ -563,6 +562,7 @@ ComprasControleApp.renderList = function () {
         <tbody>${body}</tbody>
       </table>
     </div>`;
+  if (window.lucide) lucide.createIcons();
 };
 
 ComprasControleApp.exportExcel = function () {
@@ -635,7 +635,7 @@ ComprasControleApp.renderPage = function () {
                 onchange="ComprasControleApp.onField('endDate', this.value)">
             </div>
           </div>
-          <div id="cfin-dept-slot" class="ecau-slot cprev-cell-dept${deptLocked ? " is-locked" : ""}"></div>
+          <div id="cfin-dept-slot" class="ecau-slot cprev-cell-dept${refineLocked || deptLocked ? " is-locked" : ""}"></div>
           <div class="ecau-actions">
             <div class="ecau-actions-main">
               <button type="button" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""} onclick="ComprasControleApp.consultar()">
@@ -649,7 +649,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint"><strong>Pago</strong> já baixou. <strong>Programado</strong> é título real em aberto. <strong>Previsão</strong> ainda não virou lançamento. Previsão já paga não entra nesta lista. Em <strong>Venc./Pagto</strong>, o pago mostra a data do pagamento.</p>
+        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. Em <strong>Venc./Pagto</strong>, o pago mostra o pagamento, e essa data também precisa estar no período.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>

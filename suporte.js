@@ -51,6 +51,7 @@
       { id: "notificacoes", label: "Notificações", abas: [
         { id: "followup", label: "Follow-up de NEX" },
         { id: "elegiveis-zero", label: "Elegíveis 0% pago" },
+        { id: "elegiveis-entrada", label: "Elegíveis Pgto Entrada" },
         { id: "elegiveis-61", label: "Demais clientes elegíveis" }
       ]},
       { id: "config_cr", label: "Configurações (CR)", abas: [

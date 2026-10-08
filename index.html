@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1125">
+  <link rel="stylesheet" href="style.css?v=1130">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1125" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1130" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1331,7 +1331,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1125 &nbsp;&middot;&nbsp; 08/10/2026
+            v1.0.1130 &nbsp;&middot;&nbsp; 08/10/2026
           </span>
         </div>
       </div>
@@ -2656,7 +2656,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1125" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1130" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3308,7 +3308,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1125" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1130" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -3457,7 +3457,7 @@ ____________________________________________
           <div class="table-container fila-fit-wrap" style="margin-top: 1.5rem; max-height: calc(100vh - 250px); overflow-y: auto;">
             <table class="custom-table fila-fit-table" id="defaulters-table">
               <colgroup>
-                <col class="fila-col-id"><col class="fila-col-cli"><col class="fila-col-tit"><col class="fila-col-unid"><col class="fila-col-op">
+                <col class="fila-col-id"><col class="fila-col-cli"><col class="fila-col-tit"><col class="fila-col-unid"><col class="fila-col-signals"><col class="fila-col-op">
                 <col class="fila-col-aging"><col class="fila-col-venc"><col class="fila-col-val"><col class="fila-col-date"><col class="fila-col-date"><col class="fila-col-acao">
               </colgroup>
               <thead>
@@ -3466,6 +3466,7 @@ ____________________________________________
                   <th onclick="toggleSort('customerName')" style="cursor: pointer; user-select: none;">Cliente <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('title')" style="cursor: pointer; user-select: none; text-align: left;">Título <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('projectName')" style="cursor: pointer; user-select: none;">Unidade <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
+                  <th title="NEX e construção" style="text-align: center;"></th>
                   <th onclick="toggleSort('assignedOperator')" style="cursor: pointer; user-select: none; text-align: center;">Operador <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('maxDaysDelay')" title="Dias em Atraso (Aging)" style="cursor: pointer; user-select: none; text-align: center;">Atraso <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
                   <th onclick="toggleSort('billCount')" style="cursor: pointer; user-select: none; text-align: center;">Venc. <i data-lucide="chevrons-up-down" style="width: 11px; vertical-align: middle;"></i></th>
@@ -4005,13 +4006,14 @@ ____________________________________________
           <div class="customer-tabs-menu" style="display:flex; gap:8px; flex-wrap:wrap; margin-top: 8px;">
             <button type="button" class="customer-tab-btn active" id="btn-wesend-followup" onclick="window.switchWesendPanel('followup')">Follow-up de NEX</button>
             <button type="button" class="customer-tab-btn" id="btn-wesend-zero" onclick="window.switchWesendPanel('elegiveis-zero')">Elegíveis 0% pago</button>
+            <button type="button" class="customer-tab-btn" id="btn-wesend-entrada" onclick="window.switchWesendPanel('elegiveis-entrada')">Elegíveis Pgto Entrada</button>
             <button type="button" class="customer-tab-btn" id="btn-wesend-61" onclick="window.switchWesendPanel('elegiveis-61')">Demais clientes elegíveis</button>
             <button type="button" class="customer-tab-btn" id="btn-wesend-config" onclick="window.switchWesendPanel('config')">Configurações</button>
           </div>
 
           <div id="wesend-panel-followup" style="margin-top: 1.2rem;">
             <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 12px;">
-              Cartas no prazo de consulta (até 10 dias após o envio) ou pendentes de consulta nos Correios.
+              O primeiro bloco fica no prazo de consulta. O bloco de baixo reúne as consultas que já passaram do prazo e ainda estão sem AR digital.
               O status da carta só pode ser alterado depois de informar o objeto de rastreio e anexar o AR Digital.
               Se o cliente pagou depois do envio, a NEX sai desta lista e perde validade jurídica.
             </p>
@@ -4074,6 +4076,36 @@ ____________________________________________
                   </tr>
                 </thead>
                 <tbody id="wesend-zero-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="wesend-panel-entrada" style="display:none; margin-top: 1.2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+              <h3 style="margin:0; font-size:1rem; color:var(--color-primary);">Elegíveis Pgto Entrada</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.gerarDocumentosFisicosNEXEmMassa('.chk-wesend-entrada')">
+                <i data-lucide="printer" style="width:14px;"></i> Gerar PDF selecionados
+              </button>
+            </div>
+            <div id="nex-help-entrada" style="font-size:0.85rem; color:var(--color-text-muted); margin:0 0 12px; line-height:1.45;"></div>
+            <div class="table-container" style="max-height: calc(100vh - 280px); overflow:auto;">
+              <table class="custom-table" id="wesend-entrada-table">
+                <thead>
+                  <tr>
+                    <th style="width:40px;text-align:center;"><input type="checkbox" onchange="window.toggleWeSendSelectAll(this.checked, '.chk-wesend-entrada')"></th>
+                    <th style="width:1%;text-align:center;">ID</th>
+                    <th>Cliente</th>
+                    <th>TÍTULO</th>
+                    <th>Unidade</th>
+                    <th style="text-align:center;">Operador</th>
+                    <th style="text-align:center;">Dias em Atraso (Aging)</th>
+                    <th style="text-align:center;">Vencidas</th>
+                    <th>Valor atualizado</th>
+                    <th style="text-align:center;">Último Contato</th>
+                    <th style="text-align:center;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="wesend-entrada-body"></tbody>
               </table>
             </div>
           </div>
@@ -7590,66 +7622,66 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1125"></script>
+  <script type="module" src="firebase-config.js?v=1130"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1125"></script>
-  <script defer src="sienge-api.js?v=1125"></script>
-  <script defer src="consumo-api.js?v=1125"></script>
-  <script defer src="azure-auth.js?v=1125"></script>
-  <script defer src="app.js?v=1125"></script>
-  <script defer src="empresa-filter.js?v=1125"></script>
-  <script defer src="cartao-taxas.js?v=1125"></script>
-  <script defer src="alcada-desconto.js?v=1125"></script>
-  <script defer src="alcada-distrato.js?v=1125"></script>
-  <script defer src="home-dashboard.js?v=1125"></script>
-  <script defer src="anexos.js?v=1125"></script>
-  <script defer src="contas-pagar.js?v=1125"></script>
-  <script defer src="compras-previsoes.js?v=1125"></script>
-  <script defer src="compras-controle-financeiro.js?v=1125"></script>
-  <script defer src="compras-dashboard.js?v=1125"></script>
-  <script defer src="engenharia-caucao.js?v=1125"></script>
-  <script defer src="config-tags.js?v=1125"></script>
-  <script defer src="config-users.js?v=1125"></script>
-  <script defer src="suporte.js?v=1125"></script>
-  <script defer src="construcao.js?v=1125"></script>
-  <script defer src="empresas.js?v=1125"></script>
-  <script defer src="relacionamento.js?v=1125"></script>
-  <script defer src="cessao-direitos.js?v=1125"></script>
-  <script defer src="compromissario.js?v=1125"></script>
-  <script defer src="comercial.js?v=1125"></script>
-  <script defer src="estoque-comercial.js?v=1125"></script>
-  <script defer src="condicoes-pagamento.js?v=1125"></script>
-  <script defer src="tabelas-vigentes.js?v=1125"></script>
-  <script defer src="controle-comissao.js?v=1125"></script>
-  <script defer src="recebimentos-webro.js?v=1125"></script>
-  <script defer src="centros-custo.js?v=1125"></script>
-  <script defer src="marketing.js?v=1125"></script>
-  <script defer src="plano-financeiro.js?v=1125"></script>
-  <script defer src="orcamento-data.js?v=1125"></script>
-  <script defer src="orcamento-2026.js?v=1125"></script>
-  <script defer src="orcamento.js?v=1125"></script>
-  <script defer src="prestacao-contas.js?v=1125"></script>
+  <script defer src="data.js?v=1130"></script>
+  <script defer src="sienge-api.js?v=1130"></script>
+  <script defer src="consumo-api.js?v=1130"></script>
+  <script defer src="azure-auth.js?v=1130"></script>
+  <script defer src="app.js?v=1130"></script>
+  <script defer src="empresa-filter.js?v=1130"></script>
+  <script defer src="cartao-taxas.js?v=1130"></script>
+  <script defer src="alcada-desconto.js?v=1130"></script>
+  <script defer src="alcada-distrato.js?v=1130"></script>
+  <script defer src="home-dashboard.js?v=1130"></script>
+  <script defer src="anexos.js?v=1130"></script>
+  <script defer src="contas-pagar.js?v=1130"></script>
+  <script defer src="compras-previsoes.js?v=1130"></script>
+  <script defer src="compras-controle-financeiro.js?v=1130"></script>
+  <script defer src="compras-dashboard.js?v=1130"></script>
+  <script defer src="engenharia-caucao.js?v=1130"></script>
+  <script defer src="config-tags.js?v=1130"></script>
+  <script defer src="config-users.js?v=1130"></script>
+  <script defer src="suporte.js?v=1130"></script>
+  <script defer src="construcao.js?v=1130"></script>
+  <script defer src="empresas.js?v=1130"></script>
+  <script defer src="relacionamento.js?v=1130"></script>
+  <script defer src="cessao-direitos.js?v=1130"></script>
+  <script defer src="compromissario.js?v=1130"></script>
+  <script defer src="comercial.js?v=1130"></script>
+  <script defer src="estoque-comercial.js?v=1130"></script>
+  <script defer src="condicoes-pagamento.js?v=1130"></script>
+  <script defer src="tabelas-vigentes.js?v=1130"></script>
+  <script defer src="controle-comissao.js?v=1130"></script>
+  <script defer src="recebimentos-webro.js?v=1130"></script>
+  <script defer src="centros-custo.js?v=1130"></script>
+  <script defer src="marketing.js?v=1130"></script>
+  <script defer src="plano-financeiro.js?v=1130"></script>
+  <script defer src="orcamento-data.js?v=1130"></script>
+  <script defer src="orcamento-2026.js?v=1130"></script>
+  <script defer src="orcamento.js?v=1130"></script>
+  <script defer src="prestacao-contas.js?v=1130"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1125"></script>
-  <script defer src="caixa-diario.js?v=1125"></script>
-  <script defer src="investimento.js?v=1125"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1125"></script>
-  <script defer src="societario.js?v=1125"></script>
-  <script defer src="participacoes.js?v=1125"></script>
-  <script defer src="fiscal.js?v=1125"></script>
-  <script defer src="indexadores.js?v=1125"></script>
-  <script defer src="verificar-construcao.js?v=1125"></script>
-  <script defer src="financiamento.js?v=1125"></script>
-  <script src="repactuacoes.js?v=1125"></script>
-  <script defer src="repactuacao-lote.js?v=1125"></script>
+  <script defer src="fluxo-caixa.js?v=1130"></script>
+  <script defer src="caixa-diario.js?v=1130"></script>
+  <script defer src="investimento.js?v=1130"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1130"></script>
+  <script defer src="societario.js?v=1130"></script>
+  <script defer src="participacoes.js?v=1130"></script>
+  <script defer src="fiscal.js?v=1130"></script>
+  <script defer src="indexadores.js?v=1130"></script>
+  <script defer src="verificar-construcao.js?v=1130"></script>
+  <script defer src="financiamento.js?v=1130"></script>
+  <script src="repactuacoes.js?v=1130"></script>
+  <script defer src="repactuacao-lote.js?v=1130"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1125"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1130"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">
