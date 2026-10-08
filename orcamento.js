@@ -78,6 +78,9 @@ const OrcamentoApp = {
 
   init() {
     this.restoreCarteira();
+    Object.keys(this.carteiraCompanies).forEach((id) => {
+      if (this.carteiraCompanies[id] === "error") delete this.carteiraCompanies[id];
+    });
     this.render();
   },
 
@@ -230,16 +233,18 @@ const OrcamentoApp = {
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
               <th class="orc-h26" colspan="${this.periodCols(2026).length}">2026</th>
               <th class="orc-h27 orc-split" colspan="${this.periodCols(2027).length}">2027</th>
-              <th class="orc-cmp orc-split" colspan="5">Comparativo</th>
+              <th class="orc-cmp orc-split" colspan="7">Comparativo</th>
             </tr>
             <tr>
               ${this.periodCols(2026).map((col) => `<th class="orc-h26${col.forecast ? " orc-fc" : ""}">${this.esc(col.label)}</th>`).join("")}
               ${this.periodCols(2027).map((col, i) => `<th class="orc-h27${i === 0 ? " orc-split" : ""}">${this.esc(col.label)}</th>`).join("")}
               <th class="orc-split">Total 2026</th>
               <th>Total 2027</th>
-              <th>Sienge 2027</th>
-              <th>Variação</th>
-              <th>Variação %</th>
+              <th title="Total 2027 − Total 2026">Variação</th>
+              <th title="Total 2027 − Total 2026">Variação %</th>
+              <th class="orc-split" title="Carteira em aberto em 2027, sem sub judice">Sienge 2027</th>
+              <th title="Sienge 2027 − orçado 2027">Variação</th>
+              <th title="Sienge 2027 − orçado 2027">Variação %</th>
             </tr>
           </thead>
           <tbody id="orc-body"></tbody>
@@ -434,7 +439,7 @@ const OrcamentoApp = {
   },
 
   tableSpan() {
-    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 5;
+    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 7;
   },
 
   bind() {
@@ -499,16 +504,7 @@ const OrcamentoApp = {
   },
 
   prefetchCarteira() {
-    const ids = this.visibleCompanyIds();
-    const run = async () => {
-      for (const id of ids) {
-        if (this._cartGen !== run.gen) return;
-        await this.flightCarteira(id);
-      }
-    };
-    run.gen = (this._cartGen || 0) + 1;
-    this._cartGen = run.gen;
-    run();
+    this.visibleCompanyIds().forEach((id) => this.flightCarteira(id));
   },
 
   flightCarteira(companyId) {
@@ -634,11 +630,41 @@ const OrcamentoApp = {
     const body = document.getElementById("orc-body");
     if (!body || !this._rows) return;
     body.querySelectorAll("td[data-sienge]").forEach((td) => {
-      const row = this._rows[Number(td.getAttribute("data-sienge"))];
+      const idx = td.getAttribute("data-sienge");
+      const row = this._rows[Number(idx)];
       if (!row) return;
-      const sum = this.cartSum(row);
-      td.textContent = sum.loading ? "…" : (sum.error ? "—" : this.money(sum.receber));
+      const fig = this.siengeFigures(row);
+      const svar = body.querySelector('td[data-svar="' + idx + '"]');
+      const spct = body.querySelector('td[data-spct="' + idx + '"]');
+      const paint = (el, text, neg) => {
+        if (!el) return;
+        el.textContent = text;
+        el.classList.toggle("orc-neg", !!neg);
+      };
+      if (fig.loading) {
+        td.textContent = "…";
+        paint(svar, "…", false);
+        paint(spct, "…", false);
+        return;
+      }
+      if (fig.error) {
+        td.textContent = "—";
+        paint(svar, "—", false);
+        paint(spct, "—", false);
+        return;
+      }
+      td.textContent = this.money(fig.receber);
+      paint(svar, this.money(fig.delta), fig.delta < 0);
+      paint(spct, this.pctLabel(fig.delta, fig.orcado), fig.delta < 0);
     });
+  },
+
+  siengeFigures(row) {
+    const sum = this.cartSum(row);
+    if (sum.loading) return { loading: true };
+    if (sum.error) return { error: true };
+    const orcado = this.sum(row && row.m27);
+    return { receber: sum.receber, orcado, delta: sum.receber - orcado };
   },
 
   siengeTipHtml(row, sum) {
@@ -1130,24 +1156,38 @@ const OrcamentoApp = {
     const delta = t27 - t26;
     const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf")));
     const cart = row.cartCcs ? ' data-cart="' + row._i + '"' : "";
-    const sienge = this.siengeCell(row);
     const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
     const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"' + cart + '><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
       + this.moneyCell(t27, "orc-y27")
-      + sienge
       + this.moneyCell(delta, delta < 0 ? "orc-neg" : "")
       + this.pctCell(delta, t26)
+      + this.siengeCells(row)
       + "</tr>";
   },
 
-  siengeCell(row) {
-    if (!row.cartCcs) return '<td class="orc-sienge">—</td>';
-    const sum = this.cartSum(row);
-    const text = sum.loading ? "…" : (sum.error ? "—" : this.money(sum.receber));
-    return '<td class="orc-sienge" data-sienge="' + row._i + '">' + text + "</td>";
+  siengeCells(row) {
+    if (!row.cartCcs) {
+      return '<td class="orc-sienge orc-split">—</td><td>—</td><td>—</td>';
+    }
+    const fig = this.siengeFigures(row);
+    const idx = row._i;
+    if (fig.loading) {
+      return '<td class="orc-sienge orc-split" data-sienge="' + idx + '">…</td>'
+        + '<td data-svar="' + idx + '">…</td>'
+        + '<td data-spct="' + idx + '">…</td>';
+    }
+    if (fig.error) {
+      return '<td class="orc-sienge orc-split" data-sienge="' + idx + '">—</td>'
+        + '<td data-svar="' + idx + '">—</td>'
+        + '<td data-spct="' + idx + '">—</td>';
+    }
+    const neg = fig.delta < 0 ? " orc-neg" : "";
+    return '<td class="orc-sienge orc-split" data-sienge="' + idx + '">' + this.money(fig.receber) + "</td>"
+      + '<td class="' + neg.trim() + '" data-svar="' + idx + '">' + this.money(fig.delta) + "</td>"
+      + '<td class="orc-pct-col' + neg + '" data-spct="' + idx + '">' + this.pctLabel(fig.delta, fig.orcado) + "</td>";
   },
 
   async exportExcel() {
@@ -1179,7 +1219,7 @@ const OrcamentoApp = {
 
     const c26 = this.periodCols(2026);
     const c27 = this.periodCols(2027);
-    const colCount = 2 + c26.length + c27.length + 5;
+    const colCount = 2 + c26.length + c27.length + 7;
     const start27 = 3 + c26.length;
     const startCmp = start27 + c27.length;
     const ws = wb.addWorksheet("Orçamento", { properties: { showGridLines: false } });
@@ -1198,6 +1238,8 @@ const OrcamentoApp = {
       ...Array.from({ length: c26.length + c27.length }, () => ({ width: 14 })),
       { width: 16 },
       { width: 16 },
+      { width: 16 },
+      { width: 14 },
       { width: 16 },
       { width: 16 },
       { width: 14 }
@@ -1302,7 +1344,7 @@ const OrcamentoApp = {
     groupHeads.forEach(([col, text]) => {
       ws.getRow(4).getCell(col).value = text;
     });
-    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Sienge 2027", "Variação", "Variação %"]);
+    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Variação", "Variação %", "Sienge 2027", "Variação", "Variação %"]);
     const headRow = ws.getRow(5);
     headRow.height = 20;
     heads.forEach((h, i) => {
@@ -1395,29 +1437,40 @@ const OrcamentoApp = {
       const d = a27 - a26;
       paintMoney(excelRow.getCell(startCmp), a26, row.kind, false);
       paintMoney(excelRow.getCell(startCmp + 1), a27, row.kind, false);
-      const siengeCell = excelRow.getCell(startCmp + 2);
-      if (!row.cartCcs) {
-        siengeCell.value = "—";
+      paintMoney(excelRow.getCell(startCmp + 2), d, row.kind, false);
+      paintPct(excelRow.getCell(startCmp + 3), d, a26, row.kind);
+      const paintDash = (cell) => {
+        cell.value = "—";
         const dark = row.kind === "emp" || row.kind === "total";
-        const bg = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "obra" ? "FFA7F3D0" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
-        inv.excelPaint(siengeCell, {
-          fill: bg,
+        const fill = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "obra" ? "FFA7F3D0" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
+        inv.excelPaint(cell, {
+          fill,
           font: { bold: row.kind !== "leaf", size: 9, color: { argb: dark ? "FFFFFFFF" : "FF64748B" } },
           align: { horizontal: "right", vertical: "middle" },
           border: true
         });
+      };
+      if (!row.cartCcs) {
+        paintDash(excelRow.getCell(startCmp + 4));
+        paintDash(excelRow.getCell(startCmp + 5));
+        paintDash(excelRow.getCell(startCmp + 6));
       } else {
-        const sum = this.cartSum(row);
-        if (sum.loading || sum.error) {
-          siengeCell.value = sum.loading ? "…" : "—";
-          paintMoney(excelRow.getCell(startCmp + 2), 0, row.kind, false);
-          siengeCell.value = sum.loading ? "…" : "—";
+        const fig = this.siengeFigures(row);
+        if (fig.loading || fig.error) {
+          paintDash(excelRow.getCell(startCmp + 4));
+          paintDash(excelRow.getCell(startCmp + 5));
+          paintDash(excelRow.getCell(startCmp + 6));
+          if (fig.loading) {
+            excelRow.getCell(startCmp + 4).value = "…";
+            excelRow.getCell(startCmp + 5).value = "…";
+            excelRow.getCell(startCmp + 6).value = "…";
+          }
         } else {
-          paintMoney(siengeCell, sum.receber, row.kind, false);
+          paintMoney(excelRow.getCell(startCmp + 4), fig.receber, row.kind, false);
+          paintMoney(excelRow.getCell(startCmp + 5), fig.delta, row.kind, false);
+          paintPct(excelRow.getCell(startCmp + 6), fig.delta, fig.orcado, row.kind);
         }
       }
-      paintMoney(excelRow.getCell(startCmp + 3), d, row.kind, false);
-      paintPct(excelRow.getCell(startCmp + 4), d, a26, row.kind);
       rowIdx += 1;
     });
 
