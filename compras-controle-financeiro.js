@@ -312,7 +312,8 @@ ComprasControleApp.kpis = function () {
 
 ComprasControleApp.noteProgress = function (text) {
   const box = document.getElementById("cfin-results");
-  if (box) box.innerHTML = '<div class="tvig-empty">' + this.esc(text) + "</div>";
+  if (!box) return;
+  box.innerHTML = '<div class="tvig-empty"><span class="cfin-spin" aria-hidden="true"></span>' + this.esc(text) + "</div>";
 };
 
 ComprasControleApp.departmentScopeNote = function () {
@@ -353,21 +354,11 @@ ComprasControleApp.loteEnviado = function (inst) {
 
 ComprasControleApp.carregarLotes = async function () {
   const gen = (this.state.loteGen = (this.state.loteGen || 0) + 1);
-  const finish = () => {
-    if (this.state.loteGen !== gen) return;
-    this.state.rastreando = false;
-    if (this._lotePaint) {
-      clearTimeout(this._lotePaint);
-      this._lotePaint = null;
-    }
-    if (this.state.loading) return;
-    this.applyFilters();
-    this.renderList();
-  };
-  if (typeof window.siengeFetchWithRetry !== "function") {
-    finish();
-    return;
+  if (this._lotePaint) {
+    clearTimeout(this._lotePaint);
+    this._lotePaint = null;
   }
+  if (typeof window.siengeFetchWithRetry !== "function") return;
   const cache = this.state.lotesByTitulo || (this.state.lotesByTitulo = {});
   const ids = [];
   (this.state.allRows || []).forEach((r) => {
@@ -375,20 +366,15 @@ ComprasControleApp.carregarLotes = async function () {
     const id = String(r.titulo || "");
     if (id && !Object.prototype.hasOwnProperty.call(cache, id) && ids.indexOf(id) < 0) ids.push(id);
   });
-  if (!ids.length) {
-    finish();
-    return;
-  }
-  this.state.rastreando = true;
-  const schedule = () => {
-    if (this.state.loteGen !== gen || this._lotePaint) return;
-    this._lotePaint = setTimeout(() => {
-      this._lotePaint = null;
-      if (this.state.loteGen !== gen || this.state.loading) return;
-      this.applyFilters();
-      this.renderList();
-    }, 180);
+  if (!ids.length) return;
+  let done = 0;
+  const total = ids.length;
+  const paintProgress = () => {
+    if (this.state.loteGen !== gen) return;
+    this.noteProgress("Buscando processamento bancário… " + done + " de " + total);
   };
+  paintProgress();
+  await new Promise((r) => setTimeout(r, 0));
   const queue = ids.slice();
   const worker = async () => {
     while (queue.length && this.state.loteGen === gen) {
@@ -412,11 +398,14 @@ ComprasControleApp.carregarLotes = async function () {
         r.natureza = "processamento";
         r.lote = lote;
       });
-      schedule();
+      done += 1;
+      paintProgress();
     }
   };
-  await Promise.all([worker(), worker(), worker()]);
-  finish();
+  const jobs = [];
+  const workers = Math.min(3, total);
+  for (let i = 0; i < workers; i++) jobs.push(worker());
+  await Promise.all(jobs);
 };
 
 ComprasControleApp.fetchOutcome = async function (start, end) {
@@ -451,8 +440,10 @@ ComprasControleApp.consultar = async function () {
     return;
   }
   this.state.loading = true;
+  this.state.rastreando = false;
   this.state.error = "";
   this.state.consulted = true;
+  this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.renderPage();
   try {
     const payload = await this.fetchOutcome(start, end);
@@ -460,6 +451,7 @@ ComprasControleApp.consultar = async function () {
     this.state.allRows = this.transform(payload);
     this.state.updatedAt = new Date().toISOString();
     this.state.lotesByTitulo = {};
+    await this.carregarLotes();
     this.applyFilters();
   } catch (e) {
     this.state.error = (e && e.message) ? e.message : "Falha ao buscar contas a pagar no Sienge.";
@@ -468,10 +460,10 @@ ComprasControleApp.consultar = async function () {
     this.state.billsByTitulo = {};
   }
   this.state.loading = false;
-  const vaiRastrear = !!(this.state.consulted && !this.state.error && (this.state.allRows || []).some((r) => r && r.natureza === "programado" && !r.forecast));
-  this.state.rastreando = vaiRastrear;
+  this.state.rastreando = false;
+  const y = window.scrollY || 0;
   this.renderPage();
-  if (vaiRastrear) this.carregarLotes();
+  if (y) window.scrollTo(0, y);
 };
 
 ComprasControleApp.limpar = function () {
