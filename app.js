@@ -41391,11 +41391,27 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
       const newer = nT >= pT ? item : prev;
       const older = newer === item ? prev : item;
       const merged = { ...older, ...newer, company_id: Number(newer.company_id || older.company_id || id) };
+      const flagBit = (v) => (v === true || v === 1 || v === "1" || v === "true" ? 1 : 0);
+      const flagSet = (obj, key) => {
+        if (!obj || typeof obj !== "object") return false;
+        const v = obj[key];
+        return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
+      };
+      ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo"].forEach((key) => {
+        if (flagSet(newer, key)) merged[key] = flagBit(newer[key]);
+        else if (flagSet(older, key)) merged[key] = flagBit(older[key]);
+      });
       if (window.isCobrancaInternaSet(newer)) {
         merged.cobranca_interna = newer.cobranca_interna === true || newer.cobranca_interna === "1" || newer.cobranca_interna === 1 || newer.cobranca_interna === "true" ? 1 : 0;
       } else if (window.isCobrancaInternaSet(older)) {
         merged.cobranca_interna = older.cobranca_interna === true || older.cobranca_interna === "1" || older.cobranca_interna === 1 || older.cobranca_interna === "true" ? 1 : 0;
       }
+      const newerNome = newer.nome_usual == null ? "" : String(newer.nome_usual).trim();
+      const olderNome = older.nome_usual == null ? "" : String(older.nome_usual).trim();
+      if (!newerNome && olderNome && !newer.nome_usual_edited) merged.nome_usual = older.nome_usual;
+      const newerPerc = Number(newer.percentual_mldu);
+      const olderPerc = Number(older.percentual_mldu);
+      if (!newer.percentual_mldu_edited && !(newerPerc > 0) && olderPerc > 0) merged.percentual_mldu = older.percentual_mldu;
       merged.updatedAt = Math.max(pT, nT);
       recs[id] = merged;
     });
@@ -41405,6 +41421,18 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
   const out = { _v2: true };
   Object.keys(recs).forEach(id => { out[id] = recs[id]; });
   return JSON.stringify(out);
+};
+
+window.storeEmpresasCustomMerged = function(merged) {
+  if (!merged || typeof window._originalSetItem !== "function") return merged;
+  try {
+    const cur = localStorage.getItem("crm_empresas_custom") || "";
+    const again = window.mergeEmpresasCustom(cur || "{}", merged);
+    if (again && again !== cur) window._originalSetItem.call(localStorage, "crm_empresas_custom", again);
+    return again || merged;
+  } catch (e) {
+    return merged;
+  }
 };
 
 window.mergePlanoVisoes = function(localStr, cloudStr) {
@@ -41570,6 +41598,13 @@ window.syncGlobalConfigFromFirebase = async function() {
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         _originalSetItem.call(localStorage, k, merged);
                         changed = true;
+                        try {
+                          if (window.EmpresasApp && typeof EmpresasApp.hydrateCustomFields === "function") {
+                            EmpresasApp.hydrateCustomFields(JSON.parse(merged), true);
+                            const typing = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("inline-input");
+                            if (document.getElementById("empresas-content") && !EmpresasApp._empresasRendering && !typing) EmpresasApp.render();
+                          }
+                        } catch (e) {}
                     }
                     if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
@@ -41933,7 +41968,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
             payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
           }
           if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
-            payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+            payload.crm_empresas_custom = window.storeEmpresasCustomMerged(window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}"));
           }
           delete payload.crm_centros_custo_custom;
           if (payload.crm_compromissario_configs || cloud.crm_compromissario_configs) {
@@ -42284,7 +42319,7 @@ localStorage.setItem = function(key, value) {
                         payload.crm_plano_visoes_v2 = cloud.crm_plano_visoes_v2;
                       }
                       if (payload.crm_empresas_custom || cloud.crm_empresas_custom) {
-                        payload.crm_empresas_custom = window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}");
+                        payload.crm_empresas_custom = window.storeEmpresasCustomMerged(window.mergeEmpresasCustom(payload.crm_empresas_custom || "{}", cloud.crm_empresas_custom || "{}"));
                       }
                       if (typeof window.mergeTimelineConfigIntoPayload === "function") {
                         window.mergeTimelineConfigIntoPayload(payload, cloud);

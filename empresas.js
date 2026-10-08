@@ -66,8 +66,8 @@ const EmpresasApp = {
         } else {
           const cur = customData[k];
           const def = defaultCustom[k];
-          if (!cur.nome_usual && def.nome_usual) cur.nome_usual = def.nome_usual;
-          if (cur.percentual_mldu == null && def.percentual_mldu != null) cur.percentual_mldu = def.percentual_mldu;
+          if (!cur.nome_usual && def.nome_usual && !cur.nome_usual_edited) cur.nome_usual = def.nome_usual;
+          if (cur.percentual_mldu == null && def.percentual_mldu != null && !cur.percentual_mldu_edited) cur.percentual_mldu = def.percentual_mldu;
           if (!this.isCobrancaInternaSet(cur) && this.isCobrancaInternaSet(def)) cur.cobranca_interna = def.cobranca_interna;
         }
       });
@@ -128,14 +128,55 @@ const EmpresasApp = {
     const inputs = tr.querySelectorAll(".inline-input");
     const nome = inputs[0];
     const perc = inputs[1];
-    if (nome) rec.nome_usual = nome.value;
-    if (!perc) return;
-    const raw = String(perc.value || "").trim().replace(/\s/g, "").replace(",", ".");
-    if (raw === "") rec.percentual_mldu = 0;
-    else {
-      const n = Number(raw);
-      if (Number.isFinite(n)) rec.percentual_mldu = n;
+    if (nome && !nome.disabled) {
+      const typed = nome.dataset.userEdited === "1";
+      const val = nome.value == null ? "" : String(nome.value);
+      const stored = rec.nome_usual == null ? "" : String(rec.nome_usual);
+      if (val !== stored && (typed || val.trim() !== "" || !stored.trim())) {
+        rec.nome_usual = val;
+        if (typed) rec.nome_usual_edited = 1;
+      }
     }
+    if (!perc || perc.disabled) return;
+    const typedPerc = perc.dataset.userEdited === "1";
+    const raw = String(perc.value || "").trim().replace(/\s/g, "").replace(",", ".");
+    if (raw === "") {
+      if (typedPerc && Number(rec.percentual_mldu) !== 0) {
+        rec.percentual_mldu = 0;
+        rec.percentual_mldu_edited = 1;
+      }
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || Number(rec.percentual_mldu) === n) return;
+    if (!typedPerc && n === 0 && Number(rec.percentual_mldu) > 0) return;
+    rec.percentual_mldu = n;
+    if (typedPerc) rec.percentual_mldu_edited = 1;
+  },
+
+  schedulePaint(id) {
+    this._paintQueued = this._paintQueued || {};
+    const key = String(id);
+    if (this._paintQueued[key]) return;
+    this._paintQueued[key] = true;
+    const run = () => {
+      this._paintQueued[key] = false;
+      this.paintRowState(id);
+    };
+    if (typeof queueMicrotask === "function") queueMicrotask(run);
+    else setTimeout(run, 0);
+  },
+
+  scheduleCloudUpload(debounce) {
+    if (typeof window.forceUploadLocalConfig !== "function") return;
+    if (!debounce) {
+      window.forceUploadLocalConfig(true).catch(() => {});
+      return;
+    }
+    clearTimeout(this._uploadTimer);
+    this._uploadTimer = setTimeout(() => {
+      window.forceUploadLocalConfig(true).catch(() => {});
+    }, 400);
   },
 
   paintRowState(id) {
@@ -203,45 +244,61 @@ const EmpresasApp = {
       consolidacao_padrao: 0,
       gerida_pelo_grupo: 0
     };
-
+    const isText = field === "nome_usual" || field === "percentual_mldu";
     const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
-    if (field !== "nome_usual" && field !== "percentual_mldu") this.flushRowInputs(id, custom);
-    if (speOn && field !== "spe_socios") {
-      EmpresasState.customFields[id] = custom;
-      this.persistCustomMap();
-      if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
-      this.paintRowState(id);
+    if (speOn && !isText && field !== "spe_socios") {
+      this.schedulePaint(id);
       return;
     }
+    if (!isText) {
+      const bit = value ? 1 : 0;
+      const now = Date.now();
+      const prev = this._lastFlag;
+      if (prev && prev.id === id && prev.field === field && (now - prev.at) < 80 && prev.value !== bit) {
+        this.schedulePaint(id);
+        return;
+      }
+      this._lastFlag = { id: id, field: field, at: now, value: bit };
+    }
 
-    if (field === 'nome_usual') custom.nome_usual = value;
-    if (field === 'percentual_mldu') {
+    if (field === "nome_usual") {
+      const next = value == null ? "" : String(value);
+      if (next === String(custom.nome_usual || "")) return;
+      custom.nome_usual = next;
+      custom.nome_usual_edited = 1;
+    }
+    if (field === "percentual_mldu") {
       const raw = String(value == null ? "" : value).trim().replace(/\s/g, "").replace(",", ".");
-      if (raw === "") custom.percentual_mldu = 0;
-      else {
+      if (raw === "") {
+        if (Number(custom.percentual_mldu) === 0) return;
+        custom.percentual_mldu = 0;
+      } else {
         const n = Number(raw);
         if (!Number.isFinite(n)) return;
+        if (Number(custom.percentual_mldu) === n) return;
         custom.percentual_mldu = n;
       }
+      custom.percentual_mldu_edited = 1;
     }
-    if (field === 'consolidacao_padrao') custom.consolidacao_padrao = value ? 1 : 0;
-    if (field === 'gerida_pelo_grupo') custom.gerida_pelo_grupo = value ? 1 : 0;
-    if (field === 'spe_socios') custom.spe_socios = value ? 1 : 0;
-    if (field === 'cobranca_interna') {
+    if (field === "consolidacao_padrao") custom.consolidacao_padrao = value ? 1 : 0;
+    if (field === "gerida_pelo_grupo") custom.gerida_pelo_grupo = value ? 1 : 0;
+    if (field === "spe_socios") custom.spe_socios = value ? 1 : 0;
+    if (field === "cobranca_interna") {
       custom.cobranca_interna = value ? 1 : 0;
       if (window.AppState) {
         window.AppState.dashboardRendered = false;
         window.AppState.defaultersLoaded = false;
       }
     }
+    if (!isText) this.flushRowInputs(id, custom);
     custom.company_id = id;
     custom.updatedAt = Date.now();
 
     EmpresasState.customFields[id] = custom;
     this.persistCustomMap();
-    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
-    if (typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
-    this.paintRowState(id);
+    this.scheduleCloudUpload(isText);
+    if (!isText && typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
+    this.schedulePaint(id);
   },
 
   render() {
@@ -472,10 +529,10 @@ const EmpresasApp = {
           <td>${this.escAttr(company.name)}</td>
           <td style="white-space: nowrap;">${this.escAttr(company.cnpj || "-")}</td>
           <td>
-            <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual..." ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
+            <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual..." ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
           <td style="text-align: center;">
-            <input type="text" inputmode="decimal" class="inline-input" style="text-align: center;" value="${this.escAttr(percMldu)}" ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
+            <input type="text" inputmode="decimal" class="inline-input" style="text-align: center;" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
           </td>
           <td style="text-align: center; ${bgCons} transition: background-color 0.3s;">
             <label class="switch">
@@ -572,7 +629,7 @@ const EmpresasApp = {
       } else {
         const cur = customData[k];
         const def = defaultCustom[k];
-        if (!cur.nome_usual && def.nome_usual) {
+        if (!cur.nome_usual && def.nome_usual && !cur.nome_usual_edited) {
           cur.nome_usual = def.nome_usual;
           changed = true;
         }
