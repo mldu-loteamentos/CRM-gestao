@@ -1688,11 +1688,7 @@ const InvestimentoApp = {
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
             ${this.accountDropHtml()}
-            <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;display:inline-flex;align-items:center;gap:8px;" ${this.loading ? "disabled" : ""}>
-              ${this.loading
-                ? `<span class="loading-spinner" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></span> Consultando...`
-                : "Consultar"}
-            </button>
+            <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;display:inline-flex;align-items:center;gap:8px;" ${this.loading ? "disabled" : ""}>Consultar</button>
             <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.visibleAccounts().length ? "" : "disabled"}
               style="height:34px;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> Exportar Excel

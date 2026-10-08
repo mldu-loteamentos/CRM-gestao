@@ -208,12 +208,39 @@ const RecebimentosWebroApp = {
     };
   },
 
+  isWebroInst(inst) {
+    const id = inst && (inst.conditionTypeId != null ? inst.conditionTypeId : inst.paymentConditionTypeId);
+    if (id != null && id !== "" && this.isWebroCode(String(id))) return true;
+    const code = (typeof window.installmentConditionKey === "function")
+      ? window.installmentConditionKey(inst)
+      : this.conditionFromItem(inst);
+    return this.isWebroCode(code);
+  },
+
+  async loadBill(billId) {
+    if (!this._bills) this._bills = new Map();
+    const key = String(billId || "");
+    if (!key) return null;
+    if (this._bills.has(key)) return this._bills.get(key);
+    let bill = null;
+    if (typeof window.siengeFetchWithRetry === "function") {
+      try { bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(key)); }
+      catch (e) { bill = null; }
+    }
+    const info = {
+      document: String((bill && bill.documentNumber) || ""),
+      unit: String((bill && bill.unityName) || "").trim(),
+      project: String((bill && bill.enterpriseCode) || "").trim(),
+      projectName: String((bill && bill.enterpriseName) || "").trim()
+    };
+    this._bills.set(key, info);
+    return info;
+  },
+
   async enrich(row) {
-    const known = row.condition && this.isWebroCode(row.condition);
-    const rejected = row.condition && !this.isWebroCode(row.condition);
-    if (rejected) return null;
-    if (known && row.due && (row.unit || row.client)) return row;
-    if (!row.billId || typeof window.siengeFetchWithRetry !== "function") return known ? row : null;
+    if (!row.billId || typeof window.siengeFetchWithRetry !== "function") {
+      return (row.condition && this.isWebroCode(row.condition)) ? row : null;
+    }
     const instRes = await window.siengeFetchWithRetry(
       "/accounts-receivable/receivable-bills/" + encodeURIComponent(row.billId) + "/installments?limit=200"
     );
@@ -222,13 +249,19 @@ const RecebimentosWebroApp = {
       const id = String(i && (i.installmentId != null ? i.installmentId : i.installmentNumber));
       return row.installmentId && id === String(row.installmentId);
     }) || (list.length === 1 ? list[0] : null);
-    if (!inst) return known ? row : null;
+    if (!inst || !this.isWebroInst(inst)) return null;
     const code = (typeof window.installmentConditionKey === "function")
       ? window.installmentConditionKey(inst)
       : this.conditionFromItem(inst);
-    if (!this.isWebroCode(code)) return null;
-    row.condition = code || row.condition;
+    row.condition = String(inst.conditionTypeId || code || row.condition);
     row.due = this.isoDue(inst.dueDate || row.due);
+    const bill = await this.loadBill(row.billId);
+    if (bill) {
+      if (bill.unit) row.unit = bill.unit;
+      if (bill.project) row.project = bill.project;
+      if (bill.projectName) row.projectName = bill.projectName;
+      if (bill.document) row.document = bill.document;
+    }
     return row;
   },
 
@@ -283,6 +316,8 @@ const RecebimentosWebroApp = {
     const byEmp = new Map();
     const byName = new Map();
     const byUnit = new Map();
+    const byPlace = new Map();
+    const byUnitAll = new Map();
     (contratos || []).forEach((r) => {
       const emp = this.enterpriseId(r.empreendimento);
       const unit = this.unitKey(r.unidade);
@@ -305,16 +340,39 @@ const RecebimentosWebroApp = {
           map.get(key).push(item);
         };
         if (emp && unit) put(byEmp, emp + "|" + unit + "|" + due);
+        if (emp && unit) put(byPlace, emp + "|" + unit);
         if (unit) put(byUnit, unit + "|" + due);
+        if (unit) put(byUnitAll, unit);
         if (name) put(byName, name + "|" + due);
       });
     });
-    return { byEmp: byEmp, byUnit: byUnit, byName: byName };
+    return { byEmp: byEmp, byUnit: byUnit, byName: byName, byPlace: byPlace, byUnitAll: byUnitAll };
+  },
+
+  dayDiff(a, b) {
+    const da = Date.parse(String(a || "").slice(0, 10) + "T12:00:00");
+    const db = Date.parse(String(b || "").slice(0, 10) + "T12:00:00");
+    if (!Number.isFinite(da) || !Number.isFinite(db)) return 999;
+    return Math.round(Math.abs(da - db) / 86400000);
+  },
+
+  closest(list, due) {
+    let best = null;
+    let bestDays = 46;
+    (list || []).forEach((item) => {
+      if (item && item.used) return;
+      const days = this.dayDiff(due, item.vencimento);
+      if (days < bestDays) {
+        bestDays = days;
+        best = item;
+      }
+    });
+    return best;
   },
 
   pick(list) {
     if (!list || !list.length) return null;
-    return list[0];
+    return list.find((item) => item && !item.used) || null;
   },
 
   match(row, index) {
@@ -325,10 +383,13 @@ const RecebimentosWebroApp = {
     const unit = this.unitKey(row.unit);
     const name = this.fold(row.client);
     const empKey = (id) => (id && unit) ? index.byEmp.get(id + "|" + unit + "|" + due) : null;
-    return this.pick(empKey(emp))
+    const found = this.pick(empKey(emp))
       || this.pick(empKey(empFromName))
       || this.pick(name ? index.byName.get(name + "|" + due) : null)
-      || this.pick(unit ? index.byUnit.get(unit + "|" + due) : null);
+      || this.pick(unit ? index.byUnit.get(unit + "|" + due) : null)
+      || this.closest((emp && unit && index.byPlace.get(emp + "|" + unit)) || (empFromName && unit && index.byPlace.get(empFromName + "|" + unit)) || (unit && index.byUnitAll.get(unit)) || [], due);
+    if (found) found.used = true;
+    return found;
   },
 
   async consultar() {
@@ -390,6 +451,8 @@ const RecebimentosWebroApp = {
         listed.push({
           empreendimento: (comissao && comissao.empreendimento) || row.projectName || row.project,
           contrato: comissao ? comissao.contrato : "",
+          documento: row.document || "",
+          titulo: row.billId ? (row.billId + (row.installmentId ? "/" + row.installmentId : "")) : "",
           unidade: (comissao && comissao.unidade) || row.unit,
           cliente: row.client || (comissao && comissao.pagador) || "",
           vencimento: row.due,
@@ -397,7 +460,7 @@ const RecebimentosWebroApp = {
           condicao: row.condition,
           valorRecebido: Number(row.valorRecebido) || 0,
           valor: comissao ? comissao.valor : 0,
-          situacao: comissao ? "Liberar" : "Sem comissão"
+          situacao: comissao ? "Repassar à Moura Leite" : "Sem comissão"
         });
       });
       listed.sort((a, b) => String(b.pagoEm).localeCompare(String(a.pagoEm)) || String(a.empreendimento).localeCompare(String(b.empreendimento), "pt-BR"));
@@ -435,6 +498,8 @@ const RecebimentosWebroApp = {
       { header: "Vencimento", key: "vencimento", width: 16 },
       { header: "Recebido em", key: "pagoEm", width: 16 },
       { header: "Valor recebido", key: "valorRecebido", width: 18 },
+      { header: "Título", key: "titulo", width: 16 },
+      { header: "Contrato", key: "documento", width: 28 },
       { header: "Contrato CV", key: "contrato", width: 16 },
       { header: "Comissão a liberar", key: "valor", width: 20 },
       { header: "Situação", key: "situacao", width: 18 }
@@ -453,11 +518,13 @@ const RecebimentosWebroApp = {
         pagoEm: this.fmtDate(r.pagoEm),
         valorRecebido: Number(r.valorRecebido) || 0,
         contrato: r.contrato,
+        documento: r.documento,
+        titulo: r.titulo,
         valor: Number(r.valor) || 0,
         situacao: r.situacao
       });
       line.getCell(7).numFmt = "#,##0.00";
-      line.getCell(9).numFmt = "#,##0.00";
+      line.getCell(11).numFmt = "#,##0.00";
     });
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -483,7 +550,7 @@ const RecebimentosWebroApp = {
       <div class="ccom-page">
         <div class="search-filter-panel tvig-params ccom-params">
           <h3 class="tvig-section-title">Recebimentos Webro</h3>
-          <p class="rweb-note">Primeiro entram os recebimentos dos últimos 30 dias cuja condição está marcada como Parcela Webro em Comercial, Condições de pagamento. Depois, pelo empreendimento e pela unidade, a tela procura no CV CRM a comissão da Moura Leite no mesmo vencimento para liberar.</p>
+          <p class="rweb-note">A consulta começa pelo recebimento da parcela do cliente marcada como Parcela Webro. O título e o contrato (CVMOURALEI) identificam o empreendimento e a unidade, e a tela cruza com a comissão da Moura Leite para mostrar o que a Webro precisa repassar.</p>
           <div class="ccom-filters">
             <div class="tvig-filter-actions">
               <button type="button" class="btn btn-primary ccom-consult" ${s.loading ? "disabled" : ""} onclick="RecebimentosWebroApp.consultar()">
@@ -504,7 +571,7 @@ const RecebimentosWebroApp = {
             <div class="ccom-kpi"><span>Valor recebido</span><strong>${this.esc(this.money(recebido))}</strong></div>
             <div class="ccom-kpi"><span>Com comissão a liberar</span><strong>${comCount}</strong></div>
             <div class="ccom-kpi"><span>Comissão a liberar</span><strong>${this.esc(this.money(comissao))}</strong></div>
-            <div class="ccom-kpi"><span>Sem comissão neste vencimento</span><strong>${s.webroSemComissao || 0}</strong></div>
+            <div class="ccom-kpi"><span>Sem comissão da Moura Leite</span><strong>${s.webroSemComissao || 0}</strong></div>
           </div>
           <div class="crm-card ccom-card">
             <div class="crm-scroll-table ccom-table-wrap">
@@ -518,6 +585,8 @@ const RecebimentosWebroApp = {
                     <th>Vencimento</th>
                     <th>Recebido em</th>
                     <th class="ccom-num">Valor recebido</th>
+                    <th>Título</th>
+                    <th>Contrato</th>
                     <th>Contrato CV</th>
                     <th class="ccom-num">Comissão</th>
                     <th>Situação</th>
@@ -531,6 +600,8 @@ const RecebimentosWebroApp = {
                   <td>${this.esc(this.fmtDate(r.vencimento))}</td>
                   <td>${this.esc(this.fmtDate(r.pagoEm))}</td>
                   <td class="ccom-num">${this.esc(this.money(r.valorRecebido))}</td>
+                  <td class="ccom-td-id">${this.esc(r.titulo || "—")}</td>
+                  <td class="ccom-td-id">${this.esc(r.documento || "—")}</td>
                   <td class="ccom-td-id">${this.esc(r.contrato || "—")}</td>
                   <td class="ccom-num">${Number(r.valor) > 0 ? this.esc(this.money(r.valor)) : "—"}</td>
                   <td><span class="ccom-sit ${Number(r.valor) > 0 ? "ccom-sit-pago" : "ccom-sit-prog"}">${this.esc(r.situacao || "—")}</span></td>

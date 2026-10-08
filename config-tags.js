@@ -282,6 +282,9 @@ const ConfigTagsApp = {
       const overlay = document.getElementById("tag-modal-overlay");
       if (overlay) overlay.remove();
       this.loadTags();
+      if (window.AnexosApp && typeof AnexosApp.loadTagsAtivas === "function") {
+        AnexosApp.loadTagsAtivas(true);
+      }
     } catch (e) {
       alert("Erro ao salvar TAG: " + e.message);
     }
@@ -295,6 +298,9 @@ const ConfigTagsApp = {
       const docRef = window.firebaseCollections.doc(window.firebaseDb, "tags", String(id));
       await window.firebaseCollections.deleteDoc(docRef);
       this.loadTags();
+      if (window.AnexosApp && typeof AnexosApp.loadTagsAtivas === "function") {
+        AnexosApp.loadTagsAtivas(true);
+      }
     } catch (e) {
       alert("Erro ao excluir TAG: " + e.message);
     }

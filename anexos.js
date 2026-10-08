@@ -1492,10 +1492,7 @@ function renderAnexosModule(opts) {
 
   AnexosApp.bindEvents();
   anexosCreateIcons(root);
-  if (!AnexosState.tagsLoadStarted) {
-    AnexosState.tagsLoadStarted = true;
-    AnexosApp.loadTagsAtivas();
-  }
+  AnexosApp.loadTagsAtivas();
   if (!AnexosState.enterprisesLoadStarted) {
     AnexosState.enterprisesLoadStarted = true;
     AnexosApp.loadEnterprisesInBackground();
@@ -3426,38 +3423,78 @@ const AnexosApp = {
     }).catch(() => {});
   },
 
-  async loadTagsAtivas() {
+  tagDestino(tag) {
+    const raw = String(tag && (tag.destino || tag.type || "") || "");
+    return raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().indexOf("client") >= 0 ? "Cliente" : "Unidade";
+  },
+
+  tagIsActive(status) {
+    const s = String(status == null || status === "" ? "ativa" : status)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    return s !== "inativa" && s !== "inativo" && s !== "false" && s !== "0";
+  },
+
+  normalizeTag(raw, id) {
+    const data = raw || {};
+    const name = String(data.name || data.nome || data.tag || "").trim();
+    if (!name) return null;
+    return {
+      id: id || data.id || "",
+      name: name,
+      destino: this.tagDestino(data),
+      status: this.tagIsActive(data.status) ? "Ativa" : "Inativa"
+    };
+  },
+
+  async loadTagsAtivas(force) {
+    const fresh = AnexosState.tagsLoadedAt && (Date.now() - AnexosState.tagsLoadedAt) < 8000;
+    if (!force && fresh) return AnexosState.tagsAtivas;
+    if (this._tagsLoading) return this._tagsLoading;
+    this._tagsLoading = this.fetchTagsAtivas();
+    try { return await this._tagsLoading; }
+    finally { this._tagsLoading = null; }
+  },
+
+  async fetchTagsAtivas() {
+    const signature = () => (AnexosState.tagsAtivas || []).map((t) => t.name + "|" + t.destino).join("\n");
+    const before = signature();
     try {
       if (!window.firebaseCollections || !window.firebaseDb) {
         throw new Error("Firebase não está inicializado.");
       }
-      const q = window.firebaseCollections.query(
-        window.firebaseCollections.collection(window.firebaseDb, 'tags')
-      );
-      const querySnapshot = await window.firebaseCollections.getDocs(q);
+      const col = window.firebaseCollections.collection(window.firebaseDb, "tags");
+      const querySnapshot = await window.firebaseCollections.getDocs(col);
       const tags = [];
-      querySnapshot.forEach(doc => {
-        tags.push({ id: doc.id, ...doc.data() });
+      const seen = new Set();
+      querySnapshot.forEach((docSnap) => {
+        const row = this.normalizeTag(docSnap.data(), docSnap.id);
+        if (!row || row.status !== "Ativa") return;
+        const key = row.name.toUpperCase() + "|" + row.destino;
+        if (seen.has(key)) return;
+        seen.add(key);
+        tags.push(row);
       });
-      // Filter active tags only
-      AnexosState.tagsAtivas = tags.filter(t => t.status === 'Ativa');
-      AnexosState.tagsAtivas.sort((a, b) => a.name.localeCompare(b.name));
-      
-      this.renderFilesList();
+      tags.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      AnexosState.tagsAtivas = tags;
+      AnexosState.tagsLoadedAt = Date.now();
     } catch (e) {
       console.error("Erro ao buscar tags do Firebase:", e);
-      AnexosState.tagsAtivas = [
-        { name: "RG", destino: "Unidade", status: "Ativa" },
-        { name: "CPF", destino: "Unidade", status: "Ativa" },
-        { name: "CNH", destino: "Unidade", status: "Ativa" },
-        { name: "CONTRATO", destino: "Unidade", status: "Ativa" },
-        { name: "DISTRATO", destino: "Unidade", status: "Ativa" },
-        { name: "COMPROVANTE DE RESIDÊNCIA", destino: "Unidade", status: "Ativa" },
-        { name: "ADITAMENTO", destino: "Unidade", status: "Ativa" },
-        { name: "CESSÃO DE DIREITOS", destino: "Unidade", status: "Ativa" }
-      ];
-      this.renderFilesList();
+      AnexosState.tagsLoadedAt = 0;
+      if (!(AnexosState.tagsAtivas || []).length) {
+        AnexosState.tagsAtivas = [
+          { name: "RG", destino: "Unidade", status: "Ativa" },
+          { name: "CPF", destino: "Unidade", status: "Ativa" },
+          { name: "CNH", destino: "Unidade", status: "Ativa" },
+          { name: "CONTRATO", destino: "Unidade", status: "Ativa" },
+          { name: "DISTRATO", destino: "Unidade", status: "Ativa" },
+          { name: "COMPROVANTE DE RESIDÊNCIA", destino: "Unidade", status: "Ativa" },
+          { name: "ADITAMENTO", destino: "Unidade", status: "Ativa" },
+          { name: "CESSÃO DE DIREITOS", destino: "Unidade", status: "Ativa" }
+        ];
+      }
     }
+    if (signature() !== before && typeof this.renderFilesList === "function") this.renderFilesList();
+    return AnexosState.tagsAtivas;
   },
 
   async buscarUnidades() {
@@ -3690,9 +3727,10 @@ const AnexosApp = {
       ).join('');
 
       const allowedDestino = AnexosState.contexto === 'Ambos' ? null : AnexosState.contexto;
+      const escTag = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
       const availableOpts = AnexosState.tagsAtivas
-        .filter(t => !f.tags.includes(t.name) && (!allowedDestino || t.destino === allowedDestino))
-        .map(t => `<option value="${t.name}">${t.name}</option>`)
+        .filter(t => !f.tags.includes(t.name) && (!allowedDestino || AnexosApp.tagDestino(t) === allowedDestino))
+        .map(t => `<option value="${escTag(t.name)}">${escTag(t.name)}</option>`)
         .join('');
 
       return `
@@ -4768,6 +4806,12 @@ window.anexosUploadUnitAttachment = async function(opts) {
 };
 
 // Travar saida da página se tiver uploads pendentes
+document.addEventListener("tabChanged", function (e) {
+  if (e.detail === "anexos" && window.AnexosApp && typeof AnexosApp.loadTagsAtivas === "function") {
+    AnexosApp.loadTagsAtivas(true);
+  }
+});
+
 window.addEventListener('beforeunload', (e) => {
   if (AnexosState.files.length > 0) {
     e.preventDefault();

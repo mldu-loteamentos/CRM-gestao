@@ -6,6 +6,7 @@ const OrcamentoApp = {
   companyDropOpen: false,
   companyQuery: "",
   expanded: new Set(),
+  mouraView: false,
   ready: false,
 
   data() {
@@ -92,7 +93,10 @@ const OrcamentoApp = {
         .orc-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.78rem; }
         .orc-table th { position: sticky; background: #105436; color: #fff; z-index: 2; padding: 8px 10px; text-align: right; font-weight: 700; white-space: nowrap; }
         .orc-table thead tr:first-child th { top: 0; z-index: 4; }
-        .orc-table thead tr:nth-child(2) th { top: 33px; z-index: 3; }
+        .orc-table thead tr:first-child th.orc-h26,
+        .orc-table thead tr:first-child th.orc-h27,
+        .orc-table thead tr:first-child th.orc-cmp { text-align: center; }
+        .orc-table thead tr:nth-child(2) th { top: 33px; z-index: 3; text-align: center; }
         .orc-table th.orc-label { text-align: left; left: 0; z-index: 5; min-width: 380px; }
         .orc-table th.orc-h26 { background: #0c3d28; }
         .orc-table th.orc-h27 { background: #1a6b45; }
@@ -101,6 +105,13 @@ const OrcamentoApp = {
         .orc-table td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; }
         .orc-split { border-left: 2px solid rgba(15, 23, 42, 0.18); }
         .orc-emp td { background: #0c3d28; color: #fff; font-weight: 700; }
+        .orc-total td { position: sticky; bottom: 0; background: #134e3a; color: #fff; font-weight: 800; z-index: 2; border-top: 2px solid #0c3d28; }
+        .orc-total td:first-child { z-index: 3; background: #134e3a; }
+        .orc-var, .orc-pct { display: block; line-height: 1.2; }
+        .orc-pct { font-size: 0.68rem; font-weight: 700; }
+        .orc-view { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
+        .orc-view button { height: 38px; border: 0; background: #fff; color: #105436; font-weight: 700; padding: 0 12px; cursor: pointer; }
+        .orc-view button.is-on { background: #105436; color: #fff; }
         .orc-cc td { background: #e8f5ee; font-weight: 700; color: #105436; }
         .orc-leaf td { background: #fff; font-weight: 500; color: #1e293b; }
         .orc-neg { color: #b91c1c; }
@@ -116,12 +127,16 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Primeiro vêm os meses de 2026 — janeiro a setembro recebido, outubro a dezembro forecast (*) — depois os meses de 2027, o total de cada ano e a variação. O desconto de juros contratuais reduz o total.</p>
+          <p>Empresa, centro de custo e a conta do plano. Os meses de 2026 vêm primeiro — janeiro a setembro recebido, outubro a dezembro forecast (*) — depois os de 2027. A variação traz o valor e o percentual. O total soma cada mês. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
         </div>
       </div>
       <div class="orc-tools">
         <div id="orc-emp-box"></div>
         <input id="orc-search" class="orc-search" type="search" placeholder="Buscar empresa, centro de custo ou conta" value="${this.esc(this.query)}">
+        <div class="orc-view">
+          <button type="button" id="orc-view-total" class="${this.mouraView ? "" : "is-on"}">Valor total</button>
+          <button type="button" id="orc-view-moura" class="${this.mouraView ? "is-on" : ""}">Valor Moura Leite</button>
+        </div>
         <button type="button" class="orc-btn" id="orc-expand">Expandir todos</button>
         <button type="button" class="orc-btn" id="orc-collapse">Recolher todos</button>
       </div>
@@ -133,7 +148,7 @@ const OrcamentoApp = {
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
               <th class="orc-h26" colspan="12">2026</th>
               <th class="orc-h27 orc-split" colspan="12">2027</th>
-              <th class="orc-split" colspan="3">Comparativo</th>
+              <th class="orc-cmp orc-split" colspan="3">Comparativo</th>
             </tr>
             <tr>
               ${months.map((m, i) => `<th class="orc-h26${i >= 9 ? " orc-fc" : ""}">${m}${i >= 9 ? "*" : ""}</th>`).join("")}
@@ -223,6 +238,10 @@ const OrcamentoApp = {
         this.paint();
       });
     }
+    const viewTotal = document.getElementById("orc-view-total");
+    if (viewTotal) viewTotal.addEventListener("click", () => this.setMoura(false));
+    const viewMoura = document.getElementById("orc-view-moura");
+    if (viewMoura) viewMoura.addEventListener("click", () => this.setMoura(true));
     const expand = document.getElementById("orc-expand");
     if (expand) expand.addEventListener("click", () => this.expandAll(true));
     const collapse = document.getElementById("orc-collapse");
@@ -246,6 +265,44 @@ const OrcamentoApp = {
 
   blank() {
     return Array(12).fill(0);
+  },
+
+  setMoura(on) {
+    this.mouraView = !!on;
+    const total = document.getElementById("orc-view-total");
+    const moura = document.getElementById("orc-view-moura");
+    if (total) total.classList.toggle("is-on", !this.mouraView);
+    if (moura) moura.classList.toggle("is-on", this.mouraView);
+    this.paint();
+  },
+
+  participation(companyId) {
+    const id = String(companyId);
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}; } catch (e) { custom = {}; }
+    const row = custom[id];
+    if (row && row.percentual_mldu != null && row.percentual_mldu !== "") {
+      const n = Number(row.percentual_mldu);
+      return Number.isFinite(n) ? n : 0;
+    }
+    const defaults = { "1": 100, "5": 66, "6": 50, "12": 50, "13": 27.75, "32": 100 };
+    return defaults[id] != null ? defaults[id] : 0;
+  },
+
+  shareFactor(companyId) {
+    if (!this.mouraView) return 1;
+    return this.participation(companyId) / 100;
+  },
+
+  scaleMonths(arr, factor) {
+    return (arr || this.blank()).map((v) => (Number(v) || 0) * factor);
+  },
+
+  pctLabel(delta, base) {
+    if (Math.abs(base) < 0.005) return "—";
+    const p = (delta / base) * 100;
+    const sign = p > 0 ? "+" : "";
+    return sign + p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
   },
 
   addMonths(target, source, conta) {
@@ -413,15 +470,19 @@ const OrcamentoApp = {
         this.sumNode(cc.tree, "m26").forEach((v, i) => { e26[i] += v; });
         this.sumNode(cc.tree, "m27").forEach((v, i) => { e27[i] += v; });
       });
-      e26.forEach((v, i) => { y26[i] += v; });
-      e27.forEach((v, i) => { y27[i] += v; });
+      const factor = this.shareFactor(emp.e);
+      const se26 = this.scaleMonths(e26, factor);
+      const se27 = this.scaleMonths(e27, factor);
+      se26.forEach((v, i) => { y26[i] += v; });
+      se27.forEach((v, i) => { y27[i] += v; });
+      const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
       rows.push(this.rowHtml({
         kind: "emp",
         key: emp.key,
         depth: 0,
-        label: emp.e + " — " + (emp.en || ""),
-        m26: e26,
-        m27: e27,
+        label: emp.e + " — " + (emp.en || "") + shareNote,
+        m26: se26,
+        m27: se27,
         expandable: true
       }));
       if (!this.expanded.has(emp.key)) return;
@@ -431,8 +492,8 @@ const OrcamentoApp = {
           key: cc.key,
           depth: 1,
           label: cc.cc + " — " + cc.cn,
-          m26: this.sumNode(cc.tree, "m26"),
-          m27: this.sumNode(cc.tree, "m27"),
+          m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
+          m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
           expandable: true
         }));
         if (!this.expanded.has(cc.key)) return;
@@ -442,13 +503,24 @@ const OrcamentoApp = {
             key: cc.key + "|" + acc.conta,
             depth: 2,
             label: acc.conta + "  " + (acc.nome || this.accountName(acc.conta)),
-            m26: acc.m26,
-            m27: acc.m27,
+            m26: this.scaleMonths(acc.m26, factor),
+            m27: this.scaleMonths(acc.m27, factor),
             expandable: false
           }));
         });
       });
     });
+    if (companies.length) {
+      rows.push(this.rowHtml({
+        kind: "total",
+        key: "",
+        depth: 0,
+        label: "Total",
+        m26: y26,
+        m27: y27,
+        expandable: false
+      }));
+    }
     body.innerHTML = rows.join("") || '<tr><td class="orc-empty" colspan="28">Nenhuma empresa com essas contas.</td></tr>';
     if (kpis) {
       const rec = this.sum(y26.slice(0, 9));
@@ -462,7 +534,7 @@ const OrcamentoApp = {
         <div class="orc-kpi"><span>FORECAST OUT–DEZ 2026</span><strong class="orc-fc">${this.money(fc)}</strong></div>
         <div class="orc-kpi"><span>2026 COMPLETO</span><strong>${this.money(t26)}</strong></div>
         <div class="orc-kpi"><span>ORÇADO 2027</span><strong>${this.money(t27)}</strong></div>
-        <div class="orc-kpi"><span>VARIAÇÃO 2027 − 2026</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)}</strong></div>
+        <div class="orc-kpi"><span>VARIAÇÃO 2027 − 2026</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
       `;
     }
   },
@@ -480,6 +552,11 @@ const OrcamentoApp = {
     return '<td class="' + cls + '">' + this.money(value) + "</td>";
   },
 
+  varCell(delta, base, extra) {
+    const cls = [delta < 0 ? "orc-neg" : "", extra || ""].filter(Boolean).join(" ");
+    return '<td class="' + cls + '"><span class="orc-var">' + this.money(delta) + '</span><span class="orc-pct">' + this.pctLabel(delta, base) + "</span></td>";
+  },
+
   rowHtml(row) {
     const open = this.expanded.has(row.key);
     const chevron = row.expandable
@@ -489,14 +566,14 @@ const OrcamentoApp = {
     const t26 = this.sum(row.m26);
     const t27 = this.sum(row.m27);
     const delta = t27 - t26;
-    const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "cc" ? "orc-cc" : "orc-leaf");
+    const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "cc" ? "orc-cc" : "orc-leaf"));
     const y26 = row.m26.map((v, i) => this.moneyCell(v, i >= 9 ? "orc-fc" : "")).join("");
     const y27 = row.m27.map((v, i) => this.moneyCell(v, "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
       + this.moneyCell(t27, "orc-y27")
-      + this.moneyCell(delta, "")
+      + this.varCell(delta, t26, "")
       + "</tr>";
   }
 };

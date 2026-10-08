@@ -3244,6 +3244,8 @@ function auditActionMeta(action, summary, module) {
   if (key === "BOLETO_ERRO" || /falha ao gerar boleto/.test(blob)) return { group: "boleto", label: "Falha ao gerar boleto" };
   if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
+  if (key === "CAUCAO_VENCIMENTO" || /vencimento da cau[cç][aã]o/.test(blob)) return { group: "caucao", label: "Vencimento de caução" };
+  if (key === "CAUCAO_LIBERACAO" || /cau[cç][aã]o liberada|libera[cç][aã]o da cau[cç][aã]o/.test(blob)) return { group: "caucao", label: "Liberação de caução" };
   if (
     /attachment/.test(blob)
     || ((/anexo/.test(blob) || /ged/.test(blob)) && /envi|upload|post|erro/.test(blob))
@@ -3620,6 +3622,7 @@ window.renderAuditLogs = async function(forceReload) {
     if (actionFilter === "principais" && meta.group === "outros") return false;
     if (actionFilter === "boleto" && meta.group !== "boleto") return false;
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
+    if (actionFilter === "caucao" && meta.group !== "caucao") return false;
     if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
       const t = auditParseTs(row.timestamp);
@@ -3657,10 +3660,13 @@ window.renderAuditLogs = async function(forceReload) {
     const nBoleto = window._auditCache.rows.filter(function(r) {
       return auditActionMeta(r.action, r.summary, r.module).group === "boleto";
     }).length;
+    const nCaucao = window._auditCache.rows.filter(function(r) {
+      return auditActionMeta(r.action, r.summary, r.module).group === "caucao";
+    }).length;
     countEl.textContent = rows.length
       ? (rows.length + " registro(s)")
       : (window._auditCache.rows.length
-        ? ("Nenhum no filtro · " + window._auditCache.rows.length + " no total (" + nBoleto + " boleto · " + nAnexo + " anexo)")
+        ? ("Nenhum no filtro · " + window._auditCache.rows.length + " no total (" + nBoleto + " boleto · " + nAnexo + " anexo · " + nCaucao + " caução)")
         : "Nenhum registro");
   }
 

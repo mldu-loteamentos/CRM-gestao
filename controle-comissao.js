@@ -112,6 +112,53 @@ const ControleComissaoApp = {
     return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   },
 
+  fold(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  },
+
+  siengeGet(path) {
+    if (typeof window.siengeFetchWithRetry !== "function") return Promise.resolve(null);
+    const req = window.siengeFetchWithRetry(path, 1);
+    req.catch(function () {});
+    let timer;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 12000); });
+    return Promise.race([req.catch(() => null), timeout]).finally(() => clearTimeout(timer));
+  },
+
+  isWebroInst(inst) {
+    const id = inst && inst.conditionTypeId;
+    if (id == null || id === "") return false;
+    return typeof window.paymentConditionIsWebro === "function" && window.paymentConditionIsWebro(String(id)) === true;
+  },
+
+  async findClienteBill(emp, unit, clientName) {
+    const name = String(clientName || "").trim();
+    const wantUnit = this.unitKey(unit);
+    if (!name || !wantUnit) return null;
+    const query = name.split(/\s+/).slice(0, 3).join(" ");
+    const data = await this.siengeGet("/customers?name=" + encodeURIComponent(query) + "&limit=15");
+    const customers = (data && data.results) || [];
+    const wantName = this.fold(name);
+    for (let i = 0; i < customers.length && i < 6; i++) {
+      const c = customers[i];
+      const id = c && (c.id != null ? c.id : c.customerId);
+      if (!id) continue;
+      const cname = this.fold(c.name || "");
+      if (wantName && cname && cname !== wantName && cname.indexOf(wantName) < 0 && wantName.indexOf(cname) < 0) continue;
+      const bills = await this.siengeGet("/accounts-receivable/receivable-bills?customerId=" + encodeURIComponent(id) + "&limit=40");
+      const list = (bills && bills.results) || [];
+      const hit = list.find((b) => {
+        if (this.unitKey(b && b.unityName) !== wantUnit) return false;
+        const code = String((b && b.enterpriseCode) || "");
+        if (emp && code && code !== String(emp) && this.enterpriseId(b.enterpriseName) !== String(emp)) return false;
+        const doc = String((b && (b.documentId || b.documentIdentificationId)) || "").toUpperCase();
+        return !doc || doc === "CT";
+      });
+      if (hit) return hit;
+    }
+    return null;
+  },
+
   nfsMap() {
     try {
       const raw = JSON.parse(localStorage.getItem("crm_comissao_nfs_v1") || "{}");
@@ -296,40 +343,44 @@ const ControleComissaoApp = {
     };
   },
 
-  async loadClienteParcelas(emp, unit) {
-    if (typeof window.siengeFetchWithRetry !== "function") return null;
-    const data = await window.siengeFetchWithRetry("/units?enterpriseId=" + encodeURIComponent(emp) + "&name=" + encodeURIComponent(unit) + "&limit=50");
-    const units = (data && data.results) || [];
-    const want = this.unitKey(unit);
-    const found = units.find((x) => this.unitKey(x && x.name) === want);
-    if (!found) return null;
-    let billId = found.receivableBillId || "";
-    const contractId = found.contractId || found.salesContractId || (found.currentSalesContract && found.currentSalesContract.id);
-    if (!billId && contractId) {
-      const sc = await window.siengeFetchWithRetry("/sales-contracts/" + encodeURIComponent(contractId));
-      billId = (sc && (sc.receivableBillId || sc.billReceivableId)) || "";
-    }
+  async loadClienteParcelas(emp, unit, clientName) {
+    const bill = await this.findClienteBill(emp, unit, clientName);
+    const billId = bill && (bill.receivableBillId || bill.id);
     if (!billId) return null;
     let list = [];
+    const instRes = await this.siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200");
+    list = (instRes && instRes.results) || (Array.isArray(instRes) ? instRes : []);
+    const histById = {};
     try {
-      const hist = await window.siengeFetchWithRetry("/bulk-data/v1/customer-extract-history?startDueDate=1996-01-01&endDueDate=2045-01-01&billReceivableId=" + encodeURIComponent(billId) + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false");
+      const hist = await this.siengeGet("/bulk-data/v1/customer-extract-history?startDueDate=1996-01-01&endDueDate=2045-01-01&billReceivableId=" + encodeURIComponent(billId) + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false");
       const rows = (hist && (hist.data || hist.results)) || [];
       const first = Array.isArray(rows) ? rows[0] : null;
-      if (first && Array.isArray(first.installments) && first.installments.length) list = first.installments;
+      ((first && first.installments) || []).forEach((inst) => {
+        const id = inst && (inst.installmentId != null ? inst.installmentId : inst.id);
+        if (id != null) histById[String(id)] = inst;
+      });
     } catch (e) {}
-    if (!list.length) {
-      const instRes = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200");
-      list = (instRes && instRes.results) || (Array.isArray(instRes) ? instRes : []);
-    }
-    const byDue = {};
-    list.forEach((inst) => {
-      const due = String(inst && inst.dueDate || "").slice(0, 10);
-      if (!due) return;
-      const row = this.clienteFromInst(inst, billId);
-      const prev = byDue[due];
-      if (!prev || (row.baixada && !prev.baixada)) byDue[due] = row;
+    const merged = list.map((inst) => {
+      const id = String(inst && (inst.installmentId != null ? inst.installmentId : inst.id));
+      const hist = histById[id] || {};
+      const receipts = (Array.isArray(hist.receipts) && hist.receipts.length) ? hist.receipts : (inst.receipts || []);
+      return Object.assign({}, hist, inst, { receipts: receipts });
     });
-    return { byDue: byDue };
+    const byDue = {};
+    const webro = [];
+    merged.forEach((inst) => {
+      const due = String(inst && inst.dueDate || "").slice(0, 10);
+      const row = this.clienteFromInst(inst, billId);
+      row.due = due;
+      row.webro = this.isWebroInst(inst);
+      row.documento = String((bill && bill.documentNumber) || "");
+      if (row.webro) webro.push(row);
+      if (!due) return;
+      const prev = byDue[due];
+      if (!prev || (row.webro && !prev.webro) || (row.baixada && !prev.baixada && row.webro === prev.webro)) byDue[due] = row;
+    });
+    webro.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    return { byDue: byDue, webro: webro, billId: String(billId), documento: String((bill && bill.documentNumber) || "") };
   },
 
   recalcRecebidos() {
@@ -359,37 +410,72 @@ const ControleComissaoApp = {
     rows.forEach((r) => {
       const emp = this.enterpriseId(r.empreendimento);
       const unit = String(r.unidade || "").trim();
-      if (!emp || !unit) return;
-      const key = emp + "|" + this.unitKey(unit);
+      const client = String(r.pagador || "").trim();
+      if (!unit || !client) {
+        this.mouraProgramacao(r).forEach((p) => { p.clienteBusca = true; p.cliente = null; });
+        return;
+      }
+      const key = (emp || "") + "|" + this.unitKey(unit) + "|" + this.fold(client);
       if (seen[key]) return;
       seen[key] = true;
-      jobs.push({ key: key, emp: emp, unit: unit });
+      jobs.push({ key: key, emp: emp, unit: unit, client: client });
     });
     const resolved = {};
     let cursor = 0;
+    let done = 0;
+    const apply = () => {
+      rows.forEach((r) => {
+        const emp = this.enterpriseId(r.empreendimento);
+        const unit = String(r.unidade || "").trim();
+        const client = String(r.pagador || "").trim();
+        const pack = unit && client ? resolved[(emp || "") + "|" + this.unitKey(unit) + "|" + this.fold(client)] : null;
+        if (pack === undefined) return;
+        const moura = this.mouraProgramacao(r).slice().sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)));
+        const webro = (pack && pack.webro) || [];
+        const used = {};
+        moura.forEach((p) => {
+          const due = String(p.vencimento || "").slice(0, 10);
+          p.clienteBusca = true;
+          let cliente = null;
+          if (pack && pack.byDue && pack.byDue[due] && pack.byDue[due].webro) cliente = pack.byDue[due];
+          if (!cliente) {
+            let best = -1;
+            let bestDays = 46;
+            webro.forEach((w, i) => {
+              if (used[i]) return;
+              const days = Math.abs((Date.parse(String(w.due).slice(0, 10) + "T12:00:00") || 0) - (Date.parse(due + "T12:00:00") || 0)) / 86400000;
+              if (days <= 45 && days < bestDays) {
+                bestDays = days;
+                best = i;
+              }
+            });
+            if (best >= 0) cliente = webro[best];
+          }
+          if (!cliente && pack && pack.byDue) cliente = pack.byDue[due] || null;
+          if (cliente) {
+            const idx = webro.indexOf(cliente);
+            if (idx >= 0) used[idx] = true;
+          }
+          p.cliente = cliente;
+          if (p.cliente && p.cliente.baixada) {
+            p.pago = true;
+            p.situacao = "Recebido";
+          }
+        });
+      });
+    };
     const run = async () => {
       while (cursor < jobs.length) {
         const job = jobs[cursor++];
-        try { resolved[job.key] = await this.loadClienteParcelas(job.emp, job.unit); }
+        try { resolved[job.key] = await this.loadClienteParcelas(job.emp, job.unit, job.client); }
         catch (e) { resolved[job.key] = null; }
+        done += 1;
+        apply();
+        if (!this.state.loading && (done % 2 === 0 || done === jobs.length)) this.render();
       }
     };
     await Promise.all([run(), run(), run()]);
-    rows.forEach((r) => {
-      const emp = this.enterpriseId(r.empreendimento);
-      const unit = String(r.unidade || "").trim();
-      const pack = emp && unit ? resolved[emp + "|" + this.unitKey(unit)] : null;
-      (r.programacao || []).forEach((p) => {
-        if (!this.isMouraNome(p.beneficiario)) return;
-        const due = String(p.vencimento || "").slice(0, 10);
-        p.clienteBusca = true;
-        p.cliente = pack && pack.byDue ? (pack.byDue[due] || null) : null;
-        if (p.cliente && p.cliente.baixada) {
-          p.pago = true;
-          p.situacao = "Recebido";
-        }
-      });
-    });
+    apply();
     this.recalcRecebidos();
     if (!this.state.loading) this.render();
   },

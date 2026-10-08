@@ -89,15 +89,7 @@ window.permFlagsForAction = function(sub, act) {
 
 const ConfigUsersApp = {
   
-  users: [
-    { id: 1, name: "ISRAEL DE OLIVEIRA MENDES", email: "israel@mouraleite.com.br", sienge_user: "ISRAEL", phone: "(15) 99811-8246", profile_name: "ADMINISTRADOR", status: "ATIVO", manager_name: "", manager_email: "" },
-    { id: 2, name: "LETICIA PEREIRA DE OLIVEIRA", email: "leticia.oliveira@mouraleite.com.br", sienge_user: "LETICIA.OLIVEIRA", phone: "(14) 98822-5570", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
-    { id: 3, name: "MICHELLE FRANCINE VIEIRA", email: "michelle.vieira@mouraleite.com.br", sienge_user: "MICHELLE.VIEIRA", phone: "(14) 99655-7212", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
-    { id: 4, name: "MICHELLE PEREIRA YAMASHIRO", email: "michelle.pereira@mouraleite.com.br", sienge_user: "MICHELLE.PEREIRA", phone: "(14) 99144-8775", profile_name: "OPERADOR COBRANÇA", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" },
-    { id: 5, name: "THAIANE CRISTINA", email: "thaiane.oliveira@mouraleite.com.br", sienge_user: "THAIANE.CORDEIRO", phone: "(19) 99453-6608", profile_name: "OPERADOR COBRANÇA", operator_type: "externo", status: "PENDENTE", manager_name: "", manager_email: "" },
-    { id: 6, name: "CARLOS EDUARDO COLENCI", email: "caco@colenci.com.br", sienge_user: "CACO", phone: "(14) 99671-2870", profile_name: "OPERADOR COBRANÇA", operator_type: "advogado", status: "PENDENTE", manager_name: "", manager_email: "", adv_companies: [], adv_cities: [], adv_cost_centers: [] },
-    { id: 7, name: "LUCELIA SALVADOR JUSTO", email: "lucelia.justo@mouraleite.com.br", sienge_user: "LUCELIA JUSTO", phone: "(14) 99704-2756", profile_name: "OPERADOR COBRANÇA BACK OFFICE", operator_type: "interno", status: "PENDENTE", manager_name: "", manager_email: "" }
-  ],
+  users: [],
 
   profiles: [], // Será carregado dinamicamente
 
@@ -432,6 +424,8 @@ const ConfigUsersApp = {
   ],
 
   selectedProfile: "admin",
+  view: "usuarios",
+  userFilters: { nome: "", perfil: "", email: "", status: "todos" },
 
   async loadUsers() {
     try {
@@ -559,25 +553,7 @@ const ConfigUsersApp = {
   },
 
   async ensureProfilesReferencedByUsers() {
-    if (!Array.isArray(this.profiles)) this.profiles = [];
-    const norm = (name) => String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
-    const known = new Set(this.profiles.map((p) => norm(p && p.name)));
-    let added = false;
-    (this.users || []).forEach((u) => {
-      const name = String(u && u.profile_name || "").trim();
-      if (!name) return;
-      const key = norm(name);
-      if (!key || known.has(key)) return;
-      const id = this.profileIdFromName(name);
-      if (!id || this.profiles.some((p) => String(p.id) === id)) return;
-      if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(id);
-      this.profiles.push({ id, name: name.toUpperCase() });
-      known.add(key);
-      added = true;
-    });
-    if (!added) return;
-    this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
-    await this.persistProfilesCloud();
+    return;
   },
 
   writePermissionPayload(profileId, perms) {
@@ -926,15 +902,23 @@ const ConfigUsersApp = {
       defaultValue: profile.name,
       confirmLabel: "Salvar nome",
       icon: "pencil",
-      onConfirm: (newName) => {
+      onConfirm: async (newName) => {
         const next = newName.trim().toUpperCase();
         if (!next || next === profile.name) return;
         if (this.profiles.some(p => p.id !== id && String(p.name).toUpperCase() === next)) {
           alert("Já existe outro perfil com esse nome.");
           return;
         }
+        const previous = profile.name;
         profile.name = next;
-        localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
+        (this.users || []).forEach((u) => {
+          if (String(u.profile_name || "").trim().toUpperCase() === previous.toUpperCase()) u.profile_name = next;
+        });
+        this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+        try { await this.persistProfilesCloud(); } catch (e) {
+          alert("O nome mudou nesta tela, mas não gravou na nuvem. " + (e && e.message ? e.message : "Tente de novo."));
+        }
+        try { await this.persistUsers(); } catch (e) {}
         this.render();
       }
     });
@@ -1610,11 +1594,51 @@ const ConfigUsersApp = {
       }
   },
 
+  setView(view) {
+    this.view = view === "perfis" ? "perfis" : "usuarios";
+    this.render();
+  },
+
+  onUserFilter(field, value) {
+    if (!this.userFilters) this.userFilters = { nome: "", perfil: "", email: "", status: "todos" };
+    this.userFilters[field] = value;
+    const el = document.activeElement;
+    const id = el && el.id;
+    const pos = el && typeof el.selectionStart === "number" ? el.selectionStart : null;
+    this.render();
+    if (!id) return;
+    const next = document.getElementById(id);
+    if (!next) return;
+    next.focus();
+    if (pos != null && next.setSelectionRange) {
+      try { next.setSelectionRange(pos, pos); } catch (e) {}
+    }
+  },
+
+  filteredUsers() {
+    const f = this.userFilters || {};
+    const nome = String(f.nome || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const email = String(f.email || "").toLowerCase().trim();
+    const perfil = String(f.perfil || "");
+    const status = f.status || "todos";
+    return (this.users || []).filter((u) => {
+      const un = String(u.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (nome && un.indexOf(nome) < 0) return false;
+      if (email && String(u.email || "").toLowerCase().indexOf(email) < 0) return false;
+      if (perfil && String(u.profile_name || "") !== perfil) return false;
+      const st = String(u.status || "").toUpperCase();
+      if (status === "ativos" && st !== "ATIVO") return false;
+      if (status === "inativos" && st !== "INATIVO") return false;
+      return true;
+    });
+  },
+
   render() {
     const root = document.getElementById('config-users-root');
     if (!root) return;
 
-    let trs = this.users.map(u => {
+    const shownUsers = this.filteredUsers();
+    let trs = shownUsers.map(u => {
       const isActive = u.status === 'ATIVO';
       const isPending = String(u.status || '').toUpperCase() === 'PENDENTE';
       const statusSwitch = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1645,6 +1669,26 @@ const ConfigUsersApp = {
         </tr>
       `;
     }).join('');
+    if (!trs) {
+      trs = `<tr><td colspan="6" style="padding:28px 16px;text-align:center;color:#64748b;">Nenhum usuário neste filtro.</td></tr>`;
+    }
+
+    const filters = this.userFilters || { nome: "", perfil: "", email: "", status: "todos" };
+    const profileChoices = [];
+    const seenProfile = {};
+    (this.profiles || []).forEach((p) => {
+      const name = String(p && p.name || "").trim();
+      if (!name || seenProfile[name]) return;
+      seenProfile[name] = true;
+      profileChoices.push(name);
+    });
+    (this.users || []).forEach((u) => {
+      const name = String(u && u.profile_name || "").trim();
+      if (!name || seenProfile[name]) return;
+      seenProfile[name] = true;
+      profileChoices.push(name);
+    });
+    profileChoices.sort((a, b) => a.localeCompare(b, "pt-BR"));
 
     const optionsHtml = this.profiles.map(p => {
        const isSelected = p.id === this.selectedProfile;
@@ -1791,19 +1835,60 @@ const ConfigUsersApp = {
         .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         .ml-switch input:checked + .ml-slider { background: #105436; }
         .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
+        .cfg-tabs { display: flex; gap: 8px; margin: 0 0 22px; }
+        .cfg-tab { border: 1px solid #d7e3db; background: #fff; color: #334155; border-radius: 999px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+        .cfg-tab.is-on { background: #105436; color: #fff; border-color: #105436; }
+        .cfg-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+        .cfg-filters label { display: block; font-size: 0.72rem; font-weight: 700; color: #64748b; margin-bottom: 6px; }
+        .cfg-filters .form-control { height: 38px; }
       </style>
       <div style="padding: 30px; max-width: 1100px; margin: 0 auto;">
-        
-        <!-- SEÇÃO: USUÁRIOS -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap;">
           <h2 style="display: flex; align-items: center; gap: 10px; font-size: 1.5rem; margin: 0; color: #202124;">
-            <i data-lucide="users" style="width: 24px; height: 24px;"></i> Gerenciar Usuários e Perfis
+            <i data-lucide="users" style="width: 24px; height: 24px;"></i> Usuários e Perfis
           </h2>
+          ${this.view === "usuarios" ? `
           <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.openUserModal()">
             <i data-lucide="user-plus" style="width: 18px; margin-right: 6px;"></i> Convidar Usuário
-          </button>
+          </button>` : `
+          <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.savePermissions()">
+            <i data-lucide="save" style="width: 18px; margin-right: 6px;"></i> Salvar Permissões
+          </button>`}
+        </div>
+        <div class="cfg-tabs">
+          <button type="button" class="cfg-tab ${this.view === "usuarios" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('usuarios')">Usuários</button>
+          <button type="button" class="cfg-tab ${this.view === "perfis" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('perfis')">Perfis</button>
         </div>
 
+        ${this.view === "usuarios" ? `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-bottom:16px;">
+          <div class="cfg-filters">
+            <div>
+              <label for="cfg-user-nome">Nome</label>
+              <input id="cfg-user-nome" class="form-control" type="search" placeholder="Nome do usuário" value="${this.esc(filters.nome)}" oninput="ConfigUsersApp.onUserFilter('nome', this.value)">
+            </div>
+            <div>
+              <label for="cfg-user-perfil">Perfil</label>
+              <select id="cfg-user-perfil" class="form-control" onchange="ConfigUsersApp.onUserFilter('perfil', this.value)">
+                <option value="">Todos</option>
+                ${profileChoices.map((name) => `<option value="${this.esc(name)}" ${filters.perfil === name ? "selected" : ""}>${this.esc(name)}</option>`).join("")}
+              </select>
+            </div>
+            <div>
+              <label for="cfg-user-email">E-mail</label>
+              <input id="cfg-user-email" class="form-control" type="search" placeholder="E-mail" value="${this.esc(filters.email)}" oninput="ConfigUsersApp.onUserFilter('email', this.value)">
+            </div>
+            <div>
+              <label for="cfg-user-status">Situação</label>
+              <select id="cfg-user-status" class="form-control" onchange="ConfigUsersApp.onUserFilter('status', this.value)">
+                <option value="todos" ${filters.status === "todos" ? "selected" : ""}>Todos</option>
+                <option value="ativos" ${filters.status === "ativos" ? "selected" : ""}>Somente ativos</option>
+                <option value="inativos" ${filters.status === "inativos" ? "selected" : ""}>Desativados</option>
+              </select>
+            </div>
+            <div style="font-size:0.8rem;color:#64748b;padding-bottom:8px;">${shownUsers.length} usuário(s)</div>
+          </div>
+        </div>
         <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 40px; border: 1px solid #f0f0f0;">
           <table style="width: 100%; border-collapse: collapse; text-align: left;">
             <thead>
@@ -1821,17 +1906,7 @@ const ConfigUsersApp = {
             </tbody>
           </table>
         </div>
-
-        <!-- SEÇÃO: CONFIGURAÇÃO DE PERFIS -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h2 style="display: flex; align-items: center; gap: 10px; font-size: 1.5rem; margin: 0; color: #202124;">
-            <i data-lucide="shield-check" style="width: 24px; height: 24px;"></i> Configuração de Perfis
-          </h2>
-          <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.savePermissions()">
-            <i data-lucide="save" style="width: 18px; margin-right: 6px;"></i> Salvar Permissões
-          </button>
-        </div>
-
+        ` : `
         <div style="display: flex; margin-bottom: 24px; align-items: center;">
            <div style="display: flex; gap: 10px; align-items: center;">
               ${profileOptions}
@@ -1842,6 +1917,7 @@ const ConfigUsersApp = {
         <div id="permissions-container">
            ${modulesHtml}
         </div>
+        `}
 
       </div>
     `;

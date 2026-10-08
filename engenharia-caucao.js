@@ -1286,6 +1286,13 @@ window.EngenhariaCaucaoApp = {
         titulo: r.titulo,
         parcela: r.parcela
       };
+      this.logCaucao(
+        "CAUCAO_LIBERACAO",
+        r,
+        "Liberação da caução retirada. Vencimento mantido em " + this.fmtDate(r.vencimento) + ".",
+        "ok",
+        { retirada: true, vencimento: r.vencimento }
+      );
     });
     this.persistLiberated();
     this.applyFilters();
@@ -1367,6 +1374,29 @@ window.EngenhariaCaucaoApp = {
     };
   },
 
+  logCaucao(action, r, summary, status, extra) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function" || !r) return;
+    try {
+      AuditService.logEvent({
+        action: action,
+        module: "Engenharia",
+        status: status || "ok",
+        summary: summary,
+        customerLabel: r.credor || "",
+        enterpriseId: r.ccId != null ? String(r.ccId) : "",
+        enterpriseName: r.ccNome || "",
+        titleId: r.titulo != null ? String(r.titulo) : "",
+        details: Object.assign({
+          parcela: r.parcela || "",
+          documento: r.documento || "",
+          valor: r.valorAjustado,
+          credor: r.credor || "",
+          empresa: r.companyId != null ? String(r.companyId) : ""
+        }, extra || {})
+      });
+    } catch (e) {}
+  },
+
   async patchBillInstallments(billId, items) {
     if (typeof window.siengePatch !== "function") {
       throw new Error("API Sienge indisponível para gravação.");
@@ -1413,9 +1443,30 @@ window.EngenhariaCaucaoApp = {
     for (const [billId, list] of byBill.entries()) {
       try {
         await this.patchBillInstallments(billId, list.map((r) => this.installmentPayload(r, due)));
-        list.forEach((r) => { r.vencimento = due; ok += 1; });
+        list.forEach((r) => {
+          const anterior = r.vencimento;
+          r.vencimento = due;
+          ok += 1;
+          this.logCaucao(
+            "CAUCAO_VENCIMENTO",
+            r,
+            "Vencimento da caução alterado de " + this.fmtDate(anterior) + " para " + this.fmtDate(due) + ".",
+            "ok",
+            { vencimentoAnterior: anterior, vencimentoNovo: due }
+          );
+        });
       } catch (e) {
-        errors.push("Título " + billId + ": " + (e && e.message ? e.message : e));
+        const msg = e && e.message ? e.message : String(e);
+        errors.push("Título " + billId + ": " + msg);
+        list.forEach((r) => {
+          this.logCaucao(
+            "CAUCAO_VENCIMENTO",
+            r,
+            "Falha ao alterar o vencimento da caução para " + this.fmtDate(due) + ". " + msg,
+            "erro",
+            { vencimentoAnterior: r.vencimento, vencimentoNovo: due, erro: msg }
+          );
+        });
       }
     }
     this.state.busy = false;
@@ -1483,12 +1534,39 @@ window.EngenhariaCaucaoApp = {
           mark(r);
           prorrogadas += 1;
           avisosProrroga.push(this.avisoItem(r, { anterior: this.fmtDate(anterior) }));
+          this.logCaucao(
+            "CAUCAO_LIBERACAO",
+            r,
+            "Caução liberada. Vencimento prorrogado de " + this.fmtDate(anterior) + " para " + this.fmtDate(r.vencimento) + ".",
+            "ok",
+            { vencimentoAnterior: anterior, vencimentoNovo: r.vencimento, prorrogada: true }
+          );
         });
       } catch (e) {
-        errors.push("Título " + billId + ": " + (e && e.message ? e.message : e));
+        const msg = e && e.message ? e.message : String(e);
+        errors.push("Título " + billId + ": " + msg);
+        list.forEach((r) => {
+          this.logCaucao(
+            "CAUCAO_LIBERACAO",
+            r,
+            "Falha ao liberar a caução. " + msg,
+            "erro",
+            { vencimento: r.vencimento, erro: msg }
+          );
+        });
       }
     }
-    manter.forEach((r) => { mark(r); liberadas += 1; });
+    manter.forEach((r) => {
+      mark(r);
+      liberadas += 1;
+      this.logCaucao(
+        "CAUCAO_LIBERACAO",
+        r,
+        "Caução liberada. Vencimento mantido em " + this.fmtDate(r.vencimento) + ".",
+        "ok",
+        { vencimento: r.vencimento, prorrogada: false }
+      );
+    });
     try {
       await this.persistLiberated();
     } catch (e) {
@@ -1509,95 +1587,227 @@ window.EngenhariaCaucaoApp = {
     alert(parts.join("\n") || "Nenhuma caução foi alterada.");
   },
 
-  exportExcel() {
-    if (this.state.loading) return;
-    if (typeof XLSX === "undefined") {
-      alert("Biblioteca de Excel indisponível.");
-      return;
+  caucaoSituacao(r) {
+    if (r && r.pago) return "Pago";
+    if (this.isLiberated(r)) return "Liberado";
+    return "Retido";
+  },
+
+  fillCaucaoSheet(ws, rows, imgId, host) {
+    const paint = (cell, opts) => host.excelPaint(cell, opts);
+    const moneyFmt = "#,##0.00";
+    const heads = [
+      "Credor", "Empresa", "Centro de custo", "Título", "Parcela",
+      "Documento", "Nº documento", "Emissão", "Vencimento", "Pagamento", "Valor (R$)", "Situação"
+    ];
+    const sitStyle = {
+      Retido: { color: "FF9A3412", fill: "FFFFF7ED" },
+      Liberado: { color: "FF105436", fill: "FFECFDF5" },
+      Pago: { color: "FFFFFFFF", fill: "FF475569" }
+    };
+    let retido = 0;
+    let liberado = 0;
+    let pago = 0;
+    rows.forEach((r) => {
+      const v = Number(r.valorAjustado) || 0;
+      const sit = this.caucaoSituacao(r);
+      if (sit === "Pago") pago += v;
+      else if (sit === "Liberado") liberado += v;
+      else retido += v;
+    });
+    const total = retido + liberado + pago;
+
+    ws.properties.showGridLines = false;
+    ws.views = [{
+      state: "frozen",
+      ySplit: 4,
+      topLeftCell: "A5",
+      activeCell: "A5",
+      showGridLines: false
+    }];
+    ws.columns = [
+      { width: 42 }, { width: 12 }, { width: 36 }, { width: 14 }, { width: 12 },
+      { width: 14 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 14 },
+      { width: 16 }, { width: 14 }
+    ];
+    ws.mergeCells("A1:G2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const de = this.fmtDate(this.state.startDate);
+    const ate = this.fmtDate(this.state.endDate);
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 16, bold: true, color: { argb: "FF105436" } }, text: "Gestão de caução\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: "Vencimento de " + de + " a " + ate }
+      ]
+    };
+    paint(title, {
+      fill: "FFFFFFFF",
+      align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
+    });
+    const logoCm = 1.54;
+    const logoPx = Math.round(logoCm * 96 / 2.54);
+    if (imgId != null) {
+      try {
+        ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+      } catch (e) {}
     }
-    const rows = this.state.shown || [];
-    if (!rows.length) {
-      alert("Não há cauções para exportar neste filtro.");
-      return;
-    }
+    [
+      { label: "Títulos", value: rows.length, color: "FF0F172A", money: false },
+      { label: "Retido", value: retido, color: "FF9A3412", money: true },
+      { label: "Liberado", value: liberado, color: "FF105436", money: true },
+      { label: "Pago", value: pago, color: "FF475569", money: true },
+      { label: "Total", value: total, color: "FF0F172A", money: true }
+    ].forEach((k, i) => {
+      const col = 8 + i;
+      const lab = ws.getRow(1).getCell(col);
+      const val = ws.getRow(2).getCell(col);
+      lab.value = k.label;
+      val.value = k.value;
+      paint(lab, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+        align: { horizontal: "right", vertical: "bottom" }
+      });
+      paint(val, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 12, color: { argb: k.color } },
+        align: { horizontal: "right", vertical: "middle" },
+        numFmt: k.money ? moneyFmt : "0"
+      });
+    });
+    ws.getRow(3).height = 8;
+    const head = ws.getRow(4);
+    head.height = 20;
+    heads.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      paint(cell, {
+        fill: "FF105436",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+        border: true
+      });
+    });
+
     const grouped = new Map();
     rows.forEach((r) => {
       const g = r.credor || "Sem credor";
       if (!grouped.has(g)) grouped.set(g, []);
       grouped.get(g).push(r);
     });
-    const aoa = [[
-      "Credor", "Id Empresa", "Centro de custo", "Título", "Parcela",
-      "Documento", "Nº documento", "Emissão", "Vencimento", "Pagamento", "Valor (R$)", "Situação"
-    ]];
-    const headerRows = new Set([0]);
-    const groupRows = new Set();
+    let rowIdx = 5;
     [...grouped.keys()].sort((a, b) => a.localeCompare(b, "pt-BR")).forEach((credor) => {
       const list = grouped.get(credor);
-      const total = list.reduce((s, r) => s + (Number(r.valorAjustado) || 0), 0);
-      groupRows.add(aoa.length);
-      aoa.push([
-        credor.toUpperCase(),
-        "",
-        list.length + (list.length === 1 ? " título" : " títulos"),
-        "", "", "", "", "", "", "",
-        total,
-        ""
-      ]);
-      list.forEach((r) => {
-        aoa.push([
+      const soma = list.reduce((s, r) => s + (Number(r.valorAjustado) || 0), 0);
+      const band = ws.getRow(rowIdx);
+      band.height = 20;
+      for (let c = 1; c <= 12; c++) {
+        const cell = band.getCell(c);
+        paint(cell, {
+          fill: "FF334155",
+          font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+          align: { horizontal: c === 11 ? "right" : "left", vertical: "middle" },
+          border: true,
+          numFmt: c === 11 ? moneyFmt : undefined
+        });
+      }
+      band.getCell(1).value = String(credor).toUpperCase();
+      band.getCell(3).value = list.length + (list.length === 1 ? " título" : " títulos");
+      band.getCell(11).value = soma;
+      rowIdx += 1;
+      list.forEach((r, i) => {
+        const sit = this.caucaoSituacao(r);
+        const tone = sitStyle[sit];
+        const bg = i % 2 ? "FFF8FAFC" : "FFFFFFFF";
+        const line = ws.getRow(rowIdx);
+        line.height = 18;
+        const values = [
           r.credor || "",
-          r.companyId,
+          r.companyId != null ? String(r.companyId) : "",
           (r.ccId ? r.ccId + " - " : "") + (r.ccNome || ""),
-          r.titulo,
-          r.parcela || "",
+          r.titulo != null ? String(r.titulo) : "",
+          r.parcela != null ? String(r.parcela) : "",
           "CAU",
           r.documento || "",
           this.fmtDate(r.emissao),
           this.fmtDate(r.vencimento),
           r.pago ? this.fmtDate(r.dataPagamento) : "",
           Number(r.valorAjustado) || 0,
-          r.pago ? "Pago" : (this.isLiberated(r) ? "Liberado" : "Retido")
-        ]);
+          sit
+        ];
+        values.forEach((v, c) => {
+          const cell = line.getCell(c + 1);
+          cell.value = v;
+          const isMoney = c === 10;
+          const isSit = c === 11;
+          paint(cell, {
+            fill: isSit ? tone.fill : bg,
+            font: {
+              size: 9,
+              bold: isMoney || isSit,
+              color: { argb: isSit ? tone.color : (isMoney ? tone.color : "FF0F172A") }
+            },
+            align: { horizontal: isMoney ? "right" : "left", vertical: "middle" },
+            border: true,
+            numFmt: isMoney ? moneyFmt : undefined
+          });
+        });
+        rowIdx += 1;
       });
     });
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const range = XLSX.utils.decode_range(ws["!ref"]);
-    ws["!cols"] = [
-      { wch: 40 }, { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 10 },
-      { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }
-    ];
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const addr = XLSX.utils.encode_cell({ r: R, c: C });
-        let cell = ws[addr];
-        if (!cell) { cell = { t: "s", v: "" }; ws[addr] = cell; }
-        cell.s = {
-          border: {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-          },
-          alignment: { vertical: "center", wrapText: true },
-          font: { name: "Calibri", sz: 11 }
-        };
-        if (headerRows.has(R)) {
-          cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
-          cell.s.font.bold = true;
-          cell.s.alignment.horizontal = "center";
-        }
-        if (groupRows.has(R)) {
-          cell.s.fill = { fgColor: { rgb: "D1FAE5" } };
-          cell.s.font.bold = true;
-        }
-        if (R > 0 && C === 10 && cell.t === "n") cell.z = "#,##0.00";
-      }
-    }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Caução por credor");
-    XLSX.writeFile(wb, "gestao-caucao-" + this.isoToday() + ".xlsx");
+    rowIdx += 1;
+    ws.mergeCells(rowIdx, 1, rowIdx, 12);
+    const foot = ws.getCell(rowIdx, 1);
+    foot.value = host.generatedAtLabel(new Date());
+    paint(foot, {
+      font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+      align: { vertical: "middle", horizontal: "left" }
+    });
+    ws.getRow(rowIdx).height = 18;
   },
+
+  async exportExcel() {
+    if (this.state.loading) return;
+    const rows = this.state.shown || [];
+    if (!rows.length) {
+      alert("Não há cauções para exportar neste filtro.");
+      return;
+    }
+    const host = window.InvestimentoApp;
+    if (!host || typeof host.ensureExcelJS !== "function" || typeof host.excelPaint !== "function") {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+    let ExcelJS;
+    try {
+      ExcelJS = await host.ensureExcelJS();
+    } catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    try {
+      const logo = await host.logoDataUrl();
+      if (logo && logo.dataUrl) imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+    } catch (e) {}
+    const ws = wb.addWorksheet("Caução", { properties: { showGridLines: false } });
+    this.fillCaucaoSheet(ws, rows, imgId, host);
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "gestao-caucao-" + this.isoToday() + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  },
+
 
   renderPage() {
     const root = document.getElementById("engenharia-caucao-root");
