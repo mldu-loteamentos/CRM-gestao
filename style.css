@@ -5168,9 +5168,38 @@ circle.donut-segment {
   box-shadow: 2px 0 0 #e2e8f0;
 }
 .part-matrix-credor { padding-left: 10px !important; }
-.part-matrix-table tbody tr:hover td { background: #d1fae5; }
-.part-matrix-table tbody tr:hover .part-matrix-sticky { background: #a7f3d0; box-shadow: inset 4px 0 0 #f37021, 2px 0 0 #e2e8f0; }
-.part-matrix-table tbody tr:hover .part-matrix-btn { background: #a7f3d0; border-color: #6ee7b7; }
+.part-matrix-table tbody tr:hover td { background: #f8fafc; }
+.part-matrix-table tbody tr:hover .part-matrix-sticky { background: #f1f5f9; box-shadow: inset 3px 0 0 #cbd5e1, 2px 0 0 #e2e8f0; }
+.part-matrix-table tbody tr:hover .part-matrix-btn { background: #f1f5f9; border-color: #e2e8f0; }
+.part-matrix-table tbody tr.is-on td { background: #f1f5f9; }
+.part-matrix-table tbody tr.is-on .part-matrix-sticky { background: #e9eef3; box-shadow: inset 3px 0 0 #94a3b8, 2px 0 0 #e2e8f0; }
+.part-matrix-table tbody tr.is-on:hover td { background: #e9eef3; }
+.part-matrix-table tbody tr.is-on:hover .part-matrix-sticky { background: #e2e8f0; }
+.part-avaliar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.part-avaliar input { accent-color: #64748b; margin: 0; }
+.part-duvida {
+  display: block;
+  width: min(320px, 100%);
+  height: 28px;
+  margin-top: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 0.75rem;
+  color: #0f172a;
+  background: #fff;
+}
+.part-credor-line { display: flex; align-items: center; min-width: 0; }
 .part-matrix-credor-btn {
   display: block;
   width: 100%;
@@ -5187,7 +5216,7 @@ circle.donut-segment {
   padding: 2px 0;
 }
 .part-matrix-credor-btn:hover { text-decoration: underline; }
-.part-expense-table tbody tr:hover td { background: #d1fae5; }
+.part-expense-table tbody tr:hover td { background: #f1f5f9; }
 .part-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
 .part-top-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .part-top-actions .form-control,

@@ -13,6 +13,7 @@ const ParticipacoesApp = {
   parsing: false,
   uploadProgress: "",
   detail: null, // { credor, periodo } | null
+  avaliar: null,
   companyPickerOpen: false,
   exportScope: "current", // current | all
   cloudSyncing: false,
@@ -1082,6 +1083,86 @@ const ParticipacoesApp = {
     return { months: monthsWithValue, creditors, colTotals, grand, saldoChecks };
   },
 
+  captureScroll() {
+    const parents = [];
+    let el = document.getElementById("participacoes-root");
+    while (el) {
+      el = el.parentElement;
+      if (!el) break;
+      parents.push({ el: el, top: el.scrollTop || 0 });
+    }
+    const matrix = document.getElementById("part-matrix-scroll");
+    return {
+      parents: parents,
+      matrixTop: matrix ? matrix.scrollTop : 0,
+      matrixLeft: matrix ? matrix.scrollLeft : 0,
+      win: window.scrollY || document.documentElement.scrollTop || 0
+    };
+  },
+
+  restoreScroll(saved) {
+    if (!saved) return;
+    const apply = () => {
+      (saved.parents || []).forEach((item) => {
+        if (item.el) item.el.scrollTop = item.top || 0;
+      });
+      const matrix = document.getElementById("part-matrix-scroll");
+      if (matrix) {
+        matrix.scrollTop = saved.matrixTop || 0;
+        matrix.scrollLeft = saved.matrixLeft || 0;
+      }
+      window.scrollTo(0, saved.win || 0);
+    };
+    apply();
+    requestAnimationFrame(apply);
+  },
+
+  ensureAvaliar() {
+    if (this.avaliar) return;
+    try {
+      this.avaliar = JSON.parse(localStorage.getItem("crm_ellenceo_avaliar") || "{}") || {};
+    } catch (e) {
+      this.avaliar = {};
+    }
+    if (!this.avaliar || typeof this.avaliar !== "object") this.avaliar = {};
+  },
+
+  avaliarStorageKey(groupKey) {
+    return String(this.companyId || "") + "|" + String(groupKey || "");
+  },
+
+  avaliarEntry(groupKey) {
+    this.ensureAvaliar();
+    return this.avaliar[this.avaliarStorageKey(groupKey)] || null;
+  },
+
+  saveAvaliar() {
+    try { localStorage.setItem("crm_ellenceo_avaliar", JSON.stringify(this.avaliar || {})); } catch (e) {}
+  },
+
+  setAvaliar(groupEnc, on) {
+    let groupKey = groupEnc;
+    try { groupKey = decodeURIComponent(groupEnc); } catch (e) {}
+    const key = this.avaliarStorageKey(groupKey);
+    this.ensureAvaliar();
+    const prev = this.avaliar[key] || {};
+    if (on) this.avaliar[key] = { on: true, duvida: prev.duvida || "" };
+    else delete this.avaliar[key];
+    this.saveAvaliar();
+    this.render();
+  },
+
+  setDuvida(groupEnc, text) {
+    let groupKey = groupEnc;
+    try { groupKey = decodeURIComponent(groupEnc); } catch (e) {}
+    const key = this.avaliarStorageKey(groupKey);
+    this.ensureAvaliar();
+    const prev = this.avaliar[key];
+    if (!prev || !prev.on) return;
+    prev.duvida = String(text || "");
+    this.saveAvaliar();
+  },
+
   openMatrixDetail(credorEnc, periodo) {
     let credor = credorEnc;
     try { credor = decodeURIComponent(credorEnc); } catch (e) {}
@@ -1129,9 +1210,14 @@ const ParticipacoesApp = {
             <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique no credor para ver todos os lançamentos. Clique no valor para ver só aquele mês.</div>
             ${warn ? `<div style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Conferência Saldo Total: ${this.esc(warn)}</div>` : ""}
           </div>
-          <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button type="button" class="btn btn-outline" style="height:36px;" onclick="ParticipacoesApp.exportPpt()" ${mx.creditors.some((c) => this.avaliarEntry(c.groupKey)) ? "" : "disabled"} title="Gera um slide para cada mês dos credores marcados como Avaliar">
+              <i data-lucide="presentation" style="width:14px;height:14px;"></i> Gerar PPT
+            </button>
+            <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
+          </div>
         </div>
-        <div style="overflow:auto;max-height:min(70vh,720px);">
+        <div id="part-matrix-scroll" style="overflow:auto;max-height:min(70vh,720px);">
           <table class="part-matrix-table">
             <thead>
               <tr>
@@ -1143,9 +1229,18 @@ const ParticipacoesApp = {
             <tbody>
               ${mx.creditors.map((c) => {
                 const enc = encodeURIComponent(c.credor);
-                return `<tr class="${this.detail && this.detail.groupKey === this.credorGroupKey(c.credor) ? "is-on" : ""}">
+                const flagEnc = encodeURIComponent(c.groupKey);
+                const flagged = this.avaliarEntry(c.groupKey);
+                return `<tr class="${this.detail && this.detail.groupKey === c.groupKey ? "is-on" : ""}">
                   <td class="part-matrix-sticky part-matrix-credor" title="Ver todos os lançamentos de ${this.esc(c.credor)}">
-                    <button type="button" class="part-matrix-credor-btn" onclick="ParticipacoesApp.openMatrixDetail('${enc}','')">${this.esc(c.credor)}</button>
+                    <div class="part-credor-line">
+                      <label class="part-avaliar" title="Incluir este credor no PPT">
+                        <input type="checkbox" ${flagged ? "checked" : ""} onclick="event.stopPropagation()" onchange="ParticipacoesApp.setAvaliar('${flagEnc}', this.checked)">
+                        Avaliar
+                      </label>
+                      <button type="button" class="part-matrix-credor-btn" onclick="ParticipacoesApp.openMatrixDetail('${enc}','')">${this.esc(c.credor)}</button>
+                    </div>
+                    ${flagged ? `<input class="part-duvida" placeholder="Dúvida para o slide" value="${this.esc(flagged.duvida || "")}" oninput="ParticipacoesApp.setDuvida('${flagEnc}', this.value)">` : ""}
                   </td>
                   ${mx.months.map((m) => {
                     const cell = c.cells[m];
@@ -1573,6 +1668,148 @@ const ParticipacoesApp = {
     });
   },
 
+  async ensurePptx() {
+    if (window.PptxGenJS) return window.PptxGenJS;
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Falha ao carregar o gerador de PPT"));
+      document.head.appendChild(s);
+    });
+    return window.PptxGenJS;
+  },
+
+  addAvaliarSlide(pptx, ctx) {
+    const slide = pptx.addSlide();
+    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: 7.5, fill: { color: "105436" } });
+    slide.addShape(pptx.ShapeType.rect, { x: 0.18, y: 0, w: 0.08, h: 7.5, fill: { color: "F37021" } });
+    slide.addText(ctx.company, {
+      x: 0.48, y: 0.18, w: 10.6, h: 0.42,
+      fontFace: "Calibri", fontSize: 22, bold: true, color: "F37021", margin: 0
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0.48, y: 0.78, w: 0.38, h: 0.38,
+      fill: { color: "F8FAFC" }, line: { color: "CBD5E1", pt: 1 }
+    });
+    slide.addText([
+      { text: "Fornecedor: ", options: { bold: true } },
+      { text: ctx.credorName, options: { bold: true, breakLine: true } },
+      { text: "Valor acumulado: ", options: { bold: true } },
+      { text: this.fmt(ctx.totalCredor), options: { bold: true, breakLine: true } },
+      { text: "Dúvida: ", options: { bold: true } },
+      { text: ctx.duvida || "—", options: { bold: true } }
+    ], {
+      x: 1.0, y: 0.72, w: 11.6, h: 1.15,
+      fontFace: "Calibri", fontSize: 16, color: "0F172A", margin: 0
+    });
+    const monthLab = this.periodLabel(ctx.month, ctx.month);
+    const nice = monthLab.charAt(0).toUpperCase() + monthLab.slice(1);
+    const monthTotal = ctx.allRows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    const partNote = ctx.parts > 1 ? " · parte " + (ctx.part + 1) + "/" + ctx.parts : "";
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: 0.48, y: 2.05, w: 12.4, h: 4.65,
+      fill: { color: "F0FDF4" },
+      line: { color: "D1FAE5", pt: 1 },
+      rectRadius: 0.08
+    });
+    slide.addText(ctx.credorName, {
+      x: 0.68, y: 2.16, w: 11.9, h: 0.3,
+      fontFace: "Calibri", fontSize: 13, bold: true, color: "166534", margin: 0
+    });
+    slide.addText(nice + " · " + ctx.allRows.length + " Lançamento(s) · " + this.fmt(monthTotal) + partNote, {
+      x: 0.68, y: 2.46, w: 11.9, h: 0.26,
+      fontFace: "Calibri", fontSize: 11, color: "64748B", margin: 0
+    });
+    const head = (text, align) => ({
+      text: text,
+      options: { fill: { color: "F8FAFC" }, color: "64748B", bold: true, align: align || "left", fontSize: 10 }
+    });
+    const cell = (text, align, bold) => ({
+      text: String(text || "—"),
+      options: { fill: { color: "FFFFFF" }, color: "0F172A", align: align || "left", bold: !!bold, fontSize: 12 }
+    });
+    const tableRows = [[head("DATA"), head("DETALHE"), head("CATEGORIA"), head("VALOR", "right")]];
+    ctx.rows.forEach((r) => {
+      tableRows.push([
+        cell(r.date),
+        cell(r.detalhe || "—"),
+        cell(r.categoria || "Outras"),
+        cell(this.fmt(r.valor), "right", true)
+      ]);
+    });
+    slide.addTable(tableRows, {
+      x: 0.68, y: 2.82, w: 12.0,
+      colW: [1.7, 6.1, 2.2, 2.0],
+      border: [
+        { pt: 0.4, color: "E2E8F0" },
+        { pt: 0.4, color: "E2E8F0" },
+        { pt: 0.4, color: "E2E8F0" },
+        { pt: 0.4, color: "E2E8F0" }
+      ],
+      fontFace: "Calibri",
+      valign: "middle"
+    });
+    if (ctx.logo && ctx.logo.dataUrl) {
+      slide.addImage({ data: ctx.logo.dataUrl, x: 11.2, y: 6.88, w: 1.7, h: 0.46 });
+    }
+  },
+
+  async exportPpt() {
+    const mx = this.matrixData();
+    const picked = mx.creditors.filter((c) => this.avaliarEntry(c.groupKey));
+    if (!picked.length) {
+      alert("Marque Avaliar em pelo menos um credor.");
+      return;
+    }
+    let PptxGenJS;
+    try {
+      PptxGenJS = await this.ensurePptx();
+    } catch (e) {
+      alert("Não foi possível carregar o gerador de PPT. Recarregue a página.");
+      return;
+    }
+    const pptx = new PptxGenJS();
+    pptx.defineLayout({ name: "WIDE", width: 13.333, height: 7.5 });
+    pptx.layout = "WIDE";
+    pptx.author = "CRM Moura Leite";
+    pptx.title = "Prestação de contas — avaliar";
+    const company = String((this.crmCompany(this.companyId) && this.crmCompany(this.companyId).name) || this.companyLabel(this.companyId) || "Empresa").toUpperCase();
+    let logo = null;
+    try {
+      if (window.InvestimentoApp && typeof InvestimentoApp.logoDataUrl === "function") {
+        logo = await InvestimentoApp.logoDataUrl();
+      }
+    } catch (e) { logo = null; }
+    picked.forEach((c) => {
+      const entry = this.avaliarEntry(c.groupKey) || {};
+      const months = mx.months.filter((m) => c.cells[m] && (c.cells[m].rows || []).length);
+      months.forEach((month) => {
+        const allRows = (c.cells[month].rows || []).slice().sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+        const chunks = [];
+        for (let i = 0; i < allRows.length; i += 10) chunks.push(allRows.slice(i, i + 10));
+        if (!chunks.length) chunks.push([]);
+        chunks.forEach((rows, part) => {
+          this.addAvaliarSlide(pptx, {
+            company: company,
+            credorName: c.credor,
+            totalCredor: c.total,
+            duvida: entry.duvida || "",
+            month: month,
+            allRows: allRows,
+            rows: rows,
+            part: part,
+            parts: chunks.length,
+            logo: logo
+          });
+        });
+      });
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const safe = company.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 40) || "empresa";
+    await pptx.writeFile({ fileName: "avaliar_" + safe + "_" + stamp + ".pptx" });
+  },
+
   async exportExcel() {
     const scope = this.exportScope || "current";
     let companyIds = [];
@@ -1691,6 +1928,8 @@ const ParticipacoesApp = {
   render() {
     const root = document.getElementById("participacoes-root");
     if (!root) return;
+    this.ensureAvaliar();
+    const scroll = this.captureScroll();
     this.refreshCompanyList();
     const crm = this.crmCompany(this.companyId);
     const groups = this.grouped();
@@ -1832,6 +2071,7 @@ const ParticipacoesApp = {
     `;
     this.paintCompany();
     if (window.lucide) lucide.createIcons();
+    this.restoreScroll(scroll);
   },
 
   companyItems() {

@@ -9,6 +9,7 @@ const OrcamentoApp = {
   planDropOpen: false,
   planQuery: "",
   quarterView: false,
+  includeParceria: true,
   expanded: new Set(),
   mouraView: false,
   ready: false,
@@ -137,6 +138,8 @@ const OrcamentoApp = {
         .orc-view button.is-on { background: #105436; color: #fff; }
         .orc-view button:hover:not(.is-on) { background: #d1fae5; }
         .orc-cc td { background: #d1fae5; font-weight: 700; color: #064e3b; }
+        .orc-obra td { background: #a7f3d0; font-weight: 800; color: #064e3b; }
+        .orc-table tbody tr.orc-obra:hover td { background: #6ee7b7; }
         .orc-leaf td { background: #fff; font-weight: 600; color: #0f172a; }
         .orc-neg { color: #991b1b; }
         .orc-y27 { color: #064e3b; }
@@ -168,6 +171,11 @@ const OrcamentoApp = {
         <button type="button" class="orc-ghost${this.quarterView ? " is-on" : ""}" id="orc-quarter" title="Recolher os meses em trimestres"><i data-lucide="calendar-range"></i> ${this.quarterView ? "Ver meses" : "Por trimestre"}</button>
         <button type="button" class="orc-ghost" id="orc-expand"><i data-lucide="chevrons-down"></i> Expandir todos</button>
         <button type="button" class="orc-ghost orc-ghost-muted" id="orc-collapse"><i data-lucide="chevrons-up"></i> Recolher todos</button>
+        <label class="moura-switch" title="Ligado soma o centro de custo com PARCERIA no nome. Desligado deixa só o empreendimento.">
+          <input type="checkbox" id="orc-parceria" ${this.includeParceria ? "checked" : ""}>
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Incluir parceria</span>
+        </label>
         <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
       </div>
       <div class="orc-kpis" id="orc-kpis"></div>
@@ -400,6 +408,11 @@ const OrcamentoApp = {
     if (expand) expand.addEventListener("click", () => this.expandAll(true));
     const collapse = document.getElementById("orc-collapse");
     if (collapse) collapse.addEventListener("click", () => this.expandAll(false));
+    const parceria = document.getElementById("orc-parceria");
+    if (parceria) parceria.addEventListener("change", () => {
+      this.includeParceria = !!parceria.checked;
+      this.paint();
+    });
     const excel = document.getElementById("orc-excel");
     if (excel) excel.addEventListener("click", () => this.exportExcel());
     const body = document.getElementById("orc-body");
@@ -507,6 +520,51 @@ const OrcamentoApp = {
     return map;
   },
 
+  obraPrefix(code) {
+    const s = String(code || "").trim();
+    if (!/^\d{4,}$/.test(s)) return "";
+    return s.slice(0, -2);
+  },
+
+  isParceriaCc(cc) {
+    const name = String((cc && cc.cn) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return name.indexOf("PARCERIA") >= 0;
+  },
+
+  groupCostCenters(emp) {
+    const buckets = new Map();
+    const singles = [];
+    (emp.costCenters || []).forEach((cc) => {
+      const prefix = this.obraPrefix(cc.cc);
+      if (!prefix) {
+        singles.push(cc);
+        return;
+      }
+      if (!buckets.has(prefix)) buckets.set(prefix, []);
+      buckets.get(prefix).push(cc);
+    });
+    const items = [];
+    buckets.forEach((list, prefix) => {
+      list.sort((a, b) => String(a.cc).localeCompare(String(b.cc), "pt-BR", { numeric: true }));
+      if (list.length < 2) {
+        singles.push(list[0]);
+        return;
+      }
+      const first = list[0];
+      items.push({
+        grouped: true,
+        key: emp.key + "|obra:" + prefix,
+        prefix: prefix,
+        label: prefix + " — " + (first.cn || ""),
+        centers: list,
+        sort: String(first.cc)
+      });
+    });
+    singles.forEach((cc) => items.push({ grouped: false, cc: cc, sort: String(cc.cc) }));
+    items.sort((a, b) => String(a.sort).localeCompare(String(b.sort), "pt-BR", { numeric: true }));
+    return items;
+  },
+
   companiesTree() {
     const q = this.query.trim().toLowerCase();
     const byEmp = new Map();
@@ -542,15 +600,21 @@ const OrcamentoApp = {
           if (cc.empHit || cc.ccHit) return true;
           return [...cc.accounts.keys()].some((conta) => this.accountBlob(conta).includes(q));
         })
+        .filter((cc) => this.includeParceria || !this.isParceriaCc(cc))
         .sort((a, b) => String(a.cc).localeCompare(String(b.cc), "pt-BR", { numeric: true }));
+      emp.obras = this.groupCostCenters(emp);
+      const openSearch = q && q !== this._openedFor;
       emp.costCenters.forEach((cc) => {
         const showAll = !q || cc.empHit || cc.ccHit;
         cc.tree = this.buildTree(cc.accounts, q, showAll);
-        if (q && q !== this._openedFor) {
-          this.expanded.add(emp.key);
-          this.expanded.add(cc.key);
-        }
       });
+      if (openSearch) {
+        this.expanded.add(emp.key);
+        emp.obras.forEach((item) => {
+          if (item.grouped) this.expanded.add(item.key);
+          (item.grouped ? item.centers : [item.cc]).forEach((cc) => this.expanded.add(cc.key));
+        });
+      }
     });
     this._openedFor = q;
     return companies.filter((emp) => emp.costCenters.length);
@@ -597,7 +661,10 @@ const OrcamentoApp = {
     const next = new Set();
     this.companiesTree().forEach((emp) => {
       next.add(emp.key);
-      emp.costCenters.forEach((cc) => next.add(cc.key));
+      (emp.obras || []).forEach((item) => {
+        if (item.grouped) next.add(item.key);
+        (item.grouped ? item.centers : [item.cc]).forEach((cc) => next.add(cc.key));
+      });
     });
     this.expanded = next;
     this.paint();
@@ -639,19 +706,21 @@ const OrcamentoApp = {
         m27: se27,
         expandable: true,
         parentEmp: "",
+        parentObra: "",
         parentCc: ""
       });
-      emp.costCenters.forEach((cc) => {
+      const pushCenter = (cc, depth, parentObra) => {
         rows.push({
           kind: "cc",
           level: "Centro de custo",
           key: cc.key,
-          depth: 1,
+          depth: depth,
           label: cc.cc + " — " + cc.cn,
           m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
           expandable: true,
           parentEmp: emp.key,
+          parentObra: parentObra,
           parentCc: ""
         });
         this.leafAccounts(cc).forEach((acc) => {
@@ -659,15 +728,42 @@ const OrcamentoApp = {
             kind: "leaf",
             level: "Conta",
             key: cc.key + "|" + acc.conta,
-            depth: 2,
+            depth: depth + 1,
             label: acc.conta + "  " + (acc.nome || this.accountName(acc.conta)),
             m26: this.scaleMonths(acc.m26, factor),
             m27: this.scaleMonths(acc.m27, factor),
             expandable: false,
             parentEmp: emp.key,
+            parentObra: parentObra,
             parentCc: cc.key
           });
         });
+      };
+      (emp.obras || []).forEach((item) => {
+        if (!item.grouped) {
+          pushCenter(item.cc, 1, "");
+          return;
+        }
+        const g26 = this.blank();
+        const g27 = this.blank();
+        item.centers.forEach((cc) => {
+          this.sumNode(cc.tree, "m26").forEach((v, i) => { g26[i] += v; });
+          this.sumNode(cc.tree, "m27").forEach((v, i) => { g27[i] += v; });
+        });
+        rows.push({
+          kind: "obra",
+          level: "Obra",
+          key: item.key,
+          depth: 1,
+          label: item.label,
+          m26: this.scaleMonths(g26, factor),
+          m27: this.scaleMonths(g27, factor),
+          expandable: true,
+          parentEmp: emp.key,
+          parentObra: "",
+          parentCc: ""
+        });
+        item.centers.forEach((cc) => pushCenter(cc, 2, item.key));
       });
     });
     if (companies.length) {
@@ -681,6 +777,7 @@ const OrcamentoApp = {
         m27: y27,
         expandable: false,
         parentEmp: "",
+        parentObra: "",
         parentCc: ""
       });
     }
@@ -689,8 +786,15 @@ const OrcamentoApp = {
 
   rowVisible(row) {
     if (row.kind === "emp" || row.kind === "total") return true;
-    if (row.kind === "cc") return this.expanded.has(row.parentEmp);
-    return this.expanded.has(row.parentEmp) && this.expanded.has(row.parentCc);
+    const empOpen = this.expanded.has(row.parentEmp);
+    if (row.kind === "obra") return empOpen;
+    if (row.kind === "cc") {
+      if (row.parentObra) return empOpen && this.expanded.has(row.parentObra);
+      return empOpen;
+    }
+    const ccOpen = this.expanded.has(row.parentCc);
+    if (row.parentObra) return empOpen && this.expanded.has(row.parentObra) && ccOpen;
+    return empOpen && ccOpen;
   },
 
   paint() {
@@ -746,7 +850,7 @@ const OrcamentoApp = {
     const t26 = this.sum(row.m26);
     const t27 = this.sum(row.m27);
     const delta = t27 - t26;
-    const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "cc" ? "orc-cc" : "orc-leaf"));
+    const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf")));
     const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
     const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
@@ -932,11 +1036,12 @@ const OrcamentoApp = {
     const paintMoney = (cell, n, kind, forecast) => {
       cell.value = Number(n) || 0;
       const dark = kind === "emp" || kind === "total";
-      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
+      const band = kind === "cc" || kind === "obra";
+      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "obra" ? "FFA7F3D0" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
       let color = dark ? "FFFFFFFF" : (n < 0 ? "FFB91C1C" : "FF0F172A");
       if (!dark && forecast) color = "FF9A3412";
       if (dark && forecast) color = "FFFDE68A";
-      if (!dark && kind === "cc" && n >= 0 && !forecast) color = "FF064E3B";
+      if (!dark && band && n >= 0 && !forecast) color = "FF064E3B";
       inv.excelPaint(cell, {
         fill: bg,
         font: { bold: kind !== "leaf", size: 9, color: { argb: color } },
@@ -947,7 +1052,7 @@ const OrcamentoApp = {
     };
     const paintPct = (cell, d, base, kind) => {
       const dark = kind === "emp" || kind === "total";
-      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
+      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "obra" ? "FFA7F3D0" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
       if (Math.abs(base) < 0.005) {
         cell.value = "—";
         inv.excelPaint(cell, {
@@ -973,10 +1078,11 @@ const OrcamentoApp = {
     data.rows.forEach((row) => {
       const excelRow = ws.getRow(rowIdx);
       excelRow.height = 18;
-      if (row.kind === "cc") excelRow.outlineLevel = 1;
-      if (row.kind === "leaf") excelRow.outlineLevel = 2;
-      const bg = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
-      const color = (row.kind === "emp" || row.kind === "total") ? "FFFFFFFF" : (row.kind === "cc" ? "FF064E3B" : "FF0F172A");
+      if (row.kind === "obra") excelRow.outlineLevel = 1;
+      if (row.kind === "cc") excelRow.outlineLevel = row.parentObra ? 2 : 1;
+      if (row.kind === "leaf") excelRow.outlineLevel = row.parentObra ? 3 : 2;
+      const bg = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "obra" ? "FFA7F3D0" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
+      const color = (row.kind === "emp" || row.kind === "total") ? "FFFFFFFF" : ((row.kind === "cc" || row.kind === "obra") ? "FF064E3B" : "FF0F172A");
       const levelCell = excelRow.getCell(1);
       levelCell.value = row.level;
       inv.excelPaint(levelCell, {
