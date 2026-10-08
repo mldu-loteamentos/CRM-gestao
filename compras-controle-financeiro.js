@@ -179,6 +179,7 @@ ComprasControleApp.applyFilters = function () {
     const shownDate = this.dataRef(r);
     if (start && (!shownDate || shownDate < start)) return false;
     if (end && (!shownDate || shownDate > end)) return false;
+    if (r.substituido) return false;
     if (r.forecast && r.pago) return false;
     if (status !== "todos" && r.natureza !== status) return false;
     if (qTitulo) {

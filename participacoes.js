@@ -63,18 +63,14 @@ const ParticipacoesApp = {
       const f = this.folderCompanies.find((x) => String(x.companyId) === String(id));
       return f ? f.label : "";
     }
-    const usual = c.nomeUsual
-      || (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[c.id] && EmpresasState.customFields[c.id].nome_usual)
-      || "";
-    return usual || c.name || "";
+    return c.name || "";
   },
 
   filteredCompanies() {
     const q = String(this.companyQ || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     return this.crmCompanies().filter((c) => {
       if (!q) return true;
-      const usual = (window.EmpresasState && EmpresasState.customFields && EmpresasState.customFields[c.id] && EmpresasState.customFields[c.id].nome_usual) || "";
-      const blob = `${c.id} ${c.name || ""} ${usual}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const blob = `${c.id} ${c.name || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return blob.includes(q);
     });
   },
@@ -94,15 +90,19 @@ const ParticipacoesApp = {
     return "";
   },
 
-  /** Período impresso no cabeçalho: "DESPESAS PAGAS 01/11/2025 30/11/2025" ou "01/11/2025 até 30/11/2025" */
+  /** Período impresso no cabeçalho: "DESPESAS PAGAS 01/09/2026 30/09/2026". O mês é o do intervalo, não o do nome do arquivo. */
   periodFromPdfHeader(text) {
-    const s = String(text || "");
-    let m = s.match(/DESPESAS\s+PAGAS\s+(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{2})\/(\d{2})\/(\d{2,4})/i);
-    if (!m) m = s.match(/(\d{2})\/(\d{2})\/(\d{2,4})\s*(?:a|até|ate)\s*(\d{2})\/(\d{2})\/(\d{2,4})/i);
+    const raw = String(text || "");
+    const idx = raw.search(/DESPESAS\s+PAGAS/i);
+    const slice = (idx >= 0 ? raw.slice(idx, idx + 700) : raw.slice(0, 700)).replace(/\s+/g, " ");
+    const m = slice.match(/(\d{2})\/(\d{2})\/(\d{2,4})\D{0,80}?(\d{2})\/(\d{2})\/(\d{2,4})/);
     if (!m) return "";
     const end = this.normalizeBrDate(`${m[4]}/${m[5]}/${m[6]}`);
     const parts = end.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    return parts ? `${parts[3]}-${parts[2]}` : "";
+    if (!parts) return "";
+    const month = Number(parts[2]);
+    if (month < 1 || month > 12) return "";
+    return `${parts[3]}-${parts[2]}`;
   },
 
   extractSaldoTotal(text) {
@@ -572,22 +572,48 @@ const ParticipacoesApp = {
     return parts.join("\n");
   },
 
-  /**
-   * Mês da matriz = período do PDF de fechamento (nome do arquivo),
-   * nunca o mês “solto” de uma data no detalhe (ex.: 31/10/2025 no texto da solicitação).
-   */
-  expensePeriodKey(r) {
-    const fromName = this.periodFromFileName(r && r.sourceFile);
-    if (fromName && /^\d{4}-\d{2}$/.test(fromName)) return fromName;
-    const hit = (this.files || []).find((f) => f && f.name && r && r.sourceFile && f.name === r.sourceFile);
-    if (hit && hit.closing && /^\d{4}-\d{2}$/.test(String(hit.closing))) return String(hit.closing);
-    const stored = r && r.periodo;
-    if (stored && /^\d{4}-\d{2}$/.test(String(stored))) return String(stored);
+  /** Mês da coluna Data (dd/mm/aaaa). Não usa data solta no detalhe, tipo COFINS 08/2026. */
+  paymentMonth(r) {
     const iso = String((r && r.iso) || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso.slice(0, 7);
     const d = this.normalizeBrDate((r && r.date) || "");
     const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (m) return `${m[3]}-${m[2]}`;
+    return m ? `${m[3]}-${m[2]}` : "";
+  },
+
+  /**
+   * Mês do PDF = mês das datas do quadro DESPESAS PAGAS.
+   * O nome do arquivo (ex.: 2026_10) não empurra setembro para outubro.
+   */
+  shownClosing(f) {
+    if (!f) return "";
+    const counts = {};
+    (f.expenses || []).forEach((r) => {
+      const k = this.paymentMonth(r);
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+    let best = "";
+    let n = 0;
+    Object.keys(counts).forEach((k) => {
+      if (counts[k] > n) { best = k; n = counts[k]; }
+    });
+    if (best) return best;
+    if (f.closing && /^\d{4}-\d{2}$/.test(String(f.closing))) return String(f.closing);
+    return this.periodFromFileName(f.name) || "";
+  },
+
+  expensePeriodKey(r) {
+    const hit = (this.files || []).find((f) => f && f.name && r && r.sourceFile && f.name === r.sourceFile);
+    if (hit) {
+      const shown = this.shownClosing(hit);
+      if (shown && /^\d{4}-\d{2}$/.test(shown)) return shown;
+    }
+    const pay = this.paymentMonth(r);
+    if (pay) return pay;
+    const stored = r && r.periodo;
+    if (stored && /^\d{4}-\d{2}$/.test(String(stored))) return String(stored);
+    const fromName = this.periodFromFileName(r && r.sourceFile);
+    if (fromName && /^\d{4}-\d{2}$/.test(fromName)) return fromName;
     return "sem-periodo";
   },
 
@@ -870,7 +896,7 @@ const ParticipacoesApp = {
     const text = await this.extractPdfText(url);
     const headerPeriod = this.periodFromPdfHeader(text);
     const fromName = this.periodFromFileName(fileRec.name);
-    fileRec.closing = fromName || headerPeriod || fileRec.closing || "";
+    fileRec.closing = headerPeriod || fromName || fileRec.closing || "";
     fileRec.saldoTotal = this.extractSaldoTotal(text);
     fileRec.expenses = this.parseExpenseLines(text, fileRec);
     fileRec.cacheVer = 9;
@@ -946,10 +972,10 @@ const ParticipacoesApp = {
       (f.expenses || []).forEach((r) => {
         const fixed = this.repairExpenseRow(r);
         if (!(Number(fixed.valor) > 0) || this.isNoiseCredor(fixed.credor) || this.isBankStatementNoise(fixed.credor, fixed.detalhe)) return;
-        list.push(Object.assign({}, fixed, {
-          periodo: filePeriod || fixed.periodo || this.periodFromFileName(fixed.sourceFile),
-          sourceFile: fixed.sourceFile || f.name
-        }));
+        const sourceFile = fixed.sourceFile || f.name;
+        const row = Object.assign({}, fixed, { sourceFile });
+        row.periodo = this.expensePeriodKey(row) || filePeriod || "";
+        list.push(row);
       });
     });
     return list;
@@ -959,10 +985,13 @@ const ParticipacoesApp = {
     if (this.fileName) {
       const f = this.files.find((x) => x.name === this.fileName);
       const filePeriod = f && (f.closing || this.periodFromFileName(f.name));
-      return (f && f.expenses) ? f.expenses.map((r) => Object.assign({}, this.repairExpenseRow(r), {
-        periodo: filePeriod || r.periodo || "",
-        sourceFile: r.sourceFile || (f && f.name) || ""
-      })).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe)) : [];
+      return (f && f.expenses) ? f.expenses.map((r) => {
+        const row = Object.assign({}, this.repairExpenseRow(r), {
+          sourceFile: r.sourceFile || (f && f.name) || ""
+        });
+        row.periodo = this.expensePeriodKey(row) || filePeriod || "";
+        return row;
+      }).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe)) : [];
     }
     return this.allExpenses();
   },
@@ -1071,7 +1100,7 @@ const ParticipacoesApp = {
     const grand = creditors.reduce((s, c) => s + c.total, 0);
     const saldoChecks = [];
     (this.files || []).forEach((f) => {
-      const p = f.closing || this.periodFromFileName(f.name);
+      const p = this.shownClosing(f) || f.closing || this.periodFromFileName(f.name);
       if (!p || !monthsWithValue.includes(p)) return;
       const saldo = Number(f.saldoTotal) || 0;
       if (!(saldo > 0)) return;
@@ -1426,7 +1455,7 @@ const ParticipacoesApp = {
       await this.tryServerUpload(picked);
       serverOk = true;
     } catch (e) {
-      this.hint = "Upload no servidor local indisponível — salvando no Firebase / navegador.";
+      serverOk = false;
     }
 
     try {
@@ -1435,9 +1464,8 @@ const ParticipacoesApp = {
         this.uploadProgress = `Lendo ${i + 1}/${picked.length}: ${file.name}`;
         this.render();
         const objectUrl = URL.createObjectURL(file);
-        let closing = this.periodFromFileName(file.name);
         const text = await this.extractPdfText(objectUrl);
-        if (!closing) closing = this.periodFromPdfHeader(text);
+        let closing = this.periodFromPdfHeader(text) || this.periodFromFileName(file.name);
         const ym = closing ? closing.split("-") : [];
         const expenses = this.parseExpenseLines(text, { name: file.name, closing });
 
@@ -1937,7 +1965,7 @@ const ParticipacoesApp = {
     const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
     const selectedFile = this.files.find((f) => f.name === this.fileName);
     const periodTitle = this.fileName
-      ? this.periodLabel(selectedFile && selectedFile.closing, this.fileName)
+      ? this.periodLabel(selectedFile ? this.shownClosing(selectedFile) : "", this.fileName)
       : (this.files.length ? "Todos os períodos" : "—");
     const uploadDisabled = !this.companyId;
     const companyTitle = (crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa";
@@ -2010,7 +2038,7 @@ const ParticipacoesApp = {
               </button>
               ${this.files.map((f) => {
                 const active = f.name === this.fileName;
-                const lab = this.periodLabel(f.closing, f.name);
+                const lab = this.periodLabel(this.shownClosing(f), f.name);
                 const cloud = f.pdfUrl ? " · nuvem" : "";
                 return `<button type="button" onclick="ParticipacoesApp.onFile(${JSON.stringify(f.name)})"
                   style="padding:6px 11px;border-radius:999px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};color:${active ? "#1d4ed8" : "#475569"};font-size:0.75rem;font-weight:700;cursor:pointer;text-transform:capitalize;"
