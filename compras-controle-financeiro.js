@@ -157,13 +157,39 @@ ComprasControleApp.groupMeta = function (group) {
   return map[group] || map.programado;
 };
 
+ComprasControleApp.hojeIso = function () {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+
+ComprasControleApp.vencido = function (r) {
+  if (!r || r.forecast) return false;
+  const due = String(r.vencimento || "").slice(0, 10);
+  return !!due && due < this.hojeIso();
+};
+
+ComprasControleApp.statusDe = function (r) {
+  if (!r) return "programado";
+  if (r.natureza === "pago" || r.natureza === "previsao" || r.natureza === "processamento") return r.natureza;
+  const id = String(r.titulo || "");
+  const cache = this.state.lotesByTitulo || {};
+  if (this.state.rastreando && id && !Object.prototype.hasOwnProperty.call(cache, id)) return "rastreando";
+  if (this.vencido(r)) return "vencido";
+  return "programado";
+};
+
 ComprasControleApp.tipoTag = function (r) {
-  if (r.natureza === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
-  if (r.natureza === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
-  if (r.natureza === "processamento") {
+  const st = this.statusDe(r);
+  if (st === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
+  if (st === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
+  if (st === "processamento") {
     const lote = r.lote ? " title=\"Lote " + this.esc(r.lote) + " enviado ao banco\"" : "";
     return '<span class="cprev-tag cprev-tag-banco"' + lote + ">Processamento bancário</span>";
   }
+  if (st === "rastreando") {
+    return '<span class="cprev-tag cprev-tag-rastreando" title="Consultando se o título já foi enviado ao banco"><span class="cfin-spin" aria-hidden="true"></span>Rastreando banco</span>';
+  }
+  if (st === "vencido") return '<span class="cprev-tag cprev-tag-vencido">Vencido</span>';
   return '<span class="cprev-tag cprev-tag-nota">Programado</span>';
 };
 
@@ -210,7 +236,7 @@ ComprasControleApp.applyFilters = function () {
     if (r.substituido) return false;
     if (this.previsaoConsumidaPorAdiantamento(r, consumidos)) return false;
     if (r.forecast && r.pago) return false;
-    if (status !== "todos" && r.natureza !== status) return false;
+    if (status !== "todos" && this.statusDe(r) !== status) return false;
     if (qTitulo) {
       const blob = this.fold([r.titulo, r.documento, r.parcela].join("")).replace(/\s+/g, "");
       if (blob.indexOf(qTitulo) < 0) return false;
@@ -235,7 +261,7 @@ ComprasControleApp.sortValue = function (r, key) {
   if (key === "doc") return this.fold(r.docId || "");
   if (key === "ndoc") return this.fold(r.documento || "");
   if (key === "data") return this.dataRef(r);
-  if (key === "tipo") return r.natureza || "";
+  if (key === "tipo") return this.statusDe(r);
   if (key === "valor") return Number(r.valorAjustado) || 0;
   return "";
 };
@@ -270,13 +296,15 @@ ComprasControleApp.toggleSort = function (key) {
 
 ComprasControleApp.kpis = function () {
   const rows = this.state.shown || [];
-  const out = { qtd: rows.length, total: 0, pago: 0, programado: 0, processamento: 0, previsao: 0 };
+  const out = { qtd: rows.length, total: 0, pago: 0, programado: 0, processamento: 0, previsao: 0, vencido: 0 };
   rows.forEach((r) => {
     const v = Number(r.valorAjustado) || 0;
     out.total += v;
-    if (r.natureza === "pago") out.pago += v;
-    else if (r.natureza === "processamento") out.processamento += v;
-    else if (r.natureza === "previsao") out.previsao += v;
+    const st = this.statusDe(r);
+    if (st === "pago") out.pago += v;
+    else if (st === "processamento") out.processamento += v;
+    else if (st === "previsao") out.previsao += v;
+    else if (st === "vencido") out.vencido += v;
     else out.programado += v;
   });
   return out;
@@ -325,14 +353,42 @@ ComprasControleApp.loteEnviado = function (inst) {
 
 ComprasControleApp.carregarLotes = async function () {
   const gen = (this.state.loteGen = (this.state.loteGen || 0) + 1);
-  if (typeof window.siengeFetchWithRetry !== "function") return;
+  const finish = () => {
+    if (this.state.loteGen !== gen) return;
+    this.state.rastreando = false;
+    if (this._lotePaint) {
+      clearTimeout(this._lotePaint);
+      this._lotePaint = null;
+    }
+    if (this.state.loading) return;
+    this.applyFilters();
+    this.renderList();
+  };
+  if (typeof window.siengeFetchWithRetry !== "function") {
+    finish();
+    return;
+  }
   const cache = this.state.lotesByTitulo || (this.state.lotesByTitulo = {});
   const ids = [];
   (this.state.allRows || []).forEach((r) => {
     if (!r || r.natureza !== "programado" || r.forecast) return;
     const id = String(r.titulo || "");
-    if (id && !cache[id] && ids.indexOf(id) < 0) ids.push(id);
+    if (id && !Object.prototype.hasOwnProperty.call(cache, id) && ids.indexOf(id) < 0) ids.push(id);
   });
+  if (!ids.length) {
+    finish();
+    return;
+  }
+  this.state.rastreando = true;
+  const schedule = () => {
+    if (this.state.loteGen !== gen || this._lotePaint) return;
+    this._lotePaint = setTimeout(() => {
+      this._lotePaint = null;
+      if (this.state.loteGen !== gen || this.state.loading) return;
+      this.applyFilters();
+      this.renderList();
+    }, 180);
+  };
   const queue = ids.slice();
   const worker = async () => {
     while (queue.length && this.state.loteGen === gen) {
@@ -349,22 +405,18 @@ ComprasControleApp.carregarLotes = async function () {
       } catch (e) {
         cache[id] = {};
       }
+      (this.state.allRows || []).forEach((r) => {
+        if (!r || String(r.titulo) !== id || r.natureza !== "programado" || r.forecast) return;
+        const lote = (cache[id] || {})[String(r.parcela || "")];
+        if (!lote) return;
+        r.natureza = "processamento";
+        r.lote = lote;
+      });
+      schedule();
     }
   };
   await Promise.all([worker(), worker(), worker()]);
-  if (this.state.loteGen !== gen || this.state.loading) return;
-  let changed = false;
-  (this.state.allRows || []).forEach((r) => {
-    if (!r || r.natureza !== "programado" || r.forecast) return;
-    const lote = (cache[String(r.titulo)] || {})[String(r.parcela || "")];
-    if (!lote) return;
-    r.natureza = "processamento";
-    r.lote = lote;
-    changed = true;
-  });
-  if (!changed) return;
-  this.applyFilters();
-  this.renderList();
+  finish();
 };
 
 ComprasControleApp.fetchOutcome = async function (start, end) {
@@ -416,8 +468,10 @@ ComprasControleApp.consultar = async function () {
     this.state.billsByTitulo = {};
   }
   this.state.loading = false;
+  const vaiRastrear = !!(this.state.consulted && !this.state.error && (this.state.allRows || []).some((r) => r && r.natureza === "programado" && !r.forecast));
+  this.state.rastreando = vaiRastrear;
   this.renderPage();
-  if (this.state.consulted && !this.state.error) this.carregarLotes();
+  if (vaiRastrear) this.carregarLotes();
 };
 
 ComprasControleApp.limpar = function () {
@@ -436,6 +490,7 @@ ComprasControleApp.limpar = function () {
   this.state.allRows = [];
   this.state.billsByTitulo = {};
   this.state.lotesByTitulo = {};
+  this.state.rastreando = false;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.state.consulted = false;
   this.state.error = "";
@@ -612,6 +667,7 @@ ComprasControleApp.renderList = function () {
       <div class="ccom-kpi"><span>Pago</span><strong>${this.esc(this.money(k.pago))}</strong></div>
       <div class="ccom-kpi"><span>Processamento</span><strong>${this.esc(this.money(k.processamento))}</strong></div>
       <div class="ccom-kpi"><span>Programado</span><strong>${this.esc(this.money(k.programado))}</strong></div>
+      <div class="ccom-kpi"><span>Vencido</span><strong>${this.esc(this.money(k.vencido))}</strong></div>
       <div class="ccom-kpi"><span>Previsão</span><strong>${this.esc(this.money(k.previsao))}</strong></div>
       <div class="ccom-kpi"><span>Total</span><strong>${this.esc(this.money(k.total))}</strong></div>`;
   }
@@ -619,7 +675,7 @@ ComprasControleApp.renderList = function () {
     box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
   }
-  const th = (key, label) => `<th onclick="ComprasControleApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+  const th = (key, label, cls) => `<th class="${cls || ""}" onclick="ComprasControleApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
   const body = rows.map((r) => {
     const subst = r.substituido
       ? `<span class="cprev-tag cprev-tag-subst">Substituído${r.tituloSubstituto ? " · " + this.esc(r.tituloSubstituto) : ""}</span>`
@@ -650,9 +706,10 @@ ComprasControleApp.renderList = function () {
       #cfin-table .cprev-col-cc { width: 15%; }
       #cfin-table .cprev-col-dept { width: 8%; }
       #cfin-table .cprev-col-cred { width: 12%; }
-      #cfin-table .cprev-col-tipo { width: 168px; }
-      #cfin-table td.cprev-col-tipo { overflow: visible; text-overflow: unset; }
-      #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; }
+      #cfin-table .cprev-col-tipo { width: 176px; }
+      #cfin-table th.cprev-col-tipo,
+      #cfin-table td.cprev-col-tipo { overflow: visible; text-overflow: unset; text-align: center; }
+      #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; margin-right: 0; }
     </style>
     <div class="table-container cprev-table-wrap">
       <table class="custom-table cprev-table" id="cfin-table">
@@ -663,7 +720,7 @@ ComprasControleApp.renderList = function () {
         </colgroup>
         <thead><tr>
           ${th("emp", "Emp.")}${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
-          ${th("parc", "Parc.")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Tipo")}${th("valor", "Valor")}
+          ${th("parc", "Parc.")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("valor", "Valor")}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
@@ -677,8 +734,8 @@ ComprasControleApp.exportExcel = function () {
     alert("Não há títulos para exportar. Consulte antes.");
     return;
   }
-  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Tipo", "Valor"];
-  const tipo = { pago: "Pago", processamento: "Processamento bancário", programado: "Programado", previsao: "Previsão" };
+  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Status", "Valor"];
+  const tipo = { pago: "Pago", processamento: "Processamento bancário", programado: "Programado", previsao: "Previsão", vencido: "Vencido", rastreando: "Rastreando banco" };
   const aoa = [head].concat(rows.map((r) => [
     r.companyId,
     (r.ccId ? r.ccId + " - " : "") + (r.ccNome || ""),
@@ -689,7 +746,7 @@ ComprasControleApp.exportExcel = function () {
     r.docId || "",
     r.documento || "",
     this.fmtDate(this.dataRef(r)),
-    tipo[r.natureza] || r.natureza,
+    tipo[this.statusDe(r)] || r.natureza,
     Number(r.valorAjustado) || 0
   ]));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -721,12 +778,13 @@ ComprasControleApp.renderPage = function () {
               oninput="ComprasControleApp.onField('qTitulo', this.value)" autocomplete="off">
           </div>
           <div class="form-group ecau-search ecau-cell-sit${refineLocked ? " is-locked" : ""}">
-            <label>Tipo</label>
+            <label>Status</label>
             <select class="form-control" ${refineLocked ? "disabled" : ""} onchange="ComprasControleApp.onField('status', this.value)">
               <option value="todos" ${status === "todos" ? "selected" : ""}>Todos</option>
               <option value="pago" ${status === "pago" ? "selected" : ""}>Pago</option>
               <option value="processamento" ${status === "processamento" ? "selected" : ""}>Processamento bancário</option>
               <option value="programado" ${status === "programado" ? "selected" : ""}>Programado</option>
+              <option value="vencido" ${status === "vencido" ? "selected" : ""}>Vencido</option>
               <option value="previsao" ${status === "previsao" ? "selected" : ""}>Previsão</option>
             </select>
           </div>

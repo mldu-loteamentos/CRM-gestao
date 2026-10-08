@@ -5990,13 +5990,16 @@ circle.donut-segment {
 .cprev-table-wrap #cfin-table .cprev-col-parc { width: 48px; }
 .cprev-table-wrap #cfin-table .cprev-col-doc { width: 52px; }
 .cprev-table-wrap #cfin-table .cprev-col-ndoc { width: 72px; }
-.cprev-table-wrap #cfin-table .cprev-col-tipo { width: 168px; }
+.cprev-table-wrap #cfin-table .cprev-col-tipo { width: 176px; }
+.cprev-table-wrap #cfin-table th.cprev-col-tipo,
 .cprev-table-wrap #cfin-table td.cprev-col-tipo {
   overflow: visible;
   text-overflow: unset;
+  text-align: center;
 }
 .cprev-table-wrap #cfin-table td.cprev-col-tipo .cprev-tag {
   margin-left: 0;
+  margin-right: 0;
 }
 .cprev-table-wrap .cprev-col-val { width: 96px; text-align: right; }
 .cprev-table-wrap .cprev-group-header td {
@@ -6308,6 +6311,19 @@ circle.donut-segment {
 .cprev-tag-nota { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-previsao { background: #fee2e2; color: #b91c1c; }
 .cprev-tag-banco { background: #cffafe; color: #0e7490; }
+.cprev-tag-vencido { background: #ffedd5; color: #c2410c; }
+.cprev-tag-rastreando { background: #f1f5f9; color: #475569; }
+.cfin-spin {
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  border: 2px solid rgba(71, 85, 105, 0.28);
+  border-top-color: #475569;
+  border-radius: 50%;
+  display: inline-block;
+  animation: ecau-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
 .cprev-ppc-btn {
   border: 0;
   background: transparent;
