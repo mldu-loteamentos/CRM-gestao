@@ -380,6 +380,14 @@ const TabelasVigentesApp = {
     return -1;
   },
 
+  normalizeReajuste(raw) {
+    const t = String(raw == null ? "" : raw).trim();
+    if (!t) return "";
+    const fold = this.fold(t).replace(/\s+/g, "");
+    if (fold === "0" || fold === "REAL" || t === "-" || t === "—" || t === "–") return "REAL";
+    return t;
+  },
+
   indexadorOptions(current) {
     let names = [];
     try {
@@ -389,10 +397,11 @@ const TabelasVigentesApp = {
     if (!names.length && window.IndexadoresState && Array.isArray(IndexadoresState.siengeIndexers)) {
       names = IndexadoresState.siengeIndexers.map((i) => String((i && i.name) || "").trim()).filter(Boolean);
     }
-    const cur = String(current || "").trim();
-    if (cur && names.indexOf(cur) < 0) names = [cur].concat(names);
-    if (names.indexOf("REAL") < 0) names = ["REAL"].concat(names);
-    return names;
+    names = names.map((n) => this.normalizeReajuste(n)).filter((n) => n && n !== "REAL");
+    names = names.filter((n, i) => names.indexOf(n) === i);
+    const cur = this.normalizeReajuste(current);
+    if (cur && cur !== "REAL" && names.indexOf(cur) < 0) names = [cur].concat(names);
+    return ["REAL"].concat(names);
   },
 
   migrateRow(r) {
@@ -411,7 +420,7 @@ const TabelasVigentesApp = {
       entradaMin: this.stripSuffix(src.entradaMin),
       parcelamentoEntrada: this.sanitizeInt(src.parcelamentoEntrada),
       taxaJuros: this.padDec(src.taxaJuros, 4),
-      reajuste: this.stripDash(src.reajuste),
+      reajuste: this.normalizeReajuste(src.reajuste),
       descontoOn,
       descontoPct: src.descontoPct != null && String(src.descontoPct) !== ""
         ? this.stripSuffix(src.descontoPct)
@@ -987,7 +996,7 @@ const TabelasVigentesApp = {
     }
     if (String(d.rows[idx].reajuste || "") === String(val || "")) return;
     this.pushUndo();
-    d.rows[idx].reajuste = val;
+    d.rows[idx].reajuste = this.normalizeReajuste(val);
   },
 
   onEditorFlag(idx, field, on) {
@@ -1150,7 +1159,7 @@ const TabelasVigentesApp = {
                     ${this.sheetCell(i, "entradaMin", r.entradaMin, { affix: "%", center: true, locked: this.sheetFieldLocked(i, "entradaMin", r) })}
                     ${this.sheetCell(i, "parcelamentoEntrada", r.parcelamentoEntrada, { affix: "x", center: true, locked: this.sheetFieldLocked(i, "parcelamentoEntrada", r) })}
                     ${this.sheetCell(i, "taxaJuros", this.padDec(r.taxaJuros, 4), { affix: "%", center: true, locked: this.sheetFieldLocked(i, "taxaJuros", r) })}
-                    ${this.sheetSelect(i, "reajuste", this.isBoletoRow(i, r) ? "REAL" : r.reajuste, this.indexadorOptions(this.isBoletoRow(i, r) ? "REAL" : r.reajuste), { locked: this.sheetFieldLocked(i, "reajuste", r), center: true })}
+                    ${this.sheetSelect(i, "reajuste", this.normalizeReajuste(this.isBoletoRow(i, r) ? "REAL" : r.reajuste), this.indexadorOptions(this.isBoletoRow(i, r) ? "REAL" : r.reajuste), { locked: this.sheetFieldLocked(i, "reajuste", r), center: true })}
                     <td class="tvig-sheet-td" data-row="${i}" data-field="desconto">
                       <div class="tvig-desc-cell">
                         <label class="moura-switch${this.sheetFieldLocked(i, "descontoOn", r) ? " is-locked" : ""}" title="Desconto especial">
@@ -1284,9 +1293,11 @@ const TabelasVigentesApp = {
 
   matchIndexador(raw) {
     const t = String(raw == null ? "" : raw).trim();
-    if (!t || t === "—" || t === "-" || t === "–") return "";
-    const names = this.indexadorOptions(t);
-    const fold = this.fold(t);
+    const mapped = this.normalizeReajuste(t);
+    if (!t) return "";
+    if (mapped === "REAL") return "REAL";
+    const names = this.indexadorOptions(mapped);
+    const fold = this.fold(mapped);
     const exact = names.find((n) => this.fold(n) === fold);
     if (exact) return exact;
     const part = names.find((n) => this.fold(n).indexOf(fold) >= 0);

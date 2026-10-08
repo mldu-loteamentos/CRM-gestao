@@ -243,8 +243,8 @@ const OrcamentoApp = {
               <th title="Total 2027 − Total 2026">Variação</th>
               <th title="Total 2027 − Total 2026">Variação %</th>
               <th class="orc-split" title="Carteira em aberto em 2027, sem sub judice">Sienge 2027</th>
-              <th title="Sienge 2027 − orçado 2027">Variação</th>
-              <th title="Sienge 2027 − orçado 2027">Variação %</th>
+              <th title="Orçado 2027 − Sienge 2027. Correção anual da carteira, vendas e antecipações.">Variação</th>
+              <th title="(Orçado 2027 − Sienge 2027) ÷ Sienge 2027">Variação %</th>
             </tr>
           </thead>
           <tbody id="orc-body"></tbody>
@@ -655,7 +655,7 @@ const OrcamentoApp = {
       }
       td.textContent = this.money(fig.receber);
       paint(svar, this.money(fig.delta), fig.delta < 0);
-      paint(spct, this.pctLabel(fig.delta, fig.orcado), fig.delta < 0);
+      paint(spct, this.pctLabel(fig.delta, fig.receber), fig.delta < 0);
     });
   },
 
@@ -664,7 +664,7 @@ const OrcamentoApp = {
     if (sum.loading) return { loading: true };
     if (sum.error) return { error: true };
     const orcado = this.sum(row && row.m27);
-    return { receber: sum.receber, orcado, delta: sum.receber - orcado };
+    return { receber: sum.receber, orcado, delta: orcado - sum.receber };
   },
 
   siengeTipHtml(row, sum) {
@@ -1187,7 +1187,7 @@ const OrcamentoApp = {
     const neg = fig.delta < 0 ? " orc-neg" : "";
     return '<td class="orc-sienge orc-split" data-sienge="' + idx + '">' + this.money(fig.receber) + "</td>"
       + '<td class="' + neg.trim() + '" data-svar="' + idx + '">' + this.money(fig.delta) + "</td>"
-      + '<td class="orc-pct-col' + neg + '" data-spct="' + idx + '">' + this.pctLabel(fig.delta, fig.orcado) + "</td>";
+      + '<td class="orc-pct-col' + neg + '" data-spct="' + idx + '">' + this.pctLabel(fig.delta, fig.receber) + "</td>";
   },
 
   async exportExcel() {
@@ -1468,7 +1468,7 @@ const OrcamentoApp = {
         } else {
           paintMoney(excelRow.getCell(startCmp + 4), fig.receber, row.kind, false);
           paintMoney(excelRow.getCell(startCmp + 5), fig.delta, row.kind, false);
-          paintPct(excelRow.getCell(startCmp + 6), fig.delta, fig.orcado, row.kind);
+          paintPct(excelRow.getCell(startCmp + 6), fig.delta, fig.receber, row.kind);
         }
       }
       rowIdx += 1;
