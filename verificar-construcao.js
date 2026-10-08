@@ -836,12 +836,12 @@ window.VerificarConstrucaoApp = {
         const thresholdDays = _vcGetThreshold();
 
         root.innerHTML = `
-            <div class="crm-card" style="padding: 24px;">
-                <h3 style="font-size: 1.2rem; color: var(--color-primary); margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="camera" style="width: 24px;"></i> Verificar Construção (Atraso >= ${thresholdDays} dias)
+            <div class="crm-card" style="padding: 14px 16px;">
+                <h3 style="font-size: 1.05rem; color: var(--color-primary); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="camera" style="width: 20px;"></i> Verificar Construção (Atraso >= ${thresholdDays} dias)
                 </h3>
 
-                <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: nowrap;">
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.abrirModalObrasAndamento()">
                             <i data-lucide="building" style="width: 16px;"></i> Obras em andamento
@@ -867,19 +867,28 @@ window.VerificarConstrucaoApp = {
                 </div>
 
                 <div id="vc-results" style="display: none;">
-                    <div style="max-height: 75vh; overflow-y: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; table-layout: fixed;" id="vc-table">
+                    <div style="max-height: calc(100vh - 196px); overflow: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8rem; table-layout: fixed; white-space: nowrap;" id="vc-table">
+                            <colgroup>
+                                <col style="width: 34px;">
+                                <col style="width: 8%;">
+                                <col>
+                                <col style="width: 68px;">
+                                <col style="width: 112px;">
+                                <col style="width: 168px;">
+                                <col style="width: 34%;">
+                            </colgroup>
                             <thead style="position: sticky; top: 0; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); z-index: 10;">
                                 <tr>
-                                    <th style="padding: 12px 10px; width: 42px; text-align: center; color: rgba(255,255,255,0.8);">
+                                    <th style="padding: 7px 6px; text-align: center; color: rgba(255,255,255,0.8);">
                                         <input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)">
                                     </th>
-                                    <th style="padding: 12px 10px; width: 12%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">UNIDADE</th>
-                                    <th style="padding: 12px 10px; width: 22%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">CLIENTE</th>
-                                    <th style="padding: 12px 10px; width: 10%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">TÍTULO</th>
-                                    <th style="padding: 12px 10px; width: 14%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">PARC. VENCIDAS</th>
-                                    <th style="padding: 12px 10px; width: 16%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: left;">ÚLTIMA VISTORIA</th>
-                                    <th style="padding: 12px 10px; width: 18%; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">STATUS</th>
+                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">UNIDADE</th>
+                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">CLIENTE</th>
+                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">TÍTULO</th>
+                                    <th style="padding: 7px 6px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.02em; text-align: center;">PARC. VENCIDAS</th>
+                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.02em; text-align: left;">ÚLTIMA VISTORIA</th>
+                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">STATUS</th>
                                 </tr>
                             </thead>
                             <tbody id="vc-tbody"></tbody>
@@ -1553,10 +1562,10 @@ window.VerificarConstrucaoApp = {
             // City Header Row
             html += `
                 <tr style="background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%);">
-                    <td style="padding: 10px 12px; text-align: center; width: 40px;">
+                    <td style="padding: 5px 6px; text-align: center;">
                         <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')" style="accent-color: #86efac;">
                     </td>
-                    <td colspan="6" style="padding: 10px 12px; font-weight: 700; font-size: 0.85rem; color: #fff; letter-spacing: 0.08em; text-transform: uppercase;">
+                    <td colspan="6" style="padding: 5px 8px; font-weight: 700; font-size: 0.78rem; color: #fff; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;">
                         📍 ${cidade}
                     </td>
                 </tr>
@@ -1576,12 +1585,12 @@ window.VerificarConstrucaoApp = {
                 // Empreendimento Header Row
                 html += `
                     <tr style="background: #eaf4ee; border-bottom: 1px solid #a7d4b4;">
-                        <td style="padding: 9px 12px; text-align: center; width: 40px;">
+                        <td style="padding: 4px 6px; text-align: center;">
                             <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''} style="accent-color: #3d7a4a;">
                         </td>
-                        <td colspan="6" style="padding: 9px 12px; font-weight: 700; color: #2e6b3e; font-size: 0.83rem;">
+                        <td colspan="6" style="padding: 4px 8px; font-weight: 700; color: #2e6b3e; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                             🏗️ ${empLabelDisplay}
-                            ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:2px 8px; border-radius:4px; font-size:0.72rem; margin-left:10px; font-weight:600;">⚠ Obra em Andamento</span>' : ''}
+                            ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:1px 6px; border-radius:4px; font-size:0.68rem; margin-left:8px; font-weight:600;">⚠ Obra em Andamento</span>' : ''}
                         </td>
                     </tr>
                 `;
@@ -1599,8 +1608,8 @@ window.VerificarConstrucaoApp = {
                     unidades.forEach((u, uIdx) => {
                         const rowBg = uIdx % 2 === 0 ? '#fff' : '#f9fafb';
                         const validAction = u.statusLabel === 'Aguardando Validação'
-                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:5px 12px; font-size:0.78rem; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(45,107,62,0.35);">Validar Vistoria</button>`
-                            : `<span style="${u.statusColor}">${u.statusLabel}</span>${u.solicitadoHa ? `<br><span style="color:#d97706; font-size:0.72rem; font-weight:600;">${u.solicitadoHa}</span>` : ''}`;
+                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:3px 10px; font-size:0.75rem; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; white-space:nowrap;">Validar Vistoria</button>`
+                            : `<span style="${u.statusColor} white-space:nowrap;">${u.statusLabel}</span>${u.solicitadoHa ? ` <span style="color:#d97706; font-size:0.72rem; font-weight:600; white-space:nowrap;">${u.solicitadoHa}</span>` : ''}`;
 
                         const valorFmt = u.valorVencido > 0
                             ? u.valorVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -1609,23 +1618,20 @@ window.VerificarConstrucaoApp = {
                             ? `<span style="background:#fef2f2; color:#dc2626; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.78rem;">${u.parcelasVencidas}</span>`
                             : '<span style="background:#ecfdf5; color:#166534; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.72rem;">Adimplente</span>';
                         const lastVistoriaHtml = u.lastCheckDateStr !== '-'
-                            ? `<div style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; line-height:1.25;">
-                                    <span style="font-size:0.8rem; font-weight:600; color:#334155;">${u.lastCheckDateStr}</span>
-                                    <span style="color:#ea580c; font-size:0.7rem; font-weight:600;">Há ${u.lastCheckDays}</span>
-                               </div>`
-                            : '<span style="color:#94a3b8; font-weight:400; font-size:0.8rem;">Nunca</span>';
+                            ? `<span style="font-size:0.78rem; font-weight:600; color:#334155; white-space:nowrap;">${u.lastCheckDateStr}</span> <span style="color:#ea580c; font-size:0.7rem; font-weight:600; white-space:nowrap;">Há ${u.lastCheckDays}</span>`
+                            : '<span style="color:#94a3b8; font-weight:400; font-size:0.78rem; white-space:nowrap;">Nunca</span>';
 
                         html += `
                             <tr style="border-bottom: 1px solid #f1f5f9; background:${rowBg}; transition: background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${rowBg}'">
-                                <td style="padding: 10px 12px; text-align: center; width: 42px;">
+                                <td style="padding: 4px 6px; text-align: center;">
                                     <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''} style="accent-color: #16a34a;">
                                 </td>
-                                <td style="padding: 10px 12px; font-weight: 700; color: #1e293b; font-size: 0.88rem;">${u.unidade}</td>
-                                <td style="padding: 10px 12px; color: #334155; font-size: 0.83rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.clienteName}${_vcRowIsSubjudice(u) ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:0.68rem;font-weight:700;margin-left:4px;">Sub Judice</span>' : ''}</td>
-                                <td style="padding: 10px 12px; color: #475569; font-size: 0.82rem;">${u.titulo}</td>
-                                <td style="padding: 10px 12px; text-align: center;">${parcelasDisplay}</td>
-                                <td style="padding: 10px 12px; text-align: left; vertical-align: middle;">${lastVistoriaHtml}</td>
-                                <td style="padding: 10px 12px;">${validAction}</td>
+                                <td style="padding: 4px 8px; font-weight: 700; color: #1e293b; font-size: 0.8rem; white-space: nowrap;">${u.unidade}</td>
+                                <td style="padding: 4px 8px; color: #334155; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${String(u.clienteName || '').replace(/"/g, '&quot;')}">${u.clienteName}${_vcRowIsSubjudice(u) ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:0.68rem;font-weight:700;margin-left:4px;">Sub Judice</span>' : ''}</td>
+                                <td style="padding: 4px 8px; color: #475569; font-size: 0.78rem; white-space: nowrap;">${u.titulo}</td>
+                                <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">${parcelasDisplay}</td>
+                                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; white-space: nowrap;">${lastVistoriaHtml}</td>
+                                <td style="padding: 4px 8px; white-space: nowrap;">${validAction}</td>
                             </tr>
                         `;
                     });

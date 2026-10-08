@@ -156,10 +156,17 @@ const OrcamentoApp = {
         .orc-code { font-family: ui-monospace, Consolas, monospace; margin-right: 8px; }
         .orc-sub { display: block; margin-left: 22px; font-weight: 500; color: #64748b; font-size: 0.72rem; }
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
-        .orc-cart-tip { position: fixed; z-index: 80; min-width: 210px; background: #0c3d28; color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 0.75rem; line-height: 1.35; pointer-events: none; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28); }
-        .orc-cart-tip strong { display: block; margin-top: 2px; font-size: 0.92rem; }
-        .orc-cart-tip .orc-cart-sub { margin-top: 8px; color: #fdba74; font-weight: 700; }
-        .orc-cart-tip .orc-cart-sub strong { color: #ffedd5; }
+        .orc-sienge { color: #1e3a8a; cursor: help; font-variant-numeric: tabular-nums; }
+        .orc-emp .orc-sienge, .orc-total .orc-sienge { color: #dbeafe; }
+        .orc-cart-tip { position: fixed; z-index: 80; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px 6px; pointer-events: none; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2); }
+        .orc-cart-tip table { border-collapse: collapse; font-size: 0.72rem; }
+        .orc-cart-tip th { text-align: right; font-weight: 700; color: #fff; background: #105436; padding: 4px 8px; }
+        .orc-cart-tip th:first-child { text-align: left; border-radius: 4px 0 0 0; }
+        .orc-cart-tip th:last-child { border-radius: 0 4px 0 0; }
+        .orc-cart-tip td { text-align: right; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+        .orc-cart-tip td:first-child { text-align: left; color: #475569; font-weight: 700; }
+        .orc-cart-tip tr.orc-cart-total td { border-top: 1px solid #e2e8f0; font-weight: 800; color: #0f172a; padding-top: 4px; }
+        .orc-cart-tip .orc-cart-note { margin: 4px 2px 0; font-size: 0.66rem; color: #64748b; }
       </style>
       <div class="orc-head">
         <div>
@@ -193,13 +200,14 @@ const OrcamentoApp = {
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
               <th class="orc-h26" colspan="${this.periodCols(2026).length}">2026</th>
               <th class="orc-h27 orc-split" colspan="${this.periodCols(2027).length}">2027</th>
-              <th class="orc-cmp orc-split" colspan="4">Comparativo</th>
+              <th class="orc-cmp orc-split" colspan="5">Comparativo</th>
             </tr>
             <tr>
               ${this.periodCols(2026).map((col) => `<th class="orc-h26${col.forecast ? " orc-fc" : ""}">${this.esc(col.label)}</th>`).join("")}
               ${this.periodCols(2027).map((col, i) => `<th class="orc-h27${i === 0 ? " orc-split" : ""}">${this.esc(col.label)}</th>`).join("")}
               <th class="orc-split">Total 2026</th>
               <th>Total 2027</th>
+              <th>Sienge 2027</th>
               <th>Variação</th>
               <th>Variação %</th>
             </tr>
@@ -396,7 +404,7 @@ const OrcamentoApp = {
   },
 
   tableSpan() {
-    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 4;
+    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 5;
   },
 
   bind() {
@@ -439,18 +447,18 @@ const OrcamentoApp = {
         this.paint();
       });
       body.addEventListener("mouseover", (ev) => {
-        const tr = ev.target.closest("tr[data-cart]");
-        if (!tr || tr === this._cartRow) return;
-        this._cartRow = tr;
-        this.placeCartTip(tr);
-        const row = this._rows && this._rows[Number(tr.getAttribute("data-cart"))];
-        if (row && row.companyId) this.flightCarteira(row.companyId);
+        const cell = ev.target.closest("td[data-sienge]");
+        if (!cell || cell === this._cartCell) return;
+        this._cartCell = cell;
+        this.placeCartTip(cell);
+        const row = this._rows && this._rows[Number(cell.getAttribute("data-sienge"))];
+        (row && row.companyIds || []).forEach((id) => this.flightCarteira(id));
       });
       body.addEventListener("mouseout", (ev) => {
-        const tr = ev.target.closest("tr[data-cart]");
-        if (!tr) return;
-        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("tr[data-cart]");
-        if (next === tr) return;
+        const cell = ev.target.closest("td[data-sienge]");
+        if (!cell) return;
+        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("td[data-sienge]");
+        if (next === cell) return;
         this.hideCartTip();
       });
     }
@@ -486,7 +494,8 @@ const OrcamentoApp = {
       this.carteiraCompanies[id] = "error";
     }).finally(() => {
       delete this._cartFlight[id];
-      if (this._cartRow) this.placeCartTip(this._cartRow);
+      this.refreshSiengeColumn();
+      if (this._cartCell) this.placeCartTip(this._cartCell);
     });
     return this._cartFlight[id];
   },
@@ -545,10 +554,11 @@ const OrcamentoApp = {
       "2027-12-31"
     );
     const byCc = {};
-    const add = (cc, field, value) => {
+    const add = (cc, field, value, month) => {
       const key = String(cc);
-      if (!byCc[key]) byCc[key] = { receber: 0, sub: 0 };
+      if (!byCc[key]) byCc[key] = { receber: 0, sub: 0, months: this.blank() };
       byCc[key][field] += value;
+      if (field === "receber" && month >= 0 && month < 12) byCc[key].months[month] += value;
     };
     extract.forEach((item) => {
       const nested = (item && (item.billsReceivable || item.bills)) || [];
@@ -562,7 +572,8 @@ const OrcamentoApp = {
           const balance = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
           if (!(balance > 0.009)) return;
           const marked = subKeys.has(String(bill.billReceivableId) + "|" + String(inst.id));
-          add(cc, marked ? "sub" : "receber", balance);
+          const month = Number(due.slice(5, 7)) - 1;
+          add(cc, marked ? "sub" : "receber", balance, month);
         });
       });
     });
@@ -570,50 +581,71 @@ const OrcamentoApp = {
   },
 
   cartSum(row) {
-    const companyId = row && row.companyId;
-    const status = this.carteiraCompanies[String(companyId || "")];
-    if (status === "error") return { error: true };
-    if (status !== "done") return { loading: true };
+    const ids = (row && row.companyIds) || [];
+    if (!ids.length) return { loading: true, receber: 0, months: this.blank() };
+    const states = ids.map((id) => this.carteiraCompanies[String(id)]);
+    if (states.some((status) => status !== "done" && status !== "error")) return { loading: true, receber: 0, months: this.blank() };
+    if (states.every((status) => status === "error")) return { error: true, receber: 0, months: this.blank() };
     let receber = 0;
-    let sub = 0;
+    const months = this.blank();
     (row.cartCcs || []).forEach((cc) => {
       const pack = this.carteira[String(cc)];
       if (!pack) return;
       receber += Number(pack.receber) || 0;
-      sub += Number(pack.sub) || 0;
+      (pack.months || []).forEach((v, i) => { months[i] += Number(v) || 0; });
     });
-    return { receber, sub };
+    return { receber, months };
   },
 
-  placeCartTip(tr) {
+  refreshSiengeColumn() {
+    const body = document.getElementById("orc-body");
+    if (!body || !this._rows) return;
+    body.querySelectorAll("td[data-sienge]").forEach((td) => {
+      const row = this._rows[Number(td.getAttribute("data-sienge"))];
+      if (!row) return;
+      const sum = this.cartSum(row);
+      td.textContent = sum.loading ? "…" : (sum.error ? "—" : this.money(sum.receber));
+    });
+  },
+
+  siengeTipHtml(row, sum) {
+    if (sum.loading) return "Buscando a carteira de 2027…";
+    if (sum.error) return "Não foi possível consultar a carteira de 2027.";
+    const lines = this.months().map((name, i) => {
+      return "<tr><td>" + this.esc(String(name).toLowerCase()) + "</td><td>"
+        + this.money(row.m26 && row.m26[i]) + "</td><td>"
+        + this.money(row.m27 && row.m27[i]) + "</td><td>"
+        + this.money(sum.months[i]) + "</td></tr>";
+    }).join("");
+    return "<table><thead><tr><th></th><th>2026</th><th>2027</th><th>Sienge</th></tr></thead><tbody>"
+      + lines
+      + '<tr class="orc-cart-total"><td>Total</td><td>' + this.money(this.sum(row.m26))
+      + "</td><td>" + this.money(this.sum(row.m27))
+      + "</td><td>" + this.money(sum.receber) + "</td></tr></tbody></table>"
+      + '<div class="orc-cart-note">out–dez de 2026 são forecast. Sienge é a carteira em aberto, sem sub judice.</div>';
+  },
+
+  placeCartTip(cell) {
     const tip = document.getElementById("orc-cart-tip");
-    if (!tip || !tr || !tr.isConnected) return;
-    const row = this._rows && this._rows[Number(tr.getAttribute("data-cart"))];
+    if (!tip || !cell || !cell.isConnected) return;
+    const row = this._rows && this._rows[Number(cell.getAttribute("data-sienge"))];
     if (!row) return;
-    const sum = this.cartSum(row);
-    if (sum.loading) {
-      tip.innerHTML = "Buscando a carteira de 2027…";
-    } else if (sum.error) {
-      tip.innerHTML = "Não foi possível consultar a carteira de 2027.";
-    } else if (sum.receber <= 0.009 && sum.sub <= 0.009) {
-      tip.innerHTML = "Sem carteira a receber em 2027.";
-    } else {
-      tip.innerHTML = "A receber em 2027<strong>R$ " + this.money(sum.receber) + "</strong>"
-        + '<div class="orc-cart-sub">Sub judice<strong>R$ ' + this.money(sum.sub) + "</strong></div>";
-    }
+    tip.innerHTML = this.siengeTipHtml(row, this.cartSum(row));
     tip.hidden = false;
-    const rect = tr.getBoundingClientRect();
-    const width = tip.offsetWidth || 220;
-    let left = rect.left + 36;
-    if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
-    let top = rect.bottom + 6;
-    if (top + 84 > window.innerHeight) top = Math.max(8, rect.top - 84);
+    const rect = cell.getBoundingClientRect();
+    const width = tip.offsetWidth || 280;
+    const height = tip.offsetHeight || 280;
+    let left = rect.left - width - 8;
+    if (left < 8) left = Math.min(rect.right + 8, window.innerWidth - width - 8);
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+    let top = rect.top;
+    if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
     tip.style.left = left + "px";
     tip.style.top = top + "px";
   },
 
   hideCartTip() {
-    this._cartRow = null;
+    this._cartCell = null;
     const tip = document.getElementById("orc-cart-tip");
     if (tip) tip.hidden = true;
   },
@@ -896,6 +928,7 @@ const OrcamentoApp = {
         depth: 0,
         label: emp.e + " — " + (emp.en || "") + shareNote,
         companyId: emp.e,
+        companyIds: [String(emp.e)],
         cartCcs: emp.costCenters.map((cc) => cc.cc),
         m26: se26,
         m27: se27,
@@ -912,6 +945,7 @@ const OrcamentoApp = {
           depth: depth,
           label: cc.cc + " — " + cc.cn,
           companyId: emp.e,
+          companyIds: [String(emp.e)],
           cartCcs: [cc.cc],
           m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
@@ -954,6 +988,7 @@ const OrcamentoApp = {
           depth: 1,
           label: item.label,
           companyId: emp.e,
+          companyIds: [String(emp.e)],
           cartCcs: item.centers.map((cc) => cc.cc),
           m26: this.scaleMonths(g26, factor),
           m27: this.scaleMonths(g27, factor),
@@ -966,12 +1001,20 @@ const OrcamentoApp = {
       });
     });
     if (companies.length) {
+      const allCcs = [];
+      const allIds = [];
+      companies.forEach((emp) => {
+        allIds.push(String(emp.e));
+        (emp.costCenters || []).forEach((cc) => allCcs.push(cc.cc));
+      });
       rows.push({
         kind: "total",
         level: "Total",
         key: "",
         depth: 0,
         label: "Total",
+        companyIds: allIds,
+        cartCcs: allCcs,
         m26: y26,
         m27: y27,
         expandable: false,
@@ -997,6 +1040,7 @@ const OrcamentoApp = {
   },
 
   paint() {
+    this.hideCartTip();
     const body = document.getElementById("orc-body");
     const kpis = document.getElementById("orc-kpis");
     if (!body) return;
@@ -1053,15 +1097,24 @@ const OrcamentoApp = {
     const delta = t27 - t26;
     const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf")));
     const cart = row.cartCcs ? ' data-cart="' + row._i + '"' : "";
+    const sienge = this.siengeCell(row);
     const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
     const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"' + cart + '><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
       + this.moneyCell(t27, "orc-y27")
+      + sienge
       + this.moneyCell(delta, delta < 0 ? "orc-neg" : "")
       + this.pctCell(delta, t26)
       + "</tr>";
+  },
+
+  siengeCell(row) {
+    if (!row.cartCcs) return '<td class="orc-sienge">—</td>';
+    const sum = this.cartSum(row);
+    const text = sum.loading ? "…" : (sum.error ? "—" : this.money(sum.receber));
+    return '<td class="orc-sienge" data-sienge="' + row._i + '">' + text + "</td>";
   },
 
   async exportExcel() {
@@ -1093,7 +1146,7 @@ const OrcamentoApp = {
 
     const c26 = this.periodCols(2026);
     const c27 = this.periodCols(2027);
-    const colCount = 2 + c26.length + c27.length + 4;
+    const colCount = 2 + c26.length + c27.length + 5;
     const start27 = 3 + c26.length;
     const startCmp = start27 + c27.length;
     const ws = wb.addWorksheet("Orçamento", { properties: { showGridLines: false } });
@@ -1110,6 +1163,7 @@ const OrcamentoApp = {
       { width: 18 },
       { width: 52 },
       ...Array.from({ length: c26.length + c27.length }, () => ({ width: 14 })),
+      { width: 16 },
       { width: 16 },
       { width: 16 },
       { width: 16 },
@@ -1215,7 +1269,7 @@ const OrcamentoApp = {
     groupHeads.forEach(([col, text]) => {
       ws.getRow(4).getCell(col).value = text;
     });
-    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Variação", "Variação %"]);
+    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Sienge 2027", "Variação", "Variação %"]);
     const headRow = ws.getRow(5);
     headRow.height = 20;
     heads.forEach((h, i) => {
@@ -1308,8 +1362,29 @@ const OrcamentoApp = {
       const d = a27 - a26;
       paintMoney(excelRow.getCell(startCmp), a26, row.kind, false);
       paintMoney(excelRow.getCell(startCmp + 1), a27, row.kind, false);
-      paintMoney(excelRow.getCell(startCmp + 2), d, row.kind, false);
-      paintPct(excelRow.getCell(startCmp + 3), d, a26, row.kind);
+      const siengeCell = excelRow.getCell(startCmp + 2);
+      if (!row.cartCcs) {
+        siengeCell.value = "—";
+        const dark = row.kind === "emp" || row.kind === "total";
+        const bg = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "obra" ? "FFA7F3D0" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF")));
+        inv.excelPaint(siengeCell, {
+          fill: bg,
+          font: { bold: row.kind !== "leaf", size: 9, color: { argb: dark ? "FFFFFFFF" : "FF64748B" } },
+          align: { horizontal: "right", vertical: "middle" },
+          border: true
+        });
+      } else {
+        const sum = this.cartSum(row);
+        if (sum.loading || sum.error) {
+          siengeCell.value = sum.loading ? "…" : "—";
+          paintMoney(excelRow.getCell(startCmp + 2), 0, row.kind, false);
+          siengeCell.value = sum.loading ? "…" : "—";
+        } else {
+          paintMoney(siengeCell, sum.receber, row.kind, false);
+        }
+      }
+      paintMoney(excelRow.getCell(startCmp + 3), d, row.kind, false);
+      paintPct(excelRow.getCell(startCmp + 4), d, a26, row.kind);
       rowIdx += 1;
     });
 

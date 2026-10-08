@@ -829,24 +829,61 @@ const ComprasPrevisoesApp = {
     return { start: s.slice(0, 7) + "-01", end: s.slice(0, 7) + "-" + String(last).padStart(2, "0") };
   },
 
+  async billsNoPeriodo(start, end, bill) {
+    const rows = [];
+    let offset = 0;
+    for (let page = 0; page < 5; page++) {
+      let path = "/bills?startDate=" + encodeURIComponent(start)
+        + "&endDate=" + encodeURIComponent(end)
+        + "&creditorId=" + encodeURIComponent(bill.creditorId)
+        + "&limit=200&offset=" + offset;
+      if (bill.debtorId != null && bill.debtorId !== "") path += "&debtorId=" + encodeURIComponent(bill.debtorId);
+      const data = await window.siengeFetchWithRetry(path, 1);
+      const chunk = (data && data.results) || [];
+      rows.push.apply(rows, chunk);
+      const count = data && data.resultSetMetadata && Number(data.resultSetMetadata.count);
+      offset += chunk.length;
+      if (!chunk.length || chunk.length < 200 || (Number.isFinite(count) && offset >= count)) break;
+    }
+    return rows;
+  },
+
+  candidatoSubstituto(bill, item) {
+    if (!item || String(item.id) === String(bill.id)) return false;
+    if (this.isDocSubstituivel(item.documentIdentificationId, item.documentNumber)) return false;
+    if (bill.debtorId != null && item.debtorId != null && Number(item.debtorId) !== Number(bill.debtorId)) return false;
+    if (bill.creditorId != null && item.creditorId != null && Number(item.creditorId) !== Number(bill.creditorId)) return false;
+    return true;
+  },
+
+  mesmoDocumentoSubstituto(bill, item) {
+    const wanted = this.fold(bill && bill.documentNumber).replace(/[^A-Z0-9]+/g, " ").trim().split(/\s+/).filter((w) => w.length >= 3);
+    if (!wanted.length || !item) return false;
+    const id = this.fold(item.documentIdentificationId).replace(/[^A-Z0-9]/g, "");
+    const num = this.fold(item.documentNumber);
+    return wanted.some((w) => id === w || num.indexOf(w) >= 0);
+  },
+
+  escolherSubstituto(rows, amount) {
+    if (!rows.length) return "";
+    const ranked = rows.slice().sort((a, b) =>
+      Math.abs(Number(a.totalInvoiceAmount) - Number(amount)) - Math.abs(Number(b.totalInvoiceAmount) - Number(amount))
+    );
+    return String(ranked[0].id);
+  },
+
   async tituloSubstitutoDaBaixa(bill, amount, paymentDate) {
     const start = String(bill && bill.issueDate || "").slice(0, 10);
     const end = String(paymentDate || "").slice(0, 10);
     if (!start || !end || !bill || !bill.creditorId || typeof window.siengeFetchWithRetry !== "function") return "";
-    const data = await window.siengeFetchWithRetry(
-      "/bills?startDate=" + encodeURIComponent(start) +
-      "&endDate=" + encodeURIComponent(end) +
-      "&creditorId=" + encodeURIComponent(bill.creditorId) +
-      "&limit=200",
-      1
-    );
-    const hits = ((data && data.results) || []).filter((item) => {
-      if (!item || String(item.id) === String(bill.id)) return false;
-      if (this.isDocSubstituivel(item.documentIdentificationId, "")) return false;
-      if (bill.debtorId != null && Number(item.debtorId) !== Number(bill.debtorId)) return false;
-      return Math.abs(Number(item.totalInvoiceAmount) - Number(amount)) < 0.02;
-    });
-    return hits.length === 1 ? String(hits[0].id) : "";
+    const rows = (await this.billsNoPeriodo(start, end, bill)).filter((item) => this.candidatoSubstituto(bill, item));
+    const exact = rows.filter((item) => Math.abs(Number(item.totalInvoiceAmount) - Number(amount)) < 0.02);
+    if (exact.length === 1) return String(exact[0].id);
+    const sameDay = rows.filter((item) => String(item.issueDate || "").slice(0, 10) === end);
+    const byDoc = sameDay.filter((item) => this.mesmoDocumentoSubstituto(bill, item));
+    if (byDoc.length) return this.escolherSubstituto(byDoc, amount);
+    if (sameDay.length) return this.escolherSubstituto(sameDay, amount);
+    return "";
   },
 
   aplicarBaixas(titulo, map) {
