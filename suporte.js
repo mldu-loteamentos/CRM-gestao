@@ -33,7 +33,8 @@
   const MENU = [
     { id: "home", label: "Home" },
     { id: "engenharia", label: "Engenharia", subs: [
-      { id: "caucao", label: "Gestão de caução" }
+      { id: "caucao", label: "Gestão de caução" },
+      { id: "config", label: "Configurações" }
     ]},
     { id: "vistoria", label: "Vistoria", subs: [
       { id: "vistoria_tela", label: "Vistoria" },
@@ -131,6 +132,7 @@
     "construcao-home": { modulo: "home" },
     "construcao-engenharia": { modulo: "engenharia", subitem: "caucao" },
     "engenharia-caucao": { modulo: "engenharia", subitem: "caucao" },
+    "engenharia-config": { modulo: "engenharia", subitem: "config" },
     vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
     "construcao-compras": { modulo: "compras" },
     "compras-previsoes": { modulo: "compras", subitem: "previsoes" },

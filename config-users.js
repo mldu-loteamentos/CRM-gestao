@@ -129,6 +129,13 @@ const ConfigUsersApp = {
       savedPerms.sub_eng_geral_caucao_visualizar = true;
       savedPerms.sub_eng_geral_caucao_editar = !!savedPerms.sub_eng_geral_engenharia_editar;
     }
+    if (savedPerms.sub_eng_geral_config_acessar == null && (
+      savedPerms.mod_eng || savedPerms.sub_eng_geral || savedPerms.sub_eng_geral_engenharia_acessar
+    )) {
+      savedPerms.sub_eng_geral_config_acessar = true;
+      savedPerms.sub_eng_geral_config_visualizar = true;
+      savedPerms.sub_eng_geral_config_editar = true;
+    }
     ["acessar", "visualizar", "editar"].forEach((flag) => {
       const oldKey = "sub_rel_geral_relacionamento_" + flag;
       const newKey = "sub_rel_geral_buscar_cliente_" + flag;
@@ -272,7 +279,8 @@ const ConfigUsersApp = {
     {
       name: "Engenharia", icon: "hard-hat", key: "mod_eng",
       submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [
-        { id: "caucao", label: "Gestão de caução", permBase: "sub_eng_geral_caucao" }
+        { id: "caucao", label: "Gestão de caução", permBase: "sub_eng_geral_caucao" },
+        { id: "config", label: "Configurações", permBase: "sub_eng_geral_config" }
       ] }]
     },
     {

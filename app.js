@@ -3006,6 +3006,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compras-previsoes": "Follow-up de previsões",
     "compras-config": "Calendário de vencimento de títulos a pagar",
     "engenharia-caucao": "Gestão de caução",
+    "engenharia-config": "Configurações",
     "construcao-engenharia": "Gestão de caução",
     "construcao-compras": "Follow-up de previsões",
     "construcao-marketing": "Eventos",
@@ -3060,6 +3061,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compras-previsoes": "clipboard-list",
     "compras-config": "calendar-clock",
     "engenharia-caucao": "shield-check",
+    "engenharia-config": "settings",
     "construcao-engenharia": "shield-check",
     "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
@@ -4089,6 +4091,7 @@ window.expandCrmMenuPerms = function(perms) {
   };
   ["acessar", "visualizar", "editar"].forEach(function(flag) {
     fill("sub_eng_geral_caucao_" + flag, "sub_eng_geral_engenharia_" + flag);
+    fill("sub_eng_geral_config_" + flag, "sub_eng_geral_engenharia_" + flag);
     fill("sub_rel_geral_buscar_cliente_" + flag, "sub_rel_geral_relacionamento_" + flag);
   });
   if (copy.sub_eng_geral_caucao_acessar == null && (
@@ -4099,6 +4102,13 @@ window.expandCrmMenuPerms = function(perms) {
     if (copy.sub_eng_geral_caucao_editar == null) {
       copy.sub_eng_geral_caucao_editar = copy.sub_eng_geral_engenharia_editar === true;
     }
+  }
+  if (copy.sub_eng_geral_config_acessar == null && (
+    copy.mod_eng === true || copy.sub_eng_geral === true || copy.sub_eng_geral_engenharia_acessar === true
+  )) {
+    copy.sub_eng_geral_config_acessar = true;
+    if (copy.sub_eng_geral_config_visualizar == null) copy.sub_eng_geral_config_visualizar = true;
+    if (copy.sub_eng_geral_config_editar == null) copy.sub_eng_geral_config_editar = true;
   }
   if (copy.mod_gerencial == null && (
     copy.mod_societario === true || copy.mod_participacoes === true
@@ -5140,6 +5150,21 @@ window.permCoversMenuKey = function(perms, modKey) {
     if (perms.sub_eng_geral_caucao_acessar == null
       && perms.sub_eng_geral_caucao_visualizar == null
       && perms.sub_eng_geral_caucao_editar == null) {
+      return perms.mod_eng === true
+        || perms.sub_eng_geral === true
+        || perms.sub_eng_geral_engenharia_acessar === true
+        || perms.sub_eng_geral_engenharia_visualizar === true
+        || perms.sub_eng_geral_engenharia_editar === true;
+    }
+    return false;
+  }
+  if (modKey === "sub_eng_geral_config_acessar") {
+    if (perms.sub_eng_geral_config_acessar === true
+      || perms.sub_eng_geral_config_visualizar === true
+      || perms.sub_eng_geral_config_editar === true) return true;
+    if (perms.sub_eng_geral_config_acessar == null
+      && perms.sub_eng_geral_config_visualizar == null
+      && perms.sub_eng_geral_config_editar == null) {
       return perms.mod_eng === true
         || perms.sub_eng_geral === true
         || perms.sub_eng_geral_engenharia_acessar === true
@@ -40627,6 +40652,7 @@ window.SYNC_KEYS = [
     "crm_compromissario_cessao_v1",
     "crm_compras_prazo_lancamento_v1",
     "crm_engenharia_caucao_liberados_v1",
+    "crm_engenharia_caucao_prorrogacao_v1",
     "crm_engenharia_caucao_avisos_v1",
     "crm_comissao_nfs_v1"
 ];
@@ -41364,6 +41390,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_engenharia_caucao_prorrogacao_v1" && typeof window.mergeEngenhariaCaucaoProrrogacao === "function") {
+                    const merged = window.mergeEngenhariaCaucaoProrrogacao(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (k === "crm_engenharia_caucao_avisos_v1" && typeof window.mergeEngenhariaCaucaoAvisos === "function") {
                     const merged = window.mergeEngenhariaCaucaoAvisos(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
@@ -41670,6 +41707,17 @@ window.forceUploadLocalConfig = async function(silent = true) {
               try { _originalSetItem.call(localStorage, "crm_compras_prazo_lancamento_v1", payload.crm_compras_prazo_lancamento_v1); } catch (e) {}
             } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
               payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
+            }
+          }
+          if (payload.crm_engenharia_caucao_prorrogacao_v1 || cloud.crm_engenharia_caucao_prorrogacao_v1) {
+            if (typeof window.mergeEngenhariaCaucaoProrrogacao === "function") {
+              payload.crm_engenharia_caucao_prorrogacao_v1 = window.mergeEngenhariaCaucaoProrrogacao(
+                payload.crm_engenharia_caucao_prorrogacao_v1 || "{}",
+                cloud.crm_engenharia_caucao_prorrogacao_v1 || "{}"
+              );
+              try { _originalSetItem.call(localStorage, "crm_engenharia_caucao_prorrogacao_v1", payload.crm_engenharia_caucao_prorrogacao_v1); } catch (e) {}
+            } else if (!payload.crm_engenharia_caucao_prorrogacao_v1 && cloud.crm_engenharia_caucao_prorrogacao_v1) {
+              payload.crm_engenharia_caucao_prorrogacao_v1 = cloud.crm_engenharia_caucao_prorrogacao_v1;
             }
           }
           if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {
@@ -41998,6 +42046,16 @@ localStorage.setItem = function(key, value) {
                           );
                         } else if (!payload.crm_compras_prazo_lancamento_v1 && cloud.crm_compras_prazo_lancamento_v1) {
                           payload.crm_compras_prazo_lancamento_v1 = cloud.crm_compras_prazo_lancamento_v1;
+                        }
+                      }
+                      if (payload.crm_engenharia_caucao_prorrogacao_v1 || cloud.crm_engenharia_caucao_prorrogacao_v1) {
+                        if (typeof window.mergeEngenhariaCaucaoProrrogacao === "function") {
+                          payload.crm_engenharia_caucao_prorrogacao_v1 = window.mergeEngenhariaCaucaoProrrogacao(
+                            payload.crm_engenharia_caucao_prorrogacao_v1 || "{}",
+                            cloud.crm_engenharia_caucao_prorrogacao_v1 || "{}"
+                          );
+                        } else if (!payload.crm_engenharia_caucao_prorrogacao_v1 && cloud.crm_engenharia_caucao_prorrogacao_v1) {
+                          payload.crm_engenharia_caucao_prorrogacao_v1 = cloud.crm_engenharia_caucao_prorrogacao_v1;
                         }
                       }
                       if (payload.crm_engenharia_caucao_liberados_v1 || cloud.crm_engenharia_caucao_liberados_v1) {

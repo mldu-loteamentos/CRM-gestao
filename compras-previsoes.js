@@ -451,11 +451,15 @@ const ComprasPrevisoesApp = {
     return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().includes("PAGADORIA");
   },
 
-  /** null = pagadoria, vê tudo. Lista vazia = sem departamento, não vê nada. */
+  /** null = pagadoria ou administrador, vê tudo. Lista vazia = sem departamento, não vê nada. */
   departmentWindows() {
     const u = this.sessionUser();
     if (!u) return [];
-    if (this.isPagadoriaProfile(u.profile_name || u.profile)) return null;
+    const profile = u.profile_name || u.profile || u.role || "";
+    if (this.isPagadoriaProfile(profile)) return null;
+    if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return null;
+    const folded = String(profile).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    if (folded === "ADMINISTRADOR") return null;
     const hist = Array.isArray(u.department_history) ? u.department_history : [];
     return hist.map((h) => ({
       id: String(h && h.id != null ? h.id : ""),
@@ -763,6 +767,15 @@ const ComprasPrevisoesApp = {
         <div class="ml-emp-filter-label">Departamento</div>
         <button type="button" class="ml-emp-filter-btn" disabled>
           <span>${this.esc(label)}</span>
+        </button>
+      </div>`;
+    }
+    const items = this.deptItems();
+    if (!access && !items.length) {
+      return `<div class="ml-emp-filter" id="cprev-filter-dept">
+        <div class="ml-emp-filter-label">Departamento</div>
+        <button type="button" class="ml-emp-filter-btn" disabled>
+          <span>Todos</span>
         </button>
       </div>`;
     }

@@ -574,7 +574,7 @@ const server = http.createServer(async (req, res) => {
           ? 'Cauções prorrogadas por falta de liberação'
           : 'Cauções liberadas com pagamento em até 3 dias';
         const lead = kind === 'prorrogacao'
-          ? 'Os cauções abaixo não estavam liberados e chegaram na data mínima de pagamento da tesouraria. O vencimento foi prorrogado em 30 dias por falta de liberação.'
+          ? 'Os cauções abaixo não estavam liberados e chegaram na data mínima de pagamento da tesouraria. O vencimento foi prorrogado em ' + (Math.max(1, Number(body.dias) || 30)) + ' dias por falta de liberação.'
           : 'Os cauções abaixo estão liberados e serão pagos na data de vencimento.';
         const html = `
           <div style="font-family:Arial,sans-serif;color:#1c2e24;">

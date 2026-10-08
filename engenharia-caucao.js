@@ -5,6 +5,34 @@
  */
 var ECAU_LIBERA_LS = "crm_engenharia_caucao_liberados_v1";
 var ECAU_AVISO_LS = "crm_engenharia_caucao_avisos_v1";
+var ECAU_PRORROGA_LS = "crm_engenharia_caucao_prorrogacao_v1";
+var ECAU_PRORROGA_DEFAULT = { antes: 10, dias: 30 };
+var ECAU_EMISSAO_AVISO = "Não é possível liberar, pois a data de emissão do título é posterior ao vencimento. Contate o financeiro para ajustar.";
+
+function parseCaucaoProrrogacao(raw) {
+  let obj = raw;
+  if (typeof raw === "string") {
+    try { obj = JSON.parse(raw || "{}") || {}; } catch (e) { obj = {}; }
+  }
+  if (!obj || typeof obj !== "object") obj = {};
+  const clamp = (n, min, max, fallback) => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(v)));
+  };
+  return {
+    antes: clamp(obj.antes != null ? obj.antes : ECAU_PRORROGA_DEFAULT.antes, 0, 365, ECAU_PRORROGA_DEFAULT.antes),
+    dias: clamp(obj.dias != null ? obj.dias : ECAU_PRORROGA_DEFAULT.dias, 1, 365, ECAU_PRORROGA_DEFAULT.dias),
+    updatedAt: Number(obj.updatedAt || 0)
+  };
+}
+
+window.mergeEngenhariaCaucaoProrrogacao = function (localStr, cloudStr) {
+  const local = parseCaucaoProrrogacao(localStr);
+  const cloud = parseCaucaoProrrogacao(cloudStr);
+  const picked = Number(local.updatedAt || 0) >= Number(cloud.updatedAt || 0) ? local : cloud;
+  return JSON.stringify(picked);
+};
 
 window.EngenhariaCaucaoApp = {
   SKIP_OPS: {
@@ -88,10 +116,36 @@ window.EngenhariaCaucaoApp = {
     return !!(em && d && d < em);
   },
 
+  prorrogacao() {
+    try { return parseCaucaoProrrogacao(localStorage.getItem(ECAU_PRORROGA_LS) || "{}"); }
+    catch (e) { return parseCaucaoProrrogacao({}); }
+  },
+
+  saveProrrogacao(cfg) {
+    const next = parseCaucaoProrrogacao(cfg);
+    next.updatedAt = Date.now();
+    try { localStorage.setItem(ECAU_PRORROGA_LS, JSON.stringify(next)); } catch (e) {}
+    if (typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true).catch(function () {});
+    }
+    return next;
+  },
+
   dentroPrazoMinimo(r) {
     const due = this.isoDate(r && r.vencimento);
-    const minDue = this.addDaysIso(this.isoToday(), this.minDaysToday());
-    return !!(due && minDue && due < minDue);
+    const limite = this.addDaysIso(this.isoToday(), this.prorrogacao().antes);
+    return !!(due && limite && due <= limite);
+  },
+
+  emissaoFutura(r) {
+    const em = this.isoDate(r && r.emissao);
+    return !!(em && em > this.isoToday());
+  },
+
+  emissaoAlertaHtml(r) {
+    if (!this.emissaoFutura(r)) return "";
+    const tip = this.esc(ECAU_EMISSAO_AVISO);
+    return `<span class="ecau-emissao-alerta" data-ecau-tip="${tip}" role="img" aria-label="${tip}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>`;
   },
 
   addMonthsIso(iso, months) {
@@ -288,7 +342,12 @@ window.EngenhariaCaucaoApp = {
         const res = await fetch("/api/caucao/avisos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ kind: kind, to: to, items: batch.map((q) => q.item) })
+          body: JSON.stringify({
+            kind: kind,
+            to: to,
+            dias: this.prorrogacao().dias,
+            items: batch.map((q) => q.item)
+          })
         });
         const data = await res.json().catch(function () { return {}; });
         if (data && data.sent) sentKeys.push.apply(sentKeys, batch.map((q) => q.key));
@@ -985,7 +1044,6 @@ window.EngenhariaCaucaoApp = {
     });
     const selectable = this.credorRows(credor);
     const allOn = selectable.length > 0 && selectable.every((r) => this.state.selected[this.rowKey(r)]);
-    const markBtn = `<button type="button" class="ecau-mark-credor" ${selectable.length ? "" : "disabled"} title="${selectable.length ? (allOn ? "Desmarcar este credor" : "Marcar todos deste credor") : "Nenhum título em aberto neste credor"}" onclick="event.preventDefault();event.stopPropagation();EngenhariaCaucaoApp.toggleCredor('${encodeURIComponent(credor || "Sem credor")}')">${allOn ? "Desmarcar" : "Marcar todos"}</button>`;
     const cell = "background:#f1f5f9;color:#475569;font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;";
     return `<tr class="fila-group-header cprev-group-header is-neutral">
       <td class="ecau-col-chk" style="${cell}text-transform:none;">
@@ -999,7 +1057,6 @@ window.EngenhariaCaucaoApp = {
           <span>${this.esc(credor || "Sem credor")}</span>
           <span class="ecau-group-tools">
             <span class="cprev-group-chip">${this.esc(countLabel)}</span>
-            ${markBtn}
           </span>
         </div>
       </td>
@@ -1142,7 +1199,7 @@ window.EngenhariaCaucaoApp = {
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="CAU">CAU</td>
         <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
-        <td class="ecau-col-emissao" title="${this.esc(this.fmtDate(r.emissao))}">${this.esc(this.fmtDate(r.emissao))}</td>
+        <td class="ecau-col-emissao"><span class="ecau-emissao-wrap"><span>${this.esc(this.fmtDate(r.emissao))}</span>${this.emissaoAlertaHtml(r)}</span></td>
         <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
         <td class="ecau-col-pag">${r.pago ? this.esc(this.fmtDate(r.dataPagamento)) : "—"}</td>
         <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
@@ -1270,8 +1327,8 @@ window.EngenhariaCaucaoApp = {
           </div>
           <div class="cprev-modal-body" style="padding:18px;">
             <label for="ecau-new-due" style="display:block;font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:6px;">Novo vencimento</label>
-            <input type="date" id="ecau-new-due" class="form-control" value="${this.esc(this.isoToday())}" oninput="EngenhariaCaucaoApp.syncDueWarn()">
-            <p id="ecau-due-warn" class="ecau-due-warn" hidden>Não é possível liberar, pois a data de emissão do título é posterior ao vencimento. Contate o financeiro para ajustar.</p>
+            <input type="date" id="ecau-new-due" class="form-control" value="${this.esc(this.isoToday())}" oninput="EngenhariaCaucaoApp.syncDueWarn()" onkeydown="if(this.disabled){event.preventDefault();}">
+            <p id="ecau-due-warn" class="ecau-due-warn" hidden>${this.esc(ECAU_EMISSAO_AVISO)}</p>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
               <button type="button" class="btn btn-cancel" onclick="EngenhariaCaucaoApp.closeModal()">Cancelar</button>
               <button type="button" class="btn btn-primary" id="ecau-due-apply" onclick="EngenhariaCaucaoApp.applyDueDate()">Aplicar no Sienge</button>
@@ -1291,6 +1348,11 @@ window.EngenhariaCaucaoApp = {
     const blocked = !!(due && rows.some((r) => this.vencimentoAntesDaEmissao(r, due)));
     if (warn) warn.hidden = !blocked;
     if (btn) btn.disabled = blocked;
+    if (input) {
+      input.disabled = blocked;
+      input.classList.toggle("is-locked", blocked);
+      if (blocked) input.blur();
+    }
   },
 
   installmentPayload(r, dueDate) {
@@ -1376,9 +1438,9 @@ window.EngenhariaCaucaoApp = {
     const jaLiberadas = rows.filter((r) => this.isLiberated(r));
     const prorrogar = rows.filter((r) => !this.isLiberated(r) && this.dentroPrazoMinimo(r));
     const manter = rows.filter((r) => !this.isLiberated(r) && !this.dentroPrazoMinimo(r));
-    const minDays = this.minDaysToday();
+    const cfg = this.prorrogacao();
     const lines = [];
-    if (prorrogar.length) lines.push(prorrogar.length + " caução(ões) com vencimento dentro do prazo mínimo de " + minDays + " dias serão prorrogadas em 30 dias e liberadas.");
+    if (prorrogar.length) lines.push(prorrogar.length + " caução(ões) com vencimento dentro de " + cfg.antes + " dias serão prorrogadas em " + cfg.dias + " dias e liberadas.");
     if (manter.length) lines.push(manter.length + " caução(ões) serão liberadas mantendo o vencimento atual.");
     if (jaLiberadas.length) lines.push(jaLiberadas.length + " já liberada(s) mantêm o vencimento para a tesouraria.");
     const msg = "Liberar as cauções selecionadas?\n\n" + lines.join("\n");
@@ -1412,7 +1474,7 @@ window.EngenhariaCaucaoApp = {
     });
     for (const [billId, list] of byBill.entries()) {
       const nextByKey = {};
-      list.forEach((r) => { nextByKey[this.rowKey(r)] = this.addDaysIso(r.vencimento, 30); });
+      list.forEach((r) => { nextByKey[this.rowKey(r)] = this.addDaysIso(r.vencimento, cfg.dias); });
       try {
         await this.patchBillInstallments(billId, list.map((r) => this.installmentPayload(r, nextByKey[this.rowKey(r)])));
         list.forEach((r) => {
@@ -1440,7 +1502,7 @@ window.EngenhariaCaucaoApp = {
     this.applyFilters();
     this.renderList();
     const parts = [];
-    if (prorrogadas) parts.push(prorrogadas + " prorrogada(s) em 30 dias e liberada(s).");
+    if (prorrogadas) parts.push(prorrogadas + " prorrogada(s) em " + cfg.dias + " dias e liberada(s).");
     if (liberadas) parts.push(liberadas + " liberada(s) com o vencimento atual.");
     if (jaLiberadas.length) parts.push(jaLiberadas.length + " já liberada(s): vencimento mantido para a tesouraria.");
     if (errors.length) parts.push("Falhas:\n" + errors.slice(0, 6).join("\n"));
@@ -1646,6 +1708,83 @@ window.EngenhariaCaucaoApp = {
       this.applyFilters();
       this.renderList();
     }).catch(function () {});
+  },
+
+  onProrrogaField(field, val) {
+    const draft = parseCaucaoProrrogacao(this.state.prorrogaDraft || this.prorrogacao());
+    draft[field] = val;
+    draft.updatedAt = this.state.prorrogaDraft && this.state.prorrogaDraft.updatedAt;
+    this.state.prorrogaDraft = parseCaucaoProrrogacao(draft);
+  },
+
+  cancelProrrogaEdit() {
+    this.state.prorrogaDraft = this.prorrogacao();
+    this.renderConfig();
+  },
+
+  restoreProrrogaDefault() {
+    this.state.prorrogaDraft = parseCaucaoProrrogacao(ECAU_PRORROGA_DEFAULT);
+    this.renderConfig();
+  },
+
+  saveProrrogaConfig() {
+    const saved = this.saveProrrogacao(this.state.prorrogaDraft || this.prorrogacao());
+    this.state.prorrogaDraft = saved;
+    this.renderConfig();
+    alert("Prorrogação de caução salva.");
+  },
+
+  renderConfig() {
+    const root = document.getElementById("engenharia-config-root");
+    if (!root) return;
+    const cfg = parseCaucaoProrrogacao(this.state.prorrogaDraft || this.prorrogacao());
+    this.state.prorrogaDraft = cfg;
+    root.innerHTML = `
+      <div class="cprev-config-page">
+        <div class="crm-card cprev-config-card">
+          <div class="cprev-config-help">
+            <i data-lucide="info"></i>
+            <p>O caução <strong>retido</strong> que estiver a vencer dentro do prazo abaixo é prorrogado no Sienge no momento da liberação. O primeiro campo diz com quantos dias de antecedência isso acontece. O segundo diz quantos dias o vencimento avança.</p>
+          </div>
+          <div class="cprev-prazo-list">
+            <label class="cprev-prazo-row">
+              <span class="cprev-prazo-day">
+                <span class="cprev-prazo-name">Dias antes do vencimento</span>
+              </span>
+              <span class="cprev-prazo-field">
+                <input type="number" min="0" max="365" step="1" value="${this.esc(cfg.antes)}"
+                  aria-label="Dias antes do vencimento"
+                  onchange="EngenhariaCaucaoApp.onProrrogaField('antes', this.value)">
+                <span>dias</span>
+              </span>
+            </label>
+            <label class="cprev-prazo-row">
+              <span class="cprev-prazo-day">
+                <span class="cprev-prazo-name">Dias para prorrogar</span>
+              </span>
+              <span class="cprev-prazo-field">
+                <input type="number" min="1" max="365" step="1" value="${this.esc(cfg.dias)}"
+                  aria-label="Dias para prorrogar no futuro"
+                  onchange="EngenhariaCaucaoApp.onProrrogaField('dias', this.value)">
+                <span>dias</span>
+              </span>
+            </label>
+          </div>
+          <div class="cprev-config-actions">
+            <button type="button" class="btn btn-cancel" onclick="EngenhariaCaucaoApp.cancelProrrogaEdit()">Cancelar</button>
+            <button type="button" class="btn btn-outline" onclick="EngenhariaCaucaoApp.restoreProrrogaDefault()">Restaurar padrão</button>
+            <button type="button" class="btn btn-primary" onclick="EngenhariaCaucaoApp.saveProrrogaConfig()">Salvar</button>
+          </div>
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  initConfig() {
+    const root = document.getElementById("engenharia-config-root");
+    if (!root) return;
+    this.state.prorrogaDraft = this.prorrogacao();
+    this.renderConfig();
   }
 };
 
@@ -1687,5 +1826,8 @@ window.mergeEngenhariaCaucaoAvisos = function (localStr, cloudStr) {
 document.addEventListener("tabChanged", function (e) {
   if (e.detail === "engenharia-caucao" || e.detail === "construcao-engenharia") {
     EngenhariaCaucaoApp.init();
+  }
+  if (e.detail === "engenharia-config") {
+    EngenhariaCaucaoApp.initConfig();
   }
 });
