@@ -168,15 +168,31 @@ const EmpresasApp = {
   },
 
   scheduleCloudUpload(debounce) {
-    if (typeof window.forceUploadLocalConfig !== "function") return;
+    const run = () => {
+      this._uploadTimer = null;
+      if (typeof window.persistEmpresasCustomToFirebase === "function") {
+        window.persistEmpresasCustomToFirebase().catch(() => {});
+        return;
+      }
+      if (typeof window.forceUploadLocalConfig === "function") window.forceUploadLocalConfig(true).catch(() => {});
+    };
     if (!debounce) {
-      window.forceUploadLocalConfig(true).catch(() => {});
+      clearTimeout(this._uploadTimer);
+      run();
       return;
     }
     clearTimeout(this._uploadTimer);
-    this._uploadTimer = setTimeout(() => {
-      window.forceUploadLocalConfig(true).catch(() => {});
-    }, 400);
+    this._uploadTimer = setTimeout(run, 250);
+  },
+
+  flushCloudUpload() {
+    if (this._uploadTimer) {
+      clearTimeout(this._uploadTimer);
+      this._uploadTimer = null;
+    }
+    if (typeof window.persistEmpresasCustomToFirebase === "function") {
+      window.persistEmpresasCustomToFirebase().catch(() => {});
+    }
   },
 
   paintRowState(id) {
@@ -655,9 +671,7 @@ const EmpresasApp = {
         rec = {
           company_id: id,
           nome_usual: "",
-          percentual_mldu: 0,
-          consolidacao_padrao: 0,
-          gerida_pelo_grupo: 0
+          percentual_mldu: 0
         };
         EmpresasState.customFields[id] = rec;
         changed = true;
@@ -668,10 +682,7 @@ const EmpresasApp = {
         changed = true;
       }
     });
-    if (changed) {
-      this.persistCustomMap();
-      if (fromNetwork && window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
-    }
+    if (changed) this.persistCustomMap();
     this.renderFilaPrompt();
     if (document.getElementById("empresas-content")) this.render();
   },
@@ -785,3 +796,38 @@ document.addEventListener('tabChanged', (e) => {
 
 window.EmpresasApp = EmpresasApp;
 window.EmpresasState = EmpresasState;
+
+window.empresasCustomPayload = function() {
+  const fromMem = { _v2: true };
+  let n = 0;
+  Object.values((window.EmpresasState && EmpresasState.customFields) || {}).forEach((item) => {
+    if (!item || typeof item !== "object" || item.company_id == null) return;
+    fromMem[String(item.company_id)] = item;
+    n++;
+  });
+  if (n) return JSON.stringify(fromMem);
+  try { return localStorage.getItem("crm_empresas_custom") || "{}"; } catch (e) { return "{}"; }
+};
+
+window.persistEmpresasCustomToFirebase = async function() {
+  const fc = window.firebaseCollections;
+  if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb || typeof window.mergeEmpresasCustom !== "function") return "";
+  const docRef = fc.doc(window.firebaseDb, "config", "global");
+  let saved = "";
+  await fc.runTransaction(window.firebaseDb, async (tx) => {
+    const snap = await tx.get(docRef);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    const cloud = exists ? (snap.data() || {}) : {};
+    const mem = window.empresasCustomPayload();
+    saved = window.mergeEmpresasCustom(mem, cloud.crm_empresas_custom || "{}");
+    tx.set(docRef, { crm_empresas_custom: saved }, { merge: true });
+  });
+  if (saved && typeof window._originalSetItem === "function") {
+    try { window._originalSetItem.call(localStorage, "crm_empresas_custom", saved); } catch (e) {}
+  }
+  return saved;
+};
+
+window.addEventListener("pagehide", () => {
+  if (window.EmpresasApp && typeof EmpresasApp.flushCloudUpload === "function") EmpresasApp.flushCloudUpload();
+});

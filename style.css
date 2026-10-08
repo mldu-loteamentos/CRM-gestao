@@ -6359,6 +6359,7 @@ circle.donut-segment {
   border-color: #105436;
 }
 .cprev-tag-subst { background: #e0e7ff; color: #3730a3; }
+.cprev-tag-cancel { background: #ffedd5; color: #9a3412; }
 .cprev-table-wrap .ecau-table {
   table-layout: auto;
   min-width: 1290px;

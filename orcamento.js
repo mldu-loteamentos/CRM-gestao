@@ -551,11 +551,12 @@ const OrcamentoApp = {
         return;
       }
       const first = list[0];
+      const head = prefix === "129" ? "12900" : prefix;
       items.push({
         grouped: true,
         key: emp.key + "|obra:" + prefix,
         prefix: prefix,
-        label: prefix + " — " + (first.cn || ""),
+        label: head + " — " + (first.cn || ""),
         centers: list,
         sort: String(first.cc)
       });

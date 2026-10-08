@@ -4912,6 +4912,12 @@ window.commitCrmGlobalConfig = async function(payload) {
       next.crm_users = window.stripRemovedCrmUsers(window.mergeCrmUsers(localUsers, cloud.crm_users || "[]"));
     }
     if (window.crmUsersRemovedList().length) next.removedEmails = window.crmUsersRemovedList();
+    if (typeof window.mergeEmpresasCustom === "function") {
+      const memEmp = typeof window.empresasCustomPayload === "function"
+        ? window.empresasCustomPayload()
+        : (next.crm_empresas_custom || "{}");
+      next.crm_empresas_custom = window.mergeEmpresasCustom(memEmp, cloud.crm_empresas_custom || "{}");
+    }
     let localLib = next.crm_engenharia_caucao_liberados_v1 || "{}";
     try {
       const storedLib = localStorage.getItem("crm_engenharia_caucao_liberados_v1");
@@ -41388,8 +41394,13 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
       }
       const pT = Number(prev.updatedAt || 0);
       const nT = Number(item.updatedAt || 0);
-      const newer = nT >= pT ? item : prev;
-      const older = newer === item ? prev : item;
+      const touched = (obj) => !!(obj && (obj.nome_usual_edited || obj.percentual_mldu_edited || Number(obj.updatedAt || 0) > 0));
+      let newer;
+      let older;
+      if (nT > pT) { newer = item; older = prev; }
+      else if (pT > nT) { newer = prev; older = item; }
+      else if (touched(item) && !touched(prev)) { newer = item; older = prev; }
+      else { newer = prev; older = item; }
       const merged = { ...older, ...newer, company_id: Number(newer.company_id || older.company_id || id) };
       const flagBit = (v) => (v === true || v === 1 || v === "1" || v === "true" ? 1 : 0);
       const flagSet = (obj, key) => {
@@ -41397,14 +41408,16 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
         const v = obj[key];
         return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
       };
+      const newerTouched = Number(newer.updatedAt || 0) > 0;
       ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo"].forEach((key) => {
-        if (flagSet(newer, key)) merged[key] = flagBit(newer[key]);
+        if (flagSet(newer, key) && (newerTouched || !flagSet(older, key))) merged[key] = flagBit(newer[key]);
         else if (flagSet(older, key)) merged[key] = flagBit(older[key]);
       });
-      if (window.isCobrancaInternaSet(newer)) {
-        merged.cobranca_interna = newer.cobranca_interna === true || newer.cobranca_interna === "1" || newer.cobranca_interna === 1 || newer.cobranca_interna === "true" ? 1 : 0;
+      const cobBit = (obj) => (obj.cobranca_interna === true || obj.cobranca_interna === "1" || obj.cobranca_interna === 1 || obj.cobranca_interna === "true" ? 1 : 0);
+      if (window.isCobrancaInternaSet(newer) && (newerTouched || !window.isCobrancaInternaSet(older))) {
+        merged.cobranca_interna = cobBit(newer);
       } else if (window.isCobrancaInternaSet(older)) {
-        merged.cobranca_interna = older.cobranca_interna === true || older.cobranca_interna === "1" || older.cobranca_interna === 1 || older.cobranca_interna === "true" ? 1 : 0;
+        merged.cobranca_interna = cobBit(older);
       }
       const newerNome = newer.nome_usual == null ? "" : String(newer.nome_usual).trim();
       const olderNome = older.nome_usual == null ? "" : String(older.nome_usual).trim();

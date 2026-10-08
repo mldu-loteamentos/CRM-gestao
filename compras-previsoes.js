@@ -99,6 +99,7 @@ const ComprasPrevisoesApp = {
     pedidosByTitulo: {},
     notaByPedido: {},
     notaByContrato: {},
+    baixasByTitulo: {},
     notasByPedido: {},
     parcelasCache: {},
     openTitulo: "",
@@ -784,6 +785,142 @@ const ComprasPrevisoesApp = {
     }
     this.paintParcelasModal();
     if (this.state.consulted && !this.state.loading) this.renderList();
+  },
+
+  situacaoCellHtml(p) {
+    if (p.baixasLoading) return `<span class="cprev-anexo-vazio">Buscando baixa…</span>`;
+    if (p.substituido) {
+      const quando = p.dataPagamento ? " · " + this.fmtDate(p.dataPagamento) : "";
+      const tit = p.tituloSubstituto ? " · tít. " + this.esc(p.tituloSubstituto) : "";
+      const title = "Baixada por substituição" + (p.tituloSubstituto ? ". Virou o título " + p.tituloSubstituto : "");
+      return `<span class="cprev-tag cprev-tag-subst" title="${this.esc(title)}">Substituída${tit}${quando}</span>`;
+    }
+    if (p.cancelado) {
+      const quando = p.dataPagamento ? " · " + this.fmtDate(p.dataPagamento) : "";
+      const title = p.baixaMotivo || "Baixada por cancelamento";
+      return `<span class="cprev-tag cprev-tag-cancel" title="${this.esc(title)}">Cancelada${quando}</span>`;
+    }
+    if (p.pago) {
+      return `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`;
+    }
+    return `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`;
+  },
+
+  tituloEhPrevisaoRestrita(titulo) {
+    const id = String(titulo || "");
+    const rows = (this.state.parcelas || []).concat((this.state.allRows || []).filter((r) => String(r.titulo) === id));
+    return rows.some((row) => this.isDocSubstituivel(row && row.docId, row && row.docNome));
+  },
+
+  monthBounds(iso) {
+    const s = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const last = new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)), 0).getDate();
+    return { start: s.slice(0, 7) + "-01", end: s.slice(0, 7) + "-" + String(last).padStart(2, "0") };
+  },
+
+  async tituloSubstitutoDaBaixa(bill, amount, paymentDate) {
+    const start = String(bill && bill.issueDate || "").slice(0, 10);
+    const end = String(paymentDate || "").slice(0, 10);
+    if (!start || !end || !bill || !bill.creditorId || typeof window.siengeFetchWithRetry !== "function") return "";
+    const data = await window.siengeFetchWithRetry(
+      "/bills?startDate=" + encodeURIComponent(start) +
+      "&endDate=" + encodeURIComponent(end) +
+      "&creditorId=" + encodeURIComponent(bill.creditorId) +
+      "&limit=200",
+      1
+    );
+    const hits = ((data && data.results) || []).filter((item) => {
+      if (!item || String(item.id) === String(bill.id)) return false;
+      if (this.isDocSubstituivel(item.documentIdentificationId, "")) return false;
+      if (bill.debtorId != null && Number(item.debtorId) !== Number(bill.debtorId)) return false;
+      return Math.abs(Number(item.totalInvoiceAmount) - Number(amount)) < 0.02;
+    });
+    return hits.length === 1 ? String(hits[0].id) : "";
+  },
+
+  aplicarBaixas(titulo, map) {
+    const id = String(titulo || "");
+    const stamp = (p) => {
+      const baixa = map && map[String(p.parcela)];
+      if (!baixa) return Object.assign({}, p, { baixasLoading: false });
+      const op = this.fold(baixa.op);
+      const substituido = /SUBSTITU/.test(op);
+      const cancelado = /CANCEL/.test(op);
+      return Object.assign({}, p, {
+        baixasLoading: false,
+        tipoBaixa: baixa.op || "",
+        dataPagamento: baixa.date || p.dataPagamento || "",
+        baixaMotivo: baixa.auth || "",
+        substituido,
+        cancelado,
+        tituloSubstituto: baixa.titulo || "",
+        pago: substituido || cancelado ? false : p.pago,
+        docId: p.docId || baixa.docId || "",
+        documento: p.documento || baixa.documento || ""
+      });
+    };
+    if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+  },
+
+  async carregarBaixasPrevisao(titulo) {
+    const id = String(titulo || "");
+    if (!id || this.state.openTitulo !== id || !this.tituloEhPrevisaoRestrita(id)) return;
+    if (typeof window.siengeFetchWithRetry !== "function") return;
+    const cached = (this.state.baixasByTitulo || {})[id];
+    if (cached && cached.done) {
+      this.aplicarBaixas(id, cached.map);
+      this.paintParcelasModal();
+      return;
+    }
+    const loading = (p) => (p.pago ? Object.assign({}, p, { baixasLoading: true }) : p);
+    if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(loading);
+    this.paintParcelasModal();
+    const map = {};
+    try {
+      const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id), 1);
+      const companyId = bill && (bill.debtorId || bill.companyId);
+      const docId = this.docCode(bill && bill.documentIdentificationId);
+      const documento = String(bill && bill.documentNumber || "").trim();
+      const months = [];
+      (this.state.parcelas || []).forEach((p) => {
+        if (!p.pago) return;
+        const bounds = this.monthBounds(p.vencimento);
+        if (!bounds) return;
+        const key = bounds.start;
+        if (!months.some((m) => m.start === key)) months.push(bounds);
+      });
+      for (const bounds of months) {
+        if (this.state.openTitulo !== id) return;
+        let rows = [];
+        try { rows = await this.outcomeBills(bounds.start, bounds.end, companyId); } catch (e) { rows = []; }
+        (rows || []).forEach((row) => {
+          if (!row || String(row.billId) !== id) return;
+          const pay = (row.payments || [])[0];
+          if (!pay) return;
+          const parcela = String(row.installmentId != null ? row.installmentId : "");
+          if (!parcela || map[parcela]) return;
+          map[parcela] = {
+            op: pay.operationTypeName || "",
+            date: pay.paymentDate ? String(pay.paymentDate).slice(0, 10) : "",
+            amount: pay.netAmount != null ? pay.netAmount : pay.grossAmount,
+            auth: String(pay.paymentAuthentication || "").trim(),
+            docId,
+            documento
+          };
+        });
+      }
+      for (const parcela of Object.keys(map)) {
+        const baixa = map[parcela];
+        if (!/SUBSTITU/.test(this.fold(baixa.op))) continue;
+        try { baixa.titulo = await this.tituloSubstitutoDaBaixa(bill, baixa.amount, baixa.date); } catch (e) { baixa.titulo = ""; }
+      }
+    } catch (e) {}
+    if (!this.state.baixasByTitulo) this.state.baixasByTitulo = {};
+    this.state.baixasByTitulo[id] = { done: true, map };
+    this.aplicarBaixas(id, map);
+    this.paintParcelasModal();
   },
 
   async carregarDocumentosDoTitulo(titulo) {
@@ -1533,6 +1670,7 @@ const ComprasPrevisoesApp = {
     this.state.pedidosByTitulo = {};
     this.state.notaByPedido = {};
     this.state.notaByContrato = {};
+    this.state.baixasByTitulo = {};
     this.state.notasByPedido = {};
     this.state.notaLoadingPedido = "";
     this.state.parcelasCache = {};
@@ -1781,6 +1919,7 @@ const ComprasPrevisoesApp = {
       this.applyStoredNotas(id);
       this.paintParcelasModal();
       await this.carregarDocumentosDoTitulo(id);
+      await this.carregarBaixasPrevisao(id);
       return;
     }
     try {
@@ -1821,6 +1960,7 @@ const ComprasPrevisoesApp = {
     this.applyStoredNotas(id);
     this.paintParcelasModal();
     await this.carregarDocumentosDoTitulo(id);
+    await this.carregarBaixasPrevisao(id);
   },
 
   closeParcelas() {
@@ -1863,11 +2003,7 @@ const ComprasPrevisoesApp = {
           <td>${docNumHtml}</td>
           <td>${this.esc(this.fmtDate(p.vencimento))}</td>
           <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(p.valor))}</td>
-          <td>${p.substituido
-            ? `<span class="cprev-tag cprev-tag-subst">Substituída${p.tituloSubstituto ? " · tít. " + this.esc(p.tituloSubstituto) : ""}</span>`
-            : (p.pago
-            ? `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`
-            : `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`)}</td>
+          <td>${this.situacaoCellHtml(p)}</td>
           <td>${this.anexosCellHtml(p)}</td>
         </tr>`;
         }).join("")
