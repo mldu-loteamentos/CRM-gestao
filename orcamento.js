@@ -16,6 +16,7 @@ const OrcamentoApp = {
   carteira: {},
   carteiraCompanies: {},
   _cartFlight: {},
+  CART_LS: "crm_orcamento_carteira_2027",
 
   data() {
     return window.ORCAMENTO_RECEITA_2027 || { year: 2027, months: [], reducers: [], names: {}, lines: [] };
@@ -76,7 +77,36 @@ const OrcamentoApp = {
   },
 
   init() {
+    this.restoreCarteira();
     this.render();
+  },
+
+  restoreCarteira() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(this.CART_LS) || "null");
+      const byCc = raw && raw.byCc;
+      if (!byCc || typeof byCc !== "object") return;
+      Object.keys(byCc).forEach((cc) => {
+        const pack = byCc[cc];
+        if (!pack || typeof pack !== "object") return;
+        const months = Array.isArray(pack.months) ? pack.months.map((n) => Number(n) || 0) : this.blank();
+        while (months.length < 12) months.push(0);
+        this.carteira[cc] = {
+          receber: Number(pack.receber) || 0,
+          sub: Number(pack.sub) || 0,
+          months: months.slice(0, 12)
+        };
+      });
+    } catch (e) {}
+  },
+
+  saveCarteira() {
+    const payload = { savedAt: Date.now(), byCc: this.carteira };
+    if (typeof window.persistLargeCacheIfRoom === "function") {
+      window.persistLargeCacheIfRoom(this.CART_LS, payload);
+      return;
+    }
+    try { localStorage.setItem(this.CART_LS, JSON.stringify(payload)); } catch (e) {}
   },
 
   render() {
@@ -490,6 +520,7 @@ const OrcamentoApp = {
     this._cartFlight[id] = this.fetchCarteiraCompany(id).then((pack) => {
       Object.keys(pack).forEach((cc) => { this.carteira[cc] = pack[cc]; });
       this.carteiraCompanies[id] = "done";
+      this.saveCarteira();
     }).catch(() => {
       this.carteiraCompanies[id] = "error";
     }).finally(() => {
@@ -582,18 +613,20 @@ const OrcamentoApp = {
 
   cartSum(row) {
     const ids = (row && row.companyIds) || [];
-    if (!ids.length) return { loading: true, receber: 0, months: this.blank() };
-    const states = ids.map((id) => this.carteiraCompanies[String(id)]);
-    if (states.some((status) => status !== "done" && status !== "error")) return { loading: true, receber: 0, months: this.blank() };
-    if (states.every((status) => status === "error")) return { error: true, receber: 0, months: this.blank() };
-    let receber = 0;
     const months = this.blank();
-    (row.cartCcs || []).forEach((cc) => {
+    let receber = 0;
+    let any = false;
+    (row && row.cartCcs || []).forEach((cc) => {
       const pack = this.carteira[String(cc)];
       if (!pack) return;
+      any = true;
       receber += Number(pack.receber) || 0;
       (pack.months || []).forEach((v, i) => { months[i] += Number(v) || 0; });
     });
+    if (!ids.length) return { loading: !any, error: false, receber, months };
+    const states = ids.map((id) => this.carteiraCompanies[String(id)]);
+    if (!any && states.every((status) => status === "error")) return { error: true, receber: 0, months };
+    if (!any && states.some((status) => status !== "done")) return { loading: true, receber: 0, months };
     return { receber, months };
   },
 
