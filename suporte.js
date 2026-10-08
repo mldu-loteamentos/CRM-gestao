@@ -36,10 +36,7 @@
       { id: "caucao", label: "Gestão de caução" },
       { id: "config", label: "Configurações" }
     ]},
-    { id: "vistoria", label: "Vistoria", subs: [
-      { id: "vistoria_tela", label: "Vistoria" },
-      { id: "verificar_construcao", label: "Verificar Construção" }
-    ]},
+    { id: "vistoria", label: "Vistoria" },
     { id: "compras", label: "Compras" },
     { id: "financeiro", label: "Financeiro", subs: [
       { id: "contas_receber", label: "Contas a Receber" },
@@ -134,7 +131,7 @@
     "construcao-engenharia": { modulo: "engenharia", subitem: "caucao" },
     "engenharia-caucao": { modulo: "engenharia", subitem: "caucao" },
     "engenharia-config": { modulo: "engenharia", subitem: "config" },
-    vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
+    vistoria: { modulo: "vistoria" },
     "construcao-compras": { modulo: "compras" },
     "compras-controle": { modulo: "compras", subitem: "controle_financeiro" },
     "compras-previsoes": { modulo: "compras", subitem: "previsoes" },

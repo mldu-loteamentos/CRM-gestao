@@ -237,6 +237,18 @@ const ConfigUsersApp = {
         || savedPerms.sub_com_geral_dashboard_editar
       );
     }
+    if (!savedPerms.mod_vistoria && (
+      savedPerms.sub_vist_tela
+      || savedPerms.sub_vist_verificar
+      || savedPerms.sub_vistoria_geral_vistoria_acessar
+      || savedPerms.sub_vistoria_geral_vistoria_visualizar
+      || savedPerms.sub_vistoria_geral_vistoria_editar
+      || savedPerms.sub_vistoria_geral_verificar_construcao_acessar
+      || savedPerms.sub_vistoria_geral_verificar_construcao_visualizar
+      || savedPerms.sub_vistoria_geral_verificar_construcao_editar
+    )) {
+      savedPerms.mod_vistoria = true;
+    }
     return savedPerms;
   },
 
@@ -316,11 +328,8 @@ const ConfigUsersApp = {
       ] }]
     },
     {
-      name: "Vistoria", icon: "camera", key: "mod_vistoria",
-      submodules: [
-        { name: "Vistoria", key: "sub_vist_tela", actions: [{ id: "vistoria", label: "Vistoria", permBase: "sub_vistoria_geral_vistoria" }] },
-        { name: "Verificar Construção", key: "sub_vist_verificar", actions: [{ id: "verificar_construcao", label: "Verificar Construção", permBase: "sub_vistoria_geral_verificar_construcao" }] }
-      ]
+      name: "Vistoria", icon: "camera", key: "mod_vistoria", direct: true,
+      submodules: []
     },
     {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
@@ -1713,6 +1722,9 @@ const ConfigUsersApp = {
     if (isAdmin) return { acessar: true, visualizar: true, editar: true };
     const modOn = !!(perms && perms[scope.mod.key]);
     if (scope.level === "module") {
+      if (!(scope.actions || []).length) {
+        return { acessar: modOn, visualizar: modOn, editar: modOn };
+      }
       let visualizar = false;
       let editar = false;
       if (modOn) {
@@ -1985,6 +1997,18 @@ const ConfigUsersApp = {
     const modulesHtml = this.view !== "perfis" ? "" : this.modules.map(mod => {
       const isModChecked = savedPerms[mod.key] ? 'checked' : '';
       const modDisabledAttr = isAdmin ? 'disabled' : '';
+      const direct = !!mod.direct || !(mod.submodules || []).length;
+
+      if (direct) {
+        return `
+        <div style="background: #fff; border: 1px solid #e8eaed; border-radius: 12px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+           <div style="padding: 18px 24px; font-size: 1.1rem; color: #202124; display: flex; align-items: center; gap: 10px; font-weight: 600; background: #f8f9fa;">
+             <input type="checkbox" class="profile-perm-checkbox" data-level="module" data-key="${mod.key}" ${isModChecked} ${modDisabledAttr} style="width: 18px; height: 18px; accent-color: #105436;">
+             <i data-lucide="${mod.icon || 'folder'}" style="width: 20px; color: #105436;"></i>
+             <label style="margin: 0;">Módulo ${mod.name}</label>
+           </div>
+        </div>`;
+      }
 
       const submodulesHtml = mod.submodules.map(sub => {
          const isSubChecked = savedPerms[sub.key] ? 'checked' : '';

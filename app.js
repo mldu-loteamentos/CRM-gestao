@@ -29213,11 +29213,37 @@ window.showFilaSignalTip = function(event, el) {
   }
   const kind = el.getAttribute("data-kind");
   let inner = "";
+  let soft = false;
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
   if (kind === "mail") {
     const letter = window.nexLetterForClient(client);
-    inner = letter
-      ? `<div style="font-weight:800;color:#105436;margin-bottom:4px;">NEX enviada</div><div>${window.nexFmtBr(letter.date || letter.createdAt)}</div>`
-      : `<div style="font-weight:800;color:#64748b;">Sem NEX enviada</div>`;
+    if (!letter) {
+      soft = true;
+      inner = `<div style="font-weight:600;color:#94a3b8;font-size:0.82rem;">Sem NEX enviada</div>`;
+    } else {
+      const sent = window.nexFmtBr(letter.date || letter.createdAt);
+      const delivered = window.nexIsEntregue(letter.status);
+      const deliveredAt = window.nexParseIso(letter.deliveredAt);
+      const lost = window.nexLostValidityByPayment(letter);
+      const statusTxt = String(letter.status || "").trim();
+      const entrega = delivered
+        ? (deliveredAt ? "Entregue em " + window.nexFmtBr(deliveredAt) : "Entregue, sem data informada")
+        : ("Não entregue" + (statusTxt ? " · " + statusTxt : ""));
+      let prazo = "O prazo de 30 dias para validade jurídica começa na data da entrega.";
+      if (lost.lost) {
+        prazo = "Sem validade jurídica: houve pagamento em " + window.nexFmtBr(lost.pay) + ".";
+      } else if (delivered && deliveredAt) {
+        const mora = window.nexAddDays(deliveredAt, 30);
+        const today = window.nexTodayIso();
+        if (!letter.arDigital) prazo = "Validade jurídica em " + window.nexFmtBr(mora) + ", depois de anexar o AR Digital.";
+        else if (today < mora) prazo = "Validade jurídica em " + window.nexFmtBr(mora) + ".";
+        else prazo = "Com validade jurídica desde " + window.nexFmtBr(mora) + ".";
+      }
+      inner = `<div style="font-weight:800;color:#105436;margin-bottom:4px;">NEX enviada</div>
+        <div style="color:#334155;">${esc(sent)}</div>
+        <div style="margin-top:6px;font-weight:700;color:${delivered ? "#105436" : "#b45309"};">${esc(entrega)}</div>
+        <div style="margin-top:4px;color:#475569;line-height:1.35;">${esc(prazo)}</div>`;
+    }
   } else {
     const sig = window.filaLookupSignals(client);
     const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
@@ -29226,16 +29252,24 @@ window.showFilaSignalTip = function(event, el) {
     const status = sig.pending
       ? (sig.pending.status === "aguardando_validacao" ? "Vistoria em andamento — aguardando validação" : "Vistoria em andamento")
       : (sig.construction && sig.construction.stage ? "Construção: " + sig.construction.stage : "Construção registrada");
+    const linkIso = sig.pending && typeof _vcPendingRequestDate === "function" ? _vcPendingRequestDate(sig.pending) : "";
+    const linkLine = linkIso
+      ? `<div style="margin-top:4px;font-weight:600;color:#334155;">Link enviado em ${esc(window.nexFmtBr(linkIso))}</div>`
+      : "";
     const img = photo
       ? `<img src="${String(photo).replace(/"/g, "&quot;")}" alt="Foto da vistoria" style="display:block;width:200px;height:140px;object-fit:cover;border-radius:8px;margin-bottom:8px;">`
       : "";
-    inner = `${img}<div style="font-weight:700;color:#105436;">${String(status).replace(/</g, "&lt;")}</div>`;
+    inner = `${img}<div style="font-weight:700;color:#105436;">${esc(status)}</div>${linkLine}`;
   }
-  tip.innerHTML = `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.14);padding:10px;">${inner}</div>`;
+  const box = soft
+    ? "background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;box-shadow:none;padding:8px 10px;"
+    : "background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.14);padding:10px;";
+  tip.innerHTML = `<div style="${box}">${inner}</div>`;
   tip.style.display = "block";
+  tip.style.maxWidth = "280px";
   let left = event.clientX + 12;
   let top = event.clientY + 12;
-  if (left + 250 > window.innerWidth) left = Math.max(8, event.clientX - 250);
+  if (left + 300 > window.innerWidth) left = Math.max(8, event.clientX - 300);
   if (top + tip.offsetHeight > window.innerHeight) top = Math.max(8, event.clientY - tip.offsetHeight - 12);
   tip.style.left = left + "px";
   tip.style.top = top + "px";
