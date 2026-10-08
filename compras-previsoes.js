@@ -98,6 +98,7 @@ const ComprasPrevisoesApp = {
     billsByTitulo: {},
     pedidosByTitulo: {},
     notaByPedido: {},
+    notaByContrato: {},
     notasByPedido: {},
     parcelasCache: {},
     openTitulo: "",
@@ -359,6 +360,7 @@ const ComprasPrevisoesApp = {
       this.isNotaDoc(b.documentIdentificationId, b.documentIdentificationName, b)
     );
     if (onBill) return true;
+    if (this.state.notaByContrato && this.state.notaByContrato[id]) return true;
     const pedidos = this.state.pedidosByTitulo[id] || {};
     return Object.keys(pedidos).some((pedido) => this.state.notaByPedido[pedido] === true);
   },
@@ -527,7 +529,7 @@ const ComprasPrevisoesApp = {
     const nota = (p.notas || [])[0];
     const virou = this.isNotaDoc(p.docId, p.docNome, null) || !!nota;
     if (!virou) return this.esc(p.docId || "—");
-    const code = this.docCode(p.docId) || this.docCode(String((nota && nota.label) || "").split(" ")[0]) || "NFS";
+    const code = (nota && nota.docCode) || this.docCode(p.docId) || this.docCode(String((nota && nota.label) || "").split(" ")[0]) || "NFS";
     return `<span class="cprev-tag cprev-tag-nota cprev-doc-nota">${this.esc(code)}</span>`;
   },
 
@@ -602,6 +604,181 @@ const ComprasPrevisoesApp = {
     const id = String(titulo || "");
     if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
     if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+  },
+
+  docNumButton(r) {
+    const doc = r && r.documento ? String(r.documento) : "";
+    if (!doc) return this.esc("—");
+    if (this.docCode(r.docId) === "PCT") {
+      return `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.abrirPct('${this.esc(r.titulo)}')">${this.esc(doc)}</button>`;
+    }
+    const pedido = this.pedidoKey(doc);
+    if (!pedido) return this.esc(doc);
+    return `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.abrirPpc('${this.esc(r.titulo)}','${pedido}')">${this.esc(doc)}</button>`;
+  },
+
+  isLinhaPct(p, contract) {
+    if (!p) return false;
+    if (this.docCode(p.docId) === "PCT") return true;
+    return !!(contract && String(p.documento || "").trim() === String(contract).trim() && this.pedidoKey(p.documento));
+  },
+
+  applyStoredNotas(titulo) {
+    Object.keys(this.state.notasByPedido || {}).forEach((key) => {
+      if (String(key).indexOf("ct:") === 0) this.applyNotasDoContrato(titulo, key);
+      else this.applyNotasDoPedido(titulo, key);
+    });
+  },
+
+  applyNotasDoContrato(titulo, cacheKey) {
+    const pack = this.state.notasByPedido[cacheKey] || { notas: [], contract: "" };
+    const notas = pack.notas || [];
+    const used = new Set();
+    const stamp = (p) => {
+      if (this.isLinhaPct(p, pack.contract) || !p.pago || p.substituido) {
+        return Object.assign({}, p, { notasLoading: false, notas: [], notasErro: "" });
+      }
+      const amount = Number(p.valor);
+      let best = -1;
+      let bestDist = Infinity;
+      notas.forEach((n, idx) => {
+        if (used.has(idx) || Math.abs(Number(n.amount) - amount) >= 0.02) return;
+        const dist = this.daySpan(p.vencimento, n.dueDate);
+        const score = dist == null ? 9999 : Math.abs(dist);
+        if (score < bestDist) {
+          bestDist = score;
+          best = idx;
+        }
+      });
+      if (best < 0) return Object.assign({}, p, { notasLoading: false });
+      used.add(best);
+      const nota = notas[best];
+      return Object.assign({}, p, {
+        notasLoading: false,
+        notas: [nota],
+        notasErro: "",
+        virouNota: this.isNotaDoc(nota.docCode, nota.label, null)
+      });
+    };
+    const id = String(titulo || "");
+    if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+  },
+
+  async titulosDoContrato(creditorId, contract, start, end, selfId) {
+    const found = [];
+    let offset = 0;
+    for (let page = 0; page < 8; page++) {
+      const data = await window.siengeFetchWithRetry(
+        "/bills?startDate=" + encodeURIComponent(start) +
+        "&endDate=" + encodeURIComponent(end) +
+        "&creditorId=" + encodeURIComponent(creditorId) +
+        "&limit=200&offset=" + offset,
+        1
+      );
+      const rows = (data && data.results) || [];
+      rows.forEach((bill) => {
+        if (!bill || String(bill.id) === String(selfId)) return;
+        if (String(bill.contractNumber || "").trim() !== String(contract)) return;
+        if (bill.measurementNumber == null || bill.measurementNumber === "") return;
+        if (this.DOC_PREVISAO[this.docCode(bill.documentIdentificationId)]) return;
+        found.push(bill);
+      });
+      const count = data && data.resultSetMetadata ? Number(data.resultSetMetadata.count) : 0;
+      offset += rows.length;
+      if (!rows.length || rows.length < 200 || (count && offset >= count)) break;
+    }
+    return found;
+  },
+
+  async buscarNotasContrato(titulo) {
+    const titleId = String(titulo || this.state.openTitulo || "");
+    const cacheKey = "ct:" + titleId;
+    if (!titleId || typeof window.siengeFetchWithRetry !== "function") return;
+    const cached = this.state.notasByPedido[cacheKey];
+    if (cached && cached.done && !cached.error) {
+      this.applyNotasDoContrato(titleId, cacheKey);
+      this.paintParcelasModal();
+      return;
+    }
+    if (this.state.notaLoadingPedido === cacheKey) return;
+    this.state.notaLoadingPedido = cacheKey;
+    const loading = (p) => (!this.isLinhaPct(p, "") && p.pago && !p.substituido)
+      ? Object.assign({}, p, { notasLoading: true, notasErro: "" })
+      : p;
+    if (this.state.openTitulo === titleId) this.state.parcelas = (this.state.parcelas || []).map(loading);
+    this.paintParcelasModal();
+    let notas = [];
+    let error = "";
+    let contract = "";
+    try {
+      const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(titleId), 1);
+      contract = String(bill && bill.contractNumber || "").trim();
+      const companyId = bill && (bill.companyId || bill.debtorId);
+      const creditorId = bill && bill.creditorId;
+      if (!contract || !companyId) throw new Error("sem contrato");
+      const med = await window.siengeFetchWithRetry(
+        "/supply-contracts/measurements/all?documentId=CT&contractNumber=" + encodeURIComponent(contract) +
+        "&companyId=" + encodeURIComponent(companyId) + "&limit=200",
+        1
+      );
+      const measurements = (med && med.results) || [];
+      const byNumber = {};
+      measurements.forEach((m) => { if (m && m.measurementNumber != null) byNumber[String(m.measurementNumber)] = m; });
+      const dates = measurements.map((m) => String(m.measurementDate || "").slice(0, 10)).filter(Boolean).sort();
+      const start = dates[0] || String(bill.issueDate || "").slice(0, 10) || this.isoToday();
+      const linked = creditorId
+        ? await this.titulosDoContrato(creditorId, contract, start, this.isoToday(), titleId)
+        : [];
+      for (const item of linked) {
+        const docCode = this.docCode(item.documentIdentificationId) || "DOC";
+        const number = String(item.documentNumber || "").trim();
+        const billId = item.id != null ? String(item.id) : "";
+        const measurement = byNumber[String(item.measurementNumber)] || null;
+        let attachments = [];
+        if (billId) {
+          try { attachments = await this.anexosDoTitulo(billId); } catch (e) { attachments = []; }
+        }
+        notas.push({
+          number: number || billId,
+          series: "",
+          docCode,
+          label: (docCode + " " + (number || billId)).trim(),
+          billId,
+          attachments,
+          issueDate: item.issueDate ? String(item.issueDate).slice(0, 10) : "",
+          dueDate: measurement && measurement.dueDate ? String(measurement.dueDate).slice(0, 10) : "",
+          amount: Number(item.totalInvoiceAmount) || Number(measurement && measurement.netValue) || 0,
+          measurementNumber: item.measurementNumber
+        });
+      }
+    } catch (e) {
+      const msg = String((e && e.message) || e || "");
+      error = /403/.test(msg)
+        ? "Sem permissão para consultar as medições deste contrato no Sienge."
+        : (/sem contrato/.test(msg)
+          ? "Este PCT não tem número de contrato no Sienge."
+          : "Não foi possível consultar as medições deste PCT.");
+    }
+    this.state.notasByPedido[cacheKey] = { done: true, notas, error, contract };
+    if (!this.state.notaByContrato) this.state.notaByContrato = {};
+    this.state.notaByContrato[titleId] = notas.some((n) => this.isNotaDoc(n.docCode, n.label, null));
+    if (this.state.notaLoadingPedido === cacheKey) this.state.notaLoadingPedido = "";
+    this.applyNotasDoContrato(titleId, cacheKey);
+    if (error && this.state.openTitulo === titleId) {
+      this.state.parcelas = (this.state.parcelas || []).map((p) => (
+        !this.isLinhaPct(p, contract) && p.pago && !p.substituido
+          ? Object.assign({}, p, { notasLoading: false, notasErro: error })
+          : p
+      ));
+    }
+    this.paintParcelasModal();
+    if (this.state.consulted && !this.state.loading) this.renderList();
+  },
+
+  async abrirPct(titulo) {
+    await this.openParcelas(titulo);
+    await this.buscarNotasContrato(titulo);
   },
 
   async buscarNotasPedido(pedido, titulo) {
@@ -1321,6 +1498,7 @@ const ComprasPrevisoesApp = {
     this.state.billsByTitulo = {};
     this.state.pedidosByTitulo = {};
     this.state.notaByPedido = {};
+    this.state.notaByContrato = {};
     this.state.notasByPedido = {};
     this.state.notaLoadingPedido = "";
     this.state.parcelasCache = {};
@@ -1440,9 +1618,7 @@ const ComprasPrevisoesApp = {
         <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${subst}${pago}</td>
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="${this.esc(r.docId || "—")}">${this.esc(r.docId || "—")}</td>
-        <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.pedidoKey(r.documento)
-          ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.abrirPpc('${this.esc(r.titulo)}','${this.pedidoKey(r.documento)}')">${this.esc(r.documento)}</button>`
-          : this.esc(r.documento || "—")}</td>
+        <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.docNumButton(r)}</td>
         <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
         <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
       </tr>`;
@@ -1568,7 +1744,7 @@ const ComprasPrevisoesApp = {
     if (this.state.parcelasCache[id]) {
       this.state.parcelas = this.state.parcelasCache[id];
       this.state.parcelasLoading = false;
-      Object.keys(this.state.notasByPedido || {}).forEach((pedido) => this.applyNotasDoPedido(id, pedido));
+      this.applyStoredNotas(id);
       this.paintParcelasModal();
       return;
     }
@@ -1607,7 +1783,7 @@ const ComprasPrevisoesApp = {
       }
     }
     if (this.state.openTitulo === id) this.state.parcelasLoading = false;
-    Object.keys(this.state.notasByPedido || {}).forEach((pedido) => this.applyNotasDoPedido(id, pedido));
+    this.applyStoredNotas(id);
     this.paintParcelasModal();
   },
 
@@ -1636,12 +1812,15 @@ const ComprasPrevisoesApp = {
     const rowsHtml = parcelas.length
       ? parcelas.map((p) => {
           const pedido = this.pedidoKey(p.documento);
-          const docNum = (p.notas && p.notas.length && !pedido)
+          const isPct = this.docCode(p.docId) === "PCT";
+          const docNum = (p.notas && p.notas.length && !pedido && !isPct)
             ? p.notas.map((n) => n.number).join(", ")
-            : (pedido ? "" : (p.documento || "—"));
-          const docNumHtml = pedido
+            : (pedido && !isPct ? "" : (p.documento || "—"));
+          const docNumHtml = isPct
+            ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.buscarNotasContrato('${this.esc(p.titulo || titulo)}')">${this.esc(p.documento || "PCT")}</button>`
+            : (pedido
             ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.buscarNotasPedido('${pedido}','${this.esc(p.titulo || titulo)}')">${this.esc(p.documento)}</button>`
-            : this.esc(docNum);
+            : this.esc(docNum));
           return `<tr>
           <td>${this.esc(p.parcela || "—")}</td>
           <td>${this.docCellHtml(p)}</td>
