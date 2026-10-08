@@ -452,6 +452,7 @@ const ComprasPrevisoesApp = {
         label: doc + " " + number,
         billId,
         attachments,
+        issueDate: inv && inv.issueDate ? String(inv.issueDate).slice(0, 10) : "",
         deliveryDate: delivery && delivery.deliveryDate ? String(delivery.deliveryDate).slice(0, 10) : ""
       });
     }
@@ -480,15 +481,73 @@ const ComprasPrevisoesApp = {
     return list.filter((n) => n.deliveryDate && n.deliveryDate === due);
   },
 
-  notaCellHtml(n) {
+  daySpan(fromIso, toIso) {
+    const a = String(fromIso || "").slice(0, 10);
+    const b = String(toIso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+    const ms = Date.parse(b + "T00:00:00") - Date.parse(a + "T00:00:00");
+    if (!Number.isFinite(ms)) return null;
+    return Math.round(ms / 86400000);
+  },
+
+  pmpInfo(parcelas) {
+    const parts = [];
+    (parcelas || []).forEach((p) => {
+      if (!p.pago || p.substituido || !p.dataPagamento) return;
+      const nota = (p.notas || []).find((n) => n && n.issueDate);
+      if (!nota) return;
+      const days = this.daySpan(nota.issueDate, p.dataPagamento);
+      if (days == null) return;
+      parts.push({
+        label: nota.label || ("NFS " + nota.number),
+        days,
+        issue: nota.issueDate,
+        paid: p.dataPagamento
+      });
+    });
+    if (!parts.length) return null;
+    const avg = Math.round(parts.reduce((sum, part) => sum + part.days, 0) / parts.length);
+    return { days: avg, parts };
+  },
+
+  pmpHtml(parcelas) {
+    const info = this.pmpInfo(parcelas);
+    if (!info) return "";
+    const label = info.days === 1 ? "1 dia" : info.days + " dias";
+    const title = info.parts.map((part) =>
+      part.label + ": " + part.days + " dias (emissão " + this.fmtDate(part.issue) + ", pago " + this.fmtDate(part.paid) + ")"
+    ).join(". ");
+    return `<div class="cprev-pmp" title="${this.esc(title)}"><span>PMP</span><strong>${this.esc(label)}</strong></div>`;
+  },
+
+  docCellHtml(p) {
+    if (this.pedidoKey(p.documento) && !this.isNotaDoc(p.docId, p.docNome, null)) {
+      return this.esc(p.docId || "—");
+    }
+    const nota = (p.notas || [])[0];
+    const virou = this.isNotaDoc(p.docId, p.docNome, null) || !!nota;
+    if (!virou) return this.esc(p.docId || "—");
+    const code = this.docCode(p.docId) || this.docCode(String((nota && nota.label) || "").split(" ")[0]) || "NFS";
+    return `<span class="cprev-tag cprev-tag-nota cprev-doc-nota">${this.esc(code)}</span>`;
+  },
+
+  anexoPackHtml(n) {
     const bill = n.billId
-      ? `<span class="cprev-nota-bill">Título ${this.esc(n.billId)}</span>`
+      ? `<span class="cprev-anexo-bill">Tít. <strong>${this.esc(n.billId)}</strong></span>`
       : "";
-    const pdfs = (n.attachments || []).map((a) => {
+    const files = (n.attachments || []).map((a) => {
       const label = a.description || "PDF";
-      return `<button type="button" class="cprev-pdf-btn" title="Baixar ${this.esc(a.name)}" onclick="event.stopPropagation(); ComprasPrevisoesApp.baixarAnexoTitulo('${this.esc(n.billId)}','${this.esc(a.id)}')">Baixar ${this.esc(label)}</button>`;
+      return `<button type="button" class="cprev-pdf-btn" title="Baixar ${this.esc(a.name)}" onclick="event.stopPropagation(); ComprasPrevisoesApp.baixarAnexoTitulo('${this.esc(n.billId)}','${this.esc(a.id)}')"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2v7.1M5.2 7.1 8 9.9l2.8-2.8M3.2 12.2h9.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>${this.esc(label)}</button>`;
     }).join("");
-    return `<span class="cprev-nota-pack"><span class="cprev-tag cprev-tag-nota">${this.esc(n.label)}</span>${bill}${pdfs}</span>`;
+    if (!bill && !files) return `<span class="cprev-anexo-vazio">—</span>`;
+    return `<div class="cprev-anexos">${bill}<span class="cprev-anexo-list">${files}</span></div>`;
+  },
+
+  anexosCellHtml(p) {
+    if (p.notasLoading) return `<span class="cprev-anexo-vazio">Buscando…</span>`;
+    if (p.notas && p.notas.length) return p.notas.map((n) => this.anexoPackHtml(n)).join("");
+    if (p.notasErro) return `<span class="cprev-anexo-erro" title="${this.esc(p.notasErro)}">Sem anexo</span>`;
+    return `<span class="cprev-anexo-vazio">—</span>`;
   },
 
   async baixarAnexoTitulo(billId, attachmentId) {
@@ -1577,23 +1636,15 @@ const ComprasPrevisoesApp = {
     const rowsHtml = parcelas.length
       ? parcelas.map((p) => {
           const pedido = this.pedidoKey(p.documento);
-          const docId = (!p.docId && p.notas && p.notas.length) ? "NFS" : (p.docId || "—");
           const docNum = (p.notas && p.notas.length && !pedido)
             ? p.notas.map((n) => n.number).join(", ")
-            : (pedido
-              ? ""
-              : (p.documento || "—"));
+            : (pedido ? "" : (p.documento || "—"));
           const docNumHtml = pedido
             ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.buscarNotasPedido('${pedido}','${this.esc(p.titulo || titulo)}')">${this.esc(p.documento)}</button>`
             : this.esc(docNum);
-          let notaHtml = `<span class="cprev-tag">Não</span>`;
-          if (p.notasLoading) notaHtml = `<span class="cprev-tag">Buscando…</span>`;
-          else if (p.notas && p.notas.length) notaHtml = p.notas.map((n) => this.notaCellHtml(n)).join(" ");
-          else if (p.notasErro) notaHtml = `<span class="cprev-tag" title="${this.esc(p.notasErro)}">${this.esc(p.notasErro)}</span>`;
-          else if (this.isNotaDoc(p.docId, p.docNome, null) && p.documento) notaHtml = `<span class="cprev-tag cprev-tag-nota">${this.esc(p.docId || "NFS")} ${this.esc(p.documento)}</span>`;
           return `<tr>
           <td>${this.esc(p.parcela || "—")}</td>
-          <td>${this.esc(docId)}</td>
+          <td>${this.docCellHtml(p)}</td>
           <td>${docNumHtml}</td>
           <td>${this.esc(this.fmtDate(p.vencimento))}</td>
           <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(p.valor))}</td>
@@ -1602,7 +1653,7 @@ const ComprasPrevisoesApp = {
             : (p.pago
             ? `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`
             : `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`)}</td>
-          <td>${notaHtml}</td>
+          <td>${this.anexosCellHtml(p)}</td>
         </tr>`;
         }).join("")
       : `<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhuma parcela encontrada para este título.</td></tr>`;
@@ -1614,7 +1665,10 @@ const ComprasPrevisoesApp = {
               <h3>Parcelas do título ${this.esc(titulo)}</h3>
               <p>${this.esc((sample && sample.credor) || "—")}${sample && sample.companyId ? " · Empresa " + this.esc(sample.companyId) : ""}</p>
             </div>
-            <button type="button" class="btn btn-cancel" onclick="ComprasPrevisoesApp.closeParcelas()">Fechar</button>
+            <div class="cprev-modal-actions">
+              ${this.pmpHtml(parcelas)}
+              <button type="button" class="btn btn-cancel" onclick="ComprasPrevisoesApp.closeParcelas()">Fechar</button>
+            </div>
           </div>
           ${this.state.parcelasLoading ? `<div class="tvig-empty" style="padding:16px;">Carregando parcelas…</div>` : ""}
           ${this.state.parcelasError ? `<div class="ccom-aviso">${this.esc(this.state.parcelasError)}</div>` : ""}
@@ -1628,7 +1682,7 @@ const ComprasPrevisoesApp = {
                   <th>Vencimento</th>
                   <th style="text-align:right;">Valor</th>
                   <th>Situação</th>
-                  <th>Virou nota</th>
+                  <th>Anexos</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>

@@ -6285,29 +6285,79 @@ circle.donut-segment {
   padding: 0;
 }
 .cprev-ppc-btn:hover { color: #0d462c; }
-.cprev-nota-pack {
-  display: inline-flex;
-  flex-wrap: wrap;
+.cprev-doc-nota { margin-left: 0; }
+.cprev-modal-actions {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 14px;
+  flex-shrink: 0;
 }
-.cprev-nota-bill {
-  font-size: 0.72rem;
+.cprev-pmp {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+  padding-right: 2px;
+}
+.cprev-pmp span {
+  font-size: 0.68rem;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+.cprev-pmp strong {
+  font-size: 0.95rem;
   color: #105436;
+}
+.cprev-anexos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.cprev-anexo-bill {
+  font-size: 0.72rem;
+  color: #64748b;
   white-space: nowrap;
 }
-.cprev-pdf-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
+.cprev-anexo-bill strong {
   color: #105436;
-  border-radius: 999px;
-  font-size: 0.66rem;
   font-weight: 700;
-  padding: 1px 7px;
-  cursor: pointer;
 }
-.cprev-pdf-btn:hover { background: #f0fdf4; }
+.cprev-anexo-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cprev-anexo-vazio,
+.cprev-anexo-erro {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+.cprev-pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #d6e4dc;
+  background: #f8faf8;
+  color: #105436;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cprev-pdf-btn svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.cprev-pdf-btn:hover {
+  background: #eef6f1;
+  border-color: #105436;
+}
 .cprev-tag-subst { background: #e0e7ff; color: #3730a3; }
 .cprev-table-wrap .ecau-table {
   table-layout: auto;
