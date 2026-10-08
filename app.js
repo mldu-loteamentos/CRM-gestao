@@ -2983,6 +2983,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     preambles: "Preâmbulos & Configurações",
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
+    rydoo: "Rydoo",
     "config-tags": "Configuração de TAGs",
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
@@ -3046,6 +3047,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     preambles: "settings",
     anexos: "paperclip",
     "contas-pagar": "landmark",
+    rydoo: "receipt",
     "config-tags": "tags",
     "config-users": "users",
     "doc-padrao": "file-cog",
@@ -5111,6 +5113,9 @@ window.applyPermissions = function(profileName) {
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
+        const rydooAlias = modKey === 'sub_fin_cp_rydoo_acessar'
+          && perms.sub_fin_cp_rydoo_acessar == null
+          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
         const orcAlias = modKey === "sub_fin_orc_orcamento_acessar"
           && perms.sub_fin_orc_orcamento_acessar == null
           && perms.sub_fin_orc_orcamento_visualizar == null
@@ -5166,7 +5171,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_com_geral_estoque_acessar === true
           || perms.sub_com_geral_tabelas_vigentes_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';

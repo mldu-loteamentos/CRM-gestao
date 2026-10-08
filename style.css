@@ -5984,6 +5984,20 @@ circle.donut-segment {
 .cprev-table-wrap .cprev-col-ndoc { width: 86px; }
 .cprev-table-wrap .cprev-col-venc { width: 84px; }
 .cprev-table-wrap .cprev-col-tipo { width: 108px; }
+.cprev-table-wrap #cfin-table .cprev-col-cc { width: 15%; }
+.cprev-table-wrap #cfin-table .cprev-col-dept { width: 8%; }
+.cprev-table-wrap #cfin-table .cprev-col-cred { width: 12%; }
+.cprev-table-wrap #cfin-table .cprev-col-parc { width: 48px; }
+.cprev-table-wrap #cfin-table .cprev-col-doc { width: 52px; }
+.cprev-table-wrap #cfin-table .cprev-col-ndoc { width: 72px; }
+.cprev-table-wrap #cfin-table .cprev-col-tipo { width: 168px; }
+.cprev-table-wrap #cfin-table td.cprev-col-tipo {
+  overflow: visible;
+  text-overflow: unset;
+}
+.cprev-table-wrap #cfin-table td.cprev-col-tipo .cprev-tag {
+  margin-left: 0;
+}
 .cprev-table-wrap .cprev-col-val { width: 96px; text-align: right; }
 .cprev-table-wrap .cprev-group-header td {
   overflow: visible;

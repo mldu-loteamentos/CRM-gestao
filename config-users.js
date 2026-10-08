@@ -195,6 +195,19 @@ const ConfigUsersApp = {
         || savedPerms.sub_compras_geral_previsoes_editar
       );
     }
+    if (savedPerms.sub_fin_cp_rydoo_acessar == null && (
+      savedPerms.sub_fin_cp === true
+      || savedPerms.sub_fin_cp_assistente_cp_acessar
+      || savedPerms.sub_fin_cp_prestacao_contas_acessar
+      || savedPerms.sub_fin_cp_parametrizacao_parceiro_acessar
+    )) {
+      savedPerms.sub_fin_cp_rydoo_acessar = true;
+      savedPerms.sub_fin_cp_rydoo_visualizar = true;
+      savedPerms.sub_fin_cp_rydoo_editar = !!(
+        savedPerms.sub_fin_cp_assistente_cp_editar
+        || savedPerms.sub_fin_cp_prestacao_contas_editar
+      );
+    }
     if (savedPerms.sub_fin_cr_recebimentos_webro_acessar == null && (
       savedPerms.sub_fin_cr === true
       || savedPerms.sub_fin_cr_fila_cobranca_acessar
@@ -361,7 +374,8 @@ const ConfigUsersApp = {
           actions: [
             { id: "assistente_cp", label: "Assistente de Contas a Pagar" },
             { id: "prestacao_contas", label: "Prestação de Contas" },
-            { id: "parametrizacao_parceiro", label: "Parametrização de Parceiro" }
+            { id: "parametrizacao_parceiro", label: "Parametrização de Parceiro" },
+            { id: "rydoo", label: "Rydoo", permBase: "sub_fin_cp_rydoo" }
           ]
         },
         {

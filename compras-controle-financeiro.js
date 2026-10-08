@@ -474,17 +474,21 @@ ComprasControleApp.paintFilters = function () {
   const self = this;
   const bind = (id, key, openKey, qKey, itemsFn, nouns) => {
     if (!window.MlEmpresaFilter) return;
-    MlEmpresaFilter.bind({
-      id: id,
-      onToggleOpen() {
+    MlEmpresaFilter.bind(id, {
+      toggleOpen() {
         if (self.state.loading) return;
-        if (key !== "companyIds" && !self.state.consulted) return;
+        if (key === "deptIds" && self.departmentFilterLocked()) return;
+        if (!self.state.consulted && key !== "companyIds") return;
         self.state[openKey] = !self.state[openKey];
+        if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
+        if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
+        if (openKey === "openDept") { self.state.openEmp = false; self.state.openCred = false; self.state.openCc = false; }
+        if (openKey === "openCc") { self.state.openEmp = false; self.state.openCred = false; self.state.openDept = false; }
         self.paintFilters();
       },
-      onQuery(q) { self.state[qKey] = q; },
-      onList() {
-        const box = document.querySelector("#" + id + " .ml-emp-filter-list");
+      setQuery(q) {
+        self.state[qKey] = q || "";
+        const box = document.getElementById(id + "-list");
         if (!box) return;
         box.innerHTML = MlEmpresaFilter.listHtml({
           id: id,
@@ -502,21 +506,27 @@ ComprasControleApp.paintFilters = function () {
         const cur = self.state[key].slice();
         self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
         self.state[openKey] = true;
-        self.applyFilters();
-        self.renderList();
+        if (self.state.consulted) {
+          self.applyFilters();
+          self.renderList();
+        }
         self.paintFilters();
       },
       selectAll() {
         if (self.state.loading) return;
+        if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds") return;
         self.state[key] = itemsFn().map((x) => String(x.id));
         self.state[openKey] = true;
-        self.applyFilters();
-        self.renderList();
+        if (self.state.consulted) {
+          self.applyFilters();
+          self.renderList();
+        }
         self.paintFilters();
       },
       selectNone() {
         if (self.state.loading) return;
+        if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds") return;
         if (key === "deptIds" && self.accessibleDepartments()) {
           self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
@@ -524,8 +534,10 @@ ComprasControleApp.paintFilters = function () {
           self.state[key] = [];
         }
         self.state[openKey] = true;
-        self.applyFilters();
-        self.renderList();
+        if (self.state.consulted) {
+          self.applyFilters();
+          self.renderList();
+        }
         self.paintFilters();
       }
     });
@@ -634,7 +646,13 @@ ComprasControleApp.renderList = function () {
     <style>
       #cfin-table thead th { white-space: nowrap; }
       #cfin-table tbody tr.cprev-row { cursor: default; }
-      #cfin-table .cprev-col-venc { width: 108px; }
+      #cfin-table .cprev-col-venc { width: 96px; }
+      #cfin-table .cprev-col-cc { width: 15%; }
+      #cfin-table .cprev-col-dept { width: 8%; }
+      #cfin-table .cprev-col-cred { width: 12%; }
+      #cfin-table .cprev-col-tipo { width: 168px; }
+      #cfin-table td.cprev-col-tipo { overflow: visible; text-overflow: unset; }
+      #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; }
     </style>
     <div class="table-container cprev-table-wrap">
       <table class="custom-table cprev-table" id="cfin-table">
