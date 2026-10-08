@@ -817,7 +817,7 @@ const OrcamentoApp = {
     const singles = [];
     (emp.costCenters || []).forEach((cc) => {
       const prefix = this.obraPrefix(cc.cc);
-      if (!prefix) {
+      if (!prefix || prefix === "147") {
         singles.push(cc);
         return;
       }
