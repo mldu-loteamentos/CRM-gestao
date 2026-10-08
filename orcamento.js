@@ -13,6 +13,9 @@ const OrcamentoApp = {
   expanded: new Set(),
   mouraView: false,
   ready: false,
+  carteira: {},
+  carteiraCompanies: {},
+  _cartFlight: {},
 
   data() {
     return window.ORCAMENTO_RECEITA_2027 || { year: 2027, months: [], reducers: [], names: {}, lines: [] };
@@ -153,6 +156,10 @@ const OrcamentoApp = {
         .orc-code { font-family: ui-monospace, Consolas, monospace; margin-right: 8px; }
         .orc-sub { display: block; margin-left: 22px; font-weight: 500; color: #64748b; font-size: 0.72rem; }
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
+        .orc-cart-tip { position: fixed; z-index: 80; min-width: 210px; background: #0c3d28; color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 0.75rem; line-height: 1.35; pointer-events: none; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28); }
+        .orc-cart-tip strong { display: block; margin-top: 2px; font-size: 0.92rem; }
+        .orc-cart-tip .orc-cart-sub { margin-top: 8px; color: #fdba74; font-weight: 700; }
+        .orc-cart-tip .orc-cart-sub strong { color: #ffedd5; }
       </style>
       <div class="orc-head">
         <div>
@@ -200,6 +207,7 @@ const OrcamentoApp = {
           <tbody id="orc-body"></tbody>
         </table>
       </div>
+      <div id="orc-cart-tip" class="orc-cart-tip" hidden></div>
     `;
     this.paintCompany();
     this.paintPlan();
@@ -207,6 +215,7 @@ const OrcamentoApp = {
     this.paint();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
     this.ready = true;
+    this.prefetchCarteira();
   },
 
   companyItems() {
@@ -259,18 +268,21 @@ const OrcamentoApp = {
         this.companyDropOpen = true;
         this.paintCompany();
         this.paint();
+        this.prefetchCarteira();
       },
       selectAll: () => {
         this.selectedCompanyIds = this.companies().map((c) => c.id);
         this.companyDropOpen = true;
         this.paintCompany();
         this.paint();
+        this.prefetchCarteira();
       },
       selectNone: () => {
         this.selectedCompanyIds = [];
         this.companyDropOpen = true;
         this.paintCompany();
         this.paint();
+        this.prefetchCarteira();
       }
     });
   },
@@ -423,9 +435,187 @@ const OrcamentoApp = {
         const key = btn.getAttribute("data-orc-key");
         if (this.expanded.has(key)) this.expanded.delete(key);
         else this.expanded.add(key);
+        this.hideCartTip();
         this.paint();
       });
+      body.addEventListener("mouseover", (ev) => {
+        const tr = ev.target.closest("tr[data-cart]");
+        if (!tr || tr === this._cartRow) return;
+        this._cartRow = tr;
+        this.placeCartTip(tr);
+        const row = this._rows && this._rows[Number(tr.getAttribute("data-cart"))];
+        if (row && row.companyId) this.flightCarteira(row.companyId);
+      });
+      body.addEventListener("mouseout", (ev) => {
+        const tr = ev.target.closest("tr[data-cart]");
+        if (!tr) return;
+        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("tr[data-cart]");
+        if (next === tr) return;
+        this.hideCartTip();
+      });
     }
+  },
+
+  visibleCompanyIds() {
+    return this.companies().map((c) => c.id).filter((id) => this.companyOn(id));
+  },
+
+  prefetchCarteira() {
+    const ids = this.visibleCompanyIds();
+    const run = async () => {
+      for (const id of ids) {
+        if (this._cartGen !== run.gen) return;
+        await this.flightCarteira(id);
+      }
+    };
+    run.gen = (this._cartGen || 0) + 1;
+    this._cartGen = run.gen;
+    run();
+  },
+
+  flightCarteira(companyId) {
+    const id = String(companyId || "");
+    if (!id) return Promise.resolve();
+    if (this.carteiraCompanies[id] === "done" || this.carteiraCompanies[id] === "error") return Promise.resolve();
+    if (this._cartFlight[id]) return this._cartFlight[id];
+    this.carteiraCompanies[id] = "loading";
+    this._cartFlight[id] = this.fetchCarteiraCompany(id).then((pack) => {
+      Object.keys(pack).forEach((cc) => { this.carteira[cc] = pack[cc]; });
+      this.carteiraCompanies[id] = "done";
+    }).catch(() => {
+      this.carteiraCompanies[id] = "error";
+    }).finally(() => {
+      delete this._cartFlight[id];
+      if (this._cartRow) this.placeCartTip(this._cartRow);
+    });
+    return this._cartFlight[id];
+  },
+
+  async bulkRows(path) {
+    const once = window.siengeFetchWithRetry;
+    if (typeof once !== "function") throw new Error("API Sienge indisponível.");
+    const payload = await once(path, 2);
+    return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+  },
+
+  async bulkRowsRange(buildPath, start, end) {
+    try {
+      return await this.bulkRows(buildPath(start, end));
+    } catch (err) {
+      if (Number(err && err.status) !== 507 || start >= end) throw err;
+      const s = new Date(start + "T12:00:00");
+      const e = new Date(end + "T12:00:00");
+      const midDate = new Date(s.getTime() + Math.floor((e - s) / 2));
+      const mid = midDate.getFullYear() + "-" + String(midDate.getMonth() + 1).padStart(2, "0") + "-" + String(midDate.getDate()).padStart(2, "0");
+      const nextDate = new Date(mid + "T12:00:00");
+      nextDate.setDate(nextDate.getDate() + 1);
+      const next = nextDate.getFullYear() + "-" + String(nextDate.getMonth() + 1).padStart(2, "0") + "-" + String(nextDate.getDate()).padStart(2, "0");
+      if (mid < start || mid >= end || next > end) throw err;
+      const left = await this.bulkRowsRange(buildPath, start, mid);
+      const right = await this.bulkRowsRange(buildPath, next, end);
+      return left.concat(right);
+    }
+  },
+
+  isSubJudiceIncome(row) {
+    const flag = String(row && row.subJudicie || "").trim().toUpperCase();
+    if (flag === "S" || flag === "SIM" || flag === "TRUE" || flag === "1") return true;
+    const situation = String(row && row.defaulterSituation || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return situation.indexOf("SUB") >= 0 && situation.indexOf("JUD") >= 0;
+  },
+
+  async fetchCarteiraCompany(companyId) {
+    const id = encodeURIComponent(companyId);
+    const income = await this.bulkRowsRange(
+      (start, end) => "/bulk-data/v1/income?startDate=" + encodeURIComponent(start) + "&endDate=" + encodeURIComponent(end) + "&selectionType=D&companyId=" + id,
+      "2027-01-01",
+      "2027-12-31"
+    );
+    const subKeys = new Set();
+    income.forEach((row) => {
+      if (!this.isSubJudiceIncome(row)) return;
+      subKeys.add(String(row.billId) + "|" + String(row.installmentId));
+    });
+    const extract = await this.bulkRowsRange(
+      (start, end) => "/bulk-data/v1/customer-extract-history?startDueDate=" + encodeURIComponent(start)
+        + "&endDueDate=" + encodeURIComponent(end)
+        + "&companyId=" + id
+        + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false",
+      "2027-01-01",
+      "2027-12-31"
+    );
+    const byCc = {};
+    const add = (cc, field, value) => {
+      const key = String(cc);
+      if (!byCc[key]) byCc[key] = { receber: 0, sub: 0 };
+      byCc[key][field] += value;
+    };
+    extract.forEach((item) => {
+      const nested = (item && (item.billsReceivable || item.bills)) || [];
+      const bills = nested.length ? nested : ((item && item.installments) ? [item] : []);
+      bills.forEach((bill) => {
+        const cc = bill && bill.costCenter && bill.costCenter.id;
+        if (cc == null || cc === "") return;
+        (bill.installments || []).forEach((inst) => {
+          const due = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
+          if (due < "2027-01-01" || due > "2027-12-31") return;
+          const balance = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
+          if (!(balance > 0.009)) return;
+          const marked = subKeys.has(String(bill.billReceivableId) + "|" + String(inst.id));
+          add(cc, marked ? "sub" : "receber", balance);
+        });
+      });
+    });
+    return byCc;
+  },
+
+  cartSum(row) {
+    const companyId = row && row.companyId;
+    const status = this.carteiraCompanies[String(companyId || "")];
+    if (status === "error") return { error: true };
+    if (status !== "done") return { loading: true };
+    let receber = 0;
+    let sub = 0;
+    (row.cartCcs || []).forEach((cc) => {
+      const pack = this.carteira[String(cc)];
+      if (!pack) return;
+      receber += Number(pack.receber) || 0;
+      sub += Number(pack.sub) || 0;
+    });
+    return { receber, sub };
+  },
+
+  placeCartTip(tr) {
+    const tip = document.getElementById("orc-cart-tip");
+    if (!tip || !tr || !tr.isConnected) return;
+    const row = this._rows && this._rows[Number(tr.getAttribute("data-cart"))];
+    if (!row) return;
+    const sum = this.cartSum(row);
+    if (sum.loading) {
+      tip.innerHTML = "Buscando a carteira de 2027…";
+    } else if (sum.error) {
+      tip.innerHTML = "Não foi possível consultar a carteira de 2027.";
+    } else if (sum.receber <= 0.009 && sum.sub <= 0.009) {
+      tip.innerHTML = "Sem carteira a receber em 2027.";
+    } else {
+      tip.innerHTML = "A receber em 2027<strong>R$ " + this.money(sum.receber) + "</strong>"
+        + '<div class="orc-cart-sub">Sub judice<strong>R$ ' + this.money(sum.sub) + "</strong></div>";
+    }
+    tip.hidden = false;
+    const rect = tr.getBoundingClientRect();
+    const width = tip.offsetWidth || 220;
+    let left = rect.left + 36;
+    if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+    let top = rect.bottom + 6;
+    if (top + 84 > window.innerHeight) top = Math.max(8, rect.top - 84);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  },
+
+  hideCartTip() {
+    this._cartRow = null;
+    const tip = document.getElementById("orc-cart-tip");
+    if (tip) tip.hidden = true;
   },
 
   received() {
@@ -705,6 +895,8 @@ const OrcamentoApp = {
         key: emp.key,
         depth: 0,
         label: emp.e + " — " + (emp.en || "") + shareNote,
+        companyId: emp.e,
+        cartCcs: emp.costCenters.map((cc) => cc.cc),
         m26: se26,
         m27: se27,
         expandable: true,
@@ -719,6 +911,8 @@ const OrcamentoApp = {
           key: cc.key,
           depth: depth,
           label: cc.cc + " — " + cc.cn,
+          companyId: emp.e,
+          cartCcs: [cc.cc],
           m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
           expandable: true,
@@ -759,6 +953,8 @@ const OrcamentoApp = {
           key: item.key,
           depth: 1,
           label: item.label,
+          companyId: emp.e,
+          cartCcs: item.centers.map((cc) => cc.cc),
           m26: this.scaleMonths(g26, factor),
           m27: this.scaleMonths(g27, factor),
           expandable: true,
@@ -805,6 +1001,8 @@ const OrcamentoApp = {
     const kpis = document.getElementById("orc-kpis");
     if (!body) return;
     const data = this.collect();
+    data.rows.forEach((row, i) => { row._i = i; });
+    this._rows = data.rows;
     const html = data.rows.filter((row) => this.rowVisible(row)).map((row) => this.rowHtml(row));
     body.innerHTML = html.join("") || '<tr><td class="orc-empty" colspan="' + this.tableSpan() + '">Nenhuma empresa com essas contas.</td></tr>';
     if (kpis) {
@@ -854,9 +1052,10 @@ const OrcamentoApp = {
     const t27 = this.sum(row.m27);
     const delta = t27 - t26;
     const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf")));
+    const cart = row.cartCcs ? ' data-cart="' + row._i + '"' : "";
     const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
     const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
-    return '<tr class="' + cls + '"><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
+    return '<tr class="' + cls + '"' + cart + '><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
       + this.moneyCell(t27, "orc-y27")
